@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+
+# Runtime artefacts (never commit lab data)
+*.db
+*.log
+*.raw
+*.mzML
+*.mzBIN
+config.yaml
+!labwatch/config.example.yaml
+
+# Duplicate of the extracted inventory folder
+reference/pc-inventory/*.zip
+
+# OS / editor
+.DS_Store
+Thumbs.db
+~$*
+.Rhistory
+.idea/
+.vscode/

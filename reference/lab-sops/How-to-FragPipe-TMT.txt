@@ -1,0 +1,22 @@
+# Text extracted from How-to-FragPipe-TMT.docx (screenshots omitted — open the .docx for those)
+
+ How to TMT with FragPipe
+<w:p w14:paraId="5197BBC5" w14:textId="2BA06D93" w:rsidR="003554BC" w:rsidRPr="003554BC" w:rsidRDefault="003554BC" w:rsidP="003554BC"><w:pPr><w:rPr><w:b/><w:bCs/><w:color w:val="EE0000"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr></w:pPr><w:r w:rsidRPr="003554BC"><w:rPr><w:b/><w:bCs/><w:color w:val="EE0000"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr><w:t>Select Peak Picking & zero Samples from the dropdown
+Select Peak Picking & zero Samples from the dropdown
+Select your .raw files here
+Press start…..file conversion will take approx.. 15 min
+Load TMT-10 MS3 workflow in FragPipe
+<w:p w14:paraId="60489F39" w14:textId="3531CFDA" w:rsidR="003554BC" w:rsidRPr="003554BC" w:rsidRDefault="003554BC" w:rsidP="003554BC"><w:pPr><w:rPr><w:b/><w:bCs/><w:color w:val="EE0000"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr></w:pPr><w:r><w:rPr><w:b/><w:bCs/><w:color w:val="EE0000"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr><w:t>Just load the folder
+Just load the folder
+Set experimental detail/bio-replicates if applicable
+If Bioreplicates are contained within TMT channels (e.g. rep1 126, rep2 127N, rep3 127C, etc.) set Bioreplicate to 1.
+<w:p w14:paraId="225630C6" w14:textId="65C04AB0" w:rsidR="00A00CBB" w:rsidRPr="003554BC" w:rsidRDefault="00A00CBB" w:rsidP="00A00CBB"><w:pPr><w:rPr><w:b/><w:bCs/><w:color w:val="EE0000"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr></w:pPr><w:r><w:rPr><w:b/><w:bCs/><w:color w:val="EE0000"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr><w:t>Define replicates
+Define replicates
+Select the appropriate tag set
+Keep the 126, 127N, etc. description for each channel in Sample name! And save to the raw-file folder
+Run the analysis
+“”
+Look at your Data using FragPipe Analysit
+Run the following R-script to obtain the correct experimental annotation file for downstream analysis with FragPipe Analyst: C:\Users\Daniel Nomura\Desktop\correct_experimental_annotation_for_Fragpipe-TMT
+Use the abundance_gene_MD.tsv and the newly generated experimental_annotation.tsv as input for FragPipe Analyst (http://fragpipe-analyst.nesvilab.org). Filter
+ for 100% non missing values in all replicates for best data quality.

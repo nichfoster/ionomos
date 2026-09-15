@@ -1,0 +1,43 @@
+# labwatch configuration — copy to C:/Fragpipe_Auto/config.yaml and edit.
+# Forward slashes are fine on Windows. NO SPACES in any path (FragPipe rule).
+
+paths:
+  inbox:        C:/Fragpipe_Auto/inbox
+  users_root:   C:/Fragpipe_General          # jobs land in users_root/<USER>/<experiment>
+  fragpipe_exe: C:/FragPipe/FragPipe-24.0/fragpipe/bin/fragpipe.exe   # CONFIRM on the PC
+  workflow_dir: C:/Fragpipe_Auto/workflows
+  fasta_dir:    C:/Fragpipe_Auto/fasta
+  database:     C:/Fragpipe_Auto/labwatch.db
+  log_dir:      C:/Fragpipe_Auto/logs
+
+watcher:
+  poll_seconds: 10
+  stable_seconds: 60          # whole-tree fingerprint must be unchanged this long
+  min_raw_files: 1
+
+fragpipe:
+  threads: 28                 # machine has 32 logical CPUs
+  ram_gb: 48                  # machine has 64 GB
+  timeout_minutes: 240
+  config_tools_folder: ""     # leave blank unless the first headless run can't find tools
+  config_diann: ""            # e.g. C:/DIA-NN/2.3.2/DiaNN.exe — DIA only, if needed
+
+# One entry per METHOD token accepted in folder names. Keys are canonical
+# (case-insensitive match on the folder name).
+methods:
+  isoDTB:
+    workflow: isoDTB.workflow
+    fasta: human_reviewed_decoys.fas
+    data_type: DDA
+    postprocess: [isodtb_sites]
+    isodtb_mod_mass: "561.3387"
+  TMT:
+    workflow: TMT10-MS3.workflow
+    fasta: human_reviewed_decoys.fas
+    data_type: DDA
+    postprocess: [tmt_annotation]
+  DIA:
+    workflow: DIA.workflow
+    fasta: human_reviewed_decoys.fas
+    data_type: DIA
+    postprocess: []

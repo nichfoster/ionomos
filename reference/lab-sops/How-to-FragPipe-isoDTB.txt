@@ -1,0 +1,27 @@
+# Text extracted from How-to-FragPipe-isoDTB.docx (screenshots omitted — open the .docx for those)
+
+isoDTB via Fragpipe:
+Works for standard isoDTB experiments that use iodoacetamide alkyne (C6) and (commercial) isoDTB reagents according to Zanon et al. The workflow is designed for Trypsin digested samples.
+Can be adjusted for other reagents/enzymes!
+Load raw files, define experiment, set replicates:
+<w:p w14:paraId="68A3A010" w14:textId="77777777" w:rsidR="00B93D7D" w:rsidRDefault="00B93D7D" w:rsidP="00B93D7D"><w:r><w:t>Define replicate
+Define replicate
+Enter experiment name
+Select files from raw-folder
+Directory must not contain any spaces!
+Briefly check for correct database:
+<w:p w14:paraId="39D4FFDA" w14:textId="4BBFF45D" w:rsidR="00615E70" w:rsidRDefault="00615E70" w:rsidP="00615E70"><w:r><w:t>This is human whole proteome
+This is human whole proteome
+Check Quantification Tab:
+<w:p w14:paraId="16303914" w14:textId="34001646" w:rsidR="00B93D7D" w:rsidRDefault="00B93D7D"><w:r><w:t>Make sure Match between runs (MBR) is checked
+Make sure Match between runs (MBR) is checked
+Output and start run:
+<w:p w14:paraId="32FD3A9E" w14:textId="68807A67" w:rsidR="00615E70" w:rsidRDefault="00615E70" w:rsidP="00615E70"><w:r><w:t>Set output directoryMake sure this is an empty folder
+Set output directoryMake sure this is an empty folder
+This will take ~30-60 minutes for 3x7 fractions
+Once done you have to group the peptides group them to labelled sites by using this R-Script
+open R by double-clicking:
+Change the input/output_tsv directory to your Fragpipe output folder
+Change the sample_prefix to your experiment name from 1
+copy the code to the console and press enter
+Your processes/grouped output file is in the defined output directory

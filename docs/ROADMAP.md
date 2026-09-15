@@ -1,0 +1,88 @@
+# Roadmap
+
+Phases are ordered so that each one is independently useful and testable
+without the next. Phase 1 can be developed and unit-tested entirely on a Mac
+with fake folders; nothing before Phase 2 touches FragPipe.
+
+## Phase 0 — Plan ✅ (this commit)
+
+- Repo, docs, package skeleton, reference material organised.
+- Fixed inventory script.
+
+**Exit:** naming convention reviewed by 2–3 lab members; fixed inventory re-run
+on the PC and results added to `reference/pc-inventory/`.
+
+## Phase 1 — Watcher + intake (no FragPipe)
+
+Build, in this order, each with tests:
+
+1. `naming.py` — pure parsers for folder names and raw filenames, with the
+   rejection reasons spelled out. Table-driven tests using the real names from
+   the inventory (both the ones that should pass and the ones that should fail).
+2. `config.py` — load/validate `config.yaml`; friendly errors for missing paths.
+3. `watcher.py` — inbox polling with tree-fingerprint stability. Test with a
+   thread that slowly writes files.
+4. `ledger.py` — SQLite schema + transitions + startup recovery.
+5. `intake.py` — validate → move → `labwatch.json` → ledger. Rejection writes
+   `.REJECTED.txt`.
+6. `cli.py` — `labwatch run`, `labwatch status`, `labwatch dry-run <folder>`
+   (parse and print what *would* happen, move nothing).
+7. `run_labwatch.bat` + Task Scheduler instructions.
+
+**Exit:** on the PC, dropping a correctly named folder of raws lands it in the
+right user directory with `labwatch.json` saying `queued` and nothing else
+happens. A bad name gets a `.REJECTED.txt`. Runs for a week without falling over.
+
+## Phase 2 — isoDTB end-to-end
+
+1. Pin the lab's `isoDTB.workflow` (+ FASTA) into `C:\Fragpipe_Auto\workflows\`.
+2. `manifest.py` — `.fp-manifest` from parsed raws.
+3. `runners/fragpipe.py` — adapt prior-work runner; confirm launcher path on 24.0.
+4. `worker.py` — pull queued job, run, record.
+5. `runners/isodtb.py` — port the site-merge R script; golden-file test vs an
+   existing lab output.
+6. `DONE.txt` / `FAILED.txt` + `labwatch retry`.
+
+**Exit:** one real isoDTB experiment processed with no manual steps; the
+`_sites.tsv` matches the R output on the same input.
+
+## Phase 3 — DIA, then TMT
+
+- DIA: pin workflow, `data_type: DIA`, sort out DIA-NN version/`--config-diann`.
+  No post-proc.
+- TMT: `experiment.yaml` `tmt:` block → `annotation.txt`; confirm how headless
+  24.0 finds it; port the annotation R script; resolve the "Peak Picking &
+  zero Samples" pre-step question.
+
+## Phase 4 — Operations & niceties
+
+- Log rotation, disk-space check before accepting a job (C: has 99 GB free;
+  refuse if < 2× raw size), email/Slack/Teams notify on done/failed.
+- `labwatch status` as a tiny local web page if people ask.
+- Auto-archive finished experiments to `D:\<user>\` after N days.
+- Optional: auto-pull from `C:\Proteomics_File_Sharing` (reversing D3) once
+  the convention is trusted.
+
+## Open questions (need a human)
+
+Collected from the other docs; resolve before/during Phase 1.
+
+**Lab process**
+- [ ] Confirm the naming convention with users (NAMING_CONVENTION.md).
+- [ ] Is `USER` == folder under `C:\Fragpipe_General\`? Who has multiple folders?
+- [ ] Is plain `DDA` a real method in the lab or only isoDTB/TMT/DIA?
+- [ ] Which DIA workflow is used, and what happens after a DIA run?
+- [ ] What is the TMT "Peak Picking & zero Samples" pre-step (which app)? Still needed with FragPipe 24?
+- [ ] Where are FASTA files kept, which ones, how often updated?
+
+**Machine**
+- [ ] Exact FragPipe 24.0 launcher path and whether `--headless` works on it as installed.
+- [ ] Direction/type of the `Proteomics_File_Sharing` share.
+- [ ] Sleep/power policy and whether Task Scheduler can run at logon for the shared account.
+- [ ] Should results go to C: (fast, 99 GB free) or D: (slow USB, 14 TB free)? Proposal:
+      run on C:, archive to D: (Phase 4).
+- [ ] Install git on the PC, or deploy via zip/wheel?
+
+**Software**
+- [ ] How does FragPipe 24.0 headless locate the TMT `annotation.txt`?
+- [ ] Does bundled DIA-NN suffice or is `--config-diann` needed for 2.3.2?

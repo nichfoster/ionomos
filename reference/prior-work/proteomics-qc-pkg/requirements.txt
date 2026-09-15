@@ -1,0 +1,4 @@
+PyYAML>=6.0
+streamlit>=1.30
+pandas>=2.0
+plotly>=5.18
