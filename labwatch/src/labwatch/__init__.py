@@ -2,4 +2,4 @@
 
 See ../../docs/ARCHITECTURE.md for the component map.
 """
-__version__ = "0.1.0"
+__version__ = "0.1.1"

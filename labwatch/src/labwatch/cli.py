@@ -272,6 +272,10 @@ def cmd_testbed(args) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Windows pipes/consoles default to cp1252; check/status print ✓ ✗ ↳.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(prog="labwatch", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", default=str(default_config_path()))

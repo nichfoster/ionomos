@@ -16,6 +16,7 @@ Write-Host "==> ruff";   .\.venv\Scripts\ruff check src tests
 Write-Host "==> pytest"; .\.venv\Scripts\pytest -q -rs
 if ($Bed) {
     Write-Host "==> testbed"
-    .\.venv\Scripts\labwatch testbed init (Join-Path (Get-Location) "..\labwatch-testbed")
+    # default = C:\labwatch-testbed (no spaces; the repo may live under C:\Users\<First Last>\)
+    .\.venv\Scripts\labwatch testbed init
     Write-Host "activate with:  .\.venv\Scripts\Activate.ps1"
 }

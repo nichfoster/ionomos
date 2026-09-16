@@ -52,3 +52,40 @@ def test_bad_method(lab):
 def test_missing_file():
     with pytest.raises(ConfigError, match="not found"):
         load("/definitely/not/here.yaml")
+
+
+# --- regression: Windows default encoding is cp1252, so every text file we write/read must say utf-8 -------------
+
+def test_all_text_io_is_explicit_utf8():
+    import re
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[1] / "src" / "labwatch"
+    bad = []
+    for f in src.glob("*.py"):
+        text = f.read_text(encoding="utf-8")
+        for m in re.finditer(r"\.(write_text|read_text)\(", text):
+            # take the call up to its closing paren (calls here never nest parens deeper than one level)
+            depth, j = 1, m.end()
+            while depth and j < len(text):
+                depth += {"(": 1, ")": -1}.get(text[j], 0)
+                j += 1
+            if "encoding=" not in text[m.start():j]:
+                bad.append(f"{f.name}:{text.count(chr(10), 0, m.start()) + 1}: {text[m.start():j][:80]}")
+    assert not bad, "text I/O without encoding='utf-8' (breaks on Windows):\n" + "\n".join(bad)
+
+
+def test_testbed_config_is_utf8_readable(tmp_path):
+    from labwatch import testbed
+
+    cfg = testbed.init(tmp_path / "bed")
+    text = cfg.read_text(encoding="utf-8")
+    assert text.startswith("# labwatch TESTBED config")
+    assert text.splitlines()[0].isascii()
+
+
+def test_testbed_default_root_has_no_spaces_on_windows(monkeypatch):
+    from labwatch import testbed
+
+    monkeypatch.setattr(testbed.os, "name", "nt")
+    assert " " not in str(testbed.default_root())

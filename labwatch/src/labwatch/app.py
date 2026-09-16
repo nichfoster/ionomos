@@ -661,7 +661,9 @@ class App:
         t.grid(row=1, column=0, columnspan=2, sticky="ew", **PAD)
         t.columnconfigure(1, weight=1)
         ttk.Label(t, text="Testbed folder").grid(row=0, column=0, sticky="e", **PAD)
-        self.v("tb.dir").set(str(Path.home() / "labwatch-testbed").replace("\\", "/"))
+        from labwatch.testbed import default_root as _testbed_default_root
+
+        self.v("tb.dir").set(str(_testbed_default_root().resolve()).replace("\\", "/"))
         ttk.Entry(t, textvariable=self.v("tb.dir"), width=50).grid(row=0, column=1, sticky="ew", **PAD)
         ttk.Button(t, text="Browse…", command=lambda: self._browse_into("tb.dir")).grid(row=0, column=2, **PAD)
         ttk.Button(t, text="Create testbed", command=self.tb_init).grid(row=0, column=3, **PAD)
@@ -825,7 +827,7 @@ class App:
         except OSError as exc:
             messagebox.showerror("Testbed", str(exc))
             return
-        self.out.write((d / "README.txt").read_text(), clear=True)
+        self.out.write((d / "README.txt").read_text(encoding="utf-8"), clear=True)
         self.out.write(f"testbed ready: {cfg}")
 
     def tb_drop(self, slow: bool):

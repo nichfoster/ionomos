@@ -24,7 +24,10 @@ powershell -ExecutionPolicy Bypass -File scripts\test_windows.ps1 -Bed
 Needs Python 3.11+ from python.org with *tcl/tk* and *py launcher* ticked.
 
 Both scripts create `labwatch/.venv`, install in editable mode, run ruff and
-pytest, and (with `--bed`/`-Bed`) build `./labwatch-testbed`.
+pytest, and (with `--bed`/`-Bed`) build the testbed: `./labwatch-testbed` on
+macOS, **`C:\labwatch-testbed`** on Windows. (Not under your profile folder:
+usernames like `Daniel Nomura` contain a space, and on Windows the config
+loader refuses paths with spaces — the FragPipe rule.)
 
 ## Driving the testbed from the app
 
@@ -40,7 +43,8 @@ Activate the venv first (`source labwatch/.venv/bin/activate` or
 `labwatch\.venv\Scripts\Activate.ps1`), then, in **terminal 1**:
 
 ```bash
-labwatch --config labwatch-testbed/Fragpipe_Auto/config.yaml run
+labwatch --config labwatch-testbed/Fragpipe_Auto/config.yaml run       # macOS
+labwatch --config C:\labwatch-testbed\Fragpipe_Auto\config.yaml run   # Windows
 ```
 
 (`--no-gui` to see what a headless install does — rejection notes instead of the window.)

@@ -141,7 +141,7 @@ def running_pid(log_dir: Path) -> int | None:
     if not p.is_file():
         return None
     try:
-        pid = int(p.read_text().strip())
+        pid = int(p.read_text(encoding="utf-8").strip())
     except ValueError:
         return None
     if _alive(pid):
