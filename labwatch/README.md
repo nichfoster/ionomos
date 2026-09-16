@@ -20,12 +20,10 @@ ruff check src tests
 
 ## Deploy (proteomics PC, Windows)
 
-Build a release on the Mac, copy the zip over, run the installer — full
-walkthrough in [`../docs/DEPLOY_WINDOWS.md`](../docs/DEPLOY_WINDOWS.md).
-
-```bash
-../deploy/make_release.sh        # -> ../dist/labwatch-<version>-windows.zip
-```
+Preferred: build `LabWatch.exe` on a Windows machine with
+`deploy\build_exe.ps1`, unzip on the PC, double-click. Fallback: wheel +
+`install.ps1` via `deploy/make_release.sh`. Full walkthrough in
+[`../docs/DEPLOY_WINDOWS.md`](../docs/DEPLOY_WINDOWS.md).
 
 ## Modules
 
@@ -38,7 +36,10 @@ walkthrough in [`../docs/DEPLOY_WINDOWS.md`](../docs/DEPLOY_WINDOWS.md).
 | `intake.py` | ✅ plan → move → labwatch.json → ledger; `.REJECTED.txt` on failure |
 | `resolve.py` | ✅ tkinter resolver window; pure validation logic separately testable |
 | `testbed.py` | ✅ `labwatch testbed init/list/drop/reset/gui-demo` |
-| `cli.py` | ✅ `run [--no-gui]`, `check`, `status`, `dry-run`, `retry`, `testbed` |
+| `app.py` | ✅ setup wizard / control panel (`labwatch setup`, or the exe with no args) |
+| `configio.py` | ✅ commented config.yaml writer used by the app |
+| `service.py` | ✅ child watcher process, PID file, Task Scheduler, exe routing |
+| `cli.py` | ✅ `setup`, `run [--no-gui]`, `check`, `status`, `dry-run`, `retry`, `testbed` |
 | `manifest.py` | stub |
 | `worker.py` | stub |
 | `runners/fragpipe.py` | stub (port from `reference/prior-work`) |

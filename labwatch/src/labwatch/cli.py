@@ -1,6 +1,8 @@
 """
 Command line.
 
+    labwatch                                       no arguments -> the setup/control app
+    labwatch setup    [--config PATH]              setup wizard / control panel (tkinter)
     labwatch run      [--config PATH] [--no-gui]   watcher + intake, forever (worker: Phase 2)
     labwatch check    [--config PATH]              doctor: config, paths, users, GUI, ledger
     labwatch status   [--config PATH] [--all]      jobs from the ledger
@@ -8,13 +10,13 @@ Command line.
     labwatch retry    JOB_ID [--config PATH]       failed -> queued
     labwatch testbed  ...                          build/drive a fake lab for testing (see testbed.py)
 
---config defaults to $LABWATCH_CONFIG, then ./config.yaml.
+--config defaults to $LABWATCH_CONFIG, then the path last saved by the app,
+then ./config.yaml (next to the exe when frozen).
 """
 from __future__ import annotations
 
 import argparse
 import logging
-import os
 import signal
 import sys
 import threading
@@ -26,6 +28,7 @@ from labwatch import __version__
 from labwatch.config import Config, ConfigError, load, remember_alias
 from labwatch.intake import IntakeError, intake, plan
 from labwatch.ledger import Ledger
+from labwatch.service import clear_pid, default_config_path, write_pid
 from labwatch.watcher import Watcher
 
 log = logging.getLogger("labwatch")
@@ -68,6 +71,7 @@ def cmd_run(args) -> int:
     ledger = Ledger(cfg.database)
     for jid in ledger.recover_on_startup():
         log.warning("job %d was running at shutdown; marked failed", jid)
+    write_pid(cfg.log_dir)
 
     resolver = None
     root = None
@@ -90,7 +94,10 @@ def cmd_run(args) -> int:
 
     w = Watcher(cfg.inbox, on_stable, cfg.poll_seconds, cfg.stable_seconds, cfg.min_raw_files)
     if root is None:
-        w.run_forever()
+        try:
+            w.run_forever()
+        finally:
+            clear_pid(cfg.log_dir)
         return 0
 
     # GUI mode: watcher in a thread, Tk on the main thread.
@@ -119,8 +126,16 @@ def cmd_run(args) -> int:
         root.mainloop()
     except KeyboardInterrupt:
         pass
-    w.stop()
+    finally:
+        w.stop()
+        clear_pid(cfg.log_dir)
     return 0
+
+
+def cmd_setup(args) -> int:
+    from labwatch.app import main as app_main
+
+    return app_main(Path(args.config) if args.config_given else None)
 
 
 def cmd_check(args) -> int:
@@ -259,11 +274,12 @@ def cmd_testbed(args) -> int:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="labwatch", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--config", default=os.environ.get("LABWATCH_CONFIG", "config.yaml"))
+    ap.add_argument("--config", default=str(default_config_path()))
     ap.add_argument("-v", "--verbose", action="store_true")
     ap.add_argument("--version", action="version", version=f"labwatch {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
+    sub.add_parser("setup", help="setup wizard / control panel").set_defaults(fn=cmd_setup)
     r = sub.add_parser("run", help="watch the inbox forever")
     r.add_argument("--no-gui", action="store_true", help="never open the resolver window")
     r.set_defaults(fn=cmd_run)
@@ -282,7 +298,11 @@ def main(argv: list[str] | None = None) -> int:
 
     testbed.add_parser(sub).set_defaults(fn=cmd_testbed)
 
+    argv = sys.argv[1:] if argv is None else argv
+    if not argv:  # double-clicked exe / bare `labwatch` -> the app
+        argv = ["setup"]
     args = ap.parse_args(argv)
+    args.config_given = any(a == "--config" or a.startswith("--config=") for a in argv)
     return args.fn(args)
 
 

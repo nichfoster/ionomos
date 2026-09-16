@@ -89,3 +89,13 @@ instantly, and the answer is persisted as `experiment.yaml` + learned aliases
 so the same question is never asked twice. The note remains the fallback for
 headless runs and for "Skip". Rejected folders are re-evaluated when their
 tree changes or the note is deleted, so users fix things in place.
+
+### D14 — One executable, two faces; the GUI writes the same config.yaml
+**2026-09-15.** `LabWatch.exe` with no arguments is the setup wizard /
+control panel; with arguments it is the CLI. Everything the app does goes
+through the same `config.yaml` and the same `config.load` validation, so the
+app can't produce a config the watcher rejects, and power users can still edit
+the file by hand. Two exes are shipped (windowed for the app and for the
+Task-Scheduler `run`, console for terminal use) because a windowed exe can't
+print and a console exe leaves a window open at logon. PyInstaller must run
+on Windows; the Mac build only validates the spec.

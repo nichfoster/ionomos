@@ -31,3 +31,4 @@ Thumbs.db
 .Rhistory
 .idea/
 .vscode/
+build/

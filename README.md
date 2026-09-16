@@ -26,11 +26,14 @@ Eclipse PC                    shared folder                 Proteomics PC
 
 ## Status
 
-**Phase 1 — watcher + intake, ready to deploy.** Folders dropped in the inbox
-are detected, interpreted (flexible naming + a small resolver window for the
-rest), filed into the owner's directory and queued. FragPipe is not invoked
-yet (Phase 2). See [docs/ROADMAP.md](docs/ROADMAP.md), and
-[docs/DEPLOY_WINDOWS.md](docs/DEPLOY_WINDOWS.md) to put it on the PC.
+**Phase 1 — watcher + intake + setup app, ready to deploy.** Folders dropped
+in the inbox are detected, interpreted (flexible naming + a small resolver
+window for the rest), filed into the owner's directory and queued. A tkinter
+app (`LabWatch.exe`, or `labwatch setup`) is the setup wizard and control
+panel — folders, users, methods, every parameter, start/stop, startup task,
+and a built-in testbed. FragPipe is not invoked yet (Phase 2). See
+[docs/ROADMAP.md](docs/ROADMAP.md), and [docs/DEPLOY_WINDOWS.md](docs/DEPLOY_WINDOWS.md)
+to put it on the PC.
 
 ## Layout
 
@@ -38,7 +41,7 @@ yet (Phase 2). See [docs/ROADMAP.md](docs/ROADMAP.md), and
 |---|---|
 | [`docs/`](docs/) | Design docs — read these first |
 | [`labwatch/`](labwatch/) | The watcher package (Python 3.11+, installed on the proteomics PC) |
-| [`deploy/`](deploy/) | Windows installer (`install.ps1`), launcher, release-zip builder |
+| [`deploy/`](deploy/) | `build_exe.ps1` (PyInstaller → `LabWatch.exe`), `install.ps1` fallback, release-zip builder |
 | [`scripts/`](scripts/) | One-shot dev/test setup for macOS and Windows |
 | [`tools/inventory/`](tools/inventory/) | PowerShell inventory collector to run on the lab PC (fixed version) |
 | [`reference/pc-inventory/`](reference/pc-inventory/) | Raw output of the inventory runs (2026-09-15) |
@@ -63,7 +66,8 @@ yet (Phase 2). See [docs/ROADMAP.md](docs/ROADMAP.md), and
 ## Quick start (dev, on this Mac)
 
 ```bash
-scripts/test_mac.sh --bed        # venv + lint + 137 tests + a fake lab in ./labwatch-testbed
+scripts/test_mac.sh --bed        # venv + lint + 149 tests + a fake lab in ./labwatch-testbed
+labwatch/.venv/bin/labwatch setup   # the app, pointed at any config you like
 ```
 
 Deployment on the proteomics PC is described in [labwatch/README.md](labwatch/README.md).

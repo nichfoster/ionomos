@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Build a self-contained release zip for the Windows PC.
+# Build the FALLBACK (wheel-based) release zip for the Windows PC.
+# The preferred route is deploy/build_exe.ps1 on Windows -> LabWatch.exe.
 #   deploy/make_release.sh            -> dist/labwatch-<version>-windows.zip
 # Contents: labwatch wheel, dependency wheels for Windows (offline install),
 # install.ps1, uninstall.ps1, run_labwatch.bat, config.example.yaml, DEPLOY_WINDOWS.md

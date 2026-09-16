@@ -33,8 +33,10 @@ Done 2026-09-15: `naming` (keyword/glued-initials/date formats/method from
 file names), `config`, `watcher` (note-aware retry, backoff), `ledger`,
 `intake` (experiment.yaml overrides, Windows lock retry), `resolve` (tkinter
 window), `testbed`, `cli` (run / check / status / dry-run / retry / testbed),
-137 tests incl. real-GUI and end-to-end, release zip + `install.ps1`.
-Remaining for exit: run `docs/DEPLOY_WINDOWS.md` on the PC.
+`app` (setup wizard / control panel with a Testbed tab), `configio`,
+`service`, PyInstaller exe (`LabWatch.exe` + `labwatch.exe`), 149 tests incl.
+real-GUI and end-to-end, `install.ps1` fallback.
+Remaining for exit: build the exe on Windows and run `docs/DEPLOY_WINDOWS.md` Way A on the PC.
 
 **Exit:** on the PC, dropping a correctly named folder of raws lands it in the
 right user directory with `labwatch.json` saying `queued` and nothing else

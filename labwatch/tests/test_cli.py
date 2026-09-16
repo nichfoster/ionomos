@@ -40,3 +40,14 @@ def test_testbed_init_list_drop_reset(tmp_path, capsys):
 def test_status_empty(lab, capsys):
     assert main(["--config", str(lab["cfg_path"]), "status"]) == 0
     assert "no ledger" in capsys.readouterr().out
+
+
+def test_no_args_opens_setup(monkeypatch):
+    import labwatch.app as app_mod
+
+    called = []
+    monkeypatch.setattr(app_mod, "main", lambda cfg=None: called.append(cfg) or 0)
+    assert main([]) == 0
+    assert called == [None]
+    assert main(["--config", "x.yaml", "setup"]) == 0
+    assert str(called[1]) == "x.yaml"

@@ -4,7 +4,7 @@ Three layers, all runnable on macOS and Windows:
 
 | Layer | What | Command |
 |---|---|---|
-| Unit + e2e (`pytest`) | 137 tests: naming, config, ledger, watcher timing, intake, overrides, resolver logic, **real tkinter dialog** (skipped if no display), and 6 end-to-end runs of watcher-thread + intake against testbed samples | `scripts/test_mac.sh` / `scripts\test_windows.ps1` |
+| Unit + e2e (`pytest`) | 149 tests: naming, config, config I/O, ledger, watcher timing, intake, overrides, resolver logic, **real tkinter dialog and the setup app** (skipped if no display), and 6 end-to-end runs of watcher-thread + intake against testbed samples | `scripts/test_mac.sh` / `scripts\test_windows.ps1` |
 | Testbed (manual) | A fake lab on disk with 12 sample drops covering every path, a fake FragPipe, and the real CLI | `labwatch testbed …` |
 | The real PC | `dry-run` on real folders, then a throwaway drop | see DEPLOY_WINDOWS.md §5 |
 
@@ -26,7 +26,15 @@ Needs Python 3.11+ from python.org with *tcl/tk* and *py launcher* ticked.
 Both scripts create `labwatch/.venv`, install in editable mode, run ruff and
 pytest, and (with `--bed`/`-Bed`) build `./labwatch-testbed`.
 
-## Driving the testbed
+## Driving the testbed from the app
+
+`labwatch setup` (or `LabWatch.exe`) → tab **5 Run & Test** → *Testbed*:
+**Create testbed** → **Start TESTBED watcher** → pick a sample → **Drop** /
+**Drop slowly** → watch the output pane (tick *follow the watcher log*).
+**Resolver window demo** opens the dialog with sample data. **Reset testbed**
+wipes it. Everything below is the same thing from the command line.
+
+## Driving the testbed from the command line
 
 Activate the venv first (`source labwatch/.venv/bin/activate` or
 `labwatch\.venv\Scripts\Activate.ps1`), then, in **terminal 1**:
@@ -89,3 +97,19 @@ skip the window next time.
   should show `cannot move … will retry` and succeed once the file is closed.
 - Log out and back in: the Task Scheduler task should restart the watcher;
   anything left `running` in the ledger is marked `failed (interrupted)`.
+
+## The frozen executable
+
+`deploy/build_app_mac.sh` builds a single-file `dist/exe/labwatch` on macOS
+from the same PyInstaller spec used for Windows, so packaging problems
+(missing hidden imports, tkinter data files) show up here first:
+
+```bash
+deploy/build_app_mac.sh
+dist/exe/labwatch --version
+dist/exe/labwatch testbed init /tmp/bed && dist/exe/labwatch --config /tmp/bed/Fragpipe_Auto/config.yaml check
+dist/exe/labwatch setup          # the app, frozen
+```
+
+The Windows build (`deploy\build_exe.ps1`) produces `LabWatch.exe` (windowed)
+and `labwatch.exe` (console) from the same spec.
