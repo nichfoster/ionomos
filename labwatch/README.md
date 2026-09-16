@@ -5,8 +5,7 @@ developer/operator view.
 
 ## Status
 
-Phase 0/1. `naming.py` is implemented and tested; everything else is a stub
-with its contract in the module docstring. See `../docs/ROADMAP.md`.
+Phase 1 complete (watcher + intake, no FragPipe yet). See `../docs/ROADMAP.md`.
 
 ## Develop (Mac/Linux)
 
@@ -37,15 +36,15 @@ C:\Fragpipe_Auto\labwatch\.venv\Scripts\labwatch run
 
 | Module | State |
 |---|---|
-| `naming.py` | ✅ implemented + tests |
-| `config.py` | stub |
-| `watcher.py` | stub |
-| `ledger.py` | stub |
-| `intake.py` | stub |
+| `naming.py` | ✅ keyword/user/date matching, per-method raw tails |
+| `config.py` | ✅ YAML load + validation (FragPipe paths are warnings until Phase 2) |
+| `watcher.py` | ✅ inbox polling with tree-fingerprint stability |
+| `ledger.py` | ✅ SQLite jobs table, startup recovery |
+| `intake.py` | ✅ plan → move → labwatch.json → ledger; `.REJECTED.txt` on failure |
+| `cli.py` | ✅ `run`, `status`, `dry-run`, `retry` |
 | `manifest.py` | stub |
 | `worker.py` | stub |
 | `runners/fragpipe.py` | stub (port from `reference/prior-work`) |
 | `runners/isodtb.py` | stub (port from `reference/lab-scripts`) |
 | `runners/tmt.py` | stub (port from `reference/lab-scripts`) |
 | `runners/dia.py` | stub |
-| `cli.py` | stub |

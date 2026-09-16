@@ -71,3 +71,12 @@ changing a workflow should not require a code change.
 installable Python package with its own `pyproject.toml`. The QC pipeline and
 any future tools sit beside it rather than inside it. Reference material and
 lab artefacts live under `reference/`, never inside a package.
+
+### D12 — Keyword matching instead of a fixed folder layout; sanitise, don't reject
+**2026-09-15.** Supersedes the fixed-field part of D9. Nich's direction:
+"as flexible as possible." Method is found by keyword anywhere in the folder
+name, user by initials/alias token, date opportunistically. Spaces and
+punctuation are sanitised on the way in rather than rejected, with the
+original name recorded. The *tail* of raw file names stays strict because
+that's what FragPipe's manifest is built from, and its meaning is per-method
+(isoDTB rep_frac; TMT frac with biorep 1; DIA cond_biorep).

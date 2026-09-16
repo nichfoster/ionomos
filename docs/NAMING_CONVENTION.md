@@ -1,134 +1,116 @@
 # Naming convention
 
-This is the contract between lab members and the watcher. It is deliberately
-short: a user should be able to remember it without looking it up, and the
-watcher must be able to derive everything FragPipe needs from it.
+The contract between lab members and the watcher. Philosophy: **flexible
+folder names, strict raw-file tails.** The watcher looks for keywords in the
+folder name rather than enforcing a fixed layout; the *end* of each raw file
+name is reserved for replicate/fraction numbers, and what those numbers mean
+depends on the method.
 
-**Status: PROPOSED — confirm with the lab before Phase 1.** See open questions
-at the bottom.
+Implemented in `labwatch/src/labwatch/naming.py`; `labwatch dry-run <folder>`
+shows exactly how a folder will be interpreted without touching it.
 
-## Design goals
+## Folder name
 
-1. Everything FragPipe's manifest needs (experiment name, bioreplicate, data
-   type) must be derivable from names alone for the common case.
-2. Match what people already do. Existing folders like
-   `20260902-isoDTB_EJQ-2-027` and `20260804-isoDTB_IJ607061` are close to the
-   proposal; raw files already use `<prefix>_<rep>_<fraction>.raw`.
-3. Never contain spaces or characters FragPipe/Windows choke on.
-4. Sort chronologically in Explorer.
+Anything you like, as long as the name contains:
 
-## Experiment folder name
-
-```
-<DATE>_<USER>_<METHOD>_<EXPID>[_<DESCRIPTION>]
-```
-
-| Field | Rule | Example |
+| Must contain | How it's found | Examples that work |
 |---|---|---|
-| `DATE` | `YYYYMMDD`, date the samples were run | `20260902` |
-| `USER` | your handle — must match your folder under `C:\Fragpipe_General\` | `EJQ`, `Isaac`, `Chris` |
-| `METHOD` | one of `isoDTB`, `TMT`, `DIA`, `DDA` (case-insensitive) | `isoDTB` |
-| `EXPID` | your notebook/experiment ID; use `-` inside, never `_` | `EJQ-2-027` |
-| `DESCRIPTION` | optional free text, `-` separated | `1uM-3h` |
+| **Method** | keyword anywhere in the name (case-insensitive): `isoDTB`, `TMT`, `DIA` (aliases configurable, e.g. `DIANN`) | `20260902-isoDTB_EJQ-2-027`, `THB10ISODTB`, `KL6159A_9plex_TMT`, `EJQ_123_DIA` |
+| **User** | your initials or your folder name under `C:\Fragpipe_General\`, as a separate token (split on `_ - . space ( )`). Aliases live in `config.yaml` (`IJ` → `Isaac`, `EJQ_2` → `EJQ`) | `EJQ_isoDTB_…`, `…_IJ_DIA`, `Taylor Elements TMT run 3` |
+| *(optional)* **Date** | a token that is `YYYYMMDD`, `MMDDYYYY` or `MMDDYY`. If absent, the drop date is recorded | `20260902`, `08172026`, `081726` |
 
-Fields are separated by `_`. Inside a field use `-`. Allowed characters:
-`A-Z a-z 0-9 - .`. No spaces, no parentheses, no `&`, no `+`.
+Recommended shape (sorts well, unambiguous): `YYYYMMDD_<initials>_<method>_<whatever>`
+e.g. `20260902_EJQ_isoDTB_EJQ-2-027_1uM-3h`.
 
-Examples:
+**Spaces and punctuation are tolerated** — the folder is renamed on the way in
+(`20260902-isoDTB_EJQ-2-027 (1uM 3h)` → `20260902-isoDTB_EJQ-2-027-1uM-3h`)
+because FragPipe cannot handle spaces in paths. The original name is kept in
+`labwatch.json`.
 
-```
-20260902_EJQ_isoDTB_EJQ-2-027_1uM-3h
-20260914_Isaac_DIA_IJD05_FLAG-AR-pulldown
-20260126_Aman_TMT_KL6159A-159B_9plex
-```
+Rejected, with a `<name>.REJECTED.txt` note left next to the folder:
 
-Rejected (with reason written to `labwatch.REJECTED.txt` next to the folder):
+- no method keyword (`IJD05_FLAG_pulldown`)
+- two method keywords (`EJQ_isoDTB_and_TMT`)
+- no recognisable user (`EJQ123_isoDTB` — `EJQ123` is one token; write `EJQ_123_isoDTB`),
+  unless `users.default` is set in config, in which case it's filed there
+- two users (`EJQ_Isaac_isoDTB`)
+- destination already exists / same name was processed before → add `_redo`
 
-```
-EJQ123_isoDTB                    → no date, no user
-20260902-isoDTB_EJQ-2-027        → fields separated by '-' not '_'
-20260902_EJQ_isoDTB_EJQ-2-027 (1uM 3h)   → spaces / parentheses
-20260902_ejq_isodtb_EJQ-2-027    → ok: USER and METHOD are case-insensitive but
-                                   USER must resolve to an existing user folder
-```
+## Raw file names — the tail is reserved
 
-## Raw file names
+Separators before the numbers may be `_` or `-`; optional `R`/`rep` and
+`F`/`frac` prefixes are accepted.
 
-FragPipe needs, per raw file: **experiment** (grouping label), **bioreplicate**
-(integer), **data type** (`DDA`/`DIA`). The watcher derives these from the
-trailing numeric suffixes of the filename:
+### isoDTB — `<sample>_<rep>_<fraction>.raw`
 
 ```
-<SAMPLE>_<REP>_<FRACTION>.raw     fractionated (isoDTB, TMT with offline fractions)
-<SAMPLE>_<REP>.raw                single-shot (DIA, unfractionated DDA)
+EJQ_PK_EJQ-2-027_isoDTB_1uM_3h_1_1.raw … _3_7.raw    3 reps × 7 fractions
+X_R2_F7.raw                                          same thing, prefixed
+X_2.raw                                              unfractionated, rep 2
 ```
+`sample` → FragPipe experiment; `rep` → bioreplicate; fractions merge automatically.
+Every rep must have the same fraction set (a missing `_3_7` means the copy was
+incomplete → rejected).
 
-- `SAMPLE` is everything before the numeric suffixes. It becomes the FragPipe
-  **experiment** name. Files with different `SAMPLE` in one folder become
-  different experiments (e.g. `DMSO_1.raw`, `DMSO_2.raw`, `Drug_1.raw`,
-  `Drug_2.raw` → two experiments, two bioreplicates each).
-- `REP` becomes **bioreplicate**.
-- `FRACTION` is ignored by the manifest (FragPipe groups fractions by
-  experiment+bioreplicate automatically) but is validated for completeness:
-  every replicate must have the same set of fractions, otherwise the job is
-  rejected as incomplete.
+### TMT — `<sample>[_TMT]_[F]<fraction>.raw`
 
-This is exactly how existing runs are laid out, e.g.
-`EJQ_PK_EJQ-2-027_isoDTB_1uM_3h_1_1.raw … _3_7.raw` → experiment
-`EJQ_PK_EJQ-2-027_isoDTB_1uM_3h`, bioreplicates 1–3, 7 fractions each.
+```
+KL6159A_TMT_F1.raw … KL6159A_TMT_F8.raw     one plex, 8 fractions
+KL6159A_F3.raw   KL6159A_3.raw              also fine
+KL6159A.raw                                 single fraction
+```
+Every TMT run holds all replicates in its channels, so **bioreplicate is
+always 1** (per the lab SOP). `sample` → experiment (= plex name). Two plexes
+in one drop = two different `sample` prefixes. Channel → sample-name mapping
+comes from `experiment.yaml` (below) or a FragPipe `annotation.txt` you put in
+the folder.
 
-`.raw` files may be at the top level of the folder or inside a `raw/`
-subfolder. Anything else (`.mzML`, `.xlsx`, notes) is left alone and carried
-along with the move.
+### DIA — `<condition>_<biorep>.raw`
 
-## `experiment.yaml` (optional)
+```
+DMSO_1.raw  DMSO_2.raw  DMSO_3.raw
+Drug_1.raw  Drug_2.raw  Drug_3.raw          two conditions × 3 bioreps
+Drug_R3.raw                                 also fine
+```
+`condition` → experiment; `biorep` → bioreplicate. A file with no trailing
+number is bioreplicate 1.
 
-For anything the names can't say. If present in the folder it is validated and
-its values override anything parsed from names.
+Raw files may sit at the top level or in a `raw\` subfolder. Anything else in
+the folder (`.xlsx`, notes, `.mzML`) is carried along untouched.
+
+## `experiment.yaml` (optional) — Phase 2/3
+
+For things names can't say. If present it is validated at intake and its
+values override what was parsed.
 
 ```yaml
-# All keys optional.
-method: TMT                 # override METHOD from folder name
-fasta: 2025-01_human_reviewed_decoys.fas   # filename under config `fasta_dir`; default per method
-workflow: tmt10-ms3-phospho # filename (no ext) under config `workflow_dir`; default per method
+method: TMT                 # override the keyword match
+workflow: TMT10-MS3-phospho # file under config workflow_dir (no extension needed)
+fasta: human_reviewed_2025-01_decoys.fas
 
-# Override per-file assignments. Filename → {experiment, bioreplicate}.
-files:
+files:                      # per-file overrides
   KL6159A_1_1.raw: {experiment: plex1, bioreplicate: 1}
 
-# TMT only. Required unless a FragPipe-style annotation.txt is already in the folder.
-# One block per plex (= per experiment name above).
-tmt:
-  tag: TMT-10               # TMT-6 | TMT-10 | TMT-11 | TMT-16 | TMT-18
-  channels:                 # channel → sample name. Keep the channel token in the
-    126:  DMSO_126          #   sample name (the lab's TMT SOP requires it, and the
-    127N: DMSO_127N         #   annotation-fixing script keys off it).
+tmt:                        # TMT only; one block per plex (= experiment name)
+  tag: TMT-10
+  channels:                 # channel → sample name. KEEP the channel token in
+    126:  DMSO_126          #   the sample name (lab SOP; the annotation script keys on it)
+    127N: DMSO_127N
     127C: Drug_127C
-    # ...
 
-# Free-form. Copied verbatim into labwatch.json for provenance.
-notes: "24 h treatment, 1 µM"
+notes: "24 h treatment, 1 µM"   # copied into labwatch.json for provenance
 ```
 
-The watcher writes the FragPipe `annotation.txt` (`<channel>\t<sample>`) from
-the `tmt.channels` block, one per plex, into the experiment folder before the
-run.
+## What the watcher derives
 
-## What the watcher does with all this
+1. folder name → `user`, `method`, `date`, sanitised name
+2. `user` → destination `C:\Fragpipe_General\<user>\<safe-name>\`
+3. `method` → workflow, FASTA, data type, post-processing (from `config.yaml`)
+4. raw names → FragPipe manifest lines (`file  experiment  bioreplicate  DDA|DIA`)
+5. all of it → `labwatch.json` in the destination
 
-1. Folder name → `user`, `method`, `exp_id`, `date`, `description`.
-2. `user` → destination `C:\Fragpipe_General\<user>\` (must exist; configurable).
-3. `method` → default workflow file + FASTA + post-processing steps (from `config.yaml`).
-4. Raw file names (+ `experiment.yaml`) → `fragpipe-files.fp-manifest`.
-5. Everything above → `labwatch.json` in the experiment folder.
+## Still to confirm with the lab
 
-## Open questions for the lab
-
-- Is `USER` = folder name under `C:\Fragpipe_General\` the right identity? Some
-  people have multiple folders (`EJQ`, `EJQ_2`; `Taylor_Elements`).
-- Do users want the date to be the acquisition date or the drop date? (Proposal: acquisition.)
-- Is `DDA` (plain, non-isoDTB label-free) actually used, or can we drop it from v1?
-- TMT: is `annotation.txt` something people are comfortable writing by hand
-  (it's a 2-column text file), or must it always come from `experiment.yaml`?
-- Are there ever mixed methods in one drop (e.g. isoDTB + DIA of the same
-  samples)? Proposal: no — one folder = one method = one FragPipe run.
+- Is user = folder under `C:\Fragpipe_General\` right? Which initials/aliases to configure?
+- Are there ever two methods in one drop? (Currently rejected.)
+- TMT: hand-written `annotation.txt` vs `experiment.yaml` — which do people prefer?

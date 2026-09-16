@@ -1,119 +1,188 @@
-"""Table-driven tests for the naming convention, using names seen on the lab PC."""
+"""Table-driven naming tests, using folder and raw names seen on the lab PC."""
 from datetime import date
 
 import pytest
 
-from labwatch.naming import NamingError, group_raws, parse_folder_name, parse_raw_name
+from labwatch.naming import (
+    NamingError,
+    build_user_lookup,
+    find_method,
+    group_raws,
+    parse_folder_name,
+    parse_raw_name,
+    sanitize,
+)
 
-METHODS = {"isodtb": "isoDTB", "tmt": "TMT", "dia": "DIA", "dda": "DDA"}
+USERS = build_user_lookup(
+    ["EJQ", "Isaac", "Chris", "Aman", "Carolyn", "Thang", "Zoe", "Taylor_Elements", "Yun"],
+    aliases={"Isaac": ["IJ", "IJD"], "EJQ": ["EJQ_2"], "Thang": ["THB"]},
+)
 
 
-# ---------------------------------------------------------------- folders --
+# ------------------------------------------------------------------ sanitize --
 
 @pytest.mark.parametrize(
-    "name, user, method, exp_id, desc",
+    "raw, safe",
     [
-        ("20260902_EJQ_isoDTB_EJQ-2-027_1uM-3h", "EJQ", "isoDTB", "EJQ-2-027", "1uM-3h"),
-        ("20260902_EJQ_isoDTB_EJQ-2-027", "EJQ", "isoDTB", "EJQ-2-027", None),
-        ("20260914_Isaac_DIA_IJD05_FLAG-AR-pulldown", "Isaac", "DIA", "IJD05", "FLAG-AR-pulldown"),
-        ("20260126_Aman_TMT_KL6159A-159B_9plex", "Aman", "TMT", "KL6159A-159B", "9plex"),
-        # method token is case-insensitive and canonicalised
-        ("20260902_ejq_isodtb_EJQ-2-027", "ejq", "isoDTB", "EJQ-2-027", None),
-        # description may itself contain underscores (everything after EXPID)
-        ("20260902_EJQ_isoDTB_EJQ-2-027_1uM_3h_redo", "EJQ", "isoDTB", "EJQ-2-027", "1uM_3h_redo"),
+        ("20260902_EJQ_isoDTB_EJQ-2-027", "20260902_EJQ_isoDTB_EJQ-2-027"),
+        ("EJQ-2-027_ER-FLAG_Pulldown_(1uM", "EJQ-2-027_ER-FLAG_Pulldown_1uM"),
+        ("EJQ-2-027_ER-FLAG_Pulldown_(500nM_24h)", "EJQ-2-027_ER-FLAG_Pulldown_500nM_24h"),
+        ("Again (see this one)", "Again-see-this-one"),
+        ("  my exp  ", "my-exp"),
+        ("012626_from Cdrive", "012626_from-Cdrive"),
     ],
 )
-def test_folder_ok(name, user, method, exp_id, desc):
-    f = parse_folder_name(name, METHODS)
+def test_sanitize(raw, safe):
+    assert sanitize(raw) == safe
+    assert " " not in safe
+
+
+# -------------------------------------------------------------------- method --
+
+@pytest.mark.parametrize(
+    "name, method",
+    [
+        ("20260902-isoDTB_EJQ-2-027", "isoDTB"),
+        ("THB10ISODTB", "isoDTB"),           # glued, substring fallback
+        ("thb10isodtb2", "isoDTB"),
+        ("KL6159A_159B_9plex_TMT", "TMT"),
+        ("EJQ123_DIA", "DIA"),
+        ("CS_22rv1_175-12c5uM_24h_DIA", "DIA"),
+        ("Fragpipe-DIANN", "DIA"),
+        ("HTwt_ZD1186KM_50uM_16h_isoDTB", "isoDTB"),
+    ],
+)
+def test_find_method(name, method):
+    assert find_method(name) == method
+
+
+def test_find_method_none_and_ambiguous():
+    with pytest.raises(NamingError, match="no method"):
+        find_method("20260914-FLAGPull_IJD05_FLAGAR")
+    with pytest.raises(NamingError, match="ambiguous"):
+        find_method("EJQ_isoDTB_and_TMT")
+    # 'dia' inside another word does not count if a real token exists elsewhere
+    assert find_method("media_TMT_run") == "TMT"
+
+
+# -------------------------------------------------------------------- folder --
+
+@pytest.mark.parametrize(
+    "name, user, method, d",
+    [
+        ("20260902-isoDTB_EJQ-2-027", "EJQ", "isoDTB", date(2026, 9, 2)),
+        ("20260804-isoDTB_IJ607061", None, "isoDTB", date(2026, 8, 4)),  # IJ607061 is one token, no user
+        ("20260331-IJ-602161-isoDTB", "Isaac", "isoDTB", date(2026, 3, 31)),
+        ("08172026-isoDTB-ELK Carolyn", "Carolyn", "isoDTB", date(2026, 8, 17)),
+        ("081726-isoDTB-Carolyn", "Carolyn", "isoDTB", date(2026, 8, 17)),
+        ("EJQ123_DIA", None, "DIA", None),  # EJQ123 is one token
+        ("EJQ_123_DIA", "EJQ", "DIA", None),
+        ("THB10ISODTB", None, "isoDTB", None),
+        ("THB_10_isoDTB", "Thang", "isoDTB", None),
+        ("Taylor Elements TMT run 3", "Taylor_Elements", "TMT", None),
+        ("20260126_Aman_TMT_KL6159A-159B_9plex", "Aman", "TMT", date(2026, 1, 26)),
+        ("EJQ_2 isoDTB 10uM 2h", "EJQ", "isoDTB", None),  # alias EJQ_2 -> EJQ
+    ],
+)
+def test_parse_folder(name, user, method, d):
+    if user is None:
+        with pytest.raises(NamingError, match="no known user"):
+            parse_folder_name(name, USERS)
+        return
+    f = parse_folder_name(name, USERS)
     assert f.user == user
     assert f.method == method
-    assert f.exp_id == exp_id
-    assert f.description == desc
-    assert f.date == date(int(name[:4]), int(name[4:6]), int(name[6:8]))
+    assert f.date == d
+    assert " " not in f.safe
 
 
-@pytest.mark.parametrize(
-    "name, reason",
-    [
-        # real names from the inventory that should be rejected
-        ("EJQ123_isoDTB", "must be"),
-        ("20260902-isoDTB_EJQ-2-027", "must be"),
-        ("THB10ISODTB", "must be"),
-        ("HTwt_ZD1186KM_50uM_16h_isoDTB", "must be"),  # no date
-        ("EJQ-2-027_ER-FLAG_Pulldown_(1uM", "disallowed"),
-        ("20260902_EJQ_isoDTB_EJQ-2-027 (1uM 3h)", "spaces"),
-        ("20260902_EJQ_FOO_EJQ-2-027", "unknown METHOD"),
-        ("20261402_EJQ_isoDTB_EJQ-2-027", "valid YYYYMMDD"),
-        ("20260902_EJQ_isoDTB", "must be"),  # missing EXPID
-        (" 20260902_EJQ_isoDTB_X", "whitespace"),
-    ],
-)
-def test_folder_rejected(name, reason):
-    with pytest.raises(NamingError, match=reason):
-        parse_folder_name(name, METHODS)
+def test_parse_folder_ambiguous_user():
+    with pytest.raises(NamingError, match="ambiguous user"):
+        parse_folder_name("EJQ_Isaac_isoDTB", USERS)
 
 
-def test_folder_without_method_table_returns_token_as_typed():
-    assert parse_folder_name("20260902_EJQ_IsoDtb_X").method == "IsoDtb"
-
-
-# ------------------------------------------------------------------- raws --
+# ---------------------------------------------------------------------- raws --
 
 @pytest.mark.parametrize(
-    "fname, sample, rep, frac",
+    "fname, method, sample, rep, frac",
     [
-        ("EJQ_PK_EJQ-2-027_isoDTB_1uM_3h_3_7.raw", "EJQ_PK_EJQ-2-027_isoDTB_1uM_3h", 3, 7),
-        ("EJQ_EJQ2027_isoDTB_10uM_2h_1_1.raw", "EJQ_EJQ2027_isoDTB_10uM_2h", 1, 1),
-        ("DMSO_2.raw", "DMSO", 2, None),
-        ("Sample_01_03.RAW", "Sample", 1, 3),
+        # isoDTB: rep_frac
+        ("EJQ_PK_EJQ-2-027_isoDTB_1uM_3h_3_7.raw", "isoDTB", "EJQ_PK_EJQ-2-027_isoDTB_1uM_3h", 3, 7),
+        ("X_R2_F7.raw", "isoDTB", "X", 2, 7),
+        ("X_rep2_frac7.RAW", "isoDTB", "X", 2, 7),
+        ("X-1-1.raw", "isoDTB", "X", 1, 1),
+        ("X_2.raw", "isoDTB", "X", 2, None),
+        # TMT: [_TMT]_[F]frac ; rep always 1
+        ("KL6159A_TMT_F1.raw", "TMT", "KL6159A", 1, 1),
+        ("KL6159A_F8.raw", "TMT", "KL6159A", 1, 8),
+        ("KL6159A_TMT_1.raw", "TMT", "KL6159A", 1, 1),
+        ("KL6159A_3.raw", "TMT", "KL6159A", 1, 3),
+        ("KL6159A.raw", "TMT", "KL6159A", 1, None),
+        ("KL6159A_TMT.raw", "TMT", "KL6159A", 1, None),
+        # DIA: cond_biorep
+        ("DMSO_1.raw", "DIA", "DMSO", 1, None),
+        ("Drug_R3.raw", "DIA", "Drug", 3, None),
+        ("CS_22rv1_175_DIA_2.raw", "DIA", "CS_22rv1_175_DIA", 2, None),
+        ("Untitled.raw", "DIA", "Untitled", 1, None),
+        # spaces are sanitised, not rejected
+        ("my sample 1_2.raw", "isoDTB", "my-sample", 1, 2),
     ],
 )
-def test_raw_ok(fname, sample, rep, frac):
-    r = parse_raw_name(fname)
+def test_raw_ok(fname, method, sample, rep, frac):
+    r = parse_raw_name(fname, method)
     assert (r.sample, r.rep, r.fraction) == (sample, rep, frac)
+    assert " " not in r.safe_filename
 
 
-@pytest.mark.parametrize(
-    "fname",
-    ["notes.txt", "Sample.raw", "Sample_a.raw", "Sample 1.raw", "Sample_1_2_3x.raw"],
-)
-def test_raw_rejected(fname):
-    with pytest.raises(NamingError):
-        parse_raw_name(fname)
+def test_raw_rejected():
+    with pytest.raises(NamingError, match="not a .raw"):
+        parse_raw_name("notes.txt", "DIA")
+    with pytest.raises(NamingError, match="isoDTB files must end"):
+        parse_raw_name("Sample.raw", "isoDTB")
+    with pytest.raises(NamingError, match="unknown method"):
+        parse_raw_name("S_1.raw", "DDA")
 
 
 def _iso(reps, fracs, prefix="EJQ_PK_EJQ-2-027_isoDTB_1uM_3h"):
     return [f"{prefix}_{r}_{f}.raw" for r in reps for f in fracs]
 
 
-def test_group_fractionated_3x7():
-    rs = group_raws(_iso(range(1, 4), range(1, 8)))
+def test_group_isodtb_3x7():
+    rs = group_raws(_iso(range(1, 4), range(1, 8)), "isoDTB")
     assert rs.samples == ["EJQ_PK_EJQ-2-027_isoDTB_1uM_3h"]
-    assert rs.layout["EJQ_PK_EJQ-2-027_isoDTB_1uM_3h"] == {1: list(range(1, 8)), 2: list(range(1, 8)), 3: list(range(1, 8))}
+    assert set(rs.layout[rs.samples[0]]) == {1, 2, 3}
+    assert rs.layout[rs.samples[0]][2] == list(range(1, 8))
 
 
-def test_group_two_conditions_single_shot():
-    rs = group_raws(["DMSO_1.raw", "DMSO_2.raw", "Drug_1.raw", "Drug_2.raw"])
+def test_group_dia_two_conditions():
+    rs = group_raws(["DMSO_1.raw", "DMSO_2.raw", "Drug_1.raw", "Drug_2.raw"], "DIA")
     assert rs.layout == {"DMSO": {1: [], 2: []}, "Drug": {1: [], 2: []}}
+
+
+def test_group_tmt_fractions_one_plex():
+    rs = group_raws([f"KL_TMT_F{i}.raw" for i in range(1, 9)], "TMT")
+    assert rs.layout == {"KL": {1: list(range(1, 9))}}
 
 
 def test_group_uneven_fractions_is_incomplete():
     files = _iso([1, 2, 3], range(1, 8))
     files.remove("EJQ_PK_EJQ-2-027_isoDTB_1uM_3h_3_7.raw")
-    with pytest.raises(NamingError, match="same fractions"):
-        group_raws(files)
+    with pytest.raises(NamingError, match="incomplete"):
+        group_raws(files, "isoDTB")
 
 
 def test_group_mixed_single_and_fractionated():
     with pytest.raises(NamingError, match="mixes"):
-        group_raws(["S_1.raw", "S_1_1.raw"])
+        group_raws(["S_1.raw", "S_1_1.raw"], "isoDTB")
 
 
-def test_group_duplicate():
-    with pytest.raises(NamingError, match="duplicate"):
-        group_raws(["S_1_1.raw", "S_01_1.raw"])
+def test_group_duplicate_after_normalisation():
+    with pytest.raises(NamingError, match="two files resolve"):
+        group_raws(["S_1_1.raw", "S_01_1.raw"], "isoDTB")
+    with pytest.raises(NamingError, match="two files resolve"):
+        group_raws(["A.raw", "A_TMT.raw"], "TMT")
 
 
 def test_group_empty():
     with pytest.raises(NamingError, match="no .raw"):
-        group_raws([])
+        group_raws([], "DIA")

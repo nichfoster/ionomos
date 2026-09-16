@@ -12,7 +12,7 @@ with fake folders; nothing before Phase 2 touches FragPipe.
 **Exit:** naming convention reviewed by 2–3 lab members; fixed inventory re-run
 on the PC and results added to `reference/pc-inventory/`.
 
-## Phase 1 — Watcher + intake (no FragPipe)
+## Phase 1 — Watcher + intake (no FragPipe) ✅ code complete, not yet deployed
 
 Build, in this order, each with tests:
 
@@ -28,6 +28,10 @@ Build, in this order, each with tests:
 6. `cli.py` — `labwatch run`, `labwatch status`, `labwatch dry-run <folder>`
    (parse and print what *would* happen, move nothing).
 7. `run_labwatch.bat` + Task Scheduler instructions.
+
+Done 2026-09-15: `naming`, `config`, `watcher`, `ledger`, `intake`, `cli`
+(run / status / dry-run / retry), 77 tests, live smoke test on macOS.
+Remaining for exit: deploy to the PC (`labwatch/README.md`), Task Scheduler.
 
 **Exit:** on the PC, dropping a correctly named folder of raws lands it in the
 right user directory with `labwatch.json` saying `queued` and nothing else
@@ -58,6 +62,9 @@ happens. A bad name gets a `.REJECTED.txt`. Runs for a week without falling over
 
 - Log rotation, disk-space check before accepting a job (C: has 99 GB free;
   refuse if < 2× raw size), email/Slack/Teams notify on done/failed.
+- **Data presentation**: volcano plot + summary at the end of each run —
+  either an HTML report (plotly, no server) or a small Shiny/Streamlit app.
+  FragPipe Analyst ships R code that can be reused for the stats.
 - `labwatch status` as a tiny local web page if people ask.
 - Auto-archive finished experiments to `D:\<user>\` after N days.
 - Optional: auto-pull from `C:\Proteomics_File_Sharing` (reversing D3) once
@@ -68,7 +75,8 @@ happens. A bad name gets a `.REJECTED.txt`. Runs for a week without falling over
 Collected from the other docs; resolve before/during Phase 1.
 
 **Lab process**
-- [ ] Confirm the naming convention with users (NAMING_CONVENTION.md).
+- [ ] Confirm the naming convention with users (NAMING_CONVENTION.md); collect initials → user-folder aliases for config.
+- [ ] Trello board has a naming discussion — reconcile with NAMING_CONVENTION.md.
 - [ ] Is `USER` == folder under `C:\Fragpipe_General\`? Who has multiple folders?
 - [ ] Is plain `DDA` a real method in the lab or only isoDTB/TMT/DIA?
 - [ ] Which DIA workflow is used, and what happens after a DIA run?

@@ -1,26 +1,177 @@
 """
-Configuration loading and validation.
+Configuration loading and validation. Nothing else in the package reads YAML.
 
-Contract (Phase 1):
-    load(path) -> Config
-        - Parses config.yaml (see ../../config.example.yaml).
-        - Validates every `paths.*` entry: exists (or parent exists for
-          database/log_dir), and contains NO SPACES (FragPipe rule).
-        - Validates each `methods.<KEY>` has workflow/fasta/data_type/postprocess,
-          and that workflow_dir/<workflow> and fasta_dir/<fasta> exist.
-        - Builds `Config.method_lookup`: {key.lower(): key} for naming.parse_folder_name.
-        - Raises ConfigError with a message that names the offending key.
+    cfg = load("C:/Fragpipe_Auto/config.yaml")            # validates paths exist
+    cfg = load(path, check_paths=False)                    # for dry-run / tests
 
-    Config is a frozen dataclass; nothing else in the package reads YAML.
-
-Reuse: reference/prior-work/proteomics-qc-pkg/config_loader.py (path checks).
+Every path is checked for spaces (FragPipe rule) regardless of check_paths.
 """
 from __future__ import annotations
+
+from dataclasses import dataclass, field, replace
+from pathlib import Path
+
+import yaml
+
+from labwatch.naming import DEFAULT_METHOD_ALIASES
 
 
 class ConfigError(ValueError):
     """config.yaml is missing, malformed, or points at things that don't exist."""
 
 
-def load(path: str):  # -> Config
-    raise NotImplementedError("Phase 1")
+@dataclass(frozen=True)
+class MethodConfig:
+    key: str
+    workflow: str
+    fasta: str
+    data_type: str  # DDA | DIA
+    postprocess: tuple[str, ...]
+    aliases: tuple[str, ...]
+    extra: dict = field(default_factory=dict)  # method-specific knobs (e.g. isodtb_mod_mass)
+
+
+@dataclass(frozen=True)
+class Config:
+    inbox: Path
+    users_root: Path
+    fragpipe_exe: Path
+    workflow_dir: Path
+    fasta_dir: Path
+    database: Path
+    log_dir: Path
+
+    poll_seconds: float
+    stable_seconds: float
+    min_raw_files: int
+
+    threads: int
+    ram_gb: int
+    timeout_minutes: int
+    config_tools_folder: str
+    config_diann: str
+
+    methods: dict[str, MethodConfig]
+    user_aliases: dict[str, list[str]]
+    default_user: str  # "" => reject folders with no recognisable user
+    warnings: tuple[str, ...] = ()  # non-fatal path problems (FragPipe bits missing, etc.)
+
+    @property
+    def method_aliases(self) -> dict[str, list[str]]:
+        return {k: list(m.aliases) for k, m in self.methods.items()}
+
+    def known_users(self) -> list[str]:
+        """Users = subfolders of users_root (a new user is just a new folder)."""
+        if not self.users_root.is_dir():
+            return []
+        return sorted(p.name for p in self.users_root.iterdir() if p.is_dir() and not p.name.startswith("."))
+
+
+_REQUIRED_PATHS = ("inbox", "users_root", "fragpipe_exe", "workflow_dir", "fasta_dir", "database", "log_dir")
+
+
+def _get(d: dict, section: str, key: str, default=None, required=False):
+    sec = d.get(section)
+    if not isinstance(sec, dict):
+        if required:
+            raise ConfigError(f"missing section '{section}:'")
+        return default
+    if key not in sec:
+        if required:
+            raise ConfigError(f"missing '{section}.{key}'")
+        return default
+    return sec[key]
+
+
+def _path(section: str, key: str, value) -> Path:
+    if not isinstance(value, str) or not value.strip():
+        raise ConfigError(f"'{section}.{key}' must be a non-empty path string")
+    if " " in value:
+        raise ConfigError(f"'{section}.{key}' contains a space ({value!r}); FragPipe cannot handle that")
+    return Path(value)
+
+
+def load(path: str | Path, check_paths: bool = True) -> Config:
+    p = Path(path)
+    if not p.is_file():
+        raise ConfigError(f"config file not found: {p}")
+    try:
+        raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as exc:
+        raise ConfigError(f"could not parse {p}: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise ConfigError(f"{p} must be a YAML mapping")
+
+    paths = {k: _path("paths", k, _get(raw, "paths", k, required=True)) for k in _REQUIRED_PATHS}
+
+    methods_raw = raw.get("methods")
+    if not isinstance(methods_raw, dict) or not methods_raw:
+        raise ConfigError("'methods:' must list at least one method")
+    methods: dict[str, MethodConfig] = {}
+    for key, m in methods_raw.items():
+        if not isinstance(m, dict):
+            raise ConfigError(f"'methods.{key}' must be a mapping")
+        for req in ("workflow", "fasta", "data_type"):
+            if not m.get(req):
+                raise ConfigError(f"'methods.{key}.{req}' is required")
+        if m["data_type"] not in ("DDA", "DIA"):
+            raise ConfigError(f"'methods.{key}.data_type' must be DDA or DIA")
+        aliases = m.get("aliases") or DEFAULT_METHOD_ALIASES.get(key) or [key.lower()]
+        extra = {k: v for k, v in m.items() if k not in ("workflow", "fasta", "data_type", "postprocess", "aliases")}
+        methods[key] = MethodConfig(
+            key=key,
+            workflow=str(m["workflow"]),
+            fasta=str(m["fasta"]),
+            data_type=m["data_type"],
+            postprocess=tuple(m.get("postprocess") or ()),
+            aliases=tuple(str(a) for a in aliases),
+            extra=extra,
+        )
+
+    users = raw.get("users") or {}
+    user_aliases = {str(k): [str(a) for a in (v or [])] for k, v in (users.get("aliases") or {}).items()}
+
+    cfg = Config(
+        **paths,
+        poll_seconds=float(_get(raw, "watcher", "poll_seconds", 10)),
+        stable_seconds=float(_get(raw, "watcher", "stable_seconds", 60)),
+        min_raw_files=int(_get(raw, "watcher", "min_raw_files", 1)),
+        threads=int(_get(raw, "fragpipe", "threads", 8)),
+        ram_gb=int(_get(raw, "fragpipe", "ram_gb", 16)),
+        timeout_minutes=int(_get(raw, "fragpipe", "timeout_minutes", 240)),
+        config_tools_folder=str(_get(raw, "fragpipe", "config_tools_folder", "") or ""),
+        config_diann=str(_get(raw, "fragpipe", "config_diann", "") or ""),
+        methods=methods,
+        user_aliases=user_aliases,
+        default_user=str(users.get("default") or ""),
+    )
+
+    if check_paths:
+        errors, warnings = _check_paths(cfg)
+        if errors:
+            raise ConfigError("config problems:\n  - " + "\n  - ".join(errors))
+        if warnings:
+            cfg = replace(cfg, warnings=tuple(warnings))
+    return cfg
+
+
+def _check_paths(cfg: Config) -> tuple[list[str], list[str]]:
+    """Return (errors, warnings). Errors block Phase 1; warnings only matter for FragPipe runs."""
+    problems: list[str] = []
+    warnings: list[str] = []
+    for name in ("inbox", "users_root"):
+        if not getattr(cfg, name).is_dir():
+            problems.append(f"paths.{name}: folder does not exist: {getattr(cfg, name)}")
+    for name in ("database", "log_dir"):
+        parent = getattr(cfg, name) if name == "log_dir" else getattr(cfg, name).parent
+        if not parent.is_dir():
+            problems.append(f"paths.{name}: parent folder does not exist: {parent}")
+    if cfg.default_user and not (cfg.users_root / cfg.default_user).is_dir():
+        problems.append(f"users.default: folder does not exist: {cfg.users_root / cfg.default_user}")
+    # FragPipe bits are only needed from Phase 2 on.
+    if not cfg.fragpipe_exe.is_file():
+        warnings.append(f"paths.fragpipe_exe not found: {cfg.fragpipe_exe} (needed to run searches)")
+    for m in cfg.methods.values():
+        if not (cfg.workflow_dir / m.workflow).is_file():
+            warnings.append(f"methods.{m.key}.workflow not found: {cfg.workflow_dir / m.workflow}")
+    return problems, warnings

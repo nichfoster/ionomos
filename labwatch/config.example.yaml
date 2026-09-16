@@ -22,21 +22,32 @@ fragpipe:
   config_tools_folder: ""     # leave blank unless the first headless run can't find tools
   config_diann: ""            # e.g. C:/DIA-NN/2.3.2/DiaNN.exe — DIA only, if needed
 
-# One entry per METHOD token accepted in folder names. Keys are canonical
-# (case-insensitive match on the folder name).
+# Who is who. Users are the subfolders of users_root; a new user = a new folder.
+# Aliases let initials in a folder name resolve to that folder.
+users:
+  aliases:
+    Isaac: [IJ, IJD]
+    EJQ: [EJQ_2]
+  default: ""                 # e.g. "_unsorted" — file unrecognised users there instead of rejecting
+
+# One entry per method. The key is canonical; `aliases` are the keywords
+# searched for (case-insensitive) in folder names.
 methods:
   isoDTB:
+    aliases: [isodtb, iso-dtb]
     workflow: isoDTB.workflow
     fasta: human_reviewed_decoys.fas
     data_type: DDA
     postprocess: [isodtb_sites]
     isodtb_mod_mass: "561.3387"
   TMT:
+    aliases: [tmt]
     workflow: TMT10-MS3.workflow
     fasta: human_reviewed_decoys.fas
     data_type: DDA
     postprocess: [tmt_annotation]
   DIA:
+    aliases: [dia, diann, dia-nn]
     workflow: DIA.workflow
     fasta: human_reviewed_decoys.fas
     data_type: DIA

@@ -144,8 +144,15 @@ fragpipe:
   timeout_minutes: 240      # 3×7 isoDTB takes 30–60 min; TMT phospho can be longer
   config_diann: C:/DIA-NN/2.3.2/DiaNN.exe   # only if FragPipe can't find its bundled one
 
-methods:                    # keyed by canonical METHOD token from the folder name
+users:
+  aliases:                  # initials / alternate spellings -> folder under users_root
+    Isaac: [IJ, IJD]
+    EJQ:   [EJQ_2]
+  default: ""               # set to e.g. "_unsorted" to file unrecognised users there instead of rejecting
+
+methods:                    # keyed by canonical METHOD keyword; aliases are matched in folder names
   isoDTB:
+    aliases: [isodtb, iso-dtb]
     workflow: isoDTB.workflow
     fasta:    human_reviewed_2025-01_decoys.fas
     data_type: DDA
