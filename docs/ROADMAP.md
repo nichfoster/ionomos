@@ -34,7 +34,7 @@ file names), `config`, `watcher` (note-aware retry, backoff), `ledger`,
 `intake` (experiment.yaml overrides, Windows lock retry), `resolve` (tkinter
 window), `testbed`, `cli` (run / check / status / dry-run / retry / testbed),
 `app` (setup wizard / control panel with a Testbed tab), `configio`,
-`service`, PyInstaller exe (`LabWatch.exe` + `labwatch.exe`), 149 tests incl.
+`service`, PyInstaller exe (`LabWatch.exe` + `labwatch-cli.exe`), 149 tests incl.
 real-GUI and end-to-end, `install.ps1` fallback.
 2026-09-16: dev install on the PC (`deploy/dev_install.ps1`, `labwatch update`,
 "Update from GitHub" in the app), `labwatch diagnose` / "Copy diagnostics",

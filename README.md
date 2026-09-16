@@ -68,7 +68,7 @@ to put it on the PC.
 ## Quick start (dev, on this Mac)
 
 ```bash
-scripts/test_mac.sh --bed        # venv + lint + 159 tests + a fake lab in ./labwatch-testbed
+scripts/test_mac.sh --bed        # venv + lint + 162 tests + a fake lab in ./labwatch-testbed
 labwatch/.venv/bin/labwatch setup   # the app, pointed at any config you like
 ```
 

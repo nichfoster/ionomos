@@ -111,14 +111,14 @@ py -3.14 -c "import tkinter; print('ok')"
 | Want to… | Do |
 |---|---|
 | change any setting | open `LabWatch.exe`, edit, **Save** (restart the watcher for timing changes) |
-| see the queue | tab 5 → **Show queue**, or `labwatch.exe status` |
+| see the queue | tab 5 → **Show queue**, or `labwatch-cli.exe status` |
 | see the log | tab 5 → tick *follow the watcher log*, or `C:\Fragpipe_Auto\logs\labwatch.log` |
-| report a problem | tab 5 → **Copy diagnostics** → paste (or `labwatch.exe diagnose`) |
+| report a problem | tab 5 → **Copy diagnostics** → paste (or `labwatch-cli.exe diagnose`) |
 | stop / start the watcher | tab 5 buttons; the startup task restarts it at next logon |
 | add a user | tab 2 → Add; or just create the folder under `C:\Fragpipe_General` |
-| see what a folder would do | `labwatch.exe dry-run "C:\path\to\folder"` |
+| see what a folder would do | `labwatch-cli.exe dry-run "C:\path\to\folder"` |
 | upgrade | unzip the new build over `C:\Fragpipe_Auto`; config/data untouched |
-| uninstall | tab 5 → **Remove** startup task; delete `LabWatch.exe`/`labwatch.exe`. Data stays. |
+| uninstall | tab 5 → **Remove** startup task; delete `LabWatch.exe`/`labwatch-cli.exe`. Data stays. Full reset: `deploy\clean_slate.ps1`. |
 
 ## Troubleshooting
 
@@ -139,5 +139,13 @@ py -3.14 -c "import tkinter; print('ok')"
 - **"contains a space" on Check.** Every path in the config must be space-free
   (FragPipe). Don't put the testbed or the install under `C:\Users\<First Last>\…`;
   use `C:\labwatch-testbed` / `C:\Fragpipe_Auto`.
+- **Double-clicking `LabWatch.exe` flashes a console window and closes.** Look
+  for `LabWatch-crash.txt` next to the exe — the full error is in there (the
+  app also shows it in a dialog). Builds before 0.1.2 had a bug where the
+  console exe overwrote the windowed one (Windows ignores the case of
+  `LabWatch.exe` vs `labwatch.exe`); download a current build from Releases.
+- **Start over completely.** `deploy\clean_slate.ps1` removes the program
+  (task, exes, venvs, shortcut, remembered config path) and keeps all data and
+  `config.yaml`; `-Config` also removes the config and ledger.
 - **`LabWatch.exe` flagged by antivirus / SmartScreen.** Unsigned PyInstaller
   exes sometimes are. "More info → Run anyway", or use Way B.

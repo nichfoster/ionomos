@@ -66,14 +66,14 @@ def labwatch_command(console: bool = False) -> list[str]:
     """argv prefix that runs the labwatch CLI, whether frozen or from a venv.
 
     Frozen builds ship two exes: LabWatch.exe (windowed: the app, and `run`)
-    and labwatch.exe (console: check/status/dry-run). `console=True` picks the
+    and labwatch-cli.exe (console: check/status/dry-run). `console=True` picks the
     console one when it exists so captured output actually comes back.
     """
     if getattr(sys, "frozen", False):
         if os.name == "nt":
-            want = "labwatch.exe" if console else "LabWatch.exe"
+            want = "labwatch-cli.exe" if console else "LabWatch.exe"
             other = _sibling(want)
-            if other and other.name != Path(sys.executable).name:
+            if other and other.name.lower() != Path(sys.executable).name.lower():
                 return [str(other)]
         return [sys.executable]
     return [sys.executable, "-m", "labwatch.cli"]

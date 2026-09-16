@@ -1,7 +1,7 @@
 """
 LabWatch app — setup wizard on first run, control panel afterwards.
 
-    labwatch setup [--config PATH]        (or just double-click labwatch.exe)
+    labwatch setup [--config PATH]        (or just double-click LabWatch.exe)
 
 Tabs:  1 Folders · 2 Users · 3 Methods · 4 Advanced · 5 Run & Test · Help
 Bottom bar: config path, Reload, Save, Save & Check.

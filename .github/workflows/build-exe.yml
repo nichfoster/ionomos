@@ -1,4 +1,4 @@
-# Builds LabWatch.exe / labwatch.exe on a GitHub Windows machine and attaches
+# Builds LabWatch.exe / labwatch-cli.exe on a GitHub Windows machine and attaches
 # the zip to a GitHub Release. Nothing to build by hand, ever.
 #
 #   tag a version:      git tag v0.2.0 && git push --tags     -> release "v0.2.0" with the zip
@@ -24,7 +24,7 @@ jobs:
       - name: Smoke test the console exe
         shell: pwsh
         run: |
-          $exe = Get-ChildItem dist\LabWatch-*-windows\labwatch.exe | Select-Object -First 1
+          $exe = Get-ChildItem dist\LabWatch-*-windows\labwatch-cli.exe | Select-Object -First 1
           & $exe --version
           & $exe testbed init C:\bed
           & $exe --config C:\bed\Fragpipe_Auto\config.yaml check
