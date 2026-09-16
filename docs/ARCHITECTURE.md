@@ -22,7 +22,9 @@
 | `watcher.py` | Poll the inbox; detect new **folders**; wait for copy to finish | `prior-work/watcher.py` (size-stability idea, generalised to a tree) |
 | `naming.py` | Pure functions: folder name → fields; raw filename → (sample, rep, fraction) | — |
 | `manifest.py` | Read/validate `experiment.yaml`; build `.fp-manifest` + TMT `annotation.txt` | `prior-work/fragpipe_runner.build_manifest` |
-| `intake.py` | Validate a stable folder, move it to the user dir, write `labwatch.json`, insert ledger row | — |
+| `intake.py` | Validate a stable folder, move it to the user dir, write `labwatch.json`, insert ledger row; hand unresolvable names to the resolver | — |
+| `resolve.py` | tkinter window for fixing user/method/file tails; writes `experiment.yaml` + learned aliases | — |
+| `testbed.py` | Fake lab + sample drops + fake FragPipe for testing on any OS | — |
 | `ledger.py` | SQLite job table + status transitions; source of truth for "what's queued" | `prior-work/store.py` |
 | `worker.py` | Pull next `queued` job, run it, record result. Sequential. | `prior-work/queue_worker.py` |
 | `runners/fragpipe.py` | Build the headless command, run with timeout, tee log | `prior-work/fragpipe_runner.py` (nearly as-is) |
@@ -101,10 +103,14 @@ C:\Fragpipe_General\<user>\<experiment>\    ← where jobs land
 ## Job state machine
 
 ```
-            ┌──────────┐  name/raw invalid  ┌──────────┐
- detected ─▶│stabilising│ ─────────────────▶│ rejected │ (folder stays in inbox + .REJECTED.txt)
-            └──────────┘                    └──────────┘
-                 │ stable + valid, moved
+            ┌──────────┐  name/raw invalid  ┌──────────┐ human answers ┌──────────┐
+ detected ─▶│stabilising│ ─────────────────▶│ resolver │──────────────▶│ (re-plan)│
+            └──────────┘                    └──────────┘  skip / no GUI └──────────┘
+                 │ stable + valid, moved          │                          │
+                 │                                ▼                          │
+                 │                          ┌──────────┐  folder changed or  │
+                 │                          │ rejected │  note deleted ──────┘
+                 │                          └──────────┘ (stays in inbox + .REJECTED.txt)
                  ▼
             ┌──────────┐    worker picks     ┌──────────┐   exit 0 + postproc ok   ┌──────┐
             │  queued  │ ───────────────────▶│ running  │ ────────────────────────▶│ done │
@@ -149,6 +155,11 @@ users:
     Isaac: [IJ, IJD]
     EJQ:   [EJQ_2]
   default: ""               # set to e.g. "_unsorted" to file unrecognised users there instead of rejecting
+  # learned_aliases_file: C:/Fragpipe_Auto/learned_aliases.yaml   (written by the resolver window)
+
+gui:
+  enabled: true             # open the resolver window on naming problems (needs an interactive session)
+  timeout_minutes: 0        # 0 = wait for a human; N = auto-skip (reject with note) after N minutes
 
 methods:                    # keyed by canonical METHOD keyword; aliases are matched in folder names
   isoDTB:

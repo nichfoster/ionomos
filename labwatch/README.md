@@ -5,7 +5,9 @@ developer/operator view.
 
 ## Status
 
-Phase 1 complete (watcher + intake, no FragPipe yet). See `../docs/ROADMAP.md`.
+Phase 1 complete and hardened (watcher + intake + resolver window + testbed;
+no FragPipe yet). See `../docs/ROADMAP.md`. Testing: `../docs/TESTING.md`.
+Deploying: `../docs/DEPLOY_WINDOWS.md`.
 
 ## Develop (Mac/Linux)
 
@@ -18,19 +20,12 @@ ruff check src tests
 
 ## Deploy (proteomics PC, Windows)
 
-Target layout is `C:\Fragpipe_Auto\` — see `docs/ARCHITECTURE.md`.
+Build a release on the Mac, copy the zip over, run the installer — full
+walkthrough in [`../docs/DEPLOY_WINDOWS.md`](../docs/DEPLOY_WINDOWS.md).
 
-```powershell
-# python on PATH is the Store stub on this machine; use the py launcher.
-py -3.14 -m venv C:\Fragpipe_Auto\labwatch\.venv
-C:\Fragpipe_Auto\labwatch\.venv\Scripts\pip install <path-to-this-folder>
-copy config.example.yaml C:\Fragpipe_Auto\config.yaml   # then edit
-C:\Fragpipe_Auto\labwatch\.venv\Scripts\labwatch dry-run C:\Fragpipe_Auto\inbox\<some_folder>
-C:\Fragpipe_Auto\labwatch\.venv\Scripts\labwatch run
+```bash
+../deploy/make_release.sh        # -> ../dist/labwatch-<version>-windows.zip
 ```
-
-`run_labwatch.bat` wraps the last line for Task Scheduler (run at log on,
-"run whether user is logged on or not" if the account policy allows it).
 
 ## Modules
 
@@ -41,7 +36,9 @@ C:\Fragpipe_Auto\labwatch\.venv\Scripts\labwatch run
 | `watcher.py` | ✅ inbox polling with tree-fingerprint stability |
 | `ledger.py` | ✅ SQLite jobs table, startup recovery |
 | `intake.py` | ✅ plan → move → labwatch.json → ledger; `.REJECTED.txt` on failure |
-| `cli.py` | ✅ `run`, `status`, `dry-run`, `retry` |
+| `resolve.py` | ✅ tkinter resolver window; pure validation logic separately testable |
+| `testbed.py` | ✅ `labwatch testbed init/list/drop/reset/gui-demo` |
+| `cli.py` | ✅ `run [--no-gui]`, `check`, `status`, `dry-run`, `retry`, `testbed` |
 | `manifest.py` | stub |
 | `worker.py` | stub |
 | `runners/fragpipe.py` | stub (port from `reference/prior-work`) |

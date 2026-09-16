@@ -80,3 +80,12 @@ punctuation are sanitised on the way in rather than rejected, with the
 original name recorded. The *tail* of raw file names stays strict because
 that's what FragPipe's manifest is built from, and its meaning is per-method
 (isoDTB rep_frac; TMT frac with biorep 1; DIA cond_biorep).
+
+### D13 — A tiny tkinter window beats a rejection note
+**2026-09-15.** When a folder can't be interpreted, the watcher (running in
+the interactive session on the PC) opens a pre-filled tkinter dialog rather
+than only writing a note. tkinter ships with Python (no dependency), opens
+instantly, and the answer is persisted as `experiment.yaml` + learned aliases
+so the same question is never asked twice. The note remains the fallback for
+headless runs and for "Skip". Rejected folders are re-evaluated when their
+tree changes or the note is deleted, so users fix things in place.

@@ -4,10 +4,12 @@ Configuration loading and validation. Nothing else in the package reads YAML.
     cfg = load("C:/Fragpipe_Auto/config.yaml")            # validates paths exist
     cfg = load(path, check_paths=False)                    # for dry-run / tests
 
-Every path is checked for spaces (FragPipe rule) regardless of check_paths.
+Paths with spaces are an error on Windows (FragPipe rule on the real PC) and a
+warning elsewhere (so a testbed can live under "~/Code Projects/").
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -54,6 +56,10 @@ class Config:
     methods: dict[str, MethodConfig]
     user_aliases: dict[str, list[str]]
     default_user: str  # "" => reject folders with no recognisable user
+    learned_aliases_file: Path  # aliases the GUI was told to remember
+    gui_enabled: bool
+    gui_timeout_seconds: float  # 0 => wait forever for an answer
+    config_path: Path
     warnings: tuple[str, ...] = ()  # non-fatal path problems (FragPipe bits missing, etc.)
 
     @property
@@ -83,11 +89,17 @@ def _get(d: dict, section: str, key: str, default=None, required=False):
     return sec[key]
 
 
+_SPACE_WARNINGS: list[str] = []
+
+
 def _path(section: str, key: str, value) -> Path:
     if not isinstance(value, str) or not value.strip():
         raise ConfigError(f"'{section}.{key}' must be a non-empty path string")
     if " " in value:
-        raise ConfigError(f"'{section}.{key}' contains a space ({value!r}); FragPipe cannot handle that")
+        msg = f"'{section}.{key}' contains a space ({value!r}); FragPipe cannot handle that"
+        if os.name == "nt":
+            raise ConfigError(msg)
+        _SPACE_WARNINGS.append(msg + " (tolerated off-Windows for testing)")
     return Path(value)
 
 
@@ -102,7 +114,9 @@ def load(path: str | Path, check_paths: bool = True) -> Config:
     if not isinstance(raw, dict):
         raise ConfigError(f"{p} must be a YAML mapping")
 
+    _SPACE_WARNINGS.clear()
     paths = {k: _path("paths", k, _get(raw, "paths", k, required=True)) for k in _REQUIRED_PATHS}
+    space_warnings = list(_SPACE_WARNINGS)
 
     methods_raw = raw.get("methods")
     if not isinstance(methods_raw, dict) or not methods_raw:
@@ -130,6 +144,11 @@ def load(path: str | Path, check_paths: bool = True) -> Config:
 
     users = raw.get("users") or {}
     user_aliases = {str(k): [str(a) for a in (v or [])] for k, v in (users.get("aliases") or {}).items()}
+    learned_file = Path(users.get("learned_aliases_file") or (p.parent / "learned_aliases.yaml"))
+    for k, v in _read_learned(learned_file).items():
+        user_aliases.setdefault(k, [])
+        user_aliases[k] += [a for a in v if a not in user_aliases[k]]
+    gui = raw.get("gui") or {}
 
     cfg = Config(
         **paths,
@@ -144,15 +163,45 @@ def load(path: str | Path, check_paths: bool = True) -> Config:
         methods=methods,
         user_aliases=user_aliases,
         default_user=str(users.get("default") or ""),
+        learned_aliases_file=learned_file,
+        gui_enabled=bool(gui.get("enabled", True)),
+        gui_timeout_seconds=float(gui.get("timeout_minutes", 0) or 0) * 60,
+        config_path=p,
     )
 
+    warnings = space_warnings
     if check_paths:
-        errors, warnings = _check_paths(cfg)
+        errors, more = _check_paths(cfg)
         if errors:
             raise ConfigError("config problems:\n  - " + "\n  - ".join(errors))
-        if warnings:
-            cfg = replace(cfg, warnings=tuple(warnings))
-    return cfg
+        warnings += more
+    return replace(cfg, warnings=tuple(warnings)) if warnings else cfg
+
+
+def _read_learned(path: Path) -> dict[str, list[str]]:
+    if not path.is_file():
+        return {}
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError:
+        return {}
+    return {str(k): [str(a) for a in (v or [])] for k, v in data.items()} if isinstance(data, dict) else {}
+
+
+def remember_alias(cfg: Config, user: str, alias: str) -> None:
+    """Persist 'alias means user' (from the GUI) so future drops resolve without asking."""
+    data = _read_learned(cfg.learned_aliases_file)
+    data.setdefault(user, [])
+    if alias not in data[user]:
+        data[user].append(alias)
+    cfg.learned_aliases_file.parent.mkdir(parents=True, exist_ok=True)
+    cfg.learned_aliases_file.write_text(
+        "# Aliases learned from the labwatch resolver window. user: [alias, ...]\n" + yaml.safe_dump(data),
+        encoding="utf-8",
+    )
+    cfg.user_aliases.setdefault(user, [])
+    if alias not in cfg.user_aliases[user]:
+        cfg.user_aliases[user].append(alias)
 
 
 def _check_paths(cfg: Config) -> tuple[list[str], list[str]]:

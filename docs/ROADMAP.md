@@ -29,9 +29,12 @@ Build, in this order, each with tests:
    (parse and print what *would* happen, move nothing).
 7. `run_labwatch.bat` + Task Scheduler instructions.
 
-Done 2026-09-15: `naming`, `config`, `watcher`, `ledger`, `intake`, `cli`
-(run / status / dry-run / retry), 77 tests, live smoke test on macOS.
-Remaining for exit: deploy to the PC (`labwatch/README.md`), Task Scheduler.
+Done 2026-09-15: `naming` (keyword/glued-initials/date formats/method from
+file names), `config`, `watcher` (note-aware retry, backoff), `ledger`,
+`intake` (experiment.yaml overrides, Windows lock retry), `resolve` (tkinter
+window), `testbed`, `cli` (run / check / status / dry-run / retry / testbed),
+137 tests incl. real-GUI and end-to-end, release zip + `install.ps1`.
+Remaining for exit: run `docs/DEPLOY_WINDOWS.md` on the PC.
 
 **Exit:** on the PC, dropping a correctly named folder of raws lands it in the
 right user directory with `labwatch.json` saying `queued` and nothing else

@@ -26,10 +26,11 @@ Eclipse PC                    shared folder                 Proteomics PC
 
 ## Status
 
-**Phase 0 — planning.** Nothing runs yet. The repo holds the design docs, the
-package skeleton, and the reference material gathered from the lab PC. See
-[docs/ROADMAP.md](docs/ROADMAP.md) for what's next and
-[docs/SCOPE.md](docs/SCOPE.md) for what is and isn't in scope.
+**Phase 1 — watcher + intake, ready to deploy.** Folders dropped in the inbox
+are detected, interpreted (flexible naming + a small resolver window for the
+rest), filed into the owner's directory and queued. FragPipe is not invoked
+yet (Phase 2). See [docs/ROADMAP.md](docs/ROADMAP.md), and
+[docs/DEPLOY_WINDOWS.md](docs/DEPLOY_WINDOWS.md) to put it on the PC.
 
 ## Layout
 
@@ -37,6 +38,8 @@ package skeleton, and the reference material gathered from the lab PC. See
 |---|---|
 | [`docs/`](docs/) | Design docs — read these first |
 | [`labwatch/`](labwatch/) | The watcher package (Python 3.11+, installed on the proteomics PC) |
+| [`deploy/`](deploy/) | Windows installer (`install.ps1`), launcher, release-zip builder |
+| [`scripts/`](scripts/) | One-shot dev/test setup for macOS and Windows |
 | [`tools/inventory/`](tools/inventory/) | PowerShell inventory collector to run on the lab PC (fixed version) |
 | [`reference/pc-inventory/`](reference/pc-inventory/) | Raw output of the inventory runs (2026-09-15) |
 | [`reference/lab-sops/`](reference/lab-sops/) | The lab's how-to docs for isoDTB and TMT in FragPipe (+ extracted text) |
@@ -54,11 +57,13 @@ package skeleton, and the reference material gathered from the lab PC. See
 | [PROTEOMICS_PC.md](docs/PROTEOMICS_PC.md) | Facts about the target machine from the inventory, and what's still unknown |
 | [DECISIONS.md](docs/DECISIONS.md) | Decision log (why polling, why folder-level, why Python not R, …) |
 | [ROADMAP.md](docs/ROADMAP.md) | Phased build plan and open questions to resolve with the lab |
+| [DEPLOY_WINDOWS.md](docs/DEPLOY_WINDOWS.md) | Step-by-step install on the proteomics PC |
+| [TESTING.md](docs/TESTING.md) | Test suite + testbed on macOS and Windows |
 
 ## Quick start (dev, on this Mac)
 
 ```bash
-cd labwatch && python3 -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]" && pytest
+scripts/test_mac.sh --bed        # venv + lint + 137 tests + a fake lab in ./labwatch-testbed
 ```
 
 Deployment on the proteomics PC is described in [labwatch/README.md](labwatch/README.md).

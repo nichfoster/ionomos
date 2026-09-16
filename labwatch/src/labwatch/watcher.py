@@ -12,14 +12,19 @@ Why a tree fingerprint rather than "on created":
     at least `min_raw_files` *.raw are present do we call on_stable(path).
 
 What is ignored: loose files at the inbox top level, hidden/temp names
-(".", "~$"), and our own *.REJECTED.txt files. Folders already handed off are
-remembered in-process so we don't hand them off twice in one run; the ledger
-(via the intake callback) is what prevents re-intake across restarts.
+(".", "~$"), and our own *.REJECTED.txt files. A queued folder has been moved
+out of the inbox, so if the same name shows up again it is a new drop; the
+ledger (via intake) is what rejects a duplicate name.
 
-on_stable(path) -> bool: return True when the folder was consumed (moved or
-rejected) so the watcher forgets it; False to keep watching (e.g. transient
-error) — it will be re-offered once its fingerprint changes or on the next
-stable window.
+on_stable(path) -> IntakeResult:
+    QUEUED   — folder was moved; forget it.
+    REJECTED — a .REJECTED.txt note was written. Keep watching: re-offer when
+               the tree changes (user fixed it) or the note disappears (user
+               deleted it to ask for a retry).
+    RETRY    — transient (Windows file lock). Re-offer after `retry_seconds`,
+               doubling each time up to 5 min.
+Any exception from on_stable is logged and treated as RETRY. The loop itself
+never dies: a failing scan is logged and the next poll happens anyway.
 """
 from __future__ import annotations
 
@@ -30,6 +35,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from labwatch.intake import IntakeResult, note_path
 from labwatch.naming import RAW_SUFFIX
 
 log = logging.getLogger("labwatch.watcher")
@@ -64,26 +70,29 @@ def _ignored(name: str) -> bool:
 class _Pending:
     fp: Fingerprint
     stable_since: float  # monotonic
-    announced: bool = False  # logged "detected" once
-    offered: bool = False  # on_stable returned False; wait for a change before re-offering
+    announced: bool = False  # logged "waiting for raws" once
+    rejected: bool = False  # note written; wait for a change or note deletion
+    retry_at: float | None = None  # monotonic time before which we don't re-offer
+    retry_delay: float = 0.0
 
 
 class Watcher:
     def __init__(
         self,
         inbox: Path,
-        on_stable: Callable[[Path], bool],
+        on_stable: Callable[[Path], IntakeResult],
         poll_seconds: float = 10,
         stable_seconds: float = 60,
         min_raw_files: int = 1,
+        retry_seconds: float = 15,
     ):
         self.inbox = Path(inbox)
         self.on_stable = on_stable
         self.poll_seconds = poll_seconds
         self.stable_seconds = stable_seconds
         self.min_raw_files = min_raw_files
+        self.retry_seconds = retry_seconds
         self._pending: dict[Path, _Pending] = {}
-        self._done: set[Path] = set()
         self._running = False
 
     # ------------------------------------------------------------------ poll --
@@ -101,15 +110,12 @@ class Watcher:
             if _ignored(entry.name) or not entry.is_dir():
                 continue
             present.add(entry)
-            if entry in self._done:
-                continue
             if self._evaluate(entry, now):
                 handed.append(entry)
 
         # forget folders that disappeared (user pulled it back out, or we moved it)
         for gone in [p for p in self._pending if p not in present]:
             del self._pending[gone]
-        self._done &= present
         return handed
 
     def _evaluate(self, folder: Path, now: float) -> bool:
@@ -121,10 +127,20 @@ class Watcher:
                      folder.name, len(fp), count_raws(fp))
             return False
         if fp != pend.fp:
-            pend.fp, pend.stable_since, pend.offered = fp, now, False
+            pend.fp, pend.stable_since = fp, now
+            pend.rejected, pend.retry_at, pend.retry_delay = False, None, 0.0
             return False
-        if pend.offered or (now - pend.stable_since) < self.stable_seconds:
+        if (now - pend.stable_since) < self.stable_seconds:
             return False
+        if pend.rejected:
+            if note_path(folder).exists():
+                return False
+            log.info("rejection note for %s was removed; trying again", folder.name)
+            pend.rejected = False
+        if pend.retry_at is not None:
+            if now < pend.retry_at:
+                return False
+            pend.retry_at = None
         n_raw = count_raws(fp)
         if n_raw < self.min_raw_files:
             if not pend.announced:
@@ -135,15 +151,18 @@ class Watcher:
 
         log.info("stable: %s (%d files, %d raw)", folder.name, len(fp), n_raw)
         try:
-            consumed = self.on_stable(folder)
+            result = self.on_stable(folder)
         except Exception:
             log.exception("on_stable failed for %s", folder.name)
-            consumed = False
-        if consumed:
-            self._done.add(folder)
-            self._pending.pop(folder, None)
-        else:
-            pend.offered = True
+            result = IntakeResult.RETRY
+        if result == IntakeResult.QUEUED:
+            self._pending.pop(folder, None)  # it was moved; a reappearance is a new drop
+        elif result == IntakeResult.REJECTED:
+            pend.rejected = True
+        else:  # RETRY with exponential backoff, capped at 5 min
+            pend.retry_delay = min(max(self.retry_seconds, pend.retry_delay * 2), 300)
+            pend.retry_at = now + pend.retry_delay
+            log.info("will retry %s in %.0fs", folder.name, pend.retry_delay)
         return True
 
     # ------------------------------------------------------------------ loop --
@@ -154,7 +173,10 @@ class Watcher:
                  self.inbox, self.poll_seconds, self.stable_seconds, self.min_raw_files)
         try:
             while self._running:
-                self.scan_once()
+                try:
+                    self.scan_once()
+                except Exception:
+                    log.exception("scan failed; will poll again")
                 time.sleep(self.poll_seconds)
         except KeyboardInterrupt:
             log.info("watcher stopped by user")

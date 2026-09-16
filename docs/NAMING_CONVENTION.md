@@ -15,9 +15,9 @@ Anything you like, as long as the name contains:
 
 | Must contain | How it's found | Examples that work |
 |---|---|---|
-| **Method** | keyword anywhere in the name (case-insensitive): `isoDTB`, `TMT`, `DIA` (aliases configurable, e.g. `DIANN`) | `20260902-isoDTB_EJQ-2-027`, `THB10ISODTB`, `KL6159A_9plex_TMT`, `EJQ_123_DIA` |
-| **User** | your initials or your folder name under `C:\Fragpipe_General\`, as a separate token (split on `_ - . space ( )`). Aliases live in `config.yaml` (`IJ` → `Isaac`, `EJQ_2` → `EJQ`) | `EJQ_isoDTB_…`, `…_IJ_DIA`, `Taylor Elements TMT run 3` |
-| *(optional)* **Date** | a token that is `YYYYMMDD`, `MMDDYYYY` or `MMDDYY`. If absent, the drop date is recorded | `20260902`, `08172026`, `081726` |
+| **Method** | keyword anywhere in the folder name (case-insensitive): `isoDTB`, `TMT`, `DIA` (aliases configurable, e.g. `DIANN`). If the folder name has none, the **raw file names** are searched too | `20260902-isoDTB_EJQ-2-027`, `THB10ISODTB`, `KL6159A_9plex_TMT`, `EJQ_123_DIA` |
+| **User** | your initials or your folder name under `C:\Fragpipe_General\`. Matched as a token (split on `_ - . space ( )`) **or glued to an ID** (`IJD05`, `EJQ123`, `THB10`). Aliases live in `config.yaml` (`IJ` → `Isaac`); the resolver window can add them | `EJQ_isoDTB_…`, `IJD05_isoDTB`, `Taylor Elements TMT run 3` |
+| *(optional)* **Date** | `YYYYMMDD`, `YYYY-MM-DD`, `MMDDYYYY`, `MM-DD-YYYY` or `MMDDYY`. If absent, the drop date is recorded | `20260902`, `2026-09-02`, `08172026`, `081726` |
 
 Recommended shape (sorts well, unambiguous): `YYYYMMDD_<initials>_<method>_<whatever>`
 e.g. `20260902_EJQ_isoDTB_EJQ-2-027_1uM-3h`.
@@ -31,15 +31,19 @@ Rejected, with a `<name>.REJECTED.txt` note left next to the folder:
 
 - no method keyword (`IJD05_FLAG_pulldown`)
 - two method keywords (`EJQ_isoDTB_and_TMT`)
-- no recognisable user (`EJQ123_isoDTB` — `EJQ123` is one token; write `EJQ_123_isoDTB`),
-  unless `users.default` is set in config, in which case it's filed there
+- no recognisable user (`XYZ99_isoDTB`) — unless `users.default` is set, in which case it's filed there
 - two users (`EJQ_Isaac_isoDTB`)
 - destination already exists / same name was processed before → add `_redo`
 
+**All of these except the last open the resolver window** (see below) when the
+watcher runs with the GUI enabled; the `.REJECTED.txt` note is the fallback.
+
 ## Raw file names — the tail is reserved
 
-Separators before the numbers may be `_` or `-`; optional `R`/`rep` and
-`F`/`frac` prefixes are accepted.
+Separators before the numbers may be `_` or `-`. Optional prefixes are
+accepted: `R`, `rep`, `Rep_`, `bio`, `biorep`, `n` for replicates; `F`, `frac`,
+`fraction` for fractions (`X_R2_F7`, `X_rep2_frac7`, `X_bio2_F7` all mean rep 2,
+fraction 7).
 
 ### isoDTB — `<sample>_<rep>_<fraction>.raw`
 
@@ -78,18 +82,48 @@ number is bioreplicate 1.
 Raw files may sit at the top level or in a `raw\` subfolder. Anything else in
 the folder (`.xlsx`, notes, `.mzML`) is carried along untouched.
 
-## `experiment.yaml` (optional) — Phase 2/3
+## When labwatch can't tell: the resolver window
 
-For things names can't say. If present it is validated at intake and its
-values override what was parsed.
+If the user, method, a file's tail, or the fraction layout can't be worked
+out, a small window opens on the proteomics PC:
+
+```
+ 20260902-isoDTB_XYZ-2-027 (1uM 3h)
+ ⚠ no known user in '…'; include your initials or folder name (known: Aman, Chris, EJQ, Isaac)
+
+ User    [ Isaac        ▼]  (type a new name to create a folder)
+ Method  [ isoDTB       ▼]   Date [2026-09-02]
+ [x] Remember that [XYZ] means this user (future drops won't ask)
+ [ ] Accept uneven fractions between replicates
+
+ Files — experiment / replicate / fraction          [Re-read from file names]
+ EJQ_PK_…_1_1.raw   [EJQ_PK_EJQ-2-027_isoDTB_1uM_3h] [1] [1]
+ …
+                                    [Skip (leave in inbox)]  [Accept & queue ⏎]
+```
+
+Everything is pre-filled with the best guess; Enter accepts, Esc skips. The
+answer is saved as `experiment.yaml` inside the folder (so re-dropping it
+never asks again) and, if "remember" is ticked, the initials are added to
+`learned_aliases.yaml` so that person is recognised from then on. Skip leaves
+the folder in the inbox with a `.REJECTED.txt` note; fixing the folder or
+deleting the note triggers a retry.
+
+## `experiment.yaml` (optional)
+
+For things names can't say, or to pre-answer the window. If present it is
+validated at intake and its values override what was parsed.
 
 ```yaml
 method: TMT                 # override the keyword match
-workflow: TMT10-MS3-phospho # file under config workflow_dir (no extension needed)
+user: Isaac                 # override the initials match
+date: 2026-09-02
+workflow: TMT10-MS3-phospho # file under config workflow_dir
 fasta: human_reviewed_2025-01_decoys.fas
+allow_uneven_fractions: true   # accept reps with different fraction sets
 
-files:                      # per-file overrides
-  KL6159A_1_1.raw: {experiment: plex1, bioreplicate: 1}
+files:                      # per-file overrides (fraction: -1 = single-shot)
+  KL6159A_1_1.raw: {experiment: plex1, bioreplicate: 1, fraction: 1}
 
 tmt:                        # TMT only; one block per plex (= experiment name)
   tag: TMT-10

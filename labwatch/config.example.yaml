@@ -29,6 +29,14 @@ users:
     Isaac: [IJ, IJD]
     EJQ: [EJQ_2]
   default: ""                 # e.g. "_unsorted" — file unrecognised users there instead of rejecting
+  # learned_aliases_file: C:/Fragpipe_Auto/learned_aliases.yaml   # written by the resolver window
+
+# The resolver window: opens when a folder can't be interpreted (unknown user,
+# no method, odd file names, uneven fractions). Needs the watcher to run in an
+# interactive session (Task Scheduler "run only when user is logged on").
+gui:
+  enabled: true
+  timeout_minutes: 0          # 0 = wait for a person; N = auto-skip after N minutes
 
 # One entry per method. The key is canonical; `aliases` are the keywords
 # searched for (case-insensitive) in folder names.

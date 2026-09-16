@@ -17,6 +17,10 @@ dist/
 config.yaml
 !labwatch/config.example.yaml
 
+# Testbeds and release builds
+labwatch-testbed/
+dist/
+
 # Duplicate of the extracted inventory folder
 reference/pc-inventory/*.zip
 

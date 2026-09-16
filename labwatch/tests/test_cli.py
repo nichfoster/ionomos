@@ -16,6 +16,27 @@ def test_dry_run_accept_and_reject(lab, capsys):
     assert not (lab["inbox"] / "nobody_isoDTB.REJECTED.txt").exists()
 
 
+def test_check(lab, capsys):
+    assert main(["--config", str(lab["cfg_path"]), "check"]) == 0
+    out = capsys.readouterr().out
+    assert "config parses" in out and "EJQ" in out and "alias IJ, IJD" in out
+
+
+def test_testbed_init_list_drop_reset(tmp_path, capsys):
+    bed = tmp_path / "bed"
+    assert main(["testbed", "init", str(bed)]) == 0
+    assert (bed / "Fragpipe_Auto" / "config.yaml").is_file()
+    assert main(["testbed", "list", str(bed)]) == 0
+    assert "iso_good" in capsys.readouterr().out
+    assert main(["testbed", "drop", "iso_good", str(bed)]) == 0
+    assert (bed / "Fragpipe_Auto" / "inbox" / "20260902-isoDTB_EJQ-2-027").is_dir()
+    assert main(["--config", str(bed / "Fragpipe_Auto" / "config.yaml"), "check"]) == 0
+    assert main(["--config", str(bed / "Fragpipe_Auto" / "config.yaml"), "dry-run",
+                 str(bed / "Fragpipe_Auto" / "inbox" / "20260902-isoDTB_EJQ-2-027")]) == 0
+    assert main(["testbed", "reset", str(bed)]) == 0
+    assert not any((bed / "Fragpipe_Auto" / "inbox").iterdir())
+
+
 def test_status_empty(lab, capsys):
     assert main(["--config", str(lab["cfg_path"]), "status"]) == 0
     assert "no ledger" in capsys.readouterr().out

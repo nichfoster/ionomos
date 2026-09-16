@@ -71,13 +71,19 @@ def test_find_method_none_and_ambiguous():
     "name, user, method, d",
     [
         ("20260902-isoDTB_EJQ-2-027", "EJQ", "isoDTB", date(2026, 9, 2)),
-        ("20260804-isoDTB_IJ607061", None, "isoDTB", date(2026, 8, 4)),  # IJ607061 is one token, no user
+        ("20260804-isoDTB_IJ607061", "Isaac", "isoDTB", date(2026, 8, 4)),  # initials glued to ID
+        ("20260914-FLAGPull_IJD05_FLAGAR_DIA", "Isaac", "DIA", date(2026, 9, 14)),  # IJD beats IJ
         ("20260331-IJ-602161-isoDTB", "Isaac", "isoDTB", date(2026, 3, 31)),
         ("08172026-isoDTB-ELK Carolyn", "Carolyn", "isoDTB", date(2026, 8, 17)),
         ("081726-isoDTB-Carolyn", "Carolyn", "isoDTB", date(2026, 8, 17)),
-        ("EJQ123_DIA", None, "DIA", None),  # EJQ123 is one token
+        ("EJQ123_DIA", "EJQ", "DIA", None),  # glued
+        ("2026-09-02 EJQ DIA", "EJQ", "DIA", date(2026, 9, 2)),
+        ("09-02-2026_EJQ_DIA", "EJQ", "DIA", date(2026, 9, 2)),
+        ("EJQ_DIA_090226", "EJQ", "DIA", date(2026, 9, 2)),
+        ("EJQ_DIA_20261402", "EJQ", "DIA", None),  # invalid date -> ignored
+        ("nobody_here_DIA", None, "DIA", None),
         ("EJQ_123_DIA", "EJQ", "DIA", None),
-        ("THB10ISODTB", None, "isoDTB", None),
+        ("THB10ISODTB", "Thang", "isoDTB", None),  # glued initials + glued method
         ("THB_10_isoDTB", "Thang", "isoDTB", None),
         ("Taylor Elements TMT run 3", "Taylor_Elements", "TMT", None),
         ("20260126_Aman_TMT_KL6159A-159B_9plex", "Aman", "TMT", date(2026, 1, 26)),
@@ -96,6 +102,13 @@ def test_parse_folder(name, user, method, d):
     assert " " not in f.safe
 
 
+def test_method_fallback_from_raw_names():
+    f = parse_folder_name("EJQ_2_027_run", USERS, raw_names=["EJQ_isoDTB_1uM_1_1.raw"])
+    assert f.method == "isoDTB"
+    with pytest.raises(NamingError, match="no method"):
+        parse_folder_name("EJQ_2_027_run", USERS, raw_names=["x_1_1.raw"])
+
+
 def test_parse_folder_ambiguous_user():
     with pytest.raises(NamingError, match="ambiguous user"):
         parse_folder_name("EJQ_Isaac_isoDTB", USERS)
@@ -110,6 +123,10 @@ def test_parse_folder_ambiguous_user():
         ("EJQ_PK_EJQ-2-027_isoDTB_1uM_3h_3_7.raw", "isoDTB", "EJQ_PK_EJQ-2-027_isoDTB_1uM_3h", 3, 7),
         ("X_R2_F7.raw", "isoDTB", "X", 2, 7),
         ("X_rep2_frac7.RAW", "isoDTB", "X", 2, 7),
+        ("X_Rep_2_Fraction_7.raw", "isoDTB", "X", 2, 7),
+        ("X_bio2_F7.raw", "isoDTB", "X", 2, 7),
+        ("X_biorep2_frac7.raw", "isoDTB", "X", 2, 7),
+        ("X_n2_f7.raw", "isoDTB", "X", 2, 7),
         ("X-1-1.raw", "isoDTB", "X", 1, 1),
         ("X_2.raw", "isoDTB", "X", 2, None),
         # TMT: [_TMT]_[F]frac ; rep always 1
@@ -122,6 +139,8 @@ def test_parse_folder_ambiguous_user():
         # DIA: cond_biorep
         ("DMSO_1.raw", "DIA", "DMSO", 1, None),
         ("Drug_R3.raw", "DIA", "Drug", 3, None),
+        ("Drug_bio3.raw", "DIA", "Drug", 3, None),
+        ("Drug_Rep_3.raw", "DIA", "Drug", 3, None),
         ("CS_22rv1_175_DIA_2.raw", "DIA", "CS_22rv1_175_DIA", 2, None),
         ("Untitled.raw", "DIA", "Untitled", 1, None),
         # spaces are sanitised, not rejected

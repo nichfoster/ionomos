@@ -27,12 +27,18 @@ def test_missing_inbox_is_error(lab):
     assert load(lab["cfg_path"], check_paths=False).inbox.name == "nope"
 
 
-def test_space_in_path_is_error(lab):
+def test_space_in_path(lab):
+    import os
+
     d = lab["cfg_dict"]
     d["paths"]["users_root"] = "C:/Program Files/x"
     lab["cfg_path"].write_text(yaml.safe_dump(d))
-    with pytest.raises(ConfigError, match="space"):
-        load(lab["cfg_path"], check_paths=False)
+    if os.name == "nt":
+        with pytest.raises(ConfigError, match="space"):
+            load(lab["cfg_path"], check_paths=False)
+    else:
+        cfg = load(lab["cfg_path"], check_paths=False)
+        assert any("space" in w for w in cfg.warnings)
 
 
 def test_bad_method(lab):
