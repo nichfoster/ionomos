@@ -1,5 +1,9 @@
 # Deploying LabWatch on the proteomics PC
 
+> **Still prototyping?** Use the *development install* instead —
+> [DEV_LOOP.md](DEV_LOOP.md): one script, then every fix pushed from the Mac
+> is one button in the app. The ways below are for the finished tool.
+
 Two ways. **Way A** (the app) is what you want: one folder, double-click,
 follow the tabs. **Way B** (script + wheel) is the fallback if you can't build
 the exe.
@@ -11,20 +15,15 @@ runs FragPipe). No internet is needed on the PC.
 
 ## Way A — the LabWatch app (recommended)
 
-### A1. Build the exe once (5 min, any Windows machine — the lab PC is fine)
+### A1. Get the exe (2 min)
 
-PyInstaller can't cross-compile from a Mac, so this step runs on Windows.
+GitHub builds it. Either download `LabWatch-<version>-windows.zip` from the
+repo's **Releases** page (created automatically when a version is tagged:
+`git tag v0.2.0 && git push --tags`), or run *Actions → build-exe → Run
+workflow* and take the zip from "Artifacts".
 
-1. Get the repo onto the Windows machine (zip of the repo, or `git clone`).
-2. Make sure Python 3.11+ is installed **with tcl/tk** (step "Check Python" below).
-3. In PowerShell, in the repo folder:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File deploy\build_exe.ps1
-```
-
-Output: `dist\LabWatch-<version>-windows.zip` containing `LabWatch.exe`,
-`labwatch.exe`, and the docs. Keep that zip — it's the installer for every PC.
+To build by hand instead (any Windows machine with Python 3.11+ incl. tcl/tk):
+`powershell -ExecutionPolicy Bypass -File deploy\build_exe.ps1` → `dist\LabWatch-<version>-windows.zip`.
 
 ### A2. Install (2 min)
 
@@ -114,6 +113,7 @@ py -3.14 -c "import tkinter; print('ok')"
 | change any setting | open `LabWatch.exe`, edit, **Save** (restart the watcher for timing changes) |
 | see the queue | tab 5 → **Show queue**, or `labwatch.exe status` |
 | see the log | tab 5 → tick *follow the watcher log*, or `C:\Fragpipe_Auto\logs\labwatch.log` |
+| report a problem | tab 5 → **Copy diagnostics** → paste (or `labwatch.exe diagnose`) |
 | stop / start the watcher | tab 5 buttons; the startup task restarts it at next logon |
 | add a user | tab 2 → Add; or just create the folder under `C:\Fragpipe_General` |
 | see what a folder would do | `labwatch.exe dry-run "C:\path\to\folder"` |

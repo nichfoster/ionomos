@@ -1,7 +1,10 @@
 """Shared fixture: a fake C:\\Fragpipe_Auto + C:\\Fragpipe_General layout in a temp dir."""
+import os
 from pathlib import Path
 
 import pytest
+
+os.environ.setdefault("LABWATCH_OFFLINE", "1")  # the app must not git-fetch during tests
 import yaml
 
 from labwatch.config import load

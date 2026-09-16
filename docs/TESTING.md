@@ -4,9 +4,10 @@ Three layers, all runnable on macOS and Windows:
 
 | Layer | What | Command |
 |---|---|---|
-| Unit + e2e (`pytest`) | 149 tests: naming, config, config I/O, ledger, watcher timing, intake, overrides, resolver logic, **real tkinter dialog and the setup app** (skipped if no display), and 6 end-to-end runs of watcher-thread + intake against testbed samples | `scripts/test_mac.sh` / `scripts\test_windows.ps1` |
+| Unit + e2e (`pytest`) | 159 tests: naming, config, config I/O, ledger, watcher timing, intake, overrides, resolver logic, **real tkinter dialog and the setup app** (skipped if no display), and 6 end-to-end runs of watcher-thread + intake against testbed samples | `scripts/test_mac.sh` / `scripts\test_windows.ps1` |
 | Testbed (manual) | A fake lab on disk with 12 sample drops covering every path, a fake FragPipe, and the real CLI | `labwatch testbed …` |
-| The real PC | `dry-run` on real folders, then a throwaway drop | see DEPLOY_WINDOWS.md §5 |
+| The real PC | `dry-run` on real folders, then a throwaway drop; **Copy diagnostics** to report back | see DEV_LOOP.md |
+| GitHub Actions | the pytest suite on Linux **and Windows** on every push | Actions tab |
 
 ## One-shot setup
 

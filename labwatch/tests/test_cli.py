@@ -51,3 +51,18 @@ def test_no_args_opens_setup(monkeypatch):
     assert called == [None]
     assert main(["--config", "x.yaml", "setup"]) == 0
     assert str(called[1]) == "x.yaml"
+
+
+def test_diagnose(lab, capsys):
+    assert main(["--config", str(lab["cfg_path"]), "diagnose"]) == 0
+    out = capsys.readouterr().out
+    assert "=== check" in out and "=== config.yaml" in out and "(saved to" in out
+    assert list((lab["auto"] / "logs").glob("diagnostics-*.txt"))
+
+
+def test_update_outside_checkout(monkeypatch, capsys):
+    from labwatch import service
+
+    monkeypatch.setattr(service, "source_checkout", lambda: None)
+    assert main(["update"]) == 2
+    assert "not running from a git checkout" in capsys.readouterr().err

@@ -36,7 +36,10 @@ window), `testbed`, `cli` (run / check / status / dry-run / retry / testbed),
 `app` (setup wizard / control panel with a Testbed tab), `configio`,
 `service`, PyInstaller exe (`LabWatch.exe` + `labwatch.exe`), 149 tests incl.
 real-GUI and end-to-end, `install.ps1` fallback.
-Remaining for exit: build the exe on Windows and run `docs/DEPLOY_WINDOWS.md` Way A on the PC.
+2026-09-16: dev install on the PC (`deploy/dev_install.ps1`, `labwatch update`,
+"Update from GitHub" in the app), `labwatch diagnose` / "Copy diagnostics",
+GitHub Actions (tests on Linux+Windows; exe built on `v*` tags). See DEV_LOOP.md.
+Remaining for exit: the week of real drops on the PC.
 
 **Exit:** on the PC, dropping a correctly named folder of raws lands it in the
 right user directory with `labwatch.json` saying `queued` and nothing else

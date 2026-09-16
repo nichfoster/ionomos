@@ -41,7 +41,8 @@ to put it on the PC.
 |---|---|
 | [`docs/`](docs/) | Design docs — read these first |
 | [`labwatch/`](labwatch/) | The watcher package (Python 3.11+, installed on the proteomics PC) |
-| [`deploy/`](deploy/) | `build_exe.ps1` (PyInstaller → `LabWatch.exe`), `install.ps1` fallback, release-zip builder |
+| [`deploy/`](deploy/) | `dev_install.ps1` (PC runs from a git clone; updates = one button), `build_exe.ps1` (PyInstaller → `LabWatch.exe`, also run by GitHub Actions), `install.ps1` fallback |
+| [`.github/workflows/`](.github/workflows/) | CI: tests on Linux + Windows every push; exe build + Release on `v*` tags |
 | [`scripts/`](scripts/) | One-shot dev/test setup for macOS and Windows |
 | [`tools/inventory/`](tools/inventory/) | PowerShell inventory collector to run on the lab PC (fixed version) |
 | [`reference/pc-inventory/`](reference/pc-inventory/) | Raw output of the inventory runs (2026-09-15) |
@@ -60,14 +61,16 @@ to put it on the PC.
 | [PROTEOMICS_PC.md](docs/PROTEOMICS_PC.md) | Facts about the target machine from the inventory, and what's still unknown |
 | [DECISIONS.md](docs/DECISIONS.md) | Decision log (why polling, why folder-level, why Python not R, …) |
 | [ROADMAP.md](docs/ROADMAP.md) | Phased build plan and open questions to resolve with the lab |
-| [DEPLOY_WINDOWS.md](docs/DEPLOY_WINDOWS.md) | Step-by-step install on the proteomics PC |
+| [DEV_LOOP.md](docs/DEV_LOOP.md) | **Start here for prototyping:** Mac ↔ GitHub ↔ PC loop, updates and diagnostics |
+| [DEPLOY_WINDOWS.md](docs/DEPLOY_WINDOWS.md) | Step-by-step install of the finished tool on the proteomics PC |
 | [TESTING.md](docs/TESTING.md) | Test suite + testbed on macOS and Windows |
 
 ## Quick start (dev, on this Mac)
 
 ```bash
-scripts/test_mac.sh --bed        # venv + lint + 149 tests + a fake lab in ./labwatch-testbed
+scripts/test_mac.sh --bed        # venv + lint + 159 tests + a fake lab in ./labwatch-testbed
 labwatch/.venv/bin/labwatch setup   # the app, pointed at any config you like
 ```
 
-Deployment on the proteomics PC is described in [labwatch/README.md](labwatch/README.md).
+On the PC: [docs/DEV_LOOP.md](docs/DEV_LOOP.md) while prototyping,
+[docs/DEPLOY_WINDOWS.md](docs/DEPLOY_WINDOWS.md) for the finished tool.

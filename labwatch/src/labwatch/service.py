@@ -241,3 +241,195 @@ def create_desktop_shortcut() -> tuple[bool, str]:
     r = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True,
                        creationflags=_creationflags())
     return r.returncode == 0, str(lnk) if r.returncode == 0 else (r.stderr or r.stdout)
+
+
+# ------------------------------------------------- dev install (git checkout) ----
+#
+# While prototyping, the PC runs labwatch straight from a git clone with an
+# editable install (deploy/dev_install.ps1). Then "update" = git pull, and no
+# exe has to be rebuilt. These helpers detect that situation and drive it.
+
+
+def source_checkout() -> Path | None:
+    """Repo root if this package is imported from a git checkout (editable install); else None."""
+    if getattr(sys, "frozen", False):
+        return None
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        if (parent / ".git").exists() and (parent / "labwatch" / "pyproject.toml").is_file():
+            return parent
+    return None
+
+
+def _git(repo: Path, *args: str, timeout: float = 120) -> tuple[int, str]:
+    try:
+        r = subprocess.run(["git", *args], cwd=str(repo), capture_output=True, text=True, timeout=timeout,
+                           encoding="utf-8", errors="replace", creationflags=_creationflags())
+    except FileNotFoundError:
+        return 127, "git is not installed (https://git-scm.com/download/win)"
+    except subprocess.TimeoutExpired:
+        return 1, "git timed out (no network?)"
+    return r.returncode, ((r.stdout or "") + (r.stderr or "")).strip()
+
+
+def git_describe(repo: Path) -> str:
+    """'<branch> @ <short sha> (<date>)' or '?'."""
+    code, out = _git(repo, "log", "-1", "--format=%h %cs", timeout=10)
+    if code != 0:
+        return "?"
+    _, branch = _git(repo, "rev-parse", "--abbrev-ref", "HEAD", timeout=10)
+    sha, _, date = out.partition(" ")
+    return f"{branch} @ {sha} ({date})"
+
+
+def updates_available(repo: Path) -> tuple[int | None, str]:
+    """(number of commits behind origin, message). None = could not check."""
+    code, out = _git(repo, "fetch", "--quiet", timeout=60)
+    if code != 0:
+        return None, out or "fetch failed"
+    code, out = _git(repo, "rev-list", "--count", "HEAD..@{u}", timeout=10)
+    if code != 0:
+        return None, out
+    try:
+        return int(out.strip()), ""
+    except ValueError:
+        return None, out
+
+
+def update_source(repo: Path, log=print) -> tuple[bool, str]:
+    """git pull --ff-only, then reinstall the package (editable) so new deps/entry points land.
+
+    Refuses if there are local edits (someone changed code on the PC by hand):
+    those should be committed or reverted deliberately, never clobbered.
+    """
+    code, dirty = _git(repo, "status", "--porcelain", "--untracked-files=no", timeout=10)
+    if code != 0:
+        return False, dirty
+    if dirty.strip():
+        return False, ("local changes on this machine would be overwritten:\n" + dirty +
+                       "\nRun 'git stash' (or 'git checkout .') in " + str(repo) + " first.")
+    before = _git(repo, "rev-parse", "--short", "HEAD", timeout=10)[1]
+    log(f"git pull ({repo})")
+    code, out = _git(repo, "pull", "--ff-only", timeout=180)
+    log(out)
+    if code != 0:
+        return False, out
+    after = _git(repo, "rev-parse", "--short", "HEAD", timeout=10)[1]
+    if before != after:
+        _, changes = _git(repo, "log", "--oneline", f"{before}..{after}", timeout=10)
+        log("changes:\n" + changes)
+    log("pip install -e (a few seconds)")
+    r = subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-e", str(repo / "labwatch")],
+                       capture_output=True, text=True, encoding="utf-8", errors="replace", creationflags=_creationflags())
+    if r.returncode != 0:
+        return False, (r.stdout or "") + (r.stderr or "")
+    return True, f"updated {before} -> {after}" if before != after else "already up to date"
+
+
+def restart_app() -> None:
+    """Start a fresh copy of the app (so updated code is loaded) and exit this one."""
+    cmd = [*labwatch_command(), "setup"]
+    subprocess.Popen(cmd, creationflags=_creationflags(), close_fds=True)
+    os._exit(0)
+
+
+# ------------------------------------------------------------ diagnostics ----
+
+
+def diagnostics(config_path: Path, log_lines: int = 150) -> str:
+    """One text block with everything needed to debug a report from the PC."""
+    import datetime
+    import io
+    import platform
+    from contextlib import redirect_stderr, redirect_stdout
+
+    from labwatch import __version__
+
+    out: list[str] = []
+    a = out.append
+    a(f"labwatch {__version__}  {datetime.datetime.now():%Y-%m-%d %H:%M:%S}")
+    a(f"python {sys.version.split()[0]}  {platform.platform()}  exe={sys.executable}")
+    src = source_checkout()
+    if getattr(sys, "frozen", False):
+        install = "frozen exe"
+    elif src:
+        install = f"git checkout {src}  {git_describe(src)}"
+    else:
+        install = "pip package"
+    a(f"install: {install}")
+    a(f"config: {config_path}  (exists={Path(config_path).is_file()})")
+    a(f"startup task: {task_status()}")
+
+    def section(title: str, body: str):
+        a("")
+        a(f"=== {title} " + "=" * max(0, 60 - len(title)))
+        a(body.rstrip())
+
+    from labwatch import cli
+
+    class _A:  # minimal args namespace for cmd_check/cmd_status
+        config = str(config_path)
+        all = True
+
+    for name, fn in (("check", cli.cmd_check), ("status --all", cli.cmd_status)):
+        buf = io.StringIO()
+        try:
+            with redirect_stdout(buf), redirect_stderr(buf):
+                fn(_A())
+        except SystemExit as exc:
+            buf.write(f"(exit {exc.code})")
+        except Exception as exc:  # noqa: BLE001 - diagnostics must never crash
+            import traceback
+
+            buf.write(traceback.format_exc() if not isinstance(exc, KeyboardInterrupt) else "")
+        section(name, buf.getvalue())
+
+    cfg_text = ""
+    log_dir: Path | None = None
+    inbox: Path | None = None
+    try:
+        cfg_text = Path(config_path).read_text(encoding="utf-8", errors="replace")
+        import yaml
+
+        raw = yaml.safe_load(cfg_text) or {}
+        log_dir = Path(raw.get("paths", {}).get("log_dir", ""))
+        inbox = Path(raw.get("paths", {}).get("inbox", ""))
+    except Exception as exc:  # noqa: BLE001
+        cfg_text = f"(could not read: {exc})"
+    section("config.yaml", cfg_text)
+
+    if log_dir and log_dir.is_dir():
+        lf = log_dir / "labwatch.log"
+        if lf.is_file():
+            lines = lf.read_text(encoding="utf-8", errors="replace").splitlines()
+            section(f"log tail ({lf}, last {log_lines} of {len(lines)} lines)", "\n".join(lines[-log_lines:]))
+        else:
+            section("log", f"no {lf}")
+        pid = running_pid(log_dir)
+        a(f"watcher pid: {pid or 'not running'}")
+    if inbox and inbox.is_dir():
+        notes = sorted(inbox.glob("*.REJECTED.txt"))
+        items = sorted(p.name + ("/" if p.is_dir() else "") for p in inbox.iterdir())
+        section("inbox", "\n".join(items) or "(empty)")
+        for n in notes[-5:]:
+            section(f"note {n.name}", n.read_text(encoding="utf-8", errors="replace"))
+    return "\n".join(out) + "\n"
+
+
+def save_diagnostics(config_path: Path) -> tuple[str, Path | None]:
+    """Build the diagnostics text and also save it next to the log (if a log_dir exists)."""
+    import datetime
+
+    text = diagnostics(config_path)
+    where: Path | None = None
+    try:
+        import yaml
+
+        raw = yaml.safe_load(Path(config_path).read_text(encoding="utf-8")) or {}
+        log_dir = Path(raw["paths"]["log_dir"])
+        if log_dir.is_dir():
+            where = log_dir / f"diagnostics-{datetime.datetime.now():%Y%m%d-%H%M%S}.txt"
+            where.write_text(text, encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        where = None
+    return text, where

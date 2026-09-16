@@ -1,4 +1,6 @@
 """Drive the setup/control app through a real Tk root (skipped without a display)."""
+import time
+
 import pytest
 
 from labwatch.config import load
@@ -94,3 +96,29 @@ def test_start_and_stop_testbed_watcher(app, tmp_path):
     assert app.proc is not None and app.proc.poll() is None
     app.stop_watcher()
     assert app.proc is None
+
+
+def test_dev_section_and_diagnostics(app, tmp_path, monkeypatch):
+    from tkinter import messagebox
+
+    # running the tests from the checkout -> the dev box exists
+    assert app.repo is not None and app.dev_lbl.winfo_exists()
+    monkeypatch.setattr(messagebox, "showinfo", lambda *a, **k: None)
+    monkeypatch.setattr(messagebox, "showerror", lambda *a, **k: pytest.fail(f"dialog: {a}"))
+    clip = []
+    monkeypatch.setattr(app.root, "clipboard_clear", lambda: clip.clear())
+    monkeypatch.setattr(app.root, "clipboard_append", clip.append)  # real pasteboard + destroy() segfaults macOS Tk
+    app.v("quick.root").set(str(tmp_path / "Auto"))
+    app.v("quick.users").set(str(tmp_path / "General"))
+    app.apply_quick()
+    app.create_all()
+    assert app.save()
+    app.copy_diagnostics()
+    for _ in range(50):
+        app.root.update()
+        if "=== check" in app.out.text.get("1.0", "end"):
+            break
+        time.sleep(0.05)
+    shown = app.out.text.get("1.0", "end")
+    assert "=== check" in shown and "=== config.yaml" in shown
+    assert clip and "=== check" in clip[0]

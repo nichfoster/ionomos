@@ -36,7 +36,11 @@ log = logging.getLogger("labwatch.resolve")
 
 
 def gui_available() -> tuple[bool, str]:
-    """(ok, reason). False when tkinter is missing or there is no display."""
+    """(ok, reason). False when tkinter is missing, there is no display, or LABWATCH_NO_GUI is set."""
+    import os
+
+    if os.environ.get("LABWATCH_NO_GUI"):
+        return False, "disabled by LABWATCH_NO_GUI"
     try:
         import tkinter as tk
     except ImportError as exc:

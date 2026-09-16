@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
+.venv-build/
 .pytest_cache/
 .ruff_cache/
 build/
@@ -17,7 +18,8 @@ dist/
 config.yaml
 !labwatch/config.example.yaml
 
-# Testbeds and release builds
+# Testbeds, release builds, the convenience copy made by dev_install.ps1
+UPDATE.ps1
 labwatch-testbed/
 dist/
 

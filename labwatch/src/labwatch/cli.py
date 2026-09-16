@@ -9,6 +9,8 @@ Command line.
     labwatch dry-run  FOLDER [--config PATH]       parse + validate + show the plan; touches nothing
     labwatch retry    JOB_ID [--config PATH]       failed -> queued
     labwatch testbed  ...                          build/drive a fake lab for testing (see testbed.py)
+    labwatch diagnose [--config PATH]              everything needed to report a problem, in one text block
+    labwatch update                                git pull + reinstall (only when running from a git checkout)
 
 --config defaults to $LABWATCH_CONFIG, then the path last saved by the app,
 then ./config.yaml (next to the exe when frozen).
@@ -40,9 +42,10 @@ def _setup_logging(log_dir: Path | None, verbose: bool) -> None:
     root.setLevel(logging.DEBUG if verbose else logging.INFO)
     for h in list(root.handlers):
         root.removeHandler(h)
-    sh = logging.StreamHandler(sys.stderr)
-    sh.setFormatter(fmt)
-    root.addHandler(sh)
+    if sys.stderr is not None:  # None under pythonw.exe / windowed exe
+        sh = logging.StreamHandler(sys.stderr)
+        sh.setFormatter(fmt)
+        root.addHandler(sh)
     if log_dir:
         log_dir.mkdir(parents=True, exist_ok=True)
         fh = RotatingFileHandler(log_dir / "labwatch.log", maxBytes=5_000_000, backupCount=5, encoding="utf-8")
@@ -262,6 +265,28 @@ def cmd_retry(args) -> int:
     return 0
 
 
+def cmd_diagnose(args) -> int:
+    from labwatch.service import save_diagnostics
+
+    text, where = save_diagnostics(Path(args.config))
+    print(text)
+    if where:
+        print(f"(saved to {where})")
+    return 0
+
+
+def cmd_update(args) -> int:
+    from labwatch.service import source_checkout, update_source
+
+    repo = source_checkout()
+    if repo is None:
+        print("not running from a git checkout; update by installing a new release instead", file=sys.stderr)
+        return 2
+    ok, msg = update_source(repo)
+    print(msg)
+    return 0 if ok else 1
+
+
 def cmd_testbed(args) -> int:
     from labwatch import testbed
 
@@ -297,6 +322,8 @@ def main(argv: list[str] | None = None) -> int:
     rt = sub.add_parser("retry", help="re-queue a failed job")
     rt.add_argument("job_id", type=int)
     rt.set_defaults(fn=cmd_retry)
+    sub.add_parser("diagnose", help="print + save a diagnostics report").set_defaults(fn=cmd_diagnose)
+    sub.add_parser("update", help="git pull + reinstall (dev install only)").set_defaults(fn=cmd_update)
 
     from labwatch import testbed
 

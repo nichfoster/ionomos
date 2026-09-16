@@ -65,6 +65,18 @@ TESTING WITHOUT REAL DATA
   drops and a fake FragPipe. Start the testbed watcher, then Drop samples and
   watch them move (or open the folders and drag them yourself).
 
+UPDATING (while the tool is being developed)
+  If this app was installed with deploy\\dev_install.ps1 it runs straight from
+  a copy of the GitHub repository, and the Run & Test tab shows a
+  "Development install" box. When a fix is pushed from the Mac, press
+  "Update from GitHub & restart" — that is the whole upgrade. Settings, the
+  ledger and lab data are never touched by an update.
+
+REPORTING A PROBLEM
+  Run & Test tab -> "Copy diagnostics". It puts check + status + config + the
+  last 150 log lines on the clipboard (and saves a copy in the logs folder).
+  Paste that into the chat with a sentence about what you expected.
+
 WHERE THINGS ARE
   config.yaml        all settings (path shown at the bottom of this window)
   logs/labwatch.log  what the watcher did
@@ -633,7 +645,7 @@ class App:
         self.nb.add(f, text="  5  Run & Test  ")
         f.columnconfigure(0, weight=1)
         f.columnconfigure(1, weight=1)
-        f.rowconfigure(2, weight=1)
+        f.rowconfigure(3, weight=1)
 
         w = ttk.LabelFrame(f, text="Watcher", padding=6)
         w.grid(row=0, column=0, sticky="nsew", **PAD)
@@ -643,8 +655,11 @@ class App:
         ttk.Button(w, text="Start watcher", command=self.start_watcher).grid(row=1, column=1, **PAD)
         ttk.Button(w, text="Stop watcher", command=self.stop_watcher).grid(row=1, column=2, **PAD)
         ttk.Button(w, text="Show queue (status)", command=lambda: self._cli(["status", "--all"])).grid(row=1, column=3, **PAD)
-        ttk.Label(w, text="Start = runs in the background until you Stop or log out. Use the startup task to make it permanent.",
-                  foreground="#666", wraplength=420).grid(row=2, column=0, columnspan=4, sticky="w", padx=6)
+        ttk.Button(w, text="Copy diagnostics", command=self.copy_diagnostics).grid(row=2, column=0, **PAD)
+        ttk.Label(w, text="Start = runs in the background until you Stop or log out. Use the startup task to make it "
+                          "permanent. Copy diagnostics = one text block (check, status, config, log tail) on the "
+                          "clipboard — paste it to whoever is fixing things.",
+                  foreground="#666", wraplength=420).grid(row=3, column=0, columnspan=4, sticky="w", padx=6)
 
         s = ttk.LabelFrame(f, text="Start automatically at logon" + ("" if IS_WIN else " (Windows only)"), padding=6)
         s.grid(row=0, column=1, sticky="nsew", **PAD)
@@ -657,8 +672,10 @@ class App:
                           "interactively at every logon (so the resolver window can appear).",
                   foreground="#666", wraplength=420).grid(row=2, column=0, columnspan=3, sticky="w", padx=6)
 
+        self._dev_section(f, row=1)
+
         t = ttk.LabelFrame(f, text="Testbed — try everything with fake data", padding=6)
-        t.grid(row=1, column=0, columnspan=2, sticky="ew", **PAD)
+        t.grid(row=2, column=0, columnspan=2, sticky="ew", **PAD)
         t.columnconfigure(1, weight=1)
         ttk.Label(t, text="Testbed folder").grid(row=0, column=0, sticky="e", **PAD)
         from labwatch.testbed import default_root as _testbed_default_root
@@ -690,7 +707,7 @@ class App:
                   foreground="#666").pack(side="left", padx=8)
 
         o = ttk.Frame(f)
-        o.grid(row=2, column=0, columnspan=2, sticky="nsew", **PAD)
+        o.grid(row=3, column=0, columnspan=2, sticky="nsew", **PAD)
         o.columnconfigure(0, weight=1)
         o.rowconfigure(1, weight=1)
         top = ttk.Frame(o)
@@ -815,6 +832,89 @@ class App:
         self.out.write(msg)
         if ok:
             messagebox.showinfo("Shortcut", f"Created {msg}")
+
+    # -- dev install: update from GitHub / diagnostics
+
+    def _dev_section(self, f, row: int):
+        """Shown only when labwatch is imported from a git checkout (deploy/dev_install.ps1)."""
+        self.repo = service.source_checkout()
+        if self.repo is None:
+            return
+        d = ttk.LabelFrame(f, text="Development install — this app runs from a git checkout", padding=6)
+        d.grid(row=row, column=0, columnspan=2, sticky="ew", **PAD)
+        d.columnconfigure(0, weight=1)
+        self.dev_lbl = ttk.Label(d, text=f"{self.repo}   {service.git_describe(self.repo)}   (checking for updates…)")
+        self.dev_lbl.grid(row=0, column=0, columnspan=3, sticky="w", **PAD)
+        ttk.Button(d, text="Update from GitHub & restart", command=self.update_from_git).grid(row=1, column=0, sticky="w", **PAD)
+        ttk.Button(d, text="Check again", command=self._check_updates).grid(row=1, column=1, sticky="w", **PAD)
+        ttk.Button(d, text="Open repo folder", command=lambda: self._open(str(self.repo))).grid(row=1, column=2, sticky="w", **PAD)
+        ttk.Label(d, text="Update = stop the watcher, git pull, reinstall, reopen this app. Settings and data are untouched.",
+                  foreground="#666", wraplength=700).grid(row=2, column=0, columnspan=3, sticky="w", padx=6)
+        if not os.environ.get("LABWATCH_OFFLINE"):
+            self._check_updates()
+
+    def _check_updates(self):
+        repo = self.repo
+
+        def go():
+            n, msg = service.updates_available(repo)
+            if n is None:
+                txt = f"could not check: {msg}"
+            elif n == 0:
+                txt = "up to date"
+            else:
+                txt = f"UPDATE AVAILABLE: {n} new commit{'s' if n != 1 else ''} on GitHub"
+            self.post(lambda: self.dev_lbl.configure(text=f"{repo}   {service.git_describe(repo)}   — {txt}",
+                                                     foreground="#c62828" if (n or 0) > 0 else ""))
+
+        threading.Thread(target=go, daemon=True).start()
+
+    def update_from_git(self):
+        if self.proc is not None and self.proc.poll() is None:
+            service.stop_process(self.proc)
+            self.proc = None
+        pid = service.running_pid(self._log_dir())
+        if pid:
+            if not messagebox.askyesno("Update", f"The watcher (pid {pid}) is running. Stop it and update?"):
+                return
+            service.kill_pid(pid)
+        self.bv("follow").set(False)
+        self._toggle_follow()
+        self.out.write("updating…", clear=True)
+        repo = self.repo
+
+        def go():
+            ok, msg = service.update_source(repo, log=lambda t: self.post(lambda: self.out.write(t)))
+            self.post(lambda: self._after_update(ok, msg))
+
+        threading.Thread(target=go, daemon=True).start()
+
+    def _after_update(self, ok: bool, msg: str):
+        self.out.write(msg)
+        if not ok:
+            messagebox.showerror("Update", msg)
+            return
+        if messagebox.askyesno("Update", msg + "\n\nRestart LabWatch now to load the new code?\n"
+                                          "(Press Start watcher again afterwards.)"):
+            service.restart_app()
+
+    def copy_diagnostics(self):
+        cfg = self.config_path
+        self.out.write("collecting diagnostics…", clear=True)
+
+        def go():
+            text, where = service.save_diagnostics(cfg)
+
+            def show():
+                self.root.clipboard_clear()
+                self.root.clipboard_append(text)
+                self.out.write(text + ("\n(saved to " + str(where) + ")" if where else ""), clear=True)
+                messagebox.showinfo("Diagnostics", "Copied to the clipboard" + (f" and saved to\n{where}" if where else "") +
+                                    ".\nPaste it into the chat / issue describing the problem.")
+
+            self.post(show)
+
+        threading.Thread(target=go, daemon=True).start()
 
     # -- testbed
 

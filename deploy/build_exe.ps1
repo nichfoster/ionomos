@@ -9,6 +9,7 @@ $repo = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location $repo
 $py = $null
 foreach ($v in @("3.14","3.13","3.12","3.11")) { try { & py "-$v" -c "import tkinter" 2>$null; if ($LASTEXITCODE -eq 0) { $py = "py -$v"; break } } catch {} }
+if (-not $py) { try { & python -c "import tkinter" 2>$null; if ($LASTEXITCODE -eq 0) { $py = "python" } } catch {} }  # GitHub Actions: setup-python puts it on PATH
 if (-not $py) { throw "Need Python 3.11+ with tkinter (python.org installer, tick tcl/tk)" }
 if (-not (Test-Path "labwatch\.venv-build")) { Invoke-Expression "$py -m venv labwatch\.venv-build" }
 $vpy = "labwatch\.venv-build\Scripts\python.exe"

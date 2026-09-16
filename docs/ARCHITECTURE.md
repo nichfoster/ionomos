@@ -27,14 +27,14 @@
 | `testbed.py` | Fake lab + sample drops + fake FragPipe for testing on any OS | — |
 | `app.py` | tkinter setup wizard / control panel: folders, users, methods, every parameter, start/stop, startup task, testbed | — |
 | `configio.py` | config.yaml as a dict; writes a commented file | — |
-| `service.py` | child processes, PID file, Task Scheduler, remembered config path, exe routing | — |
+| `service.py` | child processes, PID file, Task Scheduler, remembered config path, exe routing; dev install: git update, diagnostics bundle | — |
 | `ledger.py` | SQLite job table + status transitions; source of truth for "what's queued" | `prior-work/store.py` |
 | `worker.py` | Pull next `queued` job, run it, record result. Sequential. | `prior-work/queue_worker.py` |
 | `runners/fragpipe.py` | Build the headless command, run with timeout, tee log | `prior-work/fragpipe_runner.py` (nearly as-is) |
 | `runners/isodtb.py` | Post-proc: modified-peptide → site merge | port of `lab-scripts/isoDTB_…R` |
 | `runners/tmt.py` | Post-proc: experimental annotation fix | port of `lab-scripts/correct_experimental_annotation…R` |
 | `runners/dia.py` | Post-proc: (TBD — probably nothing beyond copying `report.tsv` up) | — |
-| `cli.py` | `labwatch setup / run / check / status / dry-run / retry / testbed`; no args → app | — |
+| `cli.py` | `labwatch setup / run / check / status / dry-run / retry / testbed / diagnose / update`; no args → app | — |
 
 ## Data flow for one job
 

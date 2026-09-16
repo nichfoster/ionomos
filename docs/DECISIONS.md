@@ -99,3 +99,16 @@ the file by hand. Two exes are shipped (windowed for the app and for the
 Task-Scheduler `run`, console for terminal use) because a windowed exe can't
 print and a console exe leaves a window open at logon. PyInstaller must run
 on Windows; the Mac build only validates the spec.
+
+### D15 — Prototype on the PC from a git checkout, not from the exe
+**2026-09-16.** The frozen exe is right for the lab's final install but wrong
+for iteration: every change meant rebuild → unzip → reinstall. While the tool
+is being developed the PC runs an *editable* install of a git clone
+(`deploy/dev_install.ps1`), so an update is `git pull` — exposed as an
+"Update from GitHub & restart" button in the app and `labwatch update`. The
+update refuses to clobber hand edits on the PC (all changes go via the Mac and
+GitHub). The reverse channel is `labwatch diagnose` / "Copy diagnostics": one
+text block with version + commit, check, status, config, log tail and inbox
+notes, so a report from the PC carries everything needed to reproduce it.
+GitHub Actions runs the suite on Windows on every push and builds the exe on
+tags, so the Windows-specific parts are exercised without a hand build.
