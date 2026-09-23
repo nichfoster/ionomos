@@ -84,6 +84,14 @@ retires LabWatch) tested in CI; in-app update from a downloaded Setup; Report
 a problem → one zip on the Desktop; build stamp in every report; app log;
 self-expiring detailed logging.
 
+2026-09-23 (0.5.1), from the first real install report: Find FragPipe knows the
+23/24 installer layout (C:/FragPipe/FragPipe-24.0/bin/FragPipe-24.0.exe) and never
+picks a copy under a path with spaces; settings saved in the program folder move
+next to the data; FragPipe copies / FASTA folders / "New folder" in the users
+folder aren't treated as people; the checklist refreshes after every save.
+Open: confirm FragPipe-24.0.exe runs headless with console output on the first
+real search (a fragpipe.bat beside it is preferred if FragPipe ships one).
+
 ## Phase 3 — DIA, then TMT
 
 - DIA: pin workflow, `data_type: DIA`, sort out DIA-NN version/`--config-diann`.

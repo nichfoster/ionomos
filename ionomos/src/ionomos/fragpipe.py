@@ -45,16 +45,21 @@ MANIFEST_NAME = "fragpipe-files.fp-manifest"
 CONSOLE_LOG = "fragpipe_console.log"
 CANCEL_FILE = "CANCEL"  # created in ionomos_run/ by `ionomos cancel` / the app
 
-# Where FragPipe usually lives on Windows. First match wins. The .bat is the
-# headless launcher; fragpipe.exe is a GUI wrapper that may swallow console output.
+# Where FragPipe lives on Windows. Two layouts exist:
+#   zip builds (<= 22):          <root>/fragpipe/bin/fragpipe.bat (+ a GUI fragpipe.exe)
+#   Windows installer (23, 24):  C:/FragPipe/FragPipe-24.0/bin/FragPipe-24.0.exe (+ fragpipe.bat if shipped)
 LAUNCHER_GLOBS = (
-    "C:/FragPipe/FragPipe-*/fragpipe/bin/fragpipe.bat",
+    "C:/FragPipe/*/bin/fragpipe.bat",
+    "C:/FragPipe/*/bin/FragPipe*.exe",
     "C:/FragPipe/*/fragpipe/bin/fragpipe.bat",
     "C:/FragPipe*/fragpipe/bin/fragpipe.bat",
-    "C:/Program Files/FragPipe*/fragpipe/bin/fragpipe.bat",
+    "C:/FragPipe*/bin/fragpipe.bat",
+    "C:/FragPipe*/bin/FragPipe*.exe",
+    "C:/Program Files/FragPipe*/bin/FragPipe*.exe",
     os.path.expanduser("~/FragPipe*/fragpipe/bin/fragpipe.bat"),
     os.path.expanduser("~/Downloads/FragPipe*/fragpipe/bin/fragpipe.bat"),
 )
+
 
 # Files that mean "the search produced its main table", per method. Missing
 # ones are recorded as warnings, not failures (names vary between versions).
@@ -136,19 +141,34 @@ def _fwd(p: Path) -> str:
 # ----------------------------------------------------------------- lookups --
 
 
-def detect_launcher() -> Path | None:
-    """Best guess at FragPipe's headless launcher on this machine, or None."""
+def _version_of(path: Path) -> tuple[int, ...]:
+    m = re.search(r"FragPipe(?:-jre)?-(\d+(?:\.\d+)*)", str(path), re.IGNORECASE)
+    return tuple(int(x) for x in m.group(1).split(".")) if m else (0,)
+
+
+def launcher_candidates() -> list[Path]:
+    """Every FragPipe launcher found, best first: newest version, then no spaces in the path
+    (FragPipe can't run from one), then fragpipe.bat before an .exe in the same folder."""
+    seen: dict[str, Path] = {}
     for pattern in LAUNCHER_GLOBS:
-        hits = sorted(glob.glob(pattern), reverse=True)  # newest version name first
-        if hits:
-            return Path(hits[0])
-    return None
+        for hit in glob.glob(pattern):
+            p = Path(hit)
+            if p.name.lower() == "fragpipe.exe" and (p.parent / "fragpipe.bat").is_file():
+                continue  # the zip layout's GUI exe; its .bat is the headless launcher
+            seen.setdefault(str(p).lower(), p)
+    return sorted(seen.values(), key=lambda p: (" " in str(p), tuple(-x for x in _version_of(p)),
+                                                p.suffix.lower() != ".bat", str(p)))
+
+
+def detect_launcher() -> Path | None:
+    """Best guess at FragPipe's headless launcher on this machine (never one under a path with spaces)."""
+    return next((p for p in launcher_candidates() if " " not in str(p)), None)
 
 
 def resolve_launcher(cfg: Config) -> Path:
-    """The configured launcher, preferring fragpipe.bat when fragpipe.exe was configured next to one."""
+    """The configured launcher, preferring a fragpipe.bat that sits next to a configured .exe."""
     exe = cfg.fragpipe_exe
-    if exe.name.lower() == "fragpipe.exe" and (exe.parent / "fragpipe.bat").is_file():
+    if exe.suffix.lower() == ".exe" and (exe.parent / "fragpipe.bat").is_file():
         return exe.parent / "fragpipe.bat"
     if not exe.is_file():
         found = detect_launcher()
@@ -617,7 +637,7 @@ def describe_files(workflow_dir: Path, fasta_dir: Path, workflow: str, fasta: st
 
 
 def fragpipe_root(launcher: Path) -> Path | None:
-    """<...>/FragPipe-24.0/fragpipe for a launcher at <...>/fragpipe/bin/fragpipe.bat."""
+    """The folder holding bin/, lib/, tools/: <x>/fragpipe (zip builds) or C:/FragPipe/FragPipe-24.0 (installer)."""
     p = Path(launcher)
     return p.parent.parent if p.parent.name.lower() == "bin" else None
 

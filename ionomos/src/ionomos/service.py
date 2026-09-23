@@ -58,12 +58,56 @@ def default_config_path() -> Path:
     r = remembered_config_path()
     if r:
         return r
-    lab = Path("C:/Fragpipe_Auto/config.yaml")
+    lab = Path(DATA_CONFIG)
     if os.name == "nt" and lab.is_file():
         return lab
-    if getattr(sys, "frozen", False):  # exe: config next to it
-        return Path(sys.executable).parent / "config.yaml"
+    if getattr(sys, "frozen", False):
+        beside = Path(sys.executable).parent / "config.yaml"
+        if beside.is_file() and not is_installed_build():  # a portable copy keeps its config next to it
+            return beside
+        return lab if os.name == "nt" else beside  # installed: settings live with the data, not the program
     return Path("config.yaml")
+
+
+DATA_CONFIG = "C:/Fragpipe_Auto/config.yaml"
+
+
+def is_installed_build() -> bool:
+    """Frozen and installed by the Setup (an uninstaller sits next to the exe)."""
+    return getattr(sys, "frozen", False) and any(Path(sys.executable).parent.glob("unins*.exe"))
+
+
+def relocate_config_from_program_dir(config: Path) -> Path | None:
+    """Settings saved inside the program folder (C:\\Ionomos) move next to the data (e.g. C:\\Fragpipe_Auto).
+
+    The program folder is replaced by updates and removed by uninstall, so a
+    config there is at risk. Moves config.yaml (+ config-backups/) to the folder
+    holding the job ledger, remembers the new path, and re-points the startup
+    task. Only when the target has no config yet. Returns the new path or None.
+    """
+    import shutil
+
+    from ionomos import configio
+
+    config = Path(config)
+    if not (is_installed_build() and config.is_file() and config.parent.resolve() == Path(sys.executable).parent.resolve()):
+        return None
+    try:
+        data_root = Path(configio.read_config(config)["paths"]["database"]).parent
+    except Exception:  # noqa: BLE001
+        return None
+    target = data_root / "config.yaml"
+    if " " in str(target) or not data_root.is_dir() or target.exists():
+        return None
+    shutil.copy2(config, target)
+    old_backups, new_backups = config.parent / configio.BACKUP_DIR, data_root / configio.BACKUP_DIR
+    if old_backups.is_dir() and not new_backups.exists():
+        shutil.move(str(old_backups), str(new_backups))
+    config.unlink()
+    remember_config_path(target)
+    if task_status() == "installed":
+        install_task(target)
+    return target
 
 
 # ------------------------------------------------------------ launching ----

@@ -240,6 +240,14 @@ class App:
     def __init__(self, root: tk.Tk, config_path: Path | None = None):
         self.root = root
         self.config_path = Path(config_path) if config_path else service.default_config_path()
+        try:
+            moved = service.relocate_config_from_program_dir(self.config_path)
+        except OSError as exc:
+            moved = None
+            log.warning("could not move the config out of the program folder: %s", exc)
+        if moved:
+            log.info("moved the config from %s to %s", self.config_path, moved)
+            self.config_path = moved
         self.first_run = not self.config_path.is_file()
         self.data = configio.read_config(self.config_path)
         self.proc = None  # child watcher process started from here
@@ -275,6 +283,7 @@ class App:
         root.report_callback_exception = self._on_tk_error
         root.after(100, self._pump_ui)
         self.nb.select(0)  # the checklist: always the first thing you see
+        self.nb.bind("<<NotebookTabChanged>>", lambda e: self.refresh_setup() if self.nb.select() == str(self.tab_setup) else None)
         self.root.after(300, self.refresh_setup)
         self.root.after(600, self._after_update_restart)
         self.root.after(1500, self.check_downloaded_update)
@@ -527,7 +536,11 @@ class App:
 
     def _refresh_users(self):
         root = self._users_root()
-        users = sorted(p.name for p in root.iterdir() if p.is_dir() and not p.name.startswith(".")) if root.is_dir() else []
+        from ionomos.config import DEFAULT_USER_IGNORE, _subfolders, not_a_user
+
+        ignore = tuple(self.data["users"].get("ignore") if self.data["users"].get("ignore") is not None
+                       else DEFAULT_USER_IGNORE)
+        users = [u for u in _subfolders(root) if not_a_user(u, ignore) is None]
         self.user_list.delete(0, "end")
         for u in users:
             self.user_list.insert("end", u)
@@ -1983,6 +1996,8 @@ class App:
         self._refresh_methods()
         warn = f"  ({len(cfg.warnings)} warning(s) — run Check)" if cfg.warnings else ""
         self.set_status(f"saved {self.config_path.name}{warn}")
+        log.info("saved %s", self.config_path)
+        self.root.after(50, self.refresh_setup)  # the checklist must never show a problem that's already fixed
         return True
 
     def save_and_check(self):

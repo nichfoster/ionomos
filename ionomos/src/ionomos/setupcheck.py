@@ -87,9 +87,10 @@ def run(config_path: Path, data: dict | None = None, probe_watcher: bool = True)
     probs = layout_problems(p.get("inbox", Path(".")), p.get("users_root", Path(".")),
                             p.get("log_dir", Path(".")), p.get("database", Path("x")))
     warn = []
-    spaces = [k for k, v in d["paths"].items() if " " in str(v)]
+    spaces = [f"{k} = {v}" for k, v in d["paths"].items() if " " in str(v)]
     if spaces:
-        (probs if os.name == "nt" else warn).append("spaces in " + ", ".join(spaces) + " (FragPipe can't handle them)")
+        (probs if os.name == "nt" else warn).append("a path contains a space, which FragPipe can't handle: "
+                                                    + "; ".join(spaces) + ". Pick a location without spaces (tab 1).")
     if "inbox" in p and "users_root" in p and p["inbox"].exists() and p["users_root"].exists() \
             and _drive(p["inbox"]) != _drive(p["users_root"]):
         warn.append("inbox and users folder are on different drives: every drop is copied instead of moved "
@@ -105,7 +106,12 @@ def run(config_path: Path, data: dict | None = None, probe_watcher: bool = True)
 
     # 3. users
     ur = p.get("users_root")
-    users = sorted(x.name for x in ur.iterdir() if x.is_dir() and not x.name.startswith(".")) if ur and ur.is_dir() else []
+    from ionomos.config import DEFAULT_USER_IGNORE, _subfolders, not_a_user
+
+    ignore = tuple(d["users"].get("ignore") if d["users"].get("ignore") is not None else DEFAULT_USER_IGNORE)
+    folders = _subfolders(ur) if ur else []
+    users = [u for u in folders if not_a_user(u, ignore) is None]
+    skipped = [u for u in folders if u not in users]
     stale = [u for u in (d["users"].get("aliases") or {}) if u not in users]
     if not users:
         add(Item("users", "Lab members added", "todo", "no user folders yet", "Add each person on tab 2.", "open_tab:2"))
@@ -114,7 +120,9 @@ def run(config_path: Path, data: dict | None = None, probe_watcher: bool = True)
                  + ", ".join(stale), "Add or remove those on tab 2.", "open_tab:2"))
     else:
         n_alias = sum(1 for u in users if (d["users"].get("aliases") or {}).get(u))
-        add(Item("users", "Lab members added", "ok", f"{len(users)} user(s), {n_alias} with initials"))
+        note = (f"; not treated as people: {', '.join(skipped)} (FragPipe copies, FASTA folders, names with "
+                f"spaces — move them out of the users folder when convenient)") if skipped else ""
+        add(Item("users", "Lab members added", "ok", f"{len(users)} user(s), {n_alias} with initials{note}"))
 
     # 4. config saved + valid
     saved = config_path.is_file()

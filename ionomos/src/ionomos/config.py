@@ -17,6 +17,9 @@ import yaml
 
 from ionomos.naming import DEFAULT_METHOD_ALIASES
 
+# users_root subfolders that are never people: FragPipe copies, FASTA stores, Explorer's "New folder"
+DEFAULT_USER_IGNORE = ("FragPipe*", "Fasta*", "New folder*", "~*")
+
 
 class ConfigError(ValueError):
     """config.yaml is missing, malformed, or points at things that don't exist."""
@@ -63,6 +66,7 @@ class Config:
     gui_timeout_seconds: float  # 0 => wait forever for an answer
     config_path: Path
     analysis: dict = field(default_factory=dict)  # downstream settings (see downstream/analysis.py); "enabled" too
+    user_ignore: tuple[str, ...] = DEFAULT_USER_IGNORE  # users_root subfolders that aren't people (glob patterns)
     warnings: tuple[str, ...] = ()  # non-fatal path problems (FragPipe bits missing, etc.)
 
     @property
@@ -70,10 +74,36 @@ class Config:
         return {k: list(m.aliases) for k, m in self.methods.items()}
 
     def known_users(self) -> list[str]:
-        """Users = subfolders of users_root (a new user is just a new folder)."""
-        if not self.users_root.is_dir():
-            return []
-        return sorted(p.name for p in self.users_root.iterdir() if p.is_dir() and not p.name.startswith("."))
+        """Users = subfolders of users_root (a new user is just a new folder), minus not_users()."""
+        return [u for u in _subfolders(self.users_root) if not_a_user(u, self.user_ignore) is None]
+
+    def ignored_user_folders(self) -> dict[str, str]:
+        """Subfolders of users_root that are not treated as people, with the reason."""
+        out = {}
+        for u in _subfolders(self.users_root):
+            why = not_a_user(u, self.user_ignore)
+            if why:
+                out[u] = why
+        return out
+
+
+def _subfolders(root: Path) -> list[str]:
+    try:
+        return sorted(p.name for p in root.iterdir() if p.is_dir() and not p.name.startswith("."))
+    except OSError:
+        return []
+
+
+def not_a_user(name: str, patterns: tuple[str, ...] = DEFAULT_USER_IGNORE) -> str | None:
+    """Why a users_root subfolder isn't a person, or None if it is one."""
+    import fnmatch
+
+    if " " in name:
+        return "has a space (FragPipe can't use such a path)"
+    for pat in patterns:
+        if fnmatch.fnmatch(name.lower(), pat.lower()):
+            return f"matches users.ignore '{pat}'"
+    return None
 
 
 _REQUIRED_PATHS = ("inbox", "users_root", "fragpipe_exe", "workflow_dir", "fasta_dir", "database", "log_dir")
@@ -173,6 +203,7 @@ def load(path: str | Path, check_paths: bool = True) -> Config:
         gui_timeout_seconds=float(gui.get("timeout_minutes", 0) or 0) * 60,
         config_path=p,
         analysis=_analysis(raw.get("analysis")),
+        user_ignore=tuple(str(x) for x in (users.get("ignore") if users.get("ignore") is not None else DEFAULT_USER_IGNORE)),
     )
 
     warnings = space_warnings

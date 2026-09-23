@@ -16,7 +16,7 @@ fragpipe.exe --headless --workflow <wf> --manifest <mf> --workdir <out>
 - Confirmed CLI shape in `prior-work/fragpipe_runner.py`. Launcher: the 22.0
   copy in the inventory has `fragpipe\bin\fragpipe.bat` (headless, console) next
   to `fragpipe.exe` (GUI wrapper); ionomos uses the `.bat` and swaps a configured
-  `.exe` for the `.bat` beside it. **Re-confirm on the 24.0 install** (app → Find FragPipe).
+  `.exe` for the `.bat` beside it. On the lab PC, FragPipe 24.0 came from its Windows installer: `C:\FragPipe\FragPipe-24.0\bin\FragPipe-24.0.exe`, `lib\fragpipe-24.0.jar`, `jre\`, `tools\` (MSFragger 4.4.1, IonQuant 1.11.20, diaTracer 2.2.1, DIA-NN 2.3.2) — from the first Ionomos report, 2026-09-23. Whether that exe prints headless output like the old .bat is confirmed by the first real search.
 - Manifest = `.fp-manifest`, tab-separated: `path \t experiment \t bioreplicate \t DDA|DIA`.
 - The FASTA is baked into the `.workflow` file (`database.db-path`). ionomos
   writes a per-job copy of the pinned workflow with `database.db-path` set to the

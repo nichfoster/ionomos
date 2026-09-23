@@ -9,7 +9,6 @@ a git checkout asks git; a plain pip install knows only its version.
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
 from ionomos import __version__
 
@@ -23,8 +22,9 @@ def info() -> dict:
     except ImportError:
         pass
     if getattr(sys, "frozen", False):
-        exe_dir = Path(sys.executable).parent
-        d["kind"] = "installed" if any(exe_dir.glob("unins*.exe")) else "portable exe"
+        from ionomos.service import is_installed_build
+
+        d["kind"] = "installed" if is_installed_build() else "portable exe"
     else:
         from ionomos.service import source_checkout
 

@@ -47,7 +47,8 @@ def defaults(root: str | None = None, users_root: str | None = None) -> dict:
                      "min_valid": 2, "normalize": "median", "top_labels": 15,
                      "control_keywords": ["DMSO", "vehicle", "veh", "ctrl", "control", "mock", "untreated", "NT",
                                           "WT", "EV", "scr", "scramble", "siNT", "PBS"]},
-        "users": {"aliases": {}, "default": "", "learned_aliases_file": f"{root}/learned_aliases.yaml"},
+        "users": {"aliases": {}, "default": "", "learned_aliases_file": f"{root}/learned_aliases.yaml",
+                  "ignore": ["FragPipe*", "Fasta*", "New folder*", "~*"]},
         "methods": {
             "isoDTB": {"aliases": ["isodtb", "iso-dtb"], "workflow": "isoDTB.workflow",
                        "fasta": "human_reviewed_decoys.fas", "data_type": "DDA",
@@ -168,6 +169,7 @@ def dump_config(d: dict) -> str:
         a(f"    {_y(user)}: {_y(list(als))}")
     a(f"  default: {_y(u.get('default', '') or '')}   # e.g. \"_unsorted\" to accept unknown users")
     a(f"  learned_aliases_file: {_y(u.get('learned_aliases_file', ''))}")
+    a(f"  ignore: {_y(list(u.get('ignore') or []))}   # users_root subfolders that aren't people (FragPipe copies, FASTA folders)")
     a("")
     a("methods:   # key = canonical name; aliases are matched in folder/file names")
     for key, m in d["methods"].items():
