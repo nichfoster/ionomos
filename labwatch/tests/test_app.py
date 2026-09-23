@@ -18,7 +18,13 @@ def app(tmp_path, monkeypatch):
 
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("APPDATA", str(tmp_path))
-    root = tk.Tk()
+    try:
+        root = tk.Tk()
+    except tk.TclError:  # GitHub's Windows runners sometimes fail Tcl init after many interpreters; once more
+        import gc
+
+        gc.collect()
+        root = tk.Tk()
     root.withdraw()
     a = App(root, tmp_path / "Auto" / "config.yaml")
     yield a
