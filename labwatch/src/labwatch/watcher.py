@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -85,6 +86,7 @@ class Watcher:
         stable_seconds: float = 60,
         min_raw_files: int = 1,
         retry_seconds: float = 15,
+        heartbeat=None,
     ):
         self.inbox = Path(inbox)
         self.on_stable = on_stable
@@ -94,6 +96,9 @@ class Watcher:
         self.retry_seconds = retry_seconds
         self._pending: dict[Path, _Pending] = {}
         self._running = False
+        self._stop = threading.Event()
+        self.heartbeat = heartbeat
+        self._inbox_missing = False
 
     # ------------------------------------------------------------------ poll --
 
@@ -102,16 +107,24 @@ class Watcher:
         now = time.monotonic() if now is None else now
         handed: list[Path] = []
         if not self.inbox.is_dir():
-            log.warning("inbox does not exist: %s", self.inbox)
+            if not self._inbox_missing:  # log once per outage (e.g. a network share dropped), not every poll
+                log.error("inbox is not reachable: %s — waiting for it to come back", self.inbox)
+                self._inbox_missing = True
             return handed
+        if self._inbox_missing:
+            log.info("inbox is back: %s", self.inbox)
+            self._inbox_missing = False
 
         present: set[Path] = set()
         for entry in sorted(self.inbox.iterdir()):
-            if _ignored(entry.name) or not entry.is_dir():
-                continue
-            present.add(entry)
-            if self._evaluate(entry, now):
-                handed.append(entry)
+            try:
+                if _ignored(entry.name) or not entry.is_dir():
+                    continue
+                present.add(entry)
+                if self._evaluate(entry, now):
+                    handed.append(entry)
+            except Exception:  # one unreadable folder must not stop the others from being seen
+                log.exception("could not evaluate %s; will look again next poll", entry.name)
 
         # forget folders that disappeared (user pulled it back out, or we moved it)
         for gone in [p for p in self._pending if p not in present]:
@@ -172,12 +185,15 @@ class Watcher:
         log.info("watching %s (poll=%ss, stable=%ss, min_raw=%d)",
                  self.inbox, self.poll_seconds, self.stable_seconds, self.min_raw_files)
         try:
-            while self._running:
+            while self._running and not self._stop.is_set():
                 try:
                     self.scan_once()
                 except Exception:
                     log.exception("scan failed; will poll again")
-                time.sleep(self.poll_seconds)
+                if self.heartbeat is not None:
+                    waiting = len(self._pending)
+                    self.heartbeat.beat("watcher", f"{waiting} folder(s) in inbox" if waiting else "ok")
+                self._stop.wait(self.poll_seconds)
         except KeyboardInterrupt:
             log.info("watcher stopped by user")
         finally:
@@ -185,3 +201,4 @@ class Watcher:
 
     def stop(self) -> None:
         self._running = False
+        self._stop.set()

@@ -171,3 +171,130 @@ class Ledger:
     def already_taken(self, inbox_name: str) -> bool:
         row = self._conn.execute("SELECT 1 FROM jobs WHERE inbox_name=?", (inbox_name,)).fetchone()
         return row is not None
+
+
+# ------------------------------------------------------------------ failsafes --
+
+
+def integrity(db_path: str | Path) -> str:
+    """'ok', 'missing', or SQLite's complaint. Never raises."""
+    p = Path(db_path)
+    if not p.is_file():
+        return "missing"
+    try:
+        con = sqlite3.connect(f"file:{p.as_posix()}?mode=ro", uri=True, timeout=10)
+        try:
+            row = con.execute("PRAGMA integrity_check").fetchone()
+            con.execute("SELECT count(*) FROM jobs").fetchone()
+        finally:
+            con.close()
+    except sqlite3.DatabaseError as exc:
+        return f"unreadable: {exc}"
+    return "ok" if row and row[0] == "ok" else f"corrupt: {row[0] if row else '?'}"
+
+
+def backup(db_path: str | Path, backup_dir: str | Path, keep: int = 14) -> Path | None:
+    """Consistent copy (SQLite online backup) to backup_dir/labwatch-<date>.db; one per day, newest `keep` kept."""
+    p = Path(db_path)
+    if not p.is_file():
+        return None
+    d = Path(backup_dir)
+    d.mkdir(parents=True, exist_ok=True)
+    dest = d / f"labwatch-{datetime.now():%Y%m%d}.db"
+    if dest.exists():
+        return dest
+    src = sqlite3.connect(p, timeout=30)
+    try:
+        dst = sqlite3.connect(dest)
+        with dst:
+            src.backup(dst)
+        dst.close()
+    finally:
+        src.close()
+    for old in sorted(d.glob("labwatch-*.db"))[:-keep]:
+        try:
+            old.unlink()
+        except OSError:
+            pass
+    return dest
+
+
+def rebuild_from_status_files(db_path: str | Path, users_root: str | Path) -> tuple[Path | None, int]:
+    """Replace a broken ledger: move it aside, re-create jobs from every <user>/<exp>/labwatch.json.
+
+    Each experiment folder carries its full intake record, so nothing about
+    what was filed is lost with the database. Jobs that were running come
+    back queued. Returns (where the broken file was moved, jobs recovered).
+    """
+    p = Path(db_path)
+    moved = None
+    if p.exists():
+        moved = p.with_name(f"{p.name}.broken-{datetime.now():%Y%m%d-%H%M%S}")
+        p.replace(moved)
+        for ext in ("-wal", "-shm", "-journal"):
+            side = p.with_name(p.name + ext)
+            if side.exists():
+                side.replace(moved.with_name(moved.name + ext))
+    led = Ledger(p)
+    records = []
+    root = Path(users_root)
+    for status_file in root.glob("*/*/labwatch.json") if root.is_dir() else []:
+        try:
+            rec = json.loads(status_file.read_text(encoding="utf-8"))
+            folder = rec["plan"]["folder"]
+            records.append((rec.get("queued_at") or "", status_file.parent, rec, folder))
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    n = 0
+    for queued_at, dest, rec, folder in sorted(records, key=lambda r: r[0]):
+        status = rec.get("status") if rec.get("status") in STATUSES else "queued"
+        if status == "running":
+            status = "queued"
+        job = Job(inbox_name=folder.get("safe") or dest.name, user=folder.get("user") or dest.parent.name,
+                  method=folder.get("method") or "?", dest_dir=str(dest), parsed=rec, status=status,
+                  reason=rec.get("reason"), created_at=queued_at or None)
+        try:
+            led.insert(job)
+            n += 1
+        except sqlite3.IntegrityError:
+            continue
+    led.close()
+    return moved, n
+
+
+def adopt_orphans(ledger: Ledger, users_root: str | Path) -> list[int]:
+    """Queue experiment folders that labwatch filed but that never reached the ledger.
+
+    Happens if the database was locked/unwritable right after a folder was
+    moved. Such a folder has labwatch.json with status 'queued' (or 'running')
+    and no job row pointing at it. Returns the new job ids.
+    """
+    root = Path(users_root)
+    if not root.is_dir():
+        return []
+    known = {Path(j.dest_dir) for j in ledger.list()}
+    known_names = {j.inbox_name for j in ledger.list()}
+    new: list[int] = []
+    for status_file in root.glob("*/*/labwatch.json"):
+        dest = status_file.parent
+        if dest in known:
+            continue
+        try:
+            rec = json.loads(status_file.read_text(encoding="utf-8"))
+            folder = rec["plan"]["folder"]
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        if rec.get("status") not in ("queued", "running"):
+            continue
+        name = folder.get("safe") or dest.name
+        if name in known_names:
+            continue
+        job = Job(inbox_name=name, user=folder.get("user") or dest.parent.name, method=folder.get("method") or "?",
+                  dest_dir=str(dest), parsed=rec, status="queued",
+                  reason="re-adopted: was filed but missing from the job list", created_at=rec.get("queued_at"))
+        try:
+            new.append(ledger.insert(job))
+            known_names.add(name)
+        except sqlite3.IntegrityError:
+            continue
+    return new

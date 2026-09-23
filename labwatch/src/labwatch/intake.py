@@ -214,6 +214,24 @@ def _lenient(filename: str, method: str) -> RawName:
 
 
 def plan(folder: Path, cfg: Config, ledger: Ledger | None = None) -> Plan:
+    """Read-only interpretation of a folder. Raises IntakeError (never a bare NamingError)."""
+    try:
+        return _plan(folder, cfg, ledger)
+    except NamingError as exc:  # e.g. a name made only of symbols/emoji survives until sanitize()
+        msg = str(exc)
+        if "no usable characters" in msg:
+            msg += " — rename it using letters and digits (e.g. 20260902_EJQ_isoDTB_sample)"
+        raise IntakeError(msg, Kind.RAWS if ".raw" in msg.lower() else Kind.OTHER) from exc
+
+
+def _safe(name: str, fallback: str = "unnamed") -> str:
+    try:
+        return sanitize(name)
+    except NamingError:
+        return fallback
+
+
+def _plan(folder: Path, cfg: Config, ledger: Ledger | None = None) -> Plan:
     folder = Path(folder)
     if not folder.is_dir():
         raise IntakeError(f"not a folder: {folder}")
@@ -259,8 +277,10 @@ def plan(folder: Path, cfg: Config, ledger: Ledger | None = None) -> Plan:
         raise IntakeError(f"destination already exists: {dest} — rename the folder (e.g. add _redo)", Kind.DEST)
 
     renames = {r.filename: r.safe_filename for r in raws.files if r.filename != r.safe_filename}
-    if len(set(renames.values())) != len(renames):
-        raise IntakeError("two raw files sanitise to the same name; rename them", Kind.RAWS)
+    finals = [r.safe_filename.lower() for r in raws.files]  # lower(): Windows names are case-insensitive
+    if len(set(finals)) != len(finals):
+        raise IntakeError("two raw files end up with the same name after removing spaces/symbols; "
+                          "rename one of them", Kind.RAWS)
 
     prefix = f"{raw_dir}/" if raw_dir else ""
     manifest = [ManifestLine(prefix + r.safe_filename, r.sample, r.rep, mcfg.data_type) for r in raws.files]
@@ -300,7 +320,7 @@ def draft(folder: Path, cfg: Config, error: IntakeError | None = None) -> Draft:
 
     files: list[DraftFile] = []
     for f in raw_names:
-        df = DraftFile(filename=f, experiment=sanitize(f[: -len(RAW_SUFFIX)]), bioreplicate="1")
+        df = DraftFile(filename=f, experiment=_safe(f[: -len(RAW_SUFFIX)]), bioreplicate="1")
         if method:
             try:
                 r = parse_raw_name(f, method)
@@ -394,6 +414,9 @@ def _clear_note(folder: Path) -> None:
 
 
 def _rename_retry(a: Path, b: Path, attempts: int = 5) -> None:
+    """Rename a -> b, retrying Windows locks. Never overwrites: plan() guarantees b is free."""
+    if b.exists() and a.resolve() != b.resolve():
+        raise FileExistsError(f"refusing to overwrite {b}")
     for i in range(attempts):
         try:
             os.rename(a, b)
@@ -405,7 +428,26 @@ def _rename_retry(a: Path, b: Path, attempts: int = 5) -> None:
 
 
 def intake(folder: Path, cfg: Config, ledger: Ledger, resolver: Resolver | None = None) -> IntakeResult:
+    """Never raises for a folder's content: transient disk trouble -> RETRY, a bug -> REJECTED with a note."""
     folder = Path(folder)
+    try:
+        return _intake(folder, cfg, ledger, resolver)
+    except (PermissionError, FileNotFoundError, BlockingIOError, InterruptedError) as exc:
+        log.warning("transient problem with %s (%s); will retry", folder.name, exc)
+        return IntakeResult.RETRY
+    except Exception as exc:
+        log.exception("unexpected error while taking in %s", folder.name)
+        if not folder.is_dir():
+            return IntakeResult.RETRY  # half-moved? let the next scan look again
+        try:
+            _reject(folder, f"labwatch hit an unexpected problem with this folder ({type(exc).__name__}: {exc}). "
+                            f"It was left untouched. Please send diagnostics (LabWatch app -> Run & Test).")
+        except OSError:
+            return IntakeResult.RETRY
+        return IntakeResult.REJECTED
+
+
+def _intake(folder: Path, cfg: Config, ledger: Ledger, resolver: Resolver | None = None) -> IntakeResult:
     try:
         p = plan(folder, cfg, ledger)
     except IntakeError as exc:
@@ -461,7 +503,12 @@ def intake(folder: Path, cfg: Config, ledger: Ledger, resolver: Resolver | None 
 
     job = Job(inbox_name=p.folder.safe, user=p.folder.user, method=p.folder.method,
               dest_dir=str(dest), parsed=record)
-    ledger.insert(job)
+    try:
+        ledger.insert(job)
+    except Exception:  # noqa: BLE001 - the folder is already moved; don't report a retry
+        log.exception("filed %s but could not record it in the job list; it will be adopted automatically "
+                      "(labwatch checks for such folders at start-up and every hour)", dest)
+        return IntakeResult.QUEUED
     log.info("queued job %d: %s -> %s (%s, %d raw files)", job.id, folder.name, dest,
              p.folder.method, len(p.manifest))
     return IntakeResult.QUEUED

@@ -220,6 +220,8 @@ def test_watcher_and_worker_together(bed):
     finally:
         wat.stop()
         wrk.stop()
+        for t in threads:
+            t.join(timeout=20)
 
 
 # ------------------------------------------------------------------ unit bits --

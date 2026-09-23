@@ -9,7 +9,10 @@ Command line.
     labwatch dry-run  FOLDER [--config PATH]       parse + validate + show the plan; touches nothing
     labwatch retry    JOB_ID [--config PATH]       failed -> queued
     labwatch testbed  ...                          build/drive a fake lab for testing (see testbed.py)
-    labwatch diagnose [--config PATH]              everything needed to report a problem, in one text block
+    labwatch diagnose [--zip [PATH]]               everything needed to report a problem (text, or a .zip bundle)
+    labwatch cancel   JOB_ID                       stop a running search / drop a queued job
+    labwatch pause | resume                        hold / release the FragPipe queue
+    labwatch repair-ledger [--force]               rebuild the job list from the experiment folders
     labwatch update                                git pull + reinstall (only when running from a git checkout)
 
 --config defaults to $LABWATCH_CONFIG, then the path last saved by the app,
@@ -19,9 +22,11 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import signal
 import sys
 import threading
+import time
 from functools import partial
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -67,29 +72,98 @@ def _load(args, check_paths: bool) -> Config:
 # ---------------------------------------------------------------- commands --
 
 
+def _open_ledger(cfg: Config) -> Ledger:
+    """Open the ledger; if the file is corrupt, keep it aside and rebuild from the labwatch.json files."""
+    from labwatch import ledger as ledger_mod
+
+    state = ledger_mod.integrity(cfg.database)
+    if state not in ("ok", "missing"):
+        log.critical("job ledger %s is damaged (%s); rebuilding it from the experiment folders", cfg.database, state)
+        moved, n = ledger_mod.rebuild_from_status_files(cfg.database, cfg.users_root)
+        log.critical("ledger rebuilt with %d job(s); the damaged file was kept as %s", n, moved)
+    return Ledger(cfg.database)
+
+
+def _maintenance(cfg: Config) -> None:
+    """Daily housekeeping: ledger backup, prune our own old diagnostics/crash files."""
+    from labwatch import health
+    from labwatch import ledger as ledger_mod
+
+    try:
+        led = Ledger(cfg.database)
+        try:
+            for jid in ledger_mod.adopt_orphans(led, cfg.users_root):
+                log.warning("job %d: re-adopted a filed experiment that was missing from the job list", jid)
+        finally:
+            led.close()
+    except Exception:  # noqa: BLE001
+        log.exception("orphan check failed")
+    try:
+        b = ledger_mod.backup(cfg.database, cfg.log_dir / "backups")
+        if b:
+            log.debug("ledger backup: %s", b)
+    except Exception:  # noqa: BLE001
+        log.exception("ledger backup failed")
+    health.prune(cfg.log_dir, "diagnostics-*.txt", keep=20)
+    health.prune(cfg.log_dir, "diagnostics-*.zip", keep=10)
+
+
 def cmd_run(args) -> int:
+    from labwatch import health
+
     cfg = _load(args, check_paths=True)
     _setup_logging(cfg.log_dir, args.verbose)
-    log.info("labwatch %s starting (config %s)", __version__, cfg.config_path)
-    ledger = Ledger(cfg.database)
+    health.install_excepthooks(cfg.log_dir)
+    lock = health.InstanceLock(cfg.log_dir)
+    try:
+        lock.acquire()
+    except health.AlreadyRunning as exc:
+        log.error("%s", exc)
+        print(str(exc), file=sys.stderr)
+        return 3
+    log.info("labwatch %s starting (config %s, pid %d)", __version__, cfg.config_path, os.getpid())
+    ledger = _open_ledger(cfg)
     for jid, st in ledger.recover_on_startup():
         log.warning("job %d was running when labwatch stopped; now %s", jid, st)
     write_pid(cfg.log_dir)
+    _maintenance(cfg)
+    hb = health.Heartbeat(cfg.log_dir)
+    hb.beat("watcher", "starting", force=True)
+    stop = threading.Event()
+    threads: list[threading.Thread] = []
 
-    worker = worker_thread = None
+    def supervised(name: str, target):
+        t = threading.Thread(target=health.supervise, args=(name, target, stop),
+                             kwargs={"on_crash": lambda n, e: health.write_crash_file(cfg.log_dir, n, repr(e))},
+                             name=name, daemon=True)
+        t.start()
+        threads.append(t)
+
+    worker = None
     if cfg.auto_run:
         from labwatch.worker import Worker
 
-        worker = Worker(cfg)
-        worker_thread = threading.Thread(target=worker.run_forever, name="worker", daemon=True)
-        worker_thread.start()
+        worker = Worker(cfg, heartbeat=hb)
+        supervised("worker", worker.run_forever)
     else:
         log.info("fragpipe.auto_run is off: jobs are filed and queued, FragPipe is not started")
 
-    def stop_worker():
-        if worker is not None:
-            worker.stop()
-            worker_thread.join(timeout=60)  # lets a running FragPipe be killed and its job re-queued
+    from labwatch.service import STOP_FILE, clear_stop
+
+    clear_stop(cfg.log_dir)  # a leftover request must not stop this fresh start
+
+    def daily():
+        last = time.monotonic()
+        while not stop.wait(1):
+            if (cfg.log_dir / STOP_FILE).exists():  # graceful stop requested by the app / another process
+                log.info("stop requested via %s", cfg.log_dir / STOP_FILE)
+                clear_stop(cfg.log_dir)
+                shutdown()
+                return
+            if time.monotonic() - last > 3600:
+                last = time.monotonic()
+                _maintenance(cfg)
+
 
     resolver = None
     root = None
@@ -107,52 +181,60 @@ def cmd_run(args) -> int:
         else:
             log.warning("resolver window disabled: %s — problems will be rejected with a note", why)
 
+    intake_ledger = ledger
+
     def on_stable(folder: Path):
-        return intake(folder, cfg, ledger, resolver)
+        return intake(folder, cfg, intake_ledger, resolver)
 
-    w = Watcher(cfg.inbox, on_stable, cfg.poll_seconds, cfg.stable_seconds, cfg.min_raw_files)
-    if root is None:
-        if hasattr(signal, "SIGTERM"):
-            signal.signal(signal.SIGTERM, lambda *_: w.stop())
-        try:
-            w.run_forever()
-        except KeyboardInterrupt:
-            pass
-        finally:
-            stop_worker()
-            clear_pid(cfg.log_dir)
-        return 0
+    w = Watcher(cfg.inbox, on_stable, cfg.poll_seconds, cfg.stable_seconds, cfg.min_raw_files, heartbeat=hb)
 
-    # GUI mode: watcher in a thread, Tk on the main thread.
-    t = threading.Thread(target=w.run_forever, name="watcher", daemon=True)
-    t.start()
-    resolver.start()
-
-    def stop(*_):
-        log.info("stopping")
+    def shutdown(*_):
+        if not stop.is_set():
+            log.info("stopping")
+        stop.set()
         w.stop()
-        root.quit()
+        if worker is not None:
+            worker.stop()
+        if root is not None:
+            try:
+                root.after(0, root.quit)
+            except Exception:  # noqa: BLE001 - Tk may already be gone
+                pass
 
-    signal.signal(signal.SIGINT, stop)
+    threading.Thread(target=daily, name="maintenance", daemon=True).start()
+    signal.signal(signal.SIGINT, shutdown)
     if hasattr(signal, "SIGTERM"):
-        signal.signal(signal.SIGTERM, stop)
+        signal.signal(signal.SIGTERM, shutdown)
+    if hasattr(signal, "SIGBREAK"):  # Windows: Ctrl-Break / console close
+        signal.signal(signal.SIGBREAK, shutdown)
 
-    def heartbeat():
-        if not t.is_alive():
-            log.error("watcher thread died; exiting")
-            root.quit()
-            return
-        root.after(1000, heartbeat)
-
-    root.after(1000, heartbeat)
     try:
-        root.mainloop()
-    except KeyboardInterrupt:
-        pass
+        if root is None:
+            health.supervise("watcher", w.run_forever, stop)
+        else:
+            # GUI mode: watcher in a thread, Tk on the main thread (the resolver window needs it).
+            supervised("watcher", w.run_forever)
+            resolver.start()
+
+            def tick():
+                if stop.is_set():
+                    root.quit()
+                    return
+                root.after(500, tick)
+
+            root.after(500, tick)
+            try:
+                root.mainloop()
+            except KeyboardInterrupt:
+                pass
     finally:
-        w.stop()
-        stop_worker()
+        shutdown()
+        for t in threads:
+            t.join(timeout=60)  # lets a running FragPipe be killed and its job re-queued
+        hb.clear()
         clear_pid(cfg.log_dir)
+        lock.release()
+        log.info("labwatch stopped")
     return 0
 
 
@@ -184,53 +266,71 @@ def cmd_check(args) -> int:
         p = getattr(cfg, name)
         row(p.is_dir(), f"paths.{name}", str(p))
     row(cfg.database.parent.is_dir(), "paths.database (parent)", str(cfg.database))
-    from labwatch import fragpipe
+    from labwatch import fragpipe, health
+    from labwatch import ledger as ledger_mod
+    from labwatch.worker import paused
 
-    try:
-        launcher = fragpipe.resolve_launcher(cfg)
-        row(True, "FragPipe launcher", str(launcher) + ("" if launcher == cfg.fragpipe_exe else "  (using the .bat next to the configured exe)"))
-    except fragpipe.Hold as exc:
-        row(None, "FragPipe launcher", f"{exc}; jobs wait until it's set")
+    free = health.disk_free_gb(cfg.users_root)
+    if free is not None:
+        low = free < max(cfg.min_free_gb, 1)
+        row(None if low else True, "disk free (data drive)",
+            f"{free:.0f} GB" + (f"  — below fragpipe.min_free_gb {cfg.min_free_gb:g}: searches will wait" if low else ""))
+    for ok, label, detail in fragpipe.install_report(cfg):
+        row(None if ok is False else ok,
+            f"FragPipe {label}" if not label.startswith("FragPipe") else label,
+            detail + ("; jobs wait until it's set" if ok is False and label == "launcher" else ""))
     row(True if cfg.auto_run else None, "fragpipe.auto_run",
         "on: queued jobs are searched automatically" if cfg.auto_run else "off: jobs are only filed and queued")
+    if paused(cfg.log_dir):
+        row(None, "searches", "PAUSED (labwatch resume / app: Jobs -> Resume)")
     users = cfg.known_users()
     row(bool(users), "users", ", ".join(users) if users else "none — create folders under users_root")
     for u, als in cfg.user_aliases.items():
         row(u in users, f"  alias {', '.join(als)}", f"-> {u}" + ("" if u in users else "  (no such user folder!)"))
-    for k, m in cfg.methods.items():
-        wf = fragpipe._find_file(m.workflow, cfg.workflow_dir, ".workflow")
-        fa = fragpipe._find_file(m.fasta, cfg.fasta_dir) if m.fasta else None
-        if wf is None:
-            row(None, f"methods.{k}", f"workflow {m.workflow} missing in {cfg.workflow_dir} — {k} jobs wait")
-            continue
-        in_wf = fragpipe.workflow_db_path(wf.read_text(encoding="utf-8", errors="replace"))
-        if fa:
-            row(True, f"methods.{k}", f"{wf.name} + {fa.name} ({m.data_type})")
-        elif in_wf and Path(in_wf).is_file():
-            row(True, f"methods.{k}", f"{wf.name} ({m.data_type}); FASTA from the workflow: {in_wf}")
-        else:
-            row(None, f"methods.{k}", f"{wf.name}: FASTA {m.fasta} missing in {cfg.fasta_dir} — {k} jobs wait")
+    for k in cfg.methods:
+        for i, (ok, text) in enumerate(fragpipe.describe_method(cfg, k)):
+            row(None if ok is False else ok, f"methods.{k}" if i == 0 else "",
+                text + (f" — {k} jobs wait" if ok is False else ""))
     if cfg.gui_enabled:
-        from labwatch.resolve import gui_available
+        from labwatch.resolve import gui_available_isolated
 
-        ok, why = gui_available()
+        ok, why = gui_available_isolated()
         row(ok or None, "resolver window", "available" if ok else f"disabled: {why}")
     else:
         row(None, "resolver window", "disabled in config")
-    if cfg.database.is_file():
+    state = ledger_mod.integrity(cfg.database)
+    if state == "ok":
         jobs = Ledger(cfg.database).list()
         counts = {}
         for j in jobs:
             counts[j.status] = counts.get(j.status, 0) + 1
         row(True, "ledger", ", ".join(f"{k}={v}" for k, v in counts.items()) or "empty")
-    else:
+    elif state == "missing":
         row(True, "ledger", "not created yet")
+    else:
+        row(False, "ledger", f"{state} — run: labwatch repair-ledger (rebuilds it from the experiment folders)")
+    running = health.is_locked(cfg.log_dir)
+    hb, healthy = health.heartbeat_summary(cfg.log_dir)
+    row(True if running and healthy else None, "watcher",
+        f"running (pid {health.holder_pid(cfg.log_dir) or '?'}); {hb}" if running else "not running")
+    crashes = health.recent_crashes(cfg.log_dir, 1)
+    if crashes:
+        row(None, "last crash report", str(crashes[-1]))
     print("\nall good" if ok_all else "\nfix the ✗ items above")
     return 0 if ok_all else 1
 
 
 def cmd_status(args) -> int:
+    from labwatch import fragpipe, health
+    from labwatch.worker import paused
+
     cfg = _load(args, check_paths=False)
+    running = health.is_locked(cfg.log_dir)
+    hb, healthy = health.heartbeat_summary(cfg.log_dir)
+    print(f"watcher: {'running' if running else 'NOT running'}" + (f" — {hb}" if running else "")
+          + ("" if healthy or not running else "  (not responding?)"))
+    if paused(cfg.log_dir):
+        print("searches: PAUSED  (labwatch resume)")
     if not cfg.database.is_file():
         print("no ledger yet (nothing has been dropped)")
         return 0
@@ -243,6 +343,9 @@ def cmd_status(args) -> int:
     print(f"{'id':>4}  {'status':<8} {'method':<7} {'user':<10} {'created':<20} name")
     for j in jobs:
         line = f"{j.id:>4}  {j.status:<8} {j.method:<7} {j.user:<10} {(j.created_at or '')[:19]:<20} {j.inbox_name}"
+        if j.status == "running":
+            step = fragpipe.progress(Path(j.dest_dir) / fragpipe.RUN_DIR / fragpipe.CONSOLE_LOG)
+            line += f"\n      ↳ FragPipe: {step}, attempt {j.attempts}, started {(j.started_at or '')[:19]}"
         if j.reason:
             line += f"\n      ↳ {j.reason}"
         print(line)
@@ -304,12 +407,54 @@ def cmd_retry(args) -> int:
 
 
 def cmd_diagnose(args) -> int:
-    from labwatch.service import save_diagnostics
+    from labwatch.service import save_diagnostics, save_diagnostics_zip
 
+    if args.zip:
+        z = save_diagnostics_zip(Path(args.config), Path(args.zip) if args.zip != "auto" else None)
+        print(f"diagnostics bundle: {z}")
+        return 0
     text, where = save_diagnostics(Path(args.config))
     print(text)
     if where:
         print(f"(saved to {where})")
+    return 0
+
+
+def cmd_cancel(args) -> int:
+    from labwatch.worker import request_cancel
+
+    cfg = _load(args, check_paths=False)
+    print(request_cancel(Ledger(cfg.database), args.job_id))
+    return 0
+
+
+def cmd_pause(args) -> int:
+    from labwatch.worker import pause, resume
+
+    cfg = _load(args, check_paths=False)
+    if args.cmd == "pause":
+        pause(cfg.log_dir, "from the command line")
+        print("searches paused: queued jobs wait; a running search finishes. `labwatch resume` to continue.")
+    else:
+        resume(cfg.log_dir)
+        print("searches resumed")
+    return 0
+
+
+def cmd_repair_ledger(args) -> int:
+    from labwatch import health
+    from labwatch import ledger as ledger_mod
+
+    cfg = _load(args, check_paths=False)
+    if health.is_locked(cfg.log_dir):
+        print("stop the watcher first (it has the ledger open)", file=sys.stderr)
+        return 1
+    state = ledger_mod.integrity(cfg.database)
+    if state == "ok" and not args.force:
+        print("ledger is fine; nothing to do (use --force to rebuild anyway)")
+        return 0
+    moved, n = ledger_mod.rebuild_from_status_files(cfg.database, cfg.users_root)
+    print(f"ledger rebuilt from the experiment folders: {n} job(s)" + (f"; old file kept as {moved}" if moved else ""))
     return 0
 
 
@@ -360,7 +505,18 @@ def main(argv: list[str] | None = None) -> int:
     rt = sub.add_parser("retry", help="re-queue a failed job")
     rt.add_argument("job_id", type=int)
     rt.set_defaults(fn=cmd_retry)
-    sub.add_parser("diagnose", help="print + save a diagnostics report").set_defaults(fn=cmd_diagnose)
+    dg = sub.add_parser("diagnose", help="print + save a diagnostics report")
+    dg.add_argument("--zip", nargs="?", const="auto", metavar="PATH",
+                    help="write a .zip bundle (report, logs, failed jobs' FragPipe logs) instead")
+    dg.set_defaults(fn=cmd_diagnose)
+    cn = sub.add_parser("cancel", help="cancel a queued or running job")
+    cn.add_argument("job_id", type=int)
+    cn.set_defaults(fn=cmd_cancel)
+    sub.add_parser("pause", help="start no new FragPipe searches").set_defaults(fn=cmd_pause)
+    sub.add_parser("resume", help="undo pause").set_defaults(fn=cmd_pause)
+    rl = sub.add_parser("repair-ledger", help="rebuild the job ledger from the experiment folders")
+    rl.add_argument("--force", action="store_true")
+    rl.set_defaults(fn=cmd_repair_ledger)
     sub.add_parser("update", help="git pull + reinstall (dev install only)").set_defaults(fn=cmd_update)
 
     from labwatch import testbed
@@ -368,6 +524,12 @@ def main(argv: list[str] | None = None) -> int:
     testbed.add_parser(sub).set_defaults(fn=cmd_testbed)
 
     argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["probe-gui"]:  # hidden: used by check/diagnose to test the display safely
+        from labwatch.resolve import gui_available
+
+        ok, why = gui_available()
+        print("ok" if ok else why)
+        return 0 if ok else 1
     if argv[:1] == ["fake-fragpipe"]:  # hidden: the testbed's stand-in for FragPipe
         from labwatch.testbed import fake_fragpipe
 

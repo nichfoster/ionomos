@@ -16,6 +16,7 @@ import os
 import queue
 import sys
 import threading
+import time
 import tkinter as tk
 from collections.abc import Callable
 from datetime import datetime
@@ -76,9 +77,10 @@ UPDATING (while the tool is being developed)
   ledger and lab data are never touched by an update.
 
 REPORTING A PROBLEM
-  Run & Test tab -> "Copy diagnostics". It puts check + status + config + the
-  last 150 log lines on the clipboard (and saves a copy in the logs folder).
-  Paste that into the chat with a sentence about what you expected.
+  Run & Test tab -> "Save diagnostics bundle (.zip)" — one file with the
+  report, config, logs, crash reports and the FragPipe logs of failed or
+  running jobs (never raw data). Or "Copy diagnostics" for the text only.
+  Send it with a sentence about what you expected.
 
 FRAGPIPE SEARCHES
   Each filed experiment is searched with its method's workflow + FASTA.
@@ -86,10 +88,38 @@ FRAGPIPE SEARCHES
     labwatch_run/   the manifest, the workflow as used, FragPipe's console log
     fragpipe/       FragPipe's output
     DONE.txt or FAILED.txt   one-line result (FAILED says why)
-  A job "waiting: ..." is missing a setup file (FragPipe launcher, workflow,
-  FASTA) and starts by itself once it's there. After fixing a failure:
-  Run & Test -> "Retry a failed job…". Re-runs keep old output as
-  fragpipe_previous_<time>/.
+  A job "waiting: ..." is missing something outside the job (FragPipe
+  launcher, workflow, FASTA, free disk space) and starts by itself once
+  that's fixed. Re-runs keep old output as fragpipe_previous_<time>/.
+
+JOBS TAB (6)
+  Every job, live: status, how long it ran, and what FragPipe is doing now.
+  Select one to see details and — for a failed job — the MOST LIKELY CAUSE
+  in plain English (out of memory, MSFragger not installed, disk full, file
+  open in another program, ...). Buttons: Open folder, FragPipe log, Retry,
+  Cancel (stops a running search), Copy details.
+  Pause searches: no new FragPipe runs start (the running one finishes) —
+  e.g. while someone needs the PC. Resume to continue.
+  Check FragPipe install: finds FragPipe's version, bundled Java, MSFragger,
+  IonQuant, diaTracer, DIA-NN, and checks each method's workflow + FASTA
+  (including whether the FASTA has decoys).
+
+METHODS TAB: IMPORT WORKFLOW
+  Select a method -> Import workflow… -> pick a .workflow file (e.g. the
+  fragpipe.workflow inside a run that worked). It is copied in as
+  <method>.workflow and its FASTA is copied to the FASTA folder too. The
+  readiness line under the form shows ✓/!/✗ for workflow and FASTA.
+
+SAFETY NETS (automatic)
+  - Only one watcher can run per setup; a second one refuses to start.
+  - If part of the watcher crashes it restarts itself; crash reports go to
+    logs/crash-*.txt. The app shows NOT RESPONDING if it hangs.
+  - Stopping the watcher stops FragPipe cleanly and re-queues the job.
+  - The job list is backed up daily (logs/backups) and rebuilt from the
+    experiment folders if it's ever damaged (labwatch repair-ledger).
+  - Every Save keeps the previous config in config-backups/
+    (Advanced -> Restore a previous config…). An invalid config is never
+    written over a good one.
 
 WHERE THINGS ARE
   config.yaml        all settings (path shown at the bottom of this window)
@@ -98,8 +128,10 @@ WHERE THINGS ARE
   <folder>/labwatch.json    status + provenance next to each experiment
   <inbox>/<name>.REJECTED.txt   why a folder was not taken; fix it or delete the note
 
-COMMAND LINE (same program)
-  labwatch check | status | dry-run <folder> | run | retry <id> | testbed ...
+COMMAND LINE (same program; labwatch-cli.exe on Windows)
+  labwatch check | status | dry-run <folder> | run | retry <id> | cancel <id>
+  labwatch pause | resume | diagnose [--zip] | repair-ledger | testbed ...
+  labwatch testbed stress   many messy drops + chaos, then checks nothing was lost
 """
 
 
@@ -205,6 +237,7 @@ class App:
         self._tab_methods()
         self._tab_advanced()
         self._tab_run()
+        self._tab_jobs()
         self._tab_help()
         self._bottom_bar()
         self._load_vars()
@@ -212,6 +245,7 @@ class App:
         self._refresh_methods()
         self._refresh_status()
         root.protocol("WM_DELETE_WINDOW", self.on_close)
+        root.report_callback_exception = self._on_tk_error
         root.after(100, self._pump_ui)
         if self.first_run:
             self.nb.select(0)
@@ -223,10 +257,36 @@ class App:
     def _pump_ui(self):
         try:
             while True:
-                self._ui_q.get_nowait()()
+                fn = self._ui_q.get_nowait()
+                try:
+                    fn()
+                except Exception:  # noqa: BLE001 - one bad callback must not stop the pump
+                    self._on_tk_error(*sys.exc_info())
         except queue.Empty:
             pass
         self.root.after(100, self._pump_ui)
+
+    def _on_tk_error(self, exc_type, exc, tb):
+        """Any error in a button/callback: log it, save a crash report, tell the user — never die silently."""
+        import traceback
+
+        from labwatch import health
+
+        text = "".join(traceback.format_exception(exc_type, exc, tb))
+        log_dir = None
+        try:
+            log_dir = self._log_dir()
+        except Exception:  # noqa: BLE001
+            pass
+        where = health.write_crash_file(log_dir if log_dir and log_dir.is_dir() else None, "app", text)
+        try:
+            self.out.write("INTERNAL ERROR (the app keeps running):\n" + text, clear=True)
+        except Exception:  # noqa: BLE001
+            pass
+        messagebox.showerror("LabWatch — something went wrong",
+                             f"{exc_type.__name__}: {exc}\n\nThe app keeps running. Details"
+                             + (f" were saved to\n{where}" if where else " are in the output pane on Run & Test")
+                             + ".\nIf it keeps happening: Run & Test -> Save diagnostics bundle, and send it.")
 
     # -------------------------------------------------------- helpers ----
 
@@ -258,7 +318,7 @@ class App:
         d = configio.read_config(self.config_path) if self.config_path.is_file() else configio.defaults()
         d["paths"] = {k: self.v(f"paths.{k}").get().strip().replace("\\", "/") for k in d["paths"]}
         for sec, keys in (("watcher", ("poll_seconds", "stable_seconds", "min_raw_files")),
-                          ("fragpipe", ("threads", "ram_gb", "timeout_minutes"))):
+                          ("fragpipe", ("threads", "ram_gb", "timeout_minutes", "min_free_gb"))):
             for k in keys:
                 raw = self.v(f"{sec}.{k}").get().strip()
                 try:
@@ -522,12 +582,16 @@ class App:
         self.m_extra.grid(row=3, column=1, columnspan=3, sticky="ew", **PAD)
         ttk.Label(e, text="steps: isodtb_sites, tmt_annotation (comma-separated; run after FragPipe)",
                   foreground="#666").grid(row=4, column=3, sticky="w", padx=6)
+        self.m_info = ttk.Label(e, text="Select a method to see whether its workflow and FASTA are ready.",
+                                foreground="#444", wraplength=820, justify="left")
+        self.m_info.grid(row=6, column=0, columnspan=4, sticky="w", **PAD)
         b = ttk.Frame(e)
         b.grid(row=5, column=0, columnspan=4, sticky="w", **PAD)
         ttk.Button(b, text="Apply changes", command=self.apply_method).pack(side="left", padx=4)
         ttk.Button(b, text="New method", command=self.new_method).pack(side="left", padx=4)
         ttk.Button(b, text="Remove method", command=self.remove_method).pack(side="left", padx=4)
-        ttk.Button(b, text="Open workflows folder", command=lambda: self._open(self.v("paths.workflow_dir").get())).pack(side="left", padx=12)
+        ttk.Button(b, text="Import workflow…", command=self.import_workflow).pack(side="left", padx=12)
+        ttk.Button(b, text="Open workflows folder", command=lambda: self._open(self.v("paths.workflow_dir").get())).pack(side="left", padx=4)
         ttk.Button(b, text="Open FASTA folder", command=lambda: self._open(self.v("paths.fasta_dir").get())).pack(side="left", padx=4)
 
     def _refresh_methods(self):
@@ -556,6 +620,55 @@ class App:
         self.v("m.postprocess").set(", ".join(m.get("postprocess", [])))
         self.m_extra.delete("1.0", "end")
         self.m_extra.insert("1.0", "\n".join(f"{k}: {v}" for k, v in m.items() if k not in ("aliases", "workflow", "fasta", "data_type", "postprocess")))
+        self._describe_method(m.get("workflow", ""), m.get("fasta", ""))
+
+    def _describe_method(self, workflow: str, fasta: str):
+        """Readiness of a workflow + FASTA pair, computed off the Tk thread (FASTAs can be big)."""
+        from labwatch import fragpipe
+
+        wf_dir = Path(self.v("paths.workflow_dir").get().strip() or ".")
+        fa_dir = Path(self.v("paths.fasta_dir").get().strip() or ".")
+        self.m_info.configure(text="checking workflow and FASTA…", foreground="#444")
+
+        def go():
+            try:
+                lines = fragpipe.describe_files(wf_dir, fa_dir, workflow, fasta)
+            except Exception as exc:  # noqa: BLE001
+                lines = [(False, f"could not inspect: {exc}")]
+            mark = {True: "✓", None: "!", False: "✗"}
+            text = "\n".join(f"{mark[ok]} {t}" for ok, t in lines)
+            color = "#c62828" if any(ok is False for ok, _ in lines) else ("#b26a00" if any(ok is None for ok, _ in lines) else "#2e7d32")
+            self.post(lambda: self.m_info.configure(text=text, foreground=color))
+
+        threading.Thread(target=go, daemon=True).start()
+
+    def import_workflow(self):
+        from labwatch import fragpipe
+
+        key = self.v("m.key").get().strip()
+        if not key:
+            messagebox.showinfo("Import workflow", "Select (or create) the method first, then import its workflow.")
+            return
+        src = filedialog.askopenfilename(title=f"Workflow for {key} (a .workflow file, e.g. from a good run's fragpipe folder)",
+                                         filetypes=[("FragPipe workflow", "*.workflow"), ("all", "*.*")])
+        if not src:
+            return
+        wf_dir = Path(self.v("paths.workflow_dir").get().strip())
+        fa_dir = Path(self.v("paths.fasta_dir").get().strip())
+        try:
+            res = fragpipe.import_workflow(Path(src), key, wf_dir, fa_dir)
+        except OSError as exc:
+            messagebox.showerror("Import workflow", f"Could not import:\n{exc}")
+            return
+        self.v("m.workflow").set(res["workflow"])
+        if res["fasta"]:
+            self.v("m.fasta").set(res["fasta"])
+        self._refresh_methods()
+        self.apply_method()
+        self._describe_method(res["workflow"], self.v("m.fasta").get())
+        messagebox.showinfo("Import workflow", f"{key} now uses {res['workflow']}"
+                            + (f" and FASTA {res['fasta']}" if res["fasta"] else "") + ".\n\n"
+                            + "\n".join(res["notes"]) + "\n\nPress Save to keep it.")
 
     def apply_method(self):
         key = self.v("m.key").get().strip()
@@ -635,13 +748,14 @@ class App:
         num(fp, 1, "fragpipe.threads", "Threads", "PC has 32 logical CPUs; leave a few for the OS")
         num(fp, 2, "fragpipe.ram_gb", "RAM (GB)", "of 64 GB")
         num(fp, 3, "fragpipe.timeout_minutes", "Timeout (min)", "a search running longer is stopped and failed; 0 = no limit")
-        ttk.Label(fp, text="Tools folder").grid(row=4, column=0, sticky="e", **PAD)
-        ttk.Entry(fp, textvariable=self.v("fragpipe.config_tools_folder"), width=34).grid(row=4, column=1, columnspan=2, sticky="ew", **PAD)
-        ttk.Label(fp, text="DIA-NN exe").grid(row=5, column=0, sticky="e", **PAD)
-        ttk.Entry(fp, textvariable=self.v("fragpipe.config_diann"), width=34).grid(row=5, column=1, columnspan=2, sticky="ew", **PAD)
+        num(fp, 4, "fragpipe.min_free_gb", "Min free disk (GB)", "a search waits while the data drive has less than this + its raw files free")
+        ttk.Label(fp, text="Tools folder").grid(row=5, column=0, sticky="e", **PAD)
+        ttk.Entry(fp, textvariable=self.v("fragpipe.config_tools_folder"), width=34).grid(row=5, column=1, columnspan=2, sticky="ew", **PAD)
+        ttk.Label(fp, text="DIA-NN exe").grid(row=6, column=0, sticky="e", **PAD)
+        ttk.Entry(fp, textvariable=self.v("fragpipe.config_diann"), width=34).grid(row=6, column=1, columnspan=2, sticky="ew", **PAD)
         ttk.Label(fp, text="Off = experiments are only filed and queued. Tools folder / DIA-NN exe are optional: "
                            "only if the first headless run can't find MSFragger / DIA-NN. Restart the watcher after changes.",
-                  foreground="#666", wraplength=380).grid(row=6, column=0, columnspan=3, sticky="w", padx=6)
+                  foreground="#666", wraplength=380).grid(row=7, column=0, columnspan=3, sticky="w", padx=6)
 
         g = group("Resolver window", 0, 1)
         ttk.Checkbutton(g, text="Open a window when a folder can't be interpreted", variable=self.bv("gui.enabled")).grid(row=0, column=0, columnspan=3, sticky="w", **PAD)
@@ -658,8 +772,26 @@ class App:
         ttk.Button(m, text="Open config.yaml in editor", command=lambda: self._open(str(self.config_path))).grid(row=0, column=0, **PAD)
         ttk.Button(m, text="Open logs folder", command=lambda: self._open(self.v("paths.log_dir").get())).grid(row=0, column=1, **PAD)
         ttk.Button(m, text="Reset all to defaults", command=self.reset_defaults).grid(row=0, column=2, **PAD)
-        ttk.Label(m, text="Every setting here is also a plain key in config.yaml (see comments in the file).",
+        ttk.Button(m, text="Restore a previous config…", command=self.restore_config).grid(row=0, column=3, **PAD)
+        ttk.Label(m, text="Every setting here is also a plain key in config.yaml (see comments in the file). "
+                          "Each Save keeps the previous version in config-backups/ next to it.",
                   foreground="#666", wraplength=380).grid(row=1, column=0, columnspan=3, sticky="w", padx=6)
+
+    def restore_config(self):
+        d = self.config_path.parent / configio.BACKUP_DIR
+        r = filedialog.askopenfilename(title="Pick a saved config to restore", initialdir=str(d if d.is_dir() else self.config_path.parent),
+                                       filetypes=[("config", "*.yaml"), ("all", "*.*")])
+        if not r:
+            return
+        try:
+            self.data = configio.read_config(Path(r))
+        except Exception as exc:  # noqa: BLE001 - show any parse problem
+            messagebox.showerror("Restore", f"Could not read {r}:\n{exc}")
+            return
+        self._load_vars()
+        self._refresh_users()
+        self._refresh_methods()
+        self.set_status(f"loaded {Path(r).name} — press Save to make it the active config")
 
     def reset_defaults(self):
         if messagebox.askyesno("Reset", "Reset all settings to defaults? (Not saved until you press Save.)"):
@@ -686,6 +818,7 @@ class App:
         ttk.Button(w, text="Stop watcher", command=self.stop_watcher).grid(row=1, column=2, **PAD)
         ttk.Button(w, text="Show queue (status)", command=lambda: self._cli(["status", "--all"])).grid(row=1, column=3, **PAD)
         ttk.Button(w, text="Copy diagnostics", command=self.copy_diagnostics).grid(row=2, column=0, **PAD)
+        ttk.Button(w, text="Save diagnostics bundle (.zip)", command=self.save_bundle).grid(row=2, column=3, **PAD)
         ttk.Button(w, text="Retry a failed job…", command=self.retry_job).grid(row=2, column=1, **PAD)
         ttk.Button(w, text="Open job folder…", command=self.open_job).grid(row=2, column=2, **PAD)
         self.fp_status = ttk.Label(w, text="", wraplength=440)
@@ -763,32 +896,63 @@ class App:
         return Path(self.v("paths.log_dir").get().strip() or ".")
 
     def _refresh_status(self):
+        try:
+            self._refresh_status_once()
+        finally:
+            self.root.after(2000, self._refresh_status)  # keep refreshing even if one pass failed
+
+    def _refresh_status_once(self):
+        from labwatch import health
+
         txt, ok = "Watcher: stopped", False
+        active_log = self._active_log_dir()
         if self.proc is not None and self.proc.poll() is None:
             which = "TESTBED" if self.proc_config != self.config_path else "lab config"
             txt, ok = f"Watcher: RUNNING (started here, {which}, pid {self.proc.pid})", True
         else:
             if self.proc is not None:
+                code = self.proc.returncode
                 self.proc = None
-            pid = service.running_pid(self._log_dir())
-            if pid:
+                if code not in (0, None, -15, 1 if IS_WIN else -15):
+                    self.out.write(f"the watcher exited with code {code} — see the log (tick 'follow the watcher log')")
+            if health.is_locked(active_log) or service.running_pid(active_log):
+                pid = health.holder_pid(active_log) or service.running_pid(active_log)
                 txt, ok = f"Watcher: RUNNING (pid {pid}, started elsewhere — startup task?)", True
+        if ok:
+            hb, healthy = health.heartbeat_summary(active_log)
+            if not healthy and "no heartbeat" not in hb:
+                txt += f" — NOT RESPONDING ({hb}). Stop and start it again."
+                ok = False
         self.run_status.configure(text=txt, foreground="#2e7d32" if ok else "#c62828")
         self.fp_status.configure(text=self._jobs_summary())
-        st = service.task_status()
-        self.task_status.configure(text={"installed": "Startup task: installed", "missing": "Startup task: not installed",
-                                         "n/a": "Startup task: n/a on this OS"}[st])
-        self.root.after(2000, self._refresh_status)
+        now = time.monotonic()
+        if now - getattr(self, "_task_checked", -1e9) > 30:  # schtasks is slow; ask every 30 s
+            self._task_checked = now
+            st = service.task_status()
+            self.task_status.configure(text={"installed": "Startup task: installed", "missing": "Startup task: not installed",
+                                             "n/a": "Startup task: n/a on this OS"}[st])
+
+    def _active_cfg(self) -> Path:
+        """The config of the watcher started here (e.g. the testbed), else the lab config."""
+        return self.proc_config if (self.proc is not None and self.proc.poll() is None) else self.config_path
+
+    def _active_paths(self) -> dict:
+        cfg = self._active_cfg()
+        try:
+            return configio.read_config(cfg)["paths"] if cfg and cfg.is_file() else {}
+        except Exception:  # noqa: BLE001 - half-edited config
+            return {}
+
+    def _active_log_dir(self) -> Path:
+        return Path(self._active_paths().get("log_dir") or self._log_dir())
 
     def _ledger(self):
-        from labwatch.ledger import Ledger
+        from labwatch.ledger import Ledger, integrity
 
-        cfg = self.proc_config if (self.proc is not None and self.proc.poll() is None) else self.config_path
-        try:
-            db = Path(configio.read_config(cfg)["paths"]["database"]) if cfg and cfg.is_file() else None
-        except Exception:  # noqa: BLE001 - half-edited config
+        db = self._active_paths().get("database")
+        if not db or integrity(db) != "ok":
             return None
-        return Ledger(db) if db and db.is_file() else None
+        return Ledger(db)
 
     def _jobs_summary(self) -> str:
         led = self._ledger()
@@ -857,8 +1021,11 @@ class App:
         if not cfg.is_file():
             messagebox.showerror("Watcher", f"No config at {cfg}. " + ("Create the testbed first." if testbed else "Save first."))
             return
-        if not testbed and service.running_pid(self._log_dir()):
-            messagebox.showinfo("Watcher", "The watcher is already running (probably from the startup task).")
+        from labwatch import health
+
+        target_log = Path(configio.read_config(cfg)["paths"]["log_dir"])
+        if health.is_locked(target_log):
+            messagebox.showinfo("Watcher", "A watcher is already running for this config (probably the startup task).")
             return
         self.proc = service.start_watcher(cfg)
         self.proc_config = cfg
@@ -867,17 +1034,29 @@ class App:
         self._toggle_follow()
 
     def stop_watcher(self):
+        from labwatch import health
+
         if self.proc is not None and self.proc.poll() is None:
-            service.stop_process(self.proc)
-            self.out.write("watcher stopped")
-            self.proc = None
+            proc, log_dir = self.proc, self._active_log_dir()
+        else:
+            proc, log_dir = None, self._active_log_dir()
+            if not (health.is_locked(log_dir) or service.running_pid(log_dir)):
+                self.out.write("no watcher running")
+                return
+            pid = health.holder_pid(log_dir) or service.running_pid(log_dir)
+            if not messagebox.askyesno("Stop", f"Stop the watcher running as pid {pid} (started elsewhere)?"):
+                return
+        if "RUNNING job" in self._jobs_summary() and not messagebox.askyesno(
+                "Stop", "A FragPipe search is running. Stopping ends it; the job re-runs from the start next time. Stop?"):
             return
-        pid = service.running_pid(self._log_dir())
-        if pid and messagebox.askyesno("Stop", f"Stop the watcher running as pid {pid} (started elsewhere)?"):
-            service.kill_pid(pid)
-            self.out.write(f"sent stop to pid {pid}")
-        elif not pid:
-            self.out.write("no watcher running")
+        self.out.write("stopping the watcher (it finishes its current step and re-queues a running search)…")
+
+        def go():
+            how = service.request_stop(log_dir, proc=proc)
+            self.post(lambda: self.out.write(f"watcher {how}"))
+
+        self.proc = None if proc is not None else self.proc
+        threading.Thread(target=go, daemon=True).start()
 
     def _toggle_follow(self):
         if self._follow_job:
@@ -975,14 +1154,15 @@ class App:
                 "Update", "A FragPipe search is running. Updating stops it; the job re-runs from the start "
                           "when the watcher starts again. Update anyway?"):
             return
+        from labwatch import health
+
         if self.proc is not None and self.proc.poll() is None:
-            service.stop_process(self.proc)
+            service.request_stop(self._active_log_dir(), proc=self.proc)
             self.proc = None
-        pid = service.running_pid(self._log_dir())
-        if pid:
-            if not messagebox.askyesno("Update", f"The watcher (pid {pid}) is running. Stop it and update?"):
+        if health.is_locked(self._log_dir()):
+            if not messagebox.askyesno("Update", "The watcher is running. Stop it and update?"):
                 return
-            service.kill_pid(pid)
+            service.request_stop(self._log_dir())
         self.bv("follow").set(False)
         self._toggle_follow()
         self.out.write("updating…", clear=True)
@@ -1002,6 +1182,28 @@ class App:
         if messagebox.askyesno("Update", msg + "\n\nRestart LabWatch now to load the new code?\n"
                                           "(Press Start watcher again afterwards.)"):
             service.restart_app()
+
+    def save_bundle(self):
+        cfg = self.config_path
+        self.out.write("building diagnostics bundle…", clear=True)
+
+        def go():
+            try:
+                z = service.save_diagnostics_zip(cfg)
+                msg = f"saved {z}"
+            except Exception as exc:  # noqa: BLE001
+                z, msg = None, f"could not build the bundle: {exc}"
+
+            def show():
+                self.out.write(msg)
+                if z:
+                    messagebox.showinfo("Diagnostics bundle", f"Saved:\n{z}\n\nIt contains the report, config, logs and the "
+                                        "FragPipe logs of failed/running jobs — no raw data. Send this file.")
+                    self._open(str(Path(z).parent))
+
+            self.post(show)
+
+        threading.Thread(target=go, daemon=True).start()
 
     def copy_diagnostics(self):
         cfg = self.config_path
@@ -1080,6 +1282,211 @@ class App:
 
     # --------------------------------------------------------- tab: help ----
 
+    # ---------------------------------------------------------- tab: jobs ----
+
+    _JCOLS = (("id", 40), ("status", 70), ("user", 80), ("method", 60), ("experiment", 260), ("queued", 110),
+              ("ran", 70), ("now", 330))
+
+    def _tab_jobs(self):
+        f = ttk.Frame(self.nb, padding=10)
+        self.nb.add(f, text="  6  Jobs  ")
+        f.columnconfigure(0, weight=1)
+        f.rowconfigure(1, weight=3)
+        f.rowconfigure(3, weight=2)
+        top = ttk.Frame(f)
+        top.grid(row=0, column=0, sticky="ew")
+        self.jobs_state = ttk.Label(top, text="", font=("", 10, "bold"))
+        self.jobs_state.pack(side="left", padx=4)
+        ttk.Button(top, text="Check FragPipe install", command=self.check_fragpipe).pack(side="right", padx=4)
+        self.pause_btn = ttk.Button(top, text="Pause searches", command=self.toggle_pause)
+        self.pause_btn.pack(side="right", padx=4)
+        ttk.Button(top, text="Refresh", command=self.refresh_jobs).pack(side="right", padx=4)
+
+        self.jtree = ttk.Treeview(f, columns=[c for c, _ in self._JCOLS], show="headings", height=10, selectmode="browse")
+        for c, w in self._JCOLS:
+            self.jtree.heading(c, text=c)
+            self.jtree.column(c, width=w, anchor="w", stretch=c in ("experiment", "now"))
+        for tag, color in (("failed", "#c62828"), ("running", "#1565c0"), ("waiting", "#b26a00"), ("done", "#2e7d32")):
+            self.jtree.tag_configure(tag, foreground=color)
+        self.jtree.grid(row=1, column=0, sticky="nsew", pady=4)
+        self.jtree.bind("<<TreeviewSelect>>", lambda e: self.show_job())
+        self.jtree.bind("<Double-1>", lambda e: self.job_action("folder"))
+
+        b = ttk.Frame(f)
+        b.grid(row=2, column=0, sticky="w")
+        for text, action in (("Open folder", "folder"), ("FragPipe log", "log"), ("Retry", "retry"),
+                             ("Cancel", "cancel"), ("Copy details", "copy")):
+            ttk.Button(b, text=text, command=lambda a=action: self.job_action(a)).pack(side="left", padx=4)
+        ttk.Label(b, text="double-click = open folder · Retry re-runs a failed job · Cancel stops a running/queued one",
+                  foreground="#666").pack(side="left", padx=12)
+        self.jdetail = OutputPane(f, height=10)
+        self.jdetail.grid(row=3, column=0, sticky="nsew", pady=4)
+        self._jobs_cache: dict[int, object] = {}
+        self._jobs_tick()
+
+    def _jobs_tick(self):
+        try:
+            if self.nb.index("current") == self.nb.index(self.jtree.master):
+                self.refresh_jobs()
+        except Exception:  # noqa: BLE001 - never stop the refresh loop
+            pass
+        self.root.after(3000, self._jobs_tick)
+
+    def refresh_jobs(self):
+        from labwatch import fragpipe
+        from labwatch.worker import paused
+
+        log_dir = self._active_log_dir()
+        is_paused = paused(log_dir)
+        self.pause_btn.configure(text="Resume searches" if is_paused else "Pause searches")
+        led = self._ledger()
+        if led is None:
+            self.jobs_state.configure(text="No jobs yet" + ("  ·  searches PAUSED" if is_paused else ""))
+            self.jtree.delete(*self.jtree.get_children())
+            return
+        try:
+            jobs = led.list()
+        finally:
+            led.close()
+        sel = self.jtree.selection()
+        self.jtree.delete(*self.jtree.get_children())
+        self._jobs_cache = {j.id: j for j in jobs}
+        counts: dict[str, int] = {}
+        for j in reversed(jobs):  # newest first
+            counts[j.status] = counts.get(j.status, 0) + 1
+            waiting = j.status == "queued" and (j.reason or "").startswith("waiting:")
+            if j.status == "running":
+                now = "FragPipe: " + fragpipe.progress(Path(j.dest_dir) / fragpipe.RUN_DIR / fragpipe.CONSOLE_LOG)
+            else:
+                now = (j.reason or "").replace("\n", " ")[:160]
+            self.jtree.insert("", "end", iid=str(j.id), tags=("waiting" if waiting else j.status,), values=(
+                j.id, "waiting" if waiting else j.status, j.user, j.method, j.inbox_name, _local(j.created_at),
+                _duration(j.started_at, j.finished_at if j.status != "running" else None) if j.started_at else "", now))
+        if sel and self.jtree.exists(sel[0]):
+            self.jtree.selection_set(sel[0])
+        summary = ", ".join(f"{n} {k}" for k, n in sorted(counts.items()))
+        self.jobs_state.configure(text=(summary or "No jobs") + ("  ·  searches PAUSED" if is_paused else ""),
+                                  foreground="#b26a00" if is_paused else "")
+
+    def _selected_job(self):
+        sel = self.jtree.selection()
+        return self._jobs_cache.get(int(sel[0])) if sel else None
+
+    def show_job(self):
+        from labwatch import fragpipe
+
+        j = self._selected_job()
+        if j is None:
+            return
+        self.jdetail.write(self._job_details(j, fragpipe), clear=True)
+
+    def _job_details(self, j, fragpipe) -> str:
+        import json
+
+        dest = Path(j.dest_dir)
+        lines = [f"job {j.id}: {j.user}/{j.inbox_name}   [{j.status}]   method {j.method}   attempts {j.attempts}",
+                 f"folder: {dest}"]
+        if j.reason:
+            lines.append(f"reason: {j.reason}")
+        try:
+            run = json.loads((dest / "labwatch.json").read_text(encoding="utf-8")).get("run") or {}
+        except (OSError, ValueError):
+            run = {}
+        for w in run.get("warnings") or []:
+            lines.append(f"note: {w}")
+        console = dest / fragpipe.RUN_DIR / fragpipe.CONSOLE_LOG
+        text = fragpipe.read_tail_text(console, 60_000)
+        hints = fragpipe.explain(text) if j.status == "failed" else []
+        if hints:
+            lines.append("")
+            lines.append("MOST LIKELY CAUSE:")
+            lines += [f"  • {h}" for h in hints]
+        if j.status == "running":
+            lines.append(f"progress: {fragpipe.progress(console)}")
+        if text:
+            lines.append("")
+            lines.append(f"--- last lines of {console}")
+            lines += text.splitlines()[-25:]
+        return "\n".join(lines)
+
+    def job_action(self, action: str):
+        from labwatch import fragpipe
+        from labwatch.worker import request_cancel
+
+        j = self._selected_job()
+        if j is None:
+            messagebox.showinfo("Jobs", "Select a job first.")
+            return
+        if action == "folder":
+            self._open(j.dest_dir)
+        elif action == "log":
+            log = Path(j.dest_dir) / fragpipe.RUN_DIR / fragpipe.CONSOLE_LOG
+            if log.is_file():
+                self._open(str(log))
+            else:
+                messagebox.showinfo("FragPipe log", "FragPipe hasn't run for this job yet.")
+        elif action == "copy":
+            self.root.clipboard_clear()
+            self.root.clipboard_append(self._job_details(j, fragpipe))
+            self.set_status(f"job {j.id} details copied")
+        elif action in ("retry", "cancel"):
+            led = self._ledger()
+            if led is None:
+                return
+            try:
+                if action == "retry":
+                    if j.status != "failed":
+                        messagebox.showinfo("Retry", f"Job {j.id} is {j.status}; only failed jobs can be retried.")
+                        return
+                    led.requeue(j.id, "retry requested", reset_attempts=True)
+                    msg = f"job {j.id} re-queued; it starts when the watcher is free"
+                else:
+                    if j.status not in ("running", "queued"):
+                        messagebox.showinfo("Cancel", f"Job {j.id} is {j.status}; nothing to cancel.")
+                        return
+                    if not messagebox.askyesno("Cancel", f"Cancel job {j.id} ({j.inbox_name})?"
+                                               + ("\nThe running FragPipe search is stopped." if j.status == "running" else "")):
+                        return
+                    msg = request_cancel(led, j.id)
+            finally:
+                led.close()
+            self.set_status(msg)
+            self.refresh_jobs()
+
+    def toggle_pause(self):
+        from labwatch.worker import pause, paused, resume
+
+        log_dir = self._active_log_dir()
+        if paused(log_dir):
+            resume(log_dir)
+            self.set_status("searches resumed")
+        else:
+            pause(log_dir, "from the app")
+            self.set_status("searches paused — queued jobs wait; a running search finishes")
+        self.refresh_jobs()
+
+    def check_fragpipe(self):
+        cfg_path = self.config_path
+        self.jdetail.write("checking the FragPipe installation and each method's workflow + FASTA…", clear=True)
+
+        def go():
+            from labwatch import fragpipe
+
+            try:
+                cfg = load(cfg_path, check_paths=False)
+                mark = {True: "✓", None: "!", False: "✗"}
+                lines = [f"{mark[ok]} {label:<16} {detail}" for ok, label, detail in fragpipe.install_report(cfg)]
+                for k in cfg.methods:
+                    lines.append("")
+                    lines.append(f"{k}:")
+                    lines += [f"  {mark[ok]} {t}" for ok, t in fragpipe.describe_method(cfg, k)]
+                text = "\n".join(lines)
+            except Exception as exc:  # noqa: BLE001
+                text = f"could not check: {exc} (save the config first?)"
+            self.post(lambda: self.jdetail.write(text, clear=True))
+
+        threading.Thread(target=go, daemon=True).start()
+
     def _tab_help(self):
         f = ttk.Frame(self.nb, padding=10)
         self.nb.add(f, text="  Help  ")
@@ -1123,14 +1530,26 @@ class App:
         self.set_status("reloaded from disk")
 
     def save(self) -> bool:
+        """Validate a candidate file first; the real config.yaml is only replaced if it passes."""
+        probe = self.config_path.with_name(f".{self.config_path.stem}.checking.yaml")
         try:
             d = self._collect()
+            self.config_path.parent.mkdir(parents=True, exist_ok=True)
+            probe.write_text(configio.dump_config(d), encoding="utf-8")
+            cfg = load(probe, check_paths=True)
             configio.write_config(self.config_path, d)
-            cfg = load(self.config_path, check_paths=True)
         except ConfigError as exc:
             messagebox.showerror("Config problem", str(exc))
-            self.set_status("not saved — fix the problem", ok=False)
+            self.set_status("not saved — fix the problem (config.yaml unchanged)", ok=False)
             return False
+        except OSError as exc:
+            messagebox.showerror("Save", f"Could not write {self.config_path}:\n{exc}")
+            return False
+        finally:
+            try:
+                probe.unlink()
+            except OSError:
+                pass
         self.data = d
         service.remember_config_path(self.config_path)
         self.first_run = False
@@ -1149,7 +1568,7 @@ class App:
         if self.proc is not None and self.proc.poll() is None:
             if messagebox.askyesno("Quit", "A watcher started from this app is running. Stop it and quit?\n"
                                            "(No = quit and leave it running)"):
-                service.stop_process(self.proc)
+                service.request_stop(self._active_log_dir(), proc=self.proc, timeout=15)
         self.root.destroy()
 
 
@@ -1158,3 +1577,23 @@ def main(config_path: Path | None = None) -> int:
     App(root, config_path)
     root.mainloop()
     return 0
+
+
+def _local(iso: str | None) -> str:
+    """UTC ISO timestamp -> local 'MM-DD HH:MM'."""
+    try:
+        return datetime.fromisoformat(iso).astimezone().strftime("%m-%d %H:%M")
+    except (TypeError, ValueError):
+        return ""
+
+
+def _duration(start: str | None, end: str | None) -> str:
+    from datetime import UTC
+
+    try:
+        a = datetime.fromisoformat(start)
+        b = datetime.fromisoformat(end) if end else datetime.now(UTC)
+    except (TypeError, ValueError):
+        return ""
+    mins = max(0, int((b - a).total_seconds() // 60))
+    return f"{mins // 60}h{mins % 60:02d}" if mins >= 60 else f"{mins} min"

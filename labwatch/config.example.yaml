@@ -20,6 +20,7 @@ fragpipe:
   threads: 28                 # machine has 32 logical CPUs
   ram_gb: 48                  # machine has 64 GB
   timeout_minutes: 240
+  min_free_gb: 20             # a search waits while the data drive has less free space than this + its raws
   config_tools_folder: ""     # leave blank unless the first headless run can't find tools
   config_diann: ""            # e.g. C:/DIA-NN/2.3.2/DiaNN.exe — DIA only, if needed
 

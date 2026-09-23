@@ -32,6 +32,8 @@
 | `worker.py` | Thread inside `labwatch run`: first runnable `queued` job → FragPipe → done/failed; holds jobs whose setup files are missing. Sequential. | `prior-work/queue_worker.py` |
 | `fragpipe.py` | Prepare a job (launcher, workflow with `database.db-path` patched to the method's FASTA, manifest, TMT annotation), run headless with timeout/stop, kill the process tree | `prior-work/fragpipe_runner.py` |
 | `postprocess.py` | Registry of post-processing steps named in `methods.X.postprocess` (none built yet) | — |
+| `health.py` | Failsafes: single-instance lock, heartbeat, thread supervisor, crash hooks/files, disk/RAM facts, log-problem extraction | — |
+| `stress.py` | `labwatch testbed stress`: messy drops + chaos against a real watcher/worker, invariant checks; name fuzzer | — |
 | `runners/isodtb.py` | Post-proc: modified-peptide → site merge | port of `lab-scripts/isoDTB_…R` |
 | `runners/tmt.py` | Post-proc: experimental annotation fix | port of `lab-scripts/correct_experimental_annotation…R` |
 | `runners/dia.py` | Post-proc: (TBD — probably nothing beyond copying `report.tsv` up) | — |
@@ -207,3 +209,22 @@ that database and (b) record provenance. See WORKFLOWS.md.
 - **Sequential.** One FragPipe at a time; the queue is the ledger.
 - **Idempotent restart.** Inbox is re-scanned on start; the ledger says what's
   already been taken.
+
+## Failsafes (0.3.0)
+
+| Threat | Defence |
+|---|---|
+| Two watchers on one inbox (startup task + app, two users) | OS file lock `logs/labwatch.lock`; the second exits with code 3 |
+| A loop crashes on a bug | `health.supervise` restarts it with backoff; `crash-*.txt` in `logs/`; excepthooks for every thread |
+| A loop hangs | `logs/heartbeat.json` per part; app / `status` / diagnose show NOT RESPONDING after 90 s |
+| Stop / update mid-search | `logs/STOP` → graceful shutdown: FragPipe tree killed, job re-queued; fallback `taskkill /T` (never a bare terminate, which orphans Java on Windows) |
+| Ledger corrupt | integrity check at start → moved aside, rebuilt from every `labwatch.json`; daily backups in `logs/backups/`; `labwatch repair-ledger` |
+| Ledger locked/unwritable right after a move | intake still reports QUEUED; `adopt_orphans` at start and hourly re-creates the job from `labwatch.json` |
+| Folder can never be parsed (symbols-only names, a bug) | `intake()` never raises: transient OS errors → RETRY, anything else → `.REJECTED.txt` (no infinite retry loop) |
+| Sanitised names collide | `plan()` rejects duplicate final names (case-insensitive); renames refuse to overwrite |
+| Disk nearly full | a search is held ("waiting: low disk space") until `min_free_gb` + its raws are free |
+| Inbox share disappears | logged once, watched until it's back |
+| Invalid config saved from the app | validated as a candidate file first; the good file is never replaced; every save backed up to `config-backups/` |
+| FragPipe says exit 0 but a step failed / wrote nothing | parsed from the console (`Process 'X' finished, exit code: N`) → failed |
+| A GUI button throws | `report_callback_exception` → dialog + crash file; the app keeps running |
+| `check`/diagnose on a wedged display | the Tk probe runs in a child process with a timeout |

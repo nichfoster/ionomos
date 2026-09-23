@@ -150,3 +150,101 @@ def test_fragpipe_controls(app, tmp_path, monkeypatch):
     led.set_status(2, "failed", "boom")
     s = app._jobs_summary()
     assert "RUNNING job 1" in s and "0 queued, 1 failed, 0 done" in s
+
+
+def _lab_app(app, tmp_path):
+    app.v("quick.root").set(str(tmp_path / "Auto"))
+    app.v("quick.users").set(str(tmp_path / "General"))
+    app.apply_quick()
+    app.create_all()
+    assert app.save()
+
+
+def test_invalid_save_never_replaces_a_good_config(app, tmp_path, monkeypatch):
+    from tkinter import messagebox
+
+    _lab_app(app, tmp_path)
+    good = (tmp_path / "Auto" / "config.yaml").read_text(encoding="utf-8")
+    errors = []
+    monkeypatch.setattr(messagebox, "showerror", lambda *a, **k: errors.append(a))
+    app.v("paths.inbox").set(str(tmp_path / "does not exist" / "inbox"))  # missing folder -> invalid
+    assert not app.save()
+    assert errors and (tmp_path / "Auto" / "config.yaml").read_text(encoding="utf-8") == good
+    assert not list((tmp_path / "Auto").glob(".config.checking.yaml"))
+
+
+def test_tk_errors_are_caught_and_reported(app, tmp_path, monkeypatch):
+    from tkinter import messagebox
+
+    _lab_app(app, tmp_path)
+    shown = []
+    monkeypatch.setattr(messagebox, "showerror", lambda *a, **k: shown.append(a))
+    try:
+        raise ValueError("button exploded")
+    except ValueError:
+        import sys
+
+        app._on_tk_error(*sys.exc_info())
+    assert shown and "button exploded" in shown[0][1]
+    assert list((tmp_path / "Auto" / "logs").glob("crash-*.txt"))
+    app.post(lambda: 1 / 0)  # a failing UI callback must not stop the pump
+    app._pump_ui()
+    assert len(shown) == 2
+
+
+def test_jobs_tab_lists_and_acts(app, tmp_path, monkeypatch):
+    from tkinter import messagebox
+
+    from labwatch.ledger import Job, Ledger
+
+    _lab_app(app, tmp_path)
+    dest = tmp_path / "General" / "EJQ" / "exp"
+    dest.mkdir(parents=True)
+    led = Ledger(tmp_path / "Auto" / "labwatch.db")
+    led.insert(Job(inbox_name="exp", user="EJQ", method="isoDTB", dest_dir=str(dest)))
+    led.set_status(1, "failed", "FragPipe exited with code 1")
+    led.insert(Job(inbox_name="exp2", user="EJQ", method="DIA", dest_dir=str(dest)))
+    app.refresh_jobs()
+    assert set(app.jtree.get_children()) == {"1", "2"}
+    assert app.jtree.set("1", "status") == "failed"
+    app.jtree.selection_set("1")
+    app.show_job()
+    assert "FragPipe exited with code 1" in app.jdetail.text.get("1.0", "end")
+    app.job_action("retry")
+    assert led.get(1).status == "queued" and led.get(1).attempts == 0
+    monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: True)
+    app.refresh_jobs()
+    app.jtree.selection_set("2")
+    app.job_action("cancel")
+    assert led.get(2).status == "failed" and "cancelled" in led.get(2).reason
+    app.toggle_pause()
+    assert (tmp_path / "Auto" / "logs" / "PAUSED").exists()
+    app.refresh_jobs()
+    assert "PAUSED" in app.jobs_state.cget("text")
+    app.toggle_pause()
+    assert not (tmp_path / "Auto" / "logs" / "PAUSED").exists()
+
+
+def test_import_workflow_and_restore_config(app, tmp_path, monkeypatch):
+    from tkinter import filedialog, messagebox
+
+    _lab_app(app, tmp_path)
+    fa = tmp_path / "db.fas"
+    fa.write_text(">sp|A\nMK\n>rev_sp|A\nKM\n", encoding="utf-8")
+    wf = tmp_path / "good_run" / "fragpipe.workflow"
+    wf.parent.mkdir()
+    wf.write_text(f"database.db-path={fa.as_posix()}\n", encoding="utf-8")
+    monkeypatch.setattr(filedialog, "askopenfilename", lambda **k: str(wf))
+    monkeypatch.setattr(messagebox, "showinfo", lambda *a, **k: None)
+    app.mtree.selection_set("isoDTB")
+    app._show_method()
+    app.import_workflow()
+    assert app.data["methods"]["isoDTB"]["workflow"] == "isoDTB.workflow"
+    assert app.data["methods"]["isoDTB"]["fasta"] == "db.fas"
+    assert (tmp_path / "Auto" / "fasta" / "db.fas").is_file()
+    assert app.save()
+    backups = sorted((tmp_path / "Auto" / "config-backups").glob("config-*.yaml"))
+    assert backups
+    monkeypatch.setattr(filedialog, "askopenfilename", lambda **k: str(backups[0]))
+    app.restore_config()
+    assert app.data["methods"]["isoDTB"]["fasta"] == "human_reviewed_decoys.fas"  # the pre-import version

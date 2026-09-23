@@ -17,7 +17,7 @@ a = Analysis(
     datas=[],
     hiddenimports=["tkinter", "tkinter.ttk", "tkinter.filedialog", "tkinter.messagebox", "tkinter.scrolledtext",
                    "yaml", "labwatch.app", "labwatch.resolve", "labwatch.testbed", "labwatch.worker",
-                   "labwatch.fragpipe", "labwatch.postprocess"],
+                   "labwatch.fragpipe", "labwatch.postprocess", "labwatch.health", "labwatch.stress"],
     hookspath=[],
     runtime_hooks=[],
     excludes=["pandas", "numpy", "matplotlib", "scipy", "PIL", "pytest", "ruff"],

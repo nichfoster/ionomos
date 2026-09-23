@@ -58,7 +58,8 @@ Back in the app: tab 3 → select the method → pick the files → **Apply chan
 
 ### A4b. First real search (15–60 min, once)
 
-1. Tab 1 → **Find FragPipe** (fills `…\fragpipe\bin\fragpipe.bat`) → **Save**.
+0. Easiest way to get the workflow: tab 3 → select the method → **Import workflow…** → pick the `fragpipe.workflow` inside a recent run that worked. Its FASTA is copied in too.
+1. Tab 1 → **Find FragPipe** (fills `…\fragpipe\bin\fragpipe.bat`) → **Save**. Tab 6 → **Check FragPipe install**: MSFragger/IonQuant ✓ and each FASTA has decoys.
 2. Tab 5 → **Save & Check**: `FragPipe launcher` ✓ and `methods.isoDTB` ✓ (workflow + FASTA).
 3. Drop a *small* real isoDTB folder (e.g. one replicate, 2–3 fractions).
 4. Watch tab 5: *FragPipe: RUNNING job N* → *done*. In the experiment folder:
@@ -128,7 +129,10 @@ py -3.14 -c "import tkinter; print('ok')"
 | change any setting | open `LabWatch.exe`, edit, **Save** (restart the watcher for timing changes) |
 | see the queue | tab 5 → **Show queue**, or `labwatch-cli.exe status` |
 | see the log | tab 5 → tick *follow the watcher log*, or `C:\Fragpipe_Auto\logs\labwatch.log` |
-| report a problem | tab 5 → **Copy diagnostics** → paste (or `labwatch-cli.exe diagnose`) |
+| report a problem | tab 5 → **Save diagnostics bundle (.zip)** → send the file (or `labwatch-cli.exe diagnose --zip`) |
+| see / retry / cancel jobs | tab **6 Jobs** (double-click = open folder; failed jobs show the likely cause) |
+| keep the PC free for a while | tab 6 → **Pause searches** (the running search finishes; nothing new starts) |
+| check FragPipe is installed right | tab 6 → **Check FragPipe install** (MSFragger / IonQuant / DIA-NN, decoys in each FASTA) |
 | stop / start the watcher | tab 5 buttons; the startup task restarts it at next logon |
 | add a user | tab 2 → Add; or just create the folder under `C:\Fragpipe_General` |
 | see what a folder would do | `labwatch-cli.exe dry-run "C:\path\to\folder"` |
@@ -143,7 +147,10 @@ py -3.14 -c "import tkinter; print('ok')"
   (or add an `experiment.yaml`); it's retried automatically. Deleting the note also retries.
 - **Job says "waiting: …"** (tab 5 or `status`). A setup file is missing — the
   FragPipe launcher, or that method's workflow/FASTA. Fix it; the job starts by itself.
-- **Job FAILED.** `FAILED.txt` in the experiment folder has the reason;
+- **Watcher says NOT RESPONDING** (tab 5). Stop watcher → Start watcher. Send the diagnostics bundle.
+- **"another labwatch watcher is already running"**: the startup task already runs one — that's fine; use the app to see it.
+- **Job list damaged** (check says ledger ✗): the watcher rebuilds it automatically at start; or `labwatch-cli.exe repair-ledger`.
+- **Job FAILED.** Tab 6 shows the *most likely cause* in plain English. `FAILED.txt` in the experiment folder has the reason;
   `labwatch_run\fragpipe_console.log` has FragPipe's full output. Fix, then
   tab 5 → **Retry a failed job…** (old output is kept as `fragpipe_previous_<time>\`).
 - **Stopping/updating LabWatch during a search** kills that FragPipe run; the job

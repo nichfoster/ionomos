@@ -175,13 +175,31 @@ def fake_fragpipe(argv: list[str]) -> int:
             say(f"ERROR: file in manifest does not exist: {r[0]}")
             return 1
     say(f"{len(rows)} files, workflow {Path(a.workflow).name}, database {Path(db).name}")
+    # LABWATCH_FAKE_FP_MODE simulates real failure modes: oom | msfragger | step-fail-exit0 | silent-exit0
+    mode = os.environ.get("LABWATCH_FAKE_FP_MODE", "")
+    if mode == "oom":
+        print("Exception in thread \"main\" java.lang.OutOfMemoryError: Java heap space", flush=True)
+        return 1
+    if mode == "msfragger":
+        print("MSFragger jar not found. Please download MSFragger in the Config tab.", flush=True)
+        return 1
+    if mode == "step-fail-exit0":
+        print(f"MSFragger [Work dir: {a.workdir}]", flush=True)
+        print("Process 'MSFragger' finished, exit code: 137", flush=True)
+        Path(a.workdir).mkdir(parents=True, exist_ok=True)
+        (Path(a.workdir) / "partial.txt").write_text("x", encoding="utf-8")
+        return 0
+    if mode == "silent-exit0":
+        return 0
     total = float(os.environ.get("LABWATCH_FAKE_FP_SECONDS", "4"))
     for step in ("MSFragger", "MSBooster", "Percolator", "ProteinProphet", "IonQuant"):
-        say(f"running {step}...")
+        print(f"{step} [Work dir: {a.workdir}]", flush=True)  # FragPipe's own format
         time.sleep(total / 5)
-    if any("FAKEFAIL" in r[0] for r in rows):
-        say("ERROR: IonQuant crashed (this sample fails on purpose)")
-        return 1
+        if step == "IonQuant" and any("FAKEFAIL" in r[0] for r in rows):
+            say("ERROR: IonQuant crashed (this sample fails on purpose)")
+            print(f"Process '{step}' finished, exit code: 1", flush=True)
+            return 1
+        print(f"Process '{step}' finished, exit code: 0", flush=True)
     wd = Path(a.workdir)
     wd.mkdir(parents=True, exist_ok=True)
     (wd / "fragpipe.workflow").write_text(wf_text, encoding="utf-8")
@@ -230,7 +248,9 @@ def init(root: Path, slow_defaults: bool = False) -> Path:
         p = auto / "workflows" / wf
         if not p.exists():
             p.write_text(f"# placeholder workflow for the testbed ({wf})\ndatabase.db-path=FAKE.fas\n", encoding="utf-8")
-    (auto / "fasta" / "human_reviewed_decoys.fas").write_text(">sp|FAKE|FAKE_HUMAN fake\nMKV\n", encoding="utf-8")
+    (auto / "fasta" / "human_reviewed_decoys.fas").write_text(
+        ">sp|FAKE1|FAKE1_HUMAN fake protein 1\nMKVLAAGIVGLLLAC\n>sp|FAKE2|FAKE2_HUMAN fake protein 2\nMSTNPKPQRKTKRNT\n"
+        ">rev_sp|FAKE1|FAKE1_HUMAN\nCALLLGVIGAALVKM\n>rev_sp|FAKE2|FAKE2_HUMAN\nTNRKTKRQPKPNTSM\n", encoding="utf-8")
 
     exe = write_fake_launcher(auto)
     (auto / "fake_fragpipe.py").unlink(missing_ok=True)  # older testbeds
@@ -246,7 +266,7 @@ def init(root: Path, slow_defaults: bool = False) -> Path:
         },
         "watcher": {"poll_seconds": 1 if not slow_defaults else 10, "stable_seconds": 3 if not slow_defaults else 60,
                     "min_raw_files": 1},
-        "fragpipe": {"threads": 4, "ram_gb": 4, "timeout_minutes": 5},
+        "fragpipe": {"threads": 4, "ram_gb": 4, "timeout_minutes": 5, "min_free_gb": 0.1},
         "gui": {"enabled": True, "timeout_minutes": 0},
         "users": {"aliases": {"Isaac": ["IJ", "IJD"], "EJQ": ["EJQ_2"]}, "default": ""},
         "methods": {
@@ -372,6 +392,13 @@ def add_parser(sub):
     r = s.add_parser("reset", help="empty inbox/users/ledger/logs")
     r.add_argument("dir", nargs="?", default=DEFAULT_DIR)
     s.add_parser("gui-demo", help="open the resolver window with sample data")
+    st = s.add_parser("stress", help="many messy drops + chaos against a real watcher/worker; checks invariants")
+    st.add_argument("--n", type=int, default=60, help="number of drops (default 60)")
+    st.add_argument("--seed", type=int, default=1)
+    st.add_argument("--dir", default=None, help="where to build it (default: a temp folder, deleted afterwards)")
+    st.add_argument("--keep", action="store_true", help="keep the temp folder to inspect")
+    st.add_argument("--no-chaos", action="store_true")
+    st.add_argument("--fuzz", type=int, default=3000, help="random names through the parsers (0 = skip)")
     return p
 
 
@@ -390,6 +417,21 @@ def main(args) -> int:
         dst = drop(Path(args.dir), args.name, slow=args.slow)
         print(f"dropped {dst}")
         return 0
+    if args.tb_cmd == "stress":
+        import logging
+
+        from labwatch import stress
+
+        logging.basicConfig(level=logging.WARNING, format="%(levelname)-7s %(name)s: %(message)s")
+        bad = stress.fuzz_names(args.fuzz, args.seed) if args.fuzz else []
+        print(f"fuzz: {args.fuzz} random names through the parsers — {len(bad)} failure(s)")
+        for b in bad[:10]:
+            print("  -", b)
+        print(f"stress: {args.n} drops, seed {args.seed}{'' if not args.no_chaos else ', no chaos'} …", flush=True)
+        rep = stress.run(args.n, args.seed, Path(args.dir) if args.dir else None, keep=args.keep,
+                         chaos=not args.no_chaos)
+        print(rep.text())
+        return 0 if rep.ok and not bad else 1
     if args.tb_cmd == "reset":
         reset(Path(args.dir))
         print("testbed reset")

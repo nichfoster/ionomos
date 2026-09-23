@@ -42,6 +42,10 @@ jobs:
           Write-Host $s
           Get-Content C:\bed\Fragpipe_Auto\logs\labwatch.log -Tail 15
           if (-not $done) { throw "frozen exe did not complete a job" }
+          # stress the frozen build: messy drops + chaos, invariant checks
+          $env:LABWATCH_FAKE_FP_SECONDS = "0.2"
+          & $exe testbed stress --n 60 --seed 3 --fuzz 2000
+          if ($LASTEXITCODE -ne 0) { throw "stress test failed on the frozen exe" }
       - uses: actions/upload-artifact@v4
         with:
           name: LabWatch-windows

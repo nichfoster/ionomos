@@ -4,9 +4,10 @@ Three layers, all runnable on macOS and Windows:
 
 | Layer | What | Command |
 |---|---|---|
-| Unit + e2e (`pytest`) | 180 tests: naming, config, config I/O, ledger, watcher timing, intake, overrides, **FragPipe runner + worker** (done / failed / held / timeout / stop / re-run against the fake FragPipe), resolver logic, **real tkinter dialog and the setup app** (skipped if no display), and 6 end-to-end runs of watcher-thread + intake against testbed samples | `scripts/test_mac.sh` / `scripts\test_windows.ps1` |
+| Unit + e2e (`pytest`) | 228 tests: naming, config, config I/O, ledger, watcher timing, intake, overrides, **FragPipe runner + worker** (done / failed / held / timeout / stop / re-run against the fake FragPipe), resolver logic, **real tkinter dialog and the setup app** (skipped if no display), and 6 end-to-end runs of watcher-thread + intake against testbed samples | `scripts/test_mac.sh` / `scripts\test_windows.ps1` |
 | Testbed (manual) | A fake lab on disk with 12 sample drops covering every path, a fake FragPipe, and the real CLI | `labwatch testbed …` |
 | The real PC | `dry-run` on real folders, then a throwaway drop; **Copy diagnostics** to report back | see DEV_LOOP.md |
+| Stress | `labwatch testbed stress --n 150`: messy drops (unicode/emoji/huge names, no raws, empty raws, bad tails, duplicates, slow copies, failing searches) + chaos (worker killed mid-run, ledger locked, corrupt status file, pause/resume, cancel), then invariant checks; plus a 5000-name parser fuzz | any machine; a smaller run is in pytest |
 | GitHub Actions | the pytest suite on Linux **and Windows** on every push | Actions tab |
 
 ## One-shot setup
@@ -124,3 +125,17 @@ dist/exe/labwatch setup          # the app, frozen
 
 The Windows build (`deploy\build_exe.ps1`) produces `LabWatch.exe` (windowed)
 and `labwatch-cli.exe` (console) from the same spec.
+
+## Stress testing
+
+```bash
+labwatch testbed stress                 # 60 drops + chaos + 3000 fuzzed names, ~30 s
+labwatch testbed stress --n 300 --seed 7 --keep   # bigger; keep the folder to look at
+```
+
+It prints the outcome counts and either `all invariants hold` (exit 0) or the
+list of violations (exit 1). The invariants: no raw file lost or duplicated
+(count + bytes), every drop filed or noted, no job stuck queued/running,
+DONE/FAILED notes present, ledger integrity OK, no CRITICAL log record.
+Failure modes of the fake FragPipe for manual testing:
+`LABWATCH_FAKE_FP_MODE=oom | msfragger | step-fail-exit0 | silent-exit0`.

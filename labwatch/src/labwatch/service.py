@@ -93,8 +93,63 @@ def start_watcher(config: Path, no_gui: bool = False) -> subprocess.Popen:
     return subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=_creationflags())
 
 
+STOP_FILE = "STOP"
+
+
+def request_stop(log_dir: Path, pid: int | None = None, proc: subprocess.Popen | None = None,
+                 timeout: float = 20) -> str:
+    """Stop a watcher gracefully (it kills its FragPipe, re-queues the job, releases its lock), else force it.
+
+    The watcher polls <log_dir>/STOP every second. If it hasn't exited after
+    `timeout` s, the whole process tree is killed (taskkill /T on Windows —
+    plain terminate() there would orphan FragPipe's Java processes).
+    """
+    import time
+
+    from labwatch import health
+
+    log_dir = Path(log_dir)
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        (log_dir / STOP_FILE).write_text("stop requested\n", encoding="utf-8")
+    except OSError:
+        pass
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        alive = proc.poll() is None if proc is not None else health.is_locked(log_dir)
+        if not alive:
+            clear_stop(log_dir)
+            return "stopped"
+        time.sleep(0.5)
+    target = proc.pid if proc is not None else (pid or health.holder_pid(log_dir))
+    if target:
+        kill_pid(target)
+    if proc is not None:
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+    clear_stop(log_dir)
+    return f"forced (did not stop within {timeout:.0f}s)"
+
+
+def clear_stop(log_dir: Path) -> None:
+    try:
+        (Path(log_dir) / STOP_FILE).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def stop_process(proc: subprocess.Popen, timeout: float = 5) -> None:
+    """Hard stop of a child process tree (fallback; prefer request_stop)."""
     if proc.poll() is not None:
+        return
+    if os.name == "nt":
+        kill_pid(proc.pid)  # taskkill /T: takes FragPipe's java children with it
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            pass
         return
     try:
         proc.terminate()
@@ -336,17 +391,68 @@ def restart_app() -> None:
 # ------------------------------------------------------------ diagnostics ----
 
 
+def _raw_paths(config_path: Path) -> dict:
+    """paths: section of a config, tolerating a config that doesn't validate."""
+    try:
+        import yaml
+
+        raw = yaml.safe_load(Path(config_path).read_text(encoding="utf-8")) or {}
+        return {k: Path(v) for k, v in (raw.get("paths") or {}).items() if isinstance(v, str) and v}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _capture(fn, *args) -> str:
+    import io
+    import traceback
+    from contextlib import redirect_stderr, redirect_stdout
+
+    buf = io.StringIO()
+    try:
+        with redirect_stdout(buf), redirect_stderr(buf):
+            fn(*args)
+    except SystemExit as exc:
+        buf.write(f"(exit {exc.code})")
+    except Exception:  # noqa: BLE001 - diagnostics must never crash
+        buf.write(traceback.format_exc())
+    return buf.getvalue()
+
+
+def _problem_jobs(db: Path, limit_failed: int = 5):
+    """Running, waiting and the most recent failed jobs, newest last."""
+    from labwatch.ledger import Ledger, integrity
+
+    if integrity(db) != "ok":
+        return []
+    led = Ledger(db)
+    try:
+        jobs = led.list()
+    finally:
+        led.close()
+    running = [j for j in jobs if j.status == "running"]
+    waiting = [j for j in jobs if j.status == "queued" and (j.reason or "").startswith("waiting:")]
+    failed = [j for j in jobs if j.status == "failed"][-limit_failed:]
+    return running + waiting + failed
+
+
 def diagnostics(config_path: Path, log_lines: int = 150) -> str:
     """One text block with everything needed to debug a report from the PC."""
     import datetime
-    import io
+    import json
+    import os as _os
     import platform
-    from contextlib import redirect_stderr, redirect_stdout
 
-    from labwatch import __version__
+    from labwatch import __version__, fragpipe, health
+    from labwatch import ledger as ledger_mod
 
     out: list[str] = []
     a = out.append
+
+    def section(title: str, body: str):
+        a("")
+        a(f"=== {title} " + "=" * max(0, 60 - len(title)))
+        a((body or "").rstrip() or "(nothing)")
+
     a(f"labwatch {__version__}  {datetime.datetime.now():%Y-%m-%d %H:%M:%S}")
     a(f"python {sys.version.split()[0]}  {platform.platform()}  exe={sys.executable}")
     src = source_checkout()
@@ -358,12 +464,41 @@ def diagnostics(config_path: Path, log_lines: int = 150) -> str:
         install = "pip package"
     a(f"install: {install}")
     a(f"config: {config_path}  (exists={Path(config_path).is_file()})")
-    a(f"startup task: {task_status()}")
 
-    def section(title: str, body: str):
-        a("")
-        a(f"=== {title} " + "=" * max(0, 60 - len(title)))
-        a(body.rstrip())
+    paths = _raw_paths(config_path)
+    log_dir = paths.get("log_dir")
+    inbox = paths.get("inbox")
+    db = paths.get("database")
+
+    # --- system
+    total, avail = health.memory_gb()
+    sysl = [f"cpus: {_os.cpu_count()}   RAM: {total:.0f} GB total" if total else f"cpus: {_os.cpu_count()}"]
+    if avail:
+        sysl[0] += f", {avail:.0f} GB free"
+    seen = set()
+    for key in ("users_root", "inbox", "log_dir"):
+        pth = paths.get(key)
+        if pth is None:
+            continue
+        anchor = Path(pth).anchor or "/"
+        if anchor in seen:
+            continue
+        seen.add(anchor)
+        free = health.disk_free_gb(pth)
+        sysl.append(f"disk {anchor}: {free:.0f} GB free" if free is not None else f"disk {anchor}: ?")
+    section("system", "\n".join(sysl))
+
+    # --- watcher state
+    st = [f"startup task: {task_status()}"]
+    if log_dir:
+        from labwatch.worker import paused
+
+        locked = health.is_locked(log_dir)
+        hb, healthy = health.heartbeat_summary(log_dir)
+        st.append(f"watcher: {'RUNNING pid ' + str(health.holder_pid(log_dir)) if locked else 'not running'}")
+        st.append(f"heartbeat: {hb}" + ("" if healthy or not locked else "   <-- NOT RESPONDING"))
+        st.append(f"searches paused: {paused(log_dir)}")
+    section("watcher", "\n".join(st))
 
     from labwatch import cli
 
@@ -371,42 +506,63 @@ def diagnostics(config_path: Path, log_lines: int = 150) -> str:
         config = str(config_path)
         all = True
 
-    for name, fn in (("check", cli.cmd_check), ("status --all", cli.cmd_status)):
-        buf = io.StringIO()
-        try:
-            with redirect_stdout(buf), redirect_stderr(buf):
-                fn(_A())
-        except SystemExit as exc:
-            buf.write(f"(exit {exc.code})")
-        except Exception as exc:  # noqa: BLE001 - diagnostics must never crash
-            import traceback
+    section("check", _capture(cli.cmd_check, _A()))
+    section("status --all", _capture(cli.cmd_status, _A()))
 
-            buf.write(traceback.format_exc() if not isinstance(exc, KeyboardInterrupt) else "")
-        section(name, buf.getvalue())
+    # --- problem jobs in detail
+    if db:
+        for j in _problem_jobs(db):
+            dest = Path(j.dest_dir)
+            body = [f"status: {j.status}  attempts: {j.attempts}  user: {j.user}  method: {j.method}",
+                    f"folder: {dest}", f"reason: {j.reason or '-'}"]
+            try:
+                rec = json.loads((dest / "labwatch.json").read_text(encoding="utf-8"))
+                run = rec.get("run") or {}
+                for k in ("started_at", "finished_at", "exit_code", "progress", "workflow_source", "fasta"):
+                    if run.get(k) is not None:
+                        body.append(f"{k}: {run[k]}")
+                if run.get("command"):
+                    body.append("command: " + " ".join(run["command"]))
+                for w in run.get("warnings") or []:
+                    body.append(f"warning: {w}")
+            except (OSError, ValueError):
+                body.append("(labwatch.json unreadable)")
+            console = dest / fragpipe.RUN_DIR / fragpipe.CONSOLE_LOG
+            text = fragpipe.read_tail_text(console, 60_000)
+            for h in fragpipe.explain(text):
+                body.append(f"likely cause: {h}")
+            if j.status == "running":
+                body.append(f"progress: {fragpipe.progress(console)}")
+            if text:
+                body.append(f"--- last 30 lines of {console.name}")
+                body += text.splitlines()[-30:]
+            section(f"job {j.id} {j.inbox_name}", "\n".join(body))
 
     cfg_text = ""
-    log_dir: Path | None = None
-    inbox: Path | None = None
     try:
         cfg_text = Path(config_path).read_text(encoding="utf-8", errors="replace")
-        import yaml
-
-        raw = yaml.safe_load(cfg_text) or {}
-        log_dir = Path(raw.get("paths", {}).get("log_dir", ""))
-        inbox = Path(raw.get("paths", {}).get("inbox", ""))
-    except Exception as exc:  # noqa: BLE001
+    except OSError as exc:
         cfg_text = f"(could not read: {exc})"
     section("config.yaml", cfg_text)
 
     if log_dir and log_dir.is_dir():
         lf = log_dir / "labwatch.log"
+        section("recent warnings/errors", "\n".join(health.log_problems(lf, 25)))
         if lf.is_file():
             lines = lf.read_text(encoding="utf-8", errors="replace").splitlines()
             section(f"log tail ({lf}, last {log_lines} of {len(lines)} lines)", "\n".join(lines[-log_lines:]))
         else:
             section("log", f"no {lf}")
-        pid = running_pid(log_dir)
-        a(f"watcher pid: {pid or 'not running'}")
+        for c in health.recent_crashes(log_dir, 3):
+            section(f"crash report {c.name}", c.read_text(encoding="utf-8", errors="replace")[-6000:])
+        exe_crash = Path(sys.executable).parent / "LabWatch-crash.txt"
+        if exe_crash.is_file():
+            section("LabWatch-crash.txt (app start-up crash)", exe_crash.read_text(encoding="utf-8", errors="replace")[-4000:])
+    if db:
+        backups = sorted((log_dir / "backups").glob("labwatch-*.db")) if log_dir else []
+        size = f"{db.stat().st_size / 1e6:.1f} MB" if db.is_file() else "-"
+        section("ledger", f"{db}  {size}  integrity: {ledger_mod.integrity(db)}\n"
+                          f"backups: {', '.join(b.name for b in backups[-5:]) or 'none yet'}")
     if inbox and inbox.is_dir():
         notes = sorted(inbox.glob("*.REJECTED.txt"))
         items = sorted(p.name + ("/" if p.is_dir() else "") for p in inbox.iterdir())
@@ -422,14 +578,64 @@ def save_diagnostics(config_path: Path) -> tuple[str, Path | None]:
 
     text = diagnostics(config_path)
     where: Path | None = None
+    log_dir = _raw_paths(config_path).get("log_dir")
     try:
-        import yaml
-
-        raw = yaml.safe_load(Path(config_path).read_text(encoding="utf-8")) or {}
-        log_dir = Path(raw["paths"]["log_dir"])
-        if log_dir.is_dir():
+        if log_dir and log_dir.is_dir():
             where = log_dir / f"diagnostics-{datetime.datetime.now():%Y%m%d-%H%M%S}.txt"
             where.write_text(text, encoding="utf-8")
-    except Exception:  # noqa: BLE001
+    except OSError:
         where = None
     return text, where
+
+
+def save_diagnostics_zip(config_path: Path, dest: Path | None = None) -> Path:
+    """A .zip with the report, config, logs, crash reports and the problem jobs' FragPipe logs.
+
+    Never includes raw data or FragPipe result tables — only small text files,
+    with each log capped at its last 3 MB.
+    """
+    import datetime
+    import tempfile
+    import zipfile
+
+    from labwatch import fragpipe, health
+
+    stamp = f"{datetime.datetime.now():%Y%m%d-%H%M%S}"
+    paths = _raw_paths(config_path)
+    log_dir = paths.get("log_dir")
+    if dest is None:
+        base = log_dir if log_dir and log_dir.is_dir() else Path(tempfile.gettempdir())
+        dest = base / f"diagnostics-{stamp}.zip"
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    cap = 3_000_000
+
+    def add(z: zipfile.ZipFile, src: Path, arc: str):
+        try:
+            if src.is_file():
+                data = src.read_bytes()
+                z.writestr(arc, data[-cap:] if len(data) > cap else data)
+        except OSError:
+            pass
+
+    with zipfile.ZipFile(dest, "w", compression=zipfile.ZIP_DEFLATED) as z:
+        z.writestr("report.txt", diagnostics(config_path))
+        add(z, Path(config_path), "config.yaml")
+        if log_dir and log_dir.is_dir():
+            for f in sorted(log_dir.glob("labwatch.log*"))[:3]:
+                add(z, f, f"logs/{f.name}")
+            for f in health.recent_crashes(log_dir, 5):
+                add(z, f, f"crashes/{f.name}")
+            add(z, log_dir / health.HEARTBEAT_NAME, "logs/heartbeat.json")
+        db = paths.get("database")
+        if db:
+            for j in _problem_jobs(db, limit_failed=5):
+                d = Path(j.dest_dir)
+                arc = f"jobs/{j.id}-{j.inbox_name}"
+                for rel in ("labwatch.json", "FAILED.txt", "DONE.txt", "experiment.yaml",
+                            f"{fragpipe.RUN_DIR}/{fragpipe.CONSOLE_LOG}", f"{fragpipe.RUN_DIR}/{fragpipe.MANIFEST_NAME}"):
+                    add(z, d / rel, f"{arc}/{rel}")
+                wf = next((d / fragpipe.RUN_DIR).glob("*.workflow"), None) if (d / fragpipe.RUN_DIR).is_dir() else None
+                if wf:
+                    add(z, wf, f"{arc}/{fragpipe.RUN_DIR}/{wf.name}")
+    return dest

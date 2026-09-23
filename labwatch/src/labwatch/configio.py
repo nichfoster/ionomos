@@ -40,7 +40,7 @@ def defaults(root: str | None = None, users_root: str | None = None) -> dict:
             "log_dir": f"{root}/logs",
         },
         "watcher": {"poll_seconds": 10, "stable_seconds": 60, "min_raw_files": 1},
-        "fragpipe": {"auto_run": True, "threads": 28, "ram_gb": 48, "timeout_minutes": 240, "config_tools_folder": "",
+        "fragpipe": {"auto_run": True, "threads": 28, "ram_gb": 48, "timeout_minutes": 240, "min_free_gb": 20, "config_tools_folder": "",
                      "config_diann": ""},
         "gui": {"enabled": True, "timeout_minutes": 0},
         "users": {"aliases": {}, "default": "", "learned_aliases_file": f"{root}/learned_aliases.yaml"},
@@ -107,7 +107,8 @@ def dump_config(d: dict) -> str:
     a(f"  auto_run: {_y(bool(f.get('auto_run', True)))}   # run FragPipe on queued jobs automatically")
     a(f"  threads: {_y(f['threads'])}")
     a(f"  ram_gb: {_y(f['ram_gb'])}")
-    a(f"  timeout_minutes: {_y(f['timeout_minutes'])}")
+    a(f"  timeout_minutes: {_y(f['timeout_minutes'])}   # 0 = no limit")
+    a(f"  min_free_gb: {_y(f.get('min_free_gb', 20))}   # jobs wait while the data drive has less free than this + the raws")
     a(f"  config_tools_folder: {_y(f.get('config_tools_folder', '') or '')}   # only if FragPipe can't find its tools")
     a(f"  config_diann: {_y(f.get('config_diann', '') or '')}   # DIA only, path to DiaNN.exe if needed")
     a("")
@@ -137,9 +138,37 @@ def dump_config(d: dict) -> str:
     return "\n".join(L)
 
 
-def write_config(path: str | Path, d: dict) -> Path:
+BACKUP_DIR = "config-backups"
+
+
+def backup_config(path: str | Path, keep: int = 30) -> Path | None:
+    """Copy an existing config to <dir>/config-backups/config-<ts>.yaml (newest `keep` kept)."""
+    import datetime
+
+    p = Path(path)
+    if not p.is_file():
+        return None
+    d = p.parent / BACKUP_DIR
+    d.mkdir(exist_ok=True)
+    dest = d / f"config-{datetime.datetime.now():%Y%m%d-%H%M%S}.yaml"
+    dest.write_bytes(p.read_bytes())
+    for old in sorted(d.glob("config-*.yaml"))[:-keep]:
+        try:
+            old.unlink()
+        except OSError:
+            pass
+    return dest
+
+
+def write_config(path: str | Path, d: dict, backup: bool = True) -> Path:
+    """Atomically write config.yaml; the previous version goes to config-backups/ first."""
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
+    if backup:
+        try:
+            backup_config(p)
+        except OSError:
+            pass  # a failed backup must not block saving
     tmp = p.with_suffix(".yaml.tmp")
     tmp.write_text(dump_config(d), encoding="utf-8")
     os.replace(tmp, p)

@@ -15,6 +15,11 @@ For each job, in id order:
     FragPipe --exit 0 + output-->  done    (DONE.txt)
              --anything else---->  failed  (FAILED.txt with the reason and log tail)
              --labwatch stopped-->  queued  (runs again at next start)
+             --cancelled--------->  failed  ("cancelled by user")
+
+Controls that work from any process (the app, `labwatch pause`, another shell):
+    <log_dir>/PAUSED                 exists -> no new searches start (a running one finishes)
+    <job>/labwatch_run/CANCEL        exists -> that job's FragPipe is killed, job failed "cancelled"
 
 One search at a time: FragPipe already uses every core it is given.
 """
@@ -22,6 +27,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -34,6 +40,45 @@ log = logging.getLogger("labwatch.worker")
 
 DONE_NOTE = "DONE.txt"
 FAILED_NOTE = "FAILED.txt"
+PAUSE_FILE = "PAUSED"
+PROGRESS_EVERY = 30.0  # seconds between progress updates in labwatch.json
+
+
+# ---------------------------------------------------------------- controls --
+
+
+def paused(log_dir: Path) -> bool:
+    return (Path(log_dir) / PAUSE_FILE).exists()
+
+
+def pause(log_dir: Path, by: str = "") -> None:
+    Path(log_dir).mkdir(parents=True, exist_ok=True)
+    (Path(log_dir) / PAUSE_FILE).write_text(f"paused {now_iso()} {by}\n", encoding="utf-8")
+
+
+def resume(log_dir: Path) -> None:
+    (Path(log_dir) / PAUSE_FILE).unlink(missing_ok=True)
+
+
+def request_cancel(ledger: Ledger, job_id: int) -> str:
+    """Cancel a queued or running job. Returns a message for the user."""
+    job = ledger.get(job_id)
+    if job is None:
+        return f"no job {job_id}"
+    if job.status == "queued":
+        ledger.set_status(job_id, "failed", "cancelled by user (before it started)")
+        _update_status(job, status="failed", reason="cancelled by user (before it started)")
+        _note(Path(job.dest_dir), FAILED_NOTE, "Cancelled before FragPipe started. Retry to run it after all.\n")
+        return f"job {job_id} cancelled (it had not started)"
+    if job.status == "running":
+        run_dir = Path(job.dest_dir) / fragpipe.RUN_DIR
+        try:
+            run_dir.mkdir(parents=True, exist_ok=True)
+            (run_dir / fragpipe.CANCEL_FILE).write_text(now_iso(), encoding="utf-8")
+        except OSError as exc:
+            return f"could not signal job {job_id}: {exc}"
+        return f"job {job_id}: FragPipe will be stopped within a few seconds"
+    return f"job {job_id} is {job.status}; nothing to cancel"
 
 
 def _read_status(dest: Path, fallback: dict) -> dict:
@@ -72,13 +117,19 @@ def _note(dest: Path, name: str, text: str) -> None:
 
 
 class Worker:
-    def __init__(self, cfg: Config, ledger: Ledger | None = None, poll_seconds: float = 5.0):
+    def __init__(self, cfg: Config, ledger: Ledger | None = None, poll_seconds: float = 5.0, heartbeat=None):
         self.cfg = cfg
         self.ledger = ledger or Ledger(cfg.database)
         self.poll_seconds = poll_seconds
+        self.heartbeat = heartbeat
         self._stop = threading.Event()
         self._held: dict[int, str] = {}  # job id -> last hold reason (log once per change)
+        self._was_paused = False
         self.current: Job | None = None
+
+    def _beat(self, state: str = "idle") -> None:
+        if self.heartbeat is not None:
+            self.heartbeat.beat("worker", state)
 
     # ------------------------------------------------------------- control --
 
@@ -101,6 +152,16 @@ class Worker:
 
     def run_once(self) -> bool:
         """Run the first runnable queued job. True if one ran (whatever the outcome)."""
+        if paused(self.cfg.log_dir):
+            if not self._was_paused:
+                log.info("searches paused (%s exists); queued jobs wait", self.cfg.log_dir / PAUSE_FILE)
+                self._was_paused = True
+            self._beat("paused")
+            return False
+        if self._was_paused:
+            log.info("searches resumed")
+            self._was_paused = False
+        self._beat("idle")
         for job in self.ledger.list("queued"):
             if self._stop.is_set():
                 return False
@@ -156,9 +217,23 @@ class Worker:
             log.info("job %d: FragPipe pid %d: %s", job.id, pid, " ".join(cmd))
             _update_status(job, run={"pid": pid})
 
-        res = fragpipe.run(spec, self._stop, on_start=started)
+        last = [0.0]
+
+        def polled():
+            step = fragpipe.progress(spec.console_log)
+            self._beat(f"running job {job.id}: {step}")
+            if time.monotonic() - last[0] >= PROGRESS_EVERY:
+                last[0] = time.monotonic()
+                _update_status(job, run={"progress": step, "progress_at": now_iso()})
+
+        res = fragpipe.run(spec, self._stop, on_start=started, on_poll=polled)
         self.current = None
         finished = now_iso()
+        if res.cancelled:
+            (spec.run_dir / fragpipe.CANCEL_FILE).unlink(missing_ok=True)
+            _update_status(job, run={"finished_at": finished, "exit_code": res.code})
+            self._fail(job, "cancelled by user", spec)
+            return
 
         if res.stopped:
             self.ledger.requeue(job.id, "interrupted (labwatch stopped); will run again")
@@ -167,8 +242,8 @@ class Worker:
             log.warning("job %d: FragPipe stopped; job re-queued", job.id)
             return
         if not res.ok:
-            _update_status(job, run={"finished_at": finished, "exit_code": res.code})
-            self._fail(job, res.reason, spec)
+            _update_status(job, run={"finished_at": finished, "exit_code": res.code, "hints": res.hints})
+            self._fail(job, res.reason, spec, res.hints)
             return
 
         warnings = spec.warnings + fragpipe.missing_outputs(spec) + self._postprocess(job, spec)
@@ -187,15 +262,18 @@ class Worker:
 
         return postprocess.run_all(job, spec, self.cfg)
 
-    def _fail(self, job: Job, reason: str, spec: fragpipe.RunSpec | None = None) -> None:
+    def _fail(self, job: Job, reason: str, spec: fragpipe.RunSpec | None = None, hints: list[str] | None = None) -> None:
         self.ledger.set_status(job.id, "failed", reason)
         _update_status(job, status="failed", reason=reason)
         dest = Path(job.dest_dir)
         if dest.is_dir():
             log_hint = f"\nFragPipe console output: {spec.console_log}\n" if spec else "\n"
+            likely = "".join(f"  - {h}\n" for h in hints or [])
             _note(dest, FAILED_NOTE,
                   f"labwatch could not finish this experiment ({datetime.now():%Y-%m-%d %H:%M}).\n\n"
-                  f"Reason: {reason}\n{log_hint}\n"
+                  f"Reason: {reason}\n"
+                  + (f"\nMost likely cause:\n{likely}" if likely else "")
+                  + f"{log_hint}\n"
                   f"After fixing the cause: LabWatch app -> Run & Test -> Retry a failed job, "
                   f"or  labwatch retry {job.id}\n")
         log.error("job %d failed: %s", job.id, reason)

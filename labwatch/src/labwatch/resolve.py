@@ -35,6 +35,28 @@ from labwatch.naming import DEFAULT_METHOD_ALIASES, NamingError, parse_raw_name,
 log = logging.getLogger("labwatch.resolve")
 
 
+def gui_available_isolated(timeout: float = 15) -> tuple[bool, str]:
+    """gui_available() run in a child process, so a wedged display can't hang the caller (check/diagnose)."""
+    import os
+    import subprocess
+
+    if os.environ.get("LABWATCH_NO_GUI"):
+        return False, "disabled by LABWATCH_NO_GUI"
+    from labwatch.service import _creationflags, labwatch_command
+
+    try:
+        r = subprocess.run([*labwatch_command(console=True), "probe-gui"], capture_output=True, text=True,
+                           timeout=timeout, creationflags=_creationflags(), encoding="utf-8", errors="replace")
+    except subprocess.TimeoutExpired:
+        return False, f"the display did not answer within {timeout:.0f}s (window system busy or hung)"
+    except OSError as exc:
+        return False, f"could not probe: {exc}"
+    out = (r.stdout or "").strip().splitlines()
+    if r.returncode == 0 and out and out[-1] == "ok":
+        return True, ""
+    return False, (out[-1] if out else (r.stderr or "probe failed").strip()[-200:])
+
+
 def gui_available() -> tuple[bool, str]:
     """(ok, reason). False when tkinter is missing, there is no display, or LABWATCH_NO_GUI is set."""
     import os

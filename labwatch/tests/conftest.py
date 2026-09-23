@@ -30,7 +30,7 @@ def lab(tmp_path: Path):
             "log_dir": str(auto / "logs"),
         },
         "watcher": {"poll_seconds": 0.01, "stable_seconds": 0.05, "min_raw_files": 1},
-        "fragpipe": {"threads": 4, "ram_gb": 8, "timeout_minutes": 10},
+        "fragpipe": {"threads": 4, "ram_gb": 8, "timeout_minutes": 10, "min_free_gb": 0},
         "methods": {
             "isoDTB": {"workflow": "isoDTB.workflow", "fasta": "h.fas", "data_type": "DDA",
                        "postprocess": ["isodtb_sites"], "isodtb_mod_mass": "561.3387"},

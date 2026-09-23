@@ -51,6 +51,7 @@ class Config:
     threads: int
     ram_gb: int
     timeout_minutes: int
+    min_free_gb: float
     config_tools_folder: str
     config_diann: str
 
@@ -160,6 +161,7 @@ def load(path: str | Path, check_paths: bool = True) -> Config:
         threads=int(_get(raw, "fragpipe", "threads", 8)),
         ram_gb=int(_get(raw, "fragpipe", "ram_gb", 16)),
         timeout_minutes=int(_get(raw, "fragpipe", "timeout_minutes", 240)),
+        min_free_gb=float(_get(raw, "fragpipe", "min_free_gb", 20) or 0),
         config_tools_folder=str(_get(raw, "fragpipe", "config_tools_folder", "") or ""),
         config_diann=str(_get(raw, "fragpipe", "config_diann", "") or ""),
         methods=methods,

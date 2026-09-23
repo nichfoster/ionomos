@@ -65,6 +65,13 @@ small isoDTB folder, compare with a GUI run. Still to build: step 5 below.
 **Exit:** one real isoDTB experiment processed with no manual steps; the
 `_sites.tsv` matches the R output on the same input.
 
+2026-09-23 (0.3.0): failsafes (single instance, supervised loops, crash
+reports, heartbeats, graceful stop, ledger backup/rebuild/orphan adoption,
+disk-space hold, never-loop intake), richer diagnostics (+ .zip bundle),
+FragPipe friendliness (plain-English failure causes, live step progress,
+cancel, pause/resume, install check, workflow import, FASTA decoy check),
+Jobs tab, stress tester. See ARCHITECTURE.md "Failsafes".
+
 ## Phase 3 — DIA, then TMT
 
 - DIA: pin workflow, `data_type: DIA`, sort out DIA-NN version/`--config-diann`.

@@ -130,3 +130,18 @@ happen; the pinned workflow file is never modified. Inputs go in
 re-run moves the previous output aside instead of deleting it. Launcher is
 `fragpipe.bat` (the 22.0 inventory shows `bin/fragpipe.bat` next to a GUI
 `fragpipe.exe`); a configured `fragpipe.exe` is swapped for the `.bat` beside it.
+
+### D17 — Fail visible, never fail silent, never lose data
+**2026-09-23.** Failsafes are layered rather than clever: each loop catches
+per-iteration errors; a supervisor restarts a loop that escapes; excepthooks
+record anything else to `crash-*.txt`; heartbeats reveal hangs that none of
+those can see. Coordination between processes (app ↔ watcher) goes through
+files in `log_dir` — `labwatch.lock`, `heartbeat.json`, `STOP`, `PAUSED`, a
+job's `labwatch_run/CANCEL` — because they work identically for the startup
+task, the app, the CLI and a second Windows session, with no ports or IPC. The
+ledger is treated as a cache of the `labwatch.json` files, so it can always be
+rebuilt. A folder whose contents make intake fail deterministically is
+rejected with a note (never retried forever); only OS-level transient errors
+retry. `labwatch testbed stress` checks the end-to-end invariants (no raw file
+lost or duplicated, every drop accounted for, nothing stuck) under chaos, and
+runs in CI.

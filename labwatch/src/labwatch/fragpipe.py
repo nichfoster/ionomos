@@ -43,6 +43,7 @@ RUN_DIR = "labwatch_run"
 WORKDIR = "fragpipe"
 MANIFEST_NAME = "fragpipe-files.fp-manifest"
 CONSOLE_LOG = "fragpipe_console.log"
+CANCEL_FILE = "CANCEL"  # created in labwatch_run/ by `labwatch cancel` / the app
 
 # Where FragPipe usually lives on Windows. First match wins. The .bat is the
 # headless launcher; fragpipe.exe is a GUI wrapper that may swallow console output.
@@ -237,6 +238,15 @@ def prepare(job: Job, cfg: Config) -> RunSpec:
         more = f" (+{len(missing) - 3} more)" if len(missing) > 3 else ""
         raise JobError(f"raw file(s) missing from {dest}: {', '.join(missing[:3])}{more}")
 
+    need_free_gb = getattr(cfg, "min_free_gb", 0) or 0
+    if need_free_gb:
+        raw_gb = sum(Path(line[0]).stat().st_size for line in lines) / 1e9
+        need = need_free_gb + raw_gb  # FragPipe's intermediates are roughly the size of the raws
+        free = _disk_free_gb(dest)
+        if free is not None and free < need:
+            raise Hold(f"low disk space: {free:.0f} GB free on {dest.anchor or dest}, this search needs "
+                       f"~{need:.0f} GB (fragpipe.min_free_gb {need_free_gb} + raws {raw_gb:.1f})")
+
     raw_dir = dest / plan["raw_dir"] if plan.get("raw_dir") else dest
     annotations: dict[str, str] = {}
     if job.method == "TMT":
@@ -267,6 +277,7 @@ def prepare(job: Job, cfg: Config) -> RunSpec:
 def write_inputs(spec: RunSpec) -> str | None:
     """Create labwatch_run/ inputs and an empty workdir. Returns the name an old workdir was moved to, if any."""
     spec.run_dir.mkdir(parents=True, exist_ok=True)
+    (spec.run_dir / CANCEL_FILE).unlink(missing_ok=True)  # a cancel is for one run only
     moved = None
     if spec.workdir.exists() and any(spec.workdir.iterdir()):
         # FragPipe wants an empty output folder; keep the old attempt, never delete it
@@ -292,12 +303,15 @@ def write_inputs(spec: RunSpec) -> str | None:
 
 
 class RunResult:
-    def __init__(self, code: int | None, reason: str = "", stopped: bool = False, timed_out: bool = False):
+    def __init__(self, code: int | None, reason: str = "", stopped: bool = False, timed_out: bool = False,
+                 cancelled: bool = False, hints: list[str] | None = None):
         self.code, self.reason, self.stopped, self.timed_out = code, reason, stopped, timed_out
+        self.cancelled = cancelled
+        self.hints = hints or []
 
     @property
     def ok(self) -> bool:
-        return self.code == 0 and not self.stopped and not self.timed_out
+        return self.code == 0 and not (self.stopped or self.timed_out or self.cancelled)
 
 
 def _popen_kwargs() -> dict:
@@ -329,8 +343,9 @@ def kill_tree(proc: subprocess.Popen) -> None:
         pass
 
 
-def run(spec: RunSpec, stop: threading.Event | None = None, on_start=None, poll: float = 1.0) -> RunResult:
-    """Run FragPipe for `spec`; blocks until it exits, times out, or `stop` is set."""
+def run(spec: RunSpec, stop: threading.Event | None = None, on_start=None, poll: float = 1.0,
+        on_poll=None) -> RunResult:
+    """Run FragPipe for `spec`; blocks until it exits, times out, is cancelled, or `stop` is set."""
     stop = stop or threading.Event()
     cmd = spec.command()
     started = time.monotonic()
@@ -352,6 +367,15 @@ def run(spec: RunSpec, stop: threading.Event | None = None, on_start=None, poll:
                 break
             except subprocess.TimeoutExpired:
                 pass
+            if on_poll:
+                try:
+                    on_poll()
+                except Exception:  # noqa: BLE001 - progress reporting must not kill a search
+                    pass
+            if (spec.run_dir / CANCEL_FILE).exists():
+                kill_tree(proc)
+                out.write(b"\n# cancelled by user\n")
+                return RunResult(proc.returncode, "cancelled by user", cancelled=True)
             if stop.is_set():
                 kill_tree(proc)
                 out.write(b"\n# stopped by labwatch\n")
@@ -362,12 +386,21 @@ def run(spec: RunSpec, stop: threading.Event | None = None, on_start=None, poll:
                 return RunResult(proc.returncode, f"timed out after {spec.timeout_minutes} min "
                                                   f"(fragpipe.timeout_minutes)", timed_out=True)
         out.write(f"\n# exit code {code} after {(time.monotonic() - started) / 60:.1f} min\n".encode())
+    text = read_tail_text(spec.console_log)
+    hints = explain(text)
     if code != 0:
-        return RunResult(code, f"FragPipe exited with code {code}; last lines: {tail(spec.console_log, 4)}")
+        lead = f"{hints[0]} — " if hints else ""
+        return RunResult(code, f"{lead}FragPipe exited with code {code}; last lines: {tail(spec.console_log, 4)}",
+                         hints=hints)
+    bad_step = _FAILED_STEP.findall(text)
+    if bad_step:
+        name, c = bad_step[-1]
+        return RunResult(1, f"FragPipe step {name} failed (exit code {c}) although FragPipe exited 0; "
+                            f"last lines: {tail(spec.console_log, 4)}", hints=hints)
     produced = [p for p in spec.workdir.iterdir()] if spec.workdir.is_dir() else []
     if not produced:
         return RunResult(1, "FragPipe exited 0 but wrote nothing to the output folder; see "
-                            f"{spec.console_log}")
+                            f"{spec.console_log}", hints=hints)
     return RunResult(0)
 
 
@@ -385,3 +418,284 @@ def tail(path: Path, n: int = 20) -> str:
         return ""
     lines = [ln for ln in lines if ln.strip() and not ln.startswith("# ")]  # skip labwatch's own markers
     return " | ".join(lines[-n:])[-600:]
+
+
+def _disk_free_gb(path: Path) -> float | None:
+    from labwatch.health import disk_free_gb
+
+    return disk_free_gb(path)
+
+
+def read_tail_text(path: Path, max_bytes: int = 400_000) -> str:
+    try:
+        with open(path, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            fh.seek(max(0, fh.tell() - max_bytes))
+            return fh.read().decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+# ------------------------------------------------------------ explanations --
+
+_FAILED_STEP = re.compile(r"Process '([^']+)' finished, exit code: ([1-9]\d*)")
+
+# (regex on FragPipe's console output, plain-English explanation + what to do). First match first.
+EXPLANATIONS: list[tuple[str, str]] = [
+    (r"FASTA file path is empty|No FASTA file|database\.db-path",
+     "No protein database: set this method's FASTA in the app (tab 3), or re-export the workflow after setting it"),
+    (r"OutOfMemoryError|Java heap space|GC overhead limit",
+     "FragPipe ran out of memory: lower Threads or raise RAM (GB) in Advanced, and close other programs"),
+    (r"not enough space on the disk|No space left on device|disk is full",
+     "The disk is full: free space on the drive holding the experiment folders, then Retry"),
+    (r"(?i)msfragger.{0,80}(not found|could not find|missing|download|license|not configured)|"
+     r"(download|install).{0,40}msfragger",
+     "MSFragger isn't installed for FragPipe: open the FragPipe GUI once, Config tab -> Download/Update "
+     "MSFragger (accept the licence), then Retry"),
+    (r"(?i)ionquant.{0,80}(not found|could not find|missing|download|license)",
+     "IonQuant isn't installed for FragPipe: FragPipe GUI -> Config tab -> Download/Update IonQuant, then Retry"),
+    (r"(?i)diatracer.{0,80}(not found|could not find|missing|download|license)",
+     "diaTracer isn't installed for FragPipe: FragPipe GUI -> Config tab -> Download/Update diaTracer"),
+    (r"(?i)dia-?nn.{0,80}(not found|could not find|missing|not executable|no such file)",
+     "FragPipe can't find DIA-NN: set 'DIA-NN exe' in Advanced (e.g. C:/DIA-NN/2.3.2/DiaNN.exe)"),
+    (r"used by another process|cannot access the file",
+     "A file was open in another program (Xcalibur, Excel, Explorer preview): close it, then Retry"),
+    (r"(?i)(RawFileReader|ThermoRawFileParser|error (loading|reading).{0,60}\.raw|\.raw.{0,60}(corrupt|truncated))",
+     "A .raw file couldn't be read: it may be incomplete or corrupt — re-copy it from the instrument PC"),
+    (r"UnsupportedClassVersionError|Unsupported class file major version",
+     "Wrong Java version: FragPipe must use its bundled Java — reinstall FragPipe or set its launcher again"),
+    (r"Could not find or load main class|Unable to access jarfile",
+     "The FragPipe installation looks broken: re-select fragpipe.bat (tab 1, Find FragPipe) or reinstall FragPipe"),
+    (r"is not recognized as an internal or external command",
+     "The FragPipe launcher path is wrong: tab 1 -> Find FragPipe"),
+    (r"Access is denied|Permission denied",
+     "Windows refused access to a file or folder: check the experiment folder isn't read-only / open elsewhere"),
+    (r"(?i)output directory.{0,40}not empty|workdir.{0,40}not empty",
+     "FragPipe wants an empty output folder: Retry (labwatch moves the old output aside)"),
+    (r"(?i)philosopher.{0,120}(error|fatal)",
+     "Philosopher (the FDR/report tool) failed — often a leftover lock from an interrupted run: Retry once"),
+    (r"(?i)(no|0) (psms|peptides|proteins) (were )?(found|identified|passed)",
+     "The search found no identifications: wrong FASTA/species, wrong method, or empty/blank runs"),
+    (r"Exception in thread|java\.lang\.\w+Exception",
+     "FragPipe (Java) hit an internal error: see the console log; Retry once, then send diagnostics"),
+]
+_EXPLAIN = [(re.compile(rx), msg) for rx, msg in EXPLANATIONS]
+
+
+def explain(console_text: str) -> list[str]:
+    """Plain-English causes for a failed run, most specific first (empty if nothing recognised)."""
+    return [msg for rx, msg in _EXPLAIN if rx.search(console_text)]
+
+
+# ----------------------------------------------------------------- progress --
+
+_TASK = re.compile(r"^([A-Za-z][\w .\-]{1,50}?) \[Work dir: ", re.MULTILINE)
+_DONE_TASK = re.compile(r"Process '([^']+)' finished, exit code: (\d+)")
+KNOWN_STEPS = ("MSFragger", "MSBooster", "Percolator", "PeptideProphet", "ProteinProphet", "PTMProphet",
+               "Philosopher", "FreeQuant", "IonQuant", "TMT-Integrator", "TMTIntegrator", "diaTracer",
+               "DIA-NN", "EasyPQP", "Spectral library", "Crystal-C", "PTM-Shepherd", "Report")
+
+
+def progress(console_log: Path) -> str:
+    """Best-effort 'current step (n finished)' from FragPipe's console output."""
+    text = read_tail_text(console_log, 200_000)
+    if not text:
+        return "starting"
+    started = _TASK.findall(text)
+    finished = _DONE_TASK.findall(text)
+    if started:
+        return f"{started[-1].strip()} ({len(finished)} step(s) done)"
+    for ln in reversed(text.splitlines()[-60:]):
+        for step in KNOWN_STEPS:
+            if step.lower() in ln.lower():
+                return step
+    return "running"
+
+
+# ------------------------------------------------------------ inspections --
+
+_FASTA_CACHE: dict[tuple[str, float, int], dict] = {}
+
+
+def fasta_info(path: Path, decoy_tag: str = "rev_") -> dict:
+    """{'entries', 'decoys', 'gb'} for a FASTA; cached by (path, mtime, size)."""
+    p = Path(path)
+    try:
+        st = p.stat()
+    except OSError:
+        return {"entries": 0, "decoys": 0, "gb": 0.0, "error": "not found"}
+    key = (str(p), st.st_mtime, st.st_size)
+    if key in _FASTA_CACHE:
+        return _FASTA_CACHE[key]
+    entries = decoys = 0
+    tag = b">" + decoy_tag.encode()
+    try:
+        with open(p, "rb") as fh:
+            for line in fh:
+                if line.startswith(b">"):
+                    entries += 1
+                    if line.startswith(tag):
+                        decoys += 1
+    except OSError as exc:
+        return {"entries": 0, "decoys": 0, "gb": 0.0, "error": str(exc)}
+    info = {"entries": entries, "decoys": decoys, "gb": st.st_size / 1e9}
+    _FASTA_CACHE[key] = info
+    return info
+
+
+# (workflow key, label). Shown when present, so a summary never lies about keys it doesn't know.
+WORKFLOW_KEYS = (
+    ("workflow.description", "description"),
+    ("database.decoy-tag", "decoy tag"),
+    ("msfragger.run-msfragger", "MSFragger"),
+    ("ionquant.run-ionquant", "IonQuant"),
+    ("ionquant.mbr", "match-between-runs"),
+    ("tmtintegrator.run-tmtintegrator", "TMT-Integrator"),
+    ("diann.run-dia-nn", "DIA-NN"),
+    ("diatracer.run-diatracer", "diaTracer"),
+    ("speclibgen.run-speclibgen", "spectral library"),
+)
+
+
+def read_properties(text: str) -> dict[str, str]:
+    out = {}
+    for ln in text.splitlines():
+        ln = ln.strip()
+        if not ln or ln.startswith(("#", "!")):
+            continue
+        m = re.match(r"([^=:\s]+)\s*[=:]\s*(.*)$", ln)
+        if m:
+            out[m.group(1)] = m.group(2).replace("\\:", ":").replace("\\\\", "\\")
+    return out
+
+
+def inspect_workflow(path: Path) -> dict:
+    """{'database', 'database_exists', 'settings': {label: value}, 'decoy_tag'} for a .workflow file."""
+    try:
+        props = read_properties(Path(path).read_text(encoding="utf-8", errors="replace"))
+    except OSError as exc:
+        return {"error": str(exc)}
+    db = props.get("database.db-path", "")
+    return {
+        "database": db,
+        "database_exists": bool(db) and Path(db).is_file(),
+        "decoy_tag": props.get("database.decoy-tag", "rev_") or "rev_",
+        "settings": {label: props[k] for k, label in WORKFLOW_KEYS if k in props and props[k] != ""},
+    }
+
+
+def describe_method(cfg: Config, key: str) -> list[tuple[bool | None, str]]:
+    """Human-readable readiness lines for one method: [(ok?, text)]. ok None = warning."""
+    m = cfg.methods[key]
+    return describe_files(cfg.workflow_dir, cfg.fasta_dir, m.workflow, m.fasta)
+
+
+def describe_files(workflow_dir: Path, fasta_dir: Path, workflow: str, fasta: str) -> list[tuple[bool | None, str]]:
+    out: list[tuple[bool | None, str]] = []
+    wf = _find_file(workflow, Path(workflow_dir), ".workflow") if workflow else None
+    if wf is None:
+        return [(False, f"workflow {workflow or '(none)'} not found in {workflow_dir}")]
+    info = inspect_workflow(wf)
+    settings = ", ".join(f"{k}={v}" for k, v in info.get("settings", {}).items() if k != "description")
+    out.append((True, f"workflow {wf.name}" + (f" [{settings}]" if settings else "")))
+    fa = _find_file(fasta, Path(fasta_dir)) if fasta else None
+    source = "method setting"
+    if fa is None and info.get("database_exists"):
+        fa, source = Path(info["database"]), "workflow's own database"
+    if fa is None:
+        out.append((False, f"FASTA {fasta or '(none)'} not found in {fasta_dir}"))
+        return out
+    fi = fasta_info(fa, info.get("decoy_tag", "rev_"))
+    if fi.get("error"):
+        out.append((False, f"FASTA {fa}: {fi['error']}"))
+    elif fi["decoys"] == 0:
+        out.append((None, f"FASTA {fa.name} ({fi['entries']} entries, {source}) has NO decoys "
+                          f"(no '>{info.get('decoy_tag', 'rev_')}' entries) — add decoys in FragPipe's Database tab"))
+    else:
+        out.append((True, f"FASTA {fa.name} ({fi['entries'] - fi['decoys']} targets + {fi['decoys']} decoys, {source})"))
+    return out
+
+
+def fragpipe_root(launcher: Path) -> Path | None:
+    """<...>/FragPipe-24.0/fragpipe for a launcher at <...>/fragpipe/bin/fragpipe.bat."""
+    p = Path(launcher)
+    return p.parent.parent if p.parent.name.lower() == "bin" else None
+
+
+def install_report(cfg: Config) -> list[tuple[bool | None, str, str]]:
+    """What the FragPipe installation has: [(ok?, label, detail)] — static checks, starts nothing."""
+    rows: list[tuple[bool | None, str, str]] = []
+    try:
+        exe = resolve_launcher(cfg)
+    except Hold as exc:
+        return [(False, "launcher", str(exc))]
+    rows.append((True, "launcher", str(exe)))
+    root = fragpipe_root(exe)
+    if root is None or not root.is_dir():
+        rows.append((None, "install folder", "launcher is not in a standard fragpipe/bin folder; skipping deeper checks"))
+        return rows
+    ver = re.search(r"FragPipe-([\d.]+)", str(root))
+    jars = sorted(root.glob("lib/fragpipe*.jar"))
+    rows.append((bool(jars) or None, "FragPipe", (f"version {ver.group(1)}" if ver else "version ?") +
+                 (f", {jars[-1].name}" if jars else ", lib/fragpipe*.jar not found")))
+    java = [j for j in (root.parent / "jre" / "bin" / "java.exe", root / "jre" / "bin" / "java.exe",
+                        root.parent / "jre" / "bin" / "java", root / "jre" / "bin" / "java") if j.is_file()]
+    rows.append((True if java else None, "bundled Java", str(java[0]) if java else "not found (FragPipe will use the system Java)"))
+    tools_dirs = [Path(cfg.config_tools_folder)] if cfg.config_tools_folder else []
+    tools_dirs += [root / "tools", root.parent / "tools"]
+
+    def find(pattern: str) -> Path | None:
+        for d in tools_dirs:
+            if d.is_dir():
+                hits = sorted(d.rglob(pattern))
+                if hits:
+                    return hits[-1]
+        return None
+
+    for label, pattern, needed_for in (("MSFragger", "MSFragger*.jar", "every search"),
+                                       ("IonQuant", "IonQuant*.jar", "isoDTB / label-free / TMT quant"),
+                                       ("diaTracer", "diaTracer*.jar", "some DIA workflows")):
+        hit = find(pattern)
+        rows.append((True if hit else None, label,
+                     hit.name if hit else f"not found — needed for {needed_for}. FragPipe GUI -> Config tab -> "
+                                          f"Download/Update {label} (licence)"))
+    diann = Path(cfg.config_diann) if cfg.config_diann else find("DiaNN.exe") or find("diann*")
+    rows.append((True if diann and Path(diann).exists() else None, "DIA-NN",
+                 str(diann) if diann and Path(diann).exists() else "not found (only needed for DIA)"))
+    return rows
+
+
+def import_workflow(src: Path, method: str, workflow_dir: Path, fasta_dir: Path) -> dict:
+    """Copy a .workflow (e.g. a good run's fragpipe.workflow) into workflow_dir as <method>.workflow.
+
+    Also copies the FASTA it points at into fasta_dir if it isn't there yet.
+    An existing <method>.workflow is kept as <method>.workflow.bak-<ts>.
+    Returns {'workflow': name, 'fasta': name or '', 'notes': [...]}.
+    """
+    src = Path(src)
+    notes: list[str] = []
+    workflow_dir.mkdir(parents=True, exist_ok=True)
+    dest = workflow_dir / f"{method}.workflow"
+    if dest.exists() and dest.resolve() != src.resolve():
+        bak = dest.with_name(f"{dest.name}.bak-{datetime.now():%Y%m%d-%H%M%S}")
+        os.replace(dest, bak)
+        notes.append(f"previous {dest.name} kept as {bak.name}")
+    if dest.resolve() != src.resolve():
+        dest.write_bytes(src.read_bytes())
+    info = inspect_workflow(dest)
+    fasta_name = ""
+    db = info.get("database") or ""
+    if db and Path(db).is_file():
+        fasta_dir.mkdir(parents=True, exist_ok=True)
+        target = fasta_dir / Path(db).name
+        if not target.exists():
+            import shutil
+
+            shutil.copy2(db, target)
+            notes.append(f"copied FASTA {Path(db).name} into {fasta_dir}")
+        fasta_name = target.name
+    elif db:
+        notes.append(f"the workflow's database {db} doesn't exist on this PC — pick a FASTA for {method}")
+    else:
+        notes.append(f"the workflow has no database set — pick a FASTA for {method}")
+    return {"workflow": dest.name, "fasta": fasta_name, "notes": notes}
