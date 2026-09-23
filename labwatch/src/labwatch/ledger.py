@@ -2,7 +2,7 @@
 SQLite job ledger — the machine-readable source of truth for job state.
 
     ledger = Ledger("C:/Fragpipe_Auto/labwatch.db")
-    ledger.recover_on_startup()            # running -> failed ("interrupted")
+    ledger.recover_on_startup()            # running -> queued again (or failed after MAX_ATTEMPTS)
     job_id = ledger.insert(Job(...))        # status queued
     ledger.set_status(job_id, "running")
     job = ledger.next_queued()
@@ -21,6 +21,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 STATUSES = ("queued", "running", "done", "failed")
+MAX_ATTEMPTS = 3  # FragPipe starts per job before an interrupted job is failed instead of re-queued
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -34,7 +35,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     created_at  TEXT NOT NULL,
     started_at  TEXT,
     finished_at TEXT,
-    parsed_json TEXT NOT NULL
+    parsed_json TEXT NOT NULL,
+    attempts    INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS jobs_status ON jobs(status);
 """
@@ -57,6 +59,7 @@ class Job:
     created_at: str | None = None
     started_at: str | None = None
     finished_at: str | None = None
+    attempts: int = 0
 
     @classmethod
     def _from_row(cls, row: sqlite3.Row) -> Job:
@@ -72,15 +75,20 @@ class Job:
             started_at=row["started_at"],
             finished_at=row["finished_at"],
             parsed=json.loads(row["parsed_json"]),
+            attempts=row["attempts"] if "attempts" in row.keys() else 0,
         )
 
 
 class Ledger:
     def __init__(self, db_path: str | Path):
         self.path = Path(db_path)
-        self._conn = sqlite3.connect(self.path, check_same_thread=False)
+        self._conn = sqlite3.connect(self.path, check_same_thread=False, timeout=30)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
+        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(jobs)")}
+        if "attempts" not in cols:  # ledgers created by 0.1.x
+            self._conn.execute("ALTER TABLE jobs ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0")
+            self._conn.commit()
 
     def close(self) -> None:
         self._conn.close()
@@ -112,13 +120,36 @@ class Ledger:
             self._conn.execute("UPDATE jobs SET status=?, reason=? WHERE id=?", (status, reason, job_id))
         self._conn.commit()
 
-    def recover_on_startup(self) -> list[int]:
-        """Jobs left 'running' by a crash/reboot are failed; FragPipe died with us."""
-        rows = self._conn.execute("SELECT id FROM jobs WHERE status='running'").fetchall()
-        ids = [r["id"] for r in rows]
-        for jid in ids:
-            self.set_status(jid, "failed", "interrupted: labwatch restarted while this job was running")
-        return ids
+    def start_attempt(self, job_id: int) -> int:
+        """queued -> running and count the attempt. Returns the new attempt number."""
+        self._conn.execute("UPDATE jobs SET status='running', reason=NULL, started_at=?, finished_at=NULL,"
+                           " attempts=attempts+1 WHERE id=?", (now_iso(), job_id))
+        self._conn.commit()
+        return self._conn.execute("SELECT attempts FROM jobs WHERE id=?", (job_id,)).fetchone()["attempts"]
+
+    def recover_on_startup(self) -> list[tuple[int, str]]:
+        """Jobs left 'running' by a crash/reboot/stop: FragPipe died with us.
+
+        Re-queued so they run again automatically, unless they have already been
+        started MAX_ATTEMPTS times (then failed, so a job that kills the PC
+        can't loop forever). Returns [(job id, new status)].
+        """
+        rows = self._conn.execute("SELECT id, attempts FROM jobs WHERE status='running'").fetchall()
+        out = []
+        for r in rows:
+            if r["attempts"] >= MAX_ATTEMPTS:
+                self.set_status(r["id"], "failed", f"interrupted {r['attempts']} times; not restarting it again "
+                                                   f"(labwatch retry {r['id']} to try once more)")
+                out.append((r["id"], "failed"))
+            else:
+                self.set_status(r["id"], "queued", "interrupted (labwatch restarted); will run again")
+                out.append((r["id"], "queued"))
+        return out
+
+    def requeue(self, job_id: int, reason: str | None = None, reset_attempts: bool = False) -> None:
+        sql = "UPDATE jobs SET status='queued', reason=?, finished_at=NULL" + (", attempts=0" if reset_attempts else "")
+        self._conn.execute(sql + " WHERE id=?", (reason, job_id))
+        self._conn.commit()
 
     # ----------------------------------------------------------------- reads --
 

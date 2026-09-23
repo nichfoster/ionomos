@@ -72,9 +72,24 @@ def cmd_run(args) -> int:
     _setup_logging(cfg.log_dir, args.verbose)
     log.info("labwatch %s starting (config %s)", __version__, cfg.config_path)
     ledger = Ledger(cfg.database)
-    for jid in ledger.recover_on_startup():
-        log.warning("job %d was running at shutdown; marked failed", jid)
+    for jid, st in ledger.recover_on_startup():
+        log.warning("job %d was running when labwatch stopped; now %s", jid, st)
     write_pid(cfg.log_dir)
+
+    worker = worker_thread = None
+    if cfg.auto_run:
+        from labwatch.worker import Worker
+
+        worker = Worker(cfg)
+        worker_thread = threading.Thread(target=worker.run_forever, name="worker", daemon=True)
+        worker_thread.start()
+    else:
+        log.info("fragpipe.auto_run is off: jobs are filed and queued, FragPipe is not started")
+
+    def stop_worker():
+        if worker is not None:
+            worker.stop()
+            worker_thread.join(timeout=60)  # lets a running FragPipe be killed and its job re-queued
 
     resolver = None
     root = None
@@ -97,9 +112,14 @@ def cmd_run(args) -> int:
 
     w = Watcher(cfg.inbox, on_stable, cfg.poll_seconds, cfg.stable_seconds, cfg.min_raw_files)
     if root is None:
+        if hasattr(signal, "SIGTERM"):
+            signal.signal(signal.SIGTERM, lambda *_: w.stop())
         try:
             w.run_forever()
+        except KeyboardInterrupt:
+            pass
         finally:
+            stop_worker()
             clear_pid(cfg.log_dir)
         return 0
 
@@ -131,6 +151,7 @@ def cmd_run(args) -> int:
         pass
     finally:
         w.stop()
+        stop_worker()
         clear_pid(cfg.log_dir)
     return 0
 
@@ -163,15 +184,32 @@ def cmd_check(args) -> int:
         p = getattr(cfg, name)
         row(p.is_dir(), f"paths.{name}", str(p))
     row(cfg.database.parent.is_dir(), "paths.database (parent)", str(cfg.database))
-    row(cfg.fragpipe_exe.is_file() or None, "paths.fragpipe_exe", f"{cfg.fragpipe_exe}" + (
-        "" if cfg.fragpipe_exe.is_file() else "  (not found — needed for Phase 2 searches only)"))
+    from labwatch import fragpipe
+
+    try:
+        launcher = fragpipe.resolve_launcher(cfg)
+        row(True, "FragPipe launcher", str(launcher) + ("" if launcher == cfg.fragpipe_exe else "  (using the .bat next to the configured exe)"))
+    except fragpipe.Hold as exc:
+        row(None, "FragPipe launcher", f"{exc}; jobs wait until it's set")
+    row(True if cfg.auto_run else None, "fragpipe.auto_run",
+        "on: queued jobs are searched automatically" if cfg.auto_run else "off: jobs are only filed and queued")
     users = cfg.known_users()
     row(bool(users), "users", ", ".join(users) if users else "none — create folders under users_root")
     for u, als in cfg.user_aliases.items():
         row(u in users, f"  alias {', '.join(als)}", f"-> {u}" + ("" if u in users else "  (no such user folder!)"))
     for k, m in cfg.methods.items():
-        wf = cfg.workflow_dir / m.workflow
-        row(wf.is_file() or None, f"methods.{k}", f"{m.workflow} ({m.data_type})" + ("" if wf.is_file() else "  (workflow file missing)"))
+        wf = fragpipe._find_file(m.workflow, cfg.workflow_dir, ".workflow")
+        fa = fragpipe._find_file(m.fasta, cfg.fasta_dir) if m.fasta else None
+        if wf is None:
+            row(None, f"methods.{k}", f"workflow {m.workflow} missing in {cfg.workflow_dir} — {k} jobs wait")
+            continue
+        in_wf = fragpipe.workflow_db_path(wf.read_text(encoding="utf-8", errors="replace"))
+        if fa:
+            row(True, f"methods.{k}", f"{wf.name} + {fa.name} ({m.data_type})")
+        elif in_wf and Path(in_wf).is_file():
+            row(True, f"methods.{k}", f"{wf.name} ({m.data_type}); FASTA from the workflow: {in_wf}")
+        else:
+            row(None, f"methods.{k}", f"{wf.name}: FASTA {m.fasta} missing in {cfg.fasta_dir} — {k} jobs wait")
     if cfg.gui_enabled:
         from labwatch.resolve import gui_available
 
@@ -260,8 +298,8 @@ def cmd_retry(args) -> int:
     if job.status != "failed":
         print(f"job {job.id} is {job.status}, not failed", file=sys.stderr)
         return 1
-    ledger.set_status(job.id, "queued")
-    print(f"job {job.id} re-queued")
+    ledger.requeue(job.id, "retry requested", reset_attempts=True)
+    print(f"job {job.id} re-queued; the running watcher picks it up within seconds")
     return 0
 
 
@@ -330,6 +368,10 @@ def main(argv: list[str] | None = None) -> int:
     testbed.add_parser(sub).set_defaults(fn=cmd_testbed)
 
     argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["fake-fragpipe"]:  # hidden: the testbed's stand-in for FragPipe
+        from labwatch.testbed import fake_fragpipe
+
+        return fake_fragpipe(argv[1:])
     if not argv:  # double-clicked exe / bare `labwatch` -> the app
         argv = ["setup"]
     args = ap.parse_args(argv)

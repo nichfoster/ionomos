@@ -112,3 +112,21 @@ text block with version + commit, check, status, config, log tail and inbox
 notes, so a report from the PC carries everything needed to reproduce it.
 GitHub Actions runs the suite on Windows on every push and builds the exe on
 tags, so the Windows-specific parts are exercised without a hand build.
+
+### D16 — FragPipe runs inside the watcher process; setup gaps hold, job problems fail
+**2026-09-22.** The worker is a thread in `labwatch run` (not a second
+service): one process to start, stop, and put in Task Scheduler, and the
+startup task already runs interactively. One search at a time. Before each
+job, missing *setup* (launcher, the method's pinned workflow or FASTA) holds
+the job in `queued` with a visible "waiting: …" reason and it starts on its own
+once the file exists — a fresh install can accept drops before FragPipe is
+configured, and nothing fails because an admin hasn't finished. Problems that
+belong to the job (its experiment.yaml names a missing workflow, raws moved
+away, FragPipe exits non-zero, timeout) fail it with `FAILED.txt`. The FASTA
+is written into a per-job copy of the workflow (`database.db-path`), so the
+per-method FASTA setting is authoritative and "FASTA file path is empty" can't
+happen; the pinned workflow file is never modified. Inputs go in
+`labwatch_run/`, FragPipe's `--workdir` (`fragpipe/`) starts empty, and a
+re-run moves the previous output aside instead of deleting it. Launcher is
+`fragpipe.bat` (the 22.0 inventory shows `bin/fragpipe.bat` next to a GUI
+`fragpipe.exe`); a configured `fragpipe.exe` is swapped for the `.bat` beside it.

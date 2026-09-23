@@ -142,7 +142,7 @@ def test_no_raws_never_queues_and_unresolvable_writes_note(bed):
 def test_restart_recovers_running_job(bed):
     testbed.drop(bed["root"], "iso_good")
     assert intake(bed["cfg"].inbox / "20260902-isoDTB_EJQ-2-027", bed["cfg"], bed["ledger"]).value == "queued"
-    bed["ledger"].set_status(1, "running")
+    bed["ledger"].start_attempt(1)
     fresh = Ledger(bed["cfg"].database)
-    assert fresh.recover_on_startup() == [1]
-    assert fresh.get(1).status == "failed"
+    assert fresh.recover_on_startup() == [(1, "queued")]
+    assert fresh.get(1).status == "queued" and "interrupted" in fresh.get(1).reason

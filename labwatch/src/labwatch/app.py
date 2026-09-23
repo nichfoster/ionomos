@@ -18,6 +18,7 @@ import sys
 import threading
 import tkinter as tk
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
@@ -48,6 +49,8 @@ FIRST-TIME SETUP (this app, tabs left to right)
   4 Advanced  Timings, FragPipe threads/RAM, the resolver window, etc.
   5 Run       Save, run Check (all green?), Start the watcher, and install the
               startup task so it runs every time this account logs in.
+              The watcher also runs FragPipe on each filed experiment, one at
+              a time (Advanced -> "Run FragPipe automatically" turns that off).
   Then drop a test folder into the inbox and watch it move.
 
 NAMING RULES (tell the lab)
@@ -76,6 +79,17 @@ REPORTING A PROBLEM
   Run & Test tab -> "Copy diagnostics". It puts check + status + config + the
   last 150 log lines on the clipboard (and saves a copy in the logs folder).
   Paste that into the chat with a sentence about what you expected.
+
+FRAGPIPE SEARCHES
+  Each filed experiment is searched with its method's workflow + FASTA.
+  Inside the experiment folder you get:
+    labwatch_run/   the manifest, the workflow as used, FragPipe's console log
+    fragpipe/       FragPipe's output
+    DONE.txt or FAILED.txt   one-line result (FAILED says why)
+  A job "waiting: ..." is missing a setup file (FragPipe launcher, workflow,
+  FASTA) and starts by itself once it's there. After fixing a failure:
+  Run & Test -> "Retry a failed job…". Re-runs keep old output as
+  fragpipe_previous_<time>/.
 
 WHERE THINGS ARE
   config.yaml        all settings (path shown at the bottom of this window)
@@ -251,6 +265,7 @@ class App:
                     d[sec][k] = float(raw) if "." in raw else int(raw)
                 except ValueError:
                     raise ConfigError(f"{sec}.{k} must be a number, got {raw!r}") from None
+        d["fragpipe"]["auto_run"] = self.bv("fragpipe.auto_run", True).get()
         d["fragpipe"]["config_tools_folder"] = self.v("fragpipe.config_tools_folder").get().strip()
         d["fragpipe"]["config_diann"] = self.v("fragpipe.config_diann").get().strip()
         d["gui"]["enabled"] = self.bv("gui.enabled").get()
@@ -297,7 +312,7 @@ class App:
             ("paths.fasta_dir", "FASTA folder", "dir", "Protein databases (with decoys) the workflows use."),
             ("paths.log_dir", "Logs folder", "dir", ""),
             ("paths.database", "Job ledger (SQLite file)", "save", "Created automatically; its folder must exist."),
-            ("paths.fragpipe_exe", "FragPipe launcher (exe)", "file", "e.g. C:/FragPipe/FragPipe-24.0/fragpipe/bin/fragpipe.exe — needed only when searches are enabled."),
+            ("paths.fragpipe_exe", "FragPipe launcher", "file", "fragpipe.bat in FragPipe's bin folder, e.g. C:/FragPipe/FragPipe-24.0/fragpipe/bin/fragpipe.bat — 'Find FragPipe' looks for it."),
         ]
         self.path_rows: dict[str, PathRow] = {}
         for key, label, kind, hint in rows:
@@ -306,8 +321,20 @@ class App:
         b = ttk.Frame(f)
         b.grid(row=r, column=0, columnspan=5, sticky="w", **PAD)
         ttk.Button(b, text="Create all missing folders", command=self.create_all).pack(side="left", padx=4)
+        ttk.Button(b, text="Find FragPipe", command=self.find_fragpipe).pack(side="left", padx=4)
         ttk.Button(b, text="Open inbox", command=lambda: self._open(self.v("paths.inbox").get())).pack(side="left", padx=4)
         ttk.Button(b, text="Open users folder", command=lambda: self._open(self.v("paths.users_root").get())).pack(side="left", padx=4)
+
+    def find_fragpipe(self):
+        from labwatch.fragpipe import detect_launcher
+
+        found = detect_launcher()
+        if found:
+            self.v("paths.fragpipe_exe").set(str(found).replace("\\", "/"))
+            self.set_status(f"found FragPipe: {found} (press Save)")
+        else:
+            messagebox.showinfo("Find FragPipe", "No fragpipe.bat found under C:/FragPipe or your Downloads.\n"
+                                "Use Browse… and pick <FragPipe folder>/fragpipe/bin/fragpipe.bat.")
 
     def apply_quick(self):
         d = configio.defaults(self.v("quick.root").get().strip(), self.v("quick.users").get().strip())
@@ -602,16 +629,19 @@ class App:
         num(w, 1, "watcher.stable_seconds", "Stable for (s)", "folder must be unchanged this long before it is taken — be generous for USB/network copies")
         num(w, 2, "watcher.min_raw_files", "Min .raw files", "folders with fewer are ignored (left in the inbox)")
 
-        fp = group("FragPipe (searches — Phase 2)", 1, 0)
-        num(fp, 0, "fragpipe.threads", "Threads", "PC has 32 logical CPUs; leave a few for the OS")
-        num(fp, 1, "fragpipe.ram_gb", "RAM (GB)", "of 64 GB")
-        num(fp, 2, "fragpipe.timeout_minutes", "Timeout (min)", "a run longer than this is failed")
-        ttk.Label(fp, text="Tools folder").grid(row=3, column=0, sticky="e", **PAD)
-        ttk.Entry(fp, textvariable=self.v("fragpipe.config_tools_folder"), width=34).grid(row=3, column=1, columnspan=2, sticky="ew", **PAD)
-        ttk.Label(fp, text="DIA-NN exe").grid(row=4, column=0, sticky="e", **PAD)
-        ttk.Entry(fp, textvariable=self.v("fragpipe.config_diann"), width=34).grid(row=4, column=1, columnspan=2, sticky="ew", **PAD)
-        ttk.Label(fp, text="both optional: only if the first headless run can't find MSFragger/DIA-NN",
-                  foreground="#666", wraplength=380).grid(row=5, column=0, columnspan=3, sticky="w", padx=6)
+        fp = group("FragPipe searches", 1, 0)
+        ttk.Checkbutton(fp, text="Run FragPipe automatically on every queued experiment",
+                        variable=self.bv("fragpipe.auto_run", True)).grid(row=0, column=0, columnspan=3, sticky="w", **PAD)
+        num(fp, 1, "fragpipe.threads", "Threads", "PC has 32 logical CPUs; leave a few for the OS")
+        num(fp, 2, "fragpipe.ram_gb", "RAM (GB)", "of 64 GB")
+        num(fp, 3, "fragpipe.timeout_minutes", "Timeout (min)", "a search running longer is stopped and failed; 0 = no limit")
+        ttk.Label(fp, text="Tools folder").grid(row=4, column=0, sticky="e", **PAD)
+        ttk.Entry(fp, textvariable=self.v("fragpipe.config_tools_folder"), width=34).grid(row=4, column=1, columnspan=2, sticky="ew", **PAD)
+        ttk.Label(fp, text="DIA-NN exe").grid(row=5, column=0, sticky="e", **PAD)
+        ttk.Entry(fp, textvariable=self.v("fragpipe.config_diann"), width=34).grid(row=5, column=1, columnspan=2, sticky="ew", **PAD)
+        ttk.Label(fp, text="Off = experiments are only filed and queued. Tools folder / DIA-NN exe are optional: "
+                           "only if the first headless run can't find MSFragger / DIA-NN. Restart the watcher after changes.",
+                  foreground="#666", wraplength=380).grid(row=6, column=0, columnspan=3, sticky="w", padx=6)
 
         g = group("Resolver window", 0, 1)
         ttk.Checkbutton(g, text="Open a window when a folder can't be interpreted", variable=self.bv("gui.enabled")).grid(row=0, column=0, columnspan=3, sticky="w", **PAD)
@@ -656,6 +686,10 @@ class App:
         ttk.Button(w, text="Stop watcher", command=self.stop_watcher).grid(row=1, column=2, **PAD)
         ttk.Button(w, text="Show queue (status)", command=lambda: self._cli(["status", "--all"])).grid(row=1, column=3, **PAD)
         ttk.Button(w, text="Copy diagnostics", command=self.copy_diagnostics).grid(row=2, column=0, **PAD)
+        ttk.Button(w, text="Retry a failed job…", command=self.retry_job).grid(row=2, column=1, **PAD)
+        ttk.Button(w, text="Open job folder…", command=self.open_job).grid(row=2, column=2, **PAD)
+        self.fp_status = ttk.Label(w, text="", wraplength=440)
+        self.fp_status.grid(row=4, column=0, columnspan=4, sticky="w", **PAD)
         ttk.Label(w, text="Start = runs in the background until you Stop or log out. Use the startup task to make it "
                           "permanent. Copy diagnostics = one text block (check, status, config, log tail) on the "
                           "clipboard — paste it to whoever is fixing things.",
@@ -740,10 +774,77 @@ class App:
             if pid:
                 txt, ok = f"Watcher: RUNNING (pid {pid}, started elsewhere — startup task?)", True
         self.run_status.configure(text=txt, foreground="#2e7d32" if ok else "#c62828")
+        self.fp_status.configure(text=self._jobs_summary())
         st = service.task_status()
         self.task_status.configure(text={"installed": "Startup task: installed", "missing": "Startup task: not installed",
                                          "n/a": "Startup task: n/a on this OS"}[st])
         self.root.after(2000, self._refresh_status)
+
+    def _ledger(self):
+        from labwatch.ledger import Ledger
+
+        cfg = self.proc_config if (self.proc is not None and self.proc.poll() is None) else self.config_path
+        try:
+            db = Path(configio.read_config(cfg)["paths"]["database"]) if cfg and cfg.is_file() else None
+        except Exception:  # noqa: BLE001 - half-edited config
+            return None
+        return Ledger(db) if db and db.is_file() else None
+
+    def _jobs_summary(self) -> str:
+        led = self._ledger()
+        if led is None:
+            return "FragPipe: no jobs yet"
+        try:
+            jobs = led.list()
+        finally:
+            led.close()
+        running = [j for j in jobs if j.status == "running"]
+        counts = {s: sum(1 for j in jobs if j.status == s) for s in ("queued", "failed", "done")}
+        parts = []
+        if running:
+            j = running[0]
+            try:
+                since = datetime.fromisoformat(j.started_at).astimezone().strftime("%H:%M")
+            except (TypeError, ValueError):
+                since = "?"
+            parts.append(f"FragPipe: RUNNING job {j.id} ({j.user}/{j.inbox_name}, {j.method}) since {since}")
+        else:
+            parts.append("FragPipe: idle")
+        parts.append(f"{counts['queued']} queued, {counts['failed']} failed, {counts['done']} done")
+        waiting = next((j.reason for j in jobs if j.status == "queued" and (j.reason or "").startswith("waiting:")), None)
+        if waiting:
+            parts.append(waiting)
+        return " · ".join(parts)
+
+    def _pick_job(self, title: str, status: str | None):
+        from tkinter import simpledialog
+
+        led = self._ledger()
+        if led is None:
+            messagebox.showinfo(title, "No jobs yet.")
+            return None
+        try:
+            jobs = led.list(status)
+        finally:
+            led.close()
+        if not jobs:
+            messagebox.showinfo(title, f"No {status or ''} jobs.".replace("  ", " "))
+            return None
+        listing = "\n".join(f"{j.id}: {j.user}/{j.inbox_name}  [{j.status}]" + (f" — {j.reason[:80]}" if j.reason else "")
+                            for j in jobs[-12:])
+        jid = simpledialog.askinteger(title, f"{listing}\n\nJob number:", initialvalue=jobs[-1].id, parent=self.root)
+        return next((j for j in jobs if j.id == jid), None) if jid else None
+
+    def retry_job(self):
+        job = self._pick_job("Retry a failed job", "failed")
+        if job:
+            cfg = self.proc_config if (self.proc is not None and self.proc.poll() is None) else self.config_path
+            self._cli(["retry", str(job.id)], config=cfg)
+
+    def open_job(self):
+        job = self._pick_job("Open job folder", None)
+        if job:
+            self._open(job.dest_dir)
 
     def _tb_cfg(self) -> Path:
         return Path(self.v("tb.dir").get().strip()) / "Fragpipe_Auto" / "config.yaml"
@@ -870,6 +971,10 @@ class App:
         threading.Thread(target=go, daemon=True).start()
 
     def update_from_git(self):
+        if "RUNNING job" in self._jobs_summary() and not messagebox.askyesno(
+                "Update", "A FragPipe search is running. Updating stops it; the job re-runs from the start "
+                          "when the watcher starts again. Update anyway?"):
+            return
         if self.proc is not None and self.proc.poll() is None:
             service.stop_process(self.proc)
             self.proc = None

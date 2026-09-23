@@ -33,14 +33,14 @@ def defaults(root: str | None = None, users_root: str | None = None) -> dict:
         "paths": {
             "inbox": f"{root}/inbox",
             "users_root": users_root,
-            "fragpipe_exe": "C:/FragPipe/FragPipe-24.0/fragpipe/bin/fragpipe.exe",
+            "fragpipe_exe": "C:/FragPipe/FragPipe-24.0/fragpipe/bin/fragpipe.bat",
             "workflow_dir": f"{root}/workflows",
             "fasta_dir": f"{root}/fasta",
             "database": f"{root}/labwatch.db",
             "log_dir": f"{root}/logs",
         },
         "watcher": {"poll_seconds": 10, "stable_seconds": 60, "min_raw_files": 1},
-        "fragpipe": {"threads": 28, "ram_gb": 48, "timeout_minutes": 240, "config_tools_folder": "",
+        "fragpipe": {"auto_run": True, "threads": 28, "ram_gb": 48, "timeout_minutes": 240, "config_tools_folder": "",
                      "config_diann": ""},
         "gui": {"enabled": True, "timeout_minutes": 0},
         "users": {"aliases": {}, "default": "", "learned_aliases_file": f"{root}/learned_aliases.yaml"},
@@ -92,7 +92,7 @@ def dump_config(d: dict) -> str:
     a("paths:")
     a(f"  inbox:        {_y(p['inbox'])}   # THE drop folder users drag into")
     a(f"  users_root:   {_y(p['users_root'])}   # experiments land in users_root/<user>/<name>")
-    a(f"  fragpipe_exe: {_y(p['fragpipe_exe'])}   # headless launcher (needed for searches)")
+    a(f"  fragpipe_exe: {_y(p['fragpipe_exe'])}   # headless launcher fragpipe.bat (needed for searches)")
     a(f"  workflow_dir: {_y(p['workflow_dir'])}   # pinned .workflow files, one per method")
     a(f"  fasta_dir:    {_y(p['fasta_dir'])}")
     a(f"  database:     {_y(p['database'])}   # SQLite job ledger")
@@ -104,6 +104,7 @@ def dump_config(d: dict) -> str:
     a(f"  min_raw_files: {_y(w['min_raw_files'])}   # folders with fewer .raw files are left alone")
     a("")
     a("fragpipe:")
+    a(f"  auto_run: {_y(bool(f.get('auto_run', True)))}   # run FragPipe on queued jobs automatically")
     a(f"  threads: {_y(f['threads'])}")
     a(f"  ram_gb: {_y(f['ram_gb'])}")
     a(f"  timeout_minutes: {_y(f['timeout_minutes'])}")

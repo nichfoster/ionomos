@@ -29,12 +29,13 @@
 | `configio.py` | config.yaml as a dict; writes a commented file | — |
 | `service.py` | child processes, PID file, Task Scheduler, remembered config path, exe routing; dev install: git update, diagnostics bundle | — |
 | `ledger.py` | SQLite job table + status transitions; source of truth for "what's queued" | `prior-work/store.py` |
-| `worker.py` | Pull next `queued` job, run it, record result. Sequential. | `prior-work/queue_worker.py` |
-| `runners/fragpipe.py` | Build the headless command, run with timeout, tee log | `prior-work/fragpipe_runner.py` (nearly as-is) |
+| `worker.py` | Thread inside `labwatch run`: first runnable `queued` job → FragPipe → done/failed; holds jobs whose setup files are missing. Sequential. | `prior-work/queue_worker.py` |
+| `fragpipe.py` | Prepare a job (launcher, workflow with `database.db-path` patched to the method's FASTA, manifest, TMT annotation), run headless with timeout/stop, kill the process tree | `prior-work/fragpipe_runner.py` |
+| `postprocess.py` | Registry of post-processing steps named in `methods.X.postprocess` (none built yet) | — |
 | `runners/isodtb.py` | Post-proc: modified-peptide → site merge | port of `lab-scripts/isoDTB_…R` |
 | `runners/tmt.py` | Post-proc: experimental annotation fix | port of `lab-scripts/correct_experimental_annotation…R` |
 | `runners/dia.py` | Post-proc: (TBD — probably nothing beyond copying `report.tsv` up) | — |
-| `cli.py` | `labwatch setup / run / check / status / dry-run / retry / testbed / diagnose / update`; no args → app | — |
+| `cli.py` | `labwatch setup / run / check / status / dry-run / retry / testbed / diagnose / update`; no args → app; hidden `fake-fragpipe` for the testbed | — |
 
 ## Data flow for one job
 
@@ -57,15 +58,19 @@
                 write dest\labwatch.json  {status: queued, parsed fields, …}
                 insert ledger row.
 
- 4. worker      next queued job →
-                  status=running
-                  write dest\fragpipe\fragpipe-files.fp-manifest
-                  (TMT) write dest\annotation.txt per plex
-                  run fragpipe.exe --headless --workflow <wf> --manifest <mf>
+ 4. worker      first runnable queued job (a job whose launcher/workflow/FASTA
+                is missing is *held*: stays queued with "waiting: …")  →
+                  status=running, attempts+1
+                  move an old non-empty dest\fragpipe\ aside (fragpipe_previous_<ts>)
+                  write dest\labwatch_run\fragpipe-files.fp-manifest
+                  write dest\labwatch_run\<method>.workflow  (database.db-path = method FASTA)
+                  (TMT) write annotation.txt next to the raws (never over a user's own)
+                  run fragpipe.bat --headless --workflow <wf> --manifest <mf>
                       --workdir dest\fragpipe --threads N --ram G
-                  tee → dest\fragpipe\labwatch_fragpipe.log
-                  exit 0 → postproc(method) → status=done
-                  else   → status=failed, reason in labwatch.json + ledger
+                  tee → dest\labwatch_run\fragpipe_console.log
+                  exit 0 + output → postproc(method) → status=done, DONE.txt
+                  else / timeout  → status=failed, FAILED.txt, reason in labwatch.json + ledger
+                  labwatch stopped → FragPipe tree killed, job back to queued
 
  5. user        opens their folder, sees labwatch.json / DONE.txt / FAILED.txt
 ```
@@ -90,10 +95,13 @@ C:\Fragpipe_General\<user>\<experiment>\    ← where jobs land
   *.raw                              ← moved as-is (or raw\ if user made one)
   experiment.yaml                    ← if the user wrote one
   labwatch.json                      ← status + provenance, rewritten on every transition
-  fragpipe\                          ← --workdir; all FragPipe output
+  labwatch_run\                      ← what labwatch gave FragPipe
     fragpipe-files.fp-manifest
+    <method>.workflow                ← pinned workflow, database.db-path set
+    fragpipe_console.log             ← FragPipe's console output (all attempts)
+  fragpipe\                          ← --workdir; all FragPipe output
     fragpipe.workflow                ← FragPipe copies the workflow used here
-    labwatch_fragpipe.log
+  fragpipe_previous_<ts>\            ← an earlier attempt's output (never deleted)
     combined_modified_peptide_label_quant.tsv   (isoDTB)
     tmt-report\abundance_gene_MD.tsv            (TMT)
     report.tsv / diann-output\                   (DIA)
@@ -126,9 +134,10 @@ C:\Fragpipe_General\<user>\<experiment>\    ← where jobs land
 ```
 
 Persisted in both `labwatch.db` (queryable) and `labwatch.json` (visible to
-the user next to their data). On startup, any job found `running` in the
-ledger is set to `failed` with reason `interrupted` — FragPipe was killed with
-the process, and its workdir may be half-written.
+the user next to their data). A job interrupted by a stop, crash or reboot
+(found `running` on startup) goes back to `queued` and re-runs from scratch,
+its half-written workdir moved aside; after 3 starts it is `failed` instead so
+a job that takes the PC down can't loop. `labwatch retry` resets the count.
 
 ## Configuration (`config.yaml`)
 

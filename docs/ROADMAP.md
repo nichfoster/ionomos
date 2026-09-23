@@ -47,6 +47,13 @@ happens. A bad name gets a `.REJECTED.txt`. Runs for a week without falling over
 
 ## Phase 2 — isoDTB end-to-end
 
+2026-09-22: automatic FragPipe runs built (`worker.py`, `fragpipe.py`,
+`postprocess.py` hook; DONE/FAILED notes; retry; hold-until-configured;
+stop/timeout kill the process tree; re-runs keep old output). Tested against
+the testbed's fake FragPipe on macOS + Windows CI. **Not yet run against the
+real FragPipe 24.0 on the PC** — first real test: pin `isoDTB.workflow`, drop a
+small isoDTB folder, compare with a GUI run. Still to build: step 5 below.
+
 1. Pin the lab's `isoDTB.workflow` (+ FASTA) into `C:\Fragpipe_Auto\workflows\`.
 2. `manifest.py` — `.fp-manifest` from parsed raws.
 3. `runners/fragpipe.py` — adapt prior-work runner; confirm launcher path on 24.0.

@@ -4,7 +4,7 @@
 paths:
   inbox:        C:/Fragpipe_Auto/inbox
   users_root:   C:/Fragpipe_General          # jobs land in users_root/<USER>/<experiment>
-  fragpipe_exe: C:/FragPipe/FragPipe-24.0/fragpipe/bin/fragpipe.exe   # CONFIRM on the PC
+  fragpipe_exe: C:/FragPipe/FragPipe-24.0/fragpipe/bin/fragpipe.bat   # headless launcher; CONFIRM on the PC
   workflow_dir: C:/Fragpipe_Auto/workflows
   fasta_dir:    C:/Fragpipe_Auto/fasta
   database:     C:/Fragpipe_Auto/labwatch.db
@@ -16,6 +16,7 @@ watcher:
   min_raw_files: 1
 
 fragpipe:
+  auto_run: true              # run FragPipe on queued jobs automatically (false = only file them)
   threads: 28                 # machine has 32 logical CPUs
   ram_gb: 48                  # machine has 64 GB
   timeout_minutes: 240

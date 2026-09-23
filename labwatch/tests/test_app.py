@@ -122,3 +122,31 @@ def test_dev_section_and_diagnostics(app, tmp_path, monkeypatch):
     shown = app.out.text.get("1.0", "end")
     assert "=== check" in shown and "=== config.yaml" in shown
     assert clip and "=== check" in clip[0]
+
+
+def test_fragpipe_controls(app, tmp_path, monkeypatch):
+    from labwatch import fragpipe
+    from labwatch.ledger import Job, Ledger
+
+    app.v("quick.root").set(str(tmp_path / "Auto"))
+    app.v("quick.users").set(str(tmp_path / "General"))
+    app.apply_quick()
+    app.create_all()
+    # Find FragPipe fills the launcher path
+    fake = tmp_path / "FragPipe-24.0" / "fragpipe" / "bin" / "fragpipe.bat"
+    monkeypatch.setattr(fragpipe, "detect_launcher", lambda: fake)
+    app.find_fragpipe()
+    assert app.v("paths.fragpipe_exe").get() == str(fake).replace("\\", "/")
+    # auto_run round-trips through config.yaml
+    app.bv("fragpipe.auto_run").set(False)
+    assert app.save()
+    assert load(tmp_path / "Auto" / "config.yaml", check_paths=False).auto_run is False
+    # job summary reads the ledger
+    assert app._jobs_summary() == "FragPipe: no jobs yet"
+    led = Ledger(tmp_path / "Auto" / "labwatch.db")
+    led.insert(Job(inbox_name="a", user="EJQ", method="isoDTB", dest_dir=str(tmp_path)))
+    led.insert(Job(inbox_name="b", user="EJQ", method="DIA", dest_dir=str(tmp_path)))
+    led.start_attempt(1)
+    led.set_status(2, "failed", "boom")
+    s = app._jobs_summary()
+    assert "RUNNING job 1" in s and "0 queued, 1 failed, 0 done" in s

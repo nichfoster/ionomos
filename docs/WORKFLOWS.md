@@ -13,14 +13,16 @@ fragpipe.exe --headless --workflow <wf> --manifest <mf> --workdir <out>
              [--config-tools-folder <dir>] [--config-diann <DiaNN.exe>]
 ```
 
-- Confirmed CLI shape in `prior-work/fragpipe_runner.py`; **re-confirm the
-  launcher path on the 24.0 install** (`C:\FragPipe\FragPipe-24.0\fragpipe\bin\fragpipe.exe`
-  vs `fragpipe.bat`). The inventory didn't capture the install tree.
+- Confirmed CLI shape in `prior-work/fragpipe_runner.py`. Launcher: the 22.0
+  copy in the inventory has `fragpipe\bin\fragpipe.bat` (headless, console) next
+  to `fragpipe.exe` (GUI wrapper); labwatch uses the `.bat` and swaps a configured
+  `.exe` for the `.bat` beside it. **Re-confirm on the 24.0 install** (app → Find FragPipe).
 - Manifest = `.fp-manifest`, tab-separated: `path \t experiment \t bioreplicate \t DDA|DIA`.
-- The FASTA is baked into the `.workflow` file. Workflows must be saved from
-  the GUI *after* setting the database (with decoys) via "Save to custom
-  folder". A headless run with an empty FASTA fails with
-  "FASTA file path is empty".
+- The FASTA is baked into the `.workflow` file (`database.db-path`). labwatch
+  writes a per-job copy of the pinned workflow with `database.db-path` set to the
+  method's FASTA from `fasta_dir`, so "FASTA file path is empty" can't happen. If
+  that FASTA isn't there, the workflow's own path is used when it exists.
+  The FASTA must already contain decoys (FragPipe's "Add decoys").
 - **No spaces in any path** (SOP: "Directory must not contain any spaces!").
 - Output dir must be empty (SOP). Our `--workdir` is always a fresh `fragpipe\` subfolder.
 - Every existing run folder contains: `fragpipe.workflow`, `fragpipe.job`,

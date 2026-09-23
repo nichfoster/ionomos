@@ -21,7 +21,6 @@ import os
 import random
 import shutil
 import stat
-import sys
 import time
 from pathlib import Path
 
@@ -50,6 +49,11 @@ def _iso(prefix: str, reps=(1, 2, 3), fracs=(1, 2, 3)) -> list[str]:
 
 # name -> (folder name, files at top level, files in raw/, other files, experiment.yaml dict|None, what it shows)
 SAMPLES: dict[str, dict] = {
+    "fp_fail": dict(
+        folder="20260910_Chris_DIA_crash-test_FAKEFAIL",
+        raws=["DMSO_1.raw", "DMSO_2.raw", "Drug_1.raw", "Drug_2.raw"],
+        shows="filed fine, then the fake FragPipe fails on purpose -> job failed, FAILED.txt; Retry re-runs it",
+    ),
     "iso_good": dict(
         folder="20260902-isoDTB_EJQ-2-027",
         raws=_iso("EJQ_PK_EJQ-2-027_isoDTB_1uM_3h"), others=["EJQ-2-027_notes.xlsx"],
@@ -138,27 +142,80 @@ def build_sample(dest_parent: Path, name: str, size: int = 4096) -> Path:
 
 # ---------------------------------------------------------------------- init --
 
-FAKE_FRAGPIPE_PY = '''"""Fake FragPipe for the testbed. Accepts the real headless flags, sleeps, writes plausible output."""
-import argparse, sys, time
-from pathlib import Path
-ap = argparse.ArgumentParser()
-ap.add_argument("--headless", action="store_true")
-ap.add_argument("--workflow"); ap.add_argument("--manifest"); ap.add_argument("--workdir")
-ap.add_argument("--threads"); ap.add_argument("--ram")
-ap.add_argument("--config-tools-folder"); ap.add_argument("--config-diann")
-a, _ = ap.parse_known_args()
-wd = Path(a.workdir or ".")
-wd.mkdir(parents=True, exist_ok=True)
-print("FAKE FragPipe: workflow", a.workflow, "manifest", a.manifest, "workdir", wd)
-lines = Path(a.manifest).read_text(encoding="utf-8").splitlines() if a.manifest and Path(a.manifest).is_file() else []
-print(f"FAKE FragPipe: {len(lines)} raw files")
-for i in range(3):
-    print("working...", i + 1, "/ 3"); sys.stdout.flush(); time.sleep(1)
-(wd / "fragpipe.workflow").write_text(Path(a.workflow).read_text(encoding="utf-8") if a.workflow and Path(a.workflow).is_file() else "", encoding="utf-8")
-(wd / "combined_modified_peptide_label_quant.tsv").write_text("Peptide Sequence\\tLight Modified Peptide\\tStart\\tProtein\\n", encoding="utf-8")
-(wd / "log_fake.txt").write_text("done\\n", encoding="utf-8")
-print("FAKE FragPipe: done")
-'''
+def fake_fragpipe(argv: list[str]) -> int:
+    """Fake FragPipe (`labwatch fake-fragpipe ...`): same headless flags, same checks, plausible output.
+
+    Fails like the real one when the workflow's database.db-path doesn't exist or a
+    manifest file is missing, and on purpose when a raw path contains FAKEFAIL.
+    Run time: LABWATCH_FAKE_FP_SECONDS (default 4).
+    """
+    import argparse
+
+    ap = argparse.ArgumentParser(prog="fragpipe (fake)")
+    ap.add_argument("--headless", action="store_true")
+    for flag in ("--workflow", "--manifest", "--workdir", "--threads", "--ram", "--config-tools-folder",
+                 "--config-diann"):
+        ap.add_argument(flag)
+    a, _ = ap.parse_known_args(argv)
+    say = lambda *x: print("FAKE FragPipe:", *x, flush=True)  # noqa: E731
+    if not (a.headless and a.workflow and a.manifest and a.workdir):
+        say("usage: --headless --workflow W --manifest M --workdir D")
+        return 2
+    wf_text = Path(a.workflow).read_text(encoding="utf-8") if Path(a.workflow).is_file() else ""
+    db = next((ln.split("=", 1)[1].strip() for ln in wf_text.splitlines() if ln.startswith("database.db-path")), "")
+    if not db:
+        say("ERROR: FASTA file path is empty")
+        return 1
+    if not Path(db).is_file():
+        say(f"ERROR: FASTA file not found: {db}")
+        return 1
+    rows = [ln.split("\t") for ln in Path(a.manifest).read_text(encoding="utf-8").splitlines() if ln.strip()]
+    for r in rows:
+        if not Path(r[0]).is_file():
+            say(f"ERROR: file in manifest does not exist: {r[0]}")
+            return 1
+    say(f"{len(rows)} files, workflow {Path(a.workflow).name}, database {Path(db).name}")
+    total = float(os.environ.get("LABWATCH_FAKE_FP_SECONDS", "4"))
+    for step in ("MSFragger", "MSBooster", "Percolator", "ProteinProphet", "IonQuant"):
+        say(f"running {step}...")
+        time.sleep(total / 5)
+    if any("FAKEFAIL" in r[0] for r in rows):
+        say("ERROR: IonQuant crashed (this sample fails on purpose)")
+        return 1
+    wd = Path(a.workdir)
+    wd.mkdir(parents=True, exist_ok=True)
+    (wd / "fragpipe.workflow").write_text(wf_text, encoding="utf-8")
+    (wd / "fragpipe-files.fp-manifest").write_text(Path(a.manifest).read_text(encoding="utf-8"), encoding="utf-8")
+    (wd / f"log_{time.strftime('%Y-%m-%d_%H-%M-%S')}.txt").write_text("fake FragPipe log\n", encoding="utf-8")
+    if any(r[3] == "DIA" for r in rows if len(r) > 3):
+        (wd / "diann-output").mkdir(exist_ok=True)
+        (wd / "diann-output" / "report.tsv").write_text("Run\tProtein.Group\tPrecursor.Quantity\n", encoding="utf-8")
+    elif "tmt" in Path(a.workflow).name.lower():
+        (wd / "tmt-report").mkdir(exist_ok=True)
+        (wd / "tmt-report" / "abundance_gene_MD.tsv").write_text("Index\tNumberPSM\n", encoding="utf-8")
+    else:
+        (wd / "combined_modified_peptide_label_quant.tsv").write_text(
+            "Peptide Sequence\tLight Modified Peptide\tStart\tProtein\n", encoding="utf-8")
+    say("done")
+    return 0
+
+
+def write_fake_launcher(folder: Path) -> Path:
+    """fragpipe.bat / fragpipe.sh in `folder` that runs `labwatch fake-fragpipe` (works frozen or from a venv)."""
+    from labwatch.service import labwatch_command
+
+    cmd = labwatch_command(console=True)
+    folder.mkdir(parents=True, exist_ok=True)
+    if os.name == "nt":
+        exe = folder / "fragpipe.bat"
+        quoted = " ".join(f'"{c}"' for c in cmd)
+        exe.write_text(f"@echo off\r\n{quoted} fake-fragpipe %*\r\n", encoding="utf-8")
+    else:
+        exe = folder / "fragpipe.sh"
+        quoted = " ".join(f"'{c}'" for c in cmd)
+        exe.write_text(f'#!/bin/sh\nexec {quoted} fake-fragpipe "$@"\n', encoding="utf-8")
+        exe.chmod(exe.stat().st_mode | stat.S_IEXEC)
+    return exe
 
 
 def init(root: Path, slow_defaults: bool = False) -> Path:
@@ -175,15 +232,8 @@ def init(root: Path, slow_defaults: bool = False) -> Path:
             p.write_text(f"# placeholder workflow for the testbed ({wf})\ndatabase.db-path=FAKE.fas\n", encoding="utf-8")
     (auto / "fasta" / "human_reviewed_decoys.fas").write_text(">sp|FAKE|FAKE_HUMAN fake\nMKV\n", encoding="utf-8")
 
-    fake_py = auto / "fake_fragpipe.py"
-    fake_py.write_text(FAKE_FRAGPIPE_PY, encoding="utf-8")
-    if os.name == "nt":
-        exe = auto / "fragpipe.bat"
-        exe.write_text(f'@echo off\r\n"{sys.executable}" "{fake_py}" %*\r\n', encoding="utf-8")
-    else:
-        exe = auto / "fragpipe.sh"
-        exe.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{fake_py}" "$@"\n', encoding="utf-8")
-        exe.chmod(exe.stat().st_mode | stat.S_IEXEC)
+    exe = write_fake_launcher(auto)
+    (auto / "fake_fragpipe.py").unlink(missing_ok=True)  # older testbeds
 
     def s(p: Path) -> str:  # forward slashes, as recommended in config
         return str(p).replace("\\", "/")

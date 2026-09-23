@@ -47,6 +47,7 @@ class Config:
     stable_seconds: float
     min_raw_files: int
 
+    auto_run: bool
     threads: int
     ram_gb: int
     timeout_minutes: int
@@ -155,6 +156,7 @@ def load(path: str | Path, check_paths: bool = True) -> Config:
         poll_seconds=float(_get(raw, "watcher", "poll_seconds", 10)),
         stable_seconds=float(_get(raw, "watcher", "stable_seconds", 60)),
         min_raw_files=int(_get(raw, "watcher", "min_raw_files", 1)),
+        auto_run=bool(_get(raw, "fragpipe", "auto_run", True)),
         threads=int(_get(raw, "fragpipe", "threads", 8)),
         ram_gb=int(_get(raw, "fragpipe", "ram_gb", 16)),
         timeout_minutes=int(_get(raw, "fragpipe", "timeout_minutes", 240)),

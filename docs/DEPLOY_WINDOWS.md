@@ -39,7 +39,7 @@ To build by hand instead (any Windows machine with Python 3.11+ incl. tcl/tk):
 | **2 Users** | Type each lab member's name → **Add** (creates `C:\Fragpipe_General\<Name>`). Select a user, type their initials (`IJ, IJD`) → **Apply aliases**. |
 | **3 Methods** | For each method pick the **Workflow file** and **FASTA file** (dropdowns list what's in the folders — put files there first, see A4). |
 | **4 Advanced** | Usually nothing. Threads/RAM default to 28 / 48 GB for this PC. |
-| **5 Run & Test** | **Save & Check** → all ✓ (the `!` lines about FragPipe are fine until Phase 2) → **Install startup task** → **Start watcher**. Optional: **Desktop shortcut**. |
+| **5 Run & Test** | **Save & Check** → all ✓ (a `!` on the FragPipe launcher / a method means those jobs will *wait* until it's fixed) → **Install startup task** → **Start watcher**. Optional: **Desktop shortcut**. |
 
 Save writes `C:\Fragpipe_Auto\config.yaml`. Reopen `LabWatch.exe` any time to
 change anything; it remembers where the config is.
@@ -56,10 +56,25 @@ For each method, in the **FragPipe GUI**:
 
 Back in the app: tab 3 → select the method → pick the files → **Apply changes** → **Save**.
 
+### A4b. First real search (15–60 min, once)
+
+1. Tab 1 → **Find FragPipe** (fills `…\fragpipe\bin\fragpipe.bat`) → **Save**.
+2. Tab 5 → **Save & Check**: `FragPipe launcher` ✓ and `methods.isoDTB` ✓ (workflow + FASTA).
+3. Drop a *small* real isoDTB folder (e.g. one replicate, 2–3 fractions).
+4. Watch tab 5: *FragPipe: RUNNING job N* → *done*. In the experiment folder:
+   `DONE.txt`, `fragpipe\` with the results, `labwatch_run\fragpipe_console.log`.
+5. If it says FAILED: open `FAILED.txt` / the console log, fix, **Retry a failed
+   job…**. Paste **Copy diagnostics** + the console log to Claude if it's unclear.
+
+Advanced → *Run FragPipe automatically* off = experiments are only filed (the
+Phase 1 behaviour).
+
 ### A5. Try it (3 min)
 
 Tab 5 → **Testbed** → **Create testbed** → **Start TESTBED watcher** → pick
-`iso_good` → **Drop**. Watch the output pane: "detected … stable … queued job 1".
+`iso_good` → **Drop**. Watch the output pane: "detected … stable … queued job 1
+… FragPipe … done" (the testbed uses a fake FragPipe that takes a few seconds).
+`fp_fail` shows a failed search and **Retry a failed job…**.
 Try `gui_unknown_user` → the resolver window pops up. **Stop watcher** when done.
 
 Then a real one: make a folder `20260916_<yourinitials>_isoDTB_test` with two
@@ -126,6 +141,13 @@ py -3.14 -c "import tkinter; print('ok')"
   The folder needs ≥1 `.raw` and must be unchanged for 60 s.
 - **`<name>.REJECTED.txt` in the inbox.** Open it — it says why. Fix the folder
   (or add an `experiment.yaml`); it's retried automatically. Deleting the note also retries.
+- **Job says "waiting: …"** (tab 5 or `status`). A setup file is missing — the
+  FragPipe launcher, or that method's workflow/FASTA. Fix it; the job starts by itself.
+- **Job FAILED.** `FAILED.txt` in the experiment folder has the reason;
+  `labwatch_run\fragpipe_console.log` has FragPipe's full output. Fix, then
+  tab 5 → **Retry a failed job…** (old output is kept as `fragpipe_previous_<time>\`).
+- **Stopping/updating LabWatch during a search** kills that FragPipe run; the job
+  re-runs from the start when the watcher starts again.
 - **"cannot move … will retry"** in the log: Explorer/antivirus still had a
   file open. It retries with backoff.
 - **Resolver window never appears.** Tab 5 → Check → "resolver window" line must be ✓.

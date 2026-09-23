@@ -4,7 +4,7 @@ Three layers, all runnable on macOS and Windows:
 
 | Layer | What | Command |
 |---|---|---|
-| Unit + e2e (`pytest`) | 162 tests: naming, config, config I/O, ledger, watcher timing, intake, overrides, resolver logic, **real tkinter dialog and the setup app** (skipped if no display), and 6 end-to-end runs of watcher-thread + intake against testbed samples | `scripts/test_mac.sh` / `scripts\test_windows.ps1` |
+| Unit + e2e (`pytest`) | 180 tests: naming, config, config I/O, ledger, watcher timing, intake, overrides, **FragPipe runner + worker** (done / failed / held / timeout / stop / re-run against the fake FragPipe), resolver logic, **real tkinter dialog and the setup app** (skipped if no display), and 6 end-to-end runs of watcher-thread + intake against testbed samples | `scripts/test_mac.sh` / `scripts\test_windows.ps1` |
 | Testbed (manual) | A fake lab on disk with 12 sample drops covering every path, a fake FragPipe, and the real CLI | `labwatch testbed …` |
 | The real PC | `dry-run` on real folders, then a throwaway drop; **Copy diagnostics** to report back | see DEV_LOOP.md |
 | GitHub Actions | the pytest suite on Linux **and Windows** on every push | Actions tab |
@@ -70,6 +70,11 @@ real user experience.
 without needing a drop, to check the look and the keyboard flow (Tab between
 fields, Enter = accept, Esc = skip).
 
+Every filed sample is then "searched" by the testbed's fake FragPipe
+(`labwatch fake-fragpipe`, ~4 s; `LABWATCH_FAKE_FP_SECONDS` changes that). It
+checks what the real one checks — the workflow's FASTA exists, every manifest
+file exists — so `done` means labwatch prepared the inputs correctly.
+
 The testbed config uses fast timings (poll 1 s, stable 3 s). `labwatch testbed
 init --slow-defaults` uses production timings (10 s / 60 s).
 
@@ -89,6 +94,7 @@ init --slow-defaults` uses production timings (10 s / 60 s).
 | `gui_incomplete` | resolver: uneven fractions → "accept uneven" checkbox |
 | `reject_no_raws` | folder with no `.raw` is left alone forever (no note, no queue) |
 | `reject_two_methods` | ambiguous method → resolver |
+| `fp_fail` | filed fine, then the fake FragPipe fails → `failed` + `FAILED.txt`; retry re-runs it |
 
 After a GUI answer, look at `experiment.yaml` inside the moved folder: that is
 the persisted decision, and the same file can be hand-written by a user to
