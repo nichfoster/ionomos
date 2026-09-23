@@ -72,6 +72,12 @@ FragPipe friendliness (plain-English failure causes, live step progress,
 cancel, pause/resume, install check, workflow import, FASTA decoy check),
 Jobs tab, stress tester. See ARCHITECTURE.md "Failsafes".
 
+2026-09-23 (0.4.0): downstream analysis built — R ports (byte-identical),
+limma-style statistics (validated vs limma), volcano plots, self-contained
+HTML report, `labwatch analyze`, app Analysis tab + Re-run analysis; setup
+checklist tab + Auto-setup + `labwatch init`, unsafe layouts refused. Next:
+run it on real lab output and compare with the lab's current analyses.
+
 ## Phase 3 — DIA, then TMT
 
 - DIA: pin workflow, `data_type: DIA`, sort out DIA-NN version/`--config-diann`.

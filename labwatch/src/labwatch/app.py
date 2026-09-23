@@ -37,6 +37,11 @@ LABWATCH — what it does
   <users_root>/<user>/<experiment>/ and queues it for FragPipe.
   If it can't tell, a small window asks you.
 
+START HERE: the ✓ Setup tab
+  A live checklist of everything LabWatch needs (folders, people, FragPipe,
+  workflows + FASTA with decoys, disk space, watcher, startup task). Each open
+  item has a button. "Auto-setup" does the standard layout in one click.
+
 FIRST-TIME SETUP (this app, tabs left to right)
   1 Folders   Pick or create the inbox (the shared folder people drop into),
               the users folder, and the working folders. "Create all missing"
@@ -91,6 +96,23 @@ FRAGPIPE SEARCHES
   A job "waiting: ..." is missing something outside the job (FragPipe
   launcher, workflow, FASTA, free disk space) and starts by itself once
   that's fixed. Re-runs keep old output as fragpipe_previous_<time>/.
+
+RESULTS: STATISTICS, VOLCANO PLOTS, REPORT (tab 7 sets the defaults)
+  After each search, results/ inside the experiment folder gets:
+    report.html                 open this — volcano plot(s), hit tables, QC, methods text
+    <comparison>_differential.tsv   every protein/site: log2FC, p, q, up/down
+    volcano_<comparison>.svg    the plot on its own (slides, papers)
+    <sample>_sites.tsv          isoDTB sites — identical to the lab's R script
+    experimental_annotation.tsv TMT — identical to the lab's R script
+  Conditions come from the file names (DMSO_1.raw -> DMSO). The control is
+  recognised by name (DMSO, vehicle, ctrl, WT, ...) and every other condition
+  is compared with it. isoDTB ratios are tested against 0. Choose comparisons
+  for one experiment in its experiment.yaml:
+      analysis:
+        comparisons: ["Drug vs DMSO", "Drug2 vs DMSO"]
+  Jobs tab -> Re-run analysis applies new settings to a finished job.
+  Analysis tab -> Analyse a folder… works on any FragPipe output folder,
+  including runs from before LabWatch.
 
 JOBS TAB (6)
   Every job, live: status, how long it ran, and what FragPipe is doing now.
@@ -232,12 +254,14 @@ class App:
 
         self.nb = ttk.Notebook(root)
         self.nb.pack(fill="both", expand=True, padx=8, pady=(8, 0))
+        self._tab_setup()
         self._tab_folders()
         self._tab_users()
         self._tab_methods()
         self._tab_advanced()
         self._tab_run()
         self._tab_jobs()
+        self._tab_analysis()
         self._tab_help()
         self._bottom_bar()
         self._load_vars()
@@ -247,8 +271,8 @@ class App:
         root.protocol("WM_DELETE_WINDOW", self.on_close)
         root.report_callback_exception = self._on_tk_error
         root.after(100, self._pump_ui)
-        if self.first_run:
-            self.nb.select(0)
+        self.nb.select(0)  # the checklist: always the first thing you see
+        self.root.after(300, self.refresh_setup)
 
     def post(self, fn) -> None:
         """Thread-safe: run fn on the Tk thread soon."""
@@ -310,6 +334,12 @@ class App:
                     self.bv(f"{sec}.{k}").set(val)
                 else:
                     self.v(f"{sec}.{k}").set("" if val is None else str(val))
+        an = d.get("analysis") or {}
+        for k in ("test", "log2fc", "alpha", "min_valid", "normalize", "top_labels"):
+            self.v(f"analysis.{k}").set("" if an.get(k) is None else str(an.get(k)))
+        self.bv("analysis.enabled", True).set(bool(an.get("enabled", True)))
+        self.bv("analysis.use_adjusted", True).set(bool(an.get("use_adjusted", True)))
+        self.v("analysis.control_keywords").set(", ".join(an.get("control_keywords") or []))
         self.v("users.default").set(d["users"].get("default", "") or "")
         self.v("users.learned_aliases_file").set(d["users"].get("learned_aliases_file", "") or "")
         self.v("config_path").set(str(self.config_path))
@@ -335,6 +365,19 @@ class App:
             raise ConfigError("gui.timeout_minutes must be a number") from None
         d["users"]["aliases"] = {u: list(a) for u, a in self.data["users"].get("aliases", {}).items() if a}
         d["users"]["default"] = self.v("users.default").get().strip()
+        an = dict(d.get("analysis") or {})
+        an["enabled"] = self.bv("analysis.enabled", True).get()
+        an["use_adjusted"] = self.bv("analysis.use_adjusted", True).get()
+        for k, conv in (("log2fc", float), ("alpha", float), ("min_valid", int), ("top_labels", int)):
+            raw = self.v(f"analysis.{k}").get().strip()
+            try:
+                an[k] = conv(raw)
+            except ValueError:
+                raise ConfigError(f"analysis.{k} must be a number, got {raw!r}") from None
+        an["test"] = self.v("analysis.test").get().strip() or "moderated"
+        an["normalize"] = self.v("analysis.normalize").get().strip() or "median"
+        an["control_keywords"] = [x.strip() for x in self.v("analysis.control_keywords").get().split(",") if x.strip()]
+        d["analysis"] = an
         d["users"]["learned_aliases_file"] = self.v("users.learned_aliases_file").get().strip()
         d["methods"] = self.data["methods"]
         return d
@@ -346,6 +389,7 @@ class App:
 
     def _tab_folders(self):
         f = ttk.Frame(self.nb, padding=10)
+        self.tab_folders = f
         self.nb.add(f, text="  1  Folders  ")
         f.columnconfigure(1, weight=1)
         r = 0
@@ -430,6 +474,7 @@ class App:
 
     def _tab_users(self):
         f = ttk.Frame(self.nb, padding=10)
+        self.tab_users = f
         self.nb.add(f, text="  2  Users  ")
         f.columnconfigure(1, weight=1)
         f.rowconfigure(1, weight=1)
@@ -545,6 +590,7 @@ class App:
 
     def _tab_methods(self):
         f = ttk.Frame(self.nb, padding=10)
+        self.tab_methods = f
         self.nb.add(f, text="  3  Methods  ")
         f.columnconfigure(0, weight=1)
         f.rowconfigure(1, weight=1)
@@ -804,6 +850,7 @@ class App:
 
     def _tab_run(self):
         f = ttk.Frame(self.nb, padding=10)
+        self.tab_run = f
         self.nb.add(f, text="  5  Run & Test  ")
         f.columnconfigure(0, weight=1)
         f.columnconfigure(1, weight=1)
@@ -1282,6 +1329,179 @@ class App:
 
     # --------------------------------------------------------- tab: help ----
 
+    # --------------------------------------------------------- tab: setup ----
+
+    _MARK = {"ok": ("✓", "#2e7d32"), "todo": ("○", "#1565c0"), "warn": ("!", "#b26a00"), "fail": ("✗", "#c62828")}
+
+    def _tab_setup(self):
+        f = ttk.Frame(self.nb, padding=12)
+        self.tab_setup = f
+        self.nb.add(f, text="  ✓ Setup  ")
+        f.columnconfigure(0, weight=1)
+        f.rowconfigure(2, weight=1)
+        top = ttk.Frame(f)
+        top.grid(row=0, column=0, sticky="ew")
+        ttk.Label(top, text="Setup checklist", font=("", 15, "bold")).pack(side="left")
+        ttk.Button(top, text="Check again", command=self.refresh_setup).pack(side="right", padx=4)
+        ttk.Button(top, text="Auto-setup", command=self.auto_setup).pack(side="right", padx=4)
+        self.setup_summary = ttk.Label(f, text="checking…", font=("", 11), wraplength=860, justify="left")
+        self.setup_summary.grid(row=1, column=0, sticky="w", pady=(4, 10))
+        self.setup_list = ttk.Frame(f)
+        self.setup_list.grid(row=2, column=0, sticky="nsew")
+        self.setup_list.columnconfigure(2, weight=1)
+        ttk.Label(f, text="Auto-setup: standard folders (C:/Fragpipe_Auto + C:/Fragpipe_General), creates them, "
+                          "finds FragPipe, saves. Then add people (tab 2) and import one workflow per method (tab 3). "
+                          "Everything else on this list has a button.", foreground="#666", wraplength=860,
+                  justify="left").grid(row=3, column=0, sticky="w", pady=(10, 0))
+
+    def refresh_setup(self):
+        """Run the checklist off the Tk thread (it touches disks, the lock file, schtasks)."""
+        from labwatch import setupcheck
+
+        try:
+            data = self._collect()
+        except ConfigError as exc:
+            self.setup_summary.configure(text=f"A setting isn't valid yet: {exc}", foreground="#c62828")
+            return
+        cfg_path = self.config_path
+
+        def go():
+            try:
+                items = setupcheck.run(cfg_path, data)
+                text = setupcheck.summary(items)
+            except Exception as exc:  # noqa: BLE001
+                items, text = [], f"could not run the checklist: {exc}"
+            self.post(lambda: self._show_setup(items, text))
+
+        threading.Thread(target=go, daemon=True).start()
+
+    def _show_setup(self, items, text):
+        for w in self.setup_list.winfo_children():
+            w.destroy()
+        self.setup_items = items
+        for r, it in enumerate(items):
+            sym, color = self._MARK[it.status]
+            ttk.Label(self.setup_list, text=sym, foreground=color, font=("", 13, "bold"), width=2).grid(
+                row=r, column=0, sticky="n", padx=(0, 4), pady=3)
+            ttk.Label(self.setup_list, text=it.title, font=("", 11, "bold"), width=30).grid(row=r, column=1, sticky="nw", pady=3)
+            detail = it.detail + (f"\n→ {it.fix}" if it.status != "ok" and it.fix else "")
+            ttk.Label(self.setup_list, text=detail, foreground="#555", wraplength=520, justify="left").grid(
+                row=r, column=2, sticky="w", pady=3)
+            if it.action and it.status != "ok":
+                label = {"create_folders": "Create folders", "find_fragpipe": "Find FragPipe", "save": "Save",
+                         "install_task": "Install", "start_watcher": "Start"}.get(it.action, "Go")
+                ttk.Button(self.setup_list, text=label, command=lambda a=it.action: self._setup_action(a)).grid(
+                    row=r, column=3, sticky="ne", pady=3)
+        ok = all(i.status in ("ok", "warn") for i in items) and items
+        self.setup_summary.configure(text=text, foreground="#2e7d32" if ok else "")
+
+    def _setup_action(self, action: str):
+        if action.startswith("open_tab:"):
+            tab = {"1": self.tab_folders, "2": self.tab_users, "3": self.tab_methods, "5": self.tab_run}.get(action[-1])
+            if tab is not None:
+                self.nb.select(tab)
+            return
+        if action == "create_folders":
+            self.create_all()
+        elif action == "find_fragpipe":
+            self.find_fragpipe()
+            self.save()
+        elif action == "save":
+            self.save()
+        elif action == "install_task":
+            self.install_task()
+        elif action == "start_watcher":
+            self.start_watcher()
+        self.root.after(800, self.refresh_setup)
+
+    def auto_setup(self):
+        """Sensible defaults for everything that has one, then save. Never overwrites a path that already works."""
+        from labwatch.fragpipe import detect_launcher
+
+        inbox = Path(self.v("paths.inbox").get().strip() or "")
+        if not str(inbox) or not inbox.is_dir():
+            if not self.v("quick.root").get().strip():
+                d = configio.defaults()
+                self.v("quick.root").set(d["paths"]["inbox"].rsplit("/", 1)[0])
+                self.v("quick.users").set(d["paths"]["users_root"])
+            self.apply_quick()
+        self.create_all()
+        if not Path(self.v("paths.fragpipe_exe").get().strip() or "").is_file():
+            found = detect_launcher()
+            if found:
+                self.v("paths.fragpipe_exe").set(str(found).replace("\\", "/"))
+        self.save()
+        self.refresh_setup()
+
+    # ------------------------------------------------------- tab: analysis ----
+
+    def _tab_analysis(self):
+        f = ttk.Frame(self.nb, padding=12)
+        self.nb.add(f, text="  7  Analysis  ")
+        f.columnconfigure(1, weight=1)
+        ttk.Label(f, text="What happens after FragPipe: statistics, volcano plots and results/report.html in "
+                          "every experiment folder. These are the lab defaults; one experiment can override them "
+                          "in its experiment.yaml (analysis: comparisons: [\"Drug vs DMSO\"], control: DMSO).",
+                  wraplength=860, justify="left").grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 8))
+        ttk.Checkbutton(f, text="Make statistics, volcano plots and a report after each search",
+                        variable=self.bv("analysis.enabled", True)).grid(row=1, column=0, columnspan=3, sticky="w", **PAD)
+
+        def row(r, key, label, hint, widget=None):
+            ttk.Label(f, text=label).grid(row=r, column=0, sticky="e", **PAD)
+            (widget or ttk.Entry(f, textvariable=self.v(key), width=12)).grid(row=r, column=1, sticky="w", **PAD)
+            ttk.Label(f, text=hint, foreground="#666", wraplength=520).grid(row=r, column=2, sticky="w", **PAD)
+
+        row(2, "analysis.test", "Test", "moderated = limma-style empirical Bayes (recommended with 3 replicates: "
+            "borrows strength across all proteins); welch / student = classic t-tests",
+            ttk.Combobox(f, textvariable=self.v("analysis.test"), values=["moderated", "welch", "student"],
+                         state="readonly", width=12))
+        row(3, "analysis.log2fc", "log2 fold change ≥", "1 = 2-fold. A hit needs this and the significance cut-off")
+        row(4, "analysis.alpha", "Significance <", "0.05 is usual")
+        ttk.Checkbutton(f, text="…on Benjamini-Hochberg adjusted q-values (recommended; untick = raw p-values)",
+                        variable=self.bv("analysis.use_adjusted", True)).grid(row=5, column=1, columnspan=2, sticky="w", **PAD)
+        row(6, "analysis.min_valid", "Values per group ≥", "proteins/sites with fewer measured values are not tested")
+        row(7, "analysis.normalize", "Normalisation", "median = align sample medians (intensities only; ratios are never normalised)",
+            ttk.Combobox(f, textvariable=self.v("analysis.normalize"), values=["median", "none"], state="readonly", width=12))
+        row(8, "analysis.top_labels", "Names on volcano", "how many top hits are labelled")
+        ttk.Label(f, text="Control keywords").grid(row=9, column=0, sticky="e", **PAD)
+        ttk.Entry(f, textvariable=self.v("analysis.control_keywords"), width=70).grid(row=9, column=1, columnspan=2, sticky="ew", **PAD)
+        ttk.Label(f, text="the first condition matching one of these is the control; every other condition is "
+                          "compared against it", foreground="#666").grid(row=10, column=1, columnspan=2, sticky="w", padx=6)
+        b = ttk.Frame(f)
+        b.grid(row=11, column=0, columnspan=3, sticky="w", pady=(14, 0))
+        ttk.Button(b, text="Analyse a folder…", command=self.analyze_folder).pack(side="left", padx=4)
+        ttk.Label(b, text="any experiment or FragPipe output folder, including runs from before LabWatch "
+                          "(Save first so the settings above are used)", foreground="#666").pack(side="left", padx=8)
+
+    def analyze_folder(self):
+        from labwatch import postprocess
+
+        d = filedialog.askdirectory(title="Experiment or FragPipe output folder")
+        if not d:
+            return
+        try:
+            cfg = load(self.config_path, check_paths=False)
+        except ConfigError:
+            cfg = None
+        self.set_status(f"analysing {d}…")
+
+        def go():
+            out = postprocess.run_for_folder(Path(d), cfg)
+            msg = (f"{out.method or 'unknown method'}: " + "; ".join(
+                f"{c['name']} {c['up']} up / {c['down']} down" for c in out.summary.get("comparisons", []))
+                   + ("" if not out.warnings else "  (" + "; ".join(out.warnings) + ")"))
+
+            def done():
+                self.set_status(msg[:200])
+                if out.report and out.report.is_file():
+                    self._open(str(out.report))
+                else:
+                    messagebox.showinfo("Analyse", msg)
+
+            self.post(done)
+
+        threading.Thread(target=go, daemon=True).start()
+
     # ---------------------------------------------------------- tab: jobs ----
 
     _JCOLS = (("id", 40), ("status", 70), ("user", 80), ("method", 60), ("experiment", 260), ("queued", 110),
@@ -1310,15 +1530,15 @@ class App:
             self.jtree.tag_configure(tag, foreground=color)
         self.jtree.grid(row=1, column=0, sticky="nsew", pady=4)
         self.jtree.bind("<<TreeviewSelect>>", lambda e: self.show_job())
-        self.jtree.bind("<Double-1>", lambda e: self.job_action("folder"))
+        self.jtree.bind("<Double-1>", lambda e: self.job_action("report"))
 
         b = ttk.Frame(f)
         b.grid(row=2, column=0, sticky="w")
-        for text, action in (("Open folder", "folder"), ("FragPipe log", "log"), ("Retry", "retry"),
-                             ("Cancel", "cancel"), ("Copy details", "copy")):
+        for text, action in (("Open report", "report"), ("Open folder", "folder"), ("FragPipe log", "log"),
+                             ("Re-run analysis", "analyze"), ("Retry", "retry"), ("Cancel", "cancel"),
+                             ("Copy details", "copy")):
             ttk.Button(b, text=text, command=lambda a=action: self.job_action(a)).pack(side="left", padx=4)
-        ttk.Label(b, text="double-click = open folder · Retry re-runs a failed job · Cancel stops a running/queued one",
-                  foreground="#666").pack(side="left", padx=12)
+        ttk.Label(b, text="double-click = open the report", foreground="#666").pack(side="left", padx=12)
         self.jdetail = OutputPane(f, height=10)
         self.jdetail.grid(row=3, column=0, sticky="nsew", pady=4)
         self._jobs_cache: dict[int, object] = {}
@@ -1417,7 +1637,22 @@ class App:
         if j is None:
             messagebox.showinfo("Jobs", "Select a job first.")
             return
-        if action == "folder":
+        if action == "report":
+            rep = Path(j.dest_dir) / "results" / "report.html"
+            if rep.is_file():
+                self._open(str(rep))
+            elif j.status == "done":
+                if messagebox.askyesno("Report", "This job has no report yet (it ran before reports existed, or "
+                                                 "analysis is off). Make one now?"):
+                    self._rerun_analysis(j)
+            else:
+                messagebox.showinfo("Report", f"Job {j.id} is {j.status}; the report is made when FragPipe finishes.")
+        elif action == "analyze":
+            if j.status != "done":
+                messagebox.showinfo("Re-run analysis", "Only finished (done) jobs have FragPipe output to analyse.")
+                return
+            self._rerun_analysis(j)
+        elif action == "folder":
             self._open(j.dest_dir)
         elif action == "log":
             log = Path(j.dest_dir) / fragpipe.RUN_DIR / fragpipe.CONSOLE_LOG
@@ -1452,6 +1687,35 @@ class App:
                 led.close()
             self.set_status(msg)
             self.refresh_jobs()
+
+    def _rerun_analysis(self, j):
+        """Statistics + plots + report again with the current Analysis settings (tab 7), off the Tk thread."""
+        from labwatch import postprocess
+
+        try:
+            cfg = load(self.config_path, check_paths=False)
+        except ConfigError:
+            cfg = None
+        self.jdetail.write(f"analysing job {j.id} ({j.inbox_name})…", clear=True)
+
+        def go():
+            try:
+                out = postprocess.run_for_folder(Path(j.dest_dir), cfg, j.method)
+                lines = [f"method {out.method}"] + [f"{c['name']}: {c['up']} up, {c['down']} down of {c['tested']}"
+                                                    for c in out.summary.get("comparisons", [])]
+                lines += [f"note: {w}" for w in out.warnings]
+                text, rep = "\n".join(lines), out.report
+            except Exception as exc:  # noqa: BLE001
+                text, rep = f"analysis failed: {exc}", None
+
+            def done():
+                self.jdetail.write(text + (f"\nreport: {rep}" if rep else ""), clear=True)
+                if rep and rep.is_file():
+                    self._open(str(rep))
+
+            self.post(done)
+
+        threading.Thread(target=go, daemon=True).start()
 
     def toggle_pause(self):
         from labwatch.worker import pause, paused, resume
@@ -1561,7 +1825,7 @@ class App:
 
     def save_and_check(self):
         if self.save():
-            self.nb.select(4)
+            self.nb.select(self.tab_run)
             self._cli(["check"])
 
     def on_close(self):

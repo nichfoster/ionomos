@@ -43,6 +43,10 @@ def defaults(root: str | None = None, users_root: str | None = None) -> dict:
         "fragpipe": {"auto_run": True, "threads": 28, "ram_gb": 48, "timeout_minutes": 240, "min_free_gb": 20, "config_tools_folder": "",
                      "config_diann": ""},
         "gui": {"enabled": True, "timeout_minutes": 0},
+        "analysis": {"enabled": True, "test": "moderated", "log2fc": 1.0, "alpha": 0.05, "use_adjusted": True,
+                     "min_valid": 2, "normalize": "median", "top_labels": 15,
+                     "control_keywords": ["DMSO", "vehicle", "veh", "ctrl", "control", "mock", "untreated", "NT",
+                                          "WT", "EV", "scr", "scramble", "siNT", "PBS"]},
         "users": {"aliases": {}, "default": "", "learned_aliases_file": f"{root}/learned_aliases.yaml"},
         "methods": {
             "isoDTB": {"aliases": ["isodtb", "iso-dtb"], "workflow": "isoDTB.workflow",
@@ -145,6 +149,18 @@ def dump_config(d: dict) -> str:
     a("gui:")
     a(f"  enabled: {_y(bool(g.get('enabled', True)))}   # resolver window on naming problems")
     a(f"  timeout_minutes: {_y(g.get('timeout_minutes', 0))}   # 0 = wait for a person")
+    a("")
+    an = d.get("analysis") or {}
+    a("analysis:   # statistics + volcano plots + report after each search (per experiment: experiment.yaml analysis:)")
+    a(f"  enabled: {_y(bool(an.get('enabled', True)))}")
+    a(f"  test: {_y(an.get('test', 'moderated'))}   # moderated (limma-style, recommended) | welch | student")
+    a(f"  log2fc: {_y(an.get('log2fc', 1.0))}   # |log2 fold change| needed to call a hit")
+    a(f"  alpha: {_y(an.get('alpha', 0.05))}   # significance cut-off")
+    a(f"  use_adjusted: {_y(bool(an.get('use_adjusted', True)))}   # true: alpha applies to BH q-values; false: raw p")
+    a(f"  min_valid: {_y(an.get('min_valid', 2))}   # values needed per group to test a protein/site")
+    a(f"  normalize: {_y(an.get('normalize', 'median'))}   # median | none (intensities only)")
+    a(f"  top_labels: {_y(an.get('top_labels', 15))}   # hit names written on each volcano")
+    a(f"  control_keywords: {_y(list(an.get('control_keywords') or []))}   # how the control condition is recognised")
     a("")
     a("users:   # users are the subfolders of users_root; aliases map initials -> folder")
     a("  aliases:")

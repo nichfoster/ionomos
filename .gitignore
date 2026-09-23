@@ -34,3 +34,6 @@ Thumbs.db
 .idea/
 .vscode/
 build/
+
+# local dev preview config
+.claude/

@@ -24,6 +24,20 @@ fragpipe:
   config_tools_folder: ""     # leave blank unless the first headless run can't find tools
   config_diann: ""            # e.g. C:/DIA-NN/2.3.2/DiaNN.exe — DIA only, if needed
 
+# What happens after FragPipe: statistics, volcano plots and results/report.html.
+# An experiment can override any of these in its experiment.yaml under analysis:
+# (e.g. comparisons: ["Drug vs DMSO"], control: DMSO).
+analysis:
+  enabled: true
+  test: moderated            # moderated (limma-style empirical Bayes, recommended for n=3) | welch | student
+  log2fc: 1.0                # |log2 fold change| needed to call a hit
+  alpha: 0.05                # significance cut-off
+  use_adjusted: true         # alpha applies to Benjamini-Hochberg q-values
+  min_valid: 2               # values needed per group to test a protein/site
+  normalize: median          # median | none (intensities only)
+  top_labels: 15             # hit names written on each volcano
+  control_keywords: [DMSO, vehicle, veh, ctrl, control, mock, untreated, NT, WT, EV, scr, scramble, siNT, PBS]
+
 # Who is who. Users are the subfolders of users_root; a new user = a new folder.
 # Aliases let initials in a folder name resolve to that folder.
 users:

@@ -145,3 +145,30 @@ rejected with a note (never retried forever); only OS-level transient errors
 retry. `labwatch testbed stress` checks the end-to-end invariants (no raw file
 lost or duplicated, every drop accounted for, nothing stuck) under chaos, and
 runs in CI.
+
+### D18 — Downstream statistics in pure Python, validated against R
+**2026-09-23.** No pandas/numpy/scipy/matplotlib: the Windows exe stays small,
+the report is one offline HTML file with hand-written SVG, and nothing new has
+to be installed on the PC. The price is owning the numerical code, so every
+piece is checked against the reference implementation it replaces: the
+isoDTB and TMT scripts run *unmodified* on shared inputs and our output is
+byte-identical (including readr's number formatting and R's mean algorithm);
+t-tests and BH against scipy (1e-10); the moderated t-test against limma 3.68
+(1e-8). Generator scripts for every golden file live next to them.
+
+### D19 — Moderated t-test (limma eBayes) is the default
+**2026-09-23.** With three replicates a plain t-test has 2–4 degrees of freedom
+and barely finds anything after FDR correction (5–33 % of planted 3–4-fold
+changes in simulation). Borrowing variance across all proteins, as limma does,
+found 95–100 % with no false positives. It is the field standard for small-n
+proteomics, so it is the default; Welch/Student stay available per lab or per
+experiment. Missing values are not imputed (a feature needs `min_valid` values
+per group) — imputation choices belong to the lab, not to a default.
+
+### D20 — Setup is a checklist, not a manual
+**2026-09-23.** The app opens on a live checklist (folders writable, safe
+layout, people, config valid, FragPipe + MSFragger, workflow + FASTA with
+decoys per method, disk, watcher, startup task), each open item with a one-click
+fix. Layouts that would make labwatch act on its own files (inbox = users
+folder, one inside the other, logs inside the inbox) are config *errors*, not
+warnings. `labwatch init` gives the same result without a display.

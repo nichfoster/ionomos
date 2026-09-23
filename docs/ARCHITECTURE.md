@@ -31,7 +31,9 @@
 | `ledger.py` | SQLite job table + status transitions; source of truth for "what's queued" | `prior-work/store.py` |
 | `worker.py` | Thread inside `labwatch run`: first runnable `queued` job → FragPipe → done/failed; holds jobs whose setup files are missing. Sequential. | `prior-work/queue_worker.py` |
 | `fragpipe.py` | Prepare a job (launcher, workflow with `database.db-path` patched to the method's FASTA, manifest, TMT annotation), run headless with timeout/stop, kill the process tree | `prior-work/fragpipe_runner.py` |
-| `postprocess.py` | Registry of post-processing steps named in `methods.X.postprocess` (none built yet) | — |
+| `postprocess.py` | After a done job: runs `downstream` (or only the R-port prep steps when analysis is off); `labwatch analyze` uses it too | — |
+| `downstream/` | FragPipe tables → `QuantMatrix` → statistics → SVG plots + `results/report.html`. `isodtb.py`/`tmt.py` (R ports), `quant.py` (loaders), `analysis.py` (comparisons), `stats.py` (t-tests, limma-style moderated t, BH), `charts.py`, `report.py`, `simulate.py` (realistic test data with planted truth) | the lab's R scripts; limma |
+| `setupcheck.py` | The setup checklist (app ✓ Setup tab, `labwatch init`) | — |
 | `health.py` | Failsafes: single-instance lock, heartbeat, thread supervisor, crash hooks/files, disk/RAM facts, log-problem extraction | — |
 | `stress.py` | `labwatch testbed stress`: messy drops + chaos against a real watcher/worker, invariant checks; name fuzzer | — |
 | `runners/isodtb.py` | Post-proc: modified-peptide → site merge | port of `lab-scripts/isoDTB_…R` |
@@ -228,3 +230,23 @@ that database and (b) record provenance. See WORKFLOWS.md.
 | FragPipe says exit 0 but a step failed / wrote nothing | parsed from the console (`Process 'X' finished, exit code: N`) → failed |
 | A GUI button throws | `report_callback_exception` → dialog + crash file; the app keeps running |
 | `check`/diagnose on a wedged display | the Tk probe runs in a child process with a timeout |
+
+## Downstream pipeline (0.4.0)
+
+```
+fragpipe/ ──▶ method prep ──────────▶ QuantMatrix ─────▶ statistics ──────────▶ presentation
+              isodtb.py  (R port)      features×samples   analysis.choose_       charts.py  (SVG)
+              tmt.py     (R port)      log2, condition     comparisons            report.py  (HTML)
+              quant.py   (loaders)     per sample          stats (moderated t,
+                                                           Welch, BH)
+                                                  results/: report.html, *_differential.tsv,
+                                                  volcano_*.svg, *_matrix_log2.tsv, analysis.json
+```
+
+Each stage only knows the one before it. New method = one loader; new plot =
+one function in `charts.py` + one line in `report.py`. The whole pipeline is
+wrapped so it can never fail a job or crash the watcher: problems become
+notes in the report and warnings on the job, and `labwatch analyze` (or Jobs →
+Re-run analysis) redoes it with new settings. Settings: `config.yaml
+analysis:` (lab defaults, app tab 7) overridden by `experiment.yaml
+analysis:` (per experiment).

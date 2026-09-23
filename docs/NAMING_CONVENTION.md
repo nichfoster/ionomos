@@ -127,10 +127,15 @@ files:                      # per-file overrides (fraction: -1 = single-shot)
 
 tmt:                        # TMT only; one block per plex (= experiment name)
   tag: TMT-10
-  channels:                 # channel → sample name. KEEP the channel token in
-    126:  DMSO_126          #   the sample name (lab SOP; the annotation script keys on it)
-    127N: DMSO_127N
-    127C: Drug_127C
+  channels:                 # channel → sample name as condition_plex_channel: the lab's
+    126:  DMSO_1_126        #   annotation script (and the report's conditions) key on it
+    127N: DMSO_1_127N
+    127C: Drug_1_127C
+
+analysis:                   # results/report.html for this experiment (lab defaults: app tab 7)
+  comparisons: ["Drug vs DMSO", "Drug2 vs DMSO"]   # treatment vs control; default: all vs the control
+  control: DMSO             # default: recognised by name (DMSO, vehicle, ctrl, WT, ...)
+  log2fc: 1                 # also: alpha, use_adjusted, min_valid, normalize, test, top_labels
 
 notes: "24 h treatment, 1 µM"   # copied into labwatch.json for provenance
 ```
@@ -142,6 +147,10 @@ notes: "24 h treatment, 1 µM"   # copied into labwatch.json for provenance
 3. `method` → workflow, FASTA, data type, post-processing (from `config.yaml`)
 4. raw names → FragPipe manifest lines (`file  experiment  bioreplicate  DDA|DIA`)
 5. all of it → `labwatch.json` in the destination
+6. after FragPipe: conditions for the statistics come from the same names —
+   DIA `DMSO_1.raw` → condition `DMSO`; TMT sample `Drug_1_128N` → `Drug`;
+   isoDTB: each sample prefix is tested on its own (ratios vs 0). Edit
+   `analysis:` in `experiment.yaml` and press *Re-run analysis* to change them.
 
 ## Still to confirm with the lab
 

@@ -62,6 +62,7 @@ class Config:
     gui_enabled: bool
     gui_timeout_seconds: float  # 0 => wait forever for an answer
     config_path: Path
+    analysis: dict = field(default_factory=dict)  # downstream settings (see downstream/analysis.py); "enabled" too
     warnings: tuple[str, ...] = ()  # non-fatal path problems (FragPipe bits missing, etc.)
 
     @property
@@ -171,6 +172,7 @@ def load(path: str | Path, check_paths: bool = True) -> Config:
         gui_enabled=bool(gui.get("enabled", True)),
         gui_timeout_seconds=float(gui.get("timeout_minutes", 0) or 0) * 60,
         config_path=p,
+        analysis=_analysis(raw.get("analysis")),
     )
 
     warnings = space_warnings
@@ -180,6 +182,21 @@ def load(path: str | Path, check_paths: bool = True) -> Config:
             raise ConfigError("config problems:\n  - " + "\n  - ".join(errors))
         warnings += more
     return replace(cfg, warnings=tuple(warnings)) if warnings else cfg
+
+
+def _analysis(raw) -> dict:
+    """analysis: section, validated by the same code that uses it (typos fail loudly at load time)."""
+    from labwatch.downstream.analysis import AnalysisError, settings_from
+
+    if raw is None:
+        return {"enabled": True}
+    if not isinstance(raw, dict):
+        raise ConfigError("'analysis:' must be a mapping")
+    try:
+        settings_from(raw)
+    except AnalysisError as exc:
+        raise ConfigError(f"analysis: {exc}") from exc
+    return {"enabled": True, **raw}
 
 
 def _read_learned(path: Path) -> dict[str, list[str]]:
@@ -208,6 +225,36 @@ def remember_alias(cfg: Config, user: str, alias: str) -> None:
         cfg.user_aliases[user].append(alias)
 
 
+def _norm(p: Path) -> Path:
+    try:
+        return Path(os.path.normcase(os.path.abspath(p)))
+    except (OSError, ValueError):
+        return Path(p)
+
+
+def _inside(child: Path, parent: Path) -> bool:
+    c, p = _norm(child), _norm(parent)
+    return c == p or p in c.parents
+
+
+def layout_problems(inbox: Path, users_root: Path, log_dir: Path, database: Path) -> list[str]:
+    """Folder layouts that would make labwatch act on its own files. Always errors."""
+    out = []
+    if _norm(inbox) == _norm(users_root):
+        out.append("paths.inbox and paths.users_root are the same folder: filed experiments would be picked up "
+                   "again as new drops. Use two different folders.")
+    elif _inside(users_root, inbox):
+        out.append(f"paths.users_root ({users_root}) is inside the inbox: every user folder would look like a "
+                   f"new drop. Put them side by side.")
+    elif _inside(inbox, users_root):
+        out.append(f"paths.inbox ({inbox}) is inside the users folder: it would look like a user. "
+                   f"Put them side by side (e.g. C:/Fragpipe_Auto/inbox and C:/Fragpipe_General).")
+    for name, p in (("log_dir", log_dir), ("database", database.parent)):
+        if _inside(p, inbox):
+            out.append(f"paths.{name} ({p}) is inside the inbox; move it out (the inbox must only hold drops)")
+    return out
+
+
 def _check_paths(cfg: Config) -> tuple[list[str], list[str]]:
     """Return (errors, warnings). Errors block Phase 1; warnings only matter for FragPipe runs."""
     problems: list[str] = []
@@ -219,6 +266,7 @@ def _check_paths(cfg: Config) -> tuple[list[str], list[str]]:
         parent = getattr(cfg, name) if name == "log_dir" else getattr(cfg, name).parent
         if not parent.is_dir():
             problems.append(f"paths.{name}: parent folder does not exist: {parent}")
+    problems += layout_problems(cfg.inbox, cfg.users_root, cfg.log_dir, cfg.database)
     if cfg.default_user and not (cfg.users_root / cfg.default_user).is_dir():
         problems.append(f"users.default: folder does not exist: {cfg.users_root / cfg.default_user}")
     # FragPipe bits are only needed from Phase 2 on.

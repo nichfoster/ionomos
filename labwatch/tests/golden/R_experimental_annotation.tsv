@@ -1,0 +1,9 @@
+plex	channel	sample	sample_name	condition	replicate
+1	126	DMSO_1_126	DMSO_126	DMSO	1
+1	127N	DMSO_1_127N	DMSO_127N	DMSO	2
+1	127C	DMSO_1_127C	DMSO_127C	DMSO	3
+1	128N	Drug_1_128N	Drug_128N	Drug	1
+1	128C	Drug_1_128C	Drug_128C	Drug	2
+1	129N	Drug_1_129N	Drug_129N	Drug	3
+1	131	Pool_1_131	Pool_131	Pool	1
+1	134N	Veh_1_134N	Veh_134N	Veh	1

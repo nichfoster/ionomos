@@ -29,7 +29,10 @@ To build by hand instead (any Windows machine with Python 3.11+ incl. tcl/tk):
 
 1. Unzip `LabWatch-<version>-windows.zip` to **`C:\Fragpipe_Auto`** (any
    folder is fine as long as the path has **no spaces**).
-2. Double-click **`LabWatch.exe`**. The setup wizard opens on tab **1 Folders**.
+2. Double-click **`LabWatch.exe`**. It opens on the **✓ Setup** checklist. Press
+   **Auto-setup** (standard folders, creates them, finds FragPipe, saves), then
+   work down the list — every open item has a button or says which tab to use.
+   Headless alternative: `labwatch-cli.exe init`.
 
 ### A3. Follow the tabs (10 min)
 
@@ -130,7 +133,10 @@ py -3.14 -c "import tkinter; print('ok')"
 | see the queue | tab 5 → **Show queue**, or `labwatch-cli.exe status` |
 | see the log | tab 5 → tick *follow the watcher log*, or `C:\Fragpipe_Auto\logs\labwatch.log` |
 | report a problem | tab 5 → **Save diagnostics bundle (.zip)** → send the file (or `labwatch-cli.exe diagnose --zip`) |
-| see / retry / cancel jobs | tab **6 Jobs** (double-click = open folder; failed jobs show the likely cause) |
+| see / retry / cancel jobs | tab **6 Jobs** (double-click = open the report; failed jobs show the likely cause) |
+| look at results | `results\report.html` in the experiment folder (volcano, hits, QC); tab 6 → **Open report** |
+| change comparisons / thresholds | lab-wide: tab **7 Analysis**; one experiment: `analysis:` in its `experiment.yaml`; then tab 6 → **Re-run analysis** |
+| analyse an old FragPipe run | tab 7 → **Analyse a folder…** or `labwatch-cli.exe analyze <folder>` |
 | keep the PC free for a while | tab 6 → **Pause searches** (the running search finishes; nothing new starts) |
 | check FragPipe is installed right | tab 6 → **Check FragPipe install** (MSFragger / IonQuant / DIA-NN, decoys in each FASTA) |
 | stop / start the watcher | tab 5 buttons; the startup task restarts it at next logon |

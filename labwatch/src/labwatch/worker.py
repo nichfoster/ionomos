@@ -246,21 +246,32 @@ class Worker:
             self._fail(job, res.reason, spec, res.hints)
             return
 
-        warnings = spec.warnings + fragpipe.missing_outputs(spec) + self._postprocess(job, spec)
+        _update_status(job, run={"finished_at": finished, "exit_code": 0})
+        self._beat(f"running job {job.id}: analysis")
+        post_warnings, summary = self._postprocess(job, spec)
+        warnings = spec.warnings + fragpipe.missing_outputs(spec) + post_warnings
         self.ledger.set_status(job.id, "done", "; ".join(warnings) or None)
-        _update_status(job, status="done", reason=None,
-                       run={"finished_at": finished, "exit_code": 0, "warnings": warnings})
+        _update_status(job, status="done", reason=None, run={"warnings": warnings},
+                       **({"results": summary} if summary else {}))
+        report = f"Report:  {dest / summary['report']}\n" if summary.get("report") else ""
+        hits = "".join(f"  {c['name']}: {c['up']} up, {c['down']} down of {c['tested']}\n"
+                       for c in summary.get("comparisons", []))
         _note(dest, DONE_NOTE,
-              f"FragPipe finished {datetime.now():%Y-%m-%d %H:%M}.\n"
-              f"Results: {spec.workdir}\n"
+              f"FragPipe finished {datetime.now():%Y-%m-%d %H:%M}.\n{report}"
+              f"FragPipe output: {spec.workdir}\n"
+              + (f"Hits:\n{hits}" if hits else "")
               + ("".join(f"Note: {w}\n" for w in warnings)))
         log.info("job %d: done%s", job.id, f" ({len(warnings)} warning(s))" if warnings else "")
 
-    def _postprocess(self, job: Job, spec: fragpipe.RunSpec) -> list[str]:
-        """Post-processing hook. Steps are named per method in config (methods.X.postprocess)."""
+    def _postprocess(self, job: Job, spec: fragpipe.RunSpec) -> tuple[list[str], dict]:
+        """Downstream analysis (never fails the job; see postprocess.py)."""
         from labwatch import postprocess
 
-        return postprocess.run_all(job, spec, self.cfg)
+        try:
+            return postprocess.run_all(job, spec, self.cfg)
+        except Exception as exc:  # noqa: BLE001
+            log.exception("job %d: analysis crashed", job.id)
+            return [f"analysis crashed: {exc}"], {}
 
     def _fail(self, job: Job, reason: str, spec: fragpipe.RunSpec | None = None, hints: list[str] | None = None) -> None:
         self.ledger.set_status(job.id, "failed", reason)

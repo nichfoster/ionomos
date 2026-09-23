@@ -72,8 +72,9 @@ SAMPLES: dict[str, dict] = {
     "tmt_good": dict(
         folder="20260126_Aman_TMT_KL6159A-9plex",
         raws=[f"KL6159A_TMT_F{i}.raw" for i in range(1, 5)],
-        yaml={"tmt": {"tag": "TMT-10", "channels": {"126": "DMSO_126", "127N": "DMSO_127N", "127C": "Drug_127C",
-                                                       "128N": "Drug_128N"}}},
+        yaml={"tmt": {"tag": "TMT-10", "channels": {"126": "DMSO_1_126", "127N": "DMSO_1_127N", "127C": "DMSO_1_127C",
+                                                       "128N": "Drug_1_128N", "128C": "Drug_1_128C",
+                                                       "129N": "Drug_1_129N"}}},
         shows="TMT, 4 fractions, biorep 1, channel map in experiment.yaml -> queued",
     ),
     "glued_initials": dict(
@@ -205,17 +206,37 @@ def fake_fragpipe(argv: list[str]) -> int:
     (wd / "fragpipe.workflow").write_text(wf_text, encoding="utf-8")
     (wd / "fragpipe-files.fp-manifest").write_text(Path(a.manifest).read_text(encoding="utf-8"), encoding="utf-8")
     (wd / f"log_{time.strftime('%Y-%m-%d_%H-%M-%S')}.txt").write_text("fake FragPipe log\n", encoding="utf-8")
-    if any(r[3] == "DIA" for r in rows if len(r) > 3):
-        (wd / "diann-output").mkdir(exist_ok=True)
-        (wd / "diann-output" / "report.tsv").write_text("Run\tProtein.Group\tPrecursor.Quantity\n", encoding="utf-8")
-    elif "tmt" in Path(a.workflow).name.lower():
-        (wd / "tmt-report").mkdir(exist_ok=True)
-        (wd / "tmt-report" / "abundance_gene_MD.tsv").write_text("Index\tNumberPSM\n", encoding="utf-8")
-    else:
-        (wd / "combined_modified_peptide_label_quant.tsv").write_text(
-            "Peptide Sequence\tLight Modified Peptide\tStart\tProtein\n", encoding="utf-8")
+    _fake_results(wd, rows, Path(a.workflow).name)
     say("done")
     return 0
+
+
+def _fake_results(wd: Path, rows: list[list[str]], workflow_name: str) -> None:
+    """Realistic result tables with planted hits (labwatch.downstream.simulate), so reports have content."""
+    import zlib
+
+    from labwatch.downstream import simulate
+
+    seed = zlib.crc32("".join(r[0] for r in rows).encode())
+    if any(len(r) > 3 and r[3] == "DIA" for r in rows):
+        (wd / "diann-output" / "report.tsv").parent.mkdir(parents=True, exist_ok=True)
+        (wd / "diann-output" / "report.tsv").write_text("Run\tProtein.Group\tPrecursor.Quantity\n", encoding="utf-8")
+        simulate.dia_pg_matrix(wd / "diann-output" / "report.pg_matrix.tsv", [(r[0], r[1]) for r in rows], seed)
+    elif "tmt" in workflow_name.lower():
+        ann = Path(rows[0][0]).parent / "annotation.txt"
+        names = []
+        if ann.is_file():
+            names = [ln.split("\t")[1].strip() for ln in ann.read_text(encoding="utf-8").splitlines() if "\t" in ln]
+        names = names or ["DMSO_1_126", "DMSO_1_127N", "DMSO_1_127C", "Drug_1_128N", "Drug_1_128C", "Drug_1_129N"]
+        simulate.tmt_abundance(wd / "tmt-report" / "abundance_gene_MD.tsv", names, seed)
+    else:
+        exps: dict[str, list[int]] = {}
+        for r in rows:
+            exps.setdefault(r[1], [])
+            if int(r[2]) not in exps[r[1]]:
+                exps[r[1]].append(int(r[2]))
+        simulate.isodtb_label_quant(wd / "combined_modified_peptide_label_quant.tsv",
+                                    {e: sorted(v) for e, v in exps.items()}, seed)
 
 
 def write_fake_launcher(folder: Path) -> Path:

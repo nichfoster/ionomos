@@ -66,6 +66,13 @@ def test_isodtb_job_runs_to_done(bed):
     assert (dest / "DONE.txt").is_file() and not (dest / "FAILED.txt").exists()
     assert not w.run_once()  # queue empty
 
+    # downstream analysis ran: report + sites table (R port) + a volcano, recorded in labwatch.json and DONE.txt
+    assert (dest / "results" / "report.html").is_file()
+    assert (dest / "results" / "EJQ_PK_EJQ-2-027_isoDTB_1uM_3h_sites.tsv").is_file()
+    assert st["results"]["report"] == "results/report.html"
+    assert st["results"]["comparisons"][0]["up"] > 0  # the fake FragPipe plants engaged sites
+    assert "Report:" in (dest / "DONE.txt").read_text(encoding="utf-8")
+
 
 def test_dia_job_uses_dia_type_and_diann_flag(bed):
     cfg = replace(bed["cfg"], config_diann="C:/DIA-NN/DiaNN.exe")

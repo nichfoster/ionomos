@@ -10,6 +10,9 @@ Command line.
     labwatch retry    JOB_ID [--config PATH]       failed -> queued
     labwatch testbed  ...                          build/drive a fake lab for testing (see testbed.py)
     labwatch diagnose [--zip [PATH]]               everything needed to report a problem (text, or a .zip bundle)
+    labwatch analyze  JOB_ID|FOLDER [--control C] [--compare 'A vs B'] [--log2fc F] [--open]
+                                                   statistics + volcano plots + results/report.html
+    labwatch init     [--root DIR] [--users DIR]   create folders + a config without the app (headless setup)
     labwatch cancel   JOB_ID                       stop a running search / drop a queued job
     labwatch pause | resume                        hold / release the FragPipe queue
     labwatch repair-ledger [--force]               rebuild the job list from the experiment folders
@@ -420,6 +423,88 @@ def cmd_diagnose(args) -> int:
     return 0
 
 
+def cmd_init(args) -> int:
+    """Headless setup: folders + config + FragPipe detection, then the checklist."""
+    from labwatch import configio, fragpipe, setupcheck
+    from labwatch.service import remember_config_path
+
+    root = (args.root or configio.defaults()["paths"]["inbox"].rsplit("/", 1)[0]).replace("\\", "/")
+    users = args.users or configio.defaults()["paths"]["users_root"]
+    cfg_path = Path(args.config if args.config_given else Path(root) / "config.yaml")
+    if cfg_path.is_file() and not args.force:
+        print(f"{cfg_path} already exists; keeping it (use --force to start from defaults).")
+        data = configio.read_config(cfg_path)
+    else:
+        data = configio.defaults(root, users)
+        found = fragpipe.detect_launcher()
+        if found:
+            data["paths"]["fragpipe_exe"] = str(found).replace("\\", "/")
+            print(f"found FragPipe: {found}")
+    for key in ("inbox", "users_root", "workflow_dir", "fasta_dir", "log_dir"):
+        Path(data["paths"][key]).mkdir(parents=True, exist_ok=True)
+    Path(data["paths"]["database"]).parent.mkdir(parents=True, exist_ok=True)
+    configio.write_config(cfg_path, data)
+    remember_config_path(cfg_path)
+    print(f"config: {cfg_path}\n")
+    items = setupcheck.run(cfg_path)
+    mark = {"ok": "✓", "todo": "·", "warn": "!", "fail": "✗"}
+    for it in items:
+        print(f" {mark[it.status]} {it.title:<34} {it.detail}")
+        if it.status != "ok" and it.fix:
+            print(f"   → {it.fix}")
+    print("\n" + setupcheck.summary(items))
+    return 1 if any(i.status == "fail" for i in items) else 0
+
+
+def cmd_analyze(args) -> int:
+    """Re-run the downstream analysis for a job (by id) or any experiment / FragPipe folder."""
+    from labwatch import postprocess
+
+    cfg = None
+    try:
+        cfg = load(args.config, check_paths=False)
+    except ConfigError:
+        pass  # analysing a folder works without a lab config (defaults)
+    target = args.target
+    if target.isdigit():
+        if cfg is None or not cfg.database.is_file():
+            print("no job ledger here; give a folder path instead", file=sys.stderr)
+            return 2
+        job = Ledger(cfg.database).get(int(target))
+        if job is None:
+            print(f"no job {target}", file=sys.stderr)
+            return 2
+        dest = Path(job.dest_dir)
+    else:
+        dest = Path(target)
+    if not dest.is_dir():
+        print(f"not a folder: {dest}", file=sys.stderr)
+        return 2
+    extra = {}
+    if args.control:
+        extra["control"] = args.control
+    if args.compare:
+        extra["comparisons"] = args.compare
+    for key in ("log2fc", "alpha", "test", "min_valid"):
+        if getattr(args, key) is not None:
+            extra[key] = getattr(args, key)
+    if args.raw_p:
+        extra["use_adjusted"] = False
+    out = postprocess.run_for_folder(dest, cfg, args.method, extra)
+    print(f"method: {out.method or 'unknown'}")
+    for c in out.summary.get("comparisons", []):
+        print(f"  {c['name']}: {c['up']} up, {c['down']} down of {c['tested']} tested  ({c['table']})")
+    for w in out.warnings:
+        print(f"  note: {w}")
+    if out.report:
+        print(f"report: {out.report}")
+        if args.open:
+            from labwatch.service import open_path
+
+            open_path(out.report)
+    return 0 if out.report else 1
+
+
 def cmd_cancel(args) -> int:
     from labwatch.worker import request_cancel
 
@@ -509,6 +594,24 @@ def main(argv: list[str] | None = None) -> int:
     dg.add_argument("--zip", nargs="?", const="auto", metavar="PATH",
                     help="write a .zip bundle (report, logs, failed jobs' FragPipe logs) instead")
     dg.set_defaults(fn=cmd_diagnose)
+    it = sub.add_parser("init", help="create folders + config without the app, then show the setup checklist")
+    it.add_argument("--root", help="LabWatch folder (default C:/Fragpipe_Auto on Windows)")
+    it.add_argument("--users", help="users folder (default C:/Fragpipe_General on Windows)")
+    it.add_argument("--force", action="store_true", help="overwrite an existing config with defaults (a backup is kept)")
+    it.set_defaults(fn=cmd_init)
+    az = sub.add_parser("analyze", help="(re)run statistics, volcano plots and the report for a job or folder")
+    az.add_argument("target", help="job id, experiment folder, or any FragPipe output folder")
+    az.add_argument("--method", choices=["isoDTB", "TMT", "DIA", "LFQ", "auto"], default=None,
+                    help="default: from labwatch.json, else detected from the files")
+    az.add_argument("--control", help="control condition (default: recognised by name, e.g. DMSO)")
+    az.add_argument("--compare", action="append", metavar="'A vs B'", help="comparison; repeatable")
+    az.add_argument("--log2fc", type=float, help="fold-change threshold (log2)")
+    az.add_argument("--alpha", type=float, help="significance threshold")
+    az.add_argument("--test", choices=["moderated", "welch", "student"])
+    az.add_argument("--min-valid", dest="min_valid", type=int)
+    az.add_argument("--raw-p", action="store_true", help="apply alpha to raw p-values instead of BH q-values")
+    az.add_argument("--open", action="store_true", help="open the report when done")
+    az.set_defaults(fn=cmd_analyze)
     cn = sub.add_parser("cancel", help="cancel a queued or running job")
     cn.add_argument("job_id", type=int)
     cn.set_defaults(fn=cmd_cancel)

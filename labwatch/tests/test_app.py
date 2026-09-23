@@ -248,3 +248,63 @@ def test_import_workflow_and_restore_config(app, tmp_path, monkeypatch):
     monkeypatch.setattr(filedialog, "askopenfilename", lambda **k: str(backups[0]))
     app.restore_config()
     assert app.data["methods"]["isoDTB"]["fasta"] == "human_reviewed_decoys.fas"  # the pre-import version
+
+
+def _pump_until(app, cond, secs=15):
+    end = time.monotonic() + secs
+    while time.monotonic() < end:
+        app.root.update()
+        if cond():
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def test_setup_tab_checklist_and_auto_setup(app, tmp_path, monkeypatch):
+    from labwatch import configio, fragpipe
+
+    assert app.nb.index(app.nb.select()) == 0  # the checklist is what you see first
+    d = configio.defaults(str(tmp_path / "Auto"), str(tmp_path / "General"))
+    monkeypatch.setattr(configio, "defaults", lambda *a, **k: d)
+    monkeypatch.setattr(fragpipe, "detect_launcher", lambda: None)
+    app.auto_setup()
+    assert (tmp_path / "Auto" / "inbox").is_dir() and (tmp_path / "Auto" / "config.yaml").is_file()
+    assert _pump_until(app, lambda: getattr(app, "setup_items", None))
+    keys = {i.key: i.status for i in app.setup_items}
+    assert keys["folders"] == "ok" and keys["config"] == "ok" and keys["users"] == "todo"
+    assert "ready" in app.setup_summary.cget("text")
+    app._setup_action("open_tab:2")
+    assert app.nb.select() == str(app.tab_users)
+
+
+def test_analysis_tab_round_trips(app, tmp_path):
+    _lab_app(app, tmp_path)
+    app.v("analysis.log2fc").set("0.58")
+    app.v("analysis.test").set("welch")
+    app.bv("analysis.use_adjusted").set(False)
+    app.v("analysis.control_keywords").set("DMSO, Veh")
+    assert app.save()
+    cfg = load(tmp_path / "Auto" / "config.yaml")
+    assert cfg.analysis["log2fc"] == 0.58 and cfg.analysis["test"] == "welch"
+    assert cfg.analysis["use_adjusted"] is False and cfg.analysis["control_keywords"] == ["DMSO", "Veh"]
+
+
+def test_jobs_report_and_rerun(app, tmp_path, monkeypatch):
+    from labwatch.downstream import simulate
+    from labwatch.ledger import Job, Ledger
+
+    _lab_app(app, tmp_path)
+    dest = tmp_path / "General" / "EJQ" / "dia"
+    runs = [(f"/x/{c}_{r}.raw", c) for c in ("DMSO", "Drug") for r in (1, 2, 3)]
+    simulate.dia_pg_matrix(dest / "fragpipe" / "report.pg_matrix.tsv", runs, seed=1)
+    led = Ledger(tmp_path / "Auto" / "labwatch.db")
+    led.insert(Job(inbox_name="dia", user="EJQ", method="DIA", dest_dir=str(dest), status="done"))
+    opened = []
+    monkeypatch.setattr(app, "_open", lambda p: opened.append(p))
+    app.refresh_jobs()
+    app.jtree.selection_set("1")
+    app.job_action("analyze")
+    assert _pump_until(app, lambda: opened)
+    assert opened[-1].endswith("report.html") and (dest / "results" / "report.html").is_file()
+    app.job_action("report")
+    assert opened[-1].endswith("report.html")

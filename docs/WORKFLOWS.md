@@ -61,9 +61,14 @@ bioreps 1–3 — output subfolders `EJQ_2_027_1/`, `_2/`, `_3/`.
 - Writes `<…>_output.tsv`.
 - Inputs we must supply: `input_tsv`, `output_tsv`, `sample_prefix` (== FragPipe
   experiment name), `mod_mass` (config, default `561.3387`).
-- Port to Python/pandas is ~60 lines. Validate against one existing run's
-  output (the lab has `combined_modified_peptide_label_quant_output.tsv`
-  files on D:).
+- **Ported** (`labwatch/downstream/isodtb.py`, 2026-09-23). The output is
+  byte-identical to the R script on a deliberately awkward test table
+  (`labwatch/tests/golden/`), run with the real script. The sample prefix is
+  read from the column names instead of typed in, so several samples in one
+  folder each get a table.
+- ⚠ Quirk kept for identical output — worth a look by the lab: the script counts
+  *every letter* before the label, so an N-terminal mod written `n[42.0106]`
+  shifts that site's position by one. Easy to change once confirmed.
 
 ## TMT
 
@@ -101,9 +106,10 @@ for peptide/site).
   (prefix before first `_`), replicate (row number within condition).
 - Writes `experimental_annotation.tsv`.
 - Note the regex assumes plex index `1` and a single-token condition. Real
-  headers look like `DMSO_1_126`. Our port should derive this from the
-  `experiment.yaml` channel map instead of re-parsing headers where possible,
-  and fall back to the regex.
+  headers look like `DMSO_1_126`.
+- **Ported** (`labwatch/downstream/tmt.py`), byte-identical to the R script.
+  When names don't follow the pattern the file is empty (as in R); the report
+  then takes the condition from the text before the first `_` and says so.
 
 ## DIA
 
@@ -136,3 +142,34 @@ they do next (FragPipe Analyst upload?).
 - [ ] One R-script output per method to diff the Python port against.
 - [ ] Answer: what is the TMT "Peak Picking & zero Samples" pre-step tool?
 - [ ] Answer: how does FragPipe 24.0 headless locate `annotation.txt`?
+
+## Downstream (all methods): statistics, volcano plots, report
+
+After FragPipe, `labwatch/downstream/` turns each method's main table into one
+features × samples matrix of log2 values and runs the same statistics:
+
+| Method | Table read | Level | Test |
+|---|---|---|---|
+| isoDTB | `<prefix>_sites.tsv` (from the R port) | site | each sample's replicate log2 H/L vs 0 |
+| DIA | DIA-NN `*pg_matrix.tsv` (runs mapped to conditions via the manifest) | protein | condition vs control |
+| TMT | `tmt-report/abundance_gene_MD.tsv` (+ R-port annotation) | gene | condition vs control |
+| label-free DDA (future) | `combined_protein.tsv` (MaxLFQ if present) | protein | condition vs control |
+
+- **Test:** moderated t-test by default — a port of limma's `eBayes`
+  (limma 3.68: method-of-moments prior when all proteins have the same df,
+  maximum-likelihood prior when missing values make them differ). Matches
+  limma to 1e-8 on t and 1e-6 on p (`tests/golden/limma_*`). With 3
+  replicates it found 95–100 % of planted changes vs 5–33 % for Welch, with
+  no false positives. Welch and Student are selectable.
+- **Multiple testing:** Benjamini–Hochberg; hits need |log2FC| ≥ threshold
+  *and* q < alpha (both configurable).
+- **Normalisation:** median centring of log2 intensities (off for ratios and
+  TMT-Integrator output, which is already normalised). No imputation: a
+  protein needs `min_valid` values per group.
+- **Outputs** (`results/`): `report.html` (self-contained, works offline),
+  `volcano_<comparison>.svg`, `<comparison>_differential.tsv`,
+  `<level>_matrix_log2.tsv`, `analysis.json` (settings used).
+
+Open questions for the lab: which comparisons matter for isoDTB (vs 0, or
+compound vs compound?); whether DIA should use FragPipe's own
+`combined_protein.tsv` or DIA-NN's matrix; which thresholds people use today.

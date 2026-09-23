@@ -32,7 +32,7 @@ from labwatch.naming import NamingError, RawName, RawSet
 EXPERIMENT_YAML = "experiment.yaml"
 
 _TOP_KEYS = {"method", "user", "date", "workflow", "fasta", "allow_uneven_fractions", "files", "tmt", "notes",
-             "resolved_by"}
+             "resolved_by", "analysis"}
 _FILE_KEYS = {"experiment", "bioreplicate", "fraction"}
 
 
@@ -59,6 +59,7 @@ class Overrides:
     tmt: dict = field(default_factory=dict)
     notes: str | None = None
     resolved_by: str | None = None  # "gui" when a human set these
+    analysis: dict = field(default_factory=dict)  # per-experiment analysis settings (comparisons, control, ...)
 
     def is_empty(self) -> bool:
         return not any([self.method, self.user, self.date, self.workflow, self.fasta,
@@ -82,6 +83,8 @@ class Overrides:
             }
         if self.tmt:
             d["tmt"] = self.tmt
+        if self.analysis:
+            d["analysis"] = self.analysis
         return d
 
 
@@ -135,6 +138,18 @@ def parse_overrides(data: dict | None) -> Overrides:
             bioreplicate=_int_or_none(spec.get("bioreplicate"), f"files.{name}.bioreplicate"),
             fraction=_int_or_none(spec.get("fraction"), f"files.{name}.fraction"),
         )
+
+    an = data.get("analysis") or {}
+    if an:
+        if not isinstance(an, dict):
+            raise OverridesError("analysis: must be a mapping (e.g. comparisons: [\"Drug vs DMSO\"])")
+        from labwatch.downstream.analysis import AnalysisError, settings_from
+
+        try:
+            settings_from(an)
+        except AnalysisError as exc:
+            raise OverridesError(f"analysis: {exc}") from exc
+        ov.analysis = an
 
     tmt = data.get("tmt") or {}
     if tmt:

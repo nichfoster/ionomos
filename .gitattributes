@@ -1,0 +1,3 @@
+# golden reference files are compared byte for byte: never convert line endings
+labwatch/tests/golden/*.tsv -text
+labwatch/tests/golden/*.json -text

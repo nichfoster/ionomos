@@ -19,8 +19,8 @@ Then it waits for everything to settle and checks:
   1. no raw file was lost or duplicated (count and bytes, inbox + users folders)
   2. every drop is accounted for: filed (with a job) or still in the inbox
      (with a .REJECTED.txt note, or no raws so never taken)
-  3. no job is left queued/running; done jobs have DONE.txt + output,
-     failed jobs have FAILED.txt
+  3. no job is left queued/running; done jobs have DONE.txt + output + a
+     results/report.html (analysis didn't crash), failed jobs have FAILED.txt
   4. the ledger passes SQLite's integrity check
   5. nothing was logged at CRITICAL (a crash that a supervisor had to catch)
 
@@ -320,6 +320,11 @@ def run(n: int = 60, seed: int = 1, root: Path | None = None, keep: bool = False
             rep.violations.append(f"job {j.id}: folder missing {dest}")
         elif j.status == "done" and not ((dest / "DONE.txt").is_file() and any((dest / "fragpipe").iterdir())):
             rep.violations.append(f"job {j.id} done without DONE.txt/output")
+        elif j.status == "done" and not (dest / "results" / "report.html").is_file():
+            rep.violations.append(f"job {j.id} done without results/report.html")
+        elif j.status == "done" and (dest / "results" / "analysis_error.txt").is_file():
+            rep.violations.append(f"job {j.id}: analysis crashed: "
+                                  f"{(dest / 'results' / 'analysis_error.txt').read_text(encoding='utf-8')[-300:]}")
         elif j.status == "failed" and not (dest / "FAILED.txt").is_file():
             rep.violations.append(f"job {j.id} failed without FAILED.txt")
     for status_file in cfg.users_root.glob("*/*/labwatch.json"):
