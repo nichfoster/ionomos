@@ -40,7 +40,7 @@ Get-CimInstance Win32_Process -Filter "Name = 'python.exe' OR Name = 'pythonw.ex
 
 Write-Host "==> removing program files (data is kept)" -ForegroundColor Cyan
 foreach ($un in @("C:\Ionomos\unins000.exe")) {
-    if (Test-Path $un) { Start-Process -Wait -FilePath $un -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART"; Write-Host "  uninstalled $(Split-Path $un)" }
+    if (Test-Path $un) { $p = Start-Process -FilePath $un -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -PassThru; $p.WaitForExit(); Start-Sleep 3; Write-Host "  uninstalled $(Split-Path $un)" }
 }
 foreach ($f in @("Ionomos.exe", "ionomos-cli.exe", "Ionomos-crash.txt", "LabWatch.exe", "labwatch-cli.exe", "labwatch.exe",
                  "LabWatch-crash.txt", "run_ionomos.bat", "run_labwatch.bat", "README.txt",
