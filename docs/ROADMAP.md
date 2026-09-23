@@ -23,26 +23,26 @@ Build, in this order, each with tests:
 3. `watcher.py` — inbox polling with tree-fingerprint stability. Test with a
    thread that slowly writes files.
 4. `ledger.py` — SQLite schema + transitions + startup recovery.
-5. `intake.py` — validate → move → `labwatch.json` → ledger. Rejection writes
+5. `intake.py` — validate → move → `ionomos.json` → ledger. Rejection writes
    `.REJECTED.txt`.
-6. `cli.py` — `labwatch run`, `labwatch status`, `labwatch dry-run <folder>`
+6. `cli.py` — `ionomos run`, `ionomos status`, `ionomos dry-run <folder>`
    (parse and print what *would* happen, move nothing).
-7. `run_labwatch.bat` + Task Scheduler instructions.
+7. `run_ionomos.bat` + Task Scheduler instructions.
 
 Done 2026-09-15: `naming` (keyword/glued-initials/date formats/method from
 file names), `config`, `watcher` (note-aware retry, backoff), `ledger`,
 `intake` (experiment.yaml overrides, Windows lock retry), `resolve` (tkinter
 window), `testbed`, `cli` (run / check / status / dry-run / retry / testbed),
 `app` (setup wizard / control panel with a Testbed tab), `configio`,
-`service`, PyInstaller exe (`LabWatch.exe` + `labwatch-cli.exe`), 149 tests incl.
+`service`, PyInstaller exe (`Ionomos.exe` + `ionomos-cli.exe`), 149 tests incl.
 real-GUI and end-to-end, `install.ps1` fallback.
-2026-09-16: dev install on the PC (`deploy/dev_install.ps1`, `labwatch update`,
-"Update from GitHub" in the app), `labwatch diagnose` / "Copy diagnostics",
+2026-09-16: dev install on the PC (`deploy/dev_install.ps1`, `ionomos update`,
+"Update from GitHub" in the app), `ionomos diagnose` / "Copy diagnostics",
 GitHub Actions (tests on Linux+Windows; exe built on `v*` tags). See DEV_LOOP.md.
 Remaining for exit: the week of real drops on the PC.
 
 **Exit:** on the PC, dropping a correctly named folder of raws lands it in the
-right user directory with `labwatch.json` saying `queued` and nothing else
+right user directory with `ionomos.json` saying `queued` and nothing else
 happens. A bad name gets a `.REJECTED.txt`. Runs for a week without falling over.
 
 ## Phase 2 — isoDTB end-to-end
@@ -60,7 +60,7 @@ small isoDTB folder, compare with a GUI run. Still to build: step 5 below.
 4. `worker.py` — pull queued job, run, record.
 5. `runners/isodtb.py` — port the site-merge R script; golden-file test vs an
    existing lab output.
-6. `DONE.txt` / `FAILED.txt` + `labwatch retry`.
+6. `DONE.txt` / `FAILED.txt` + `ionomos retry`.
 
 **Exit:** one real isoDTB experiment processed with no manual steps; the
 `_sites.tsv` matches the R output on the same input.
@@ -74,9 +74,15 @@ Jobs tab, stress tester. See ARCHITECTURE.md "Failsafes".
 
 2026-09-23 (0.4.0): downstream analysis built — R ports (byte-identical),
 limma-style statistics (validated vs limma), volcano plots, self-contained
-HTML report, `labwatch analyze`, app Analysis tab + Re-run analysis; setup
-checklist tab + Auto-setup + `labwatch init`, unsafe layouts refused. Next:
+HTML report, `ionomos analyze`, app Analysis tab + Re-run analysis; setup
+checklist tab + Auto-setup + `ionomos init`, unsafe layouts refused. Next:
 run it on real lab output and compare with the lab's current analyses.
+
+2026-09-23 (0.5.0): renamed LabWatch → Ionomos with full backward
+compatibility (`names.py`); Windows installer (install / upgrade / uninstall,
+retires LabWatch) tested in CI; in-app update from a downloaded Setup; Report
+a problem → one zip on the Desktop; build stamp in every report; app log;
+self-expiring detailed logging.
 
 ## Phase 3 — DIA, then TMT
 
@@ -93,7 +99,7 @@ run it on real lab output and compare with the lab's current analyses.
 - **Data presentation**: volcano plot + summary at the end of each run —
   either an HTML report (plotly, no server) or a small Shiny/Streamlit app.
   FragPipe Analyst ships R code that can be reused for the stats.
-- `labwatch status` as a tiny local web page if people ask.
+- `ionomos status` as a tiny local web page if people ask.
 - Auto-archive finished experiments to `D:\<user>\` after N days.
 - Optional: auto-pull from `C:\Proteomics_File_Sharing` (reversing D3) once
   the convention is trusted.

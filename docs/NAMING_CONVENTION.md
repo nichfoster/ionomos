@@ -6,7 +6,7 @@ folder name rather than enforcing a fixed layout; the *end* of each raw file
 name is reserved for replicate/fraction numbers, and what those numbers mean
 depends on the method.
 
-Implemented in `labwatch/src/labwatch/naming.py`; `labwatch dry-run <folder>`
+Implemented in `ionomos/src/ionomos/naming.py`; `ionomos dry-run <folder>`
 shows exactly how a folder will be interpreted without touching it.
 
 ## Folder name
@@ -25,7 +25,7 @@ e.g. `20260902_EJQ_isoDTB_EJQ-2-027_1uM-3h`.
 **Spaces and punctuation are tolerated** — the folder is renamed on the way in
 (`20260902-isoDTB_EJQ-2-027 (1uM 3h)` → `20260902-isoDTB_EJQ-2-027-1uM-3h`)
 because FragPipe cannot handle spaces in paths. The original name is kept in
-`labwatch.json`.
+`ionomos.json`.
 
 Rejected, with a `<name>.REJECTED.txt` note left next to the folder:
 
@@ -82,7 +82,7 @@ number is bioreplicate 1.
 Raw files may sit at the top level or in a `raw\` subfolder. Anything else in
 the folder (`.xlsx`, notes, `.mzML`) is carried along untouched.
 
-## When labwatch can't tell: the resolver window
+## When ionomos can't tell: the resolver window
 
 If the user, method, a file's tail, or the fraction layout can't be worked
 out, a small window opens on the proteomics PC:
@@ -137,7 +137,7 @@ analysis:                   # results/report.html for this experiment (lab defau
   control: DMSO             # default: recognised by name (DMSO, vehicle, ctrl, WT, ...)
   log2fc: 1                 # also: alpha, use_adjusted, min_valid, normalize, test, top_labels
 
-notes: "24 h treatment, 1 µM"   # copied into labwatch.json for provenance
+notes: "24 h treatment, 1 µM"   # copied into ionomos.json for provenance
 ```
 
 ## What the watcher derives
@@ -146,7 +146,7 @@ notes: "24 h treatment, 1 µM"   # copied into labwatch.json for provenance
 2. `user` → destination `C:\Fragpipe_General\<user>\<safe-name>\`
 3. `method` → workflow, FASTA, data type, post-processing (from `config.yaml`)
 4. raw names → FragPipe manifest lines (`file  experiment  bioreplicate  DDA|DIA`)
-5. all of it → `labwatch.json` in the destination
+5. all of it → `ionomos.json` in the destination
 6. after FragPipe: conditions for the statistics come from the same names —
    DIA `DMSO_1.raw` → condition `DMSO`; TMT sample `Drug_1_128N` → `Drug`;
    isoDTB: each sample prefix is tested on its own (ratios vs 0). Edit

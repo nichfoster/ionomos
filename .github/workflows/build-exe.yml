@@ -1,8 +1,8 @@
-# Builds LabWatch.exe / labwatch-cli.exe on a GitHub Windows machine and attaches
-# the zip to a GitHub Release. Nothing to build by hand, ever.
+# Builds Ionomos on a GitHub Windows machine: the installer (Ionomos-Setup-<v>.exe) and a
+# portable zip, tests both for real, and attaches them to a GitHub Release.
 #
-#   tag a version:      git tag v0.2.0 && git push --tags     -> release "v0.2.0" with the zip
-#   or on demand:       GitHub -> Actions -> build-exe -> Run workflow   -> zip under "Artifacts"
+#   tag a version:      git tag v0.5.0 && git push --tags     -> release "v0.5.0" with both files
+#   or on demand:       GitHub -> Actions -> build-exe -> Run workflow   -> files under "Artifacts"
 name: build-exe
 on:
   push:
@@ -24,12 +24,12 @@ jobs:
       - name: Smoke test the console exe
         shell: pwsh
         run: |
-          $exe = Get-ChildItem dist\LabWatch-*-windows\labwatch-cli.exe | Select-Object -First 1
+          $exe = Get-ChildItem dist\Ionomos-*-windows\ionomos-cli.exe | Select-Object -First 1
           & $exe --version
           & $exe testbed init C:\bed
           & $exe --config C:\bed\Fragpipe_Auto\config.yaml check
           # full frozen pipeline: watcher files the drop, worker runs the (fake) FragPipe
-          $env:LABWATCH_FAKE_FP_SECONDS = "1"
+          $env:IONOMOS_FAKE_FP_SECONDS = "1"
           $w = Start-Process -FilePath $exe -ArgumentList "--config C:\bed\Fragpipe_Auto\config.yaml run --no-gui" -PassThru -NoNewWindow
           & $exe testbed drop iso_good C:\bed
           $done = $false
@@ -40,24 +40,55 @@ jobs:
           }
           Stop-Process -Id $w.Id -Force
           Write-Host $s
-          Get-Content C:\bed\Fragpipe_Auto\logs\labwatch.log -Tail 15
+          Get-Content C:\bed\Fragpipe_Auto\logs\ionomos.log -Tail 15
           if (-not $done) { throw "frozen exe did not complete a job" }
           $report = "C:\bed\Fragpipe_General\EJQ\20260902-isoDTB_EJQ-2-027\results\report.html"
           if (-not (Test-Path $report)) { throw "frozen exe did not write the analysis report" }
           & $exe analyze C:\bed\Fragpipe_General\EJQ\20260902-isoDTB_EJQ-2-027 --test welch
-          if ($LASTEXITCODE -ne 0) { throw "frozen exe: labwatch analyze failed" }
+          if ($LASTEXITCODE -ne 0) { throw "frozen exe: ionomos analyze failed" }
           & $exe init --root C:\bed2\Auto --users C:\bed2\General
           # stress the frozen build: messy drops + chaos, invariant checks
-          $env:LABWATCH_FAKE_FP_SECONDS = "0.2"
+          $env:IONOMOS_FAKE_FP_SECONDS = "0.2"
           & $exe testbed stress --n 60 --seed 3 --fuzz 2000
           if ($LASTEXITCODE -ne 0) { throw "stress test failed on the frozen exe" }
+      - name: Installer - install, retire a fake LabWatch, upgrade, uninstall (data must survive)
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist\Ionomos-Setup-*.exe | Select-Object -First 1
+          if (-not $setup) { throw "no installer was built" }
+          # a LabWatch 0.4 install to retire, and lab data that must never be touched
+          New-Item -ItemType Directory -Force C:\Fragpipe_Auto | Out-Null
+          Set-Content C:\Fragpipe_Auto\LabWatch.exe "old program"
+          Set-Content C:\Fragpipe_Auto\config.yaml "# the lab's settings"
+          schtasks /Create /TN labwatch /TR "cmd /c exit" /SC ONLOGON /F | Out-Null
+          $args = "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR=C:\IonomosT /LOG=C:\ionomos-install.log"
+          Start-Process -Wait -FilePath $setup.FullName -ArgumentList $args
+          if (-not (Test-Path C:\IonomosT\Ionomos.exe)) { Get-Content C:\ionomos-install.log -Tail 40; throw "install failed" }
+          $v = & C:\IonomosT\ionomos-cli.exe --version; Write-Host $v
+          if ($v -notmatch "installed") { throw "installed build does not know it is installed: $v" }
+          if (Test-Path C:\Fragpipe_Auto\LabWatch.exe) { throw "the old LabWatch exe was not retired" }
+          schtasks /Query /TN labwatch 2>$null | Out-Null
+          if ($LASTEXITCODE -eq 0) { throw "the old labwatch startup task was not removed" }
+          # upgrade in place (same folder remembered)
+          Start-Process -Wait -FilePath $setup.FullName -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART"
+          if (-not (Test-Path C:\IonomosT\Ionomos.exe)) { throw "upgrade lost the program" }
+          # uninstall
+          Start-Process -Wait -FilePath C:\IonomosT\unins000.exe -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART"
+          foreach ($i in 1..30) { if (-not (Test-Path C:\IonomosT\Ionomos.exe)) { break }; Start-Sleep 2 }
+          if (Test-Path C:\IonomosT\Ionomos.exe) { throw "uninstall left the program behind" }
+          if ((Get-Content C:\Fragpipe_Auto\config.yaml) -ne "# the lab's settings") { throw "the lab's config was touched" }
+          Write-Host "installer OK: install, LabWatch retirement, upgrade, uninstall; data kept"
       - uses: actions/upload-artifact@v4
         with:
-          name: LabWatch-windows
-          path: dist/LabWatch-*-windows.zip
+          name: Ionomos-windows
+          path: |
+            dist/Ionomos-Setup-*.exe
+            dist/Ionomos-*-windows.zip
       - name: Release (tags only)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/LabWatch-*-windows.zip
+          files: |
+            dist/Ionomos-Setup-*.exe
+            dist/Ionomos-*-windows.zip
           generate_release_notes: true

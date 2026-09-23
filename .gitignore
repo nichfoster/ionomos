@@ -16,11 +16,11 @@ dist/
 *.mzML
 *.mzBIN
 config.yaml
-!labwatch/config.example.yaml
+!ionomos/config.example.yaml
 
 # Testbeds, release builds, the convenience copy made by dev_install.ps1
-UPDATE.ps1
-labwatch-testbed/
+/UPDATE.ps1
+ionomos-testbed/
 dist/
 
 # Duplicate of the extracted inventory folder
@@ -37,3 +37,7 @@ build/
 
 # local dev preview config
 .claude/
+
+# stamped at build time by deploy/build_exe.ps1
+ionomos/src/ionomos/_build.py
+labwatch-testbed/

@@ -31,7 +31,7 @@ plus a clear status/log if anything went wrong.
   replicate/fraction structure from the folder and raw-file names; optional
   `experiment.yaml` for what names can't express (TMT channel annotation,
   FASTA override, etc.).
-- **Job records**: a `labwatch.json` in each experiment folder and a SQLite
+- **Job records**: a `ionomos.json` in each experiment folder and a SQLite
   ledger, so status is always inspectable and jobs survive a restart.
 - **FragPipe headless runs** for the three lab methods, in this order of
   delivery: **isoDTB → DIA → TMT**. One job at a time.
@@ -40,7 +40,7 @@ plus a clear status/log if anything went wrong.
   - isoDTB: merge modified peptides to labelled sites.
   - TMT: generate the corrected `experimental_annotation.tsv` for FragPipe Analyst.
 - **Operational basics**: runs at login via Task Scheduler, logs to file,
-  dry-run mode, a `labwatch status` CLI.
+  dry-run mode, a `ionomos status` CLI.
 
 ## Out of scope (v1)
 

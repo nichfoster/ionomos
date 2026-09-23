@@ -1,28 +1,28 @@
 <#
-LabWatch "development install" for the proteomics PC — run ONCE.
+Ionomos "development install" for the proteomics PC — run ONCE.
 
     powershell -ExecutionPolicy Bypass -File dev_install.ps1
 
-Afterwards LabWatch runs straight from a copy of the GitHub repository, so
+Afterwards Ionomos runs straight from a copy of the GitHub repository, so
 picking up a fix pushed from the Mac is one button in the app
-("Update from GitHub & restart") or one command (`labwatch update`).
+("Update from GitHub & restart") or one command (`ionomos update`).
 No exe to rebuild, nothing to uninstall.
 
 What it does (safe to re-run):
   1. checks for git (offers to install it with winget) and Python 3.11+ with tkinter
-  2. clones https://github.com/nichfoster/nomura-lab-informatics into C:\labwatch-src
+  2. clones https://github.com/nichfoster/ionomos into C:\ionomos-src
      (or pulls if it is already there)
-  3. creates C:\labwatch-src\.venv and installs labwatch into it in editable mode
-  4. puts a "LabWatch" shortcut on the Desktop (opens the app, no console window)
+  3. creates C:\ionomos-src\.venv and installs ionomos into it in editable mode
+  4. puts a "Ionomos" shortcut on the Desktop (opens the app, no console window)
   5. opens the app so you can do the folder setup
 
 Parameters:
-  -Dir   where the code lives   (default C:\labwatch-src — no spaces!)
+  -Dir   where the code lives   (default C:\ionomos-src — no spaces!)
   -Repo  git URL               (default the lab repo above)
 #>
 param(
-    [string]$Dir = "C:\labwatch-src",
-    [string]$Repo = "https://github.com/nichfoster/nomura-lab-informatics.git",
+    [string]$Dir = "C:\ionomos-src",
+    [string]$Repo = "https://github.com/nichfoster/ionomos.git",
     [switch]$NoOpen
 )
 $ErrorActionPreference = "Stop"
@@ -84,19 +84,19 @@ $venv = "$Dir\.venv"
 if (-not (Test-Path -LiteralPath "$venv\Scripts\python.exe")) { & $py -m venv $venv; Ok "venv created" }
 $vpy = "$venv\Scripts\python.exe"
 & $vpy -m pip install -q --upgrade pip
-& $vpy -m pip install -q -e "$Dir\labwatch[dev]"
+& $vpy -m pip install -q -e "$Dir\ionomos[dev]"
 if ($LASTEXITCODE -ne 0) { throw "pip install failed (internet needed the first time)" }
-Ok (& "$venv\Scripts\labwatch.exe" --version)
+Ok (& "$venv\Scripts\ionomos.exe" --version)
 
 # -------------------------------------------------------------- 4. shortcut
 Step "Desktop shortcut"
 $pyw = "$venv\Scripts\pythonw.exe"
-$lnk = Join-Path ([Environment]::GetFolderPath("Desktop")) "LabWatch.lnk"
+$lnk = Join-Path ([Environment]::GetFolderPath("Desktop")) "Ionomos.lnk"
 $s = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk)
 $s.TargetPath = $pyw
-$s.Arguments = "-m labwatch setup"
+$s.Arguments = "-m ionomos setup"
 $s.WorkingDirectory = $Dir
-$s.Description = "LabWatch setup & control (development install)"
+$s.Description = "Ionomos setup & control (development install)"
 $s.Save()
 Ok $lnk
 Copy-Item -LiteralPath "$Dir\deploy\update.ps1" -Destination "$Dir\UPDATE.ps1" -Force  # easy to find
@@ -104,6 +104,6 @@ Ok "$Dir\UPDATE.ps1  (same as the app's Update button)"
 
 # ------------------------------------------------------------------ 5. go
 Write-Host ""
-Write-Host "Done. Double-click 'LabWatch' on the Desktop any time." -ForegroundColor Cyan
+Write-Host "Done. Double-click 'Ionomos' on the Desktop any time." -ForegroundColor Cyan
 Write-Host "To pick up fixes pushed from the Mac: Run & Test tab -> 'Update from GitHub & restart'."
-if (-not $NoOpen) { Start-Process -FilePath $pyw -ArgumentList "-m labwatch setup" -WorkingDirectory $Dir }
+if (-not $NoOpen) { Start-Process -FilePath $pyw -ArgumentList "-m ionomos setup" -WorkingDirectory $Dir }

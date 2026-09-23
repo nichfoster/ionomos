@@ -49,7 +49,7 @@ throughput is a few runs per week. Parallelism would only add contention and
 failure modes.
 
 ### D8 — Status lives next to the data
-**2026-09-15.** `labwatch.json` + `DONE.txt`/`FAILED.txt` in the experiment
+**2026-09-15.** `ionomos.json` + `DONE.txt`/`FAILED.txt` in the experiment
 folder. Users look at their folder, not at a dashboard or log. SQLite is the
 machine-readable ledger for the CLI and restart recovery; the JSON is the
 human-facing copy.
@@ -66,8 +66,8 @@ be the step everyone forgets.
 workflow file, FASTA, data type, post-processing steps. Adding a method or
 changing a workflow should not require a code change.
 
-### D11 — Repo layout: monorepo, `labwatch` is the first package
-**2026-09-15.** `lab-informatics` is the umbrella; `labwatch/` is a normal
+### D11 — Repo layout: monorepo, `ionomos` is the first package
+**2026-09-15.** `lab-informatics` is the umbrella; `ionomos/` is a normal
 installable Python package with its own `pyproject.toml`. The QC pipeline and
 any future tools sit beside it rather than inside it. Reference material and
 lab artefacts live under `reference/`, never inside a package.
@@ -91,7 +91,7 @@ headless runs and for "Skip". Rejected folders are re-evaluated when their
 tree changes or the note is deleted, so users fix things in place.
 
 ### D14 — One executable, two faces; the GUI writes the same config.yaml
-**2026-09-15.** `LabWatch.exe` with no arguments is the setup wizard /
+**2026-09-15.** `Ionomos.exe` with no arguments is the setup wizard /
 control panel; with arguments it is the CLI. Everything the app does goes
 through the same `config.yaml` and the same `config.load` validation, so the
 app can't produce a config the watcher rejects, and power users can still edit
@@ -105,16 +105,16 @@ on Windows; the Mac build only validates the spec.
 for iteration: every change meant rebuild → unzip → reinstall. While the tool
 is being developed the PC runs an *editable* install of a git clone
 (`deploy/dev_install.ps1`), so an update is `git pull` — exposed as an
-"Update from GitHub & restart" button in the app and `labwatch update`. The
+"Update from GitHub & restart" button in the app and `ionomos update`. The
 update refuses to clobber hand edits on the PC (all changes go via the Mac and
-GitHub). The reverse channel is `labwatch diagnose` / "Copy diagnostics": one
+GitHub). The reverse channel is `ionomos diagnose` / "Copy diagnostics": one
 text block with version + commit, check, status, config, log tail and inbox
 notes, so a report from the PC carries everything needed to reproduce it.
 GitHub Actions runs the suite on Windows on every push and builds the exe on
 tags, so the Windows-specific parts are exercised without a hand build.
 
 ### D16 — FragPipe runs inside the watcher process; setup gaps hold, job problems fail
-**2026-09-22.** The worker is a thread in `labwatch run` (not a second
+**2026-09-22.** The worker is a thread in `ionomos run` (not a second
 service): one process to start, stop, and put in Task Scheduler, and the
 startup task already runs interactively. One search at a time. Before each
 job, missing *setup* (launcher, the method's pinned workflow or FASTA) holds
@@ -126,7 +126,7 @@ away, FragPipe exits non-zero, timeout) fail it with `FAILED.txt`. The FASTA
 is written into a per-job copy of the workflow (`database.db-path`), so the
 per-method FASTA setting is authoritative and "FASTA file path is empty" can't
 happen; the pinned workflow file is never modified. Inputs go in
-`labwatch_run/`, FragPipe's `--workdir` (`fragpipe/`) starts empty, and a
+`ionomos_run/`, FragPipe's `--workdir` (`fragpipe/`) starts empty, and a
 re-run moves the previous output aside instead of deleting it. Launcher is
 `fragpipe.bat` (the 22.0 inventory shows `bin/fragpipe.bat` next to a GUI
 `fragpipe.exe`); a configured `fragpipe.exe` is swapped for the `.bat` beside it.
@@ -136,13 +136,13 @@ re-run moves the previous output aside instead of deleting it. Launcher is
 per-iteration errors; a supervisor restarts a loop that escapes; excepthooks
 record anything else to `crash-*.txt`; heartbeats reveal hangs that none of
 those can see. Coordination between processes (app ↔ watcher) goes through
-files in `log_dir` — `labwatch.lock`, `heartbeat.json`, `STOP`, `PAUSED`, a
-job's `labwatch_run/CANCEL` — because they work identically for the startup
+files in `log_dir` — `ionomos.lock`, `heartbeat.json`, `STOP`, `PAUSED`, a
+job's `ionomos_run/CANCEL` — because they work identically for the startup
 task, the app, the CLI and a second Windows session, with no ports or IPC. The
-ledger is treated as a cache of the `labwatch.json` files, so it can always be
+ledger is treated as a cache of the `ionomos.json` files, so it can always be
 rebuilt. A folder whose contents make intake fail deterministically is
 rejected with a note (never retried forever); only OS-level transient errors
-retry. `labwatch testbed stress` checks the end-to-end invariants (no raw file
+retry. `ionomos testbed stress` checks the end-to-end invariants (no raw file
 lost or duplicated, every drop accounted for, nothing stuck) under chaos, and
 runs in CI.
 
@@ -169,6 +169,29 @@ per group) — imputation choices belong to the lab, not to a default.
 **2026-09-23.** The app opens on a live checklist (folders writable, safe
 layout, people, config valid, FragPipe + MSFragger, workflow + FASTA with
 decoys per method, disk, watcher, startup task), each open item with a one-click
-fix. Layouts that would make labwatch act on its own files (inbox = users
+fix. Layouts that would make ionomos act on its own files (inbox = users
 folder, one inside the other, logs inside the inbox) are config *errors*, not
-warnings. `labwatch init` gives the same result without a display.
+warnings. `ionomos init` gives the same result without a display.
+
+### D21 — Renamed to Ionomos; the old name stays readable forever
+**2026-09-23.** LabWatch → Ionomos everywhere (package, commands, exes, files,
+task, repo). The lab PC already holds LabWatch-era data, so every name that
+exists on disk or in Windows has its old twin in `names.py`: readers accept
+both (`labwatch.json`, `labwatch_run/`, `labwatch.log`, `labwatch.lock`, the
+`labwatch` task, `%APPDATA%\labwatch`, `LABWATCH_CONFIG`), writers use the new
+one, and the only thing ever renamed is our own status file, on first write.
+A still-running LabWatch watcher blocks an Ionomos one (same inbox). User
+folders (`C:\Fragpipe_Auto`, `C:\Fragpipe_General`) keep their names — they are
+the lab's, not the tool's.
+
+### D22 — A real installer; updates and support are one button each
+**2026-09-23.** An Inno Setup installer replaces "unzip into the data folder":
+the program goes to `C:\Ionomos` (per-user, no admin), data stays where it is,
+so install, upgrade and uninstall can never touch config or experiments. It
+stops the watcher gracefully before replacing files and retires a LabWatch
+install. The repository is private, so the app can't download updates
+itself; it opens the Releases page (the user is signed in there) and then
+offers to install the Setup it finds in Downloads. Support goes the other way
+through one button that leaves a single zip on the Desktop, with the exact
+build (commit) inside so a report maps to code. CI installs, upgrades and
+uninstalls the real installer on Windows for every release.

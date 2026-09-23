@@ -1,5 +1,5 @@
 <#
-labwatch installer for the proteomics PC (Windows 10/11, PowerShell 5.1+).
+ionomos installer for the proteomics PC (Windows 10/11, PowerShell 5.1+).
 
 Run from the unzipped release folder, in a PowerShell window *as the account
 that will run the watcher* (the shared lab account):
@@ -9,11 +9,11 @@ that will run the watcher* (the shared lab account):
 What it does (idempotent — safe to re-run to upgrade):
   1. finds Python 3.11+ (via the `py` launcher) and checks tkinter
   2. creates C:\Fragpipe_Auto\{inbox,workflows,fasta,logs} and C:\Fragpipe_General
-  3. creates C:\Fragpipe_Auto\venv and installs labwatch from the bundled wheel(s)
+  3. creates C:\Fragpipe_Auto\venv and installs ionomos from the bundled wheel(s)
   4. writes C:\Fragpipe_Auto\config.yaml from config.example.yaml (only if missing)
-  5. copies run_labwatch.bat and registers a Task Scheduler task "labwatch"
+  5. copies run_ionomos.bat and registers a Task Scheduler task "ionomos"
      that starts at logon
-  6. runs `labwatch check`
+  6. runs `ionomos check`
 
 Parameters:
   -Root       install location           (default C:\Fragpipe_Auto)
@@ -63,15 +63,15 @@ foreach ($d in @("$Root", "$Root\inbox", "$Root\workflows", "$Root\fasta", "$Roo
 }
 
 # ------------------------------------------------------------------ 3. venv
-Step "Installing labwatch into $Root\venv"
+Step "Installing ionomos into $Root\venv"
 $venv = "$Root\venv"
 if (-not (Test-Path -LiteralPath "$venv\Scripts\python.exe")) {
     & $py -m venv $venv
     Ok "venv created"
 }
 $vpy = "$venv\Scripts\python.exe"
-$wheels = Get-ChildItem -LiteralPath $here -Filter "labwatch-*.whl" | Sort-Object Name -Descending
-if (-not $wheels) { throw "No labwatch-*.whl next to install.ps1. Build a release with deploy\make_release.sh on the Mac." }
+$wheels = Get-ChildItem -LiteralPath $here -Filter "ionomos-*.whl" | Sort-Object Name -Descending
+if (-not $wheels) { throw "No ionomos-*.whl next to install.ps1. Build a release with deploy\make_release.sh on the Mac." }
 $wheel = $wheels[0].FullName
 $deps = Join-Path $here "wheels"
 & $vpy -m pip install --upgrade pip --quiet
@@ -83,7 +83,7 @@ if (Test-Path -LiteralPath $deps) {
     & $vpy -m pip install --upgrade $wheel
 }
 if ($LASTEXITCODE -ne 0) { throw "pip install failed" }
-$ver = & "$venv\Scripts\labwatch.exe" --version
+$ver = & "$venv\Scripts\ionomos.exe" --version
 Ok "$ver installed"
 
 # ---------------------------------------------------------------- 4. config
@@ -96,22 +96,22 @@ if (-not (Test-Path -LiteralPath $cfg)) {
     Set-Content -LiteralPath $cfg -Value $text -Encoding UTF8
     Ok "wrote $cfg  <-- EDIT THIS: fragpipe_exe path, user aliases, workflow names"
 } else { Ok "kept existing $cfg" }
-Copy-Item -LiteralPath (Join-Path $here "run_labwatch.bat") -Destination "$Root\run_labwatch.bat" -Force
-Ok "copied run_labwatch.bat"
+Copy-Item -LiteralPath (Join-Path $here "run_ionomos.bat") -Destination "$Root\run_ionomos.bat" -Force
+Ok "copied run_ionomos.bat"
 
 # ------------------------------------------------------- 5. task scheduler
 if (-not $NoTask) {
-    Step "Registering Task Scheduler task 'labwatch' (runs at logon, interactive so the resolver window can show)"
+    Step "Registering Task Scheduler task 'ionomos' (runs at logon, interactive so the resolver window can show)"
     $user = "$env:USERDOMAIN\$env:USERNAME"
-    schtasks /Create /TN "labwatch" /TR "`"$Root\run_labwatch.bat`"" /SC ONLOGON /RU "$user" /IT /RL LIMITED /F | Out-Null
-    if ($LASTEXITCODE -eq 0) { Ok "task registered for $user. Start it now with:  schtasks /Run /TN labwatch" }
+    schtasks /Create /TN "ionomos" /TR "`"$Root\run_ionomos.bat`"" /SC ONLOGON /RU "$user" /IT /RL LIMITED /F | Out-Null
+    if ($LASTEXITCODE -eq 0) { Ok "task registered for $user. Start it now with:  schtasks /Run /TN ionomos" }
     else { Warn "schtasks failed — register manually (see docs/DEPLOY_WINDOWS.md)" }
 }
 
 # ----------------------------------------------------------------- 6. check
-Step "labwatch check"
-& "$venv\Scripts\labwatch.exe" --config $cfg check
+Step "ionomos check"
+& "$venv\Scripts\ionomos.exe" --config $cfg check
 Write-Host ""
 Write-Host "Done. Next: edit $cfg, put your .workflow files in $Root\workflows, then:" -ForegroundColor Cyan
-Write-Host "    $venv\Scripts\labwatch.exe --config $cfg check"
-Write-Host "    schtasks /Run /TN labwatch          (or double-click $Root\run_labwatch.bat)"
+Write-Host "    $venv\Scripts\ionomos.exe --config $cfg check"
+Write-Host "    schtasks /Run /TN ionomos          (or double-click $Root\run_ionomos.bat)"

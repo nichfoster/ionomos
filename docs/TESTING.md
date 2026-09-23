@@ -1,15 +1,16 @@
-# Testing labwatch
+# Testing ionomos
 
 Three layers, all runnable on macOS and Windows:
 
 | Layer | What | Command |
 |---|---|---|
-| Unit + e2e (`pytest`) | 267 tests: naming, config, config I/O, ledger, watcher timing, intake, overrides, **FragPipe runner + worker** (done / failed / held / timeout / stop / re-run against the fake FragPipe), resolver logic, **real tkinter dialog and the setup app** (skipped if no display), and 6 end-to-end runs of watcher-thread + intake against testbed samples | `scripts/test_mac.sh` / `scripts\test_windows.ps1` |
-| Testbed (manual) | A fake lab on disk with 12 sample drops covering every path, a fake FragPipe, and the real CLI | `labwatch testbed …` |
+| Unit + e2e (`pytest`) | 284 tests: naming, config, config I/O, ledger, watcher timing, intake, overrides, **FragPipe runner + worker** (done / failed / held / timeout / stop / re-run against the fake FragPipe), resolver logic, **real tkinter dialog and the setup app** (skipped if no display), and 6 end-to-end runs of watcher-thread + intake against testbed samples | `scripts/test_mac.sh` / `scripts\test_windows.ps1` |
+| Testbed (manual) | A fake lab on disk with 12 sample drops covering every path, a fake FragPipe, and the real CLI | `ionomos testbed …` |
 | The real PC | `dry-run` on real folders, then a throwaway drop; **Copy diagnostics** to report back | see DEV_LOOP.md |
 | Downstream | R-script ports byte-identical to the real scripts; t-tests/BH vs scipy; moderated t vs limma; planted-effect recovery for isoDTB/DIA/TMT; report self-contained, SVG valid | `tests/test_downstream.py`, golden files in `tests/golden/` |
-| Stress | `labwatch testbed stress --n 150`: messy drops (unicode/emoji/huge names, no raws, empty raws, bad tails, duplicates, slow copies, failing searches) + chaos (worker killed mid-run, ledger locked, corrupt status file, pause/resume, cancel), then invariant checks; plus a 5000-name parser fuzz | any machine; a smaller run is in pytest |
-| GitHub Actions | the pytest suite on Linux **and Windows** on every push | Actions tab |
+| Stress | `ionomos testbed stress --n 150`: messy drops (unicode/emoji/huge names, no raws, empty raws, bad tails, duplicates, slow copies, failing searches) + chaos (worker killed mid-run, ledger locked, corrupt status file, pause/resume, cancel), then invariant checks; plus a 5000-name parser fuzz | any machine; a smaller run is in pytest |
+| GitHub Actions | the pytest suite on Linux **and Windows** on every push; on a version tag also the frozen exe (pipeline + stress) and the **installer**: install, retire a fake LabWatch, upgrade, uninstall, data kept | Actions tab |
+| Migration | an install from the LabWatch era (old status files, run folders, logs, lock, config pointer, env var) keeps working | `tests/test_migration.py` |
 
 ## One-shot setup
 
@@ -18,7 +19,7 @@ Three layers, all runnable on macOS and Windows:
 scripts/test_mac.sh --bed
 ```
 If it says the Python has no tkinter: `brew install python-tk@3.14` (matches
-Homebrew's python@3.14), delete `labwatch/.venv`, re-run.
+Homebrew's python@3.14), delete `ionomos/.venv`, re-run.
 
 **Windows**
 ```powershell
@@ -26,15 +27,15 @@ powershell -ExecutionPolicy Bypass -File scripts\test_windows.ps1 -Bed
 ```
 Needs Python 3.11+ from python.org with *tcl/tk* and *py launcher* ticked.
 
-Both scripts create `labwatch/.venv`, install in editable mode, run ruff and
-pytest, and (with `--bed`/`-Bed`) build the testbed: `./labwatch-testbed` on
-macOS, **`C:\labwatch-testbed`** on Windows. (Not under your profile folder:
+Both scripts create `ionomos/.venv`, install in editable mode, run ruff and
+pytest, and (with `--bed`/`-Bed`) build the testbed: `./ionomos-testbed` on
+macOS, **`C:\ionomos-testbed`** on Windows. (Not under your profile folder:
 usernames like `Daniel Nomura` contain a space, and on Windows the config
 loader refuses paths with spaces — the FragPipe rule.)
 
 ## Driving the testbed from the app
 
-`labwatch setup` (or `LabWatch.exe`) → tab **5 Run & Test** → *Testbed*:
+`ionomos setup` (or `Ionomos.exe`) → tab **5 Run & Test** → *Testbed*:
 **Create testbed** → **Start TESTBED watcher** → pick a sample → **Drop** /
 **Drop slowly** → watch the output pane (tick *follow the watcher log*).
 **Resolver window demo** opens the dialog with sample data. **Reset testbed**
@@ -42,12 +43,12 @@ wipes it. Everything below is the same thing from the command line.
 
 ## Driving the testbed from the command line
 
-Activate the venv first (`source labwatch/.venv/bin/activate` or
-`labwatch\.venv\Scripts\Activate.ps1`), then, in **terminal 1**:
+Activate the venv first (`source ionomos/.venv/bin/activate` or
+`ionomos\.venv\Scripts\Activate.ps1`), then, in **terminal 1**:
 
 ```bash
-labwatch --config labwatch-testbed/Fragpipe_Auto/config.yaml run       # macOS
-labwatch --config C:\labwatch-testbed\Fragpipe_Auto\config.yaml run   # Windows
+ionomos --config ionomos-testbed/Fragpipe_Auto/config.yaml run       # macOS
+ionomos --config C:\ionomos-testbed\Fragpipe_Auto\config.yaml run   # Windows
 ```
 
 (`--no-gui` to see what a headless install does — rejection notes instead of the window.)
@@ -55,29 +56,29 @@ labwatch --config C:\labwatch-testbed\Fragpipe_Auto\config.yaml run   # Windows
 **Terminal 2:**
 
 ```bash
-labwatch testbed list                       # the 12 samples and what each proves
-labwatch testbed drop iso_good              # -> queued under Fragpipe_General/EJQ
-labwatch testbed drop iso_good --slow       # file-by-file copy: watch the "waiting for copy to settle" log line
-labwatch testbed drop gui_unknown_user      # -> resolver window pops in terminal 1
-labwatch testbed drop gui_incomplete        # -> window with "accept uneven fractions"
-labwatch --config labwatch-testbed/Fragpipe_Auto/config.yaml status
-labwatch testbed reset                      # wipe inbox / users / ledger / logs, keep samples
+ionomos testbed list                       # the 12 samples and what each proves
+ionomos testbed drop iso_good              # -> queued under Fragpipe_General/EJQ
+ionomos testbed drop iso_good --slow       # file-by-file copy: watch the "waiting for copy to settle" log line
+ionomos testbed drop gui_unknown_user      # -> resolver window pops in terminal 1
+ionomos testbed drop gui_incomplete        # -> window with "accept uneven fractions"
+ionomos --config ionomos-testbed/Fragpipe_Auto/config.yaml status
+ionomos testbed reset                      # wipe inbox / users / ledger / logs, keep samples
 ```
 
-You can also drag folders from `labwatch-testbed/samples/` into
-`labwatch-testbed/Fragpipe_Auto/inbox/` with Finder / Explorer — that is the
+You can also drag folders from `ionomos-testbed/samples/` into
+`ionomos-testbed/Fragpipe_Auto/inbox/` with Finder / Explorer — that is the
 real user experience.
 
-`labwatch testbed gui-demo` opens the resolver window with sample data
+`ionomos testbed gui-demo` opens the resolver window with sample data
 without needing a drop, to check the look and the keyboard flow (Tab between
 fields, Enter = accept, Esc = skip).
 
 Every filed sample is then "searched" by the testbed's fake FragPipe
-(`labwatch fake-fragpipe`, ~4 s; `LABWATCH_FAKE_FP_SECONDS` changes that). It
+(`ionomos fake-fragpipe`, ~4 s; `IONOMOS_FAKE_FP_SECONDS` changes that). It
 checks what the real one checks — the workflow's FASTA exists, every manifest
-file exists — so `done` means labwatch prepared the inputs correctly.
+file exists — so `done` means ionomos prepared the inputs correctly.
 
-The testbed config uses fast timings (poll 1 s, stable 3 s). `labwatch testbed
+The testbed config uses fast timings (poll 1 s, stable 3 s). `ionomos testbed
 init --slow-defaults` uses production timings (10 s / 60 s).
 
 ## What each sample proves
@@ -85,7 +86,7 @@ init --slow-defaults` uses production timings (10 s / 60 s).
 | sample | proves |
 |---|---|
 | `iso_good` | the happy path; date/user/method from the name; 3×3 layout |
-| `iso_spaces` | spaces and `()` in folder *and* file names are sanitised, originals recorded in `labwatch.json` |
+| `iso_spaces` | spaces and `()` in folder *and* file names are sanitised, originals recorded in `ionomos.json` |
 | `dia_good` | `raw/` subfolder; DIA tails (`cond_biorep`); manifest type `DIA` |
 | `tmt_good` | TMT tails (`_TMT_F#`), biorep forced to 1, `experiment.yaml` channel map carried through |
 | `glued_initials` | `IJD05` resolves to Isaac via alias `IJD` |
@@ -113,25 +114,25 @@ skip the window next time.
 
 ## The frozen executable
 
-`deploy/build_app_mac.sh` builds a single-file `dist/exe/labwatch` on macOS
+`deploy/build_app_mac.sh` builds a single-file `dist/exe/ionomos` on macOS
 from the same PyInstaller spec used for Windows, so packaging problems
 (missing hidden imports, tkinter data files) show up here first:
 
 ```bash
 deploy/build_app_mac.sh
-dist/exe/labwatch --version
-dist/exe/labwatch testbed init /tmp/bed && dist/exe/labwatch --config /tmp/bed/Fragpipe_Auto/config.yaml check
-dist/exe/labwatch setup          # the app, frozen
+dist/exe/ionomos --version
+dist/exe/ionomos testbed init /tmp/bed && dist/exe/ionomos --config /tmp/bed/Fragpipe_Auto/config.yaml check
+dist/exe/ionomos setup          # the app, frozen
 ```
 
-The Windows build (`deploy\build_exe.ps1`) produces `LabWatch.exe` (windowed)
-and `labwatch-cli.exe` (console) from the same spec.
+The Windows build (`deploy\build_exe.ps1`) produces `Ionomos.exe` (windowed)
+and `ionomos-cli.exe` (console) from the same spec.
 
 ## Stress testing
 
 ```bash
-labwatch testbed stress                 # 60 drops + chaos + 3000 fuzzed names, ~30 s
-labwatch testbed stress --n 300 --seed 7 --keep   # bigger; keep the folder to look at
+ionomos testbed stress                 # 60 drops + chaos + 3000 fuzzed names, ~30 s
+ionomos testbed stress --n 300 --seed 7 --keep   # bigger; keep the folder to look at
 ```
 
 It prints the outcome counts and either `all invariants hold` (exit 0) or the
@@ -139,16 +140,16 @@ list of violations (exit 1). The invariants: no raw file lost or duplicated
 (count + bytes), every drop filed or noted, no job stuck queued/running,
 DONE/FAILED notes present, ledger integrity OK, no CRITICAL log record.
 Failure modes of the fake FragPipe for manual testing:
-`LABWATCH_FAKE_FP_MODE=oom | msfragger | step-fail-exit0 | silent-exit0`.
+`IONOMOS_FAKE_FP_MODE=oom | msfragger | step-fail-exit0 | silent-exit0`.
 
 ## Downstream golden files
 
-`labwatch/tests/golden/` holds inputs + reference outputs, and the scripts that
+`ionomos/tests/golden/` holds inputs + reference outputs, and the scripts that
 made them. To regenerate (needs R with dplyr/stringr/readr/tidyr/purrr/tibble
 and limma; scipy for the stats file):
 
 ```bash
-cd labwatch/tests/golden
+cd ionomos/tests/golden
 python3 make_inputs.py && Rscript run_r_scripts.R
 python3 make_limma_reference.py && Rscript run_limma.R
 python3 make_stats_reference.py        # in an env with scipy

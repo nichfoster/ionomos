@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Build a single-file labwatch binary on macOS (validates the PyInstaller spec; the real target is Windows).
+# Build a single-file ionomos binary on macOS (validates the PyInstaller spec; the real target is Windows).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-PY=${PY:-labwatch/.venv/bin/python}
+PY=${PY:-ionomos/.venv/bin/python}
 $PY -m pip install -q pyinstaller
-$PY -m PyInstaller --noconfirm --clean --distpath dist/exe --workpath build/pyi deploy/labwatch.spec
-echo "==> dist/exe/labwatch"; ls -la dist/exe/labwatch
+$PY -m PyInstaller --noconfirm --clean --distpath dist/exe --workpath build/pyi deploy/ionomos.spec
+echo "==> dist/exe/ionomos"; ls -la dist/exe/ionomos

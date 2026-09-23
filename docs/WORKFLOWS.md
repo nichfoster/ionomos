@@ -15,10 +15,10 @@ fragpipe.exe --headless --workflow <wf> --manifest <mf> --workdir <out>
 
 - Confirmed CLI shape in `prior-work/fragpipe_runner.py`. Launcher: the 22.0
   copy in the inventory has `fragpipe\bin\fragpipe.bat` (headless, console) next
-  to `fragpipe.exe` (GUI wrapper); labwatch uses the `.bat` and swaps a configured
+  to `fragpipe.exe` (GUI wrapper); ionomos uses the `.bat` and swaps a configured
   `.exe` for the `.bat` beside it. **Re-confirm on the 24.0 install** (app → Find FragPipe).
 - Manifest = `.fp-manifest`, tab-separated: `path \t experiment \t bioreplicate \t DDA|DIA`.
-- The FASTA is baked into the `.workflow` file (`database.db-path`). labwatch
+- The FASTA is baked into the `.workflow` file (`database.db-path`). ionomos
   writes a per-job copy of the pinned workflow with `database.db-path` set to the
   method's FASTA from `fasta_dir`, so "FASTA file path is empty" can't happen. If
   that FASTA isn't there, the workflow's own path is used when it exists.
@@ -61,9 +61,9 @@ bioreps 1–3 — output subfolders `EJQ_2_027_1/`, `_2/`, `_3/`.
 - Writes `<…>_output.tsv`.
 - Inputs we must supply: `input_tsv`, `output_tsv`, `sample_prefix` (== FragPipe
   experiment name), `mod_mass` (config, default `561.3387`).
-- **Ported** (`labwatch/downstream/isodtb.py`, 2026-09-23). The output is
+- **Ported** (`ionomos/downstream/isodtb.py`, 2026-09-23). The output is
   byte-identical to the R script on a deliberately awkward test table
-  (`labwatch/tests/golden/`), run with the real script. The sample prefix is
+  (`ionomos/tests/golden/`), run with the real script. The sample prefix is
   read from the column names instead of typed in, so several samples in one
   folder each get a table.
 - ⚠ Quirk kept for identical output — worth a look by the lab: the script counts
@@ -107,7 +107,7 @@ for peptide/site).
 - Writes `experimental_annotation.tsv`.
 - Note the regex assumes plex index `1` and a single-token condition. Real
   headers look like `DMSO_1_126`.
-- **Ported** (`labwatch/downstream/tmt.py`), byte-identical to the R script.
+- **Ported** (`ionomos/downstream/tmt.py`), byte-identical to the R script.
   When names don't follow the pattern the file is empty (as in R); the report
   then takes the condition from the text before the first `_` and says so.
 
@@ -145,7 +145,7 @@ they do next (FragPipe Analyst upload?).
 
 ## Downstream (all methods): statistics, volcano plots, report
 
-After FragPipe, `labwatch/downstream/` turns each method's main table into one
+After FragPipe, `ionomos/downstream/` turns each method's main table into one
 features × samples matrix of log2 values and runs the same statistics:
 
 | Method | Table read | Level | Test |
