@@ -36,7 +36,8 @@
 | `setupcheck.py` | The setup checklist (app ✓ Setup tab, `ionomos init`) | — |
 | `names.py` | Every on-disk / system name, with its LabWatch-era twin; readers accept both, writers use the new one | — |
 | `buildinfo.py` | `Ionomos 0.5.0 (build 3f2a9c1, date, installed)` — `--version`, app footer, every report | — |
-| `updates.py` | Finds a newer `Ionomos-Setup-*.exe` in Downloads, stops the watcher, runs the installer, restarts the watcher after | — |
+| `updates.py` | Asks GitHub for the newest release, downloads the Setup (size + SHA-256 verified), or finds one in Downloads; stops the watcher, runs the installer, restarts the watcher after | — |
+| `loose.py` | `.raw` files dropped without a folder: grouped by shared name into folders in the inbox once stable | — |
 | `tkutil.py` | Tk variables that can be garbage-collected on any thread (plain ones abort the process on Windows) | — |
 | `health.py` | Failsafes: single-instance lock, heartbeat, thread supervisor, crash hooks/files, disk/RAM facts, log-problem extraction | — |
 | `stress.py` | `ionomos testbed stress`: messy drops + chaos against a real watcher/worker, invariant checks; name fuzzer | — |
@@ -270,7 +271,7 @@ PC: C:\Ionomos\          program only (replaced by updates, removed by uninstall
     %APPDATA%\Ionomos\   remembered config path, app.log
 ```
 
-Update: app finds the downloaded Setup → `request_stop` (graceful; running
+Update: app finds a newer release on GitHub (or a Setup in Downloads) → verified download → `request_stop` (graceful; running
 search re-queued) → `RESTART_WATCHER` note → silent Setup → app reopens →
 watcher restarted. Report: **Report a problem…** → `save_problem_report` →
 `Ionomos-report-<ts>-v<ver>.zip` on the Desktop (note, build.json, report.txt,

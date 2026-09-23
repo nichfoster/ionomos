@@ -6,7 +6,7 @@ sits in the middle. Nothing is ever "uninstalled".
 ```
  Mac                          GitHub                        Proteomics PC
  ┌──────────────────┐  push   ┌──────────────┐   pull    ┌───────────────────────────┐
- │ edit + tests     │ ──────▶ │ private repo │ ────────▶ │ C:\ionomos-src  (clone)  │
+ │ edit + tests     │ ──────▶ │ public repo  │ ────────▶ │ C:\ionomos-src  (clone)  │
  │ (Claude)         │         │              │           │   └─ .venv  (editable)    │
  └──────────────────┘         └──────────────┘           │ Ionomos app ← runs from  │
         ▲                                                │   the clone directly      │
@@ -28,8 +28,7 @@ outside the clone and are never touched.
    powershell -ExecutionPolicy Bypass -File .\dev_install.ps1
    ```
    It installs git if missing (asks first), clones the repo to `C:\ionomos-src`
-   (a browser window asks you to sign in to GitHub once — it's a private
-   repo), makes the Python environment, puts a **Ionomos** shortcut on the
+   (the repository is public; no sign-in needed), makes the Python environment, puts a **Ionomos** shortcut on the
    Desktop, and opens the app.
 3. In the app: tab 1 → **Apply layout** → **Create all missing folders**, then
    tab 5 → **Save & Check**. Same as [DEPLOY_WINDOWS.md](DEPLOY_WINDOWS.md) A3.

@@ -346,8 +346,22 @@ def run_task() -> tuple[bool, str]:
 # ------------------------------------------------------------- desktop ----
 
 
-def open_path(p: Path) -> None:
-    """Open a folder/file with the OS file manager or default app."""
+def is_url(s: str) -> bool:
+    return str(s).lower().startswith(("http://", "https://"))
+
+
+def open_url(url: str) -> None:
+    """Open a web address in the default browser (never through Path(), which mangles '//' on Windows)."""
+    import webbrowser
+
+    webbrowser.open(url)
+
+
+def open_path(p: Path | str) -> None:
+    """Open a folder/file with the OS file manager or default app (web addresses go to the browser)."""
+    if is_url(str(p)):
+        open_url(str(p))
+        return
     p = Path(p)
     if os.name == "nt":
         os.startfile(str(p))  # type: ignore[attr-defined]

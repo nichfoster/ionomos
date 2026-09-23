@@ -92,6 +92,11 @@ folder aren't treated as people; the checklist refreshes after every save.
 Open: confirm FragPipe-24.0.exe runs headless with console output on the first
 real search (a fragpipe.bat beside it is preferred if FragPipe ships one).
 
+2026-09-23 (0.5.2): loose .raw files in the inbox are grouped into folders;
+Xcalibur timestamp suffix understood; public repo → the app checks GitHub and
+updates itself (verified download); web links open in the browser (the
+Releases button showed "does not exist").
+
 ## Phase 3 — DIA, then TMT
 
 - DIA: pin workflow, `data_type: DIA`, sort out DIA-NN version/`--config-diann`.

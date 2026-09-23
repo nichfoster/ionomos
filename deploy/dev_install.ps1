@@ -72,7 +72,7 @@ if (Test-Path -LiteralPath "$Dir\.git") {
     git -C $Dir pull --ff-only
     Ok "updated existing checkout"
 } else {
-    Write-Host "    (first clone of a private repo: a browser window asks you to sign in to GitHub once)"
+    Write-Host "    (public repository: no GitHub sign-in needed)"
     git clone $Repo $Dir
     Ok "cloned"
 }

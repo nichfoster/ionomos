@@ -11,8 +11,11 @@ Why a tree fingerprint rather than "on created":
     mtime_ns) — and only when it has been unchanged for `stable_seconds` AND
     at least `min_raw_files` *.raw are present do we call on_stable(path).
 
-What is ignored: loose files at the inbox top level, hidden/temp names
-(".", "~$"), and our own *.REJECTED.txt files. A queued folder has been moved
+Loose .raw files at the inbox top level (dragged without a folder) are
+grouped into folders once they have been unchanged for `stable_seconds`
+(loose.py); the new folder then goes through intake without waiting again.
+What is ignored: other loose files, hidden/temp names (".", "~$"), and our
+own *.REJECTED.txt files. A queued folder has been moved
 out of the inbox, so if the same name shows up again it is a new drop; the
 ledger (via intake) is what rejects a duplicate name.
 
@@ -87,6 +90,7 @@ class Watcher:
         min_raw_files: int = 1,
         retry_seconds: float = 15,
         heartbeat=None,
+        group_loose: bool = True,
     ):
         self.inbox = Path(inbox)
         self.on_stable = on_stable
@@ -99,6 +103,10 @@ class Watcher:
         self._stop = threading.Event()
         self.heartbeat = heartbeat
         self._inbox_missing = False
+        self.group_loose = group_loose
+        self._loose_fp: tuple = ()
+        self._loose_since = 0.0
+        self._loose_announced = False
 
     # ------------------------------------------------------------------ poll --
 
@@ -115,6 +123,12 @@ class Watcher:
             log.info("inbox is back: %s", self.inbox)
             self._inbox_missing = False
 
+        if self.group_loose:
+            try:
+                self._handle_loose(now)
+            except Exception:  # noqa: BLE001 - never let loose files stop folder handling
+                log.exception("could not group loose files; will look again next poll")
+
         present: set[Path] = set()
         for entry in sorted(self.inbox.iterdir()):
             try:
@@ -130,6 +144,35 @@ class Watcher:
         for gone in [p for p in self._pending if p not in present]:
             del self._pending[gone]
         return handed
+
+    def _handle_loose(self, now: float) -> None:
+        from ionomos import loose
+
+        files = loose.loose_raws(self.inbox)
+        fp = []
+        for f in files:
+            try:
+                st = f.stat()
+                fp.append((f.name, st.st_size, st.st_mtime_ns))
+            except OSError:
+                fp.append((f.name, -1, -1))
+        fp = tuple(fp)
+        if not fp:
+            self._loose_fp, self._loose_announced = (), False
+            return
+        if fp != self._loose_fp:
+            if not self._loose_announced:
+                log.info("%d loose .raw file(s) in the inbox (no folder); they will be put into a folder "
+                         "once the copy settles", len(fp))
+                self._loose_announced = True
+            self._loose_fp, self._loose_since = fp, now
+            return
+        if now - self._loose_since < self.stable_seconds:
+            return
+        folders = loose.group_loose_files(self.inbox, files)
+        for folder in folders:  # already stable: skip the second wait
+            self._pending[folder] = _Pending(fp=fingerprint(folder), stable_since=now - self.stable_seconds)
+        self._loose_fp, self._loose_announced = (), False
 
     def _evaluate(self, folder: Path, now: float) -> bool:
         fp = fingerprint(folder)

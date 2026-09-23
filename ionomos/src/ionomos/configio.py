@@ -39,7 +39,7 @@ def defaults(root: str | None = None, users_root: str | None = None) -> dict:
             "database": f"{root}/ionomos.db",
             "log_dir": f"{root}/logs",
         },
-        "watcher": {"poll_seconds": 10, "stable_seconds": 60, "min_raw_files": 1},
+        "watcher": {"poll_seconds": 10, "stable_seconds": 60, "min_raw_files": 1, "group_loose_files": True},
         "fragpipe": {"auto_run": True, "threads": 28, "ram_gb": 48, "timeout_minutes": 240, "min_free_gb": 20, "config_tools_folder": "",
                      "config_diann": ""},
         "gui": {"enabled": True, "timeout_minutes": 0},
@@ -137,6 +137,7 @@ def dump_config(d: dict) -> str:
     a(f"  poll_seconds: {_y(w['poll_seconds'])}   # how often the inbox is scanned")
     a(f"  stable_seconds: {_y(w['stable_seconds'])}   # tree must be unchanged this long before intake")
     a(f"  min_raw_files: {_y(w['min_raw_files'])}   # folders with fewer .raw files are left alone")
+    a(f"  group_loose_files: {_y(bool(w.get('group_loose_files', True)))}   # .raw files dropped without a folder get one")
     a("")
     a("fragpipe:")
     a(f"  auto_run: {_y(bool(f.get('auto_run', True)))}   # run FragPipe on queued jobs automatically")

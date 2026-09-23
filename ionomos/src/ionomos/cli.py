@@ -201,7 +201,8 @@ def cmd_run(args) -> int:
     def on_stable(folder: Path):
         return intake(folder, cfg, intake_ledger, resolver)
 
-    w = Watcher(cfg.inbox, on_stable, cfg.poll_seconds, cfg.stable_seconds, cfg.min_raw_files, heartbeat=hb)
+    w = Watcher(cfg.inbox, on_stable, cfg.poll_seconds, cfg.stable_seconds, cfg.min_raw_files, heartbeat=hb,
+                group_loose=cfg.group_loose_files)
 
     def shutdown(*_):
         if not stop.is_set():

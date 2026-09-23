@@ -347,4 +347,4 @@ def test_update_banner_appears_for_a_downloaded_installer(app, tmp_path, monkeyp
     (tmp_path / "Ionomos-Setup-9.9.9.exe").write_text("x", encoding="utf-8")
     monkeypatch.setattr(updates, "downloads_dir", lambda: tmp_path)
     app.check_downloaded_update()
-    assert _pump_until(app, lambda: app.update_btn.cget("text") == "Install update 9.9.9")
+    assert _pump_until(app, lambda: app.update_btn.cget("text") == "Update to 9.9.9")

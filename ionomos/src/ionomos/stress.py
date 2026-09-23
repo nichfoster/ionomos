@@ -106,8 +106,8 @@ def _make_drop(staging: Path, i: int, rng: random.Random, used: set[str]) -> tup
     """Build one drop in `staging`; returns (folder, kind)."""
     unusable = False
     kind = rng.choices(
-        ["iso", "dia", "tmt", "weird", "noraws", "empty_raw", "deep", "badtail", "fail", "dup"],
-        weights=[20, 12, 6, 12, 5, 4, 4, 6, 5, 4])[0]
+        ["iso", "dia", "tmt", "weird", "noraws", "empty_raw", "deep", "badtail", "fail", "dup", "loose"],
+        weights=[20, 12, 6, 12, 5, 4, 4, 6, 5, 4, 8])[0]
     user = rng.choice(["EJQ", "Isaac", "IJD", "Chris", "Aman"])
     tag = "".join(rng.choices(string.ascii_lowercase + string.digits, k=5))
     date = f"2026{rng.randint(1, 12):02d}{rng.randint(1, 28):02d}"
@@ -120,6 +120,8 @@ def _make_drop(staging: Path, i: int, rng: random.Random, used: set[str]) -> tup
             unusable = True
     elif kind == "fail":
         name = f"{date}_{user}_DIA_FAKEFAIL_{tag}"
+    elif kind == "loose":  # raws dropped without a folder; the folder here is only a staging container
+        name = f"L{i}{tag}_{user}_DIA_{tag}"
     else:
         method = {"iso": "isoDTB", "dia": "DIA", "tmt": "TMT"}.get(kind, rng.choice(["isoDTB", "DIA"]))
         name = f"{date}_{user}_{method}_{tag}"
@@ -135,6 +137,8 @@ def _make_drop(staging: Path, i: int, rng: random.Random, used: set[str]) -> tup
         files = [f"P{tag}_TMT_F{f}.raw" for f in range(1, rng.randint(2, 5))]
         (folder / "experiment.yaml").write_text(
             "tmt:\n  channels: {126: DMSO_1, 127N: DMSO_2, 127C: Drug_1, 128N: Drug_2}\n", encoding="utf-8")
+    elif kind == "loose":
+        files = [f"{name}_{c}_{r}.raw" for c in ("DMSO", "Drug") for r in range(1, rng.randint(2, 4))]
     else:  # dia, fail
         files = [f"{c}_{r}.raw" for c in ("DMSO", "Drug") for r in range(1, rng.randint(2, 4))]
     if kind == "noraws":
@@ -207,6 +211,8 @@ def run(n: int = 60, seed: int = 1, root: Path | None = None, keep: bool = False
     def copy_in(folder: Path, slow: bool):
         # drops with the same name take turns for the inbox slot, like a person dragging it in again later
         dest = cfg.inbox / folder.name
+        if rep.drops.get(f"{folder.parent.name}/{folder.name}") == "loose":
+            dest = cfg.inbox / f"__never__{folder.name}"  # loose files have no folder slot to wait for
         with delivered_lock:
             lock = name_locks.setdefault(folder.name, threading.Lock())
         with lock:
@@ -223,6 +229,12 @@ def run(n: int = 60, seed: int = 1, root: Path | None = None, keep: bool = False
             delivered[1] += b_
 
     def _copy(folder: Path, dest: Path, slow: bool):
+        if rep.drops.get(f"{folder.parent.name}/{folder.name}") == "loose":  # files straight into the inbox
+            for src in sorted(folder.glob("*.raw")):
+                shutil.copy2(src, cfg.inbox / src.name)
+                if slow:
+                    time.sleep(0.05)
+            return
         if slow:
             for src in sorted(folder.rglob("*")):
                 target = dest / src.relative_to(folder)

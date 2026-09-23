@@ -45,6 +45,12 @@ accepted: `R`, `rep`, `Rep_`, `bio`, `biorep`, `n` for replicates; `F`, `frac`,
 `fraction` for fractions (`X_R2_F7`, `X_rep2_frac7`, `X_bio2_F7` all mean rep 2,
 fraction 7).
 
+**Xcalibur timestamps are ignored.** When a file of that name already exists,
+Xcalibur appends `_YYYYMMDDhhmmss` (`X_DMSO_2_20260508204737.raw`). The tail is
+read as if it weren't there (→ DMSO, rep 2); the file keeps its full name. If
+that leaves two files with the same condition + replicate (a re-acquisition
+next to the original), the resolver window asks which is which — it never guesses.
+
 ### isoDTB — `<sample>_<rep>_<fraction>.raw`
 
 ```
@@ -82,7 +88,27 @@ number is bioreplicate 1.
 Raw files may sit at the top level or in a `raw\` subfolder. Anything else in
 the folder (`.xlsx`, notes, `.mzML`) is carried along untouched.
 
-## When ionomos can't tell: the resolver window
+## Raw files dropped without a folder
+
+Dragging just the `.raw` files into the inbox works too. Once they have stopped
+changing (same 60 s rule), Ionomos groups them by their shared name and moves
+each group into a new folder in the inbox, named after that shared part:
+
+```
+CS_22rv1_FLAG-AR_MA25-10uM_DMSO_1.raw  ┐
+CS_22rv1_FLAG-AR_MA25-10uM_MA25_1.raw  ├─▶ inbox\CS_22rv1_FLAG-AR_MA25-10uM\
+CS_22rv1_FLAG-AR_MA25-10uM_MA25_2.raw  ┘
+```
+
+Files sharing at least the first two name parts go together; trailing
+replicate/fraction numbers and Xcalibur timestamps are left out of the folder
+name; method keywords stay in it. From there it's an ordinary folder drop, so
+the same rules apply: initials and a method keyword somewhere in the file
+names (or the window asks). A folder is still the better habit — it keeps
+unrelated runs apart for sure. Non-raw loose files are left alone.
+`watcher.group_loose_files: false` turns this off (`ionomos/src/ionomos/loose.py`).
+
+## When Ionomos can't tell: the resolver window
 
 If the user, method, a file's tail, or the fraction layout can't be worked
 out, a small window opens on the proteomics PC:

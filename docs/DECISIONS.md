@@ -189,9 +189,19 @@ the lab's, not the tool's.
 the program goes to `C:\Ionomos` (per-user, no admin), data stays where it is,
 so install, upgrade and uninstall can never touch config or experiments. It
 stops the watcher gracefully before replacing files and retires a LabWatch
-install. The repository is private, so the app can't download updates
-itself; it opens the Releases page (the user is signed in there) and then
-offers to install the Setup it finds in Downloads. Support goes the other way
+install. (Since 0.5.2 the repository is public and the app downloads updates itself —
+size- and SHA-256-checked against GitHub's published digest — and still
+accepts a Setup found in Downloads.) Support goes the other way
 through one button that leaves a single zip on the Desktop, with the exact
 build (commit) inside so a report maps to code. CI installs, upgrades and
 uninstalls the real installer on Windows for every release.
+
+### D23 — Loose raw files get a folder; ambiguity still goes to a person
+**2026-09-23.** On the first real drop, Chris's files went straight into the
+inbox and were silently ignored. Ionomos now groups loose `.raw` files by their
+shared leading name parts (≥ 2) into a folder in the inbox, after the usual
+stability wait, and hands that folder to intake immediately. Only moves, never
+overwrites; files arriving later join the folder Ionomos made (marker file).
+Xcalibur's `_YYYYMMDDhhmmss` re-acquisition suffix is ignored when reading
+the tail, but a re-acquired replicate next to its original is a duplicate the
+resolver window asks about — which one is right is a scientist's call.

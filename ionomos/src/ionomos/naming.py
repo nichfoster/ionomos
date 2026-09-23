@@ -49,6 +49,15 @@ _TAIL = {
     "DIA": re.compile(rf"^(?P<sample>.+?)(?:{_SEP}{_REP}(?P<rep>\d+))?$"),
 }
 
+# Xcalibur appends _YYYYMMDDhhmmss when a file of that name already exists
+# (e.g. X_DMSO_1_20260508180610.raw). Ignored when reading the tail; the file keeps its name.
+ACQ_STAMP = re.compile(r"[_-]20\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])(?:[01]\d|2[0-3])[0-5]\d[0-5]\d$")
+
+
+def strip_acq_stamp(stem: str) -> str:
+    return ACQ_STAMP.sub("", stem)
+
+
 DEFAULT_METHOD_ALIASES: dict[str, list[str]] = {
     "isoDTB": ["isodtb", "iso-dtb", "iso_dtb"],
     "TMT": ["tmt"],
@@ -277,7 +286,7 @@ def parse_raw_name(filename: str, method: str) -> RawName:
         raise NamingError(f"unknown method {method!r}")
     stem = filename[: -len(RAW_SUFFIX)]
     safe_stem = sanitize(stem)
-    m = _TAIL[method].match(safe_stem)
+    m = _TAIL[method].match(strip_acq_stamp(safe_stem))
     if not m:  # only reachable for isoDTB (others accept a bare stem)
         raise NamingError(
             f"{filename!r}: isoDTB files must end in _<rep>_<fraction>.raw or _<rep>.raw"

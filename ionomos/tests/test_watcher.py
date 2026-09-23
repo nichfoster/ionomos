@@ -24,11 +24,18 @@ def test_waits_for_stability_then_hands_off_once(lab):
 def test_ignores_loose_files_and_rejected_notes(lab):
     inbox = lab["inbox"]
     (inbox / "stray.raw").write_bytes(b"x")
+    (inbox / "notes.txt").write_text("x")
     (inbox / "old.REJECTED.txt").write_text("x")
     (inbox / ".hidden").mkdir()
-    w = Watcher(inbox, lambda p: IntakeResult.QUEUED, stable_seconds=0)
+    w = Watcher(inbox, lambda p: IntakeResult.QUEUED, stable_seconds=0, group_loose=False)
     assert w.scan_once(now=0) == []
     assert w.scan_once(now=1) == []
+    assert (inbox / "stray.raw").is_file()  # grouping off: loose raws stay where they are
+    # grouping on (the default): the loose raw gets a folder; notes.txt stays
+    w2 = Watcher(inbox, lambda p: IntakeResult.QUEUED, stable_seconds=0)
+    w2.scan_once(now=0)
+    w2.scan_once(now=1)
+    assert (inbox / "stray" / "stray.raw").is_file() and (inbox / "notes.txt").is_file()
 
 
 def test_needs_min_raw_files(lab):

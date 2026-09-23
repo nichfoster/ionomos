@@ -69,6 +69,8 @@ NAMING RULES (tell the lab)
           TMT     <sample>_TMT_F<fraction>.raw      (all reps are in channels)
           DIA     <condition>_<biorep>.raw          (DMSO_1.raw, Drug_2.raw)
   Spaces are fine — they are removed on the way in.
+  Just the .raw files (no folder) is fine too: Ionomos groups them by name into
+  a folder. Xcalibur's _YYYYMMDDhhmmss suffix on a re-acquired file is ignored.
   If Ionomos can't work it out, a window pops up. Answers are saved in an
   experiment.yaml inside the folder, so it never asks the same thing twice.
 
@@ -77,7 +79,12 @@ TESTING WITHOUT REAL DATA
   drops and a fake FragPipe. Start the testbed watcher, then Drop samples and
   watch them move (or open the folders and drag them yourself).
 
-UPDATING (while the tool is being developed)
+UPDATES
+  Ionomos checks GitHub when it opens and every 6 hours. A new version shows
+  as "Update to x.y.z" in the bottom bar: one click downloads it (checksum
+  checked), stops the watcher cleanly, installs, reopens, restarts the watcher.
+
+UPDATING A DEVELOPMENT INSTALL (git checkout)
   If this app was installed with deploy\\dev_install.ps1 it runs straight from
   a copy of the GitHub repository, and the Run & Test tab shows a
   "Development install" box. When a fix is pushed from the Mac, press
@@ -286,7 +293,7 @@ class App:
         self.nb.bind("<<NotebookTabChanged>>", lambda e: self.refresh_setup() if self.nb.select() == str(self.tab_setup) else None)
         self.root.after(300, self.refresh_setup)
         self.root.after(600, self._after_update_restart)
-        self.root.after(1500, self.check_downloaded_update)
+        self.root.after(2500, self.check_downloaded_update)
         log.info("app started: %s, config %s", __import__("ionomos.buildinfo", fromlist=["x"]).one_line(), self.config_path)
 
     def post(self, fn) -> None:
@@ -374,6 +381,7 @@ class App:
         d["fragpipe"]["auto_run"] = self.bv("fragpipe.auto_run", True).get()
         d["fragpipe"]["config_tools_folder"] = self.v("fragpipe.config_tools_folder").get().strip()
         d["fragpipe"]["config_diann"] = self.v("fragpipe.config_diann").get().strip()
+        d["watcher"]["group_loose_files"] = self.bv("watcher.group_loose_files", True).get()
         d["gui"]["enabled"] = self.bv("gui.enabled").get()
         try:
             d["gui"]["timeout_minutes"] = float(self.v("gui.timeout_minutes").get().strip() or 0)
@@ -481,7 +489,9 @@ class App:
         self.set_status(f"created {len(made)} folder(s)" if made else "all folders already exist")
 
     def _open(self, p: str):
-        if p and Path(p).exists():
+        if p and service.is_url(str(p)):
+            service.open_url(str(p))
+        elif p and Path(p).exists():
             service.open_path(Path(p))
         else:
             messagebox.showinfo("Open", f"Does not exist yet:\n{p}")
@@ -807,6 +817,8 @@ class App:
         num(w, 0, "watcher.poll_seconds", "Poll every (s)", "how often the inbox is scanned")
         num(w, 1, "watcher.stable_seconds", "Stable for (s)", "folder must be unchanged this long before it is taken — be generous for USB/network copies")
         num(w, 2, "watcher.min_raw_files", "Min .raw files", "folders with fewer are ignored (left in the inbox)")
+        ttk.Checkbutton(w, text="Put .raw files dropped without a folder into a folder (grouped by name)",
+                        variable=self.bv("watcher.group_loose_files", True)).grid(row=3, column=0, columnspan=3, sticky="w", **PAD)
 
         fp = group("FragPipe searches", 1, 0)
         ttk.Checkbutton(fp, text="Run FragPipe automatically on every queued experiment",
@@ -1193,13 +1205,14 @@ class App:
         from ionomos.buildinfo import one_line
 
         ttk.Label(u, text=f"This is {one_line()}.").grid(row=0, column=0, columnspan=3, sticky="w", **PAD)
-        ttk.Button(u, text="Get the latest version", command=lambda: self._open(names.RELEASES_URL)).grid(row=1, column=0, **PAD)
-        ttk.Button(u, text="Install downloaded update", command=self.install_update).grid(row=1, column=1, **PAD)
-        ttk.Button(u, text="Look again", command=self.check_downloaded_update).grid(row=1, column=2, **PAD)
+        ttk.Button(u, text="Check for updates", command=lambda: self.check_downloaded_update(auto=False)).grid(row=1, column=0, **PAD)
+        ttk.Button(u, text="Update now", command=self.install_update).grid(row=1, column=1, **PAD)
+        ttk.Button(u, text="Release notes (GitHub)", command=lambda: self._open(names.RELEASES_URL)).grid(row=1, column=2, **PAD)
         self.upd_lbl = ttk.Label(u, text="", foreground="#666")
         self.upd_lbl.grid(row=2, column=0, columnspan=3, sticky="w", padx=6)
-        ttk.Label(u, text="Download Ionomos-Setup-<version>.exe from the page (sign in to GitHub), then press Install "
-                          "(or just run the file). Settings and data are kept; the watcher restarts by itself.",
+        ttk.Label(u, text="Ionomos checks GitHub when it opens and every 6 hours; a new version shows as "
+                          "'Update to …' in the bottom bar. One click downloads it (checksum-verified), stops the "
+                          "watcher cleanly, installs, reopens and restarts the watcher. Settings and data are kept.",
                   foreground="#666", wraplength=820).grid(row=3, column=0, columnspan=3, sticky="w", padx=6)
 
     # -- dev install: update from GitHub / diagnostics
@@ -1338,49 +1351,92 @@ class App:
         txt.focus_set()
         win.bind("<Escape>", lambda e: win.destroy())
 
-    def check_downloaded_update(self):
+    def check_downloaded_update(self, auto: bool = True):
+        """Ask GitHub for a newer release (and look in Downloads). auto=False: also say "you're up to date"."""
         from ionomos import updates
 
         def go():
-            found = updates.find_downloaded_installer()
-            self.post(lambda: self._show_update(found))
+            rel, why = updates.check_latest()
+            online = rel if updates.is_newer(rel) else None
+            local = updates.find_downloaded_installer()
+            self.post(lambda: self._show_update(online, local, why, auto, rel))
 
         threading.Thread(target=go, daemon=True).start()
+        if auto:
+            self.root.after(6 * 3600 * 1000, self.check_downloaded_update)  # and again every 6 hours
 
-    def _show_update(self, found):
-        self._update_found = found
-        if found and not self.update_btn.winfo_ismapped():
-            self.update_btn.configure(text=f"Install update {found[1]}")
-            self.update_btn.pack(side="right", padx=4, after=self.report_btn)
+    def _show_update(self, online, local, why: str = "", auto: bool = True, latest=None):
+        self._release, self._update_found = online, local
+        version = online.version if online else (local[1] if local else None)
+        if version:
+            self.update_btn.configure(text=f"Update to {version}")
+            if not self.update_btn.winfo_ismapped():
+                self.update_btn.pack(side="right", padx=4, after=self.report_btn)
+            log.info("update available: %s (%s)", version, "GitHub" if online else local[0])
         if hasattr(self, "upd_lbl"):
-            self.upd_lbl.configure(text=(f"Downloaded and ready: {found[0].name}" if found
-                                         else "No newer installer in Downloads."))
+            if online:
+                text = f"Ionomos {online.version} is available — press Update to {online.version}."
+            elif local:
+                text = f"Downloaded and ready: {local[0].name}"
+            elif latest is not None:
+                text = f"Up to date (latest release: {latest.version})."
+            else:
+                text = f"Couldn't check GitHub just now ({why})." if why else ""
+            self.upd_lbl.configure(text=text)
+        if not auto and not version:
+            messagebox.showinfo("Updates", f"You have the latest version ({__version__})." if latest is not None
+                                else f"Couldn't check for updates:\n{why}")
 
     def install_update(self):
+        """Download (if needed, verified) and install the newer version; the watcher restarts afterwards."""
         from ionomos import health, updates
 
-        found = getattr(self, "_update_found", None) or updates.find_downloaded_installer()
-        if not found:
-            messagebox.showinfo("Update", "No newer Ionomos-Setup-*.exe found in Downloads.\n"
-                                          "Get it with 'Get the latest version' (Run & Test tab).")
+        online = getattr(self, "_release", None)
+        local = getattr(self, "_update_found", None)
+        if not online and not local:
+            self.check_downloaded_update(auto=False)
             return
-        installer, version = found
+        version = online.version if online else local[1]
         if not updates.can_self_update():
-            messagebox.showinfo("Update", f"Run {installer} to update (this copy isn't an installed build).")
+            messagebox.showinfo("Update", f"Ionomos {version} is available: {updates.RELEASES_PAGE}\n"
+                                          "(this copy isn't an installed Windows build, so it can't update itself)")
             return
         running = health.is_locked(self._active_log_dir())
-        if not messagebox.askyesno("Update", f"Install Ionomos {version} now?\n\n"
+        if not messagebox.askyesno("Update", f"Update to Ionomos {version} now?\n\n"
                                    + ("The watcher will be stopped (a running search re-runs afterwards) and "
                                       "started again when the new version opens.\n" if running else "")
                                    + "Your settings and data are not touched."):
             return
-        log.info("installing update %s from %s", version, installer)
-        if running:
-            self.set_status("stopping the watcher for the update…")
-            self.root.update()
-            service.request_stop(self._active_log_dir(), proc=self.proc if self.proc and self.proc.poll() is None else None)
-        updates.install(installer, self._active_log_dir(), running)
-        self.root.destroy()
+
+        def finish(installer: Path):
+            log.info("installing update %s from %s", version, installer)
+            if running:
+                self.set_status("stopping the watcher for the update…")
+                self.root.update()
+                service.request_stop(self._active_log_dir(),
+                                     proc=self.proc if self.proc and self.proc.poll() is None else None)
+            updates.install(installer, self._active_log_dir(), running)
+            self.root.destroy()
+
+        if local and (not online or parse_v(local[1]) >= parse_v(online.version)):
+            finish(local[0])
+            return
+
+        def go():
+            def progress(got, total):
+                pct = f"{100 * got / total:.0f}%" if total else f"{got / 1e6:.0f} MB"
+                self.post(lambda: self.set_status(f"downloading Ionomos {version}… {pct}"))
+
+            try:
+                path = updates.download(online, progress=progress)
+            except updates.DownloadError as exc:
+                msg = str(exc)
+                self.post(lambda: messagebox.showerror("Update", f"{msg}\n\nTry again, or download it from\n{online.page}"))
+                return
+            self.post(lambda: finish(path))
+
+        self.set_status(f"downloading Ionomos {version}…")
+        threading.Thread(target=go, daemon=True).start()
 
     def _after_update_restart(self):
         """After an update that stopped the watcher: start it again (via the startup task if there is one)."""
@@ -2055,3 +2111,9 @@ def _duration(start: str | None, end: str | None) -> str:
         return ""
     mins = max(0, int((b - a).total_seconds() // 60))
     return f"{mins // 60}h{mins % 60:02d}" if mins >= 60 else f"{mins} min"
+
+
+def parse_v(v: str) -> tuple[int, ...]:
+    from ionomos.updates import parse_version
+
+    return parse_version(v)

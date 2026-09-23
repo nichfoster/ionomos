@@ -6,7 +6,7 @@ runs FragPipe):
 | I want to… | Do this |
 |---|---|
 | **install** | download `Ionomos-Setup-<version>.exe` from [Releases](https://github.com/nichfoster/ionomos/releases/latest) → run it → Next, Finish. Ionomos opens on its **✓ Setup** checklist → **Auto-setup** → work down the list. |
-| **update** | Run & Test tab → **Get the latest version** → download the new Setup → Ionomos shows **Install update x.y.z** in the bottom bar → click it. (Or just run the new Setup.) The watcher is stopped cleanly, the program replaced, the watcher started again. Settings and data are kept. |
+| **update** | nothing to download by hand: Ionomos checks GitHub when it opens and every 6 hours. When a new version is out, **Update to x.y.z** appears in the bottom bar → click → Yes. It downloads (checksum-verified), stops the watcher cleanly, installs, reopens and restarts the watcher. Settings and data are kept. *Run & Test → Check for updates* checks right now. |
 | **report a problem** | **Report a problem…** (bottom right, every tab) → a sentence → **Create report** → a zip lands on the Desktop, selected → drag it into the chat. |
 | **uninstall** | Settings → Apps → **Ionomos** → Uninstall. Removes the program, startup task and shortcuts. Keeps `config.yaml`, the job list, logs and every experiment folder. |
 | **start over completely** | `deploy\clean_slate.ps1` (also removes LabWatch leftovers; still keeps data). |
@@ -30,7 +30,8 @@ No internet is needed on the PC except to download the Setup file.
 ### A1. Get the installer (1 min)
 
 [Releases → latest](https://github.com/nichfoster/ionomos/releases/latest) →
-**Ionomos-Setup-<version>.exe** (sign in to GitHub; the repository is private).
+**Ionomos-Setup-<version>.exe** (public; no sign-in needed). Only the very first
+install is manual — after that Ionomos updates itself (see the table above).
 GitHub builds and tests it on a Windows machine for every version tag
 (`git tag v0.5.0 && git push --tags`); a portable `Ionomos-<version>-windows.zip`
 sits next to it for PCs where installers aren't allowed.
@@ -110,7 +111,8 @@ The one-paragraph version of [NAMING_CONVENTION.md](NAMING_CONVENTION.md):
 
 > Put **your initials** and **isoDTB / TMT / DIA** somewhere in the folder
 > name. Raw files end in `_rep_fraction` (isoDTB), `_F#` (TMT) or
-> `_condition_rep` (DIA). Drag the folder into `C:\Fragpipe_Auto\inbox`. If
+> `_condition_rep` (DIA). Drag the folder into `C:\Fragpipe_Auto\inbox`
+> (just the .raw files works too — Ionomos makes the folder). If
 > Ionomos can't work it out, a window will ask you.
 
 ---
