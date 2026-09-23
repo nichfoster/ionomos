@@ -18,7 +18,7 @@ a = Analysis(
     hiddenimports=["tkinter", "tkinter.ttk", "tkinter.filedialog", "tkinter.messagebox", "tkinter.scrolledtext",
                    "yaml", "labwatch.app", "labwatch.resolve", "labwatch.testbed", "labwatch.worker",
                    "labwatch.fragpipe", "labwatch.postprocess", "labwatch.health", "labwatch.stress",
-                   "labwatch.setupcheck", "labwatch.downstream", "labwatch.downstream.analysis",
+                   "labwatch.setupcheck", "labwatch.tkutil", "labwatch.downstream", "labwatch.downstream.analysis",
                    "labwatch.downstream.charts", "labwatch.downstream.isodtb", "labwatch.downstream.quant",
                    "labwatch.downstream.report", "labwatch.downstream.simulate", "labwatch.downstream.stats",
                    "labwatch.downstream.tables", "labwatch.downstream.tmt"],

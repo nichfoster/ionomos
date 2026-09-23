@@ -1,4 +1,5 @@
 """Shared fixture: a fake C:\\Fragpipe_Auto + C:\\Fragpipe_General layout in a temp dir."""
+import gc
 import os
 from pathlib import Path
 
@@ -59,3 +60,11 @@ def make_drop(inbox: Path, name: str, raws: list[str], others: list[str] = (), r
 
 def iso_raws(reps=(1, 2, 3), fracs=range(1, 8), prefix="EJQ_PK_EJQ-2-027_isoDTB_1uM_3h"):
     return [f"{prefix}_{r}_{f}.raw" for r in reps for f in fracs]
+
+
+@pytest.fixture(autouse=True)
+def _collect_garbage_on_the_main_thread():
+    """Tk objects a test leaves behind are collected here, on the main thread, not later on a
+    worker thread of another test (where Tcl would abort the process — see labwatch/tkutil.py)."""
+    yield
+    gc.collect()

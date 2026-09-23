@@ -28,6 +28,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 
+from labwatch import tkutil
 from labwatch.intake import Draft, DraftFile, Kind
 from labwatch.manifest import FileOverride, Overrides
 from labwatch.naming import DEFAULT_METHOD_ALIASES, NamingError, parse_raw_name, tokens_of
@@ -240,12 +241,12 @@ class TkResolver:
             row=1, column=0, columnspan=4, sticky="w", **pad)
 
         # ---- header fields
-        user_v = tk.StringVar(value=d.user)
-        meth_v = tk.StringVar(value=d.method or (d.known_methods[0] if d.known_methods else ""))
-        date_v = tk.StringVar(value=d.date)
-        uneven_v = tk.BooleanVar(value=d.allow_uneven or d.kind == Kind.LAYOUT and "fractions" in d.problem)
-        alias_v = tk.StringVar(value=guess_alias_token(d) if d.kind == Kind.USER else "")
-        remember_v = tk.BooleanVar(value=bool(alias_v.get()) and self.remember is not None)
+        user_v = tkutil.StringVar(value=d.user)
+        meth_v = tkutil.StringVar(value=d.method or (d.known_methods[0] if d.known_methods else ""))
+        date_v = tkutil.StringVar(value=d.date)
+        uneven_v = tkutil.BooleanVar(value=d.allow_uneven or d.kind == Kind.LAYOUT and "fractions" in d.problem)
+        alias_v = tkutil.StringVar(value=guess_alias_token(d) if d.kind == Kind.USER else "")
+        remember_v = tkutil.BooleanVar(value=bool(alias_v.get()) and self.remember is not None)
 
         ttk.Label(frm, text="User").grid(row=2, column=0, sticky="e", **pad)
         user_cb = ttk.Combobox(frm, textvariable=user_v, values=d.known_users, width=24)
@@ -291,7 +292,7 @@ class TkResolver:
             for c, h in enumerate(("file", "experiment", "rep", "frac")):
                 ttk.Label(grid, text=h, foreground="#666").grid(row=0, column=c, sticky="w", padx=4)
             for i, f in enumerate(files, start=1):
-                ev, rv, fv = tk.StringVar(value=f.experiment), tk.StringVar(value=f.bioreplicate), tk.StringVar(value=f.fraction)
+                ev, rv, fv = tkutil.StringVar(value=f.experiment), tkutil.StringVar(value=f.bioreplicate), tkutil.StringVar(value=f.fraction)
                 ttk.Label(grid, text=f.filename, foreground="#b00020" if f.error else "").grid(
                     row=i, column=0, sticky="w", padx=4)
                 ttk.Entry(grid, textvariable=ev, width=34).grid(row=i, column=1, padx=4, pady=1)
@@ -309,7 +310,7 @@ class TkResolver:
             row=6, column=3, sticky="e", **pad)
 
         # ---- buttons + error line
-        err_v = tk.StringVar()
+        err_v = tkutil.StringVar()
         ttk.Label(frm, textvariable=err_v, foreground="#b00020", wraplength=640).grid(
             row=8, column=0, columnspan=4, sticky="w", **pad)
         btns = ttk.Frame(frm)

@@ -153,3 +153,28 @@ def _all(w):
     yield w
     for c in w.winfo_children():
         yield from _all(c)
+
+
+@pytest.mark.skipif(not gui_available()[0], reason="no GUI")
+def test_tk_variables_can_be_garbage_collected_on_a_worker_thread():
+    """With plain tkinter variables this aborts the process on Windows (Tcl called from the wrong thread)."""
+    import gc
+    import threading
+    import tkinter as tk
+
+    from labwatch import tkutil
+
+    root = tk.Tk()
+    root.withdraw()
+    holder = [[tkutil.StringVar(master=root, value="x"), tkutil.BooleanVar(master=root)] for _ in range(50)]
+    for pair in holder:
+        pair.append(pair)  # a reference cycle, like a closed dialog's callbacks
+
+    def drop():
+        holder.clear()
+        gc.collect()
+
+    t = threading.Thread(target=drop)
+    t.start()
+    t.join()
+    root.destroy()

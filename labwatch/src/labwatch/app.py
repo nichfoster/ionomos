@@ -23,7 +23,7 @@ from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 
-from labwatch import __version__, configio, service
+from labwatch import __version__, configio, service, tkutil
 from labwatch.config import ConfigError, load
 
 PAD = {"padx": 6, "pady": 3}
@@ -316,12 +316,12 @@ class App:
 
     def v(self, key: str, default="") -> tk.StringVar:
         if key not in self.vars:
-            self.vars[key] = tk.StringVar(value=str(default))
+            self.vars[key] = tkutil.StringVar(value=str(default))
         return self.vars[key]
 
     def bv(self, key: str, default=False) -> tk.BooleanVar:
         if key not in self.vars:
-            self.vars[key] = tk.BooleanVar(value=bool(default))
+            self.vars[key] = tkutil.BooleanVar(value=bool(default))
         return self.vars[key]
 
     def _load_vars(self):
