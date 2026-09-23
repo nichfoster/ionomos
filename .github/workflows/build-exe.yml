@@ -80,6 +80,7 @@ jobs:
           if (Test-Path C:\IonomosT\Ionomos.exe) { throw "uninstall left the program behind" }
           if ((Get-Content C:\Fragpipe_Auto\config.yaml) -ne "# the lab's settings") { throw "the lab's config was touched" }
           Write-Host "installer OK: install, LabWatch retirement, upgrade, uninstall; data kept"
+          exit 0  # the expected non-zero from 'schtasks /Query' above must not fail the step
       - uses: actions/upload-artifact@v4
         with:
           name: Ionomos-windows
