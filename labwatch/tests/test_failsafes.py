@@ -57,6 +57,11 @@ def test_heartbeat_and_staleness(tmp_path):
     assert healthy and "worker" in text and "IonQuant" in text
     text, healthy = health.heartbeat_summary(tmp_path, now=time.time() + 600)
     assert not healthy and "NOT RESPONDING" in text
+    hb.beat("watcher", "busy: taking in EJQ_isoDTB (resolver window open)", force=True)
+    hb.beat("worker", "idle", force=True)
+    text, healthy = health.heartbeat_summary(tmp_path, now=time.time() + 600)
+    assert "watcher" in text and "NOT RESPONDING" in text  # the worker is stale...
+    assert text.count("NOT RESPONDING") == 1  # ...but a busy watcher is not
     hb.clear()
     assert health.heartbeat_summary(tmp_path) == ("no heartbeat", False)
 

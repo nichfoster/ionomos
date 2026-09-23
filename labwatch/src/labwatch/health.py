@@ -186,9 +186,10 @@ def heartbeat_summary(log_dir: Path, now: float | None = None) -> tuple[str, boo
     parts, healthy = [], True
     for name, p in sorted((hb.get("parts") or {}).items()):
         age = now - float(p.get("at", 0))
-        stale = age > STALE_AFTER
-        healthy &= not stale
         state = p.get("state") or ""
+        busy = state.startswith("busy:")  # announced long operation (resolver window open, big move)
+        stale = age > STALE_AFTER and not busy
+        healthy &= not stale
         parts.append(f"{name} {age:.0f}s ago" + (f" ({state})" if state and state != "ok" else "")
                      + (" — NOT RESPONDING" if stale else ""))
     return ", ".join(parts) or "no parts", healthy
@@ -240,7 +241,12 @@ def write_crash_file(log_dir: Path | None, where: str, exc_text: str) -> Path | 
     try:
         d = Path(log_dir)
         d.mkdir(parents=True, exist_ok=True)
-        p = d / f"{CRASH_PREFIX}{datetime.now():%Y%m%d-%H%M%S-%f}.txt"
+        stem = f"{CRASH_PREFIX}{datetime.now():%Y%m%d-%H%M%S-%f}"
+        p = d / f"{stem}.txt"
+        n = 1
+        while p.exists():  # Windows' clock ticks every ~15 ms: two crashes can share a timestamp
+            p = d / f"{stem}-{n}.txt"
+            n += 1
         from labwatch import __version__
 
         p.write_text(f"labwatch {__version__} crash in {where}\n{datetime.now().isoformat()}\n"

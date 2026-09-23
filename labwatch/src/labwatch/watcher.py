@@ -163,6 +163,8 @@ class Watcher:
             return False
 
         log.info("stable: %s (%d files, %d raw)", folder.name, len(fp), n_raw)
+        if self.heartbeat is not None:  # intake can legitimately take long (a person answering, a big copy)
+            self.heartbeat.beat("watcher", f"busy: taking in {folder.name}", force=True)
         try:
             result = self.on_stable(folder)
         except Exception:

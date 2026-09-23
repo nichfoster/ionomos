@@ -74,7 +74,37 @@ def read_config(path: str | Path) -> dict:
     raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
     if not isinstance(raw, dict):
         raw = {}
-    return _merge(defaults(), raw)
+    return _normalise(_merge(defaults(), raw))
+
+
+def _normalise(d: dict) -> dict:
+    """Empty YAML entries ('aliases:' with nothing under it) load as None; give every section its type back."""
+    base = defaults()
+    for sec, default in base.items():
+        if not isinstance(d.get(sec), dict):
+            d[sec] = default
+    users = d["users"]
+    if not isinstance(users.get("aliases"), dict):
+        users["aliases"] = {}
+    users["aliases"] = {str(k): [str(a) for a in (v or [])] if isinstance(v, (list, tuple)) else ([str(v)] if v else [])
+                        for k, v in users["aliases"].items()}
+    for k in ("default", "learned_aliases_file"):
+        if users.get(k) is None:
+            users[k] = ""
+    if not d["methods"]:
+        d["methods"] = base["methods"]
+    for key, m in list(d["methods"].items()):
+        if not isinstance(m, dict):
+            d["methods"][key] = {}
+            m = d["methods"][key]
+        for list_key in ("aliases", "postprocess"):
+            v = m.get(list_key)
+            m[list_key] = [str(x) for x in v] if isinstance(v, (list, tuple)) else ([str(v)] if v else [])
+    for sec in ("paths", "fragpipe"):
+        for k, v in d[sec].items():
+            if v is None:
+                d[sec][k] = ""
+    return d
 
 
 def _y(v) -> str:
