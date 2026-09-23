@@ -111,3 +111,7 @@ def config_env() -> str | None:
         if os.environ.get(var):
             return os.environ[var]
     return None
+
+# Recoverable inbox removals and confirmed naming examples (introduced in 0.5.3).
+REMOVED_DIR = ".removed"
+NAMING_HISTORY_FILE = "naming-history.jsonl"

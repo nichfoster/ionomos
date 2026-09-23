@@ -27,6 +27,7 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
+from pathlib import Path
 
 from ionomos import tkutil
 from ionomos.intake import Draft, DraftFile, Kind
@@ -130,6 +131,8 @@ def validate(a: Answer, known_methods: list[str]) -> str:
             date.fromisoformat(a.date.strip())
         except ValueError:
             return "Date must be YYYY-MM-DD (or blank)"
+    if not a.files:
+        return "At least one raw file is required"
     seen = set()
     for f in a.files:
         if not f.experiment.strip():
@@ -221,8 +224,11 @@ class TkResolver:
 
     def _dialog(self, d: Draft) -> Overrides | None:
         import tkinter as tk
-        from tkinter import ttk
+        from tkinter import messagebox, ttk
 
+        source = Path(d.source) if d.source else None
+        if source is not None and not source.is_dir():
+            return None
         win = tk.Toplevel(self.root)
         win.title("ionomos — needs a hand")
         win.attributes("-topmost", True)
@@ -299,6 +305,36 @@ class TkResolver:
                 ttk.Entry(grid, textvariable=rv, width=4).grid(row=i, column=2, padx=4)
                 ttk.Entry(grid, textvariable=fv, width=4).grid(row=i, column=3, padx=4)
                 rows.append((f, ev, rv, fv))
+                if source is not None:
+                    ttk.Button(grid, text="Delete", command=lambda name=f.filename: delete_file(name)).grid(
+                        row=i, column=4, padx=4)
+
+        def delete_file(filename):
+            from ionomos.inbox import remove
+            from ionomos.intake import _find_raws
+
+            try:
+                raw_dir, _, _ = _find_raws(source)
+                remove(source.parent, source / raw_dir / filename)
+                refresh_files()
+            except (OSError, ValueError) as exc:
+                messagebox.showerror("Could not remove file", str(exc), parent=win)
+
+        def refresh_files():
+            from ionomos.intake import _find_raws
+
+            if source is None:
+                return
+            if not source.is_dir():
+                skip()
+                return
+            _, current, _ = _find_raws(source)
+            saved = {f.filename: DraftFile(f.filename, ev.get(), rv.get(), fv.get()) for f, ev, rv, fv in rows}
+            if set(current) != set(saved):
+                d.files = [saved.get(name, reparse([DraftFile(name)], meth_v.get())[0]) for name in current]
+                fill_grid(d.files)
+            if not current:
+                skip()
 
         fill_grid(d.files)
 
@@ -324,6 +360,9 @@ class TkResolver:
                           remember_alias=alias_v.get().strip() if remember_v.get() else "")
 
         def accept(*_):
+            refresh_files()
+            if not win.winfo_exists():
+                return
             a = answer()
             msg = validate(a, d.known_methods)
             if msg:
@@ -340,6 +379,32 @@ class TkResolver:
         def skip(*_):
             result[0] = None
             win.destroy()
+
+        def delete_folder():
+            from ionomos.inbox import remove
+
+            try:
+                remove(source.parent, source)
+            except (OSError, ValueError) as exc:
+                messagebox.showerror("Could not remove folder", str(exc), parent=win)
+                return
+            skip()
+
+        if source is not None:
+            ttk.Button(btns, text="Delete from inbox", command=delete_folder).pack(side="left", padx=4)
+            ttk.Label(frm, text="Deleted items are recoverable in inbox/.removed. Changes restart intake.").grid(
+                row=10, column=0, columnspan=4, sticky="w")
+
+            def poll():
+                if win.winfo_exists():
+                    try:
+                        refresh_files()
+                    except OSError:
+                        pass
+                    if win.winfo_exists():
+                        win.after(500, poll)
+
+            win.after(500, poll)
 
         ttk.Button(btns, text="Skip (leave in inbox)", command=skip).pack(side="left", padx=4)
         ttk.Button(btns, text="Accept & queue  ⏎", command=accept).pack(side="left", padx=4)

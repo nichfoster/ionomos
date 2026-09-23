@@ -183,3 +183,31 @@ notes: "24 h treatment, 1 µM"   # copied into ionomos.json for provenance
 - Is user = folder under `C:\Fragpipe_General\` right? Which initials/aliases to configure?
 - Are there ever two methods in one drop? (Currently rejected.)
 - TMT: hand-written `annotation.txt` vs `experiment.yaml` — which do people prefer?
+
+## Learning from confirmed experiments
+
+When a resolver answer passes intake validation, Ionomos records the confirmed
+file labels, replicates and fractions in `logs/naming-history.jsonl`. This is a
+structured naming log, separate from ordinary diagnostic messages. Future drops
+reuse exact filename corrections (ignoring Xcalibur acquisition timestamps) and
+sample-label corrections across new replicates/fractions, scoped to the same
+user and method. For example, confirming DIA `vehicle_1.raw` as `DMSO`, replicate
+1, teaches `vehicle_2.raw` → `DMSO`, replicate 2. Explicit `experiment.yaml`
+values take precedence. Conflicting historical examples are not reused.
+This does not infer arbitrary new naming grammars or train from unconfirmed error
+messages. Remove the history file to reset this memory; normal user aliases
+remain in their existing learned-alias file.
+
+## Removing unwanted inbox data
+
+The app's **Inbox** tab lists folders and their raw files and refreshes every two
+seconds. **Delete selected** moves the selected item to `inbox/.removed/` under
+a unique ID. **Open removed items** lets you recover it manually. The watcher
+ignores this hidden folder. This is recoverable removal, not permanent erasure.
+
+The naming resolver also has **Delete** beside each raw file and **Delete from
+inbox** for the whole folder. It refreshes its file list every half second,
+including changes made in Explorer, and closes if the folder or all raws are
+gone. A changed folder restarts intake and its stability checks; answers from
+that changed snapshot are not queued. Previously saved GUI overrides for removed
+raws are ignored. Whole-folder removal also moves its rejection note.

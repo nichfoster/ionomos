@@ -278,6 +278,7 @@ class App:
         self._tab_methods()
         self._tab_advanced()
         self._tab_run()
+        self._tab_inbox()
         self._tab_jobs()
         self._tab_analysis()
         self._tab_help()
@@ -1723,6 +1724,64 @@ class App:
             self.post(done)
 
         threading.Thread(target=go, daemon=True).start()
+
+    def _tab_inbox(self):
+        frame = ttk.Frame(self.nb, padding=10)
+        self.nb.add(frame, text="Inbox")
+        ttk.Label(frame, text="Delete removes an item from intake. Recover it from the removed-items folder.").pack(anchor="w")
+        self.inbox_tree = ttk.Treeview(frame, show="tree", selectmode="browse")
+        self.inbox_tree.pack(fill="both", expand=True, pady=8)
+        buttons = ttk.Frame(frame)
+        buttons.pack(fill="x")
+        ttk.Button(buttons, text="Refresh", command=self._refresh_inbox).pack(side="left")
+        ttk.Button(buttons, text="Delete selected", command=self._delete_inbox).pack(side="left", padx=6)
+        ttk.Button(buttons, text="Open removed items", command=lambda: self._open(
+            str(Path(self.v("paths.inbox").get()) / names.REMOVED_DIR))).pack(side="left")
+        self._inbox_tick()
+
+    def _refresh_inbox(self):
+        inbox = Path(self.v("paths.inbox").get().strip())
+        selected = self.inbox_tree.selection()
+        expanded = {key for key in self.inbox_tree.get_children() if self.inbox_tree.item(key, "open")}
+        self.inbox_tree.delete(*self.inbox_tree.get_children())
+        if not inbox.is_dir():
+            return
+        for path in sorted(inbox.iterdir()):
+            if path.name.startswith(".") or path.name.endswith(".REJECTED.txt"):
+                continue
+            key = str(path)
+            self.inbox_tree.insert("", "end", iid=key, text=path.name, open=key in expanded)
+            if path.is_dir() and not path.is_symlink():
+                from ionomos.intake import _find_raws
+
+                try:
+                    raw_dir, files, _ = _find_raws(path)
+                    for name in files:
+                        self.inbox_tree.insert(key, "end", iid=str(path / raw_dir / name), text=name)
+                except OSError:
+                    continue
+        if selected and self.inbox_tree.exists(selected[0]):
+            self.inbox_tree.selection_set(selected[0])
+
+    def _inbox_tick(self):
+        try:
+            self._refresh_inbox()
+        except OSError:
+            pass
+        self.root.after(2000, self._inbox_tick)
+
+    def _delete_inbox(self):
+        from ionomos.inbox import remove
+
+        selected = self.inbox_tree.selection()
+        if not selected:
+            return
+        try:
+            destination = remove(Path(self.v("paths.inbox").get()), Path(selected[0]))
+            self.set_status(f"Removed from inbox; recover from {destination}")
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Could not remove item", str(exc))
+        self._refresh_inbox()
 
     # ---------------------------------------------------------- tab: jobs ----
 

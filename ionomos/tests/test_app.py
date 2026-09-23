@@ -348,3 +348,17 @@ def test_update_banner_appears_for_a_downloaded_installer(app, tmp_path, monkeyp
     monkeypatch.setattr(updates, "downloads_dir", lambda: tmp_path)
     app.check_downloaded_update()
     assert _pump_until(app, lambda: app.update_btn.cget("text") == "Update to 9.9.9")
+
+
+def test_inbox_delete_refreshes_and_preserves_raw(app, tmp_path):
+    from tests.conftest import make_drop
+
+    inbox = tmp_path / 'inbox'
+    inbox.mkdir()
+    folder = make_drop(inbox, 'bad', ['bad.raw'])
+    app.v('paths.inbox').set(str(inbox))
+    app._refresh_inbox()
+    app.inbox_tree.selection_set(str(folder / 'bad.raw'))
+    app._delete_inbox()
+    assert not app.inbox_tree.exists(str(folder / 'bad.raw'))
+    assert list((inbox / '.removed').rglob('bad.raw'))

@@ -178,3 +178,18 @@ def test_tk_variables_can_be_garbage_collected_on_a_worker_thread():
     t.start()
     t.join()
     root.destroy()
+
+
+@pytest.mark.skipif(not _ok, reason=f"no GUI: {_why}")
+def test_dialog_closes_when_folder_removed(lab):
+    import tkinter as tk
+
+    from ionomos.inbox import remove
+    from ionomos.resolve import TkResolver
+
+    folder = make_drop(lab['inbox'], 'bad', ['bad.raw'])
+    root = tk.Tk()
+    root.withdraw()
+    root.after(100, lambda: remove(lab['inbox'], folder))
+    assert TkResolver(root).resolve(draft(folder, lab['cfg'])) is None
+    root.destroy()

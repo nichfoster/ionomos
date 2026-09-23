@@ -205,3 +205,12 @@ overwrites; files arriving later join the folder Ionomos made (marker file).
 Xcalibur's `_YYYYMMDDhhmmss` re-acquisition suffix is ignored when reading
 the tail, but a re-acquired replicate next to its original is a duplicate the
 resolver window asks about — which one is right is a scientist's call.
+
+### 2026-09-23 — recoverable inbox deletion and naming memory
+
+Inbox and resolver deletion move items into a hidden `.removed` folder, preserving
+raw data while withdrawing it from intake. Intake compares folder fingerprints
+across the resolver wait so removed/changed input cannot be queued using stale
+answers. Confirmed resolver interpretations are logged in `naming-history.jsonl`
+and reused by user/method; exact file corrections and sample-label mappings are
+supported, and ambiguous examples are not applied. Explicit YAML wins.

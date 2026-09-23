@@ -145,6 +145,7 @@ class Draft:
     files: list[DraftFile]
     layout_error: str = ""
     allow_uneven: bool = False
+    source: str = ""
 
 
 class Resolver(Protocol):
@@ -253,6 +254,14 @@ def _plan(folder: Path, cfg: Config, ledger: Ledger | None = None) -> Plan:
         tokens=tokens_of(folder.name),
     )
     mcfg = cfg.methods[method]
+    from ionomos.naming_history import suggestions
+
+    if ov.resolved_by == "gui":
+        # A previously resolved raw may have been removed in Explorer or the inbox UI.
+        ov.files = {name: value for name, value in ov.files.items()
+                    if name in raw_names or name in {sanitize(f[:-4]) + RAW_SUFFIX for f in raw_names}}
+    learned = suggestions(cfg, user, method, raw_names)
+    ov.files = {**learned, **ov.files}  # explicit experiment.yaml always wins
 
     try:
         raws: RawSet = group_raws(raw_names, method, allow_uneven=ov.allow_uneven_fractions)
@@ -350,7 +359,7 @@ def draft(folder: Path, cfg: Config, error: IntakeError | None = None) -> Draft:
         kind=error.kind if error else Kind.OTHER,
         user=user, method=method, date=d.isoformat() if d else "",
         known_users=cfg.known_users(), known_methods=list(cfg.methods),
-        files=files, layout_error=layout_error, allow_uneven=ov.allow_uneven_fractions,
+        files=files, layout_error=layout_error, allow_uneven=ov.allow_uneven_fractions, source=str(folder),
     )
 
 
@@ -456,7 +465,14 @@ def _intake(folder: Path, cfg: Config, ledger: Ledger, resolver: Resolver | None
     except IntakeError as exc:
         if exc.kind in RESOLVABLE and resolver is not None:
             log.info("asking for help with %s (%s): %s", folder.name, exc.kind.value, exc)
+            from ionomos.watcher import fingerprint
+
+            before = fingerprint(folder)
             ov = resolver.resolve(draft(folder, cfg, exc))
+            if not folder.is_dir() or fingerprint(folder) != before:
+                _clear_note(folder)
+                return IntakeResult.RETRY
+
             if ov is None:
                 _reject(folder, f"{exc} (skipped in the resolver window)")
                 return IntakeResult.REJECTED
@@ -467,6 +483,13 @@ def _intake(folder: Path, cfg: Config, ledger: Ledger, resolver: Resolver | None
             except IntakeError as exc2:
                 _reject(folder, f"after manual fix: {exc2}")
                 return IntakeResult.REJECTED
+            try:
+                from ionomos.naming_history import remember
+
+                confirmed = draft(folder, cfg)
+                remember(cfg, folder.name, p.folder.user, p.folder.method, confirmed.files)
+            except OSError:
+                log.exception("Could not save naming history")
         else:
             _reject(folder, str(exc))
             return IntakeResult.REJECTED
