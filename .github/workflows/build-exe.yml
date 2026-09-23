@@ -28,6 +28,20 @@ jobs:
           & $exe --version
           & $exe testbed init C:\bed
           & $exe --config C:\bed\Fragpipe_Auto\config.yaml check
+          # full frozen pipeline: watcher files the drop, worker runs the (fake) FragPipe
+          $env:LABWATCH_FAKE_FP_SECONDS = "1"
+          $w = Start-Process -FilePath $exe -ArgumentList "--config C:\bed\Fragpipe_Auto\config.yaml run --no-gui" -PassThru -NoNewWindow
+          & $exe testbed drop iso_good C:\bed
+          $done = $false
+          foreach ($i in 1..60) {
+            Start-Sleep 2
+            $s = & $exe --config C:\bed\Fragpipe_Auto\config.yaml status --all | Out-String
+            if ($s -match "\bdone\b") { $done = $true; break }
+          }
+          Stop-Process -Id $w.Id -Force
+          Write-Host $s
+          Get-Content C:\bed\Fragpipe_Auto\logs\labwatch.log -Tail 15
+          if (-not $done) { throw "frozen exe did not complete a job" }
       - uses: actions/upload-artifact@v4
         with:
           name: LabWatch-windows
