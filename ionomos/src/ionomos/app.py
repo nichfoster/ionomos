@@ -1482,7 +1482,22 @@ class App:
             self.root.destroy()
 
         if local and (not online or parse_v(local[1]) >= parse_v(online.version)):
+            release = online if online and parse_v(local[1]) == parse_v(online.version) else None
+            if release is None or not release.sha256:
+                messagebox.showerror("Update", f"Ionomos {version} has no published SHA-256 to verify {local[0].name} "
+                                               f"against, so it won't be installed automatically.\n\n"
+                                               f"Download it from\n{updates.RELEASES_PAGE}")
+                return
+            if not updates._verified(local[0], release):
+                messagebox.showerror("Update", f"{local[0].name} failed its checksum — download it again "
+                                               f"from\n{updates.RELEASES_PAGE}")
+                return
             finish(local[0])
+            return
+
+        if not online.sha256:
+            messagebox.showerror("Update", f"Ionomos {online.version} has no published SHA-256, so its installer can't be "
+                                           f"verified before installing.\n\nDownload it from\n{updates.RELEASES_PAGE}")
             return
 
         def go():
