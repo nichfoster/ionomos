@@ -337,8 +337,14 @@ def test_dia_missing_controls_warns_in_report(tmp_path):
     out = downstream.analyze(dest, 'DIA', record=record)
     assert any('Expected runs missing' in w and 'DMSO_1' in w and 'DMSO_2' in w for w in out.warnings)
     assert any('DMSO has 1 sample' in w for w in out.warnings)
-    assert any('zero features' in w for w in out.warnings)
-    assert 'zero features' in out.report.read_text(encoding='utf-8')
+    codes = {i.code: i for i in out.issues}
+    assert codes["MISSING_RUNS"].severity == "error" and "DMSO_1" in codes["MISSING_RUNS"].data["runs"]
+    assert codes["SMALL_GROUP"].severity == "input" and out.summary["state"] == "failed"
+    html = out.report.read_text(encoding='utf-8')
+    assert 'Not enough replicates to test Drug vs DMSO' in html and 'Most likely' in html
+    # the volcano is still drawn (empty, with an explanation)
+    svg = (dest / out.summary["comparisons"][0]["volcano"]).read_text(encoding='utf-8')
+    assert 'No features could be tested' in svg
 
 
 def test_dia_nan_does_not_drop_unmapped_column(tmp_path):

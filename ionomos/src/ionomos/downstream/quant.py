@@ -44,6 +44,7 @@ class QuantMatrix:
     exp: str = ""  # "LFQ" | "DIA" | "TMT" | "isoDTB" (FragPipe-Analyst's data type; picks the default imputation)
     replicate: dict[str, int] = field(default_factory=dict)  # sample -> replicate number, when known
     columns: dict[str, str] = field(default_factory=dict)  # sample -> its column in the source table
+    meta: dict = field(default_factory=dict)  # loader findings for the doctor (missing_runs, unmatched_runs, ...)
 
     @property
     def conditions(self) -> list[str]:
@@ -137,6 +138,7 @@ def from_pg_matrix(path: Path, sample_map: dict[str, tuple[str, int]] | None = N
 
     runs = [h for h in header if h not in _PG_META and (match_run(run_stem(h)) is not None or numeric(h))]
     samples, cond, reps, colmap = [], {}, {}, {}
+    unmatched: list[str] = []
     for h in runs:
         stem = run_stem(h)
         key = match_run(stem)
@@ -152,6 +154,7 @@ def from_pg_matrix(path: Path, sample_map: dict[str, tuple[str, int]] | None = N
             s, c = stem, _dia_condition(clean)
             if sample_map:
                 notes.append(f"Run {stem} did not match the manifest; inferred condition {c!r}. Check sample labels.")
+                unmatched.append(stem)
         base, k = s, 2
         while s in cond:  # two runs of one sample (technical reps): keep both
             s, k = f"{base}.{k}", k + 1
@@ -173,7 +176,7 @@ def from_pg_matrix(path: Path, sample_map: dict[str, tuple[str, int]] | None = N
         if s not in reps and s.rsplit("_", 1)[-1].isdigit():
             reps[s] = int(s.rsplit("_", 1)[1])
     return QuantMatrix("intensity", "protein", feats, samples, vals, cond, str(path), notes=notes, exp="DIA",
-                       replicate=reps, columns=colmap)
+                       replicate=reps, columns=colmap, meta={"missing_runs": missing, "unmatched_runs": unmatched})
 
 
 def _dia_condition(stem: str) -> str:

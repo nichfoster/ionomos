@@ -322,39 +322,124 @@ def test_analysis_tab_edits_samples_and_runs(app, tmp_path, monkeypatch):
     app.refresh_jobs()
     app.jtree.selection_set(str(job_id))
     app.job_action("studio")  # Jobs tab -> Analysis tab with this job
-    tab = app.analysis
+    ed = app.analysis.editor
     assert app.nb.select() == str(app.tab_analysis)
-    assert _pump_until(app, lambda: len(tab.tree.get_children()) == 6)
-    assert tab.v("exp.control").get() == "DMSO" and "6 samples in 2 condition(s)" in tab.info.cget("text")
-    tab.set_condition(["Drug_3"], "DMSO")  # a mislabelled sample
-    tab.tree.selection_set("DMSO_1")
-    tab.toggle_used()  # a failed run
-    assert tab.tree.item("DMSO_1")["values"][3] == "left out" and tab.tree.item("Drug_3")["values"][1] == "DMSO"
-    tab.v("exp.log2fc").set("0.8")
-    tab.v("exp.imputation").set("none")
-    assert tab.save_choices()
+    assert _pump_until(app, lambda: len(ed.tree.get_children()) == 6)
+    assert ed.var("control").get() == "DMSO" and "6 samples in 2 condition(s)" in ed.info.cget("text")
+    ed.set_condition(["Drug_3"], "DMSO")  # a mislabelled sample
+    ed.toggle_used(["DMSO_1"])  # a failed run
+    assert ed.tree.item("DMSO_1")["values"][3] == "left out" and ed.tree.item("Drug_3")["values"][1] == "DMSO"
+    ed.var("log2fc").set("0.8")
+    ed.var("imputation").set("none")
+    assert ed.save_choices()
     an = load_overrides(dest).analysis
     assert an["sample_conditions"] == {"Drug_3": "DMSO"} and an["exclude_samples"] == ["DMSO_1"]
     assert an["log2fc"] == 0.8 and an["imputation"] == "none" and an["de_type"] == "control"
-    tab.run()
+    ed.run(confirm=False)
     assert _pump_until(app, lambda: opened, secs=30)
     assert opened[-1].endswith("report.html")
     summary = __import__("json").loads((dest / "results" / "analysis.json").read_text(encoding="utf-8"))
     assert summary["samples"]["Drug_3"] == "DMSO" and "DMSO_1" not in summary["samples"]
     assert summary["settings"]["log2fc"] == 0.8 and summary["imputation"] == "none"
     # reopening shows the saved choices
-    tab.load(dest, "DIA")
-    assert _pump_until(app, lambda: tab.tree.exists("DMSO_1") and tab.tree.item("DMSO_1")["values"][3] == "left out")
-    assert tab.v("exp.log2fc").get() == "0.8"
-    tab.v("exp.de_type").set("custom")
-    tab.v("exp.comparisons").set("Drug vs nonsense")
-    from tkinter import messagebox
+    ed.load(dest, "DIA")
+    assert _pump_until(app, lambda: ed.tree.exists("DMSO_1") and ed.tree.item("DMSO_1")["values"][3] == "left out")
+    assert ed.var("log2fc").get() == "0.8"
+    # a comparison that can't work is caught before running
+    ed.var("de_type").set("control")
+    ed.var("control").set("Placebo")
+    assert any("Placebo" in p for p in ed.problems())
 
-    errors = []
-    monkeypatch.setattr(messagebox, "showerror", lambda *a, **k: errors.append(a))
-    tab.run()  # the bad comparison is caught when the analysis runs (the condition doesn't exist)
-    assert _pump_until(app, lambda: not tab._running, secs=30)
 
+def _experiment_needing_conditions(tmp_path):
+    """A DIA experiment where every file got the same condition (the one-condition case)."""
+    import json
+
+    from ionomos import names
+    from ionomos.downstream import simulate
+
+    dest = tmp_path / "General" / "Chris" / "CS_22rv1"
+    runs = [(f"/x/CS_22rv1_{c}_{r}.raw", "CS") for c in ("DMSO", "MA25") for r in (1, 2, 3)]
+    simulate.dia_pg_matrix(dest / "fragpipe" / "report.pg_matrix.tsv", runs, seed=5)
+    rec = {"plan": {"folder": {"method": "DIA", "user": "Chris"}, "manifest": [
+        {"file": f"CS_22rv1_{c}_{r}.raw", "experiment": "CS_22rv1", "bioreplicate": k}
+        for k, (c, r) in enumerate(((c, r) for c in ("DMSO", "MA25") for r in (1, 2, 3)), 1)]}}
+    (dest / names.STATUS_FILE).write_text(json.dumps(rec), encoding="utf-8")
+    return dest
+
+
+def test_analysis_that_needs_input_pops_up_and_is_fixed_in_the_window(app, tmp_path, monkeypatch):
+    from ionomos import attention, postprocess
+    from ionomos.config import load
+
+    _lab_app(app, tmp_path)
+    cfg = load(tmp_path / "Auto" / "config.yaml", check_paths=False)
+    dest = _experiment_needing_conditions(tmp_path)
+    out = postprocess.run_for_folder(dest, cfg, "DIA", {"enrichment": False})
+    postprocess.record_issues(cfg.log_dir, dest, out, 7)
+    its = attention.items(cfg.log_dir)
+    assert len(its) == 1 and its[0].kind == "analysis_input" and "same condition" in its[0].title
+    opened = []
+    monkeypatch.setattr(app, "_open", lambda p: opened.append(p))
+    app.popups.check()  # the poller's pass: badge + window
+    assert "1 needs attention" in app.attn_btn.cget("text")
+    win = app.popups.window
+    assert win is not None and win.alive() and win.editor is not None
+    ed = win.editor
+    assert _pump_until(app, lambda: len(ed.tree.get_children()) == 6)
+    assert "same condition" in ed.issues.get("1.0", "end")
+    ed.guess_conditions()
+    assert sorted(set(ed.conditions())) == ["DMSO", "MA25"]
+    ed.var("control").set("DMSO")
+    ed.run(confirm=False)
+    assert _pump_until(app, lambda: opened, secs=30)
+    assert not attention.items(cfg.log_dir)  # resolved by the clean re-analysis
+    summary = __import__("json").loads((dest / "results" / "analysis.json").read_text(encoding="utf-8"))
+    assert summary["comparisons"][0]["name"] == "MA25 vs DMSO" and summary["state"] in ("ok",)
+    assert (dest / summary["comparisons"][0]["volcano"]).is_file()
+    app.popups.check()
+    assert not app.attn_btn.winfo_ismapped() or app.attn_btn.cget("text") == ""
+    # an item pops up once; snoozed/dismissed ones don't come back by themselves
+    it = attention.raise_item(cfg.log_dir, "search_waiting", "x waits", "no FASTA", key="w1")
+    app.popups.window.close()
+    app.popups.check()
+    assert app.popups.window.item.id == it.id
+    app.popups.window.snooze()
+    app.popups.check()
+    assert not app.popups.window.alive()
+
+
+def test_failed_search_window_retries_the_job(app, tmp_path):
+    from ionomos import attention
+    from ionomos.config import load
+    from ionomos.ledger import Job, Ledger
+
+    _lab_app(app, tmp_path)
+    cfg = load(tmp_path / "Auto" / "config.yaml", check_paths=False)
+    led = Ledger(cfg.database)
+    jid = led.insert(Job(inbox_name="x", user="EJQ", method="DIA", dest_dir=str(tmp_path / "x"), status="failed"))
+    led.close()
+    attention.raise_item(cfg.log_dir, "search_failed", "FragPipe failed on EJQ/x", "exit code 1", severity="error",
+                         key=f"search_failed:job{jid}", job_id=jid, dest=tmp_path / "x",
+                         causes=["FragPipe ran out of memory"], details="java.lang.OutOfMemoryError")
+    app.popups.check()
+    win = app.popups.window
+    assert win.alive() and "out of memory" in str(win.item.causes).lower()
+    win.retry()
+    led = Ledger(cfg.database)
+    assert led.get(jid).status == "queued"
+    led.close()
+    assert not attention.items(cfg.log_dir)
+    # the list window
+    attention.raise_item(cfg.log_dir, "intake_rejected", "Couldn't take in y", "no raw files", key="y",
+                         severity="error", data={"folder": str(tmp_path / "Auto" / "inbox" / "y")})
+    (tmp_path / "Auto" / "inbox" / "y").mkdir()
+    c = app.popups.center()
+    assert len(app.popups._center_tree.get_children()) == 1
+    c.destroy()
+    (tmp_path / "Auto" / "inbox" / "y").rmdir()  # the folder was dealt with -> the item closes itself
+    app.popups.check()
+    assert not attention.items(cfg.log_dir)
 
 def test_jobs_report_and_rerun(app, tmp_path, monkeypatch):
     from ionomos.downstream import simulate

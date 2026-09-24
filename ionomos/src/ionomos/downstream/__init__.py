@@ -52,6 +52,7 @@ class Outcome:
     files: list[Path] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     summary: dict = field(default_factory=dict)
+    issues: list = field(default_factory=list)  # doctor.Issue: what needs a person (see doctor.py)
 
 
 def _find(root: Path, *patterns: str) -> Path | None:
@@ -141,9 +142,9 @@ def load_quantities(method: str | None, workdir: Path, results: Path, record: di
     return quant.from_combined_protein(cp), files, notes
 
 
-def _guard(p, comps, settings) -> tuple[list[tuple[int, str]], list[str]]:
-    """Comparisons whose groups are too small to test: [(index, reason)], notes."""
-    bad, notes = [], []
+def _guard(p, comps, settings) -> tuple[list[tuple[int, str]], list[str], list]:
+    """Comparisons whose groups are too small to test: [(index, reason)], notes, [(t, c, [(group, n)])]."""
+    bad, notes, small = [], [], []
     m = p.m
     for k, (t, c) in enumerate(comps):
         groups = [(t, len(m.samples_of(t)))]
@@ -151,12 +152,13 @@ def _guard(p, comps, settings) -> tuple[list[tuple[int, str]], list[str]]:
             groups.append(("the other conditions", len(m.samples) - groups[0][1]))
         elif c is not None:
             groups.append((c, len(m.samples_of(c))))
-        small = [(g, n) for g, n in groups if n < settings.min_valid]
-        if small:
+        few = [(g, n) for g, n in groups if n < settings.min_valid]
+        if few:
             bad.append((k, "small"))
-            notes.append(f"Cannot test {t} vs {c or '0'}: " + ", ".join(f"{g} has {n} sample(s)" for g, n in small) +
+            small.append((t, c, few))
+            notes.append(f"Cannot test {t} vs {c or '0'}: " + ", ".join(f"{g} has {n} sample(s)" for g, n in few) +
                          f"; at least {settings.min_valid} per group are required. Check missing runs and sample labels.")
-    return bad, notes
+    return bad, notes, small
 
 
 def _blank(r) -> None:
@@ -188,10 +190,22 @@ def _enrichment(diffs, p, settings, notes) -> list[dict]:
 def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = None, overrides: dict | None = None,
             record: dict | None = None, context: dict | None = None, mod_mass: str = "561.3387",
             progress=None) -> Outcome:
-    """Run every downstream stage for one experiment folder. Never raises; problems become warnings.
+    """Run every downstream stage for one experiment folder. Never raises.
+
+    Each stage is isolated: if QC, enrichment or an export fails, the volcano plots and the report are
+    still made; if the statistics fail, a simpler test is tried; if the report fails, a plain fallback
+    page lists the volcano plots. Everything that went wrong or needs a decision ends up in
+    out.issues (doctor.py), which the worker and the app turn into pop-up windows.
     progress(text) is called between stages (the app shows it)."""
     from ionomos import __version__
-    from ionomos.downstream import export, fpa
+    from ionomos.downstream import doctor, export, fpa
+
+    dest = Path(dest)
+    workdir = dest / "fragpipe" if (dest / "fragpipe").is_dir() else dest
+    results = dest / RESULTS
+    out = Outcome(method=method, results_dir=results)
+    f = doctor.Findings(workdir=workdir)
+    errors_file = results / "analysis_error.txt"
 
     def say(msg: str) -> None:
         log.info("%s: %s", dest.name, msg)
@@ -201,126 +215,233 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
             except Exception:  # noqa: BLE001
                 pass
 
-    dest = Path(dest)
-    workdir = dest / "fragpipe" if (dest / "fragpipe").is_dir() else dest
-    results = dest / RESULTS
-    out = Outcome(method=method, results_dir=results)
+    def stage(name: str, fn, *args, **kw):
+        """Run one stage; a crash is recorded (with its traceback) and the pipeline continues."""
+        try:
+            return fn(*args, **kw)
+        except Exception as exc:  # noqa: BLE001 - one stage must never take the others down
+            tb = traceback.format_exc()
+            log.error("%s: analysis stage %r failed: %s", dest.name, name, exc)
+            f.stage_errors[name] = (f"{type(exc).__name__}: {exc}", tb)
+            try:
+                with open(errors_file, "a", encoding="utf-8") as fh:
+                    fh.write(f"--- {datetime.now():%Y-%m-%d %H:%M:%S} stage {name}\n{tb}\n")
+            except OSError:
+                pass
+            return None
+
     try:
         results.mkdir(parents=True, exist_ok=True)
-        out.method = method = method if method and method != "auto" else detect_method(workdir)
+        errors_file.unlink(missing_ok=True)
+    except OSError as exc:
+        out.warnings.append(f"cannot write {results}: {exc}")
+        out.issues = [doctor.Issue("NO_RESULTS_FOLDER", "error", "The results folder can't be written",
+                                   f"{results}: {exc}", ["The disk is full", "The folder is read-only or open elsewhere"],
+                                   ["Free disk space / close programs using the folder, then Re-run analysis"])]
+        return out
+    out.method = method = method if method and method != "auto" else detect_method(workdir)
+    f.method = method
+    try:
+        settings = analysis.settings_from(analysis_cfg, overrides)
+    except analysis.AnalysisError as exc:
+        out.warnings.append(f"analysis settings ignored ({exc}); using defaults")
         try:
-            settings = analysis.settings_from(analysis_cfg, overrides)
-        except analysis.AnalysisError as exc:
-            out.warnings.append(f"analysis settings ignored ({exc}); using defaults")
             settings = analysis.settings_from(analysis_cfg) if analysis_cfg else analysis.Settings()
-        say(f"reading {method or 'FragPipe'} results")
-        m, files, notes = load_quantities(method, workdir, results, record, mod_mass)
+        except analysis.AnalysisError:
+            settings = analysis.Settings()
+    f.settings = settings
+    notes: list[str] = []
+    diffs: list[analysis.DiffResult] = []
+    processed = None
+    qcd: dict = {}
+    enrichment: list[dict] = []
+    enr_notes: list[str] = []
+    comps: list = []
+
+    say(f"reading {method or 'FragPipe'} results")
+    loaded = stage("read", load_quantities, method, workdir, results, record, mod_mass)
+    m = None
+    if loaded is not None:
+        m, files, lnotes = loaded
         out.files += files
+        notes += lnotes
         if m is not None:
             notes += m.notes
-        diffs: list[analysis.DiffResult] = []
-        processed = None
-        qcd: dict = {}
-        enrichment: list[dict] = []
-        enr_notes: list[str] = []
-        comps: list = []
-        if m is not None and m.features:
-            files_mx = results / f"{m.level}_matrix_log2.tsv"
-            write_tsv(files_mx, ["id", "label", "description", *m.samples],
-                      [[f.id, f.label, f.description, *vals] for f, vals in zip(m.features, m.values, strict=True)])
+    f.loaded = m
+    if m is not None and m.features:
+        files_mx = results / f"{m.level}_matrix_log2.tsv"
+        if stage("tables", write_tsv, files_mx, ["id", "label", "description", *m.samples],
+                 [[x.id, x.label, x.description, *vals] for x, vals in zip(m.features, m.values, strict=True)]):
             out.files.append(files_mx)
-            say("filtering, normalising, imputing")
-            processed, pnotes = fpa.process(
-                m, exclude=settings.exclude_samples, conditions=settings.sample_conditions,
-                contaminants=settings.remove_contaminants, global_pct=settings.filter_global_pct,
-                condition_pct=settings.filter_condition_pct, normalization=settings.normalize,
-                imputation=settings.imputation, shift=settings.impute_shift, scale=settings.impute_scale,
-                seed=settings.seed)
+        say("filtering, normalising, imputing")
+        res = stage("process", fpa.process, m, exclude=settings.exclude_samples, conditions=settings.sample_conditions,
+                    contaminants=settings.remove_contaminants, global_pct=settings.filter_global_pct,
+                    condition_pct=settings.filter_condition_pct, normalization=settings.normalize,
+                    imputation=settings.imputation, shift=settings.impute_shift, scale=settings.impute_scale,
+                    seed=settings.seed)
+        if res is None:  # fall back to the data as loaded, so there are still statistics and a volcano
+            notes.append("processing failed; statistics use the values as loaded (no filtering or imputation)")
+            res = stage("process-fallback", fpa.process, m, exclude=settings.exclude_samples,
+                        conditions=settings.sample_conditions, imputation="none")
+        if res is not None:
+            processed, pnotes = res
             notes += pnotes
-            pm = processed.m
-            try:
-                comps, cnotes = analysis.choose_comparisons(pm, settings)
-            except analysis.AnalysisError as exc:
-                comps, cnotes = [], [str(exc)]
-            notes += cnotes
-            bad, gnotes = _guard(processed, comps, settings)
-            notes += gnotes
-            if comps and pm.features:
-                say("statistics (" + ", ".join(analysis.comparison_name(t, c) for t, c in comps) + ")")
-                results_ = analysis.run_contrasts(processed, comps, settings)
-                for k, _ in bad:
-                    _blank(results_[k])
-                for (t, c), r in zip(comps, results_, strict=True):
-                    d = analysis.to_diff(processed, r, c, settings)
-                    if d.tested == 0 and not any(k == comps.index((t, c)) for k, _ in bad):
-                        notes.append(f"{d.name}: zero features could be tested. No valid volcano can be drawn; "
-                                     "check replicate grouping and missing quantities.")
-                    elif d.tested == 0:
-                        notes.append(f"{d.name}: zero features could be tested (see above).")
-                    diffs.append(d)
-                    out.files.append(write_tsv(results / f"{d.slug()}_differential.tsv", analysis.DIFF_COLUMNS, d.rows))
-                    svg = results / f"volcano_{d.slug()}.svg"
-                    svg.write_text(charts.volcano(d, standalone=True), encoding="utf-8")
-                    out.files.append(svg)
-            if pm.features:
-                out.files.append(export.processed_matrix(results / f"{m.level}_matrix_processed.tsv", processed))
-                if diffs:
-                    out.files.append(export.results_table(results / f"{m.level}_results.tsv", processed, diffs))
-                say("quality control (PCA, correlation, missing values)")
-                qcd = _qc(processed, diffs, settings)
-            if diffs and settings.enrichment:
-                say("enrichment")
-                enrichment = _enrichment(diffs, processed, settings, enr_notes)
-                if enrichment:
-                    out.files.append(export.enrichment_table(results / "enrichment.tsv", enrichment))
-            try:
-                out.files += export.fragpipe_analyst(results / "fragpipe-analyst", m, processed, diffs, settings, comps)
-            except Exception as exc:  # noqa: BLE001 - an optional export must not stop the report
-                notes.append(f"FragPipe-Analyst export skipped ({exc})")
-        elif m is not None:
-            notes.append("the result table had no rows")
-        out.warnings += notes
-        ctx = {"version": __version__, **(context or {})}
-        if not ctx.get("method") or ctx["method"] == "?":
-            ctx["method"] = method or "unknown method"
-        ctx.setdefault("experiment", dest.name)
-        ctx["enrichment_notes"] = enr_notes
-        say("writing the report")
-        rel = [str(p.relative_to(results)).replace("\\", "/") if p.is_relative_to(results) else p.name
-               for p in out.files]
-        html = report.render(ctx, m, processed, diffs, out.warnings, rel, settings, qcd, enrichment)
-        out.report = results / "report.html"
-        out.report.write_text(html, encoding="utf-8")
-        pm = processed.m if processed else m
-        out.summary = {
-            "report": f"{RESULTS}/report.html",
-            "method": method,
-            "features": len(pm.features) if pm else 0,
-            "features_loaded": len(m.features) if m else 0,
-            "level": m.level if m else None,
-            "samples": {x: pm.condition[x] for x in pm.samples} if pm else {},
-            "comparisons": [{"name": d.name, "up": d.up, "down": d.down, "tested": d.tested,
-                             "table": f"{RESULTS}/{d.slug()}_differential.tsv"} for d in diffs],
-            "processing": processed.steps if processed else [],
-            "imputation": processed.imputation if processed else None,
-            "settings": analysis.as_dict(settings),
-            "enrichment": [{k: v for k, v in b.items() if k != "terms"} | {"top": [t["term"] for t in b["terms"][:5]
-                            if t["q"] <= 0.05]} for b in enrichment],
-            "enrichment_notes": enr_notes,
-            "source": m.source if m else None,
-            "generated_at": datetime.now().isoformat(timespec="seconds"),
-            "ionomos_version": __version__,
-            "notes": out.warnings,
-        }
-        (results / "analysis.json").write_text(json.dumps(out.summary, indent=2, default=str), encoding="utf-8")
-    except Exception as exc:  # noqa: BLE001 - analysis must never take the job (or the watcher) down
-        log.exception("downstream analysis failed for %s", dest)
-        out.warnings.append(f"analysis failed: {type(exc).__name__}: {exc}")
+        f.processed = processed
+    elif m is not None:
+        notes.append("the result table had no rows")
+
+    if processed is not None and processed.m.features:
+        pm = processed.m
         try:
-            (results / "analysis_error.txt").write_text(traceback.format_exc(), encoding="utf-8")
-        except OSError:
-            pass
+            comps, cnotes = analysis.choose_comparisons(pm, settings)
+        except analysis.AnalysisError as exc:
+            # explicit comparisons / control that don't fit: fall back to the defaults so a volcano is made
+            f.comparison_error = str(exc)
+            notes.append(f"{exc}; used the default comparisons instead")
+            fallback = analysis.Settings(**{**settings.__dict__, "comparisons": [], "control": None})
+            try:
+                comps, cnotes = analysis.choose_comparisons(pm, fallback)
+            except analysis.AnalysisError as exc2:
+                comps, cnotes = [], [str(exc2)]
+        notes += cnotes
+        if (pm.kind == "intensity" and len(pm.conditions) >= 2 and not settings.comparisons and not settings.control
+                and settings.de_type == "control" and analysis.find_control(pm.conditions, settings) is None):
+            ctrls = {c for _, c in comps if c not in (None, "others")}
+            f.control_guessed = next(iter(ctrls), None)
+        f.comparisons = comps
+        bad, gnotes, f.small_groups = _guard(processed, comps, settings)
+        notes += gnotes
+        if comps:
+            say("statistics (" + ", ".join(analysis.comparison_name(t, c) for t, c in comps) + ")")
+            results_ = stage("statistics", analysis.run_contrasts, processed, comps, settings)
+            if results_ is None and settings.test == "limma":
+                notes.append("limma failed on this data; a Welch t-test was used instead")
+                welch = analysis.Settings(**{**settings.__dict__, "test": "welch"})
+                results_ = stage("statistics-fallback", analysis.run_contrasts, processed, comps, welch)
+            for k, _ in bad:
+                if results_ is not None:
+                    _blank(results_[k])
+            for k, (_t, c) in enumerate(comps):
+                r = results_[k] if results_ is not None else None
+                d = stage("statistics", analysis.to_diff, processed, r, c, settings) if r is not None else None
+                if d is None:
+                    continue
+                if d.tested == 0 and not any(i == k for i, _ in bad):
+                    notes.append(f"{d.name}: zero features could be tested. No valid volcano can be drawn; "
+                                 "check replicate grouping and missing quantities.")
+                diffs.append(d)
+                tsv = results / f"{d.slug()}_differential.tsv"
+                if stage("tables", write_tsv, tsv, analysis.DIFF_COLUMNS, d.rows):
+                    out.files.append(tsv)
+                f.volcanos[d.name] = _write_volcano(results, d, stage)
+                if f.volcanos[d.name]:
+                    out.files.append(f.volcanos[d.name])
+        if pm.features:
+            pmx = stage("tables", export.processed_matrix, results / f"{m.level}_matrix_processed.tsv", processed)
+            if pmx:
+                out.files.append(pmx)
+            if diffs:
+                rt = stage("tables", export.results_table, results / f"{m.level}_results.tsv", processed, diffs)
+                if rt:
+                    out.files.append(rt)
+            say("quality control (PCA, correlation, missing values)")
+            qcd = stage("qc", _qc, processed, diffs, settings) or {}
+        if diffs and settings.enrichment:
+            say("enrichment")
+            enrichment = stage("enrichment", _enrichment, diffs, processed, settings, enr_notes) or []
+            if enrichment:
+                et = stage("enrichment", export.enrichment_table, results / "enrichment.tsv", enrichment)
+                if et:
+                    out.files.append(et)
+        exported = stage("export", export.fragpipe_analyst, results / "fragpipe-analyst", m, processed, diffs,
+                         settings, comps)
+        out.files += exported or []
+    f.diffs = diffs
+    f.enrichment_notes = enr_notes
+    out.issues = doctor.check(f)
+    out.warnings += notes
+    ctx = {"version": __version__, **(context or {})}
+    if not ctx.get("method") or ctx["method"] == "?":
+        ctx["method"] = method or "unknown method"
+    ctx.setdefault("experiment", dest.name)
+    ctx["enrichment_notes"] = enr_notes
+    ctx["issues"] = [i.as_dict() for i in out.issues]
+    say("writing the report")
+    rel = [str(p.relative_to(results)).replace("\\", "/") if p.is_relative_to(results) else p.name
+           for p in out.files]
+    out.report = results / "report.html"
+    html = stage("report", report.render, ctx, m, processed, diffs, out.warnings, rel, settings, qcd, enrichment)
+    if html is None:  # the fallback page: issues, notes and the volcano plots themselves
+        out.issues = doctor.check(f)
+        ctx["issues"] = [i.as_dict() for i in out.issues]
+        html = report.fallback(ctx, diffs, out.warnings, rel)
+    try:
+        out.report.write_text(html, encoding="utf-8")
+    except OSError as exc:
+        out.warnings.append(f"could not write the report: {exc}")
+        out.report = None
+    pm = processed.m if processed else m
+    out.summary = {
+        "report": f"{RESULTS}/report.html" if out.report else None,
+        "method": method,
+        "features": len(pm.features) if pm else 0,
+        "features_loaded": len(m.features) if m else 0,
+        "level": m.level if m else None,
+        "samples": {x: pm.condition[x] for x in pm.samples} if pm else {},
+        "comparisons": [{"name": d.name, "up": d.up, "down": d.down, "tested": d.tested,
+                         "table": f"{RESULTS}/{d.slug()}_differential.tsv",
+                         "volcano": (f"{RESULTS}/{Path(f.volcanos[d.name]).name}" if f.volcanos.get(d.name) else None)}
+                        for d in diffs],
+        "processing": processed.steps if processed else [],
+        "imputation": processed.imputation if processed else None,
+        "settings": analysis.as_dict(settings),
+        "issues": [i.as_dict() for i in out.issues],
+        "state": _state(out.issues),
+        "enrichment": [{k: v for k, v in b.items() if k != "terms"} | {"top": [t["term"] for t in b["terms"][:5]
+                        if t["q"] <= 0.05]} for b in enrichment],
+        "enrichment_notes": enr_notes,
+        "source": m.source if m else None,
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "ionomos_version": __version__,
+        "notes": out.warnings,
+    }
+    for name, (msg, _tb) in f.stage_errors.items():
+        out.warnings.append(f"analysis step {name} failed: {msg}")
+    try:
+        (results / "analysis.json").write_text(json.dumps(out.summary, indent=2, default=str), encoding="utf-8")
+    except OSError as exc:
+        out.warnings.append(f"could not write analysis.json: {exc}")
     return out
+
+
+def _state(issues) -> str:
+    sev = {i.severity for i in issues}
+    return "failed" if "error" in sev else "needs_input" if "input" in sev else "ok"
+
+
+def _write_volcano(results: Path, d, stage) -> Path | None:
+    """Every comparison gets a volcano file, checked after writing; an empty comparison gets an empty plot."""
+    import time as _time
+
+    svg = results / f"volcano_{d.slug()}.svg"
+    text = stage("volcano", charts.volcano, d, standalone=True)
+    if text is None:
+        return None
+    problem = "the file was empty"
+    for attempt in range(3):  # a virus scanner or sync client can hold the file for a moment
+        try:
+            svg.write_text(text, encoding="utf-8")
+            if svg.stat().st_size > 200:
+                return svg
+        except OSError as exc:
+            problem = str(exc)
+        _time.sleep(0.3 * (attempt + 1))
+    stage("volcano", _raise, f"could not write {svg.name}: {problem}")
+    return None
+
+
+def _raise(msg: str):
+    raise OSError(msg)
 
 
 def _qc(p, diffs, settings) -> dict:

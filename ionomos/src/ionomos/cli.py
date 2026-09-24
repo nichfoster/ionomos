@@ -111,6 +111,12 @@ def _maintenance(cfg: Config) -> None:
     except Exception:  # noqa: BLE001
         log.exception("ledger backup failed")
     health.prune(cfg.log_dir, "diagnostics-*.txt", keep=20)
+    try:
+        from ionomos import attention
+
+        attention.purge(cfg.log_dir, older_than_days=30)
+    except Exception:  # noqa: BLE001
+        log.exception("attention purge failed")
     health.prune(cfg.log_dir, "diagnostics-*.zip", keep=10)
 
 
@@ -232,6 +238,7 @@ def cmd_run(args) -> int:
             # GUI mode: watcher in a thread, Tk on the main thread (the resolver window needs it).
             supervised("watcher", w.run_forever)
             resolver.start()
+            _pops = _watcher_popups(cfg, root)  # noqa: F841 - keeps the pop-up poller alive
 
             def tick():
                 if stop.is_set():
@@ -253,6 +260,24 @@ def cmd_run(args) -> int:
         lock.release()
         log.info("ionomos stopped")
     return 0
+
+
+def _watcher_popups(cfg, root):
+    """Pop-up windows from the watcher itself, for when the app isn't open (attention.py / popups.py)."""
+    try:
+        from ionomos import service
+        from ionomos.popups import PopupHost, Popups
+
+        host = PopupHost(root=root, log_dir=lambda: cfg.log_dir, config_path=lambda: cfg.config_path,
+                         open_path=service.open_path, lab_settings=lambda: dict(cfg.analysis or {}),
+                         popups_enabled=lambda: cfg.gui_popups, database=lambda: cfg.database)
+        pops = Popups(root, host, is_app=False)
+        pops.start(first_ms=5000)
+        log.info("pop-up windows enabled (analysis decisions, failed searches) when the app isn't open")
+        return pops
+    except Exception:  # noqa: BLE001 - pop-ups are a convenience; the watcher runs without them
+        log.exception("pop-up windows unavailable")
+        return None
 
 
 def cmd_setup(args) -> int:
@@ -421,6 +446,9 @@ def cmd_retry(args) -> int:
         print(f"job {job.id} is {job.status}, not failed", file=sys.stderr)
         return 1
     ledger.requeue(job.id, "retry requested", reset_attempts=True)
+    from ionomos import attention
+
+    attention.resolve_where(cfg.log_dir, kind="search_failed", job_id=job.id)
     print(f"job {job.id} re-queued; the running watcher picks it up within seconds")
     return 0
 
@@ -537,6 +565,13 @@ def cmd_analyze(args) -> int:
         print(f"  {c['name']}: {c['up']} up, {c['down']} down of {c['tested']} tested  ({c['table']})")
     for w in out.warnings:
         print(f"  note: {w}")
+    for i in out.issues:
+        print(f"  [{i.severity}] {i.title}: {i.message}")
+        for fix in i.fixes[:2]:
+            print(f"      → {fix}")
+    if cfg is not None:
+        job_id = int(target) if target.isdigit() else None
+        postprocess.record_issues(cfg.log_dir, dest, out, job_id)
     if out.report:
         print(f"report: {out.report}")
         if args.open:
@@ -544,6 +579,37 @@ def cmd_analyze(args) -> int:
 
             open_path(out.report)
     return 0 if out.report else 1
+
+
+def cmd_attention(args) -> int:
+    """What needs a person: list, show one, dismiss."""
+    from ionomos import attention
+
+    cfg = _load(args, check_paths=False)
+    if args.action == "dismiss":
+        ok = attention.dismiss(cfg.log_dir, args.item)
+        print("dismissed" if ok else f"no item {args.item}")
+        return 0 if ok else 1
+    its = attention.items(cfg.log_dir)
+    if args.action == "show":
+        it = attention.get(cfg.log_dir, args.item)
+        if it is None:
+            print(f"no item {args.item}", file=sys.stderr)
+            return 1
+        print(f"{it.title}\n{it.message}\n")
+        for c in it.causes:
+            print(f"  likely: {c}")
+        for f in it.fixes:
+            print(f"  do: {f}")
+        if it.details:
+            print("\n" + it.details)
+        return 0
+    if not its:
+        print("nothing needs attention")
+        return 0
+    for it in its:
+        print(f"{it.id:<48} [{it.severity:<7}] {it.kind:<16} {it.title}")
+    return 0
 
 
 def cmd_cancel(args) -> int:
@@ -667,6 +733,10 @@ def main(argv: list[str] | None = None) -> int:
     az.add_argument("--quiet", action="store_true", help="no progress lines")
     az.add_argument("--open", action="store_true", help="open the report when done")
     az.set_defaults(fn=cmd_analyze)
+    at = sub.add_parser("attention", help="what needs a person (analysis decisions, failed searches, ...)")
+    at.add_argument("action", nargs="?", choices=["list", "show", "dismiss"], default="list")
+    at.add_argument("item", nargs="?", help="item id (from the list)")
+    at.set_defaults(fn=cmd_attention)
     cn = sub.add_parser("cancel", help="cancel a queued or running job")
     cn.add_argument("job_id", type=int)
     cn.set_defaults(fn=cmd_cancel)

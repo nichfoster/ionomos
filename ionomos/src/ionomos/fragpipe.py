@@ -258,6 +258,12 @@ def prepare(job: Job, cfg: Config) -> RunSpec:
     if missing:
         more = f" (+{len(missing) - 3} more)" if len(missing) > 3 else ""
         raise JobError(f"raw file(s) missing from {dest}: {', '.join(missing[:3])}{more}")
+    empty = [Path(line[0]).name for line in lines if Path(line[0]).suffix.lower() == ".raw"
+             and Path(line[0]).stat().st_size == 0]
+    if empty:
+        more = f" (+{len(empty) - 3} more)" if len(empty) > 3 else ""
+        raise JobError(f"raw file(s) are empty (0 bytes): {', '.join(empty[:3])}{more} — an aborted acquisition or "
+                       f"an interrupted copy; replace or remove them, then Retry")
 
     need_free_gb = getattr(cfg, "min_free_gb", 0) or 0
     if need_free_gb:
@@ -463,6 +469,11 @@ _FAILED_STEP = re.compile(r"Process '([^']+)' finished, exit code: ([1-9]\d*)")
 
 # (regex on FragPipe's console output, plain-English explanation + what to do). First match first.
 EXPLANATIONS: list[tuple[str, str]] = [
+    (r"raw file\(s\) are empty",
+     "A raw file is 0 bytes: the acquisition was aborted or the copy was interrupted — copy it again from the "
+     "instrument PC (or remove it from the experiment folder), then Retry"),
+    (r"raw file\(s\) missing from",
+     "Raw files were moved or deleted from the experiment folder after it was filed — put them back, then Retry"),
     (r"FASTA file path is empty|No FASTA file|database\.db-path",
      "No protein database: set this method's FASTA in the app (tab 3), or re-export the workflow after setting it"),
     (r"OutOfMemoryError|Java heap space|GC overhead limit",

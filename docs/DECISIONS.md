@@ -279,3 +279,35 @@ test per term against the genes that were actually quantified, BH across
 terms. Gene lists never leave the PC, it works offline after the first
 download, and a lab `.gmt` can be added. No library → a note in the report,
 never a failed analysis.
+
+### D27 — Anything that needs a person pops up a window, and stays on a list until fixed
+**2026-09-24.** Log lines and notes in folders were the only way Ionomos told
+anyone something went wrong; nobody reads them. Now every such event raises an
+item in a durable queue (`attention.py`, JSON files in `<log_dir>/attention/`):
+an analysis that needs a decision, an analysis that failed, a failed or held
+search, a rejected folder, an empty raw file. The app pops a window for each new
+item (and shows "⚠ N need attention"); when the app isn't open, the watcher's
+own Tk window does (the app's `app.alive` heartbeat decides who, so it never
+pops twice). Each window has the likely causes, what to do, the log tail, and
+the buttons that fix it — for analyses, the experiment editor itself (fix
+conditions, leave a run out, pick the control, Run). Items close by
+themselves when the cause is gone (a retry starts, a re-analysis comes back
+clean, the rejected folder is dealt with); "Remind me in an hour" and Dismiss
+exist, and `gui.popups: false` turns the windows off (the list stays).
+
+### D28 — The analysis always finishes, checks itself, and always draws a volcano
+**2026-09-24.** Every analysis stage runs isolated: a crash in QC, enrichment
+or an export is recorded and the rest carries on; a limma failure falls back to
+Welch; comparisons that don't fit the data fall back to the defaults; a report
+failure falls back to a plain page with every volcano plot; volcano files are
+written with retries and verified. Then the "doctor" (`downstream/doctor.py`)
+turns what it saw into issues — no result table (with the method's likely
+causes and the tables that *were* found), empty table, runs without
+quantities, runs that didn't match their samples, duplicate runs, every sample
+in one condition (with conditions suggested from the file names), no
+recognisable control (the guess is used and the person is asked), groups too
+small to test, a failed injection (identifications < 40 % of the median),
+nothing testable, no volcano, heavy imputation, few features, no hits. Input
+and error issues become the pop-up; warnings go in the report's issues panel.
+The stress test now also checks every comparison has a volcano and every
+analysis that isn't "ok" told a person.

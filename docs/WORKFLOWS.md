@@ -182,6 +182,22 @@ features × samples matrix of log2 values and runs the same statistics:
   `fragpipe-analyst/` (annotation + `reproduce_in_R.R`), `analysis.json`
   (settings and every processing step).
 
+- **Checks after every analysis** (`downstream/doctor.py`, shown at the top of
+  the report; *decide* and *problem* ones also pop up a window with the fix):
+  | code | severity | when |
+  |---|---|---|
+  | NO_TABLE / EMPTY_TABLE | problem | FragPipe produced no (or an empty) result table for the method |
+  | MISSING_RUNS | problem | searched runs with no quantities in the table |
+  | UNMATCHED_RUNS | decide | runs not in the experiment's file list (conditions guessed) |
+  | DUPLICATE_SAMPLES | decide | two runs with the same sample name (re-acquisitions) |
+  | ONE_CONDITION | decide | every sample in one condition — conditions suggested from the file names |
+  | NO_CONTROL | decide | no condition looks like a control; the guess is used until confirmed |
+  | BAD_COMPARISON | decide | chosen comparisons don't fit; defaults used meanwhile |
+  | SMALL_GROUP | decide | a group has fewer than `min_valid` samples |
+  | LOW_SAMPLE | decide | a sample has < 40 % of the median identifications (failed injection?) |
+  | ZERO_TESTED / NO_VOLCANO / CRASH_* | problem | nothing testable, plot not written, a step crashed |
+  | HIGH_IMPUTATION, FEW_FEATURES, NO_HITS, ENRICHMENT | note | worth knowing |
+
 Open questions for the lab: which comparisons matter for isoDTB (vs 0, or
 compound vs compound?); whether DIA should use FragPipe's own
 `combined_protein.tsv` or DIA-NN's matrix; which thresholds people use today.

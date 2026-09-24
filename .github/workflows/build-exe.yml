@@ -52,6 +52,10 @@ jobs:
           $sum = Get-Content (Join-Path $dia.FullName "results\analysis.json") -Raw | ConvertFrom-Json
           if ($sum.imputation -ne "perseus" -or $sum.comparisons.Count -lt 1) { throw "DIA analysis incomplete: $($sum | ConvertTo-Json -Depth 3)" }
           if (-not (Test-Path (Join-Path $dia.FullName "results\fragpipe-analyst\reproduce_in_R.R"))) { throw "no FragPipe-Analyst export" }
+          if ($sum.state -notin @("ok", "needs_input", "failed")) { throw "analysis.json has no doctor state" }
+          foreach ($c in $sum.comparisons) { if (-not (Test-Path (Join-Path $dia.FullName $c.volcano))) { throw "no volcano for $($c.name)" } }
+          & $exe --config C:\bed\Fragpipe_Auto\config.yaml attention
+          if ($LASTEXITCODE -ne 0) { throw "frozen exe: ionomos attention failed" }
           & $exe analyze C:\bed\Fragpipe_General\EJQ\20260902-isoDTB_EJQ-2-027 --test welch
           if ($LASTEXITCODE -ne 0) { throw "frozen exe: ionomos analyze failed" }
           & $exe init --root C:\bed2\Auto --users C:\bed2\General

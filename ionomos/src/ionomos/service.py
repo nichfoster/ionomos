@@ -141,6 +141,16 @@ def _creationflags() -> int:
     return 0
 
 
+def launch_app(config: Path | None = None) -> subprocess.Popen:
+    """Open the Ionomos app (setup & control window) as its own process."""
+    cmd = [*ionomos_command()]
+    if config:
+        cmd += ["--config", str(config)]
+    cmd.append("setup")
+    flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
+    return subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=flags)
+
+
 def start_watcher(config: Path, no_gui: bool = False) -> subprocess.Popen:
     """Launch `ionomos run` as a child; stdout/stderr go to <log_dir>/ionomos.log via the app itself."""
     cmd = [*ionomos_command(), "--config", str(config), "run"]

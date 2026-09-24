@@ -137,6 +137,26 @@ RESULTS: FRAGPIPE-ANALYST STATISTICS + INTERACTIVE REPORT (tab 7)
   Enrichment downloads gene-set libraries from Enrichr once; after that it
   runs offline on this PC (gene lists are never sent anywhere).
 
+WHEN SOMETHING NEEDS YOU (pop-up windows)
+  Ionomos opens a window by itself when it can't go on without a person, and
+  the bottom bar shows "⚠ N need attention" until it's dealt with:
+    • an analysis needs a decision — e.g. every sample landed in one condition,
+      no condition looks like a control, a group has one sample, a run looks
+      like a failed injection. The window has the experiment editor: fix the
+      conditions ("Guess from names" helps), leave a run out, pick the control,
+      Run analysis. The answer is saved in the experiment's experiment.yaml.
+    • an analysis had a problem — no result table (the likely FragPipe causes
+      are listed), a step crashed. Re-run analysis / FragPipe log / Report a problem.
+    • a FragPipe search failed — the most likely cause in plain English, the end
+      of FragPipe's log, Retry search.
+    • a search is waiting (no FASTA, no workflow, low disk) — what's missing.
+    • a dropped folder couldn't be taken in — why, and the inbox.
+  Windows close by themselves once the cause is fixed. "Remind me in an hour"
+  or Dismiss if it can wait. When the app is closed the watcher shows the same
+  windows. Turn pop-ups off in Advanced (the list stays).
+  Every analysis also checks itself: the report starts with the issues found,
+  and every comparison always gets a volcano plot (an empty one says why).
+
 JOBS TAB (6)
   Every job, live: status, how long it ran, and what FragPipe is doing now.
   Select one to see details and — for a failed job — the MOST LIKELY CAUSE
@@ -309,6 +329,7 @@ class App:
         self.root.after(300, self.refresh_setup)
         self.root.after(600, self._after_update_restart)
         self.root.after(2500, self.check_downloaded_update)
+        self._start_popups()
         log.info("app started: %s, config %s", __import__("ionomos.buildinfo", fromlist=["x"]).one_line(), self.config_path)
 
     def post(self, fn) -> None:
@@ -393,6 +414,7 @@ class App:
         d["fragpipe"]["config_diann"] = self.v("fragpipe.config_diann").get().strip()
         d["watcher"]["group_loose_files"] = self.bv("watcher.group_loose_files", True).get()
         d["gui"]["enabled"] = self.bv("gui.enabled").get()
+        d["gui"]["popups"] = self.bv("gui.popups", True).get()
         try:
             d["gui"]["timeout_minutes"] = float(self.v("gui.timeout_minutes").get().strip() or 0)
         except ValueError:
@@ -836,6 +858,9 @@ class App:
         g = group("Resolver window", 0, 1)
         ttk.Checkbutton(g, text="Open a window when a folder can't be interpreted", variable=self.bv("gui.enabled")).grid(row=0, column=0, columnspan=3, sticky="w", **PAD)
         num(g, 1, "gui.timeout_minutes", "Auto-skip after (min)", "0 = wait for a person; otherwise reject with a note after N minutes")
+        ttk.Checkbutton(g, text="Pop up a window when something needs you (an analysis decision, a failed search, "
+                               "a rejected folder)", variable=self.bv("gui.popups", True)).grid(
+            row=2, column=0, columnspan=3, sticky="w", **PAD)
         ttk.Label(g, text="Needs the watcher to run in the logged-in session (the startup task does this).",
                   foreground="#666", wraplength=380).grid(row=2, column=0, columnspan=3, sticky="w", padx=6)
 
@@ -1285,7 +1310,45 @@ class App:
 
     # -- report a problem / updates
 
-    def report_problem(self):
+    # ------------------------------------------------------ needs attention ----
+
+    def _start_popups(self):
+        from ionomos.popups import PopupHost, Popups
+
+        host = PopupHost(
+            root=self.root, log_dir=self._active_log_dir, config_path=lambda: self.config_path,
+            open_path=lambda p: self._open(p),
+            lab_settings=lambda: dict((self.data or {}).get("analysis") or {}),
+            popups_enabled=lambda: bool((self.data.get("gui") or {}).get("popups", True)),
+            report_problem=lambda note: self.report_problem(note), open_setup=lambda: self.nb.select(self.tab_setup),
+            on_change=self._attention_badge, database=lambda: self._active_paths().get("database"))
+        self.popups = Popups(self.root, host, is_app=True)
+        self.popups.start()
+
+    def _attention_badge(self, items) -> None:
+        n = len(items)
+        try:
+            if n:
+                errs = sum(1 for i in items if i.severity == "error")
+                self.attn_btn.configure(text=f"⚠ {n} need{'s' if n == 1 else ''} attention",
+                                        foreground="#c62828" if errs else "#b26a00")
+                if not self.attn_btn.winfo_ismapped():
+                    self.attn_btn.pack(side="right", padx=4, before=self.report_btn)
+            elif self.attn_btn.winfo_ismapped():
+                self.attn_btn.pack_forget()
+        except tk.TclError:
+            pass
+
+    def show_attention(self):
+        self.popups.center()
+
+    def refresh_attention(self):
+        try:
+            self.popups.check()
+        except Exception:  # noqa: BLE001
+            log.exception("attention refresh failed")
+
+    def report_problem(self, note: str = ""):
         """One dialog -> one zip on the Desktop, selected in Explorer, ready to drag into a chat."""
         from ionomos import health
 
@@ -1299,6 +1362,8 @@ class App:
                   foreground="#666").pack(anchor="w", pady=(0, 6))
         txt = tk.Text(f, width=64, height=6, wrap="word")
         txt.pack(fill="both", expand=True)
+        if note:
+            txt.insert("1.0", note)
         dbg = tkutil.BooleanVar(master=win, value=False)
         ttk.Checkbutton(f, text="Also turn on detailed logging for the next 24 hours (for problems that come and go; "
                                 "send another report after it happens again)", variable=dbg).pack(anchor="w", pady=(8, 0))
@@ -1746,7 +1811,8 @@ class App:
         for c, w in self._JCOLS:
             self.jtree.heading(c, text=c)
             self.jtree.column(c, width=w, anchor="w", stretch=c in ("experiment", "now"))
-        for tag, color in (("failed", "#c62828"), ("running", "#1565c0"), ("waiting", "#b26a00"), ("done", "#2e7d32")):
+        for tag, color in (("failed", "#c62828"), ("running", "#1565c0"), ("waiting", "#b26a00"), ("done", "#2e7d32"),
+                           ("attention", "#b26a00")):
             self.jtree.tag_configure(tag, foreground=color)
         self.jtree.grid(row=1, column=0, sticky="nsew", pady=4)
         self.jtree.bind("<<TreeviewSelect>>", lambda e: self.show_job())
@@ -1800,7 +1866,9 @@ class App:
                 now = "FragPipe: " + fragpipe.progress(names.console_log(Path(j.dest_dir)))
             else:
                 now = (j.reason or "").replace("\n", " ")[:160]
-            self.jtree.insert("", "end", iid=str(j.id), tags=("waiting" if waiting else j.status,), values=(
+            needs = j.status == "done" and (j.reason or "").startswith(("analysis needs", "analysis had a problem"))
+            tag = "waiting" if waiting else "attention" if needs else j.status
+            self.jtree.insert("", "end", iid=str(j.id), tags=(tag,), values=(
                 j.id, "waiting" if waiting else j.status, j.user, j.method, j.inbox_name, _local(j.created_at),
                 _duration(j.started_at, j.finished_at if j.status != "running" else None) if j.started_at else "", now))
         if sel and self.jtree.exists(sel[0]):
@@ -2000,6 +2068,7 @@ class App:
         ttk.Button(b, text="Reload", command=self.reload).pack(side="right", padx=4)
         self.report_btn = ttk.Button(b, text="Report a problem…", command=self.report_problem)
         self.report_btn.pack(side="right", padx=(4, 16))
+        self.attn_btn = tk.Button(b, text="", command=self.show_attention, foreground="#b26a00", relief="groove")
         self.update_btn = ttk.Button(b, text="", command=self.install_update)  # shown when an update is downloaded
         b2 = ttk.Frame(self.root, padding=(8, 0, 8, 6))
         b2.pack(fill="x")
@@ -2066,6 +2135,13 @@ class App:
             self._cli(["check"])
 
     def on_close(self):
+        try:
+            from ionomos import attention
+
+            self.popups.stop()
+            attention.clear_app_alive(self._active_log_dir())
+        except Exception:  # noqa: BLE001
+            pass
         if self.proc is not None and self.proc.poll() is None:
             if messagebox.askyesno("Quit", "A watcher started from this app is running. Stop it and quit?\n"
                                            "(No = quit and leave it running)"):

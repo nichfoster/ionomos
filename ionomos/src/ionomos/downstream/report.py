@@ -241,8 +241,10 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
          "<noscript><div class='notes'>This report draws its charts with JavaScript. The volcano_*.svg and *.tsv "
          "files in this folder hold the same results.</div></noscript>",
          "<section id='overview'><div class='tiles' id='tiles'></div>"]
+    b.append(issues_html(ctx.get("issues") or []))
     if notes:
-        b.append("<div class='notes'><b>Notes</b><ul>" + "".join(f"<li>{escape(n)}</li>" for n in notes) + "</ul></div>")
+        b.append("<details class='notes'><summary><b>Notes</b> (" + str(len(notes)) + ")</summary><ul>" +
+                 "".join(f"<li>{escape(n)}</li>" for n in notes) + "</ul></details>")
     b.append(_pipeline(p, diffs) + "</section>")
     b.append("<section id='differential'><h2>Differential abundance</h2><p class='sub'>"
              + (escape(s.describe()) if pm is not None else "") + ". Change the cut-offs to explore; click a point or "
@@ -288,3 +290,51 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
             f"<title>{escape(title)} — Ionomos report</title><style>{_asset('report.css')}</style></head><body>"
             f"{''.join(b)}<script id='ionomos-data' type='application/json'>{data}</script>"
             f"<script>{_asset('report.js')}</script></body></html>")
+
+
+SEVERITY_LABEL = {"error": "Problem", "input": "Needs your decision", "warning": "Worth knowing"}
+
+
+def issues_html(issues: list[dict]) -> str:
+    """The doctor's findings, most serious first, each with likely causes and what to do."""
+    if not issues:
+        return ""
+    order = {"error": 0, "input": 1, "warning": 2}
+    out = ["<div class='issues'>"]
+    for i in sorted(issues, key=lambda x: order.get(x.get("severity"), 3)):
+        sev = i.get("severity", "warning")
+        causes = "".join(f"<li>{escape(c)}</li>" for c in i.get("causes") or [])
+        fixes = "".join(f"<li>{escape(c)}</li>" for c in i.get("fixes") or [])
+        out.append(f"<div class='issue {escape(sev)}'><div class='sev'>{SEVERITY_LABEL.get(sev, sev)}</div>"
+                   f"<b>{escape(i.get('title', ''))}</b><div>{escape(i.get('message', ''))}</div>"
+                   + (f"<div class='cz'>Most likely:<ul>{causes}</ul></div>" if causes else "")
+                   + (f"<div class='cz'>What to do:<ul>{fixes}</ul></div>" if fixes else "") + "</div>")
+    out.append("</div>")
+    return "".join(out)
+
+
+def fallback(ctx: dict, diffs: list[DiffResult], notes: list[str], files: list[str]) -> str:
+    """A plain page for when the full report couldn't be made: issues, notes, and every volcano plot."""
+    from ionomos.downstream import charts
+
+    title = ctx.get("experiment") or "Experiment"
+    body = [f"<main><h1>{escape(title)}</h1><div class='meta'>Ionomos {escape(str(ctx.get('version', '')))} — "
+            "simplified report (the full interactive report could not be made; see the issues below)</div>",
+            issues_html(ctx.get("issues") or [])]
+    if notes:
+        body.append("<div class='notes'><ul>" + "".join(f"<li>{escape(n)}</li>" for n in notes) + "</ul></div>")
+    for d in diffs:
+        try:
+            svg = charts.volcano(d)
+        except Exception:  # noqa: BLE001
+            svg = "<p>(plot unavailable)</p>"
+        body.append(f"<h2>{escape(d.name)}</h2><p>{d.up} up, {d.down} down of {d.tested} tested</p>"
+                    f"<div class='card chart'>{svg}</div>")
+    body.append("<h2>Files</h2><ul>" + "".join(f"<li><a href='{escape(x)}'>{escape(x)}</a></li>" for x in files) +
+                "</ul></main>")
+    try:
+        css = _asset("report.css")
+    except OSError:
+        css = ""
+    return (f"<!doctype html><html lang='en'><head><meta charset='utf-8'><title>{escape(title)} — Ionomos report"
+            f"</title><style>{css}{charts.STYLE}</style></head><body>{''.join(body)}</body></html>")

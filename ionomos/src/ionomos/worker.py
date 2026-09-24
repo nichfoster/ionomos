@@ -173,7 +173,7 @@ class Worker:
                 self._hold(job, str(exc))
                 continue
             except fragpipe.JobError as exc:
-                self._fail(job, str(exc))
+                self._fail(job, str(exc), hints=fragpipe.explain(str(exc)))
                 return True
             self._held.pop(job.id, None)
             self._run(job, spec)
@@ -187,11 +187,16 @@ class Worker:
         log.warning("job %d waiting: %s", job.id, reason)
         self.ledger.requeue(job.id, f"waiting: {reason}")
         _update_status(job, status="queued", reason=f"waiting: {reason}")
+        _tell(self.cfg, "search_waiting", job, f"{job.user}/{job.inbox_name} is waiting to be searched",
+              reason, severity="input", causes=_waiting_causes(reason),
+              fixes=["Fix what's named above (the Setup checklist, tab ✓, shows it too); the search then starts "
+                     "by itself — nothing else to do"])
 
     # ------------------------------------------------------------- running --
 
     def _run(self, job: Job, spec: fragpipe.RunSpec) -> None:
         dest = spec.dest
+        _close(self.cfg, job, "search_waiting", "search_failed")
         attempt = self.ledger.start_attempt(job.id)
         self.current = job
         try:
@@ -252,7 +257,10 @@ class Worker:
         self._beat(f"running job {job.id}: analysis")
         post_warnings, summary = self._postprocess(job, spec)
         warnings = spec.warnings + fragpipe.missing_outputs(spec) + post_warnings
-        self.ledger.set_status(job.id, "done", "; ".join(warnings) or None)
+        state = (summary or {}).get("state")
+        headline = {"needs_input": "analysis needs your input — see the pop-up / Analysis tab",
+                    "failed": "analysis had a problem — see the pop-up / report"}.get(state)
+        self.ledger.set_status(job.id, "done", "; ".join(([headline] if headline else []) + warnings) or None)
         _update_status(job, status="done", reason=None, run={"warnings": warnings},
                        **({"results": summary} if summary else {}))
         report = f"Report:  {dest / summary['report']}\n" if summary.get("report") else ""
@@ -278,6 +286,15 @@ class Worker:
     def _fail(self, job: Job, reason: str, spec: fragpipe.RunSpec | None = None, hints: list[str] | None = None) -> None:
         self.ledger.set_status(job.id, "failed", reason)
         _update_status(job, status="failed", reason=reason)
+        if reason != "cancelled by user":
+            tail = fragpipe.read_tail_text(spec.console_log, 8000) if spec else ""
+            _tell(self.cfg, "search_failed", job, f"FragPipe failed on {job.user}/{job.inbox_name}", reason,
+                  severity="error", causes=list(hints or []) or [
+                      "See the last lines of FragPipe's log below — the first ERROR / Exception line is usually the cause"],
+                  fixes=["Fix the cause, then press Retry here (or Jobs tab → Retry)",
+                         "If it's unclear: Report a problem sends the log with everything needed"],
+                  details="\n".join(tail.splitlines()[-40:]),
+                  data={"console_log": str(spec.console_log) if spec else None})
         dest = Path(job.dest_dir)
         if dest.is_dir():
             log_hint = f"\nFragPipe console output: {spec.console_log}\n" if spec else "\n"
@@ -290,3 +307,39 @@ class Worker:
                   f"After fixing the cause: Ionomos app -> Run & Test -> Retry a failed job, "
                   f"or  ionomos retry {job.id}\n")
         log.error("job %d failed: %s", job.id, reason)
+
+
+# -------------------------------------------------------- telling a person --
+
+
+def _waiting_causes(reason: str) -> list[str]:
+    r = reason.lower()
+    if "fasta" in r:
+        return ["The method's protein database (FASTA) isn't set or the file was moved — tab 3 Methods"]
+    if "workflow" in r:
+        return ["The method's FragPipe workflow file isn't there — tab 3 Methods → Import workflow…"]
+    if "disk" in r or "space" in r:
+        return ["Not enough free disk space for FragPipe's output — free space on the data drive"]
+    if "fragpipe" in r or "launcher" in r:
+        return ["FragPipe isn't found — tab 1 Folders → Find FragPipe"]
+    return [reason]
+
+
+def _tell(cfg, kind: str, job: Job, title: str, message: str, **kw) -> None:
+    try:
+        from ionomos import attention
+
+        attention.raise_item(getattr(cfg, "log_dir", None), kind, title, message, key=f"{kind}:job{job.id}",
+                             dest=job.dest_dir, job_id=job.id, **kw)
+    except Exception:  # noqa: BLE001 - never let this stop a search
+        log.exception("could not record %s for job %s", kind, job.id)
+
+
+def _close(cfg, job: Job, *kinds: str) -> None:
+    try:
+        from ionomos import attention
+
+        for kind in kinds:
+            attention.resolve_where(getattr(cfg, "log_dir", None), kind=kind, job_id=job.id)
+    except Exception:  # noqa: BLE001
+        log.exception("could not close attention items for job %s", job.id)

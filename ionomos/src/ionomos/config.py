@@ -69,6 +69,7 @@ class Config:
     analysis: dict = field(default_factory=dict)  # downstream settings (see downstream/analysis.py); "enabled" too
     user_ignore: tuple[str, ...] = DEFAULT_USER_IGNORE  # users_root subfolders that aren't people (glob patterns)
     warnings: tuple[str, ...] = ()  # non-fatal path problems (FragPipe bits missing, etc.)
+    gui_popups: bool = True  # pop-up windows for analysis decisions / failed searches (attention.py)
 
     @property
     def method_aliases(self) -> dict[str, list[str]]:
@@ -203,6 +204,7 @@ def load(path: str | Path, check_paths: bool = True) -> Config:
         learned_aliases_file=learned_file,
         gui_enabled=bool(gui.get("enabled", True)),
         gui_timeout_seconds=float(gui.get("timeout_minutes", 0) or 0) * 60,
+        gui_popups=bool(gui.get("popups", True)),
         config_path=p,
         analysis=_analysis(raw.get("analysis")),
         user_ignore=tuple(str(x) for x in (users.get("ignore") if users.get("ignore") is not None else DEFAULT_USER_IGNORE)),

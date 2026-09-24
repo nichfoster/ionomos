@@ -66,6 +66,7 @@ def _copy(m: QuantMatrix, features=None, values=None, samples=None, condition=No
     out.exp = m.exp
     out.replicate = {s: m.replicate[s] for s in out.samples if s in m.replicate}
     out.columns = {s: m.columns[s] for s in out.samples if s in m.columns}
+    out.meta = dict(m.meta)
     return out
 
 

@@ -85,10 +85,54 @@ def inspect_folder(dest: Path, cfg, method: str | None = None) -> dict:
     m, _files, notes = downstream.load_quantities(found, workdir, dest / downstream.RESULTS, p["record"], p["mod_mass"])
     samples = []
     if m is not None:
-        samples = [{"sample": x, "condition": m.condition[x], "replicate": m.replicate.get(x)} for x in m.samples]
+        from ionomos.downstream.quant import run_stem
+
+        samples = [{"sample": x, "condition": m.condition[x], "replicate": m.replicate.get(x),
+                    "run": run_stem(m.columns[x]) if x in m.columns else x} for x in m.samples]
+    issues = []
+    try:  # what the last analysis found (the editor shows it until the next run)
+        issues = json.loads((dest / downstream.RESULTS / "analysis.json").read_text(encoding="utf-8")).get("issues") or []
+    except (OSError, ValueError):
+        pass
     return {"method": found, "source": m.source if m else None, "features": len(m.features) if m else 0,
             "kind": m.kind if m else None, "samples": samples, "notes": notes, "overrides": p["overrides"],
-            "report": dest / downstream.RESULTS / "report.html"}
+            "report": dest / downstream.RESULTS / "report.html", "issues": issues,
+            "job_id": (p["record"].get("job_id") if isinstance(p["record"], dict) else None)}
+
+
+def record_issues(log_dir, dest: Path, out, job_id: int | None = None) -> None:
+    """Turn an analysis Outcome's issues into one attention item for the experiment (a pop-up window
+    asks or explains), or close that item when the analysis came back clean. Never raises."""
+    from ionomos import attention
+    from ionomos.downstream import doctor
+
+    if log_dir is None:
+        return
+    dest = Path(dest)
+    key = f"analysis:{dest}"
+    try:
+        pop = doctor.popups(out.issues or [])
+        if not pop:
+            for it in attention.items(log_dir):
+                if it.key == key:
+                    attention.resolve(log_dir, it.id)
+            return
+        errors = [i for i in pop if i.severity == "error"]
+        first = (errors or pop)[0]
+        kind = "analysis_failed" if errors else "analysis_input"
+        more = f" (+{len(pop) - 1} more)" if len(pop) > 1 else ""
+        causes, fixes = [], []
+        for i in pop:
+            causes += [c for c in i.causes if c not in causes]
+            fixes += [x for x in i.fixes if x not in fixes]
+        attention.raise_item(
+            log_dir, kind, f"{dest.name}: {first.title}{more}", first.message, key=key,
+            severity="error" if errors else "input", dest=dest, job_id=job_id, causes=causes[:6], fixes=fixes[:6],
+            details="\n\n".join(f"[{i.severity}] {i.title}\n{i.message}" for i in out.issues),
+            data={"issues": [i.as_dict() for i in out.issues], "method": out.method,
+                  "report": str(out.report) if out.report else None})
+    except Exception:  # noqa: BLE001
+        log.exception("could not record analysis issues for %s", dest)
 
 
 def run_all(job, spec, cfg) -> tuple[list[str], dict]:
@@ -107,4 +151,5 @@ def run_all(job, spec, cfg) -> tuple[list[str], dict]:
         log.warning("job %s analysis: %s", job.id, w)
     if out.report:
         log.info("job %s: report %s", job.id, out.report)
+    record_issues(getattr(cfg, "log_dir", None), Path(job.dest_dir), out, job.id)
     return [f"analysis: {w}" for w in out.warnings], out.summary

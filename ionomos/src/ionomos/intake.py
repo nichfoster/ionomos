@@ -443,7 +443,9 @@ def intake(folder: Path, cfg: Config, ledger: Ledger, resolver: Resolver | None 
     """Never raises for a folder's content: transient disk trouble -> RETRY, a bug -> REJECTED with a note."""
     folder = Path(folder)
     try:
-        return _intake(folder, cfg, ledger, resolver)
+        res = _intake(folder, cfg, ledger, resolver)
+        _tell_a_person(folder, cfg, res)
+        return res
     except (PermissionError, FileNotFoundError, BlockingIOError, InterruptedError) as exc:
         log.warning("transient problem with %s (%s); will retry", folder.name, exc)
         return IntakeResult.RETRY
@@ -456,7 +458,40 @@ def intake(folder: Path, cfg: Config, ledger: Ledger, resolver: Resolver | None 
                             f"It was left untouched. Please send diagnostics (Ionomos app -> Run & Test).")
         except OSError:
             return IntakeResult.RETRY
+        _tell_a_person(folder, cfg, IntakeResult.REJECTED)
         return IntakeResult.REJECTED
+
+
+def _tell_a_person(folder: Path, cfg: Config, res: IntakeResult) -> None:
+    """A rejected folder becomes a pop-up (unless the person just skipped it in the naming window);
+    a folder that went through closes its old pop-up."""
+    try:
+        from ionomos import attention
+
+        log_dir = getattr(cfg, "log_dir", None)
+        key = f"intake:{folder.name}"
+        if res == IntakeResult.QUEUED:
+            for it in attention.items(log_dir):
+                if it.key == key:
+                    attention.resolve(log_dir, it.id)
+            return
+        if res != IntakeResult.REJECTED:
+            return
+        note = note_path(folder)
+        text = note.read_text(encoding="utf-8") if note.is_file() else ""
+        reason = next((ln.split(":", 1)[1].strip() for ln in text.splitlines() if ln.startswith("Reason")), text[:300])
+        if "skipped in the resolver window" in reason:
+            return
+        attention.raise_item(
+            log_dir, "intake_rejected", f"Couldn't take in “{folder.name}”", reason, key=key, severity="error",
+            dest=folder,
+            causes=["The folder or file names don't follow the naming rules (user, method, replicate)",
+                    "A folder of that name was already filed", "No raw files in the folder"],
+            fixes=["Rename the folder or files (the naming window opens when Ionomos can guess), or add an "
+                   "experiment.yaml", "Deleting the .REJECTED.txt note makes Ionomos try again"],
+            details=text, data={"folder": str(folder), "note": str(note)})
+    except Exception:  # noqa: BLE001 - telling a person must never break intake
+        log.exception("could not record the rejection of %s for the app", folder.name)
 
 
 def _intake(folder: Path, cfg: Config, ledger: Ledger, resolver: Resolver | None = None) -> IntakeResult:

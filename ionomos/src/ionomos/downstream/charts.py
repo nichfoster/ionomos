@@ -174,6 +174,9 @@ def volcano(d: DiffResult, standalone: bool = False, width: int = 760, height: i
                 b.append(f'<text class="lbl" x="{_f(x0)}" y="{_f(y0 + 10)}">{escape(text)}</text>')
                 break
 
+    if not pts:
+        b.append(f'<text class="atitle" x="{ml + pw / 2}" y="{mt + ph / 2}" text-anchor="middle">No features could be '
+                 f'tested in this comparison — see the issues in report.html</text>')
     lg = [("up", "Up", d.up), ("down", "Down", d.down), ("ns", "Not significant", d.tested - d.up - d.down)]
     x = ml
     for cls, name, n in lg:

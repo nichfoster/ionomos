@@ -87,6 +87,12 @@ tr.focus{background:var(--sunk);box-shadow:inset 3px 0 0 var(--accent)}
 .kv{display:grid;grid-template-columns:max-content 1fr;gap:3px 16px;font-size:13px}
 .kv div:nth-child(odd){color:var(--text2)}
 .files li{margin:3px 0}
+.issues{display:grid;gap:8px;margin:14px 0}
+.issue{border-radius:10px;padding:10px 14px;border:1px solid var(--ring);background:var(--surface);border-left:4px solid var(--muted)}
+.issue.error{border-left-color:var(--up)}.issue.input{border-left-color:var(--c3)}.issue.warning{border-left-color:var(--muted)}
+.issue .sev{font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--text2)}
+.issue .cz{font-size:13px;color:var(--text2);margin-top:4px}.issue ul{margin:2px 0 0;padding-left:18px}
+details.notes summary{cursor:pointer}
 #tip{position:fixed;pointer-events:none;background:var(--surface);color:var(--text);border:1px solid var(--ring);
 border-radius:8px;padding:6px 10px;font-size:12px;box-shadow:0 4px 16px rgba(0,0,0,.18);display:none;z-index:20;
 font-variant-numeric:tabular-nums;max-width:360px}

@@ -337,6 +337,8 @@ def run(n: int = 60, seed: int = 1, root: Path | None = None, keep: bool = False
         elif j.status == "done" and (dest / "results" / "analysis_error.txt").is_file():
             rep.violations.append(f"job {j.id}: analysis crashed: "
                                   f"{(dest / 'results' / 'analysis_error.txt').read_text(encoding='utf-8')[-300:]}")
+        elif j.status == "done":
+            rep.violations += _analysis_violations(j, dest, cfg)
         elif j.status == "failed" and not (dest / "FAILED.txt").is_file():
             rep.violations.append(f"job {j.id} failed without FAILED.txt")
     for status_file in names.status_files(cfg.users_root):
@@ -403,3 +405,25 @@ def fuzz_names(n: int = 2000, seed: int = 1) -> list[str]:
         except Exception as exc:  # noqa: BLE001
             failures.append(f"{name!r}: {type(exc).__name__}: {exc}")
     return failures
+
+
+def _analysis_violations(j, dest: Path, cfg) -> list[str]:
+    """Every comparison has a volcano file; an analysis that isn't 'ok' has told a person (attention item)."""
+    import json
+
+    from ionomos import attention
+
+    try:
+        summary = json.loads((dest / "results" / "analysis.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return [f"job {j.id} done without a readable results/analysis.json"]
+    out = []
+    for c in summary.get("comparisons") or []:
+        v = c.get("volcano")
+        if not v or not (dest / v).is_file():
+            out.append(f"job {j.id}: comparison {c.get('name')} has no volcano plot")
+    if summary.get("state") in ("needs_input", "failed"):
+        keys = {i.key for i in attention.items(cfg.log_dir)}
+        if f"analysis:{dest}" not in keys:
+            out.append(f"job {j.id}: analysis is {summary['state']} but nobody was told (no attention item)")
+    return out

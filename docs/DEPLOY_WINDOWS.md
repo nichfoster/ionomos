@@ -155,6 +155,7 @@ py -3.14 -c "import tkinter; print('ok')"
 | see the log | tab 5 → tick *follow the watcher log*, or `C:\Fragpipe_Auto\logs\ionomos.log` |
 | report a problem | **Report a problem…** (bottom right) → zip on the Desktop → send it (or `ionomos-cli.exe diagnose --zip`). Tick *detailed logging* for problems that come and go. |
 | see / retry / cancel jobs | tab **6 Jobs** (double-click = open the report; failed jobs show the likely cause) |
+| something needs you | a window pops up by itself (analysis decision, failed search, rejected folder) with the likely cause and the fix; the bottom bar shows **⚠ N need attention** until it's dealt with |
 | look at results | `results\report.html` in the experiment folder (interactive volcano, protein details, heatmap, enrichment, QC); tab 6 → **Open report** |
 | change comparisons / thresholds / sample groups | one experiment: tab **7 Analysis → Analyse an experiment** (pick it, edit, **Run analysis**); lab-wide: tab **7 Analysis → Lab defaults**, then **Save** |
 | analyse an old FragPipe run | tab 7 → **Analyse a folder…** or `ionomos-cli.exe analyze <folder>` |

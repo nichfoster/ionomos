@@ -109,6 +109,15 @@ experiment; decide the lab default for imputation (Perseus vs none) with that
 data; not ported yet: VSN, MLE imputation, paired designs, TMT multi-plex
 (plex-aware feature numbers), phospho site-level normalisation (PTM_normalization).
 
+2026-09-24 (0.7.0): robustness + pop-ups. Attention queue and pop-up windows
+(app or watcher) for analysis decisions, failed analyses, failed/held searches,
+rejected folders, empty raw files — each with likely causes and the fixing
+buttons (experiment editor, Retry, FragPipe log, Report a problem). Analysis
+stages isolated with fallbacks; volcano plots guaranteed and verified; the
+analysis doctor (15 checks) in every report; stress test checks volcanos and
+notifications. Open: see real pop-ups on the PC; tune the LOW_SAMPLE threshold
+and control keywords with real experiments.
+
 ## Phase 3 — DIA, then TMT
 
 - DIA: pin workflow, `data_type: DIA`, sort out DIA-NN version/`--config-diann`.
