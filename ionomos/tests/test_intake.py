@@ -157,6 +157,29 @@ def test_malformed_overrides_is_not_resolvable(lab, ledger):
     assert intake(d, lab["cfg"], ledger, resolver=_Never()) == IntakeResult.REJECTED
 
 
+# ------------------------------------------------- override path validation --
+
+
+def test_traversal_user_is_rejected_with_note_and_nothing_escaped(lab, ledger):
+    d = make_drop(lab["inbox"], "EJQ_isoDTB_x", ["S_1_1.raw"])
+    save_overrides(d, Overrides(user="../../outside"))
+    assert intake(d, lab["cfg"], ledger) == IntakeResult.REJECTED
+    note = lab["inbox"] / "EJQ_isoDTB_x.REJECTED.txt"
+    assert note.is_file() and "not a path" in note.read_text()
+    assert d.is_dir()  # left untouched in the inbox
+    assert not (lab["root"].parent / "outside").exists()  # nothing outside users_root
+    assert ledger.list() == []
+
+
+def test_gui_resolved_traversal_cannot_create_directories(lab, ledger):
+    d = make_drop(lab["inbox"], "EJQ_isoDTB_x", ["S_1_1.raw"])
+    save_overrides(d, Overrides(user="../../outside", resolved_by="gui"))
+    assert intake(d, lab["cfg"], ledger) == IntakeResult.REJECTED
+    assert not (lab["root"].parent / "outside").exists()
+    assert sorted(p.name for p in lab["general"].iterdir()) == [
+        "Aman", "Chris", "EJQ", "Isaac", "Taylor_Elements", "_unsorted"]
+
+
 # -------------------------------------------------------------- resolver --
 
 class _Never:

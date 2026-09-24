@@ -46,6 +46,11 @@ def test_merge_keeps_existing_keys(tmp_path):
         ({"files": "a.raw"}, "mapping"),
         ({"tmt": {"tag": "TMT-10"}}, "channels"),
         ({"tmt": {"plexes": {"p1": {}}}}, "channels"),
+        ({"user": "../../x"}, "not a path"),
+        ({"user": "a\\\\b"}, "not a path"),
+        ({"user": "EJQ\\nX"}, "not a path"),  # control character
+        ({"user": ".."}, "no usable characters"),
+        ({"files": {"a.raw": {"experiment": "../evil"}}}, "not a path"),
     ],
 )
 def test_bad_overrides(data, msg):
@@ -55,6 +60,18 @@ def test_bad_overrides(data, msg):
 
 def test_absent_file_is_empty(tmp_path):
     assert load_overrides(tmp_path).is_empty()
+
+
+def test_path_fields_are_sanitized():
+    ov = parse_overrides({"user": "Mary Jane", "files": {"a.raw": {"experiment": "plex 1"}}})
+    assert ov.user == "Mary-Jane"
+    assert ov.files["a.raw"].experiment == "plex-1"
+
+
+@pytest.mark.parametrize("value", ["EJQ", "Taylor_Elements", "2026-09-02-run", "v1.2.3_build"])
+def test_gui_era_values_round_trip(value):
+    assert parse_overrides({"user": value}).user == value
+    assert parse_overrides({"files": {"a.raw": {"experiment": value}}}).files["a.raw"].experiment == value
 
 
 def test_apply_file_overrides_rebuilds_layout():
