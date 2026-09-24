@@ -397,8 +397,27 @@ def _move_tree(src: Path, dst: Path) -> str:
             b = dst / a.relative_to(src)
             if not b.is_file() or _sha256(a) != _sha256(b):
                 raise IntakeError(f"copy verification failed for {a.relative_to(src)}; source left in place")
-    shutil.rmtree(src)
+    try:
+        _rmtree_retry(src)
+    except PermissionError as exc:
+        raise IntakeError(
+            f"copy complete at {dst}; could not remove the inbox copy at {src}. "
+            "The inbox folder may be partial — keep the filed copy and delete the inbox "
+            "one (if you already renamed it, merge its contents into the filed copy)."
+        ) from exc
     return "copy"
+
+
+def _rmtree_retry(src: Path, attempts: int = 5) -> None:
+    """Remove the inbox copy, retrying Windows locks (same contract as _rename_retry)."""
+    for i in range(attempts):
+        try:
+            shutil.rmtree(src)
+            return
+        except PermissionError:
+            if i == attempts - 1:
+                raise
+            time.sleep(0.5 * (i + 1))
 
 
 def write_status(dest: Path, record: dict) -> None:

@@ -352,3 +352,60 @@ def test_status_write_failure_files_minimal_record(lab, ledger, monkeypatch):
     assert "OSError" in rec["reason"]
     assert rec["plan"]["folder"]["user"] == "EJQ"
     assert len(adopt_orphans(ledger, lab["general"])) == 1
+
+
+# ---------------------------------------------------------------------------
+# Regression tests: a failed cross-volume cleanup must not wedge the drop (F2).
+# ---------------------------------------------------------------------------
+
+
+def _always_locked(p, **kw):
+    """shutil.rmtree stand-in: a handle that never lets go of the inbox copy."""
+    raise PermissionError(13, "Access is denied")
+
+
+def test_cross_volume_cleanup_transient_lock_self_heals(lab, monkeypatch):
+    """F2: one transient lock during the inbox cleanup must not fail the move."""
+    d = make_drop(lab["inbox"], "EJQ_isoDTB_x", ["S_1_1.raw"])
+    real_rmtree = shutil.rmtree
+    monkeypatch.setattr(os, "rename", _exdev)
+    state = {"n": 0}
+
+    def locked_once(p, **kw):
+        state["n"] += 1
+        if state["n"] == 1:
+            raise PermissionError(13, "Access is denied")
+        return real_rmtree(p, **kw)
+
+    monkeypatch.setattr(shutil, "rmtree", locked_once)
+    monkeypatch.setattr(time, "sleep", lambda *_: None)
+    dest = lab["general"] / "EJQ" / "EJQ_isoDTB_x"
+
+    assert _move_tree(d, dest) == "copy"
+    assert not d.exists()
+    assert (dest / "S_1_1.raw").is_file()
+
+
+def test_cross_volume_cleanup_persistent_lock_rejects_truthfully(lab, ledger, monkeypatch):
+    """F2: a lock that survives the retries rejects with both paths named — never a RETRY
+    that wedges the drop behind wrong 'add _redo' advice."""
+    monkeypatch.setattr(time, "sleep", lambda *_: None)
+
+    d = make_drop(lab["inbox"], "EJQ_isoDTB_x", ["S_1_1.raw"])
+    monkeypatch.setattr(os, "rename", _exdev)
+    monkeypatch.setattr(shutil, "rmtree", _always_locked)
+    dest = lab["general"] / "EJQ" / "EJQ_isoDTB_x"
+    with pytest.raises(IntakeError) as ei:
+        _move_tree(d, dest)
+    assert str(dest) in str(ei.value)
+    assert str(d) in str(ei.value)
+
+    # the same failure through the public API: a truthful rejection, not a retry
+    d2 = make_drop(lab["inbox"], "Aman_TMT_KL6159A", ["KL6159A_TMT_F1.raw", "KL6159A_TMT_F2.raw"])
+    monkeypatch.setattr(os, "rename", _exdev)
+    dest2 = lab["general"] / "Aman" / "Aman_TMT_KL6159A"
+    assert intake(d2, lab["cfg"], ledger) == IntakeResult.REJECTED
+    note = (lab["inbox"] / "Aman_TMT_KL6159A.REJECTED.txt").read_text()
+    assert str(dest2) in note
+    assert str(d2) in note
+    assert ledger.list() == []
