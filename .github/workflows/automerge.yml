@@ -23,6 +23,8 @@ permissions:
   contents: write
   pull-requests: write
   actions: write
+  checks: read      # statusCheckRollup needs these two; without them the
+  statuses: read    # GraphQL query fails with "Resource not accessible"
 
 concurrency:
   group: automerge
@@ -47,7 +49,8 @@ jobs:
             --jq '.[] | select(.isDraft|not) | select(.isCrossRepository|not)
                   | select([.labels[].name] | index("no-automerge") | not) | .number')
           for n in $prs; do
-            info=$(gh pr view "$n" -R "$REPO" --json mergeable,headRefName,statusCheckRollup)
+            info=$(gh pr view "$n" -R "$REPO" --json mergeable,headRefName,statusCheckRollup) \
+              || { echo "#$n: could not read PR — skipping"; continue; }
             if [ "$(jq -r .mergeable <<<"$info")" != "MERGEABLE" ]; then
               echo "#$n: $(jq -r .mergeable <<<"$info") — skipping"; continue
             fi
@@ -70,7 +73,8 @@ jobs:
               echo "#$n: merged"; merged=1
               gh api -X DELETE "repos/$REPO/git/refs/heads/$branch" >/dev/null 2>&1 || true
             else
-              echo "#$n: merge failed"
+              # the Actions token cannot merge PRs that change .github/workflows
+              echo "#$n: merge failed (workflow-file changes need a manual merge)"
             fi
           done
           if [ "$merged" = 1 ] && [ -n "$CI_WORKFLOW" ]; then
