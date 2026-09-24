@@ -97,20 +97,21 @@ def test_tk_dialog_accept_and_skip(lab):
     remembered = []
     res = TkResolver(root, remember=lambda u, a: remembered.append((u, a)))
 
-    # drive the dialog from the Tk event loop: set the user, press Return
-    def drive():
-        win = next(w for w in root.winfo_children() if isinstance(w, tk.Toplevel))
-        combos = [w for w in _all(win) if w.winfo_class() == "TCombobox"]
+    # Drive the dialogs from the Tk event loop via _when_dialog: a one-shot
+    # after() races window mapping on slow CI runners, and a callback
+    # exception is swallowed — which used to hang the modal wait forever.
+    def accept(top):
+        combos = [w for w in _all(top) if w.winfo_class() == "TCombobox"]
         combos[0].set("Isaac")
-        win.event_generate("<Return>")
+        top.event_generate("<Return>")
 
-    root.after(150, drive)
+    root.after(150, _when_dialog, root, accept)
     ov = res.resolve(dr)
     assert ov is not None and ov.user == "Isaac" and ov.method == "isoDTB"
     assert remembered == [("Isaac", "XYZ")]
 
     # second dialog: Escape -> None
-    root.after(150, lambda: next(w for w in root.winfo_children() if isinstance(w, tk.Toplevel)).event_generate("<Escape>"))
+    root.after(150, _when_dialog, root, lambda top: top.event_generate("<Escape>"))
     assert res.resolve(dr) is None
     root.destroy()
 
@@ -133,17 +134,13 @@ def test_tk_resolver_from_worker_thread(lab):
         out.append(res.resolve(dr))
         root.after(0, root.quit)
 
-    def drive():
-        tops = [w for w in root.winfo_children() if isinstance(w, tk.Toplevel)]
-        if not tops:
-            root.after(50, drive)
-            return
-        combos = [w for w in _all(tops[0]) if w.winfo_class() == "TCombobox"]
+    def accept(top):
+        combos = [w for w in _all(top) if w.winfo_class() == "TCombobox"]
         combos[0].set("EJQ")
-        tops[0].event_generate("<Return>")
+        top.event_generate("<Return>")
 
     threading.Thread(target=worker, daemon=True).start()
-    root.after(100, drive)
+    root.after(100, _when_dialog, root, accept)
     root.mainloop()
     root.destroy()
     assert out and out[0].user == "EJQ"
@@ -153,6 +150,28 @@ def _all(w):
     yield w
     for c in w.winfo_children():
         yield from _all(c)
+
+
+def _when_dialog(root, action, tries=0):
+    """Run action(dialog) once a dialog Toplevel exists.
+
+    Poll instead of a one-shot ``after()``: on a slow CI runner the dialog
+    can take longer than the delay to map, and an exception raised inside a
+    Tk callback is swallowed silently — the modal ``wait_window`` would then
+    block forever (this hung Windows CI for 15 minutes). After ~5s the poll
+    destroys the root so ``wait_window`` returns and the test fails instead
+    of hanging.
+    """
+    import tkinter as tk
+
+    tops = [w for w in root.winfo_children() if isinstance(w, tk.Toplevel)]
+    if not tops:
+        if tries >= 100:  # 100 polls x 50ms
+            root.destroy()
+            return
+        root.after(50, _when_dialog, root, action, tries + 1)
+        return
+    action(tops[0])
 
 
 @pytest.mark.skipif(not gui_available()[0], reason="no GUI")
