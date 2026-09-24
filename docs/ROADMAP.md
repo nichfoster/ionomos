@@ -59,7 +59,7 @@ small isoDTB folder, compare with a GUI run. Still to build: step 5 below.
 3. `runners/fragpipe.py` — adapt prior-work runner; confirm launcher path on 24.0.
 4. `worker.py` — pull queued job, run, record.
 5. `runners/isodtb.py` — port the site-merge R script; golden-file test vs an
-   existing lab output.
+   existing lab output. → done 2026-09-24 (last entry of this section).
 6. `DONE.txt` / `FAILED.txt` + `ionomos retry`.
 
 **Exit:** one real isoDTB experiment processed with no manual steps; the
@@ -117,6 +117,14 @@ stages isolated with fallbacks; volcano plots guaranteed and verified; the
 analysis doctor (15 checks) in every report; stress test checks volcanos and
 notifications. Open: see real pop-ups on the PC; tune the LOW_SAMPLE threshold
 and control keywords with real experiments.
+
+2026-09-24: roadmap step 5 done — `runners/isodtb.py` landed as a thin
+`merge_to_sites()` entry point that delegates to the port in
+`downstream/isodtb.py` (shipped 2026-09-23 (0.4.0), already byte-identical to
+the R goldens and wired into the live pipeline); new runner tests compare both
+`_sites.tsv` outputs with the R goldens. Nothing left to build in this phase's
+sandbox scope; what remains is the exit test above — the first real FragPipe
+run on the PC.
 
 ## Phase 3 — DIA, then TMT
 

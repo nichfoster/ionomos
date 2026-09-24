@@ -46,7 +46,7 @@
 | `tkutil.py` | Tk variables that can be garbage-collected on any thread (plain ones abort the process on Windows) | — |
 | `health.py` | Failsafes: single-instance lock, heartbeat, thread supervisor, crash hooks/files, disk/RAM facts, log-problem extraction | — |
 | `stress.py` | `ionomos testbed stress`: messy drops + chaos against a real watcher/worker, invariant checks; name fuzzer | — |
-| `runners/isodtb.py` | Post-proc: modified-peptide → site merge | port of `lab-scripts/isoDTB_…R` |
+| `runners/isodtb.py` | Post-proc: modified-peptide → site merge — thin entry point delegating to `downstream/isodtb.py`, which holds the algorithm | port of `lab-scripts/isoDTB_…R` |
 | `runners/tmt.py` | Post-proc: experimental annotation fix | port of `lab-scripts/correct_experimental_annotation…R` |
 | `runners/dia.py` | Post-proc: (TBD — probably nothing beyond copying `report.tsv` up) | — |
 | `cli.py` | `ionomos setup / run / check / status / dry-run / retry / testbed / diagnose / update`; no args → app; hidden `fake-fragpipe` for the testbed | — |
