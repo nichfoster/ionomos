@@ -83,6 +83,46 @@ def t_two_sided_p(t: float, df: float) -> float:
     return min(1.0, betainc(df / 2, 0.5, df / (df + t * t)))
 
 
+def qt_upper(alpha2: float, df: float) -> float:
+    """t such that P(|T| > t) = alpha2 (e.g. 0.05 -> R's qt(0.975, df)). Bisection on the exact tail."""
+    if math.isnan(df) or df <= 0:
+        return float("nan")
+    if math.isinf(df):
+        from ionomos.downstream.rrandom import qnorm
+
+        return qnorm(1 - alpha2 / 2)
+    lo, hi = 0.0, 1.0
+    while t_two_sided_p(hi, df) > alpha2:
+        hi *= 2
+        if hi > 1e12:
+            return float("inf")
+    for _ in range(200):
+        mid = (lo + hi) / 2
+        if t_two_sided_p(mid, df) > alpha2:
+            lo = mid
+        else:
+            hi = mid
+        if hi - lo <= 1e-15 * max(1.0, hi):
+            break
+    return (lo + hi) / 2
+
+
+def quantile(xs: Sequence[float], q: float) -> float:
+    """R's quantile(type = 7)."""
+    s = sorted(xs)
+    if not s:
+        return float("nan")
+    h = (len(s) - 1) * q
+    lo = math.floor(h)
+    return s[lo] + (h - lo) * (s[min(lo + 1, len(s) - 1)] - s[lo])
+
+
+def mad(xs: Sequence[float]) -> float:
+    """R's mad(): 1.4826 * median absolute deviation."""
+    m = median(xs)
+    return 1.4826 * median([abs(x - m) for x in xs])
+
+
 def welch_t(a: Sequence[float], b: Sequence[float]) -> tuple[float, float, float]:
     """Welch's unequal-variance t-test, two-sided. Needs >= 2 values per group."""
     na, nb = len(a), len(b)

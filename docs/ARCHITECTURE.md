@@ -31,8 +31,9 @@
 | `ledger.py` | SQLite job table + status transitions; source of truth for "what's queued" | `prior-work/store.py` |
 | `worker.py` | Thread inside `ionomos run`: first runnable `queued` job → FragPipe → done/failed; holds jobs whose setup files are missing. Sequential. | `prior-work/queue_worker.py` |
 | `fragpipe.py` | Prepare a job (launcher, workflow with `database.db-path` patched to the method's FASTA, manifest, TMT annotation), run headless with timeout/stop, kill the process tree | `prior-work/fragpipe_runner.py` |
-| `postprocess.py` | After a done job: runs `downstream` (or only the R-port prep steps when analysis is off); `ionomos analyze` uses it too | — |
-| `downstream/` | FragPipe tables → `QuantMatrix` → statistics → SVG plots + `results/report.html`. `isodtb.py`/`tmt.py` (R ports), `quant.py` (loaders), `analysis.py` (comparisons), `stats.py` (t-tests, limma-style moderated t, BH), `charts.py`, `report.py`, `simulate.py` (realistic test data with planted truth) | the lab's R scripts; limma |
+| `postprocess.py` | After a done job: runs `downstream` (or only the R-port prep steps when analysis is off); `ionomos analyze` and the Analysis tab use it too (`prepare`, `inspect_folder`) | — |
+| `analysis_tab.py` | App tab 7: analyse one experiment (samples, conditions, comparisons → experiment.yaml, Run) and the lab defaults | — |
+| `downstream/` | FragPipe tables → `QuantMatrix` → FragPipe-Analyst processing + limma → interactive `results/report.html`. `isodtb.py`/`tmt.py` (R ports), `quant.py` (loaders), `fpa.py` (FragPipeAnalystR port: filter, normalise, impute, `test_limma`), `rrandom.py` (R's RNG), `analysis.py` (settings, comparisons), `qc.py` (PCA, clustering, CV, missingness), `enrich.py` (local ORA on Enrichr libraries), `export.py` (result tables, FragPipe-Analyst annotation + R script), `report.py` + `assets/report.js`, `charts.py` (static SVG volcano), `stats.py`, `simulate.py` | the lab's R scripts; FragPipeAnalystR; limma |
 | `setupcheck.py` | The setup checklist (app ✓ Setup tab, `ionomos init`) | — |
 | `names.py` | Every on-disk / system name, with its LabWatch-era twin; readers accept both, writers use the new one | — |
 | `buildinfo.py` | `Ionomos 0.5.0 (build 3f2a9c1, date, installed)` — `--version`, app footer, every report | — |
@@ -236,25 +237,25 @@ that database and (b) record provenance. See WORKFLOWS.md.
 | A GUI button throws | `report_callback_exception` → dialog + crash file; the app keeps running |
 | `check`/diagnose on a wedged display | the Tk probe runs in a child process with a timeout |
 
-## Downstream pipeline (0.4.0)
+## Downstream pipeline (0.6.0: FragPipe-Analyst)
 
 ```
-fragpipe/ ──▶ method prep ──────────▶ QuantMatrix ─────▶ statistics ──────────▶ presentation
-              isodtb.py  (R port)      features×samples   analysis.choose_       charts.py  (SVG)
-              tmt.py     (R port)      log2, condition     comparisons            report.py  (HTML)
-              quant.py   (loaders)     per sample          stats (moderated t,
-                                                           Welch, BH)
-                                                  results/: report.html, *_differential.tsv,
-                                                  volcano_*.svg, *_matrix_log2.tsv, analysis.json
+fragpipe/ ─▶ method prep ─▶ QuantMatrix ─▶ fpa.process ────────────────▶ limma ─────────▶ QC + enrichment ─▶ report
+             isodtb.py      features ×     samples chosen / renamed      one ~0+condition  PCA, correlation,   report.html (JSON +
+             tmt.py         samples, log2  contaminants, % filters       model, eBayes,    missingness, CV,    report.js), TSVs,
+             quant.py       + condition    median / GN normalisation     CIs, BH           heatmap, ORA        volcano_*.svg,
+                                           Perseus / MinProb / … impute  add_rejections                        fragpipe-analyst/
 ```
 
-Each stage only knows the one before it. New method = one loader; new plot =
-one function in `charts.py` + one line in `report.py`. The whole pipeline is
+Settings: `config.yaml analysis:` (lab defaults, Analysis tab → Lab defaults)
+overridden by `experiment.yaml analysis:` (Analysis tab → Analyse an
+experiment writes it: sample conditions, samples left out, comparisons,
+cut-offs). Each stage only knows the one before it. The whole pipeline is
 wrapped so it can never fail a job or crash the watcher: problems become
-notes in the report and warnings on the job, and `ionomos analyze` (or Jobs →
-Re-run analysis) redoes it with new settings. Settings: `config.yaml
-analysis:` (lab defaults, app tab 7) overridden by `experiment.yaml
-analysis:` (per experiment).
+notes in the report and warnings on the job, and `ionomos analyze` / Jobs →
+Re-run analysis / the Analysis tab redo it with new settings.
+`results/fragpipe-analyst/` holds an `experiment_annotation.tsv` and a
+`reproduce_in_R.R` that repeat the analysis in FragPipeAnalystR (D24).
 
 ## Packaging, updates, support (0.5.0)
 

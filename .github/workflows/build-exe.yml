@@ -32,11 +32,12 @@ jobs:
           $env:IONOMOS_FAKE_FP_SECONDS = "1"
           $w = Start-Process -FilePath $exe -ArgumentList "--config C:\bed\Fragpipe_Auto\config.yaml run --no-gui" -PassThru -NoNewWindow
           & $exe testbed drop iso_good C:\bed
+          & $exe testbed drop dia_good C:\bed
           $done = $false
-          foreach ($i in 1..60) {
+          foreach ($i in 1..90) {
             Start-Sleep 2
             $s = & $exe --config C:\bed\Fragpipe_Auto\config.yaml status --all | Out-String
-            if ($s -match "\bdone\b") { $done = $true; break }
+            if (([regex]::Matches($s, "(?m)^\s*\d+\s+done\b")).Count -ge 2) { $done = $true; break }
           }
           Stop-Process -Id $w.Id -Force
           Write-Host $s
@@ -44,6 +45,13 @@ jobs:
           if (-not $done) { throw "frozen exe did not complete a job" }
           $report = "C:\bed\Fragpipe_General\EJQ\20260902-isoDTB_EJQ-2-027\results\report.html"
           if (-not (Test-Path $report)) { throw "frozen exe did not write the analysis report" }
+          $html = Get-Content $report -Raw
+          if ($html -notmatch "ionomos-report-v2" -or $html -notmatch "function niceTicks") { throw "report assets (report.js) missing from the frozen exe" }
+          # the DIA job went through the FragPipe-Analyst pipeline (imputation, limma, QC, R export)
+          $dia = Get-ChildItem C:\bed\Fragpipe_General\Isaac -Directory | Select-Object -First 1
+          $sum = Get-Content (Join-Path $dia.FullName "results\analysis.json") -Raw | ConvertFrom-Json
+          if ($sum.imputation -ne "perseus" -or $sum.comparisons.Count -lt 1) { throw "DIA analysis incomplete: $($sum | ConvertTo-Json -Depth 3)" }
+          if (-not (Test-Path (Join-Path $dia.FullName "results\fragpipe-analyst\reproduce_in_R.R"))) { throw "no FragPipe-Analyst export" }
           & $exe analyze C:\bed\Fragpipe_General\EJQ\20260902-isoDTB_EJQ-2-027 --test welch
           if ($LASTEXITCODE -ne 0) { throw "frozen exe: ionomos analyze failed" }
           & $exe init --root C:\bed2\Auto --users C:\bed2\General

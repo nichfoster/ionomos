@@ -155,20 +155,32 @@ features × samples matrix of log2 values and runs the same statistics:
 | TMT | `tmt-report/abundance_gene_MD.tsv` (+ R-port annotation) | gene | condition vs control |
 | label-free DDA (future) | `combined_protein.tsv` (MaxLFQ if present) | protein | condition vs control |
 
-- **Test:** moderated t-test by default — a port of limma's `eBayes`
-  (limma 3.68: method-of-moments prior when all proteins have the same df,
-  maximum-likelihood prior when missing values make them differ). Matches
-  limma to 1e-8 on t and 1e-6 on p (`tests/golden/limma_*`). With 3
-  replicates it found 95–100 % of planted changes vs 5–33 % for Welch, with
-  no false positives. Welch and Student are selectable.
-- **Multiple testing:** Benjamini–Hochberg; hits need |log2FC| ≥ threshold
-  *and* q < alpha (both configurable).
-- **Normalisation:** median centring of log2 intensities (off for ratios and
-  TMT-Integrator output, which is already normalised). No imputation: a
-  protein needs `min_valid` values per group.
-- **Outputs** (`results/`): `report.html` (self-contained, works offline),
-  `volcano_<comparison>.svg`, `<comparison>_differential.tsv`,
-  `<level>_matrix_log2.tsv`, `analysis.json` (settings used).
+- **Pipeline:** FragPipe-Analyst's, ported from FragPipeAnalystR (D24) and
+  checked against the real package: contaminants removed → features kept when
+  measured in ≥ 50 % of at least one condition (`filter_condition_pct`;
+  FragPipe-Analyst: 0) → median centring (`normalize`: median | gn | none) →
+  imputation (`imputation: auto` = Perseus-type down-shifted draws for DIA and
+  label-free, none for TMT; also none | min | zero | mindet | minprob | knn) →
+  limma (`~0 + condition`, eBayes, 95 % CIs) → Benjamini–Hochberg. Hits need
+  |log2FC| ≥ `log2fc` *and* adjusted p ≤ `alpha` (inclusive, as `add_rejections`).
+  Welch and Student remain selectable (`test`).
+- **Comparisons:** `de_type: control` (each condition vs the recognised
+  control, default), `all` (every pair, control as reference), `others` (each
+  vs the rest), or an explicit `comparisons:` list. isoDTB: each condition's
+  ratios vs 0 (moderated one-sample test).
+- **Per experiment** (Analysis tab or `experiment.yaml analysis:`):
+  `sample_conditions: {Drug_4: DMSO}`, `exclude_samples: [DMSO_3]`,
+  comparisons and any setting above.
+- **Enrichment:** each comparison's up and down hits vs the quantified genes,
+  hypergeometric test, BH; Enrichr libraries (Hallmark, GO BP/MF/CC, KEGG,
+  Reactome, WikiPathways) downloaded once, or a lab `.gmt` (D26).
+- **Outputs** (`results/`): `report.html` (interactive, self-contained, works
+  offline), `<comparison>_differential.tsv`, `<level>_results.tsv` (all
+  comparisons + values used), `<level>_matrix_log2.tsv` (as loaded),
+  `<level>_matrix_processed.tsv` (filtered/normalised/imputed + which values
+  were imputed), `enrichment.tsv`, `volcano_<comparison>.svg`,
+  `fragpipe-analyst/` (annotation + `reproduce_in_R.R`), `analysis.json`
+  (settings and every processing step).
 
 Open questions for the lab: which comparisons matter for isoDTB (vs 0, or
 compound vs compound?); whether DIA should use FragPipe's own

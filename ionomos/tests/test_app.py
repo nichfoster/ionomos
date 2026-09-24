@@ -293,6 +293,67 @@ def test_analysis_tab_round_trips(app, tmp_path):
     cfg = load(tmp_path / "Auto" / "config.yaml")
     assert cfg.analysis["log2fc"] == 0.58 and cfg.analysis["test"] == "welch"
     assert cfg.analysis["use_adjusted"] is False and cfg.analysis["control_keywords"] == ["DMSO", "Veh"]
+    # FragPipe-Analyst settings on the Lab defaults page
+    assert cfg.analysis["imputation"] == "auto" and cfg.analysis["filter_condition_pct"] == 50
+    app.analysis._preset(__import__("ionomos.analysis_tab", fromlist=["x"]).FRAGPIPE_ANALYST_DEFAULTS)
+    app.bv("analysis.lib.KEGG").set(True)
+    app.bv("analysis.lib.Reactome").set(False)
+    assert app.save()
+    cfg = load(tmp_path / "Auto" / "config.yaml")
+    assert cfg.analysis["de_type"] == "all" and cfg.analysis["normalize"] == "none"
+    assert cfg.analysis["filter_condition_pct"] == 0 and cfg.analysis["test"] == "limma"
+    assert cfg.analysis["enrichment_libraries"] == ["Hallmark", "GO Biological Process", "KEGG"]
+
+
+def test_analysis_tab_edits_samples_and_runs(app, tmp_path, monkeypatch):
+    from ionomos.downstream import simulate
+    from ionomos.ledger import Job, Ledger
+    from ionomos.manifest import load_overrides
+
+    _lab_app(app, tmp_path)
+    dest = tmp_path / "General" / "Chris" / "dia"
+    runs = [(f"/x/{c}_{r}.raw", c) for c in ("DMSO", "Drug") for r in (1, 2, 3)]
+    simulate.dia_pg_matrix(dest / "fragpipe" / "report.pg_matrix.tsv", runs, seed=3)
+    led = Ledger(tmp_path / "Auto" / "ionomos.db")
+    job_id = led.insert(Job(inbox_name="dia", user="Chris", method="DIA", dest_dir=str(dest), status="done"))
+    led.close()
+    opened = []
+    monkeypatch.setattr(app, "_open", lambda p: opened.append(p))
+    app.refresh_jobs()
+    app.jtree.selection_set(str(job_id))
+    app.job_action("studio")  # Jobs tab -> Analysis tab with this job
+    tab = app.analysis
+    assert app.nb.select() == str(app.tab_analysis)
+    assert _pump_until(app, lambda: len(tab.tree.get_children()) == 6)
+    assert tab.v("exp.control").get() == "DMSO" and "6 samples in 2 condition(s)" in tab.info.cget("text")
+    tab.set_condition(["Drug_3"], "DMSO")  # a mislabelled sample
+    tab.tree.selection_set("DMSO_1")
+    tab.toggle_used()  # a failed run
+    assert tab.tree.item("DMSO_1")["values"][3] == "left out" and tab.tree.item("Drug_3")["values"][1] == "DMSO"
+    tab.v("exp.log2fc").set("0.8")
+    tab.v("exp.imputation").set("none")
+    assert tab.save_choices()
+    an = load_overrides(dest).analysis
+    assert an["sample_conditions"] == {"Drug_3": "DMSO"} and an["exclude_samples"] == ["DMSO_1"]
+    assert an["log2fc"] == 0.8 and an["imputation"] == "none" and an["de_type"] == "control"
+    tab.run()
+    assert _pump_until(app, lambda: opened, secs=30)
+    assert opened[-1].endswith("report.html")
+    summary = __import__("json").loads((dest / "results" / "analysis.json").read_text(encoding="utf-8"))
+    assert summary["samples"]["Drug_3"] == "DMSO" and "DMSO_1" not in summary["samples"]
+    assert summary["settings"]["log2fc"] == 0.8 and summary["imputation"] == "none"
+    # reopening shows the saved choices
+    tab.load(dest, "DIA")
+    assert _pump_until(app, lambda: tab.tree.exists("DMSO_1") and tab.tree.item("DMSO_1")["values"][3] == "left out")
+    assert tab.v("exp.log2fc").get() == "0.8"
+    tab.v("exp.de_type").set("custom")
+    tab.v("exp.comparisons").set("Drug vs nonsense")
+    from tkinter import messagebox
+
+    errors = []
+    monkeypatch.setattr(messagebox, "showerror", lambda *a, **k: errors.append(a))
+    tab.run()  # the bad comparison is caught when the analysis runs (the condition doesn't exist)
+    assert _pump_until(app, lambda: not tab._running, secs=30)
 
 
 def test_jobs_report_and_rerun(app, tmp_path, monkeypatch):

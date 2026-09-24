@@ -1,3 +1,4 @@
 # golden reference files are compared byte for byte: never convert line endings
 ionomos/tests/golden/*.tsv -text
 ionomos/tests/golden/*.json -text
+ionomos/tests/golden/**/*.tsv -text

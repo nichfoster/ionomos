@@ -7,7 +7,8 @@ Three layers, all runnable on macOS and Windows:
 | Unit + e2e (`pytest`) | 284 tests: naming, config, config I/O, ledger, watcher timing, intake, overrides, **FragPipe runner + worker** (done / failed / held / timeout / stop / re-run against the fake FragPipe), resolver logic, **real tkinter dialog and the setup app** (skipped if no display), and 6 end-to-end runs of watcher-thread + intake against testbed samples | `scripts/test_mac.sh` / `scripts\test_windows.ps1` |
 | Testbed (manual) | A fake lab on disk with 12 sample drops covering every path, a fake FragPipe, and the real CLI | `ionomos testbed …` |
 | The real PC | `dry-run` on real folders, then a throwaway drop; **Copy diagnostics** to report back | see DEV_LOOP.md |
-| Downstream | R-script ports byte-identical to the real scripts; t-tests/BH vs scipy; moderated t vs limma; planted-effect recovery for isoDTB/DIA/TMT; report self-contained, SVG valid | `tests/test_downstream.py`, golden files in `tests/golden/` |
+| Downstream | R-script ports byte-identical to the real scripts; t-tests/BH vs scipy; moderated t vs limma; planted-effect recovery for isoDTB/DIA/TMT; report self-contained with its data, SVG valid | `tests/test_downstream.py`, golden files in `tests/golden/` |
+| FragPipe-Analyst port | R's RNG and Perseus imputation exact; `test_limma` all/control/others/missing vs limma; whole pipeline vs the real FragPipeAnalystR 1.1.1; PCA/hclust vs R; hypergeometric vs `phyper` | `tests/test_fpa.py`, `tests/golden/fpa/` |
 | Stress | `ionomos testbed stress --n 150`: messy drops (unicode/emoji/huge names, no raws, empty raws, bad tails, duplicates, slow copies, failing searches) + chaos (worker killed mid-run, ledger locked, corrupt status file, pause/resume, cancel), then invariant checks; plus a 5000-name parser fuzz | any machine; a smaller run is in pytest |
 | GitHub Actions | the pytest suite on Linux **and Windows** on every push; on a version tag also the frozen exe (pipeline + stress) and the **installer**: install, retire a fake LabWatch, upgrade, uninstall, data kept | Actions tab |
 | Migration | an install from the LabWatch era (old status files, run folders, logs, lock, config pointer, env var) keeps working | `tests/test_migration.py` |
@@ -157,3 +158,17 @@ python3 make_stats_reference.py        # in an env with scipy
 
 The R ports must stay byte-identical to `R_*.tsv`. If the lab changes an R
 script, regenerate and re-port.
+
+### FragPipe-Analyst port (`tests/test_fpa.py`, `tests/golden/fpa/`)
+
+```bash
+cd ionomos/tests/golden/fpa
+python3 make_fpa_inputs.py && Rscript run_fpa_reference.R <R library with limma>
+```
+
+`run_fpa_reference.R` is FragPipeAnalystR's `manual_impute()` and `test_limma()`
+transcribed to base R + limma. `e2e/` is the real FragPipeAnalystR 1.1.1 run on
+a simulated DIA-NN matrix with the `reproduce_in_R.R` Ionomos writes (how:
+`e2e/README.md`). Installing FragPipeAnalystR into a scratch library:
+`BiocManager::install(c("limma", "SummarizedExperiment", "MSnbase", ...))` then
+`remotes::install_github("Nesvilab/FragPipeAnalystR@v1.1.1")` — see its README.

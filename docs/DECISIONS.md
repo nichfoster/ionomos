@@ -164,6 +164,8 @@ found 95–100 % with no false positives. It is the field standard for small-n
 proteomics, so it is the default; Welch/Student stay available per lab or per
 experiment. Missing values are not imputed (a feature needs `min_valid` values
 per group) — imputation choices belong to the lab, not to a default.
+*(Superseded in 0.6.0 by D24: FragPipe-Analyst's pipeline, which imputes
+label-free data by default; `imputation: none` gives the old behaviour.)*
 
 ### D20 — Setup is a checklist, not a manual
 **2026-09-23.** The app opens on a live checklist (folders writable, safe
@@ -224,3 +226,56 @@ markers such as `NaN` must not cause entire run columns to be dropped. Report
 missing manifest runs and zero-test comparisons explicitly. Re-analysis reads
 current per-file experiment.yaml labels/replicates so a completed search can be
 repaired without rerunning FragPipe. Recognize FragPipe 24 `dia-quant-output` files.
+
+### D24 — The analysis is FragPipe-Analyst's, ported and checked against the package
+**2026-09-23.** The lab wants FragPipeAnalystR / FragPipe-Analyst (Nesvilab,
+Monash) for downstream analysis. R is not installed on the PC, and it would
+need ~40 Bioconductor packages, so the pipeline is ported to Python
+(`downstream/fpa.py`) in FragPipe-Analyst's order: contaminants → missing-value
+filters → normalisation → imputation → `test_limma` (one `~0 + condition` model,
+per-contrast refit when values are missing, one eBayes) → `add_rejections`
+(inclusive cut-offs), plus its QC plots (PCA on the 500 most variable features,
+clustered correlation, missing-value pattern, CVs, identifications), the
+significant-feature heatmap and enrichment. Checked three ways
+(`tests/test_fpa.py`): R's own RNG is reproduced so Perseus-type imputation with
+`set.seed(123)` gives R's numbers; limma 3.68 with the package's functions
+transcribed to base R (all / control / others / missing values, CIs to 1e-8);
+and the **real FragPipeAnalystR 1.1.1** running the `reproduce_in_R.R` script
+Ionomos exports: every protein, both comparisons, identical to 1e-10, zero
+disagreements on significance (`tests/golden/fpa/e2e/`).
+
+Changed for the lab, each a setting (Analysis tab → "Use FragPipe-Analyst's
+defaults" restores theirs): the missing-value filter keeps features measured
+in ≥ 50 % of at least one condition (theirs: 0 %), because Perseus imputation
+turns one-hit wonders into large fold changes; samples are median-centred
+(theirs: none) — a no-op on DIA-NN/MaxLFQ output that is already normalised,
+and a rescue when it isn't; the default comparison is each condition vs the
+recognised control (theirs: all pairs), as the lab designs experiments. Kept
+theirs: Perseus-type imputation for label-free data (it makes on/off proteins
+testable; in simulation it costs ~15 % recall on randomly missing values,
+which `imputation: none` recovers), none for TMT. isoDTB ratios keep the
+lab-script site table and a moderated one-sample test per condition. Not
+ported: VSN normalisation, MLE/bpca imputation, paired designs, fdrtool.
+
+FragPipeAnalystR and FragPipe-Analyst are GPL-3, and this is a translation of
+their code, so Ionomos is now distributed under GPL-3.0-or-later (LICENSE).
+
+### D25 — The report is interactive, from data embedded in the page
+**2026-09-23.** `report.html` carries its results as JSON and draws them in the
+browser with a small hand-written script (`downstream/assets/report.js`): no
+plotting library, no internet, one file to email. Cut-offs change live, points
+and rows open a protein (values per condition, imputed values hollow, stats in
+every comparison), enrichment terms mark their genes on the volcano, every
+chart downloads as SVG and the filtered table as CSV. The statistics are
+still computed once in Python; the page only re-thresholds them. Static
+`volcano_*.svg` files stay for slides and for viewers without scripts.
+
+### D26 — Enrichment runs on the PC against the right background
+**2026-09-23.** FragPipe-Analyst sends each hit list to the Enrichr web service
+(genome background) and corrects the odds ratio afterwards. Ionomos downloads
+the same Enrichr libraries once (Hallmark, GO, KEGG, Reactome, WikiPathways;
+cached in `%APPDATA%\Ionomos\genesets`) and runs a one-sided hypergeometric
+test per term against the genes that were actually quantified, BH across
+terms. Gene lists never leave the PC, it works offline after the first
+download, and a lab `.gmt` can be added. No library → a note in the report,
+never a failed analysis.

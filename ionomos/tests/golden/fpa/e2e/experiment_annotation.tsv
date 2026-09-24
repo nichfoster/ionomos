@@ -1,0 +1,10 @@
+file	sample	sample_name	condition	replicate
+C:\data\EXP_DMSO_1.raw	DMSO_1	DMSO_1	DMSO	1
+C:\data\EXP_DMSO_2.raw	DMSO_2	DMSO_2	DMSO	2
+C:\data\EXP_DMSO_3.raw	DMSO_3	DMSO_3	DMSO	3
+C:\data\EXP_DrugA_1.raw	DrugA_1	DrugA_1	DrugA	1
+C:\data\EXP_DrugA_2.raw	DrugA_2	DrugA_2	DrugA	2
+C:\data\EXP_DrugA_3.raw	DrugA_3	DrugA_3	DrugA	3
+C:\data\EXP_DrugB_1.raw	DrugB_1	DrugB_1	DrugB	1
+C:\data\EXP_DrugB_2.raw	DrugB_2	DrugB_2	DrugB	2
+C:\data\EXP_DrugB_3.raw	DrugB_3	DrugB_3	DrugB	3

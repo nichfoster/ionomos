@@ -107,22 +107,35 @@ FRAGPIPE SEARCHES
   launcher, workflow, FASTA, free disk space) and starts by itself once
   that's fixed. Re-runs keep old output as fragpipe_previous_<time>/.
 
-RESULTS: STATISTICS, VOLCANO PLOTS, REPORT (tab 7 sets the defaults)
+RESULTS: FRAGPIPE-ANALYST STATISTICS + INTERACTIVE REPORT (tab 7)
   After each search, results/ inside the experiment folder gets:
-    report.html                 open this — volcano plot(s), hit tables, QC, methods text
-    <comparison>_differential.tsv   every protein/site: log2FC, p, q, up/down
+    report.html                 open this — interactive: volcano/MA plot with live
+                                cut-offs (click a protein for its values; imputed = hollow),
+                                results table (CSV), heatmap of hits, enrichment, QC
+                                (PCA, correlation, missing values, CV), methods text
+    <comparison>_differential.tsv   every protein/site: log2FC, 95% CI, p, adjusted p, up/down
+    <level>_results.tsv         all comparisons side by side + the values used
+    enrichment.tsv              pathways / GO terms over-represented among the hits
     volcano_<comparison>.svg    the plot on its own (slides, papers)
+    fragpipe-analyst/           experiment_annotation.tsv + reproduce_in_R.R (same analysis
+                                in FragPipeAnalystR / FragPipe-Analyst, to cross-check)
     <sample>_sites.tsv          isoDTB sites — identical to the lab's R script
     experimental_annotation.tsv TMT — identical to the lab's R script
-  Conditions come from the file names (DMSO_1.raw -> DMSO). The control is
-  recognised by name (DMSO, vehicle, ctrl, WT, ...) and every other condition
-  is compared with it. isoDTB ratios are tested against 0. Choose comparisons
-  for one experiment in its experiment.yaml:
-      analysis:
-        comparisons: ["Drug vs DMSO", "Drug2 vs DMSO"]
-  Jobs tab -> Re-run analysis applies new settings to a finished job.
-  Analysis tab -> Analyse a folder… works on any FragPipe output folder,
-  including runs from before Ionomos.
+  The statistics are FragPipe-Analyst's (ported from FragPipeAnalystR): filter
+  (measured in >= 50% of one condition), median normalisation, Perseus-type
+  imputation for label-free data (none for TMT), limma, BH. Conditions come
+  from the file names (DMSO_1.raw -> DMSO); the control is recognised by name
+  (DMSO, vehicle, ctrl, WT, ...) and every other condition is compared with it.
+  isoDTB ratios are tested against 0.
+  Analysis tab -> Analyse an experiment: pick a finished job (or any FragPipe
+  output folder), fix a sample's condition, leave a failed run out, choose the
+  comparisons (vs control / all pairs / vs others / just these) and cut-offs
+  for that experiment, Run. The choices are saved in its experiment.yaml.
+  Analysis tab -> Lab defaults: the settings used after every search
+  ("Use FragPipe-Analyst's defaults" = exactly theirs).
+  Jobs tab -> Re-run analysis / Analysis options… for a finished job.
+  Enrichment downloads gene-set libraries from Enrichr once; after that it
+  runs offline on this PC (gene lists are never sent anywhere).
 
 JOBS TAB (6)
   Every job, live: status, how long it ran, and what FragPipe is doing now.
@@ -291,7 +304,8 @@ class App:
         root.report_callback_exception = self._on_tk_error
         root.after(100, self._pump_ui)
         self.nb.select(0)  # the checklist: always the first thing you see
-        self.nb.bind("<<NotebookTabChanged>>", lambda e: self.refresh_setup() if self.nb.select() == str(self.tab_setup) else None)
+        self.nb.bind("<<NotebookTabChanged>>", lambda e: self.refresh_setup() if self.nb.select() == str(self.tab_setup) else None,
+                     add="+")
         self.root.after(300, self.refresh_setup)
         self.root.after(600, self._after_update_restart)
         self.root.after(2500, self.check_downloaded_update)
@@ -358,12 +372,7 @@ class App:
                     self.bv(f"{sec}.{k}").set(val)
                 else:
                     self.v(f"{sec}.{k}").set("" if val is None else str(val))
-        an = d.get("analysis") or {}
-        for k in ("test", "log2fc", "alpha", "min_valid", "normalize", "top_labels"):
-            self.v(f"analysis.{k}").set("" if an.get(k) is None else str(an.get(k)))
-        self.bv("analysis.enabled", True).set(bool(an.get("enabled", True)))
-        self.bv("analysis.use_adjusted", True).set(bool(an.get("use_adjusted", True)))
-        self.v("analysis.control_keywords").set(", ".join(an.get("control_keywords") or []))
+        self.analysis.load_vars(d)
         self.v("users.default").set(d["users"].get("default", "") or "")
         self.v("users.learned_aliases_file").set(d["users"].get("learned_aliases_file", "") or "")
         self.v("config_path").set(str(self.config_path))
@@ -390,19 +399,7 @@ class App:
             raise ConfigError("gui.timeout_minutes must be a number") from None
         d["users"]["aliases"] = {u: list(a) for u, a in self.data["users"].get("aliases", {}).items() if a}
         d["users"]["default"] = self.v("users.default").get().strip()
-        an = dict(d.get("analysis") or {})
-        an["enabled"] = self.bv("analysis.enabled", True).get()
-        an["use_adjusted"] = self.bv("analysis.use_adjusted", True).get()
-        for k, conv in (("log2fc", float), ("alpha", float), ("min_valid", int), ("top_labels", int)):
-            raw = self.v(f"analysis.{k}").get().strip()
-            try:
-                an[k] = conv(raw)
-            except ValueError:
-                raise ConfigError(f"analysis.{k} must be a number, got {raw!r}") from None
-        an["test"] = self.v("analysis.test").get().strip() or "moderated"
-        an["normalize"] = self.v("analysis.normalize").get().strip() or "median"
-        an["control_keywords"] = [x.strip() for x in self.v("analysis.control_keywords").get().split(",") if x.strip()]
-        d["analysis"] = an
+        self.analysis.collect(d)
         d["users"]["learned_aliases_file"] = self.v("users.learned_aliases_file").get().strip()
         d["methods"] = self.data["methods"]
         return d
@@ -1659,71 +1656,13 @@ class App:
     # ------------------------------------------------------- tab: analysis ----
 
     def _tab_analysis(self):
-        f = ttk.Frame(self.nb, padding=12)
-        self.nb.add(f, text="  7  Analysis  ")
-        f.columnconfigure(1, weight=1)
-        ttk.Label(f, text="What happens after FragPipe: statistics, volcano plots and results/report.html in "
-                          "every experiment folder. These are the lab defaults; one experiment can override them "
-                          "in its experiment.yaml (analysis: comparisons: [\"Drug vs DMSO\"], control: DMSO).",
-                  wraplength=860, justify="left").grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 8))
-        ttk.Checkbutton(f, text="Make statistics, volcano plots and a report after each search",
-                        variable=self.bv("analysis.enabled", True)).grid(row=1, column=0, columnspan=3, sticky="w", **PAD)
+        from ionomos.analysis_tab import AnalysisTab
 
-        def row(r, key, label, hint, widget=None):
-            ttk.Label(f, text=label).grid(row=r, column=0, sticky="e", **PAD)
-            (widget or ttk.Entry(f, textvariable=self.v(key), width=12)).grid(row=r, column=1, sticky="w", **PAD)
-            ttk.Label(f, text=hint, foreground="#666", wraplength=520).grid(row=r, column=2, sticky="w", **PAD)
-
-        row(2, "analysis.test", "Test", "moderated = limma-style empirical Bayes (recommended with 3 replicates: "
-            "borrows strength across all proteins); welch / student = classic t-tests",
-            ttk.Combobox(f, textvariable=self.v("analysis.test"), values=["moderated", "welch", "student"],
-                         state="readonly", width=12))
-        row(3, "analysis.log2fc", "log2 fold change ≥", "1 = 2-fold. A hit needs this and the significance cut-off")
-        row(4, "analysis.alpha", "Significance <", "0.05 is usual")
-        ttk.Checkbutton(f, text="…on Benjamini-Hochberg adjusted q-values (recommended; untick = raw p-values)",
-                        variable=self.bv("analysis.use_adjusted", True)).grid(row=5, column=1, columnspan=2, sticky="w", **PAD)
-        row(6, "analysis.min_valid", "Values per group ≥", "proteins/sites with fewer measured values are not tested")
-        row(7, "analysis.normalize", "Normalisation", "median = align sample medians (intensities only; ratios are never normalised)",
-            ttk.Combobox(f, textvariable=self.v("analysis.normalize"), values=["median", "none"], state="readonly", width=12))
-        row(8, "analysis.top_labels", "Names on volcano", "how many top hits are labelled")
-        ttk.Label(f, text="Control keywords").grid(row=9, column=0, sticky="e", **PAD)
-        ttk.Entry(f, textvariable=self.v("analysis.control_keywords"), width=70).grid(row=9, column=1, columnspan=2, sticky="ew", **PAD)
-        ttk.Label(f, text="the first condition matching one of these is the control; every other condition is "
-                          "compared against it", foreground="#666").grid(row=10, column=1, columnspan=2, sticky="w", padx=6)
-        b = ttk.Frame(f)
-        b.grid(row=11, column=0, columnspan=3, sticky="w", pady=(14, 0))
-        ttk.Button(b, text="Analyse a folder…", command=self.analyze_folder).pack(side="left", padx=4)
-        ttk.Label(b, text="any experiment or FragPipe output folder, including runs from before Ionomos "
-                          "(Save first so the settings above are used)", foreground="#666").pack(side="left", padx=8)
+        self.analysis = AnalysisTab(self)
+        self.tab_analysis = self.analysis.frame
 
     def analyze_folder(self):
-        from ionomos import postprocess
-
-        d = filedialog.askdirectory(title="Experiment or FragPipe output folder")
-        if not d:
-            return
-        try:
-            cfg = load(self.config_path, check_paths=False)
-        except ConfigError:
-            cfg = None
-        self.set_status(f"analysing {d}…")
-
-        def go():
-            out = postprocess.run_for_folder(Path(d), cfg)
-            msg = (f"{out.method or 'unknown method'}: " + "; ".join(
-                f"{c['name']} {c['up']} up / {c['down']} down" for c in out.summary.get("comparisons", []))
-                   + ("" if not out.warnings else "  (" + "; ".join(out.warnings) + ")"))
-
-            def done():
-                self.set_status(msg[:200])
-                if out.report and out.report.is_file():
-                    self._open(str(out.report))
-                else:
-                    messagebox.showinfo("Analyse", msg)
-
-            self.post(done)
-
-        threading.Thread(target=go, daemon=True).start()
+        self.analysis._analyse_folder()
 
     def _tab_inbox(self):
         frame = ttk.Frame(self.nb, padding=10)
@@ -1816,7 +1755,8 @@ class App:
         b = ttk.Frame(f)
         b.grid(row=2, column=0, sticky="w")
         for text, action in (("Open report", "report"), ("Open folder", "folder"), ("FragPipe log", "log"),
-                             ("Re-run analysis", "analyze"), ("Retry", "retry"), ("Cancel", "cancel"),
+                             ("Re-run analysis", "analyze"), ("Analysis options…", "studio"), ("Retry", "retry"),
+                             ("Cancel", "cancel"),
                              ("Copy details", "copy")):
             ttk.Button(b, text=text, command=lambda a=action: self.job_action(a)).pack(side="left", padx=4)
         ttk.Label(b, text="double-click = open the report", foreground="#666").pack(side="left", padx=12)
@@ -1928,6 +1868,11 @@ class App:
                     self._rerun_analysis(j)
             else:
                 messagebox.showinfo("Report", f"Job {j.id} is {j.status}; the report is made when FragPipe finishes.")
+        elif action == "studio":
+            if j.status != "done":
+                messagebox.showinfo("Analysis", "Only finished (done) jobs have FragPipe output to analyse.")
+                return
+            self.analysis.select_job(j)
         elif action == "analyze":
             if j.status != "done":
                 messagebox.showinfo("Re-run analysis", "Only finished (done) jobs have FragPipe output to analyse.")

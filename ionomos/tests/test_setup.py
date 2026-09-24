@@ -76,7 +76,7 @@ def test_init_creates_a_working_setup(tmp_path, monkeypatch, capsys):
     assert (root / "config.yaml").is_file() and (root / "inbox").is_dir() and users.is_dir()
     assert "Folders exist and are writable" in out and "of" in out and "ready" in out
     cfg = load(root / "config.yaml")
-    assert cfg.analysis["test"] == "moderated"
+    assert cfg.analysis["test"] == "limma" and cfg.analysis["imputation"] == "auto"
     # second run keeps the config
     (root / "config.yaml").write_text((root / "config.yaml").read_text(encoding="utf-8").replace(
         "stable_seconds: 60", "stable_seconds: 42"), encoding="utf-8")

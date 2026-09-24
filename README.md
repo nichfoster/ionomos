@@ -38,8 +38,11 @@ owner's directory, then searched with headless FragPipe one at a time
 `ionomos setup`) is the setup wizard and control panel — folders, users,
 methods, every parameter, start/stop, job status, startup task, and a built-in
 testbed with a fake FragPipe. After each search: the lab's R-script outputs
-(byte-identical Python ports), limma-style statistics, volcano plots and a
-self-contained `results/report.html`. See
+(byte-identical Python ports) and FragPipe-Analyst's analysis — filtering,
+normalisation, imputation, limma, PCA/QC, enrichment — ported from
+FragPipeAnalystR and checked against it, in an interactive, self-contained
+`results/report.html`. The app's Analysis tab re-runs any experiment with
+other conditions, samples or comparisons. See
 [docs/ROADMAP.md](docs/ROADMAP.md), and [docs/DEPLOY_WINDOWS.md](docs/DEPLOY_WINDOWS.md)
 to put it on the PC.
 
@@ -76,9 +79,18 @@ to put it on the PC.
 ## Quick start (dev, on this Mac)
 
 ```bash
-scripts/test_mac.sh --bed        # venv + lint + 284 tests + a fake lab in ./ionomos-testbed
+scripts/test_mac.sh --bed        # venv + lint + tests + a fake lab in ./ionomos-testbed
 ionomos/.venv/bin/ionomos setup   # the app, pointed at any config you like
 ```
 
 On the PC: [docs/DEV_LOOP.md](docs/DEV_LOOP.md) while prototyping,
 [docs/DEPLOY_WINDOWS.md](docs/DEPLOY_WINDOWS.md) for the finished tool.
+
+## License
+
+GPL-3.0-or-later (see [LICENSE](LICENSE)). The analysis in
+`ionomos/src/ionomos/downstream/fpa.py`, `qc.py` and `enrich.py` is a Python
+translation of [FragPipeAnalystR](https://github.com/Nesvilab/FragPipeAnalystR)
+and [FragPipe-Analyst](https://github.com/MonashProteomics/FragPipe-Analyst)
+(GPL-3); please cite Hsiao et al., *J. Proteome Res.* 2024,
+doi:10.1021/acs.jproteome.4c00294, and limma (Ritchie et al., *Nucleic Acids Res.* 2015).

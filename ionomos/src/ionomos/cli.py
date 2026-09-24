@@ -10,7 +10,8 @@ Command line.
     ionomos retry    JOB_ID [--config PATH]       failed -> queued
     ionomos testbed  ...                          build/drive a fake lab for testing (see testbed.py)
     ionomos diagnose [--zip [PATH]]               everything needed to report a problem (text, or a .zip bundle)
-    ionomos analyze  JOB_ID|FOLDER [--control C] [--compare 'A vs B'] [--log2fc F] [--open]
+    ionomos analyze  JOB_ID|FOLDER [--control C] [--compare 'A vs B'] [--de-type all] [--imputation none]
+                     [--exclude SAMPLE] [--log2fc F] [--open]
                                                    statistics + volcano plots + results/report.html
     ionomos init     [--root DIR] [--users DIR]   create folders + a config without the app (headless setup)
     ionomos cancel   JOB_ID                       stop a running search / drop a queued job
@@ -519,12 +520,18 @@ def cmd_analyze(args) -> int:
         extra["control"] = args.control
     if args.compare:
         extra["comparisons"] = args.compare
-    for key in ("log2fc", "alpha", "test", "min_valid"):
+    for key in ("log2fc", "alpha", "test", "min_valid", "de_type", "imputation", "normalize", "filter_condition_pct",
+                "filter_global_pct"):
         if getattr(args, key) is not None:
             extra[key] = getattr(args, key)
     if args.raw_p:
         extra["use_adjusted"] = False
-    out = postprocess.run_for_folder(dest, cfg, args.method, extra)
+    if args.exclude:
+        extra["exclude_samples"] = args.exclude
+    if args.no_enrichment:
+        extra["enrichment"] = False
+    out = postprocess.run_for_folder(dest, cfg, args.method, extra,
+                                     progress=(lambda m: print(f"  … {m}", flush=True)) if not args.quiet else None)
     print(f"method: {out.method or 'unknown'}")
     for c in out.summary.get("comparisons", []):
         print(f"  {c['name']}: {c['up']} up, {c['down']} down of {c['tested']} tested  ({c['table']})")
@@ -645,9 +652,19 @@ def main(argv: list[str] | None = None) -> int:
     az.add_argument("--compare", action="append", metavar="'A vs B'", help="comparison; repeatable")
     az.add_argument("--log2fc", type=float, help="fold-change threshold (log2)")
     az.add_argument("--alpha", type=float, help="significance threshold")
-    az.add_argument("--test", choices=["moderated", "welch", "student"])
+    az.add_argument("--test", choices=["limma", "moderated", "welch", "student"])
+    az.add_argument("--de-type", dest="de_type", choices=["control", "all", "others"],
+                    help="each condition vs the control | every pair | each vs the rest")
+    az.add_argument("--imputation", choices=["auto", "none", "perseus", "min", "zero", "mindet", "minprob", "knn"])
+    az.add_argument("--normalize", choices=["median", "gn", "none"])
+    az.add_argument("--filter-condition-pct", dest="filter_condition_pct", type=float,
+                    help="keep features measured in >= this %% of one condition (default 50)")
+    az.add_argument("--filter-global-pct", dest="filter_global_pct", type=float)
+    az.add_argument("--exclude", action="append", metavar="SAMPLE", help="leave a sample out; repeatable")
+    az.add_argument("--no-enrichment", action="store_true", help="skip gene-set enrichment")
     az.add_argument("--min-valid", dest="min_valid", type=int)
-    az.add_argument("--raw-p", action="store_true", help="apply alpha to raw p-values instead of BH q-values")
+    az.add_argument("--raw-p", action="store_true", help="apply alpha to raw p-values instead of adjusted p")
+    az.add_argument("--quiet", action="store_true", help="no progress lines")
     az.add_argument("--open", action="store_true", help="open the report when done")
     az.set_defaults(fn=cmd_analyze)
     cn = sub.add_parser("cancel", help="cancel a queued or running job")

@@ -97,6 +97,18 @@ Xcalibur timestamp suffix understood; public repo → the app checks GitHub and
 updates itself (verified download); web links open in the browser (the
 Releases button showed "does not exist").
 
+2026-09-23 (0.6.0): analysis = FragPipe-Analyst (FragPipeAnalystR ported and
+checked against the real package): filters, median/GN normalisation, Perseus
+/ MinProb / kNN imputation, limma with CIs, all-pairs / vs-control / vs-others;
+PCA, correlation, missing values, CVs, heatmap of hits; local gene-set
+enrichment (Enrichr libraries). Interactive report. Analysis tab: per-experiment
+sample conditions, samples left out, comparisons, cut-offs (saved in
+experiment.yaml) + Run. FragPipe-Analyst export (annotation + R script).
+Open: compare against the lab's own FragPipe-Analyst sessions on a real DIA
+experiment; decide the lab default for imputation (Perseus vs none) with that
+data; not ported yet: VSN, MLE imputation, paired designs, TMT multi-plex
+(plex-aware feature numbers), phospho site-level normalisation (PTM_normalization).
+
 ## Phase 3 — DIA, then TMT
 
 - DIA: pin workflow, `data_type: DIA`, sort out DIA-NN version/`--config-diann`.

@@ -1,0 +1,11 @@
+sample_name	condition	replicate
+DMSO_1	DMSO	1
+DMSO_2	DMSO	2
+DMSO_3	DMSO	3
+DrugA_1	DrugA	1
+DrugA_2	DrugA	2
+DrugA_3	DrugA	3
+DrugB_1	DrugB	1
+DrugB_2	DrugB	2
+DrugB_3	DrugB	3
+DrugB_4	DrugB	4

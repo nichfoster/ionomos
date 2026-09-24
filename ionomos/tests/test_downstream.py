@@ -126,10 +126,14 @@ def test_dia_recovers_planted_effects(tmp_path):
     out = downstream.analyze(tmp_path / "e", "DIA", record=record)
     assert out.method == "DIA" and not out.warnings
     comp = out.summary["comparisons"][0]
-    assert comp["name"] == "Drug vs DMSO"
+    assert comp["name"] == "Drug vs DMSO" and out.summary["imputation"] == "perseus"
+    recall, false = simulate.recall_and_false(_hits(tmp_path / "e", out.summary), truth)
+    # FragPipe-Analyst's default (Perseus-type imputation) trades some power on randomly missing values
+    assert recall >= 0.7 and false <= 2, (recall, false)
+    assert out.summary["samples"] == {f"{c}_{r}": c for c in ("DMSO", "Drug") for r in (1, 2, 3)}
+    out = downstream.analyze(tmp_path / "e", "DIA", {"imputation": "none"}, record=record)
     recall, false = simulate.recall_and_false(_hits(tmp_path / "e", out.summary), truth)
     assert recall >= 0.9 and false <= 2, (recall, false)
-    assert out.summary["samples"] == {f"{c}_{r}": c for c in ("DMSO", "Drug") for r in (1, 2, 3)}
 
 
 def test_isodtb_recovers_planted_sites(tmp_path):
@@ -156,7 +160,7 @@ def test_moderated_beats_welch_on_three_replicates(tmp_path):
     truth = simulate.dia_pg_matrix(tmp_path / "e/fragpipe/report.pg_matrix.tsv", runs, seed=2)["Drug"]
     rec = {}
     for test in ("welch", "moderated"):
-        out = downstream.analyze(tmp_path / "e", "DIA", {"test": test})
+        out = downstream.analyze(tmp_path / "e", "DIA", {"test": test, "imputation": "none"})
         rec[test] = simulate.recall_and_false(_hits(tmp_path / "e", out.summary), truth)[0]
     assert rec["moderated"] > rec["welch"] + 0.3
 
@@ -242,20 +246,37 @@ def test_run_stem():
 # ------------------------------------------------------------- report + plots --
 
 
-def test_report_is_self_contained_and_plots_are_valid_svg(tmp_path):
+def _report_data(html: str) -> dict:
+    start = html.index("<script id='ionomos-data' type='application/json'>") + len("<script id='ionomos-data' type='application/json'>")
+    return json.loads(html[start:html.index("</script>", start)])
+
+
+def test_report_is_self_contained_and_interactive(tmp_path):
     runs = [(f"/x/{c}_{r}.raw", c) for c in ("DMSO", "Drug", "Drug2") for r in (1, 2, 3)]
     simulate.dia_pg_matrix(tmp_path / "e/fragpipe/report.pg_matrix.tsv", runs, seed=6)
     out = downstream.analyze(tmp_path / "e", "DIA", context={"experiment": "20260914_Isaac_DIA <test> & more"})
     html = out.report.read_text(encoding="utf-8")
-    assert "http://" not in html.replace("http://www.w3.org/2000/svg", "") and "https://" not in html
-    assert "&lt;test&gt; &amp; more" in html  # escaped
-    assert html.count("<svg") == 2 + 3  # two volcanos + three QC charts
+    low = html.lower()
+    for external in ("src='http", 'src="http', "<link ", "@import", "url(http"):
+        assert external not in low  # nothing loaded from the internet
+    assert "&lt;test&gt; &amp; more" in html and "</script><script>" not in html.split("ionomos-data")[1][:50]
+    data = _report_data(html)
+    assert data["marker"] == "ionomos-report-v2" and len(data["samples"]) == 9
+    assert [c["name"] for c in data["comps"]] == ["Drug vs DMSO", "Drug2 vs DMSO"]
+    assert len(data["comps"][0]["fc"]) == len(data["f"]["id"]) == len(data["v"])
+    assert data["qc"]["pca"]["scores"] and data["qc"]["correlation"]["matrix"] and data["qc"]["heatmap"]["rows"]
+    for section in ("id='volcano'", "id='table'", "id='heatmap'", "id='enrich'", "id='qc'", "id='methods'"):
+        assert section in html
     assert [c["name"] for c in out.summary["comparisons"]] == ["Drug vs DMSO", "Drug2 vs DMSO"]
     for svg in (tmp_path / "e/results").glob("volcano_*.svg"):
         root = ET.fromstring(svg.read_text(encoding="utf-8"))
         assert root.tag.endswith("svg") and root.find("{http://www.w3.org/2000/svg}style") is not None
     summary = json.loads((tmp_path / "e/results/analysis.json").read_text(encoding="utf-8"))
-    assert summary["settings"]["test"] == "moderated" and summary["features"] == 600
+    assert summary["settings"]["test"] == "limma" and summary["features_loaded"] == 600
+    results = tmp_path / "e/results"
+    for name in ("protein_results.tsv", "protein_matrix_processed.tsv", "fragpipe-analyst/experiment_annotation.tsv",
+                 "fragpipe-analyst/reproduce_in_R.R"):
+        assert (results / name).is_file(), name
 
 
 def test_analysis_without_results_explains_instead_of_crashing(tmp_path):

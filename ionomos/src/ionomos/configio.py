@@ -43,8 +43,11 @@ def defaults(root: str | None = None, users_root: str | None = None) -> dict:
         "fragpipe": {"auto_run": True, "threads": 28, "ram_gb": 48, "timeout_minutes": 240, "min_free_gb": 20, "config_tools_folder": "",
                      "config_diann": ""},
         "gui": {"enabled": True, "timeout_minutes": 0},
-        "analysis": {"enabled": True, "test": "moderated", "log2fc": 1.0, "alpha": 0.05, "use_adjusted": True,
-                     "min_valid": 2, "normalize": "median", "top_labels": 15,
+        "analysis": {"enabled": True, "test": "limma", "de_type": "control", "log2fc": 1.0, "alpha": 0.05,
+                     "use_adjusted": True, "remove_contaminants": True, "filter_global_pct": 0,
+                     "filter_condition_pct": 50, "normalize": "median", "imputation": "auto", "min_valid": 2,
+                     "enrichment": True, "enrichment_libraries": ["Hallmark", "GO Biological Process", "Reactome"],
+                     "enrichment_gmt": "", "top_labels": 15,
                      "control_keywords": ["DMSO", "vehicle", "veh", "ctrl", "control", "mock", "untreated", "NT",
                                           "WT", "EV", "scr", "scramble", "siNT", "PBS"]},
         "users": {"aliases": {}, "default": "", "learned_aliases_file": f"{root}/learned_aliases.yaml",
@@ -155,14 +158,26 @@ def dump_config(d: dict) -> str:
     an = d.get("analysis") or {}
     a("analysis:   # statistics + volcano plots + report after each search (per experiment: experiment.yaml analysis:)")
     a(f"  enabled: {_y(bool(an.get('enabled', True)))}")
-    a(f"  test: {_y(an.get('test', 'moderated'))}   # moderated (limma-style, recommended) | welch | student")
+    a("  # statistics follow FragPipe-Analyst / FragPipeAnalystR (filter -> normalise -> impute -> limma)")
+    a(f"  test: {_y(an.get('test', 'limma'))}   # limma (moderated t, recommended) | welch | student")
+    a(f"  de_type: {_y(an.get('de_type', 'control'))}   # control (each vs the control) | all (every pair) | others")
     a(f"  log2fc: {_y(an.get('log2fc', 1.0))}   # |log2 fold change| needed to call a hit")
     a(f"  alpha: {_y(an.get('alpha', 0.05))}   # significance cut-off")
-    a(f"  use_adjusted: {_y(bool(an.get('use_adjusted', True)))}   # true: alpha applies to BH q-values; false: raw p")
-    a(f"  min_valid: {_y(an.get('min_valid', 2))}   # values needed per group to test a protein/site")
-    a(f"  normalize: {_y(an.get('normalize', 'median'))}   # median | none (intensities only)")
+    a(f"  use_adjusted: {_y(bool(an.get('use_adjusted', True)))}   # true: alpha applies to BH-adjusted p; false: raw p")
+    a(f"  remove_contaminants: {_y(bool(an.get('remove_contaminants', True)))}")
+    a(f"  filter_global_pct: {_y(an.get('filter_global_pct', 0))}   # keep features measured in >= this % of samples")
+    a(f"  filter_condition_pct: {_y(an.get('filter_condition_pct', 50))}   # ... and in >= this % of one condition")
+    a(f"  normalize: {_y(an.get('normalize', 'median'))}   # median | gn (median + MAD) | none")
+    a(f"  imputation: {_y(an.get('imputation', 'auto'))}   # auto | none | perseus | min | zero | mindet | minprob | knn")
+    a(f"  min_valid: {_y(an.get('min_valid', 2))}   # measured values per group needed when nothing is imputed")
+    a(f"  enrichment: {_y(bool(an.get('enrichment', True)))}   # gene-set enrichment of the hits (downloads libraries once)")
+    a(f"  enrichment_libraries: {_y(list(an.get('enrichment_libraries') or []))}")
+    a(f"  enrichment_gmt: {_y(an.get('enrichment_gmt', '') or '')}   # optional extra gene sets (.gmt file)")
     a(f"  top_labels: {_y(an.get('top_labels', 15))}   # hit names written on each volcano")
     a(f"  control_keywords: {_y(list(an.get('control_keywords') or []))}   # how the control condition is recognised")
+    for k in ("impute_shift", "impute_scale", "seed", "pca_features", "heatmap_max", "control"):
+        if an.get(k) not in (None, ""):
+            a(f"  {k}: {_y(an[k])}")
     a("")
     a("users:   # users are the subfolders of users_root; aliases map initials -> folder")
     a("  aliases:")

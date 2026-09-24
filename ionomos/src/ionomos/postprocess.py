@@ -25,10 +25,9 @@ def context_for(dest: Path, record: dict, method: str) -> dict:
             "method": method, "date": folder.get("date") or "", "fragpipe": f"workflow {wf}" if wf else ""}
 
 
-def run_for_folder(dest: Path, cfg, method: str | None = None, extra: dict | None = None):
-    """Analyse one experiment folder (used after a job and by `ionomos analyze`). Returns downstream.Outcome."""
-    from ionomos import downstream
-
+def prepare(dest: Path, cfg, method: str | None = None, extra: dict | None = None) -> dict:
+    """Everything analyze() needs for one folder: the status record (with experiment.yaml file corrections
+    applied), lab settings, the experiment's analysis overrides, method, context."""
     dest = Path(dest)
     try:
         from ionomos.names import status_path
@@ -60,8 +59,36 @@ def run_for_folder(dest: Path, cfg, method: str | None = None, extra: dict | Non
     mod_mass = "561.3387"
     if cfg is not None and method in getattr(cfg, "methods", {}):
         mod_mass = str(cfg.methods[method].extra.get("isodtb_mod_mass", mod_mass))
-    layers = {**overrides, **(extra or {})}
-    return downstream.analyze(dest, method, lab, layers, record, context_for(dest, record, method or "?"), mod_mass)
+    return {"dest": dest, "method": method, "lab": lab, "overrides": {**overrides, **(extra or {})}, "record": record,
+            "context": context_for(dest, record, method or "?"), "mod_mass": mod_mass}
+
+
+def run_for_folder(dest: Path, cfg, method: str | None = None, extra: dict | None = None, progress=None):
+    """Analyse one experiment folder (used after a job, by `ionomos analyze` and the Analysis tab).
+    Returns downstream.Outcome."""
+    from ionomos import downstream
+
+    p = prepare(dest, cfg, method, extra)
+    return downstream.analyze(p["dest"], p["method"], p["lab"], p["overrides"], p["record"], p["context"],
+                              p["mod_mass"], progress=progress)
+
+
+def inspect_folder(dest: Path, cfg, method: str | None = None) -> dict:
+    """What the Analysis tab shows before running: method, source table, samples with their conditions
+    (as the data says, before this experiment's sample overrides), and the current overrides."""
+    from ionomos import downstream
+
+    p = prepare(dest, cfg, method)
+    dest = p["dest"]
+    workdir = dest / "fragpipe" if (dest / "fragpipe").is_dir() else dest
+    found = p["method"] if p["method"] and p["method"] != "auto" else downstream.detect_method(workdir)
+    m, _files, notes = downstream.load_quantities(found, workdir, dest / downstream.RESULTS, p["record"], p["mod_mass"])
+    samples = []
+    if m is not None:
+        samples = [{"sample": x, "condition": m.condition[x], "replicate": m.replicate.get(x)} for x in m.samples]
+    return {"method": found, "source": m.source if m else None, "features": len(m.features) if m else 0,
+            "kind": m.kind if m else None, "samples": samples, "notes": notes, "overrides": p["overrides"],
+            "report": dest / downstream.RESULTS / "report.html"}
 
 
 def run_all(job, spec, cfg) -> tuple[list[str], dict]:
