@@ -546,31 +546,50 @@ def _intake(folder: Path, cfg: Config, ledger: Ledger, resolver: Resolver | None
     except PermissionError as exc:
         # Windows: Explorer / antivirus still has a handle on a just-copied file. Try again later.
         log.warning("cannot move %s yet (%s); will retry", folder.name, exc.strerror or exc)
-        return IntakeResult.RETRY
+        return IntakeResult.RETRY  # pre-move: a RETRY is still honest
     except IntakeError as exc:
         _reject(folder, str(exc))
         return IntakeResult.REJECTED
 
+    # From here the folder is at dest. A RETRY would lose it: the watcher forgets
+    # folders no longer in the inbox, and both sweeps look for a status file that
+    # does not exist yet. File it best-effort instead.
     raw_base = dest / p.raw_dir if p.raw_dir else dest
-    for old, new in p.renames.items():
-        _rename_retry(raw_base / old, raw_base / new)
+    try:
+        for old, new in p.renames.items():
+            _rename_retry(raw_base / old, raw_base / new)
 
-    mcfg = cfg.methods[p.folder.method]
-    record = {
-        "ionomos_version": __version__,
-        "status": "queued",
-        "reason": None,
-        "queued_at": now_iso(),
-        "moved_by": how,
-        "plan": p.to_json(),
-        "method_config": {
-            "workflow": p.overrides.get("workflow") or mcfg.workflow,
-            "fasta": p.overrides.get("fasta") or mcfg.fasta,
-            "data_type": mcfg.data_type,
-            "postprocess": list(mcfg.postprocess),
-        },
-    }
-    write_status(dest, record)
+        mcfg = cfg.methods[p.folder.method]
+        record = {
+            "ionomos_version": __version__,
+            "status": "queued",
+            "reason": None,
+            "queued_at": now_iso(),
+            "moved_by": how,
+            "plan": p.to_json(),
+            "method_config": {
+                "workflow": p.overrides.get("workflow") or mcfg.workflow,
+                "fasta": p.overrides.get("fasta") or mcfg.fasta,
+                "data_type": mcfg.data_type,
+                "postprocess": list(mcfg.postprocess),
+            },
+        }
+        write_status(dest, record)
+    except Exception as exc:  # noqa: BLE001 - the folder is already moved; don't report a retry
+        log.exception("trouble finishing intake for %s; filing a minimal record instead", dest)
+        try:
+            write_status(dest, {
+                "ionomos_version": __version__,
+                "status": "queued",
+                "reason": f"intake hit {type(exc).__name__} after the move: {exc}",
+                "queued_at": now_iso(),
+                "moved_by": how,
+                "plan": p.to_json(),
+            })
+        except OSError:
+            log.critical("%s is moved but untracked: no status file could be written, "
+                         "so the reconciliation sweeps cannot see it", dest)
+        return IntakeResult.QUEUED
     _clear_note(folder)
 
     job = Job(inbox_name=p.folder.safe, user=p.folder.user, method=p.folder.method,

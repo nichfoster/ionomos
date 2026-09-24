@@ -1,11 +1,15 @@
 import errno
 import json
+import os
 import shutil
+import time
+from pathlib import Path
 
 import pytest
 
+import ionomos.intake
 from ionomos.intake import IntakeError, IntakeResult, Kind, _move_tree, draft, intake, plan
-from ionomos.ledger import Ledger
+from ionomos.ledger import Ledger, adopt_orphans
 from ionomos.manifest import FileOverride, Overrides, load_overrides, save_overrides
 from tests.conftest import iso_raws, make_drop
 
@@ -289,3 +293,62 @@ def test_move_tree_rejects_copy_with_missing_file(lab, monkeypatch):
         _move_tree(src, dst)
     assert (src / "big.raw").read_bytes() == big  # source left in place, intact
     assert (src / "small.raw").read_bytes() == big
+
+
+# ---------------------------------------------------------------------------
+# Regression tests: a failure AFTER the folder moved must file it, not lose it (F1).
+# ---------------------------------------------------------------------------
+
+
+def test_rename_lock_after_move_files_minimal_record(lab, ledger, monkeypatch):
+    """F1: a persistent Windows lock on a raw-file rename, after the folder moved, files a
+    minimal queued record. A RETRY here loses the folder for good (the watcher forgets it)."""
+    d = make_drop(lab["inbox"], "Isaac DIA FLAG pulldown (test)",
+                  ["DMSO 1.raw", "DMSO 2.raw", "Drug_1.raw", "Drug_2.raw"], raw_sub=True)
+    real = os.rename
+
+    def locked(src, dst, **kw):
+        if Path(src) == d:  # the folder move itself succeeds
+            return real(src, dst, **kw)
+        raise PermissionError(13, "Access is denied")  # antivirus keeps a handle on every raw file
+
+    monkeypatch.setattr(os, "rename", locked)
+    monkeypatch.setattr(time, "sleep", lambda *_: None)  # no real backoff in tests
+
+    assert intake(d, lab["cfg"], ledger) == IntakeResult.QUEUED
+
+    dest = lab["general"] / "Isaac" / "Isaac-DIA-FLAG-pulldown-test"
+    rec = json.loads((dest / "ionomos.json").read_text())
+    assert rec["status"] == "queued"
+    assert "PermissionError" in rec["reason"]
+    assert rec["plan"]["folder"]["safe"] == "Isaac-DIA-FLAG-pulldown-test"
+    assert (dest / "raw" / "DMSO 1.raw").is_file()  # the locked renames never happened
+    adopted = adopt_orphans(ledger, lab["general"])
+    assert len(adopted) == 1
+    assert ledger.next_queued().dest_dir == str(dest)
+
+
+def test_status_write_failure_files_minimal_record(lab, ledger, monkeypatch):
+    """F1: a full disk during write_status, after the folder moved, still files the
+    experiment via the fallback minimal record."""
+    d = make_drop(lab["inbox"], "20260902-isoDTB_EJQ-2-027", iso_raws())
+    real = ionomos.intake.write_status
+    calls = []
+
+    def full_disk(dest, record, **kw):
+        calls.append(dest)
+        if len(calls) == 1:
+            raise OSError(28, "No space left on device")
+        return real(dest, record, **kw)
+
+    monkeypatch.setattr(ionomos.intake, "write_status", full_disk)
+
+    assert intake(d, lab["cfg"], ledger) == IntakeResult.QUEUED
+    assert len(calls) == 2  # the failing full record, then the fallback minimal one
+
+    dest = lab["general"] / "EJQ" / "20260902-isoDTB_EJQ-2-027"
+    rec = json.loads((dest / "ionomos.json").read_text())
+    assert rec["status"] == "queued"
+    assert "OSError" in rec["reason"]
+    assert rec["plan"]["folder"]["user"] == "EJQ"
+    assert len(adopt_orphans(ledger, lab["general"])) == 1
