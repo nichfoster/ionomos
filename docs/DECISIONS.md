@@ -311,3 +311,13 @@ nothing testable, no volcano, heavy imputation, few features, no hits. Input
 and error issues become the pop-up; warnings go in the report's issues panel.
 The stress test now also checks every comparison has a volcano and every
 analysis that isn't "ok" told a person.
+
+### D29 — Cross-volume copies are hash-verified before the source is deleted
+**2026-09-24.** When inbox and users_root sit on different drives, intake
+copies the tree and used to compare file sizes before deleting the source —
+silent same-size corruption would pass and destroy the original. `_move_tree`
+now SHA-256s every copied file (1 MiB chunks) on both sides and removes the
+source only when every hash matches; any mismatch or missing file raises
+IntakeError and the source is left in place. The EXDEV rename fast path is
+unchanged, and the disk-space check before copying still sizes the tree —
+it estimates capacity, it does not verify content.

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import enum
 import errno
+import hashlib
 import json
 import logging
 import os
@@ -366,6 +367,15 @@ def draft(folder: Path, cfg: Config, error: IntakeError | None = None) -> Draft:
 # ----------------------------------------------------------------- intake --
 
 
+def _sha256(path: Path) -> str:
+    """SHA-256 of a file's contents, read in 1 MiB chunks."""
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 def _move_tree(src: Path, dst: Path) -> str:
     """Atomic rename when possible; otherwise copy+verify+delete. Returns how."""
     dst.parent.mkdir(parents=True, exist_ok=True)
@@ -381,10 +391,11 @@ def _move_tree(src: Path, dst: Path) -> str:
     if free < need * 1.1:
         raise IntakeError(f"not enough space on {dst.parent}: need {need / 1e9:.1f} GB, have {free / 1e9:.1f} GB")
     shutil.copytree(src, dst)
+    # Content hashes, not sizes — a same-size corrupt copy must never delete the source.
     for a in src.rglob("*"):
         if a.is_file():
             b = dst / a.relative_to(src)
-            if not b.is_file() or a.stat().st_size != b.stat().st_size:
+            if not b.is_file() or _sha256(a) != _sha256(b):
                 raise IntakeError(f"copy verification failed for {a.relative_to(src)}; source left in place")
     shutil.rmtree(src)
     return "copy"
