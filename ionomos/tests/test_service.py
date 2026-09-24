@@ -1,11 +1,13 @@
+import base64
 import os
 import subprocess
 import sys
+import types
 from pathlib import Path
 
 import pytest
 
-from ionomos import service
+from ionomos import names, service
 
 
 def test_config_path_memory(tmp_path, monkeypatch):
@@ -138,3 +140,41 @@ def test_diagnostics_contains_everything(lab):
 def test_diagnostics_survives_missing_config(tmp_path):
     text, where = service.save_diagnostics(tmp_path / "nope.yaml")
     assert "exists=False" in text and where is None
+
+# ------------------------------------------------------- desktop shortcut (Windows) ----
+
+
+def test_create_desktop_shortcut_encoded_command(tmp_path, monkeypatch):
+    # stub service.os (name/env are all the function reads) rather than patching
+    # os.name globally -- that would make pathlib try to build WindowsPath on POSIX
+    nt_os = types.SimpleNamespace(name="nt", environ=os.environ)
+    monkeypatch.setattr(service, "os", nt_os)
+    # _creationflags() takes its Windows branch under the stub; supply the constant it reads
+    monkeypatch.setattr(service.subprocess, "CREATE_NEW_PROCESS_GROUP", 0, raising=False)
+    monkeypatch.setattr(service.sys, "frozen", True, raising=False)
+    profile = tmp_path / "O'Brien"  # apostrophe: breaks -Command quoting, must survive encoding
+    profile.mkdir()
+    monkeypatch.setenv("USERPROFILE", str(profile))
+    calls = []
+
+    def fake_run(cmd, *a, **k):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(service.subprocess, "run", fake_run)
+    ok, msg = service.create_desktop_shortcut()
+    assert ok and Path(msg).name == names.SHORTCUT
+    assert calls and calls[0][:3] == ["powershell", "-NoProfile", "-EncodedCommand"]
+    decoded = base64.b64decode(calls[0][3]).decode("utf-16-le")
+    lnk = profile / "Desktop" / names.SHORTCUT
+    assert f"CreateShortcut('{lnk}')" in decoded  # apostrophe path unbroken
+    assert f"$s.TargetPath='{sys.executable}'" in decoded
+
+    # return-code contract: failure surfaces stderr, not the lnk path
+    def failing_run(cmd, *a, **k):
+        return subprocess.CompletedProcess(cmd, 1, "", "boom")
+
+    monkeypatch.setattr(service.subprocess, "run", failing_run)
+    ok, msg = service.create_desktop_shortcut()
+    assert not ok and msg == "boom"
+

@@ -8,6 +8,7 @@ Config path precedence (used by the app when no --config is given):
 """
 from __future__ import annotations
 
+import base64
 import json
 import os
 import subprocess
@@ -397,7 +398,9 @@ def create_desktop_shortcut() -> tuple[bool, str]:
         f"$s.TargetPath='{sys.executable}';$s.WorkingDirectory='{Path(sys.executable).parent}';"
         "$s.Description='Ionomos setup & control';$s.Save()"
     )
-    r = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True,
+    # -EncodedCommand (base64 UTF-16LE) so paths containing apostrophes survive verbatim
+    encoded = base64.b64encode(ps.encode("utf-16-le")).decode("ascii")
+    r = subprocess.run(["powershell", "-NoProfile", "-EncodedCommand", encoded], capture_output=True, text=True,
                        creationflags=_creationflags())
     return r.returncode == 0, str(lnk) if r.returncode == 0 else (r.stderr or r.stdout)
 
