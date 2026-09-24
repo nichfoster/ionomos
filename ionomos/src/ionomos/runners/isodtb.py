@@ -1,29 +1,39 @@
 """
-isoDTB post-processing: merge modified peptides to labelled sites.
+isoDTB runner entry point: merge modified peptides to labelled sites.
 
-Port of reference/lab-scripts/isoDTB_Fragpipe_merge-individual-peptides-to-Site.R
+Thin adapter over ionomos/downstream/isodtb.py — the faithful port of
+reference/lab-scripts/isoDTB_Fragpipe_merge-individual-peptides-to-Site.R
+(checked byte-identical to the R output in tests/test_downstream.py).
+
+This entry keeps the R script's user-facing shape: one input table, one
+sample prefix, one output file.
 
 Contract (Phase 2):
-    merge_to_sites(input_tsv, output_tsv, sample_prefix, mod_mass="561.3387") -> pd.DataFrame
+    merge_to_sites(input_tsv, output_tsv, sample_prefix, mod_mass="561.3387") -> Path
 
     input_tsv     = <workdir>/combined_modified_peptide_label_quant.tsv
+    output_tsv    = written exactly as the caller names it
     sample_prefix = FragPipe experiment name (RawName.sample)
-    Algorithm (mirror the R exactly, then golden-file test against a real
-    lab output):
-      - for each row, find every "[<mod_mass>]" in `Light Modified Peptide`
-      - residue letter = char before '['; position in peptide = count of
-        letters before '['; position in protein = Start + pos - 1
-      - join Protein, Protein ID, Entry Name, Gene, Protein Description,
-        Peptide Sequence, and all "<sample_prefix>_<n> Log2 Ratio HL" columns
-      - group by (Protein, Protein ID, Entry Name, Gene, Protein Description,
-        ModifiedResidue, ResiduePositionInProtein)
-      - PeptideCount = n distinct peptides; ExamplePeptides = first 3 joined "; "
-      - Mean_<col> per ratio column (nan-mean); Mean_Log2_Ratio_HL over all
-      - sort by Protein, ResiduePositionInProtein; write TSV
-    Errors: no labelled sites found; no ratio columns match the prefix.
+    Errors: SiteError with the R-parity messages — no labelled sites found;
+    no ratio columns match the prefix.
+
+The merge algorithm lives only in downstream/isodtb.py; the runner adds
+nothing. The downstream differences from the R script (prefixes auto-detected
+in the pipeline driver, the N-terminal letter-counting quirk kept for
+identical output) apply here too and are documented there.
 """
 from __future__ import annotations
 
+from pathlib import Path
 
-def merge_to_sites(input_tsv, output_tsv, sample_prefix, mod_mass="561.3387"):
-    raise NotImplementedError("Phase 2")
+from ionomos.downstream.isodtb import SiteError, site_table
+from ionomos.downstream.tables import read_tsv, write_tsv
+
+__all__ = ["SiteError", "merge_to_sites"]
+
+
+def merge_to_sites(input_tsv: Path, output_tsv: Path, sample_prefix: str, mod_mass: str = "561.3387") -> Path:
+    """Write the R script's summary_df for one prefix; return the written file."""
+    header, rows = read_tsv(Path(input_tsv))
+    out_header, out_rows = site_table(header, rows, sample_prefix, mod_mass)
+    return write_tsv(Path(output_tsv), out_header, out_rows)
