@@ -29,7 +29,10 @@ def app(tmp_path, monkeypatch):
     root.withdraw()
     a = App(root, tmp_path / "Auto" / "config.yaml")
     yield a
-    root.destroy()
+    # Unbound call: the finalizer must destroy the real root even if a test
+    # monkeypatched app.root.destroy to a no-op (a patched instance attribute
+    # would otherwise leak this Tk interpreter into the rest of the session).
+    tk.Tk.destroy(root)
 
 
 def test_first_run_wizard_flow(app, tmp_path):
