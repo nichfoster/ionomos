@@ -97,6 +97,21 @@ def _int_or_none(v, what: str) -> int | None:
         raise OverridesError(f"{what} must be an integer, got {v!r}") from None
 
 
+def _require_path_safe(value: str, what: str) -> str:
+    """Reject path-like values and sanitize the rest — nothing read from
+    experiment.yaml ever reaches a path join raw (audit L1). Path-like values
+    are refused, not rewritten: a silently altered user: could file an
+    experiment under a different user's folder."""
+    from ionomos.naming import sanitize  # local import avoids cycle at module load
+
+    if "/" in value or "\\" in value or not value.isprintable():
+        raise OverridesError(f"{what} must be a name, not a path: {value!r}")
+    try:
+        return sanitize(value)
+    except NamingError as exc:
+        raise OverridesError(f"{what}: {exc}") from exc
+
+
 def parse_overrides(data: dict | None) -> Overrides:
     data = data or {}
     if not isinstance(data, dict):
@@ -107,7 +122,7 @@ def parse_overrides(data: dict | None) -> Overrides:
 
     ov = Overrides()
     ov.method = str(data["method"]) if data.get("method") else None
-    ov.user = str(data["user"]) if data.get("user") else None
+    ov.user = _require_path_safe(str(data["user"]), "user") if data.get("user") else None
     ov.workflow = str(data["workflow"]) if data.get("workflow") else None
     ov.fasta = str(data["fasta"]) if data.get("fasta") else None
     ov.notes = str(data["notes"]) if data.get("notes") else None
@@ -133,8 +148,9 @@ def parse_overrides(data: dict | None) -> Overrides:
         bad = set(spec) - _FILE_KEYS
         if bad:
             raise OverridesError(f"files.{name}: unknown key(s) {', '.join(sorted(bad))}")
+        experiment = str(spec["experiment"]) if spec.get("experiment") else None
         ov.files[str(name)] = FileOverride(
-            experiment=str(spec["experiment"]) if spec.get("experiment") else None,
+            experiment=_require_path_safe(experiment, f"files.{name}.experiment") if experiment else None,
             bioreplicate=_int_or_none(spec.get("bioreplicate"), f"files.{name}.bioreplicate"),
             fraction=_int_or_none(spec.get("fraction"), f"files.{name}.fraction"),
         )
