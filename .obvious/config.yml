@@ -1,0 +1,5 @@
+# Ionomos repo policy (auto-detected from GitHub settings on 2026-09-24)
+branches:
+  default: master
+merge:
+  method: squash   # merge commit, squash and rebase are all allowed on the repo
