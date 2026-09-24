@@ -1,4 +1,5 @@
 """Drive the setup/control app through a real Tk root (skipped without a display)."""
+import hashlib
 import time
 
 import pytest
@@ -266,6 +267,29 @@ def _pump_until(app, cond, secs=15):
     return False
 
 
+def _update_release(sha256=None, size=1024):
+    from ionomos import updates
+
+    return updates.Release(version="9.9.9", page="https://github.com/nichfoster/ionomos/releases/tag/v9.9.9",
+                           asset_name="Ionomos-Setup-9.9.9.exe", asset_url="https://x/Ionomos-Setup-9.9.9.exe",
+                           size=size, sha256=sha256)
+
+
+def _installable_update(app, monkeypatch, shown, installed, downloaded):
+    """Make install_update() believe this is an installed Windows build; record dialogs, installs and downloads."""
+    from tkinter import messagebox
+
+    from ionomos import health, updates
+
+    monkeypatch.setattr(updates, "can_self_update", lambda: True)
+    monkeypatch.setattr(health, "is_locked", lambda *a, **k: False)
+    monkeypatch.setattr(updates, "install", lambda *a, **k: installed.append(a[0]))
+    monkeypatch.setattr(updates, "download", lambda *a, **k: downloaded.append(a[0]))
+    monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: True)
+    monkeypatch.setattr(messagebox, "showerror", lambda *a, **k: shown.append(a))
+    monkeypatch.setattr(app.root, "destroy", lambda: None)  # finish() quits the app; keep the fixture's Tk alive
+
+
 def test_setup_tab_checklist_and_auto_setup(app, tmp_path, monkeypatch):
     from ionomos import configio, fragpipe
 
@@ -494,6 +518,72 @@ def test_update_banner_appears_for_a_downloaded_installer(app, tmp_path, monkeyp
     monkeypatch.setattr(updates, "downloads_dir", lambda: tmp_path)
     app.check_downloaded_update()
     assert _pump_until(app, lambda: app.update_btn.cget("text") == "Update to 9.9.9")
+
+
+def test_install_update_refuses_a_digest_less_release(app, tmp_path, monkeypatch):
+    """A Downloads installer is never run without a published SHA-256 for its exact version."""
+
+    shown, installed, downloaded = [], [], []
+    _installable_update(app, monkeypatch, shown, installed, downloaded)
+    installer = tmp_path / "Ionomos-Setup-9.9.9.exe"
+    installer.write_bytes(b"MZ fake installer")
+    app._release, app._update_found = None, (installer, "9.9.9")
+    app.install_update()
+    assert len(shown) == 1 and "releases" in shown[0][1]
+    assert not installed
+
+
+def test_install_update_refuses_an_installer_from_a_different_version(app, tmp_path, monkeypatch):
+    """A Downloads installer claiming a version the release doesn't cover has no digest reference — refuse."""
+
+    shown, installed, downloaded = [], [], []
+    _installable_update(app, monkeypatch, shown, installed, downloaded)
+    payload = b"MZ fake installer"
+    installer = tmp_path / "Ionomos-Setup-9.9.10.exe"
+    installer.write_bytes(payload)
+    app._release = _update_release(sha256=hashlib.sha256(payload).hexdigest(), size=len(payload))
+    app._update_found = (installer, "9.9.10")
+    app.install_update()
+    assert len(shown) == 1 and "releases" in shown[0][1]
+    assert not installed and not downloaded
+
+
+def test_install_update_refuses_an_installer_that_fails_its_checksum(app, tmp_path, monkeypatch):
+
+    shown, installed, downloaded = [], [], []
+    _installable_update(app, monkeypatch, shown, installed, downloaded)
+    payload = b"MZ fake installer"
+    installer = tmp_path / "Ionomos-Setup-9.9.9.exe"
+    installer.write_bytes(b"X" * len(payload))  # same size, wrong content: the digest check must catch it
+    app._release = _update_release(sha256=hashlib.sha256(payload).hexdigest(), size=len(payload))
+    app._update_found = (installer, "9.9.9")
+    app.install_update()
+    assert len(shown) == 1 and "checksum" in shown[0][1]
+    assert not installed and not downloaded
+
+
+def test_install_update_runs_a_verified_downloads_installer(app, tmp_path, monkeypatch):
+
+    shown, installed, downloaded = [], [], []
+    _installable_update(app, monkeypatch, shown, installed, downloaded)
+    payload = b"MZ fake installer"
+    installer = tmp_path / "Ionomos-Setup-9.9.9.exe"
+    installer.write_bytes(payload)
+    app._release = _update_release(sha256=hashlib.sha256(payload).hexdigest(), size=len(payload))
+    app._update_found = (installer, "9.9.9")
+    app.install_update()
+    assert installed == [installer]
+    assert not shown and not downloaded
+
+
+def test_install_update_wont_download_a_digest_less_release(app, monkeypatch):
+
+    shown, installed, downloaded = [], [], []
+    _installable_update(app, monkeypatch, shown, installed, downloaded)
+    app._release, app._update_found = _update_release(sha256=None), None
+    app.install_update()
+    assert len(shown) == 1 and "releases" in shown[0][1]
+    assert not downloaded and not installed
 
 
 def test_inbox_delete_refreshes_and_preserves_raw(app, tmp_path):

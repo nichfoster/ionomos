@@ -174,6 +174,21 @@ def test_a_tampered_or_short_download_is_refused(tmp_path, monkeypatch):
     assert not list(tmp_path.iterdir())  # nothing left that could be run
 
 
+def test_verified_checks_content_not_just_size(tmp_path):
+    payload = b"MZ fake installer" * 100
+    rel = updates.Release(version="9.9.9", page="", asset_name="Ionomos-Setup-9.9.9.exe", asset_url="https://x/s.exe",
+                          size=len(payload), sha256=hashlib.sha256(payload).hexdigest())
+    good = tmp_path / "good.exe"
+    good.write_bytes(payload)
+    assert updates._verified(good, rel)
+    tampered = tmp_path / "tampered.exe"
+    tampered.write_bytes(b"X" + payload[1:])  # same size, different content
+    assert not updates._verified(tampered, rel)
+    short = tmp_path / "short.exe"
+    short.write_bytes(b"short")
+    assert not updates._verified(short, rel)  # size fast-fail before any hashing
+
+
 def test_offline_or_no_setup_asset(monkeypatch):
     monkeypatch.setenv("IONOMOS_OFFLINE", "1")
     assert updates.check_latest()[0] is None
