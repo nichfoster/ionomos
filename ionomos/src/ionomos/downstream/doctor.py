@@ -83,7 +83,7 @@ def _tables_present(workdir: Path | None, limit: int = 12) -> list[str]:
     if workdir is None or not Path(workdir).is_dir():
         return []
     try:
-        found = sorted(str(p.relative_to(workdir)) for p in Path(workdir).rglob("*.tsv"))
+        found = sorted(p.relative_to(workdir).as_posix() for p in Path(workdir).rglob("*.tsv"))
     except OSError:
         return []
     return found[:limit]
