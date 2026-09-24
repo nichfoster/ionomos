@@ -315,7 +315,7 @@ def test_dia_converted_names_and_nan_retain_six_runs(tmp_path):
     pg = dest / 'fragpipe/dia-quant-output/report.pg_matrix.tsv'
     simulate.dia_pg_matrix(pg, runs, seed=21)
     # DIA-NN can represent missing intensities with NaN rather than NA.
-    pg.write_text(pg.read_text().replace('\tNA', '\tNaN'))
+    pg.write_text(pg.read_text(encoding='utf-8').replace('\tNA', '\tNaN'), encoding='utf-8')
     record = {'plan': {'manifest': [
         {'file': f'C:\\data\\{stem}.raw', 'experiment': c, 'bioreplicate': i % 3 + 1}
         for i, (stem, (_, c)) in enumerate(zip(stems, runs, strict=True))]}}
@@ -338,7 +338,7 @@ def test_dia_missing_controls_warns_in_report(tmp_path):
     assert any('Expected runs missing' in w and 'DMSO_1' in w and 'DMSO_2' in w for w in out.warnings)
     assert any('DMSO has 1 sample' in w for w in out.warnings)
     assert any('zero features' in w for w in out.warnings)
-    assert 'zero features' in out.report.read_text()
+    assert 'zero features' in out.report.read_text(encoding='utf-8')
 
 
 def test_dia_nan_does_not_drop_unmapped_column(tmp_path):
@@ -367,4 +367,4 @@ def test_reanalysis_honors_updated_file_labels(tmp_path):
     out = postprocess.run_for_folder(dest, None)
     assert out.summary['comparisons'][0]['name'] == 'Drug vs DMSO'
     assert out.summary['comparisons'][0]['tested'] > 0
-    assert json.loads((dest / names.STATUS_FILE).read_text()) == record
+    assert json.loads((dest / names.STATUS_FILE).read_text(encoding='utf-8')) == record
