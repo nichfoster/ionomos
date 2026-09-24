@@ -1,0 +1,945 @@
+<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><meta name='generator' content='ionomos-report-v2'><title>Fixture_Exp — Ionomos report</title><style>:root{color-scheme:light;--page:#f9f9f7;--surface:#fcfcfb;--sunk:#f1f0ec;--text:#0b0b0b;--text2:#52514e;--muted:#898781;
+--line:#e1e0d9;--ring:rgba(11,11,11,.10);--accent:#2a78d6;--warnbg:#fff6e0;--warnink:#6b4a00;
+--up:#e34948;--down:#2a78d6;--ns:#c3c2b7;--grid:#e1e0d9;--axis:#c3c2b7;--sel:#0b0b0b;
+--c0:#2a78d6;--c1:#eb6834;--c2:#1baf7a;--c3:#eda100;--c4:#e87ba4;--c5:#008300;--c6:#4a3aa7;--c7:#e34948}
+@media (prefers-color-scheme: dark){:root:where(:not([data-theme="light"])){color-scheme:dark;--page:#0d0d0d;
+--surface:#1a1a19;--sunk:#141413;--text:#fff;--text2:#c3c2b7;--muted:#898781;--line:#2c2c2a;--ring:rgba(255,255,255,.10);
+--accent:#3987e5;--warnbg:#2a2210;--warnink:#f2d58a;--up:#e66767;--down:#3987e5;--ns:#52514e;--grid:#2c2c2a;
+--axis:#383835;--sel:#fff;--c0:#3987e5;--c1:#d95926;--c2:#199e70;--c3:#c98500;--c4:#d55181;--c5:#008300;--c6:#9085e9;--c7:#e66767}}
+:root[data-theme="dark"]{color-scheme:dark;--page:#0d0d0d;--surface:#1a1a19;--sunk:#141413;--text:#fff;--text2:#c3c2b7;
+--muted:#898781;--line:#2c2c2a;--ring:rgba(255,255,255,.10);--accent:#3987e5;--warnbg:#2a2210;--warnink:#f2d58a;
+--up:#e66767;--down:#3987e5;--ns:#52514e;--grid:#2c2c2a;--axis:#383835;--sel:#fff;--c0:#3987e5;--c1:#d95926;
+--c2:#199e70;--c3:#c98500;--c4:#d55181;--c5:#008300;--c6:#9085e9;--c7:#e66767}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:64px}
+body{margin:0;background:var(--page);color:var(--text);font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:1180px;margin:0 auto;padding:20px 20px 80px}
+h1{font-size:24px;margin:0 0 2px;font-weight:650;letter-spacing:-.01em}
+h2{font-size:18px;margin:40px 0 4px;font-weight:620}
+h3{font-size:14px;margin:20px 0 6px;font-weight:600;color:var(--text2)}
+a{color:var(--accent)}
+.sub{color:var(--text2);margin:0 0 12px}
+.meta{color:var(--muted);font-size:13px}
+.top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+.toc{position:sticky;top:0;z-index:5;background:var(--page);border-bottom:1px solid var(--line);margin:14px -20px 0;padding:8px 20px;
+display:flex;gap:4px;flex-wrap:wrap}
+.toc a{text-decoration:none;color:var(--text2);padding:4px 10px;border-radius:999px;font-size:13px}
+.toc a:hover{background:var(--sunk);color:var(--text)}
+button,select,input{font:inherit;color:var(--text)}
+button{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:5px 11px;cursor:pointer}
+button:hover{border-color:var(--muted)}
+button.on{background:var(--text);color:var(--page);border-color:var(--text)}
+select,input[type=number],input[type=search],input[type=text]{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:5px 9px}
+input[type=number]{width:78px}
+input[type=search]{min-width:220px}
+label.ctl{display:inline-flex;align-items:center;gap:6px;color:var(--text2);font-size:13px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:18px 0}
+.tile{background:var(--surface);border:1px solid var(--ring);border-radius:10px;padding:12px 14px}
+.tile .k{color:var(--text2);font-size:12px}.tile .v{font-size:26px;font-weight:620;font-variant-numeric:tabular-nums}
+.tile .d{font-size:12px;color:var(--muted)}
+.card{background:var(--surface);border:1px solid var(--ring);border-radius:12px;padding:14px;margin:12px 0}
+.notes{background:var(--warnbg);color:var(--warnink);border-radius:10px;padding:10px 14px;margin:14px 0}
+.notes ul{margin:4px 0 0;padding-left:18px}.notes li{margin:2px 0}
+.pipeline{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:8px 0}
+.step{background:var(--surface);border:1px solid var(--ring);border-radius:8px;padding:5px 10px;font-size:12.5px}
+.step b{font-variant-numeric:tabular-nums}.arrow{color:var(--muted)}
+.bar{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;background:var(--surface);border:1px solid var(--ring);
+border-radius:12px;padding:10px 14px;margin:12px 0;position:sticky;top:44px;z-index:4}
+.split{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:14px;align-items:start}
+@media (max-width:900px){.split{grid-template-columns:1fr}}
+.chart{position:relative;overflow:hidden}
+.chart svg{display:block;width:100%;height:auto;user-select:none}
+.chart canvas{display:block;max-width:100%}
+.chart .tools{position:absolute;top:6px;right:8px;display:flex;gap:6px;opacity:.85}
+.chart .tools button{font-size:12px;padding:2px 8px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12.5px;color:var(--text2);margin:6px 2px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{width:10px;height:10px;border-radius:50%;display:inline-block}
+.detail{min-height:200px}
+.detail h4{margin:0;font-size:16px}
+.detail .id{color:var(--muted);font-size:12px;word-break:break-all}
+.detail .desc{color:var(--text2);font-size:13px;margin:4px 0 8px}
+.detail table{font-size:12px;table-layout:auto}
+.detail th,.detail td{padding:4px 5px;white-space:normal}
+.detail td.n{white-space:nowrap}
+.empty{color:var(--muted);font-size:13px;padding:30px 8px;text-align:center}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
+.chip{border:1px solid var(--line);border-radius:999px;padding:2px 10px;font-size:12px;cursor:pointer;background:var(--surface)}
+.chip.on{border-color:var(--text)}
+.tablewrap{overflow:auto;max-height:560px;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{padding:5px 10px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+th{position:sticky;top:0;background:var(--surface);color:var(--text2);font-weight:600;cursor:pointer;user-select:none;z-index:1}
+th[data-dir=asc]::after{content:" ▲";font-size:10px}th[data-dir=desc]::after{content:" ▼";font-size:10px}
+td.n{text-align:right;font-variant-numeric:tabular-nums}
+td.desc{white-space:normal;min-width:240px;color:var(--text2)}
+tbody tr{cursor:pointer}tbody tr:hover{background:var(--sunk)}
+tr.focus{background:var(--sunk);box-shadow:inset 3px 0 0 var(--accent)}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.dot.up{background:var(--up)}.dot.down{background:var(--down)}
+.pager{display:flex;gap:8px;align-items:center;justify-content:flex-end;margin:6px 0;color:var(--text2);font-size:13px}
+.tabs{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin:10px 0}
+.tabs button{border:none;border-bottom:2px solid transparent;border-radius:0;background:none;color:var(--text2);padding:6px 12px}
+.tabs button.on{border-bottom-color:var(--text);color:var(--text);background:none}
+.muted{color:var(--muted)}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+.methods{color:var(--text2);max-width:84ch}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:3px 16px;font-size:13px}
+.kv div:nth-child(odd){color:var(--text2)}
+.files li{margin:3px 0}
+.issues{display:grid;gap:8px;margin:14px 0}
+.issue{border-radius:10px;padding:10px 14px;border:1px solid var(--ring);background:var(--surface);border-left:4px solid var(--muted)}
+.issue.error{border-left-color:var(--up)}.issue.input{border-left-color:var(--c3)}.issue.warning{border-left-color:var(--muted)}
+.issue .sev{font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--text2)}
+.issue .cz{font-size:13px;color:var(--text2);margin-top:4px}.issue ul{margin:2px 0 0;padding-left:18px}
+details.notes summary{cursor:pointer}
+#tip{position:fixed;pointer-events:none;background:var(--surface);color:var(--text);border:1px solid var(--ring);
+border-radius:8px;padding:6px 10px;font-size:12px;box-shadow:0 4px 16px rgba(0,0,0,.18);display:none;z-index:20;
+font-variant-numeric:tabular-nums;max-width:360px}
+@media print{.toc,.bar,.tools,.pager,button,#tip{display:none!important}body{background:#fff}.tablewrap{max-height:none}
+.split{grid-template-columns:1fr}section{break-inside:avoid-page}}
+</style></head><body><main><div class='top'><div><h1>Fixture_Exp</h1><div class='meta'>Fix · DIA · 2026-09-24 · generated 2026-09-24 20:48 · Ionomos 0.7.0</div></div><div><button id='theme' title='Light / dark'>◐</button> <button onclick='window.print()'>Print</button></div></div><nav class='toc'><a href='#overview'>Overview</a><a href='#differential'>Differential</a><a href='#heat'>Heatmap</a><a href='#enrichment'>Enrichment</a><a href='#quality'>Quality control</a><a href='#methods'>Methods</a><a href='#files'>Files</a></nav><noscript><div class='notes'>This report draws its charts with JavaScript. The volcano_*.svg and *.tsv files in this folder hold the same results.</div></noscript><section id='overview'><div class='tiles' id='tiles'></div><div class='issues'><div class='issue warning'><div class='sev'>Worth knowing</div><b>Only 90 features in the analysis</b><div>Very few proteins passed the filters; statistics and enrichment will be weak.</div><div class='cz'>Most likely:<ul><li>Low sample amount or a short gradient</li><li>A strict missing-value filter</li></ul></div><div class='cz'>What to do:<ul><li>Check the identifications per sample in the report&#x27;s QC section</li></ul></div></div></div><div class='pipeline'><span class='step'>loaded <b>90</b> × 6 samples</span><span class='arrow'>→</span><span class='step' title='values in ≥50% of the samples of at least one condition'>missing-value filter <b>−0</b></span><span class='arrow'>→</span><span class='step'>median centring</span><span class='arrow'>→</span><span class='step'>imputed <b>19</b> values (3.5%)</span><span class='arrow'>→</span><span class='step'>tested <b>90</b></span></div></section><section id='differential'><h2>Differential abundance</h2><p class='sub'>|log2FC| ≥ 1 and adjusted p ≤ 0.05 (limma moderated t-test). Change the cut-offs to explore; click a point or row for details.</p><div id='differential-body'><div class='bar'><label class='ctl'>Comparison <select id='comp'></select></label><label class='ctl'>|log2FC| ≥ <input type='number' id='lfc' step='0.1' min='0'></label><label class='ctl'>p ≤ <input type='number' id='alpha' step='0.01' min='0' max='1'></label><label class='ctl'><input type='checkbox' id='adj'> adjusted</label><label class='ctl'>labels <input type='number' id='labels' min='0' max='200' value='15'></label><input type='search' id='search' placeholder='Find gene, protein or description'><span><button id='volc' class='on'>Volcano</button> <button id='ma'>MA</button></span><button id='reset' title='Back to the saved cut-offs'>Reset</button><span id='hl'></span></div><div class='muted' id='cutnote'></div><div class='split'><div><div class='card chart' id='volcano'></div><div id='vcount' class='meta'></div><div class='chips' id='pins'></div></div><div class='card detail' id='detail'></div></div><div class='row' style='display:flex;gap:12px;align-items:center;margin-top:10px'><label class='ctl'><input type='checkbox' id='sigonly' checked> significant only</label><button id='csv'>Download CSV</button></div><div id='table'></div><h3>p-value distribution</h3><p class='sub'>Mostly flat with a peak near 0 when there are real differences; a hump in the middle hints at a problem with the model or the data.</p><div class='card chart' id='phist' style='max-width:520px'></div></div></section><section id='heat'><h2>Heatmap of significant features</h2><p class='sub'>Each row centred on its mean, so colour shows where a feature is high or low across samples.</p><div class='card chart' id='heatmap'></div><div class='legend' id='heatlegend'></div></section><section id='enrichment'><h2>Enrichment</h2><div id='enrich'></div></section><section id='quality'><h2>Quality control</h2><div id='qc'></div></section><section id='methods'><h2>Methods</h2><p class='methods'>Raw files were searched with FragPipe using the lab's pinned DIA workflow, run automatically by Ionomos. Protein intensities were log2-transformed, contaminants removed, features kept when quantified in at least 50% of the samples of at least one condition, samples median-centred, missing values imputed from a normal distribution down-shifted by 1.8 SD with 0.3× the SD of each sample (Perseus-type). Differential abundance was tested with limma (linear model ~0 + condition, empirical-Bayes moderated t-statistics, 95% confidence intervals), following FragPipe-Analyst's test_limma. P-values were adjusted with the Benjamini–Hochberg procedure; features were called significant at |log2FC| ≥ 1 and adjusted p ≤ 0.05 (limma moderated t-test). Over-representation of up- and down-regulated genes in gene sets (GO Biological Process, Hallmark, Reactome; Enrichr libraries) was tested with a one-sided hypergeometric test against all quantified genes, BH-adjusted. Processing and statistics port FragPipeAnalystR / FragPipe-Analyst (Hsiao et al., J. Proteome Res. 2024, doi:10.1021/acs.jproteome.4c00294) and limma (Ritchie et al., Nucleic Acids Res. 2015).</p><h3>Settings used</h3><div class='kv card'><div>Test</div><div>limma moderated t-test</div><div>Comparisons</div><div>each condition vs the control</div><div>Cut-offs</div><div>|log2FC| ≥ 1 and adjusted p ≤ 0.05 (limma moderated t-test)</div><div>Contaminants</div><div>removed</div><div>Missing-value filter</div><div>≥0% of all samples, ≥50% in one condition</div><div>Normalisation</div><div>median</div><div>Imputation</div><div>auto → Perseus-type (down-shift 1.8 SD, width 0.3 SD)</div><div>Enrichment</div><div>Hallmark, GO Biological Process, Reactome</div></div><h3>Cross-check in FragPipe-Analyst</h3><p class='sub'>The folder <a href='fragpipe-analyst/'>fragpipe-analyst/</a> holds an experiment_annotation.tsv for the quant table, so the same data can be opened in FragPipe-Analyst, and reproduce_in_R.R, which repeats this analysis with FragPipeAnalystR.</p></section><section id='files'><h2>Files</h2><ul class='files'><li><a href='protein_matrix_log2.tsv'>protein_matrix_log2.tsv</a></li><li><a href='Drug_vs_DMSO_differential.tsv'>Drug_vs_DMSO_differential.tsv</a></li><li><a href='volcano_Drug_vs_DMSO.svg'>volcano_Drug_vs_DMSO.svg</a></li><li><a href='protein_matrix_processed.tsv'>protein_matrix_processed.tsv</a></li><li><a href='protein_results.tsv'>protein_results.tsv</a></li><li><a href='enrichment.tsv'>enrichment.tsv</a></li><li><a href='fragpipe-analyst/experiment_annotation.tsv'>fragpipe-analyst/experiment_annotation.tsv</a></li><li><a href='fragpipe-analyst/reproduce_in_R.R'>fragpipe-analyst/reproduce_in_R.R</a></li></ul></section></main><div id='tip'></div><script id='ionomos-data' type='application/json'>{"marker":"ionomos-report-v2","title":"Fixture_Exp","kind":"intensity","levelTitle":"Proteins","levelWord":"protein","sourceName":"report.pg_matrix.tsv","samples":["DMSO_1","DMSO_2","DMSO_3","Drug_1","Drug_2","Drug_3"],"cond":["DMSO","DMSO","DMSO","Drug","Drug","Drug"],"conditions":["DMSO","Drug"],"f":{"id":["P20000","P20001","P20002","P20003","P20004","P20005","P20006","P20007","P20008","P20009","P20010","P20011","P20012","P20013","P20014","P20015","P20016","P20017","P20018","P20019","P20020","P20021","P20022","P20023","P20024","P20025","P20026","P20027","P20028","P20029","P20030","P20031","P20032","P20033","P20034","P20035","P20036","P20037","P20038","P20039","P20040","P20041","P20042","P20043","P20044","P20045","P20046","P20047","P20048","P20049","P20050","P20051","P20052","P20053","P20054","P20055","P20056","P20057","P20058","P20059","P20060","P20061","P20062","P20063","P20064","P20065","P20066","P20067","P20068","P20069","P20070","P20071","P20072","P20073","P20074","P20075","P20076","P20077","P20078","P20079","P20080","P20081","P20082","P20083","P20084","P20085","P20086","P20087","P20088","P20089"],"label":["ACTB","GAPDH","PKM","ENO1","HSP90AA1","TUBB","EEF1A1","PARK7","GSTP1","PRDX1","BTK","EGFR","KRAS","CASP8","PPIA","TXN","ALDOA","LDHA","YWHAZ","HNRNPA1","NPM1","VIM","PFN1","CFL1","UBB","GENE25","GENE26","GENE27","GENE28","GENE29","GENE30","GENE31","GENE32","GENE33","GENE34","GENE35","GENE36","GENE37","GENE38","GENE39","GENE40","GENE41","GENE42","GENE43","GENE44","GENE45","GENE46","GENE47","GENE48","GENE49","GENE50","GENE51","GENE52","GENE53","GENE54","GENE55","GENE56","GENE57","GENE58","GENE59","GENE60","GENE61","GENE62","GENE63","GENE64","GENE65","GENE66","GENE67","GENE68","GENE69","GENE70","GENE71","GENE72","GENE73","GENE74","GENE75","GENE76","GENE77","GENE78","GENE79","GENE80","GENE81","GENE82","GENE83","GENE84","GENE85","GENE86","GENE87","GENE88","GENE89"],"desc":["ACTB protein","GAPDH protein","PKM protein","ENO1 protein","HSP90AA1 protein","TUBB protein","EEF1A1 protein","PARK7 protein","GSTP1 protein","PRDX1 protein","BTK protein","EGFR protein","KRAS protein","CASP8 protein","PPIA protein","TXN protein","ALDOA protein","LDHA protein","YWHAZ protein","HNRNPA1 protein","NPM1 protein","VIM protein","PFN1 protein","CFL1 protein","UBB protein","GENE25 protein","GENE26 protein","GENE27 protein","GENE28 protein","GENE29 protein","GENE30 protein","GENE31 protein","GENE32 protein","GENE33 protein","GENE34 protein","GENE35 protein","GENE36 protein","GENE37 protein","GENE38 protein","GENE39 protein","GENE40 protein","GENE41 protein","GENE42 protein","GENE43 protein","GENE44 protein","GENE45 protein","GENE46 protein","GENE47 protein","GENE48 protein","GENE49 protein","GENE50 protein","GENE51 protein","GENE52 protein","GENE53 protein","GENE54 protein","GENE55 protein","GENE56 protein","GENE57 protein","GENE58 protein","GENE59 protein","GENE60 protein","GENE61 protein","GENE62 protein","GENE63 protein","GENE64 protein","GENE65 protein","GENE66 protein","GENE67 protein","GENE68 protein","GENE69 protein","GENE70 protein","GENE71 protein","GENE72 protein","GENE73 protein","GENE74 protein","GENE75 protein","GENE76 protein","GENE77 protein","GENE78 protein","GENE79 protein","GENE80 protein","GENE81 protein","GENE82 protein","GENE83 protein","GENE84 protein","GENE85 protein","GENE86 protein","GENE87 protein","GENE88 protein","GENE89 protein"]},"v":[[18.6709,18.7169,19.1002,17.8059,17.9863,18.4035],[20.7532,20.5934,20.7007,19.9653,19.9548,20.1618],[23.6202,23.7238,22.9978,23.1537,21.9491,22.7446],[21.4376,21.6223,20.9356,22.7961,22.6118,16.6057],[20.4185,19.8576,20.0511,19.8216,19.4768,19.8248],[21.7279,21.6951,22.123,21.354,21.4414,21.8461],[18.0639,18.8898,18.6567,17.4016,18.1112,18.4337],[19.9802,20.3839,20.2233,19.5653,19.9206,19.7561],[20.3913,20.3926,20.2057,20.3623,19.7993,19.4726],[18.2856,26.6007,26.2904,27.5101,27.1773,28.4908],[22.0492,22.5187,22.0586,22.0166,21.5646,21.945],[24.6622,24.7877,24.9318,24.3557,24.0235,24.7511],[22.9048,23.6853,23.186,22.4717,22.6946,22.8699],[25.2059,25.1704,25.1818,24.3954,24.8743,24.8553],[24.9863,24.3404,25.2743,24.483,24.5814,24.5696],[17.477,17.6973,17.1156,16.8129,16.7094,18.569],[23.4414,24.0021,24.1099,23.4847,23.4213,23.5356],[22.1967,22.2414,21.9472,24.3345,24.0011,24.1958],[23.8826,24.4983,24.4803,24.0676,23.5862,23.8911],[19.4865,26.274,26.1451,25.1139,25.5896,26.3112],[20.3946,19.9664,20.3873,19.9852,19.5122,19.4574],[22.2977,22.5315,22.4681,22.5716,21.4154,22.1439],[22.1288,22.3361,18.07,21.8169,21.7184,22.1512],[19.5751,20.12,19.2093,19.3238,18.8959,19.4519],[23.3813,22.925,22.7063,22.11,22.6483,22.7003],[22.4681,21.8427,21.7263,21.7447,21.4329,21.755],[26.2545,26.5851,25.4989,25.9688,25.6006,26.1326],[20.9731,21.1914,20.6967,20.2409,20.1338,20.5998],[25.7804,19.6342,25.3685,27.8037,27.5052,27.4235],[21.3214,21.0074,21.4048,20.8443,21.3624,20.5837],[22.3272,21.418,21.7565,21.8217,21.0129,21.6776],[24.7725,25.216,24.4436,24.5768,24.6649,24.5277],[23.1,23.38,22.8316,23.0958,22.4017,22.4206],[24.5795,24.2069,24.345,23.9093,23.5793,24.0827],[20.5639,20.903,20.6365,20.9601,20.6701,20.7118],[22.0311,22.1336,21.7992,21.6541,21.8846,21.8595],[20.4932,20.7706,21.0394,22.8036,22.5638,23.0832],[25.5057,25.523,25.6008,25.265,24.8774,25.3202],[23.7825,23.8269,23.3524,23.2739,23.1395,23.4182],[20.7755,21.2216,21.3969,21.4643,20.3787,21.1591],[23.7792,24.4054,23.7748,23.16,23.928,23.5541],[25.1258,25.0926,24.7167,24.7123,25.1299,24.7832],[19.8641,20.1296,20.1532,19.7469,19.7228,19.6888],[25.0438,24.7032,24.7893,25.0383,24.136,24.3811],[18.4875,22.2805,22.0018,20.9646,21.5825,21.8838],[22.5125,22.3748,21.8473,22.2404,21.9236,22.4645],[24.8435,24.0805,23.6697,23.804,23.4838,23.7103],[21.5898,21.0883,21.449,18.0245,18.4576,18.6513],[18.8266,18.3444,18.3367,18.6604,18.3168,18.3041],[23.4638,23.2427,23.4746,22.9104,22.7374,23.0985],[21.0146,21.066,20.3546,20.5447,20.6019,20.6383],[23.8615,23.6346,23.1595,23.0304,18.2499,22.9653],[22.8562,23.6295,23.0508,23.0951,22.9437,23.257],[24.6613,24.0703,24.0312,24.4463,24.1543,24.5876],[23.8922,23.9508,24.2649,23.2966,23.3128,23.4486],[21.5523,21.44,21.7814,21.005,21.0827,21.1899],[24.3976,24.5271,24.7981,24.3181,24.0712,24.6453],[21.7673,22.0326,21.2392,21.5847,17.7725,21.71],[18.0312,18.5663,18.7384,18.247,17.9575,18.1601],[20.0286,20.4608,20.2083,19.9971,19.4447,19.8213],[24.106,24.0224,24.5441,24.3454,23.0675,24.4884],[23.2558,23.1076,23.2767,22.8205,22.7793,23.3762],[25.8047,26.4175,25.541,25.7272,25.1284,25.5505],[20.3424,21.0695,20.5671,19.6181,20.7706,20.0287],[23.3043,22.907,22.9223,22.2752,22.4882,22.8997],[21.0343,21.3095,21.7643,20.8865,19.4504,20.9225],[29.1961,29.6442,29.6813,29.9762,28.7954,29.521],[22.6757,23.8328,23.7458,23.3201,23.032,23.3491],[23.0882,23.2227,22.4389,22.1794,22.4681,22.3409],[23.5582,22.9692,22.8766,23.0755,22.3741,22.87],[16.694,18.8048,16.5342,16.2694,18.5272,16.741],[24.1396,24.2309,24.7059,24.3382,23.9909,24.3923],[21.3731,22.3048,21.4045,21.3141,21.3474,21.9763],[20.3299,20.4878,20.3809,20.0856,19.7324,20.0263],[23.8526,24.295,23.9374,23.3921,23.4015,23.5249],[18.9998,19.0044,19.6353,18.4927,18.2453,18.7319],[20.7281,17.6633,20.8146,20.2808,19.9428,20.1638],[22.6311,22.8106,22.5003,22.6506,21.808,22.5118],[22.3971,22.2153,22.923,22.2229,21.2955,22.2415],[18.5269,18.0457,18.6196,16.335,16.3888,17.1818],[23.4556,22.4174,22.9659,22.4644,22.4745,22.9659],[22.0491,21.831,21.526,21.2118,21.0648,21.6925],[19.4644,19.9546,19.3839,21.7072,21.3107,21.0179],[19.1649,19.3319,19.3018,18.5702,18.745,18.8645],[25.4383,24.9436,24.9394,24.6369,25.0417,25.1176],[21.4484,21.8719,21.8413,23.6082,23.7794,24.3266],[25.8801,26.3031,26.2416,26.0637,26.0359,26.1425],[24.8323,25.0429,24.8793,24.2175,23.5416,24.5025],[20.5047,20.7995,20.4712,22.7411,22.834,22.0638],[23.1455,22.816,22.9677,22.7774,22.8899,22.4717]],"imp":["000000","000000","000000","000001","000000","000000","100000","000000","000000","100000","000000","000000","000000","000000","000000","000001","000000","000000","000000","100000","000000","000000","001000","001000","000000","000000","000000","000000","010000","000000","000000","000000","000000","000000","000000","000000","000000","000000","000000","000000","000000","000000","000000","000000","100000","000000","000000","000010","000000","000000","000000","000010","000000","000000","000000","000000","000000","000010","000000","000000","000000","000000","000000","000000","000000","000010","000000","000000","000000","000000","010010","000000","000000","000000","000000","000000","010000","000000","000000","111000","000000","000000","000000","000000","000000","000000","000000","000000","000000","000000"],"comps":[{"name":"Drug vs DMSO","slug":"Drug_vs_DMSO","t1":"Drug","t2":"DMSO","fc":[-0.76408,-0.65511,-0.83144,-0.66066,-0.40136,-0.30152,-0.5546,-0.44844,-0.4518,4.00051,-0.36681,-0.41711,-0.57998,-0.47771,-0.32233,-0.06621,-0.37058,2.04871,-0.43873,1.70303,-0.59784,-0.38879,1.05057,-0.41093,-0.518,-0.36813,-0.21218,-0.62893,3.98307,-0.31444,-0.32982,-0.22088,-0.46447,-0.52004,0.07951,-0.1886,2.04914,-0.38899,-0.37677,-0.13062,-0.43911,-0.10328,-0.32947,-0.32696,0.55371,-0.03537,-0.53185,-2.99788,-0.07551,-0.47825,-0.21672,-2.13667,-0.08024,0.14183,-0.68326,-0.49874,-0.22939,-1.32399,-0.32374,-0.47824,-0.25706,-0.22141,-0.45235,-0.52053,-0.49019,-0.94952,-0.07635,-0.1844,-0.58714,-0.36144,-0.16513,-0.11832,-0.14818,-0.45148,-0.58882,-0.72315,0.39376,-0.32391,-0.59181,-1.76219,-0.31136,-0.47899,1.74426,-0.5396,-0.17504,2.18418,-0.06095,-0.83096,1.95447,-0.26343],"p":[0.01666609,0.00700815,0.0643889,0.70218634,0.11859423,0.22507288,0.16199676,0.06159701,0.13498354,0.11935838,0.15476577,0.12554893,0.06226625,0.05054055,0.27626368,0.90381699,0.15196214,2.657e-05,0.12760481,0.38662056,0.04113953,0.26300593,0.38776163,0.21033658,0.09944388,0.19592252,0.53753687,0.02862006,0.04634441,0.2665332,0.35430191,0.38727136,0.13457503,0.04799076,0.68606915,0.33669404,9.693e-05,0.08520733,0.11412188,0.71011305,0.17703814,0.64277368,0.09863896,0.28095769,0.60480916,0.89443433,0.15068777,1.404e-05,0.74377965,0.03933464,0.39951836,0.14759904,0.75998719,0.58417062,0.00896449,0.02957994,0.34286466,0.25916405,0.22267216,0.07560768,0.55712216,0.35373412,0.17435829,0.191868,0.08149417,0.07880609,0.82917377,0.61166785,0.06004419,0.2482794,0.8470353,0.6256011,0.67465877,0.04419317,0.02028094,0.02831993,0.6590935,0.27204452,0.13014558,0.00101577,0.35899021,0.09925285,0.00049986,0.01915118,0.48327695,0.00011861,0.75514724,0.02391694,0.00025188,0.2291037],"q":[0.14999477,0.07884167,0.22288465,0.77000211,0.29630533,0.3818395,0.31695018,0.22288465,0.29630533,0.29630533,0.30953154,0.29630533,0.22288465,0.20675678,0.41439552,0.90381699,0.30953154,0.00119575,0.29630533,0.50577604,0.20567468,0.413586,0.50577604,0.37118221,0.27121058,0.35266053,0.67192109,0.16638714,0.20567468,0.413586,0.48953211,0.50577604,0.29630533,0.20567468,0.76229905,0.48874941,0.00266864,0.25562198,0.29630533,0.77000211,0.33194651,0.74166194,0.27121058,0.41452774,0.72434351,0.90381699,0.30953154,0.00119575,0.79533543,0.20567468,0.51366646,0.30953154,0.79533543,0.71047778,0.08964492,0.16638714,0.48953211,0.413586,0.3818395,0.25202559,0.68686293,0.48953211,0.33194651,0.35241062,0.25291294,0.25291294,0.85776597,0.72434351,0.22288465,0.40627538,0.8662861,0.73122207,0.75899112,0.20567468,0.15210705,0.16638714,0.75086601,0.41439552,0.29630533,0.01305995,0.48953211,0.27121058,0.00749797,0.15210705,0.61260459,0.00266864,0.79533543,0.16557878,0.00453386,0.3818395],"ciL":[-1.3348,-1.0571,-1.7302,-4.6657,-0.9396,-0.845,-1.4031,-0.9265,-1.0903,-1.378,-0.9166,-0.9893,-1.2003,-0.957,-0.978,-1.3435,-0.9215,1.5977,-1.0446,-2.7383,-1.1627,-1.1558,-1.6962,-1.1251,-1.1677,-0.9849,-1.0019,-1.167,0.0882,-0.9398,-1.1299,-0.7977,-1.1201,-1.0338,-0.3761,-0.6285,1.4867,-0.8506,-0.8745,-0.9455,-1.1392,-0.6179,-0.7414,-0.9993,-1.9135,-0.6568,-1.3197,-3.5908,-0.6119,-0.9244,-0.7986,-5.2732,-0.6905,-0.4549,-1.1257,-0.9292,-0.7718,-3.9125,-0.9038,-1.0231,-1.2633,-0.7578,-1.1684,-1.3836,-1.063,-2.0465,-0.9001,-1.0223,-1.208,-1.0502,-2.1588,-0.6782,-0.9654,-0.8869,-1.0502,-1.3402,-1.6709,-0.9764,-1.4157,-2.4982,-1.0746,-1.0793,1.1048,-0.9565,-0.7452,1.5633,-0.5149,-1.5096,1.3206,-0.7429],"ciR":[-0.1934,-0.2531,0.0674,3.3444,0.1369,0.2419,0.2939,0.0296,0.1867,9.3791,0.183,0.1551,0.0404,0.0015,0.3333,1.2111,0.1804,2.4997,0.1671,6.1443,-0.033,0.3782,3.7974,0.3033,0.1317,0.2487,0.5775,-0.0908,7.8779,0.311,0.4703,0.356,0.1911,-0.0063,0.5352,0.2513,2.6116,0.0726,0.121,0.6843,0.261,0.4113,0.0825,0.3453,3.0209,0.586,0.256,-2.4049,0.4609,-0.0321,0.3651,0.9999,0.53,0.7386,-0.2408,-0.0683,0.313,1.2645,0.2564,0.0666,0.7491,0.315,0.2637,0.3426,0.0826,0.1475,0.7474,0.6535,0.0337,0.3273,1.8285,0.4416,0.669,-0.0161,-0.1274,-0.1061,2.4584,0.3286,0.232,-1.0262,0.4519,0.1213,2.3837,-0.1227,0.3951,2.805,0.393,-0.1523,2.5883,0.2161],"nt":[3,3,3,2,3,3,3,3,3,3,3,3,3,3,3,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,2,3,3,3,2,3,3,3,3,3,2,3,3,3,3,3,3,3,2,3,3,3,3,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3],"nc":[3,3,3,3,3,3,2,3,3,2,3,3,3,3,3,3,3,3,3,2,3,3,2,2,3,3,3,3,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,2,3,3,3,3,3,2,3,3,0,3,3,3,3,3,3,3,3,3,3],"a":[18.4473,20.3549,23.0315,21.0015,19.9084,21.6979,18.2595,19.9716,20.1039,25.7258,22.0254,24.5853,22.9687,24.9472,24.7058,17.3969,23.6658,23.1528,24.0677,24.8201,19.9505,22.238,21.3702,19.4293,22.7452,21.8283,26.0067,20.6393,25.5859,21.0873,21.669,24.7003,22.8716,24.1171,20.7409,21.8937,21.7923,25.3487,23.4656,21.066,23.7669,24.9267,19.8842,24.6819,21.2001,22.2272,23.932,19.8768,18.4648,23.1546,20.7033,22.4835,23.1387,24.3252,23.6943,21.3419,24.4596,21.0177,18.2834,19.9935,24.0956,23.1027,25.6949,20.3994,22.7994,20.8946,29.469,23.3259,22.623,22.9539,17.2618,24.2996,21.62,20.1738,23.7339,18.8516,19.9322,22.4854,22.2159,17.5163,22.7906,21.5625,20.4731,18.9964,25.0196,22.8126,26.1112,24.5027,21.569,22.8447]}],"notes":[],"files":["protein_matrix_log2.tsv","Drug_vs_DMSO_differential.tsv","volcano_Drug_vs_DMSO.svg","protein_matrix_processed.tsv","protein_results.tsv","enrichment.tsv","fragpipe-analyst/experiment_annotation.tsv","fragpipe-analyst/reproduce_in_R.R"],"settings":{"log2fc":1.0,"alpha":0.05,"use_adjusted":true,"top_labels":15,"normalize":"median","test":"limma"},"imputationLabel":"Perseus-type (down-shift 1.8 SD, width 0.3 SD)","qc":{"pca":{"scores":[[9.6637,-4.4229,0.1911,-0.7754,-0.5062,0.0],[2.2095,7.0888,-2.5237,-2.022,0.2182,0.0],[1.1148,2.565,1.4174,4.7172,0.0375,0.0],[-3.2981,-2.1514,0.8812,-0.7654,3.8364,0.0],[-5.4258,-3.4363,-4.4774,0.6406,-1.4897,0.0],[-4.2642,0.3568,4.5115,-1.795,-2.0961,0.0]],"percent":[44.72,26.31,14.03,8.82,6.12,0.0],"n":90},"correlation":{"matrix":[[1.0,0.8002,0.8442,0.8199,0.7618,0.7774],[0.8002,1.0,0.9152,0.8705,0.8408,0.8694],[0.8442,0.9152,1.0,0.9215,0.8846,0.9177],[0.8199,0.8705,0.9215,1.0,0.9463,0.9505],[0.7618,0.8408,0.8846,0.9463,1.0,0.9159],[0.7774,0.8694,0.9177,0.9505,0.9159,1.0]],"order":[0,4,3,5,1,2],"complete_rows":90},"cv":{"DMSO":{"hist":[2,9,15,17,16,15,4,4,1,0,0,0,0,0,1,1,1,3,1,0],"median":0.2024},"Drug":{"hist":[6,7,19,16,12,9,6,5,3,1,1,0,0,0,0,2,1,2,0,0],"median":0.1864}},"features_per_sample":[85,86,87,90,85,88],"features_per_sample_after":[85,86,87,90,85,88],"missing":{"rows":["011111","011111","011111","011111","101111","101111","110111","110111","111101","111101","111101","111101","111110","111110","101101","000111"],"row_ids":[6,9,19,44,28,76,22,23,47,51,57,65,3,15,70,79],"total":16,"curve":[[0.0,74],[0.1667,88],[0.3333,89],[0.5,90],[0.6667,90],[0.8333,90],[1.0,90]],"complete":74,"under_half":90,"all":90},"box_before":[{"q1":20.7256,"median":22.4405,"q3":23.855,"lo":16.6665,"hi":26.2269,"min":16.6665,"max":29.1686,"n":85},{"q1":19.9069,"median":21.3081,"q3":22.918,"lo":16.5374,"hi":25.4407,"min":16.5374,"max":28.4843,"n":86},{"q1":20.231,"median":21.9414,"q3":23.6607,"lo":16.0076,"hi":25.7637,"min":16.0076,"max":29.1546,"n":87},{"q1":20.7512,"median":22.5997,"q3":24.0146,"lo":16.4011,"hi":27.9353,"min":16.4011,"max":30.1078,"n":90},{"q1":21.5147,"median":23.3127,"q3":24.4308,"lo":17.2334,"hi":28.3498,"min":17.2334,"max":29.64,"n":85},{"q1":20.6562,"median":22.4956,"q3":24.1385,"lo":16.7686,"hi":28.5183,"min":16.7686,"max":29.5485,"n":88}],"box_after":[{"q1":20.7532,"median":22.4681,"q3":23.8826,"lo":16.694,"hi":26.2545,"min":16.694,"max":29.1961,"n":85},{"q1":21.0668,"median":22.4681,"q3":24.078,"lo":17.6973,"hi":26.6007,"min":17.6973,"max":29.6442,"n":86},{"q1":20.7576,"median":22.4681,"q3":24.1874,"lo":16.5342,"hi":26.2904,"min":16.5342,"max":29.6813,"n":87},{"q1":20.6196,"median":22.4681,"q3":23.883,"lo":16.2694,"hi":27.8037,"min":16.2694,"max":29.9762,"n":90},{"q1":20.6701,"median":22.4681,"q3":23.5862,"lo":16.3888,"hi":27.5052,"min":16.3888,"max":28.7954,"n":85},{"q1":20.6287,"median":22.4681,"q3":24.1109,"lo":16.741,"hi":28.4908,"min":16.741,"max":29.521,"n":88}],"heatmap":{"rows":[36,85,17,88,82,47,79],"cols":[1,0,2,5,3,4],"total_significant":7,"values":[[-1.022,-1.299,-0.753,1.291,1.011,0.772],[-0.941,-1.364,-0.971,1.514,0.796,0.967],[-0.911,-0.956,-1.206,1.043,1.182,0.848],[-0.769,-1.064,-1.098,0.495,1.172,1.265],[-0.519,-1.009,-1.089,0.545,1.234,0.838],[1.212,1.713,1.572,-1.225,-1.852,-1.419],[0.529,1.011,1.103,-0.334,-1.181,-1.127]]}},"enr":[{"comparison":"Drug vs DMSO","direction":"up","library":"Hallmark","hits":5,"background":90,"terms":[{"term":"Fatty Acid Metabolism","k":1,"K":3,"n":5,"N":90,"p":0.15926115,"log2_odds":2.858,"genes":["LDHA"],"q":0.47511191},{"term":"Myc Targets V1","k":1,"K":4,"n":5,"N":90,"p":0.20757948,"log2_odds":2.426,"genes":["LDHA"],"q":0.47511191},{"term":"Hypoxia","k":1,"K":5,"n":5,"N":90,"p":0.25365044,"log2_odds":2.087,"genes":["LDHA"],"q":0.47511191},{"term":"mTORC1 Signaling","k":1,"K":6,"n":5,"N":90,"p":0.29755335,"log2_odds":1.807,"genes":["LDHA"],"q":0.47511191},{"term":"Glycolysis","k":1,"K":7,"n":5,"N":90,"p":0.33936565,"log2_odds":1.568,"genes":["LDHA"],"q":0.47511191}]},{"comparison":"Drug vs DMSO","direction":"up","library":"GO Biological Process","hits":5,"background":90,"terms":[{"term":"carbohydrate catabolic process (GO:0016052)","k":1,"K":5,"n":5,"N":90,"p":0.25365044,"log2_odds":2.087,"genes":["LDHA"],"q":1.0},{"term":"glycolytic process (GO:0006096)","k":1,"K":5,"n":5,"N":90,"p":0.25365044,"log2_odds":2.087,"genes":["LDHA"],"q":1.0},{"term":"pyruvate metabolic process (GO:0006090)","k":1,"K":5,"n":5,"N":90,"p":0.25365044,"log2_odds":2.087,"genes":["LDHA"],"q":1.0}]},{"comparison":"Drug vs DMSO","direction":"up","library":"Reactome","hits":5,"background":90,"terms":[{"term":"Metabolism R-HSA-1430728","k":1,"K":6,"n":5,"N":90,"p":0.29755335,"log2_odds":1.807,"genes":["LDHA"],"q":1.0}]},{"comparison":"Drug vs DMSO","direction":"down","library":"Hallmark","hits":2,"background":90,"terms":[]},{"comparison":"Drug vs DMSO","direction":"down","library":"GO Biological Process","hits":2,"background":90,"terms":[]},{"comparison":"Drug vs DMSO","direction":"down","library":"Reactome","hits":2,"background":90,"terms":[]}],"enrNote":""}</script><script>/* Ionomos report: everything is drawn here from the JSON in #ionomos-data. No libraries, works offline. */
+(function () {
+  "use strict";
+  const D = JSON.parse(document.getElementById("ionomos-data").textContent);
+  const SVGNS = "http://www.w3.org/2000/svg";
+  const $ = (s, el) => (el || document).querySelector(s);
+  const $$ = (s, el) => Array.from((el || document).querySelectorAll(s));
+  const nF = D.f.id.length, nS = D.samples.length;
+  const tip = $("#tip");
+  const ST = {
+    ci: 0, lfc: D.settings.log2fc, alpha: D.settings.alpha, adj: D.settings.use_adjusted, labels: D.settings.top_labels,
+    search: "", focus: null, pinned: [], mode: "volcano", zoom: null, sigOnly: true, sortKey: "p", sortDir: 1,
+    page: 0, highlight: null, highlightName: "",
+  };
+
+  // ---------------------------------------------------------------- helpers
+  const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  function svg(tag, attrs, parent) {
+    const e = document.createElementNS(SVGNS, tag);
+    for (const k in attrs || {}) if (attrs[k] != null) e.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function text(parent, x, y, s, attrs) {
+    const t = svg("text", Object.assign({ x: x, y: y, fill: css("--muted"), "font-size": 12 }, attrs || {}), parent);
+    t.textContent = s;
+    return t;
+  }
+  const fmt = (v, d) => (v == null || isNaN(v) ? "–" : (+v).toFixed(d == null ? 2 : d));
+  function fmtP(p) {
+    if (p == null || isNaN(p)) return "–";
+    if (p === 0) return "0";
+    if (p < 1e-3) { const e = Math.floor(Math.log10(p)); return (p / Math.pow(10, e)).toFixed(1) + "e" + e; }
+    return p.toFixed(p < 0.01 ? 4 : 3);
+  }
+  const fmtInt = (n) => (n == null ? "–" : n.toLocaleString());
+  function niceTicks(lo, hi, n) {
+    if (!(hi > lo)) { hi = lo + 1; }
+    const span = hi - lo, step0 = span / (n || 5), mag = Math.pow(10, Math.floor(Math.log10(step0)));
+    const err = step0 / mag, step = mag * (err >= 7.5 ? 10 : err >= 3.5 ? 5 : err >= 1.5 ? 2 : 1);
+    const out = [];
+    for (let v = Math.ceil(lo / step - 1e-9) * step; v <= hi + 1e-9 * step; v += step) out.push(+v.toFixed(10));
+    return out;
+  }
+  const condIndex = {};
+  D.conditions.forEach((c, i) => (condIndex[c] = i));
+  const condColor = (c) => css("--c" + (condIndex[c] % 8));
+  function showTip(e, html) {
+    tip.innerHTML = html;
+    tip.style.display = "block";
+    const x = Math.min(e.clientX + 14, window.innerWidth - tip.offsetWidth - 8);
+    const y = Math.min(e.clientY + 14, window.innerHeight - tip.offsetHeight - 8);
+    tip.style.left = x + "px";
+    tip.style.top = y + "px";
+  }
+  const hideTip = () => (tip.style.display = "none");
+  function download(name, content, type) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([content], { type: type }));
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  }
+  function svgTools(host, root, name) {
+    let t = $(".tools", host);
+    if (!t) { t = document.createElement("div"); t.className = "tools"; host.appendChild(t); }
+    t.innerHTML = "";
+    const b = document.createElement("button");
+    b.textContent = "SVG";
+    b.title = "Download this chart as SVG (for slides)";
+    b.onclick = () => {
+      const c = root.cloneNode(true);
+      c.setAttribute("xmlns", SVGNS);
+      const bg = document.createElementNS(SVGNS, "rect");
+      bg.setAttribute("width", "100%"); bg.setAttribute("height", "100%"); bg.setAttribute("fill", css("--surface"));
+      c.insertBefore(bg, c.firstChild);
+      download(name + ".svg", new XMLSerializer().serializeToString(c), "image/svg+xml");
+    };
+    t.appendChild(b);
+    return t;
+  }
+  function frame(host, w, h) {
+    host.querySelectorAll("svg").forEach((s) => s.remove());
+    const root = svg("svg", { viewBox: "0 0 " + w + " " + h, width: w, height: h, role: "img", style: "max-width:" + w + "px" });
+    host.insertBefore(root, host.firstChild);
+    return root;
+  }
+  function axes(g, X, Y, xt, yt, L, R, T, B, W, H, xl, yl) {
+    const grid = css("--grid"), axis = css("--axis");
+    yt.forEach((v) => {
+      svg("line", { x1: L, x2: W - R, y1: Y(v), y2: Y(v), stroke: grid }, g);
+      text(g, L - 6, Y(v) + 4, fmtTick(v), { "text-anchor": "end" });
+    });
+    xt.forEach((v) => {
+      svg("line", { x1: X(v), x2: X(v), y1: T, y2: H - B, stroke: grid }, g);
+      text(g, X(v), H - B + 16, fmtTick(v), { "text-anchor": "middle" });
+    });
+    svg("line", { x1: L, x2: W - R, y1: H - B, y2: H - B, stroke: axis }, g);
+    svg("line", { x1: L, x2: L, y1: T, y2: H - B, stroke: axis }, g);
+    if (xl) text(g, (L + W - R) / 2, H - 6, xl, { "text-anchor": "middle", fill: css("--text2"), "font-size": 13 });
+    if (yl) text(g, 14, (T + H - B) / 2, yl, { "text-anchor": "middle", fill: css("--text2"), "font-size": 13, transform: "rotate(-90 14 " + (T + H - B) / 2 + ")" });
+  }
+  function goTo(id) { const e = document.getElementById(id); if (e) e.scrollIntoView({ behavior: "smooth", block: "start" }); }
+  function fmtTick(v) { return Math.abs(v) >= 1000 ? v.toLocaleString() : String(+v.toFixed(3)); }
+  function widthOf(host, fallback) { return Math.max(320, Math.floor(host.clientWidth || fallback || 760)); }
+
+  // --------------------------------------------------------- comparisons
+  const C = () => D.comps[ST.ci];
+  function score(c, i) { return ST.adj ? c.q[i] : c.p[i]; }
+  function sigOf(c, i) {
+    const s = score(c, i), fc = c.fc[i];
+    if (s == null || fc == null || isNaN(s) || isNaN(fc)) return "";
+    return s <= ST.alpha && Math.abs(fc) >= ST.lfc ? (fc > 0 ? "up" : "down") : "";
+  }
+  function pThreshold(c) {
+    if (!ST.adj) return ST.alpha;
+    let t = null;
+    for (let i = 0; i < nF; i++) if (c.q[i] != null && c.q[i] <= ST.alpha && c.p[i] != null) t = t == null ? c.p[i] : Math.max(t, c.p[i]);
+    return t;
+  }
+  function counts(c) {
+    let up = 0, down = 0, tested = 0;
+    for (let i = 0; i < nF; i++) {
+      if (c.p[i] != null) tested++;
+      const s = sigOf(c, i);
+      if (s === "up") up++; else if (s === "down") down++;
+    }
+    return { up: up, down: down, tested: tested };
+  }
+  function matches(i) {
+    if (ST.highlight) return ST.highlight.has(i);
+    if (!ST.search) return false;
+    const q = ST.search.toLowerCase();
+    return (D.f.label[i] || "").toLowerCase().includes(q) || (D.f.id[i] || "").toLowerCase().includes(q) ||
+      (D.f.desc[i] || "").toLowerCase().includes(q);
+  }
+
+  // ------------------------------------------------------------- overview
+  function renderTiles() {
+    const host = $("#tiles");
+    if (!host) return;
+    let h = '<div class="tile"><div class="k">' + esc(D.levelTitle) + ' in the analysis</div><div class="v">' + fmtInt(nF) +
+      '</div><div class="d">' + esc(D.sourceName) + "</div></div>" +
+      '<div class="tile"><div class="k">Samples</div><div class="v">' + nS + '</div><div class="d">' + D.conditions.length +
+      " condition(s): " + esc(D.conditions.join(", ")) + "</div></div>";
+    D.comps.forEach((c, k) => {
+      const n = counts(c);
+      h += '<div class="tile" style="cursor:pointer" data-ci="' + k + '"><div class="k">' + esc(c.name) + '</div><div class="v">' +
+        fmtInt(n.up + n.down) + '</div><div class="d"><span class="dot up"></span> ' + fmtInt(n.up) + ' up · <span class="dot down"></span> ' +
+        fmtInt(n.down) + " down of " + fmtInt(n.tested) + "</div></div>";
+    });
+    host.innerHTML = h;
+    $$(".tile[data-ci]", host).forEach((t) => (t.onclick = () => { ST.ci = +t.dataset.ci; syncControls(); renderDiff(); goTo("differential"); }));
+  }
+
+  // -------------------------------------------------------------- volcano
+  function renderVolcano() {
+    const host = $("#volcano");
+    if (!host) return;
+    const c = C();
+    const W = widthOf(host), H = Math.round(Math.min(520, Math.max(360, W * 0.62)));
+    const L = 56, R = 18, T = 26, B = 44;
+    const root = frame(host, W, H);
+    const ma = ST.mode === "ma";
+    const pts = [];
+    let xmax = 1, ymax = 1, amin = Infinity, amax = -Infinity;
+    for (let i = 0; i < nF; i++) {
+      const fc = c.fc[i], p = c.p[i];
+      if (fc == null || p == null) continue;
+      const y = ma ? fc : -Math.log10(Math.max(p, 1e-300));
+      const x = ma ? c.a[i] : fc;
+      if (x == null) continue;
+      pts.push([i, x, y]);
+      if (!ma) { xmax = Math.max(xmax, Math.abs(fc)); ymax = Math.max(ymax, y); }
+      else { amin = Math.min(amin, x); amax = Math.max(amax, x); ymax = Math.max(ymax, Math.abs(fc)); }
+    }
+    let x0, x1, y0, y1;
+    if (ma) { x0 = amin - 0.5; x1 = amax + 0.5; y0 = -ymax * 1.08; y1 = ymax * 1.08; }
+    else { x0 = -xmax * 1.08; x1 = xmax * 1.08; y0 = 0; y1 = ymax * 1.06; }
+    if (ST.zoom && ST.zoom.mode === ST.mode) { x0 = ST.zoom.x0; x1 = ST.zoom.x1; y0 = ST.zoom.y0; y1 = ST.zoom.y1; }
+    const X = (v) => L + ((v - x0) / (x1 - x0)) * (W - L - R);
+    const Y = (v) => H - B - ((v - y0) / (y1 - y0)) * (H - T - B);
+    const g = svg("g", {}, root);
+    axes(g, X, Y, niceTicks(x0, x1, 8), niceTicks(y0, y1, 6), L, R, T, B, W, H,
+      ma ? "mean log2 abundance" : (D.kind === "ratio" ? "log2 H/L" : "log2 fold change"),
+      ma ? "log2 fold change" : (ST.adj ? "−log10 p (line: adjusted p cut-off)" : "−log10 p"));
+    const clip = svg("clipPath", { id: "vclip" }, svg("defs", {}, root));
+    svg("rect", { x: L, y: T, width: W - L - R, height: H - T - B }, clip);
+    const pg = svg("g", { "clip-path": "url(#vclip)" }, root);
+    const thrP = pThreshold(c), muted = css("--muted");
+    if (!ma) {
+      [-ST.lfc, ST.lfc].forEach((v) => { if (ST.lfc > 0) svg("line", { x1: X(v), x2: X(v), y1: T, y2: H - B, stroke: muted, "stroke-dasharray": "4 4" }, pg); });
+      if (thrP != null) svg("line", { x1: L, x2: W - R, y1: Y(-Math.log10(thrP)), y2: Y(-Math.log10(thrP)), stroke: muted, "stroke-dasharray": "4 4" }, pg);
+    } else {
+      [-ST.lfc, 0, ST.lfc].forEach((v) => svg("line", { x1: L, x2: W - R, y1: Y(v), y2: Y(v), stroke: muted, "stroke-dasharray": v ? "4 4" : null }, pg));
+    }
+    const colUp = css("--up"), colDown = css("--down"), colNs = css("--ns"), surf = css("--surface"), selC = css("--sel");
+    const sigs = new Map();
+    pts.forEach((p) => sigs.set(p[0], sigOf(c, p[0])));
+    const order = pts.slice().sort((a, b) => (sigs.get(a[0]) ? 1 : 0) - (sigs.get(b[0]) ? 1 : 0));
+    const screen = [];
+    order.forEach(([i, x, y]) => {
+      const s = sigs.get(i), cx = X(x), cy = Y(y);
+      screen.push([i, cx, cy]);
+      if (cx < L - 5 || cx > W - R + 5 || cy < T - 5 || cy > H - B + 5) return;
+      svg("circle", { cx: cx.toFixed(1), cy: cy.toFixed(1), r: s ? 3.4 : 2.6, fill: s === "up" ? colUp : s === "down" ? colDown : colNs,
+        "fill-opacity": s ? 1 : 0.7, stroke: s ? surf : null, "stroke-width": s ? 1 : null }, pg);
+    });
+    // search / term highlight, pinned, focus
+    const ring = (i, color, r, w) => {
+      const p = screen.find((q) => q[0] === i);
+      if (p) svg("circle", { cx: p[1], cy: p[2], r: r, fill: "none", stroke: color, "stroke-width": w }, pg);
+    };
+    if (ST.search || ST.highlight) for (const p of screen) if (matches(p[0])) svg("circle", { cx: p[1], cy: p[2], r: 5.5, fill: "none", stroke: selC, "stroke-width": 1.3 }, pg);
+    ST.pinned.forEach((i) => ring(i, selC, 6.5, 2));
+    if (ST.focus != null) ring(ST.focus, css("--accent"), 8, 2.5);
+    // labels: top hits by p + pinned + focus, greedy non-overlap
+    const want = [];
+    const ranked = pts.filter((p) => sigs.get(p[0])).sort((a, b) => c.p[a[0]] - c.p[b[0]]).slice(0, ST.labels).map((p) => p[0]);
+    ST.pinned.concat(ST.focus != null ? [ST.focus] : []).concat(ranked).forEach((i) => { if (!want.includes(i)) want.push(i); });
+    const boxes = [];
+    want.forEach((i) => {
+      const p = screen.find((q) => q[0] === i);
+      if (!p) return;
+      const s = (D.f.label[i] || D.f.id[i]).slice(0, 22), w = s.length * 6.6 + 4, h = 14;
+      const cands = [[p[1] + 6, p[2] - 6], [p[1] - 6 - w, p[2] - 6], [p[1] + 6, p[2] + 14], [p[1] - 6 - w, p[2] + 14]];
+      for (const [bx, by] of cands) {
+        const box = [bx, by - 11, bx + w, by - 11 + h];
+        if (box[0] < L || box[2] > W - R || box[1] < T || box[3] > H - B) continue;
+        if (boxes.some((o) => !(box[2] < o[0] || box[0] > o[2] || box[3] < o[1] || box[1] > o[3]))) continue;
+        boxes.push(box);
+        text(pg, bx, by, s, { fill: css("--text"), "font-size": 11.5, "font-weight": ST.pinned.includes(i) || i === ST.focus ? 650 : 400 });
+        break;
+      }
+    });
+    // corner names (FragPipe-Analyst draws the two conditions)
+    if (!ma && c.t2 && D.kind !== "ratio") {
+      text(root, W - R - 4, H - B - 8, c.t1 + " ↑", { "text-anchor": "end", fill: colUp, "font-size": 12.5, "font-weight": 600 });
+      text(root, L + 6, H - B - 8, "↑ " + c.t2, { fill: colDown, "font-size": 12.5, "font-weight": 600 });
+    }
+    // interaction: hover nearest, click focus, drag zoom, dblclick reset
+    const hit = svg("rect", { x: L, y: T, width: W - L - R, height: H - T - B, fill: "transparent", style: "cursor:crosshair" }, root);
+    const band = svg("rect", { fill: css("--accent"), "fill-opacity": 0.08, stroke: css("--accent"), "stroke-dasharray": "3 3", visibility: "hidden" }, root);
+    const toLocal = (e) => { const r = root.getBoundingClientRect(); return [(e.clientX - r.left) * (W / r.width), (e.clientY - r.top) * (H / r.height)]; };
+    const nearest = (mx, my) => {
+      let best = null, bd = 64;
+      for (const p of screen) { const d = (p[1] - mx) ** 2 + (p[2] - my) ** 2; if (d < bd) { bd = d; best = p[0]; } }
+      return best;
+    };
+    let drag = null;
+    hit.addEventListener("mousedown", (e) => { drag = toLocal(e); });
+    hit.addEventListener("mousemove", (e) => {
+      const [mx, my] = toLocal(e);
+      if (drag && (Math.abs(mx - drag[0]) > 4 || Math.abs(my - drag[1]) > 4)) {
+        band.setAttribute("visibility", "visible");
+        band.setAttribute("x", Math.min(mx, drag[0])); band.setAttribute("y", Math.min(my, drag[1]));
+        band.setAttribute("width", Math.abs(mx - drag[0])); band.setAttribute("height", Math.abs(my - drag[1]));
+        hideTip();
+        return;
+      }
+      const i = nearest(mx, my);
+      if (i == null) { hideTip(); hit.style.cursor = "crosshair"; return; }
+      hit.style.cursor = "pointer";
+      showTip(e, featureTip(i));
+    });
+    hit.addEventListener("mouseleave", () => { hideTip(); drag = null; band.setAttribute("visibility", "hidden"); });
+    hit.addEventListener("mouseup", (e) => {
+      const [mx, my] = toLocal(e);
+      if (drag && (Math.abs(mx - drag[0]) > 8 && Math.abs(my - drag[1]) > 8)) {
+        const inv = (px, lo, hi, a, b) => lo + ((px - a) / (b - a)) * (hi - lo);
+        const xa = inv(Math.min(mx, drag[0]), x0, x1, L, W - R), xb = inv(Math.max(mx, drag[0]), x0, x1, L, W - R);
+        const ya = y0 + ((H - B - Math.max(my, drag[1])) / (H - T - B)) * (y1 - y0), yb = y0 + ((H - B - Math.min(my, drag[1])) / (H - T - B)) * (y1 - y0);
+        ST.zoom = { mode: ST.mode, x0: xa, x1: xb, y0: ya, y1: yb };
+        drag = null;
+        renderVolcano();
+        return;
+      }
+      drag = null;
+      band.setAttribute("visibility", "hidden");
+      const i = nearest(mx, my);
+      if (i != null) { if (e.shiftKey) togglePin(i); setFocus(i); }
+    });
+    hit.addEventListener("dblclick", () => { ST.zoom = null; renderVolcano(); });
+    const tools = svgTools(host, root, "volcano_" + c.slug + (ma ? "_MA" : ""));
+    if (ST.zoom) {
+      const z = document.createElement("button");
+      z.textContent = "Reset zoom";
+      z.onclick = () => { ST.zoom = null; renderVolcano(); };
+      tools.insertBefore(z, tools.firstChild);
+    }
+    const n = counts(c);
+    $("#vcount").innerHTML = '<span class="dot up"></span> <b>' + fmtInt(n.up) + '</b> up &nbsp; <span class="dot down"></span> <b>' +
+      fmtInt(n.down) + "</b> down &nbsp;<span class='muted'>of " + fmtInt(n.tested) + " tested · drag to zoom, double-click to reset, shift-click to pin</span>";
+  }
+  function featureTip(i) {
+    const c = C();
+    return "<b>" + esc(D.f.label[i] || D.f.id[i]) + "</b> <span class='muted'>" + esc(D.f.id[i]) + "</span><br>log2FC " + fmt(c.fc[i]) +
+      " · p " + fmtP(c.p[i]) + " · adj. p " + fmtP(c.q[i]) + (D.f.desc[i] ? "<br><span class='muted'>" + esc(D.f.desc[i].slice(0, 90)) + "</span>" : "");
+  }
+
+  // --------------------------------------------------------------- detail
+  function isImputed(i, j) { return D.imp && D.imp[i] && D.imp[i][j] === "1"; }
+  function setFocus(i) { ST.focus = i; renderVolcano(); renderDetail(); renderTable(false); }
+  function togglePin(i) {
+    const k = ST.pinned.indexOf(i);
+    if (k >= 0) ST.pinned.splice(k, 1); else ST.pinned.push(i);
+    renderPins();
+  }
+  function renderPins() {
+    const host = $("#pins");
+    if (!host) return;
+    host.innerHTML = ST.pinned.length ? ST.pinned.map((i) => '<span class="chip' + (i === ST.focus ? " on" : "") + '" data-i="' + i + '">' +
+      esc(D.f.label[i] || D.f.id[i]) + " ✕</span>").join("") + ' <button id="pinprof">Profile of pinned</button>' : "";
+    $$(".chip", host).forEach((ch) => (ch.onclick = (e) => { const i = +ch.dataset.i; if (e.target === ch && e.offsetX > ch.offsetWidth - 18) { togglePin(i); renderVolcano(); } else setFocus(i); }));
+    const pp = $("#pinprof");
+    if (pp) pp.onclick = () => renderProfile();
+  }
+  function renderDetail() {
+    const host = $("#detail");
+    if (!host) return;
+    const i = ST.focus;
+    if (i == null) { host.innerHTML = '<div class="empty">Click a point or a table row to see that ' + esc(D.levelWord) + " here.<br>Shift-click to pin several.</div>"; return; }
+    let h = "<h4>" + esc(D.f.label[i] || D.f.id[i]) + '</h4><div class="id">' + esc(D.f.id[i]) + '</div><div class="desc">' + esc(D.f.desc[i] || "") + "</div>";
+    h += '<div id="strip" class="chart"></div>';
+    h += "<table><thead><tr><th>Comparison</th><th>log2FC</th><th>95% CI</th><th>adj. p</th></tr></thead><tbody>";
+    D.comps.forEach((c) => {
+      const s = sigOf(c, i);
+      h += "<tr><td>" + (s ? '<span class="dot ' + s + '"></span> ' : "") + esc(c.name) + '</td><td class="n">' + fmt(c.fc[i]) + '</td><td class="n">' +
+        (c.ciL[i] == null ? "–" : fmt(c.ciL[i]) + " – " + fmt(c.ciR[i])) + '</td><td class="n">' + fmtP(c.q[i]) + "</td></tr>";
+    });
+    h += '</tbody></table><div class="chips"><button id="pinbtn">' + (ST.pinned.includes(i) ? "Unpin" : "Pin") + '</button><button id="copybtn">Copy values</button></div>';
+    host.innerHTML = h;
+    $("#pinbtn").onclick = () => { togglePin(i); renderDetail(); renderVolcano(); };
+    $("#copybtn").onclick = () => {
+      const rows = ["sample\tcondition\tlog2\timputed"].concat(D.samples.map((s, j) => s + "\t" + D.cond[j] + "\t" + (D.v[i][j] == null ? "" : D.v[i][j]) + "\t" + (isImputed(i, j) ? "yes" : "")));
+      navigator.clipboard && navigator.clipboard.writeText(rows.join("\n"));
+    };
+    renderStrip($("#strip"), [i]);
+  }
+  function renderStrip(host, feats) {
+    const W = widthOf(host, 300), H = 230, L = 44, R = 10, T = 26, B = 50;
+    const root = frame(host, W, H);
+    let lo = Infinity, hi = -Infinity;
+    feats.forEach((i) => D.v[i].forEach((v) => { if (v != null) { lo = Math.min(lo, v); hi = Math.max(hi, v); } }));
+    if (!isFinite(lo)) return;
+    const pad = (hi - lo) * 0.1 || 1;
+    lo -= pad; hi += pad;
+    const groups = D.conditions;
+    const bw = (W - L - R) / groups.length;
+    const Y = (v) => H - B - ((v - lo) / (hi - lo)) * (H - T - B);
+    const g = svg("g", {}, root);
+    axes(g, () => 0, Y, [], niceTicks(lo, hi, 4), L, R, T, B, W, H, "", D.kind === "ratio" ? "log2 H/L" : "log2");
+    const surf = css("--surface");
+    groups.forEach((cnd, k) => {
+      const cx = L + bw * (k + 0.5);
+      const t = text(g, cx, H - B + 16, cnd.length > 14 ? cnd.slice(0, 13) + "…" : cnd, { "text-anchor": "middle" });
+      t.appendChild(document.createElementNS(SVGNS, "title")).textContent = cnd;
+      feats.forEach((i, fi) => {
+        const off = feats.length > 1 ? (fi - (feats.length - 1) / 2) * Math.min(18, bw / (feats.length + 1)) : 0;
+        const vals = [];
+        D.samples.forEach((s, j) => {
+          if (D.cond[j] !== cnd || D.v[i][j] == null) return;
+          const v = D.v[i][j], imp = isImputed(i, j);
+          vals.push(v);
+          const jit = ((j * 7919) % 13 - 6) * (feats.length > 1 ? 0.6 : 1.6);
+          const col = feats.length > 1 ? css("--c" + (fi % 8)) : condColor(cnd);
+          const dot = svg("circle", { cx: cx + off + jit, cy: Y(v), r: 4.2, fill: imp ? surf : col, stroke: col, "stroke-width": 1.6 }, g);
+          dot.appendChild(document.createElementNS(SVGNS, "title")).textContent = s + ": " + fmt(v) + (imp ? " (imputed)" : "");
+        });
+        if (vals.length) {
+          const m = vals.reduce((a, b) => a + b, 0) / vals.length;
+          svg("line", { x1: cx + off - 12, x2: cx + off + 12, y1: Y(m), y2: Y(m), stroke: css("--text"), "stroke-width": 2 }, g);
+        }
+      });
+    });
+    const hasImp = feats.some((i) => D.samples.some((_, j) => isImputed(i, j)));
+    if (hasImp) text(g, L + 4, H - 4, "○ imputed   ● measured", { "font-size": 11 });
+    svgTools(host, root, "values_" + feats.map((i) => D.f.label[i] || D.f.id[i]).join("_").slice(0, 60));
+  }
+  function renderProfile() {
+    const host = $("#detail");
+    if (!ST.pinned.length) return;
+    host.innerHTML = "<h4>Pinned (" + ST.pinned.length + ")</h4><div class='legend'>" + ST.pinned.map((i, k) => "<span><span class='sw' style='background:" +
+      css("--c" + (k % 8)) + "'></span>" + esc(D.f.label[i] || D.f.id[i]) + "</span>").join("") + "</div><div id='strip' class='chart'></div>";
+    renderStrip($("#strip"), ST.pinned.slice(0, 8));
+  }
+
+  // ---------------------------------------------------------------- table
+  const COLS = [
+    { k: "sig", t: "", f: (c, i) => { const s = sigOf(c, i); return s ? '<span class="dot ' + s + '"></span>' : ""; }, v: (c, i) => (sigOf(c, i) ? 0 : 1) },
+    { k: "label", t: D.kind === "ratio" ? "Site" : "Gene", f: (c, i) => esc(D.f.label[i] || ""), v: (c, i) => (D.f.label[i] || "").toLowerCase() },
+    { k: "id", t: "ID", f: (c, i) => esc((D.f.id[i] || "").slice(0, 40)), v: (c, i) => D.f.id[i] },
+    { k: "fc", t: "log2FC", n: 1, f: (c, i) => fmt(c.fc[i]), v: (c, i) => (c.fc[i] == null ? -1e9 : c.fc[i]) },
+    { k: "ci", t: "95% CI", n: 1, f: (c, i) => (c.ciL[i] == null ? "–" : fmt(c.ciL[i]) + " – " + fmt(c.ciR[i])), v: (c, i) => c.ciL[i] },
+    { k: "p", t: "p", n: 1, f: (c, i) => fmtP(c.p[i]), v: (c, i) => (c.p[i] == null ? 2 : c.p[i]) },
+    { k: "q", t: "adj. p", n: 1, f: (c, i) => fmtP(c.q[i]), v: (c, i) => (c.q[i] == null ? 2 : c.q[i]) },
+    { k: "n", t: "measured", n: 1, f: (c, i) => (c.nt[i] == null ? "" : c.nt[i] + (c.nc[i] != null && c.t2 ? " / " + c.nc[i] : "")), v: (c, i) => (c.nt[i] || 0) + (c.nc[i] || 0) },
+    { k: "desc", t: "Description", f: (c, i) => esc((D.f.desc[i] || "").slice(0, 120)), v: (c, i) => D.f.desc[i] || "", cls: "desc" },
+  ];
+  function tableRows() {
+    const c = C();
+    const out = [];
+    for (let i = 0; i < nF; i++) {
+      if (c.p[i] == null && c.fc[i] == null) continue;
+      if (ST.sigOnly && !sigOf(c, i) && !(ST.search || ST.highlight)) continue;
+      if ((ST.search || ST.highlight) && !matches(i)) continue;
+      out.push(i);
+    }
+    const col = COLS.find((x) => x.k === ST.sortKey) || COLS[5];
+    out.sort((a, b) => { const x = col.v(c, a), y = col.v(c, b); return (x > y ? 1 : x < y ? -1 : 0) * ST.sortDir; });
+    return out;
+  }
+  function renderTable(resetPage) {
+    const host = $("#table");
+    if (!host) return;
+    if (resetPage) ST.page = 0;
+    const c = C(), rows = tableRows(), per = 50;
+    const pages = Math.max(1, Math.ceil(rows.length / per));
+    ST.page = Math.min(ST.page, pages - 1);
+    let h = '<div class="tablewrap"><table><thead><tr>' + COLS.map((x) => "<th data-k='" + x.k + "'" + (x.k === ST.sortKey ? " data-dir='" + (ST.sortDir > 0 ? "asc" : "desc") + "'" : "") + ">" + x.t + "</th>").join("") + "</tr></thead><tbody>";
+    rows.slice(ST.page * per, ST.page * per + per).forEach((i) => {
+      h += "<tr data-i='" + i + "'" + (i === ST.focus ? " class='focus'" : "") + ">" + COLS.map((x) => "<td" + (x.n ? " class='n'" : x.cls ? " class='" + x.cls + "'" : "") + ">" + x.f(c, i) + "</td>").join("") + "</tr>";
+    });
+    if (!rows.length) h += "<tr><td colspan='" + COLS.length + "' class='muted'>" + (ST.sigOnly ? "No significant features at these cut-offs. Untick “significant only” to see everything." : "Nothing matches.") + "</td></tr>";
+    h += "</tbody></table></div><div class='pager'>" + fmtInt(rows.length) + " rows · page " + (ST.page + 1) + " of " + pages +
+      " <button id='pprev'>‹</button><button id='pnext'>›</button></div>";
+    host.innerHTML = h;
+    $$("th", host).forEach((th) => (th.onclick = () => { if (ST.sortKey === th.dataset.k) ST.sortDir *= -1; else { ST.sortKey = th.dataset.k; ST.sortDir = 1; } renderTable(true); }));
+    $$("tbody tr[data-i]", host).forEach((tr) => (tr.onclick = (e) => { const i = +tr.dataset.i; if (e.shiftKey) togglePin(i); setFocus(i); }));
+    $("#pprev").onclick = () => { ST.page = Math.max(0, ST.page - 1); renderTable(false); };
+    $("#pnext").onclick = () => { ST.page = Math.min(pages - 1, ST.page + 1); renderTable(false); };
+  }
+  function exportCSV() {
+    const c = C(), rows = tableRows();
+    const head = ["id", "label", "description", "log2fc", "ci_low", "ci_high", "p", "adj_p", "significant", ...D.samples];
+    const q = (s) => '"' + String(s == null ? "" : s).replace(/"/g, '""') + '"';
+    const lines = [head.join(",")].concat(rows.map((i) => [q(D.f.id[i]), q(D.f.label[i]), q(D.f.desc[i]), c.fc[i], c.ciL[i], c.ciR[i], c.p[i], c.q[i], sigOf(c, i), ...D.v[i]].map((v) => (v == null ? "" : v)).join(",")));
+    download(c.slug + "_filtered.csv", lines.join("\n"), "text/csv");
+  }
+
+  // -------------------------------------------------------- p histogram
+  function renderPHist() {
+    const host = $("#phist");
+    if (!host) return;
+    const c = C(), bins = new Array(20).fill(0);
+    let n = 0;
+    for (let i = 0; i < nF; i++) if (c.p[i] != null) { bins[Math.min(19, Math.floor(c.p[i] * 20))]++; n++; }
+    const W = widthOf(host, 300), H = 170, L = 44, R = 8, T = 10, B = 34;
+    const root = frame(host, W, H), g = svg("g", {}, root);
+    const ymax = Math.max(1, ...bins);
+    const X = (v) => L + v * (W - L - R), Y = (v) => H - B - (v / ymax) * (H - T - B);
+    axes(g, X, Y, [0, 0.25, 0.5, 0.75, 1], niceTicks(0, ymax, 3), L, R, T, B, W, H, "p-value", "");
+    const col = css("--c0");
+    bins.forEach((b, k) => svg("rect", { x: X(k / 20) + 0.5, y: Y(b), width: (W - L - R) / 20 - 1, height: H - B - Y(b), fill: col, "fill-opacity": 0.75 }, g));
+    if (n) svg("line", { x1: L, x2: W - R, y1: Y(n / 20), y2: Y(n / 20), stroke: css("--muted"), "stroke-dasharray": "3 3" }, g);
+  }
+
+  // ------------------------------------------------------------- heatmap
+  function divColor(v, lim) {
+    const t = Math.max(-1, Math.min(1, v / lim));
+    const a = t >= 0 ? hex(css("--up")) : hex(css("--down")), s = hex(css("--surface"));
+    const k = Math.abs(t);
+    return "rgb(" + Math.round(s[0] + (a[0] - s[0]) * k) + "," + Math.round(s[1] + (a[1] - s[1]) * k) + "," + Math.round(s[2] + (a[2] - s[2]) * k) + ")";
+  }
+  function hex(c) {
+    c = c.replace("#", "");
+    if (c.length === 3) c = c.split("").map((x) => x + x).join("");
+    return [parseInt(c.slice(0, 2), 16), parseInt(c.slice(2, 4), 16), parseInt(c.slice(4, 6), 16)];
+  }
+  function renderHeatmap() {
+    const host = $("#heatmap");
+    if (!host) return;
+    const hm = D.qc.heatmap;
+    if (!hm || !hm.rows.length) { host.innerHTML = '<div class="empty">No significant features to cluster at the report\'s cut-offs.</div>'; return; }
+    const cols = hm.cols, rows = hm.rows, vals = hm.values;
+    const showNames = rows.length <= 80;
+    const labW = showNames ? 110 : 8, topH = 90, cellH = Math.max(3, Math.min(14, Math.floor(620 / rows.length)));
+    const W = widthOf(host), cellW = Math.max(8, Math.floor((W - labW - 20) / cols.length));
+    const H = topH + rows.length * cellH + 8;
+    host.querySelectorAll("canvas,svg").forEach((x) => x.remove());
+    const cv = document.createElement("canvas"), dpr = window.devicePixelRatio || 1;
+    cv.width = (labW + cols.length * cellW + 10) * dpr; cv.height = H * dpr;
+    cv.style.width = labW + cols.length * cellW + 10 + "px"; cv.style.height = H + "px";
+    host.insertBefore(cv, host.firstChild);
+    const ctx = cv.getContext("2d");
+    ctx.scale(dpr, dpr);
+    const all = [];
+    vals.forEach((r) => r.forEach((v) => v != null && all.push(Math.abs(v))));
+    all.sort((a, b) => a - b);
+    const lim = Math.max(0.5, all[Math.floor(all.length * 0.95)] || 1);
+    ctx.font = "11px system-ui, sans-serif";
+    ctx.fillStyle = css("--text2");
+    cols.forEach((j, k) => {
+      ctx.save();
+      ctx.translate(labW + k * cellW + cellW / 2 + 3, topH - 14);
+      ctx.rotate(-Math.PI / 3);
+      ctx.fillText(D.samples[j].slice(0, 16), 0, 0);
+      ctx.restore();
+      ctx.fillStyle = condColor(D.cond[j]);
+      ctx.fillRect(labW + k * cellW, topH - 10, cellW - 1, 7);
+      ctx.fillStyle = css("--text2");
+    });
+    rows.forEach((i, r) => {
+      vals[r].forEach((v, k) => {
+        ctx.fillStyle = v == null ? css("--sunk") : divColor(v, lim);
+        ctx.fillRect(labW + k * cellW, topH + r * cellH, cellW - (cellW > 10 ? 1 : 0), cellH - (cellH > 6 ? 1 : 0));
+      });
+      if (showNames) {
+        ctx.fillStyle = css("--text2");
+        ctx.textAlign = "right";
+        ctx.fillText((D.f.label[i] || D.f.id[i]).slice(0, 16), labW - 6, topH + r * cellH + cellH - 2);
+        ctx.textAlign = "left";
+      }
+    });
+    cv.onmousemove = (e) => {
+      const rc = cv.getBoundingClientRect(), x = e.clientX - rc.left, y = e.clientY - rc.top;
+      const k = Math.floor((x - labW) / cellW), r = Math.floor((y - topH) / cellH);
+      if (k < 0 || k >= cols.length || r < 0 || r >= rows.length) { hideTip(); return; }
+      const i = rows[r], j = cols[k];
+      showTip(e, "<b>" + esc(D.f.label[i] || D.f.id[i]) + "</b><br>" + esc(D.samples[j]) + " (" + esc(D.cond[j]) + ")<br>centred log2 " + fmt(vals[r][k]) + (isImputed(i, j) ? " · imputed" : ""));
+    };
+    cv.onmouseleave = hideTip;
+    cv.onclick = (e) => {
+      const rc = cv.getBoundingClientRect(), r = Math.floor((e.clientY - rc.top - topH) / cellH);
+      if (r >= 0 && r < rows.length) { setFocus(rows[r]); goTo("differential"); }
+    };
+    $("#heatlegend").innerHTML = "<span><span class='sw' style='background:" + css("--down") + "'></span>below the protein's mean</span><span><span class='sw' style='background:" +
+      css("--up") + "'></span>above</span><span class='muted'>colour saturates at ±" + fmt(lim, 1) + " log2 · " + rows.length + " of " + fmtInt(hm.total_significant) +
+      " significant features, clustered (euclidean, complete linkage) · click a row to open it</span>";
+  }
+
+  // ----------------------------------------------------------- enrichment
+  function renderEnrichment() {
+    const host = $("#enrich");
+    if (!host) return;
+    if (!D.enr.length) { host.innerHTML = '<div class="empty">' + esc(D.enrNote || "Enrichment was not run.") + "</div>"; return; }
+    const comps = [...new Set(D.enr.map((b) => b.comparison))], libs = [...new Set(D.enr.map((b) => b.library))];
+    const st = host._st || (host._st = { comp: comps[0], dir: "up", lib: libs[0] });
+    let h = "<div class='bar' style='position:static'><label class='ctl'>Comparison <select id='ecomp'>" + comps.map((c) => "<option" + (c === st.comp ? " selected" : "") + ">" + esc(c) + "</option>").join("") + "</select></label>" +
+      "<label class='ctl'>Hits <select id='edir'><option value='up'" + (st.dir === "up" ? " selected" : "") + ">up</option><option value='down'" + (st.dir === "down" ? " selected" : "") + ">down</option></select></label>" +
+      "<label class='ctl'>Gene sets <select id='elib'>" + libs.map((c) => "<option" + (c === st.lib ? " selected" : "") + ">" + esc(c) + "</option>").join("") + "</select></label></div>";
+    const b = D.enr.find((x) => x.comparison === st.comp && x.direction === st.dir && x.library === st.lib);
+    h += "<p class='sub'>" + (b ? fmtInt(b.hits) + " " + st.dir + " hits tested against " + fmtInt(b.background) + " quantified genes (one-sided Fisher test, BH-adjusted)." : "") + "</p>";
+    h += "<div id='ebars' class='chart card'></div><div id='etable'></div>";
+    host.innerHTML = h;
+    $("#ecomp").onchange = (e) => { st.comp = e.target.value; renderEnrichment(); };
+    $("#edir").onchange = (e) => { st.dir = e.target.value; renderEnrichment(); };
+    $("#elib").onchange = (e) => { st.lib = e.target.value; renderEnrichment(); };
+    const terms = b ? b.terms : [];
+    if (!terms.length) { $("#ebars").innerHTML = '<div class="empty">No terms (no hits in this direction, or none overlap these gene sets).</div>'; return; }
+    const top = terms.slice(0, 15), host2 = $("#ebars");
+    const W = widthOf(host2), L = Math.min(360, W * 0.45), R = 60, T = 30, rowH = 22, H = T + top.length * rowH + 34;
+    const root = frame(host2, W, H), g = svg("g", {}, root);
+    const xmax = Math.max(2, ...top.map((t) => -Math.log10(Math.max(t.q, 1e-300))));
+    const X = (v) => L + (v / xmax) * (W - L - R);
+    niceTicks(0, xmax, 5).forEach((v) => { svg("line", { x1: X(v), x2: X(v), y1: T, y2: H - 30, stroke: css("--grid") }, g); text(g, X(v), H - 16, fmtTick(v), { "text-anchor": "middle" }); });
+    text(g, (L + W - R) / 2, H - 2, "−log10 adjusted p", { "text-anchor": "middle", fill: css("--text2") });
+    svg("line", { x1: X(-Math.log10(0.05)), x2: X(-Math.log10(0.05)), y1: T, y2: H - 30, stroke: css("--muted"), "stroke-dasharray": "4 4" }, g);
+    const col = st.dir === "up" ? css("--up") : css("--down");
+    top.forEach((t, k) => {
+      const y = T + k * rowH, v = -Math.log10(Math.max(t.q, 1e-300));
+      const r = svg("rect", { x: L, y: y + 3, width: Math.max(1, X(v) - L), height: rowH - 7, fill: col, "fill-opacity": t.q <= 0.05 ? 0.9 : 0.35, rx: 2 }, g);
+      r.appendChild(document.createElementNS(SVGNS, "title")).textContent = t.term + "\n" + t.k + " of " + t.K + " genes · adj. p " + fmtP(t.q) + "\n" + t.genes.join(", ");
+      text(g, L - 8, y + rowH / 2 + 4, t.term.length > 52 ? t.term.slice(0, 50) + "…" : t.term, { "text-anchor": "end", fill: css("--text2") });
+      text(g, X(v) + 5, y + rowH / 2 + 4, t.k + "/" + t.K, { "font-size": 11 });
+    });
+    svgTools(host2, root, "enrichment_" + st.comp + "_" + st.dir + "_" + st.lib);
+    let tb = "<div class='tablewrap' style='max-height:380px'><table><thead><tr><th>Term</th><th>overlap</th><th>p</th><th>adj. p</th><th>log2 odds</th><th>genes</th></tr></thead><tbody>";
+    terms.forEach((t, k) => {
+      tb += "<tr data-k='" + k + "' title='Show these genes on the volcano'><td>" + esc(t.term) + "</td><td class='n'>" + t.k + "/" + t.K + "</td><td class='n'>" + fmtP(t.p) + "</td><td class='n'>" + fmtP(t.q) +
+        "</td><td class='n'>" + (isFinite(t.log2_odds) ? fmt(t.log2_odds) : "∞") + "</td><td class='desc'>" + esc(t.genes.join(", ")) + "</td></tr>";
+    });
+    $("#etable").innerHTML = tb + "</tbody></table></div><p class='muted'>Click a term to mark its genes on the volcano.</p>";
+    $$("#etable tbody tr").forEach((tr) => (tr.onclick = () => {
+      const t = terms[+tr.dataset.k], genes = new Set(t.genes.map((x) => x.toUpperCase()));
+      const set = new Set();
+      for (let i = 0; i < nF; i++) { const gname = (D.f.label[i] || "").split(/[;\s]/)[0].replace(/\.\d+$/, "").toUpperCase(); if (genes.has(gname)) set.add(i); }
+      ST.highlight = set; ST.highlightName = t.term;
+      const k = D.comps.findIndex((c) => c.name === st.comp);
+      if (k >= 0) ST.ci = k;
+      syncControls(); renderDiff(); goTo("differential");
+    }));
+  }
+
+  // ------------------------------------------------------------------- QC
+  const QC_TABS = [["pca", "PCA"], ["corr", "Correlation"], ["missing", "Missing values"], ["dist", "Distributions"], ["cv", "CV"], ["ids", "Identifications"], ["imp", "Imputation"]];
+  let qcTab = "pca";
+  function renderQC() {
+    const host = $("#qc");
+    if (!host) return;
+    const tabs = QC_TABS.filter(([k]) => k !== "imp" || D.imp);
+    host.innerHTML = "<div class='tabs'>" + tabs.map(([k, t]) => "<button data-k='" + k + "'" + (k === qcTab ? " class='on'" : "") + ">" + t + "</button>").join("") + "</div><div id='qcbody'></div>";
+    $$(".tabs button", host).forEach((b) => (b.onclick = () => { qcTab = b.dataset.k; renderQC(); }));
+    ({ pca: qcPCA, corr: qcCorr, missing: qcMissing, dist: qcDist, cv: qcCV, ids: qcIds, imp: qcImp })[qcTab]($("#qcbody"));
+  }
+  function legend() { return "<div class='legend'>" + D.conditions.map((c) => "<span><span class='sw' style='background:" + condColor(c) + "'></span>" + esc(c) + "</span>").join("") + "</div>"; }
+  function qcPCA(host) {
+    const P = D.qc.pca;
+    if (!P || !P.scores.length) { host.innerHTML = "<div class='empty'>Not enough complete features for a PCA.</div>"; return; }
+    const npc = P.percent.length, st = host._st || { x: 0, y: 1, names: nS <= 24 };
+    host._st = st;
+    const opts = (sel) => P.percent.map((p, k) => "<option value='" + k + "'" + (k === sel ? " selected" : "") + ">PC" + (k + 1) + " (" + p.toFixed(1) + "%)</option>").join("");
+    host.innerHTML = "<p class='sub'>Top " + fmtInt(P.n) + " most variable features with no missing values (FragPipe-Analyst plot_pca). Replicates should sit together.</p>" +
+      "<div class='row'><label class='ctl'>x <select id='pcx'>" + opts(st.x) + "</select></label> <label class='ctl'>y <select id='pcy'>" + opts(st.y) + "</select></label> <label class='ctl'><input type='checkbox' id='pcn'" + (st.names ? " checked" : "") + "> names</label></div>" +
+      legend() + "<div class='chart card' id='pcachart'></div>";
+    $("#pcx").onchange = (e) => { st.x = +e.target.value; qcPCA(host); };
+    $("#pcy").onchange = (e) => { st.y = +e.target.value; qcPCA(host); };
+    $("#pcn").onchange = (e) => { st.names = e.target.checked; qcPCA(host); };
+    const ch = $("#pcachart"), W = widthOf(ch), H = Math.min(520, Math.round(W * 0.6)), L = 56, R = 20, T = 16, B = 44;
+    const xs = P.scores.map((s) => s[st.x]), ys = P.scores.map((s) => s[st.y]);
+    const pad = (a) => { const lo = Math.min(...a), hi = Math.max(...a), p = (hi - lo) * 0.12 || 1; return [lo - p, hi + p]; };
+    const [x0, x1] = pad(xs), [y0, y1] = pad(ys);
+    const X = (v) => L + ((v - x0) / (x1 - x0)) * (W - L - R), Y = (v) => H - B - ((v - y0) / (y1 - y0)) * (H - T - B);
+    const root = frame(ch, W, H), g = svg("g", {}, root);
+    axes(g, X, Y, niceTicks(x0, x1, 6), niceTicks(y0, y1, 5), L, R, T, B, W, H, "PC" + (st.x + 1) + " (" + P.percent[st.x].toFixed(1) + "%)", "PC" + (st.y + 1) + " (" + P.percent[st.y].toFixed(1) + "%)");
+    P.scores.forEach((s, j) => {
+      const c = svg("circle", { cx: X(s[st.x]), cy: Y(s[st.y]), r: 7, fill: condColor(D.cond[j]), stroke: css("--surface"), "stroke-width": 1.5 }, g);
+      c.addEventListener("mousemove", (e) => showTip(e, "<b>" + esc(D.samples[j]) + "</b><br>" + esc(D.cond[j])));
+      c.addEventListener("mouseleave", hideTip);
+      if (st.names) text(g, X(s[st.x]) + 9, Y(s[st.y]) + 4, D.samples[j], { "font-size": 11, fill: css("--text2") });
+    });
+    svgTools(ch, root, "PCA");
+  }
+  function seqColor(t) {
+    const a = hex(css("--c0")), s = hex(css("--surface"));
+    t = Math.max(0, Math.min(1, t));
+    return "rgb(" + Math.round(s[0] + (a[0] - s[0]) * t) + "," + Math.round(s[1] + (a[1] - s[1]) * t) + "," + Math.round(s[2] + (a[2] - s[2]) * t) + ")";
+  }
+  function qcCorr(host) {
+    const Cc = D.qc.correlation;
+    if (!Cc || !Cc.matrix.length) { host.innerHTML = "<div class='empty'>No correlation.</div>"; return; }
+    host.innerHTML = "<p class='sub'>Pearson correlation between samples over " + fmtInt(Cc.complete_rows) + " complete features, clustered. Replicates of a condition should form blocks.</p>" + legend() + "<div class='chart card' id='corrchart'></div>";
+    const ch = $("#corrchart"), o = Cc.order, n = o.length;
+    const W = widthOf(ch), lab = 130, cell = Math.max(10, Math.min(36, Math.floor((W - lab - 20) / n))), H = lab + n * cell + 10;
+    const root = frame(ch, lab + n * cell + 12, H), g = svg("g", {}, root);
+    let lo = 1, hi = -1;  // off-diagonal range, so r = 1 on the diagonal doesn't flatten the scale
+    Cc.matrix.forEach((r, a) => r.forEach((v, b) => { if (v != null && a !== b) { lo = Math.min(lo, v); hi = Math.max(hi, v); } }));
+    if (hi <= lo) { lo = Math.min(lo, 0.9); hi = 1; }
+    o.forEach((a, r) => {
+      text(g, lab - 6, lab + r * cell + cell / 2 + 4, D.samples[a].slice(0, 18), { "text-anchor": "end", "font-size": 11, fill: condColor(D.cond[a]) });
+      const t = text(g, 0, 0, D.samples[a].slice(0, 18), { "font-size": 11, fill: condColor(D.cond[a]), transform: "translate(" + (lab + r * cell + cell / 2 + 4) + "," + (lab - 6) + ") rotate(-60)" });
+      t.setAttribute("x", 0);
+      o.forEach((b, k) => {
+        const v = Cc.matrix[a][b];
+        const rc = svg("rect", { x: lab + k * cell, y: lab + r * cell, width: cell - 1, height: cell - 1, fill: v == null ? css("--sunk") : seqColor(hi > lo ? (v - lo) / (hi - lo) : 1) }, g);
+        rc.addEventListener("mousemove", (e) => showTip(e, esc(D.samples[a]) + " × " + esc(D.samples[b]) + "<br>r = " + fmt(v, 3)));
+        rc.addEventListener("mouseleave", hideTip);
+      });
+    });
+    svgTools(ch, root, "correlation");
+    ch.insertAdjacentHTML("beforeend", "<div class='legend'><span class='muted'>light = r " + fmt(lo, 3) + " · dark = r " + fmt(hi, 3) + "</span></div>");
+  }
+  function qcMissing(host) {
+    const M = D.qc.missing;
+    host.innerHTML = "<p class='sub'>" + fmtInt(M.all) + " features after filtering: " + fmtInt(M.complete) + " complete, " + fmtInt(M.under_half) +
+      " with at most 50% missing. The pattern shows every feature with a gap (blue = measured, blank = missing).</p><div class='grid2'><div class='chart card' id='misschart'></div><div class='chart card' id='cumchart'></div></div>";
+    const ch = $("#misschart");
+    if (!M.rows.length) ch.innerHTML = "<div class='empty'>No missing values.</div>";
+    else {
+      const W = widthOf(ch, 400) - 10, top = 70, cellW = Math.max(4, Math.floor((W - 10) / nS)), rows = M.rows, rh = Math.max(1, Math.min(4, Math.floor(420 / rows.length)));
+      const cv = document.createElement("canvas"), dpr = window.devicePixelRatio || 1, Wc = nS * cellW + 10, Hc = top + rows.length * rh + 4;
+      cv.width = Wc * dpr; cv.height = Hc * dpr; cv.style.width = Wc + "px"; cv.style.height = Hc + "px";
+      ch.appendChild(cv);
+      const ctx = cv.getContext("2d");
+      ctx.scale(dpr, dpr);
+      ctx.font = "10px system-ui, sans-serif";
+      D.samples.forEach((s, j) => {
+        ctx.fillStyle = condColor(D.cond[j]);
+        ctx.fillRect(j * cellW, top - 8, cellW - 1, 6);
+        ctx.save(); ctx.translate(j * cellW + cellW / 2 + 3, top - 11); ctx.rotate(-Math.PI / 3); ctx.fillStyle = css("--text2"); ctx.fillText(s.slice(0, 12), 0, 0); ctx.restore();
+      });
+      const on = css("--c0"), off = css("--sunk");
+      rows.forEach((p, r) => { for (let j = 0; j < nS; j++) { ctx.fillStyle = p[j] === "1" ? on : off; ctx.fillRect(j * cellW, top + r * rh, cellW - (cellW > 5 ? 1 : 0), rh); } });
+      cv.onmousemove = (e) => {
+        const rc = cv.getBoundingClientRect(), j = Math.floor((e.clientX - rc.left) / cellW), r = Math.floor((e.clientY - rc.top - top) / rh);
+        if (j < 0 || j >= nS || r < 0 || r >= rows.length) { hideTip(); return; }
+        const i = M.row_ids[r];
+        showTip(e, "<b>" + esc(D.f.label[i] || D.f.id[i]) + "</b><br>" + esc(D.samples[j]) + ": " + (rows[r][j] === "1" ? "measured" : "missing"));
+      };
+      cv.onmouseleave = hideTip;
+      if (M.total > rows.length) ch.insertAdjacentHTML("beforeend", "<div class='muted'>every " + Math.ceil(M.total / rows.length) + "th of " + fmtInt(M.total) + " rows shown</div>");
+    }
+    const cc = $("#cumchart"), W = widthOf(cc, 360), H = 300, L = 56, R = 14, T = 14, B = 44;
+    const root = frame(cc, W, H), g = svg("g", {}, root), curve = M.curve;
+    const X = (v) => L + v * (W - L - R), Y = (v) => H - B - (v / Math.max(1, M.all)) * (H - T - B);
+    axes(g, X, Y, [0, 0.25, 0.5, 0.75, 1], niceTicks(0, M.all, 5), L, R, T, B, W, H, "missing fraction (at most)", "features");
+    svg("polyline", { points: curve.map(([x, y]) => X(x) + "," + Y(y)).join(" "), fill: "none", stroke: css("--c1"), "stroke-width": 2.5 }, g);
+    svg("line", { x1: X(0.5), x2: X(0.5), y1: T, y2: H - B, stroke: css("--muted"), "stroke-dasharray": "4 4" }, g);
+    svgTools(cc, root, "cumulative_missing");
+  }
+  function boxes(host, stats, title) {
+    const W = widthOf(host), H = 300, L = 50, R = 10, T = 14, B = 90;
+    const root = frame(host, W, H), g = svg("g", {}, root);
+    let lo = Infinity, hi = -Infinity;
+    stats.forEach((s) => { if (s) { lo = Math.min(lo, s.lo); hi = Math.max(hi, s.hi); } });
+    if (!isFinite(lo)) return;
+    const pad = (hi - lo) * 0.06 || 1;
+    lo -= pad; hi += pad;
+    const bw = (W - L - R) / nS, Y = (v) => H - B - ((v - lo) / (hi - lo)) * (H - T - B);
+    axes(g, () => 0, Y, [], niceTicks(lo, hi, 5), L, R, T, B, W, H, "", title);
+    stats.forEach((s, j) => {
+      const cx = L + bw * (j + 0.5), w = Math.min(28, bw * 0.6), col = condColor(D.cond[j]);
+      const t = text(g, 0, 0, D.samples[j].slice(0, 16), { "font-size": 10.5, transform: "translate(" + (cx + 3) + "," + (H - B + 10) + ") rotate(60)" });
+      t.setAttribute("x", 0);
+      if (!s) return;
+      svg("line", { x1: cx, x2: cx, y1: Y(s.lo), y2: Y(s.hi), stroke: css("--muted") }, g);
+      const r = svg("rect", { x: cx - w / 2, y: Y(s.q3), width: w, height: Math.max(1, Y(s.q1) - Y(s.q3)), fill: col, "fill-opacity": 0.35, stroke: col }, g);
+      r.appendChild(document.createElementNS(SVGNS, "title")).textContent = D.samples[j] + "\nmedian " + fmt(s.median) + " · IQR " + fmt(s.q1) + "–" + fmt(s.q3) + " · n " + s.n;
+      svg("line", { x1: cx - w / 2, x2: cx + w / 2, y1: Y(s.median), y2: Y(s.median), stroke: css("--text"), "stroke-width": 2 }, g);
+    });
+    svgTools(host, root, "distributions");
+  }
+  function qcDist(host) {
+    const st = host._st || (host._st = { after: true });
+    const hasNorm = D.settings.normalize !== "none";
+    host.innerHTML = "<p class='sub'>Measured log2 values per sample" + (hasNorm ? " — toggle to compare before/after " + esc(D.settings.normalize) + " normalisation" : "") +
+      ". Medians should line up.</p>" + (hasNorm ? "<div class='row'><button id='dbefore'" + (!st.after ? " class='on'" : "") + ">before</button> <button id='dafter'" + (st.after ? " class='on'" : "") + ">after</button></div>" : "") + legend() + "<div class='chart card' id='distchart'></div>";
+    if (hasNorm) { $("#dbefore").onclick = () => { st.after = false; qcDist(host); }; $("#dafter").onclick = () => { st.after = true; qcDist(host); }; }
+    boxes($("#distchart"), st.after || !hasNorm ? D.qc.box_after : D.qc.box_before, D.kind === "ratio" ? "log2 H/L" : "log2 value");
+  }
+  function qcCV(host) {
+    const cv = D.qc.cv || {};
+    const conds = Object.keys(cv);
+    if (D.kind === "ratio") { host.innerHTML = "<div class='empty'>CVs are for intensities; this data is ratios.</div>"; return; }
+    host.innerHTML = "<p class='sub'>Coefficient of variation (sd / mean of un-logged values) per feature within each condition (FragPipe-Analyst plot_cvs). Lower is more reproducible; the dashed line is the median.</p><div class='grid2' id='cvgrid'></div>";
+    const grid = $("#cvgrid");
+    conds.forEach((c) => {
+      const d = document.createElement("div");
+      d.className = "chart card";
+      grid.appendChild(d);
+      const bins = cv[c].hist, W = widthOf(d, 300), H = 200, L = 44, R = 8, T = 30, B = 34, ymax = Math.max(1, ...bins);
+      const root = frame(d, W, H), g = svg("g", {}, root);
+      const X = (v) => L + v * (W - L - R), Y = (v) => H - B - (v / ymax) * (H - T - B);
+      axes(g, X, Y, [0, 0.25, 0.5, 0.75, 1], niceTicks(0, ymax, 3), L, R, T, B, W, H, "CV", "");
+      bins.forEach((b, k) => svg("rect", { x: X(k / bins.length) + 0.5, y: Y(b), width: (W - L - R) / bins.length - 1, height: H - B - Y(b), fill: condColor(c), "fill-opacity": 0.75 }, g));
+      if (cv[c].median != null) svg("line", { x1: X(Math.min(1, cv[c].median)), x2: X(Math.min(1, cv[c].median)), y1: T, y2: H - B, stroke: css("--text"), "stroke-dasharray": "4 3" }, g);
+      text(g, 4, 16, c + " · median " + (cv[c].median == null ? "–" : (cv[c].median * 100).toFixed(1) + "%"), { fill: css("--text"), "font-size": 12.5, "font-weight": 600 });
+    });
+  }
+  function qcIds(host) {
+    const a = D.qc.features_per_sample, b = D.qc.features_per_sample_after;
+    host.innerHTML = "<p class='sub'>" + esc(D.levelTitle) + " measured per sample (FragPipe-Analyst plot_feature_numbers): before filtering (light) and in the analysis (solid).</p>" + legend() + "<div class='chart card' id='idchart'></div>";
+    const ch = $("#idchart"), W = widthOf(ch), H = 300, L = 60, R = 10, T = 14, B = 90;
+    const root = frame(ch, W, H), g = svg("g", {}, root), ymax = Math.max(1, ...a);
+    const bw = (W - L - R) / nS, Y = (v) => H - B - (v / ymax) * (H - T - B);
+    axes(g, () => 0, Y, [], niceTicks(0, ymax, 5), L, R, T, B, W, H, "", "features");
+    a.forEach((v, j) => {
+      const x = L + bw * j + bw * 0.15, w = bw * 0.7, col = condColor(D.cond[j]);
+      svg("rect", { x: x, y: Y(v), width: w, height: H - B - Y(v), fill: col, "fill-opacity": 0.3 }, g);
+      const r = svg("rect", { x: x, y: Y(b[j]), width: w, height: H - B - Y(b[j]), fill: col }, g);
+      r.appendChild(document.createElementNS(SVGNS, "title")).textContent = D.samples[j] + ": " + v + " measured, " + b[j] + " in the analysis";
+      const t = text(g, 0, 0, D.samples[j].slice(0, 16), { "font-size": 10.5, transform: "translate(" + (x + w / 2 + 3) + "," + (H - B + 10) + ") rotate(60)" });
+      t.setAttribute("x", 0);
+    });
+    svgTools(ch, root, "identifications");
+  }
+  function qcImp(host) {
+    host.innerHTML = "<p class='sub'>Where the imputed values landed: " + esc(D.imputationLabel) + ". Imputed values should sit at the low end of the measured distribution.</p><div class='chart card' id='impchart'></div>";
+    const meas = [], imp = [];
+    for (let i = 0; i < nF; i++) for (let j = 0; j < nS; j++) { const v = D.v[i][j]; if (v == null) continue; (isImputed(i, j) ? imp : meas).push(v); }
+    const all = meas.concat(imp), lo = Math.min(...all), hi = Math.max(...all), nb = 40;
+    const hist = (xs) => { const b = new Array(nb).fill(0); xs.forEach((v) => b[Math.min(nb - 1, Math.floor(((v - lo) / (hi - lo || 1)) * nb))]++); return b; };
+    const hm = hist(meas), hi_ = hist(imp), ymax = Math.max(1, ...hm, ...hi_);
+    const ch = $("#impchart"), W = widthOf(ch), H = 280, L = 56, R = 10, T = 14, B = 44;
+    const root = frame(ch, W, H), g = svg("g", {}, root);
+    const X = (v) => L + ((v - lo) / (hi - lo || 1)) * (W - L - R), Y = (v) => H - B - (v / ymax) * (H - T - B);
+    axes(g, X, Y, niceTicks(lo, hi, 7), niceTicks(0, ymax, 4), L, R, T, B, W, H, "log2 value", "values");
+    const bw = (W - L - R) / nb;
+    hm.forEach((v, k) => svg("rect", { x: L + k * bw, y: Y(v), width: bw - 1, height: H - B - Y(v), fill: css("--c0"), "fill-opacity": 0.55 }, g));
+    hi_.forEach((v, k) => svg("rect", { x: L + k * bw, y: Y(v), width: bw - 1, height: H - B - Y(v), fill: css("--c1"), "fill-opacity": 0.75 }, g));
+    ch.insertAdjacentHTML("beforeend", "<div class='legend'><span><span class='sw' style='background:" + css("--c0") + "'></span>measured (" + fmtInt(meas.length) + ")</span><span><span class='sw' style='background:" + css("--c1") + "'></span>imputed (" + fmtInt(imp.length) + ")</span></div>");
+    svgTools(ch, root, "imputation");
+  }
+
+  // ------------------------------------------------------------- controls
+  function syncControls() {
+    const sel = $("#comp");
+    if (sel) sel.value = String(ST.ci);
+    if ($("#lfc")) $("#lfc").value = ST.lfc;
+    if ($("#alpha")) $("#alpha").value = ST.alpha;
+    if ($("#adj")) $("#adj").checked = ST.adj;
+    if ($("#hl")) $("#hl").innerHTML = ST.highlight ? "Marked: <b>" + esc(ST.highlightName) + "</b> (" + ST.highlight.size + ") <button id='hlclear'>clear</button>" : "";
+    const hc = $("#hlclear");
+    if (hc) hc.onclick = () => { ST.highlight = null; syncControls(); renderDiff(); };
+  }
+  function renderDiff() {
+    ST.zoom = null;
+    renderVolcano();
+    renderTable(true);
+    renderPHist();
+    renderDetail();
+    renderTiles();
+    const c = C();
+    const note = $("#cutnote");
+    if (note) {
+      const changed = ST.lfc !== D.settings.log2fc || ST.alpha !== D.settings.alpha || ST.adj !== D.settings.use_adjusted;
+      note.innerHTML = changed ? "Cut-offs changed here only — the TSV files, heatmap and enrichment use the saved settings (|log2FC| ≥ " + D.settings.log2fc +
+        ", " + (D.settings.use_adjusted ? "adj. p" : "p") + " ≤ " + D.settings.alpha + ")." : "";
+    }
+    $("#ma").disabled = D.kind === "ratio" || !c.t2;
+  }
+  function setup() {
+    if (!D.comps.length) {
+      const d = $("#differential-body");
+      if (d) d.innerHTML = "<div class='empty'>No comparisons were made" + (D.notes.length ? " — see the notes above." : ".") + "</div>";
+    } else {
+      $("#comp").innerHTML = D.comps.map((c, k) => "<option value='" + k + "'>" + esc(c.name) + "</option>").join("");
+      $("#comp").onchange = (e) => { ST.ci = +e.target.value; renderDiff(); };
+      const num = (id, key) => ($("#" + id).oninput = (e) => { const v = parseFloat(e.target.value); if (!isNaN(v) && v >= 0) { ST[key] = v; renderDiff(); } });
+      num("lfc", "lfc");
+      num("alpha", "alpha");
+      $("#adj").onchange = (e) => { ST.adj = e.target.checked; renderDiff(); };
+      $("#labels").oninput = (e) => { ST.labels = Math.max(0, parseInt(e.target.value, 10) || 0); renderVolcano(); };
+      $("#search").oninput = (e) => { ST.search = e.target.value.trim(); ST.highlight = null; syncControls(); renderVolcano(); renderTable(true); };
+      $("#sigonly").onchange = (e) => { ST.sigOnly = e.target.checked; renderTable(true); };
+      $("#csv").onclick = exportCSV;
+      $("#volc").onclick = () => { ST.mode = "volcano"; $("#volc").className = "on"; $("#ma").className = ""; renderVolcano(); };
+      $("#ma").onclick = () => { ST.mode = "ma"; $("#ma").className = "on"; $("#volc").className = ""; renderVolcano(); };
+      $("#reset").onclick = () => { ST.lfc = D.settings.log2fc; ST.alpha = D.settings.alpha; ST.adj = D.settings.use_adjusted; syncControls(); renderDiff(); };
+      syncControls();
+      renderDiff();
+      renderPins();
+    }
+    renderTiles();
+    renderHeatmap();
+    renderEnrichment();
+    renderQC();
+    const theme = $("#theme");
+    if (theme) theme.onclick = () => {
+      const r = document.documentElement, cur = r.getAttribute("data-theme");
+      const dark = cur ? cur === "dark" : window.matchMedia("(prefers-color-scheme: dark)").matches;
+      r.setAttribute("data-theme", dark ? "light" : "dark");
+      redraw();
+    };
+  }
+  function redraw() { if (D.comps.length) { renderVolcano(); renderPHist(); renderDetail(); } renderHeatmap(); renderEnrichment(); renderQC(); }
+  let rt = null;
+  window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(redraw, 150); });
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", redraw);
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", setup);
+  else setup();
+})();
+</script></body></html>

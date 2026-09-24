@@ -41,3 +41,7 @@ build/
 # stamped at build time by deploy/build_exe.ps1
 ionomos/src/ionomos/_build.py
 labwatch-testbed/
+
+# JS test harness (dev-only, tests/js)
+node_modules/
+ionomos/tests/js/node_modules/

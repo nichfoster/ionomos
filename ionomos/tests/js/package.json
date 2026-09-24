@@ -1,0 +1,13 @@
+{
+  "name": "ionomos-report-js-tests",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Dev-only jsdom harness for downstream/assets/report.js. Never shipped: the report stays one self-contained offline HTML file and PyYAML remains the only runtime dependency.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/"
+  },
+  "devDependencies": {
+    "jsdom": "^26.1.0"
+  }
+}
