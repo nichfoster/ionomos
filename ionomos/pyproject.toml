@@ -18,6 +18,7 @@ dev = [
     "pytest>=8",
     "ruff>=0.5",
     "pyinstaller>=6.10",
+    "pip>=26.2",
 ]
 
 [project.scripts]

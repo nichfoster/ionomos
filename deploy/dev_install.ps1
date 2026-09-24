@@ -83,7 +83,7 @@ Step "Python environment -> $Dir\.venv"
 $venv = "$Dir\.venv"
 if (-not (Test-Path -LiteralPath "$venv\Scripts\python.exe")) { & $py -m venv $venv; Ok "venv created" }
 $vpy = "$venv\Scripts\python.exe"
-& $vpy -m pip install -q --upgrade pip
+& $vpy -m pip install -q --upgrade "pip>=26.2"
 & $vpy -m pip install -q -e "$Dir\ionomos[dev]"
 if ($LASTEXITCODE -ne 0) { throw "pip install failed (internet needed the first time)" }
 Ok (& "$venv\Scripts\ionomos.exe" --version)
