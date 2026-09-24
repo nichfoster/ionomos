@@ -1,5 +1,17 @@
-# Ionomos repo policy (auto-detected from GitHub settings on 2026-09-24)
+# Obvious Autobuild repo policy — keys per https://help.obvious.ai/autobuild/config-yml-reference
 branches:
-  default: master
+  defaultBase: master
+  default: master            # legacy key written by Obvious onboarding
+
+pr:
+  merge:
+    method: squash
+
+# Agents merge their own PRs once CI is green (the automerge workflow also does).
 merge:
-  method: squash   # merge commit, squash and rebase are all allowed on the repo
+  method: squash
+  require_human_merge: false   # legacy key; was true, which parked every PR for a human
+
+reviews:
+  automated:
+    enabled: true               # run Obvious's review -> repair loop before merge
