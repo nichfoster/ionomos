@@ -16,6 +16,7 @@ import pytest
 from ionomos import downstream
 from ionomos.downstream import analysis, charts, isodtb, quant, simulate, stats, tmt
 from ionomos.downstream.tables import num, read_header, read_tsv
+from ionomos.runners import isodtb as runners_isodtb
 
 GOLD = Path(__file__).parent / "golden"
 
@@ -44,6 +45,29 @@ def test_isodtb_edge_cases():
         isodtb.site_table(header, [], "Y")
     assert isodtb.ratio_prefixes(["a_b_1 Log2 Ratio HL", "a_b_2 Log2 Ratio HL", "c_1 Log2 Ratio HL", "junk"]) == {
         "a_b": ["a_b_1 Log2 Ratio HL", "a_b_2 Log2 Ratio HL"], "c": ["c_1 Log2 Ratio HL"]}
+
+
+def test_isodtb_runner_entry_byte_identical_to_the_r_script(tmp_path):
+    for prefix in ("isoDTB_EJQ_2_027", "isoDTB_EJQ_2_028"):
+        out = tmp_path / f"{prefix}_sites.tsv"
+        written = runners_isodtb.merge_to_sites(GOLD / "isodtb_label_quant.tsv", out, prefix)
+        assert written == out
+        assert out.read_bytes() == (GOLD / f"R_{prefix}_sites.tsv").read_bytes(), prefix
+
+
+def test_isodtb_runner_entry_propagates_r_parity_errors(tmp_path):
+    with pytest.raises(runners_isodtb.SiteError, match="no 'Y_"):
+        runners_isodtb.merge_to_sites(GOLD / "isodtb_label_quant.tsv", tmp_path / "x.tsv", "Y")
+
+
+def test_isodtb_runner_entry_no_labelled_sites(tmp_path):
+    src = tmp_path / "no_sites.tsv"
+    src.write_text(
+        "Peptide Sequence\tLight Modified Peptide\tStart\tProtein\t"
+        "isoDTB_x_1 Log2 Ratio HL\nAAK\tAAK\t1\tP1\t1.0\n"
+    )
+    with pytest.raises(runners_isodtb.SiteError, match="no labelled sites"):
+        runners_isodtb.merge_to_sites(src, tmp_path / "x.tsv", "isoDTB_x")
 
 
 # ------------------------------------------------------------------ statistics --
