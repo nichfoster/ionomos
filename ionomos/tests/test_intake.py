@@ -1,9 +1,10 @@
+import errno
 import json
 import shutil
 
 import pytest
 
-from ionomos.intake import IntakeError, IntakeResult, Kind, draft, intake, plan
+from ionomos.intake import IntakeError, IntakeResult, Kind, _move_tree, draft, intake, plan
 from ionomos.ledger import Ledger
 from ionomos.manifest import FileOverride, Overrides, load_overrides, save_overrides
 from tests.conftest import iso_raws, make_drop
@@ -216,3 +217,75 @@ def test_successful_intake_clears_old_note(lab, ledger):
     note.write_text("old")
     assert intake(d, lab["cfg"], ledger) == IntakeResult.QUEUED
     assert not note.exists()
+
+
+# ------------------------------------------- cross-volume copy verification --
+
+
+def _exdev(src, dst):
+    raise OSError(errno.EXDEV, "simulated cross-volume move")
+
+
+def _crossvol_drop(inbox, name, big_content):
+    src = inbox / name
+    (src / "sub").mkdir(parents=True)
+    (src / "big.raw").write_bytes(big_content)  # spans several 1 MiB hash chunks
+    (src / "small.raw").write_bytes(b"\0" * 64)
+    (src / "sub" / "notes.txt").write_text("note")
+    return src
+
+
+def test_move_tree_copy_path_verifies_content_and_removes_source(lab, monkeypatch):
+    big = b"\x7f" * (1024 * 1024 + 5)
+    src = _crossvol_drop(lab["inbox"], "crossvol", big)
+    dst = lab["general"] / "_unsorted" / "crossvol"
+    monkeypatch.setattr("os.rename", _exdev)  # force the copy path
+
+    assert _move_tree(src, dst) == "copy"
+    assert not src.exists()
+    assert (dst / "big.raw").read_bytes() == big
+    assert (dst / "small.raw").read_bytes() == b"\0" * 64
+    assert (dst / "sub" / "notes.txt").read_text() == "note"
+
+
+def test_move_tree_rejects_same_size_corrupt_copy(lab, monkeypatch):
+    big = b"A" * (1024 * 1024 + 5)
+    src = _crossvol_drop(lab["inbox"], "corrupt", big)
+    dst = lab["general"] / "_unsorted" / "corrupt"
+    monkeypatch.setattr("os.rename", _exdev)
+    real_copytree = shutil.copytree
+
+    def corrupting_copytree(s, d, *args, **kw):
+        real_copytree(s, d, *args, **kw)
+        if not args and not kw:  # top-level call from _move_tree only
+            victim = d / "big.raw"
+            victim.write_bytes(b"B" * victim.stat().st_size)  # same size, different content
+
+    monkeypatch.setattr(shutil, "copytree", corrupting_copytree)
+
+    with pytest.raises(IntakeError, match=r"copy verification failed for big\.raw"):
+        _move_tree(src, dst)
+    assert (src / "big.raw").read_bytes() == big  # source left in place, intact
+    assert (src / "small.raw").is_file()
+    assert (src / "sub" / "notes.txt").is_file()
+
+
+def test_move_tree_rejects_copy_with_missing_file(lab, monkeypatch):
+    big = b"\0" * 64
+    src = _crossvol_drop(lab["inbox"], "missing", big)
+    dst = lab["general"] / "_unsorted" / "missing"
+    monkeypatch.setattr("os.rename", _exdev)
+    real_copytree = shutil.copytree
+
+    def dropping_copytree(s, d, *args, **kw):
+        if not args and not kw:  # top-level call from _move_tree only
+            real_copytree(s, d, ignore=shutil.ignore_patterns("small.raw"))
+        else:
+            real_copytree(s, d, *args, **kw)
+
+    monkeypatch.setattr(shutil, "copytree", dropping_copytree)
+
+    with pytest.raises(IntakeError, match=r"copy verification failed for small\.raw"):
+        _move_tree(src, dst)
+    assert (src / "big.raw").read_bytes() == big  # source left in place, intact
+    assert (src / "small.raw").read_bytes() == big
