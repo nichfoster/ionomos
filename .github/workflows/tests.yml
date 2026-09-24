@@ -23,3 +23,14 @@ jobs:
       - run: python -m pytest ionomos -q -rs
         env:
           IONOMOS_OFFLINE: "1"
+      # JS harness for the report front end (dev-only; jsdom). Same job so a
+      # front-end regression fails the same red run on both OSes.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: ionomos/tests/js/package-lock.json
+      - run: npm ci --no-fund --no-audit
+        working-directory: ionomos/tests/js
+      - run: npm test
+        working-directory: ionomos/tests/js
