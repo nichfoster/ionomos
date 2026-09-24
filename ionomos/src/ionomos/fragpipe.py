@@ -66,7 +66,8 @@ LAUNCHER_GLOBS = (
 EXPECTED_OUTPUTS = {
     "isoDTB": ("combined_modified_peptide_label_quant.tsv", "combined_modified_peptide.tsv"),
     "TMT": ("tmt-report/abundance_gene_MD.tsv", "tmt-report"),
-    "DIA": ("diann-output/report.tsv", "diann-output/report.parquet", "diann-output"),
+    "DIA": ("diann-output/report.tsv", "diann-output/report.parquet", "diann-output",
+            "dia-quant-output/report.tsv", "dia-quant-output/report.parquet", "dia-quant-output/report.pg_matrix.tsv"),
 }
 
 

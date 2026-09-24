@@ -19,7 +19,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path, PureWindowsPath
 
-from ionomos.downstream.tables import num, read_tsv
+from ionomos.downstream.tables import NA_STRINGS, num, read_tsv
 
 RAW_EXTS = (".raw", ".mzml", ".mzxml", ".d", ".dia", ".wiff", ".mgf")
 
@@ -110,20 +110,42 @@ def from_pg_matrix(path: Path, sample_map: dict[str, tuple[str, int]] | None = N
     header, rows = read_tsv(path)
     sample_map = sample_map or {}
     probe = rows[:300]
+    notes = []
+    matched = set()
+
+    def match_run(stem):
+        # Preserve exact identity first; only then remove known conversion suffixes.
+        from ionomos.naming import strip_acq_stamp
+
+        candidates = [stem, re.sub(r"_(?:uncalibrated|calibrated)$", "", stem, flags=re.IGNORECASE)]
+        for candidate in candidates:
+            if candidate in sample_map:
+                return candidate
+        canonical = strip_acq_stamp(candidates[-1])
+        hits = [key for key in sample_map if strip_acq_stamp(key) == canonical]
+        return hits[0] if len(hits) == 1 else None
+
 
     def numeric(h: str) -> bool:  # a run column holds numbers (or blanks); annotation columns hold text
-        vals = [r.get(h, "") for r in probe if r.get(h, "") not in ("", "NA")]
+        vals = [r.get(h, "") for r in probe if r.get(h, "").strip() not in NA_STRINGS]
         return all(num(v) is not None for v in vals)
 
-    runs = [h for h in header if h not in _PG_META and numeric(h)]
+    runs = [h for h in header if h not in _PG_META and (match_run(run_stem(h)) is not None or numeric(h))]
     samples, cond = [], {}
     for h in runs:
         stem = run_stem(h)
-        if stem in sample_map:
-            c, rep = sample_map[stem]
+        key = match_run(stem)
+        if key is not None:
+            matched.add(key)
+            c, rep = sample_map[key]
+            if not numeric(h):
+                notes.append(f"Run {stem}: nonnumeric quantities were treated as missing")
             s = f"{c}_{rep}"
         else:
-            s, c = stem, _dia_condition(stem)
+            clean = re.sub(r"_(?:uncalibrated|calibrated)$", "", stem, flags=re.IGNORECASE)
+            s, c = stem, _dia_condition(clean)
+            if sample_map:
+                notes.append(f"Run {stem} did not match the manifest; inferred condition {c!r}. Check sample labels.")
         base, k = s, 2
         while s in cond:  # two runs of one sample (technical reps): keep both
             s, k = f"{base}.{k}", k + 1
@@ -136,7 +158,11 @@ def from_pg_matrix(path: Path, sample_map: dict[str, tuple[str, int]] | None = N
         feats.append(Feature(id=gid, label=genes.split(";")[0] or (r.get("Protein.Names") or gid).split(";")[0],
                              description=r.get("First.Protein.Description", "")))
         vals.append([_log2(num(r.get(h))) for h in runs])
-    return QuantMatrix("intensity", "protein", feats, samples, vals, cond, str(path))
+    missing = sorted(set(sample_map) - matched)
+    if missing:
+        notes.append("Expected runs missing from the DIA protein matrix: " + ", ".join(missing) +
+                     ". Check the original pg_matrix.tsv and DIA-NN logs before interpreting comparisons.")
+    return QuantMatrix("intensity", "protein", feats, samples, vals, cond, str(path), notes=notes)
 
 
 def _dia_condition(stem: str) -> str:

@@ -214,3 +214,13 @@ across the resolver wait so removed/changed input cannot be queued using stale
 answers. Confirmed resolver interpretations are logged in `naming-history.jsonl`
 and reused by user/method; exact file corrections and sample-label mappings are
 supported, and ambiguous examples are not applied. Explicit YAML wins.
+
+### 2026-09-23 — DIA output identity and incomplete analysis warnings
+
+FragPipe's `_uncalibrated`/`_calibrated` mzML suffixes must be matched back to
+original manifest runs before condition grouping. Exact run identity wins;
+acquisition timestamp fallback is allowed only for a unique match. Missing-value
+markers such as `NaN` must not cause entire run columns to be dropped. Report
+missing manifest runs and zero-test comparisons explicitly. Re-analysis reads
+current per-file experiment.yaml labels/replicates so a completed search can be
+repaired without rerunning FragPipe. Recognize FragPipe 24 `dia-quant-output` files.

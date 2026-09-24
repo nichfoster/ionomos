@@ -78,8 +78,7 @@ def detect_method(workdir: Path) -> str | None:
 def _sample_map(record: dict | None) -> dict[str, tuple[str, int]]:
     out = {}
     for line in ((record or {}).get("plan") or {}).get("manifest") or []:
-        stem = Path(line["file"]).name
-        stem = stem[:-4] if stem.lower().endswith(".raw") else stem
+        stem = quant.run_stem(line["file"])
         out[stem] = (str(line["experiment"]), int(line["bioreplicate"]))
     return out
 
@@ -160,6 +159,8 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
             settings = analysis.settings_from(analysis_cfg) if analysis_cfg else analysis.Settings()
         m, files, notes = load_quantities(method, workdir, results, record, mod_mass)
         out.files += files
+        if m is not None:
+            notes += m.notes
         diffs: list[analysis.DiffResult] = []
         if m is not None and m.features:
             files_mx = results / f"{m.level}_matrix_log2.tsv"
@@ -172,7 +173,16 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
                 comps, cnotes = [], [str(exc)]
             notes += cnotes
             for t, c in comps:
+                counts = [(group, len(m.samples_of(group))) for group in (t, c) if group is not None]
+                insufficient = [(group, count) for group, count in counts if count < settings.min_valid]
+                if insufficient:
+                    notes.append(f"Cannot test {t} vs {c or '0'}: " +
+                                 ", ".join(f"{group} has {count} sample(s)" for group, count in insufficient) +
+                                 f"; at least {settings.min_valid} per group are required. Check missing runs and sample labels.")
                 d = analysis.differential(m, t, c, settings)
+                if d.tested == 0:
+                    notes.append(f"{d.name}: zero features could be tested. No valid volcano can be drawn; "
+                                 "check replicate grouping and missing quantities.")
                 diffs.append(d)
                 out.files.append(write_tsv(results / f"{d.slug()}_differential.tsv", analysis.DIFF_COLUMNS, d.rows))
                 svg = results / f"volcano_{d.slug()}.svg"

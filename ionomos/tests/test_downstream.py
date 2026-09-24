@@ -282,3 +282,68 @@ def test_nice_ticks_always_cover_the_data():
 
 def test_header_reader():
     assert read_header(GOLD / "tmt_abundance_gene_MD.tsv")[:2] == ["Index", "NumberPSM"]
+
+
+def test_dia_converted_names_and_nan_retain_six_runs(tmp_path):
+    prefix = 'Example_Project_Drug-10uM'
+    stems = [f'{prefix}_DMSO_1_20260101120000', f'{prefix}_DMSO_2_20260101130000',
+             f'{prefix}_DMSO_3', *(f'{prefix}_Drug_{r}' for r in (1, 2, 3))]
+    runs = [(f'C:\\data\\{stem}_uncalibrated.mzML', 'DMSO' if i < 3 else 'Drug')
+            for i, stem in enumerate(stems)]
+    dest = tmp_path / 'experiment'
+    pg = dest / 'fragpipe/dia-quant-output/report.pg_matrix.tsv'
+    simulate.dia_pg_matrix(pg, runs, seed=21)
+    # DIA-NN can represent missing intensities with NaN rather than NA.
+    pg.write_text(pg.read_text().replace('\tNA', '\tNaN'))
+    record = {'plan': {'manifest': [
+        {'file': f'C:\\data\\{stem}.raw', 'experiment': c, 'bioreplicate': i % 3 + 1}
+        for i, (stem, (_, c)) in enumerate(zip(stems, runs, strict=True))]}}
+    out = downstream.analyze(dest, 'DIA', record=record)
+    assert not out.warnings
+    assert out.summary['samples'] == {f'{c}_{r}': c for c in ('DMSO', 'Drug') for r in (1, 2, 3)}
+    assert len(out.summary['comparisons']) == 1
+    assert out.summary['comparisons'][0]['name'] == 'Drug vs DMSO'
+    assert out.summary['comparisons'][0]['tested'] > 0
+
+
+def test_dia_missing_controls_warns_in_report(tmp_path):
+    dest = tmp_path / 'e'
+    runs = [(f'{c}_{r}_uncalibrated.mzML', c) for c, reps in [('DMSO', [3]), ('Drug', [1, 2, 3])]
+            for r in reps]
+    simulate.dia_pg_matrix(dest / 'fragpipe/report.pg_matrix.tsv', runs, seed=21)
+    record = {'plan': {'manifest': [{'file': f'{c}_{r}.raw', 'experiment': c, 'bioreplicate': r}
+                                   for c in ('DMSO', 'Drug') for r in (1, 2, 3)]}}
+    out = downstream.analyze(dest, 'DIA', record=record)
+    assert any('Expected runs missing' in w and 'DMSO_1' in w and 'DMSO_2' in w for w in out.warnings)
+    assert any('DMSO has 1 sample' in w for w in out.warnings)
+    assert any('zero features' in w for w in out.warnings)
+    assert 'zero features' in out.report.read_text()
+
+
+def test_dia_nan_does_not_drop_unmapped_column(tmp_path):
+    pg = tmp_path / 'report.pg_matrix.tsv'
+    pg.write_text('Protein.Group\tDMSO_1_uncalibrated\tDMSO_2_uncalibrated\nP1\tNaN\t10\nP2\t20\t30\n')
+    m = quant.from_pg_matrix(pg)
+    assert len(m.samples) == 2 and m.values[0] == [None, math.log2(10)]
+    assert set(m.condition.values()) == {'DMSO'}
+
+
+def test_reanalysis_honors_updated_file_labels(tmp_path):
+    import json
+
+    from ionomos import names, postprocess
+    from ionomos.manifest import FileOverride, Overrides, save_overrides
+
+    dest = tmp_path / 'e'
+    runs = [(f'{c}_{r}_uncalibrated.mzML', c) for c in ('DMSO', 'Drug') for r in (1, 2, 3)]
+    simulate.dia_pg_matrix(dest / 'fragpipe/report.pg_matrix.tsv', runs, seed=21)
+    record = {'plan': {'folder': {'method': 'DIA'}, 'manifest': [
+        {'file': f'{c}_{r}.raw', 'experiment': f'old_{c}', 'bioreplicate': r}
+        for c in ('DMSO', 'Drug') for r in (1, 2, 3)]}}
+    (dest / names.STATUS_FILE).write_text(json.dumps(record))
+    save_overrides(dest, Overrides(files={f'{c}_{r}.raw': FileOverride(c, r, -1)
+                                         for c in ('DMSO', 'Drug') for r in (1, 2, 3)}))
+    out = postprocess.run_for_folder(dest, None)
+    assert out.summary['comparisons'][0]['name'] == 'Drug vs DMSO'
+    assert out.summary['comparisons'][0]['tested'] > 0
+    assert json.loads((dest / names.STATUS_FILE).read_text()) == record

@@ -41,7 +41,18 @@ def run_for_folder(dest: Path, cfg, method: str | None = None, extra: dict | Non
     try:  # an experiment.yaml edited after intake (e.g. new comparisons) wins
         from ionomos.manifest import load_overrides
 
-        overrides = load_overrides(dest).analysis or overrides
+        current = load_overrides(dest)
+        overrides = current.analysis or overrides
+        from ionomos.downstream.quant import run_stem
+
+        by_stem = {run_stem(name): value for name, value in current.files.items()}
+        for line in (record.get("plan") or {}).get("manifest") or []:
+            correction = by_stem.get(run_stem(line["file"]))
+            if correction is not None:
+                if correction.experiment:
+                    line["experiment"] = correction.experiment
+                if correction.bioreplicate is not None:
+                    line["bioreplicate"] = correction.bioreplicate
     except Exception:  # noqa: BLE001 - a broken experiment.yaml must not block the analysis
         pass
     lab = dict(getattr(cfg, "analysis", {}) or {}) if cfg is not None else {}

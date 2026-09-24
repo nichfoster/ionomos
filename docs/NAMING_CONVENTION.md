@@ -211,3 +211,10 @@ including changes made in Explorer, and closes if the folder or all raws are
 gone. A changed folder restarts intake and its stability checks; answers from
 that changed snapshot are not queued. Previously saved GUI overrides for removed
 raws are ignored. Whole-folder removal also moves its rejection note.
+
+DIA analysis matches FragPipe's converted `_uncalibrated.mzML` and
+`_calibrated.mzML` run names back to the original manifest. To correct a completed
+experiment, edit its per-file `experiment` and `bioreplicate` values in
+`experiment.yaml`, then use **Re-run analysis**. Missing expected runs and
+comparisons with insufficient replicate data appear as report warnings; zero
+tested proteins does not mean there were no biological differences.
