@@ -156,8 +156,6 @@ def test_tk_dialog_accept_and_skip(lab):
 
 @pytest.mark.skipif(not _ok, reason=f"no GUI: {_why}")
 def test_tk_resolver_from_worker_thread(lab):
-    import tkinter as tk
-
     from ionomos.resolve import TkResolver
 
     d = make_drop(lab["inbox"], "XYZ99_isoDTB_run", ["S_1_1.raw"])
