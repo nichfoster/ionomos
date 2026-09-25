@@ -227,3 +227,85 @@ def test_dialog_closes_when_folder_removed(lab):
     root.after(100, lambda: remove(lab['inbox'], folder))
     assert TkResolver(root).resolve(draft(folder, lab['cfg'])) is None
     root.destroy()
+
+
+def _err_text(win) -> str:
+    """Text of the naming dialog's error line (the only Label bound to a StringVar)."""
+    import tkinter.ttk as ttk
+
+    for w in _all(win):
+        if isinstance(w, ttk.Label):
+            name = str(w.cget("textvariable"))
+            if name:
+                return str(win.getvar(name))
+    return ""
+
+
+def _mixed_drop(inbox, name):
+    folder = make_drop(inbox, name, ["stray.raw"])
+    (folder / "raw").mkdir()
+    (folder / "raw" / "EJQ_PK_EJQ-2-027_isoDTB_1uM_3h_1_1.raw").write_bytes(b"\0" * 64)
+    return folder
+
+
+def _record_tk_escapes(root):
+    """Record what would reach Tk's callback-exception hook on the lab PC."""
+    escaped = []
+    root.report_callback_exception = lambda *a: escaped.append(a)
+    return escaped
+
+
+@pytest.mark.skipif(not _ok, reason=f"no GUI: {_why}")
+def test_mixed_drop_poll_shows_rejection_note(lab):
+    """poll()'s 500 ms re-scan of a drop turned mixed must surface the IntakeError on
+    the dialog's error line, not escape as a Tk callback traceback (PR #36 fallout)."""
+    from ionomos.resolve import TkResolver
+
+    folder = _mixed_drop(lab["inbox"], "MIX01_isoDTB_run")
+    root = make_tk_root()
+    root.withdraw()
+    escaped = _record_tk_escapes(root)
+    res = TkResolver(root)
+    seen = []
+
+    def arm_read(win):
+        def read_and_escape():
+            seen.append(_err_text(win))
+            win.event_generate("<Escape>")
+
+        win.after(700, read_and_escape)  # one poll cycle (500 ms) has run by then
+
+    _drive_dialog(root, arm_read)
+    assert res.resolve(draft(folder, lab["cfg"])) is None  # dialog stayed up, then Escape
+    root.destroy()
+    assert not escaped
+    assert seen and "top level" in seen[0] and "raw/" in seen[0]
+
+
+@pytest.mark.skipif(not _ok, reason=f"no GUI: {_why}")
+def test_mixed_drop_accept_shows_rejection_note(lab):
+    """accept() (Return) re-reads the drop before queueing: a mixed layout must surface
+    the IntakeError on the dialog's error line, not escape as a Tk callback traceback."""
+    from ionomos.resolve import TkResolver
+
+    folder = _mixed_drop(lab["inbox"], "MIX02_isoDTB_run")
+    root = make_tk_root()
+    root.withdraw()
+    escaped = _record_tk_escapes(root)
+    res = TkResolver(root)
+    seen = []
+
+    def press_return(win):
+        win.event_generate("<Return>")  # accept -> refresh_files() hits the mixed layout
+
+        def read_and_escape():
+            seen.append(_err_text(win))
+            win.event_generate("<Escape>")
+
+        win.after(100, read_and_escape)
+
+    _drive_dialog(root, press_return)
+    assert res.resolve(draft(folder, lab["cfg"])) is None  # accept must NOT close the window
+    root.destroy()
+    assert not escaped
+    assert seen and "top level" in seen[0] and "raw/" in seen[0]

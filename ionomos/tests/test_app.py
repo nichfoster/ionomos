@@ -596,3 +596,22 @@ def test_inbox_delete_refreshes_and_preserves_raw(app, tmp_path):
     app._delete_inbox()
     assert not app.inbox_tree.exists(str(folder / 'bad.raw'))
     assert list((inbox / '.removed').rglob('bad.raw'))
+
+
+def test_inbox_scan_displays_mixed_layout_rejection(app, tmp_path):
+    """A drop with raws at the top level AND in raw/ raises IntakeError from _find_raws
+    (PR #36): the Inbox scan must show that rejection on the drop instead of dying in
+    the 2s tick loop (which surfaced as a Tk callback traceback on the lab PC)."""
+    inbox = tmp_path / 'inbox'
+    inbox.mkdir()
+    folder = inbox / 'mixed'
+    folder.mkdir()
+    (folder / 'stray.raw').write_bytes(b'\0' * 64)
+    (folder / 'raw').mkdir()
+    (folder / 'raw' / 'EJQ_PK_EJQ-2-027_isoDTB_1uM_3h_1_1.raw').write_bytes(b'\0' * 64)
+    app.v('paths.inbox').set(str(inbox))
+    app._inbox_tick()  # runs _refresh_inbox now and re-arms itself; must not raise
+    children = app.inbox_tree.get_children(str(folder))
+    assert len(children) == 1
+    note = app.inbox_tree.item(children[0], 'text')
+    assert 'top level' in note and 'raw/' in note

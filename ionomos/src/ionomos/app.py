@@ -1777,15 +1777,18 @@ class App:
                     raw_dir, files, _ = _find_raws(path)
                     for name in files:
                         self.inbox_tree.insert(key, "end", iid=str(path / raw_dir / name), text=name)
-                except OSError:
-                    continue
+                except (OSError, ValueError) as exc:
+                    # IntakeError (a ValueError) means an unusable drop layout, e.g. raws
+                    # in both places (issue #14): show the reason on the drop, never a
+                    # Tk callback traceback.
+                    self.inbox_tree.insert(key, "end", iid=f"{key}::rejected", text=str(exc))
         if selected and self.inbox_tree.exists(selected[0]):
             self.inbox_tree.selection_set(selected[0])
 
     def _inbox_tick(self):
         try:
             self._refresh_inbox()
-        except OSError:
+        except (OSError, ValueError):
             pass
         self.root.after(2000, self._inbox_tick)
 
