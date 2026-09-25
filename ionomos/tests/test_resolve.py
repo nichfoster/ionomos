@@ -174,20 +174,20 @@ def test_tk_resolver_from_worker_thread(lab):
         out.append(res.resolve(dr))
         root.after(0, root.quit)
 
-    def drive():
-        tops = [w for w in root.winfo_children() if isinstance(w, tk.Toplevel)]
-        if not tops:
-            root.after(50, drive)
-            return
-        combos = [w for w in _all(tops[0]) if w.winfo_class() == "TCombobox"]
+    def accept(win):
+        combos = [w for w in _all(win) if w.winfo_class() == "TCombobox"]
         combos[0].set("EJQ")
-        tops[0].event_generate("<Return>")
+        win.event_generate("<Return>")
 
+    # _drive_dialog polls for the dialog (mapped) and arms a watchdog: the
+    # previous uncapped after(50, drive) loop ran mainloop() forever if the
+    # dialog never mapped — the same CI-hang class as #24.
+    hung = _drive_dialog(root, accept)
     threading.Thread(target=worker, daemon=True).start()
-    root.after(100, drive)
     root.mainloop()
     root.destroy()
     assert out and out[0].user == "EJQ"
+    assert not hung  # watchdog never fired: the dialog mapped and resolved
 
 
 def _all(w):
