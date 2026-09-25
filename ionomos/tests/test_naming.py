@@ -162,6 +162,42 @@ def test_raw_rejected():
         parse_raw_name("S_1.raw", "DDA")
 
 
+# A tail that is out of range or looks like a date must never become a
+# replicate/fraction number: date-shaped and 4+-digit tails cannot match the
+# tail at all, while 0 is rejected by the explicit value check.
+@pytest.mark.parametrize(
+    "fname, method, match",
+    [
+        ("X_20260902.raw", "isoDTB", "isoDTB files must end"),  # date-shaped tail
+        ("X_99999999999999.raw", "isoDTB", "isoDTB files must end"),
+        ("X_1_1000.raw", "isoDTB", "isoDTB files must end"),  # 4-digit fraction
+        ("X_0_1.raw", "isoDTB", "replicate 0 is out of range"),
+        ("X_1_0.raw", "isoDTB", "fraction 0 is out of range"),
+        ("DMSO_0.raw", "DIA", "replicate 0 is out of range"),
+        ("KL6159A_F0.raw", "TMT", "fraction 0 is out of range"),
+    ],
+)
+def test_raw_rejected_bounds(fname, method, match):
+    with pytest.raises(NamingError, match=match):
+        parse_raw_name(fname, method)
+
+
+@pytest.mark.parametrize(
+    "fname, method, sample, rep, frac",
+    [
+        # date-shaped tails are absorbed into the sample, not turned into numbers
+        ("X_20260902.raw", "DIA", "X_20260902", 1, None),
+        ("X_TMT_F20260902.raw", "TMT", "X_TMT_F20260902", 1, None),
+        ("X_1_999.raw", "isoDTB", "X", 1, 999),  # boundary: 999 accepted
+        # Xcalibur acquisition-stamp stripping unchanged
+        ("X_DMSO_2_20260508204737.raw", "isoDTB", "X_DMSO", 2, None),
+    ],
+)
+def test_raw_ok_bounds(fname, method, sample, rep, frac):
+    r = parse_raw_name(fname, method)
+    assert (r.sample, r.rep, r.fraction) == (sample, rep, frac)
+
+
 def _iso(reps, fracs, prefix="EJQ_PK_EJQ-2-027_isoDTB_1uM_3h"):
     return [f"{prefix}_{r}_{f}.raw" for r in reps for f in fracs]
 
