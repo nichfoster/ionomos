@@ -246,6 +246,40 @@ def test_successful_intake_clears_old_note(lab, ledger):
     assert not note.exists()
 
 
+# ------------------------------------------------- mixed top-level + raw/ layouts --
+
+
+def _mixed_drop(inbox: Path, name: str) -> Path:
+    """One stray top-level raw plus the real set in raw/ — the issue #14 drop shape."""
+    d = make_drop(inbox, name, ["S_1_1.raw"])
+    (d / "raw").mkdir()
+    for f in ("S_1_2.raw", "S_2_1.raw", "S_2_2.raw"):
+        (d / "raw" / f).write_bytes(b"\0" * 64)
+    return d
+
+
+def test_mixed_top_level_and_raw_subfolder_rejected(lab, ledger):
+    """#14: raws in both places must not queue a manifest of just the stray top-level file."""
+    d = _mixed_drop(lab["inbox"], "EJQ_isoDTB_x")
+    with pytest.raises(IntakeError) as e:
+        plan(d, lab["cfg"], ledger)
+    assert "1 .raw file(s) at the top level and 3 in raw/" in str(e.value)
+    assert e.value.kind == Kind.LAYOUT
+
+    dr = draft(d, lab["cfg"], e.value)  # the GUI naming window still gets a draft
+    assert dr.kind == Kind.LAYOUT and "top level" in dr.problem
+    assert [f.filename for f in dr.files] == ["S_1_1.raw"]
+
+
+def test_mixed_raw_layout_rejects_with_note_and_nothing_queued(lab, ledger):
+    d = _mixed_drop(lab["inbox"], "EJQ_isoDTB_x")
+    assert intake(d, lab["cfg"], ledger) == IntakeResult.REJECTED
+    assert d.is_dir() and (d / "raw" / "S_1_2.raw").is_file()  # left untouched in the inbox
+    note = lab["inbox"] / "EJQ_isoDTB_x.REJECTED.txt"
+    assert note.is_file() and "top level" in note.read_text()
+    assert ledger.list() == []
+
+
 # ------------------------------------------- cross-volume copy verification --
 
 
