@@ -1,10 +1,11 @@
 """Resolver: pure logic always; the real tkinter dialog only when a display exists."""
+import queue
 import threading
 
 import pytest
 
 from ionomos.intake import Draft, DraftFile, IntakeError, Kind, draft, plan
-from ionomos.manifest import FileOverride
+from ionomos.manifest import FileOverride, Overrides
 from ionomos.resolve import (
     Answer,
     guess_alias_token,
@@ -74,6 +75,191 @@ def test_to_overrides_only_records_differences():
     assert ov.user == "Isaac" and ov.method == "isoDTB"
     assert set(ov.files) == {"S_1_2.raw"}
     assert ov.files["S_1_2.raw"] == FileOverride(experiment="S", bioreplicate=2, fraction=-1)
+
+
+# ----------------------------- deterministic queue-contract: no Tcl, no display --
+
+
+class _StubRoot:
+    """No Tcl, no display: records what the resolver schedules instead of running a mainloop."""
+
+    def __init__(self):
+        self.after_callbacks = []  # (ms, fn, args) in schedule order
+
+    def after(self, ms, fn, *args):
+        self.after_callbacks.append((ms, fn, args))
+        return len(self.after_callbacks)  # token, like tk.Tk.after
+
+    def wait_window(self, win):  # only the main-thread dialog path uses this
+        pass
+
+
+class _SpyQueue(queue.Queue):
+    """A queue.Queue that signals when a resolve() request has landed.
+
+    resolve() still does its genuine put/done.wait() handoff through it; the event
+    only lets the test drive the pump at a deterministic moment — after the worker's
+    request is queued, before any pump has run.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.request_queued = threading.Event()
+
+    def put(self, item, *args, **kwargs):
+        super().put(item, *args, **kwargs)
+        self.request_queued.set()
+
+
+def _pump_driven_resolver(monkeypatch, dialog):
+    """A TkResolver on a _StubRoot, pump armed, with `dialog` stubbed in place of the
+    real Tk dialog (the real one imports tkinter and needs a display)."""
+    from ionomos.resolve import TkResolver
+
+    root = _StubRoot()
+    res = TkResolver(root)
+    res._q = _SpyQueue()  # observe the handoff without changing it
+    res.start(every_ms=50)
+    monkeypatch.setattr(TkResolver, "_dialog", dialog)
+    return res, root
+
+
+def test_tk_resolver_from_worker_thread(monkeypatch):
+    """The resolver's worker-thread contract, with no Tk across threads.
+
+    Replaces the former real-Tk cross-thread variant of the same name, which drove a
+    live dialog from root.mainloop() while a worker blocked on resolve() — and flaked
+    on windows-latest with 'Windows fatal exception: code 0x80000003', a Tcl abort
+    during off-main-thread GC after a failed dialog teardown (three master runs on
+    2026-09-25). PR #26's _drive_dialog watchdog (hangs -> fast failures) and PR #30's
+    make_tk_root init backoff were necessary but not sufficient. The contract is
+    unchanged — resolve() called off the main thread never touches Tcl: it enqueues
+    the draft and blocks; the main-thread pump produces the result — and this variant
+    needs no display, so it runs on both CI OSes.
+    """
+    res, root = _pump_driven_resolver(monkeypatch, lambda self, d: Overrides(user="EJQ", method="isoDTB"))
+    out = []
+
+    def worker():
+        out.append(res.resolve(_draft()))
+
+    t = threading.Thread(target=worker, daemon=True)
+    t.start()
+
+    # the worker reached the real queue handoff and is parked on done.wait():
+    # nothing can finish until the main-thread pump runs
+    assert res._q.request_queued.wait(5.0), "worker never reached the queue handoff"
+    assert t.is_alive() and out == []
+
+    ms, pump_fn, args = root.after_callbacks[0]  # deterministic drive, no mainloop
+    assert ms == 50  # start() scheduled the pump at the requested cadence
+    pump_fn(*args)  # one main-thread pump: stub _dialog -> box.append -> done.set()
+
+    t.join(5.0)
+    assert not t.is_alive()
+    assert out and out[0].user == "EJQ"
+
+
+def test_worker_thread_unblocks_when_dialog_crashes(monkeypatch):
+    """Pin _pump's swallow contract: a dialog that raises must resolve to None
+    ("treating as skip") and unblock the watcher thread, never hang it."""
+
+    def boom(self, d):
+        raise RuntimeError("dialog exploded")
+
+    res, root = _pump_driven_resolver(monkeypatch, boom)
+    out = []
+
+    def worker():
+        out.append(res.resolve(_draft()))
+
+    t = threading.Thread(target=worker, daemon=True)
+    t.start()
+
+    assert res._q.request_queued.wait(5.0), "worker never reached the queue handoff"
+    assert t.is_alive() and out == []
+
+    _ms, pump_fn, args = root.after_callbacks[0]
+    pump_fn(*args)  # _pump swallows the crash, leaves the box empty, sets done
+
+    t.join(5.0)
+    assert not t.is_alive()
+    assert out == [None]  # resolve() returns box[0] if box else None: the skip outcome
+
+
+def test_tk_variables_can_be_garbage_collected_on_a_worker_thread():
+    """Formerly built 50 real tkutil.StringVar/BooleanVar pairs and gc-collected them
+    on a worker thread — the site of the Windows 0x80000003 process aborts (Tcl
+    reached from the wrong thread once a dialog teardown had dirtied process-global
+    Tcl state). The guarantee the codebase actually relies on is tkutil's
+    _ThreadSafeDel guard: __del__ that would call into Tcl is skipped off the main
+    thread. Probe the guard directly — pure Python, no Tcl, runs on both CI OSes.
+    """
+    import gc
+
+    from ionomos import tkutil
+
+    worker_dels, main_dels = [], []
+
+    class _Recording:
+        def __init__(self, log):
+            self.log = log
+
+        def __del__(self):
+            self.log.append(threading.get_ident())
+
+    class Probe(tkutil._ThreadSafeDel, _Recording):
+        """MRO: Probe -> _ThreadSafeDel -> _Recording. The guard's super().__del__()
+        therefore lands in _Recording.__del__ and records the thread it finally ran on."""
+
+    holder = [Probe(worker_dels) for _ in range(50)]
+    for probe in holder:
+        probe.ref = probe  # a reference cycle, like a closed dialog's callbacks
+
+    done = threading.Event()
+
+    def drop():
+        holder.clear()
+        gc.collect()
+        done.set()
+
+    t = threading.Thread(target=drop, daemon=True)
+    t.start()
+    assert done.wait(5.0), "worker never finished the collection"
+    t.join(5.0)
+    assert worker_dels == []  # the guard deferred every __del__ off the worker thread
+
+    for p in [Probe(main_dels) for _ in range(5)]:
+        del p
+    gc.collect()
+    assert len(main_dels) == 5  # on the main thread the guard runs the real __del__
+    assert set(main_dels) == {threading.get_ident()}
+
+
+def test_src_never_instantiates_plain_tk_variables():
+    """tkutil's off-thread safety only holds if every Tk variable is a tkutil wrapper:
+    tkinter.Variable.__del__ calls into Tcl and aborts the process when gc runs on a
+    worker thread (the Windows 0x80000003 crash). AST scan, so comments and string
+    literals can't produce false hits."""
+    import ast
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[1] / "src" / "ionomos"
+    offenders = []
+    for path in sorted(src.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            fn = node.func
+            if isinstance(fn, ast.Attribute) and fn.attr in {"StringVar", "BooleanVar"}:
+                if not (isinstance(fn.value, ast.Name) and fn.value.id == "tkutil"):
+                    offenders.append(f"{path.name}:{node.lineno}")
+            elif isinstance(fn, ast.Name) and fn.id in {"StringVar", "BooleanVar"}:
+                offenders.append(f"{path.name}:{node.lineno}")
+    assert not offenders, (
+        "plain tkinter variables abort on worker-thread GC; use tkutil.StringVar/BooleanVar: " + ", ".join(offenders)
+    )
 
 
 # ------------------------------------------------------------- real tkinter --
@@ -154,66 +340,10 @@ def test_tk_dialog_accept_and_skip(lab):
     root.destroy()
 
 
-@pytest.mark.skipif(not _ok, reason=f"no GUI: {_why}")
-def test_tk_resolver_from_worker_thread(lab):
-    from ionomos.resolve import TkResolver
-
-    d = make_drop(lab["inbox"], "XYZ99_isoDTB_run", ["S_1_1.raw"])
-    dr = draft(d, lab["cfg"], IntakeError("x", Kind.USER))
-    root = make_tk_root()
-    root.withdraw()
-    res = TkResolver(root)
-    res.start(every_ms=50)
-    out = []
-
-    def worker():
-        out.append(res.resolve(dr))
-        root.after(0, root.quit)
-
-    def accept(win):
-        combos = [w for w in _all(win) if w.winfo_class() == "TCombobox"]
-        combos[0].set("EJQ")
-        win.event_generate("<Return>")
-
-    # _drive_dialog polls for the dialog (mapped) and arms a watchdog: the
-    # previous uncapped after(50, drive) loop ran mainloop() forever if the
-    # dialog never mapped — the same CI-hang class as #24.
-    hung = _drive_dialog(root, accept)
-    threading.Thread(target=worker, daemon=True).start()
-    root.mainloop()
-    root.destroy()
-    assert out and out[0].user == "EJQ"
-    assert not hung  # watchdog never fired: the dialog mapped and resolved
-
-
 def _all(w):
     yield w
     for c in w.winfo_children():
         yield from _all(c)
-
-
-@pytest.mark.skipif(not gui_available()[0], reason="no GUI")
-def test_tk_variables_can_be_garbage_collected_on_a_worker_thread():
-    """With plain tkinter variables this aborts the process on Windows (Tcl called from the wrong thread)."""
-    import gc
-    import threading
-
-    from ionomos import tkutil
-
-    root = make_tk_root()
-    root.withdraw()
-    holder = [[tkutil.StringVar(master=root, value="x"), tkutil.BooleanVar(master=root)] for _ in range(50)]
-    for pair in holder:
-        pair.append(pair)  # a reference cycle, like a closed dialog's callbacks
-
-    def drop():
-        holder.clear()
-        gc.collect()
-
-    t = threading.Thread(target=drop)
-    t.start()
-    t.join()
-    root.destroy()
 
 
 @pytest.mark.skipif(not _ok, reason=f"no GUI: {_why}")
