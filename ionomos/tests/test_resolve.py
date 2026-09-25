@@ -81,6 +81,46 @@ def test_to_overrides_only_records_differences():
 _ok, _why = gui_available()
 
 
+def _drive_dialog(root, act, watchdog_ms=20000):
+    """Drive a TkResolver dialog from the Tk event loop, deterministically.
+
+    Waits for the Toplevel to exist AND be mapped before acting, pumping the
+    event loop with root.update(). A fixed-delay one-shot driver loses a
+    display-timing race on CI: the synthetic key event is fired before the
+    freshly deiconified dialog is mapped/focused, no binding ever runs, and
+    wait_window (timeout_seconds=0) blocks until the job timeout. A watchdog
+    destroys the dialog and flags the test instead of ever hanging CI.
+    See issue #24. Returns the watchdog firings (must stay empty).
+    """
+    import tkinter as tk
+
+    hung = []
+
+    def watchdog():
+        hung.append(True)
+        for w in root.winfo_children():
+            if isinstance(w, tk.Toplevel):
+                w.destroy()
+
+    watchdog_id = root.after(watchdog_ms, watchdog)
+    acted = False
+
+    def step():
+        nonlocal acted
+        wins = [w for w in root.winfo_children() if isinstance(w, tk.Toplevel)]
+        if hung or (acted and not wins):
+            root.after_cancel(watchdog_id)
+            return
+        if wins and wins[0].winfo_ismapped() and not acted:
+            acted = True
+            act(wins[0])
+        root.update()
+        root.after(10, step)
+
+    root.after(10, step)
+    return hung
+
+
 @pytest.mark.skipif(not _ok, reason=f"no GUI: {_why}")
 def test_tk_dialog_accept_and_skip(lab):
     import tkinter as tk
@@ -97,20 +137,21 @@ def test_tk_dialog_accept_and_skip(lab):
     remembered = []
     res = TkResolver(root, remember=lambda u, a: remembered.append((u, a)))
 
-    # drive the dialog from the Tk event loop: set the user, press Return
-    def drive():
-        win = next(w for w in root.winfo_children() if isinstance(w, tk.Toplevel))
+    # drive the dialog from the Tk event loop once it is actually interactive:
+    # set the user, press Return (a fixed-delay one-shot event loses a display
+    # race on CI and hangs wait_window forever — see issue #24)
+    def accept_dialog(win):
         combos = [w for w in _all(win) if w.winfo_class() == "TCombobox"]
         combos[0].set("Isaac")
         win.event_generate("<Return>")
 
-    root.after(150, drive)
+    assert not _drive_dialog(root, accept_dialog)
     ov = res.resolve(dr)
     assert ov is not None and ov.user == "Isaac" and ov.method == "isoDTB"
     assert remembered == [("Isaac", "XYZ")]
 
     # second dialog: Escape -> None
-    root.after(150, lambda: next(w for w in root.winfo_children() if isinstance(w, tk.Toplevel)).event_generate("<Escape>"))
+    assert not _drive_dialog(root, lambda win: win.event_generate("<Escape>"))
     assert res.resolve(dr) is None
     root.destroy()
 
