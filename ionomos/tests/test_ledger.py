@@ -1,10 +1,11 @@
 import json
+import logging
 import sqlite3
 from datetime import datetime, timedelta
 
 import pytest
 
-from ionomos.ledger import Job, Ledger, adopt_orphans, backup, integrity, rebuild_from_status_files
+from ionomos.ledger import Job, Ledger, LedgerError, adopt_orphans, backup, integrity, rebuild_from_status_files
 
 
 def test_roundtrip_and_recovery(tmp_path):
@@ -130,14 +131,14 @@ def test_nonexistent_id_set_status_and_requeue_are_silent_no_ops(tmp_path):
     assert j.status == "queued" and j.reason is None
 
 
-def test_start_attempt_on_missing_id_raises_type_error(tmp_path):
-    # CHARACTERIZATION: start_attempt re-reads the row and subscripts fetchone(), which is
-    # None for a nonexistent id — TypeError (None["attempts"]). Pinned deliberately —
-    # issue tracked by the audit W5 pass. Invert or delete when fixed.
+def test_start_attempt_on_missing_id_raises_ledger_error(tmp_path):
+    # Inverted characterization (was: raw TypeError from None["attempts"]): a missing job
+    # row now raises the typed LedgerError instead, and nothing is written for it.
     led = Ledger(tmp_path / "l.db")
     jid = led.insert(_job("a"))
-    with pytest.raises(TypeError):
+    with pytest.raises(LedgerError, match="is not in the ledger"):
         led.start_attempt(jid + 12345)
+    assert led.start_attempt(jid) == 1  # existing rows untouched: still the new attempt number
 
 
 def test_recover_on_startup_fails_jobs_attempted_past_max(tmp_path):
@@ -203,11 +204,10 @@ def test_integrity_missing_db_reports_missing(tmp_path):
     assert integrity(tmp_path / "nope.db") == "missing"
 
 
-def test_rebuild_from_status_files_silently_skips_corrupt_status_file(tmp_path):
-    # CHARACTERIZATION: rebuild_from_status_files wraps each ionomos.json read in
-    # `except (OSError, ValueError, KeyError, TypeError): continue` — an unparseable record
-    # is dropped from the rebuilt ledger with no log and no attention item. Pinned
-    # deliberately — issue tracked by the audit W5 pass. Invert or delete when fixed.
+def test_rebuild_from_status_files_logs_corrupt_status_file(tmp_path, caplog):
+    # Inverted characterization (was: silent skip): an unparseable ionomos.json is still
+    # dropped from the rebuilt ledger, but a WARNING from ionomos.ledger now names it —
+    # a rebuild must show what it left out.
     db = tmp_path / "l.db"
     Ledger(db).close()
     users = tmp_path / "users"
@@ -215,16 +215,17 @@ def test_rebuild_from_status_files_silently_skips_corrupt_status_file(tmp_path):
     broken = users / "Isaac" / "20260903-TMT_Isaac-1-001"
     broken.mkdir(parents=True)
     (broken / "ionomos.json").write_text("{not json", encoding="utf-8")
-    moved, n = rebuild_from_status_files(db, users)
+    with caplog.at_level(logging.WARNING, logger="ionomos.ledger"):
+        moved, n = rebuild_from_status_files(db, users)
     assert n == 1 and moved is not None and moved.is_file() and "broken" in moved.name
     assert [j.inbox_name for j in Ledger(db).list()] == ["20260902-isoDTB_EJQ-2-027"]
+    warns = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warns) == 1 and "20260903-TMT_Isaac-1-001" in warns[0].getMessage()
 
 
-def test_rebuild_from_status_files_silently_drops_name_collision(tmp_path):
-    # CHARACTERIZATION: two status files resolving to the same inbox_name — the second insert
-    # hits the UNIQUE constraint and the record is swallowed (`except sqlite3.IntegrityError:
-    # continue`), so the rebuilt ledger is missing a filed experiment with no trace. Pinned
-    # deliberately — issue tracked by the audit W5 pass. Invert or delete when fixed.
+def test_rebuild_from_status_files_logs_name_collision(tmp_path, caplog):
+    # Inverted characterization (was: silent drop): still one survivor (insertion order by
+    # queued_at picks it), but the dropped folder is now named in a WARNING.
     db = tmp_path / "l.db"
     Ledger(db).close()
     users = tmp_path / "users"
@@ -232,10 +233,13 @@ def test_rebuild_from_status_files_silently_drops_name_collision(tmp_path):
                   queued_at="2026-09-24T10:00:00+00:00")
     _write_status(users / "Isaac" / "exp-2", "same-experiment", "queued", user="Isaac",
                   queued_at="2026-09-24T11:00:00+00:00")
-    moved, n = rebuild_from_status_files(db, users)
+    with caplog.at_level(logging.WARNING, logger="ionomos.ledger"):
+        moved, n = rebuild_from_status_files(db, users)
     assert n == 1 and moved.is_file()
     jobs = Ledger(db).list()
     assert [j.inbox_name for j in jobs] == ["same-experiment"]  # one survivor, the other dropped
+    warns = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warns) == 1 and "exp-2" in warns[0].getMessage()  # the loser is named
 
 
 def test_adopt_orphans_skips_done_and_failed_records(tmp_path):
@@ -251,15 +255,50 @@ def test_adopt_orphans_skips_done_and_failed_records(tmp_path):
     assert [j.inbox_name for j in led.list()] == ["exp-queued"]
 
 
-def test_adopt_orphans_skips_name_collisions_silently(tmp_path):
-    # CHARACTERIZATION: an orphan whose inbox_name is already taken is skipped before insert
-    # (`if name in known_names: continue`; the same silence guards the IntegrityError catch)
-    # — no error, no log, the colliding folder stays unadopted. Pinned deliberately —
-    # issue tracked by the audit W5 pass. Invert or delete when fixed.
+def test_adopt_orphans_logs_name_collisions(tmp_path, caplog):
+    # Inverted characterization (was: silent skip): colliding folders stay unadopted, but a
+    # WARNING now names each one — a filed experiment missing from the ledger must be visible.
     led = Ledger(tmp_path / "l.db")
     led.insert(_job("same-experiment", dest=str(tmp_path / "elsewhere")))
     users = tmp_path / "users"
     _write_status(users / "EJQ" / "exp-1", "same-experiment", "queued")
     _write_status(users / "Isaac" / "exp-2", "same-experiment", "queued", user="Isaac")
-    assert adopt_orphans(led, users) == []  # both collide with the existing row; no crash, no log
+    with caplog.at_level(logging.WARNING, logger="ionomos.ledger"):
+        assert adopt_orphans(led, users) == []  # both collide with the existing row; no crash
     assert [j.dest_dir for j in led.list()] == [str(tmp_path / "elsewhere")]  # nothing adopted
+    msgs = " ".join(r.getMessage() for r in caplog.records if r.levelno == logging.WARNING)
+    assert "exp-1" in msgs and "exp-2" in msgs  # every collision is named
+
+
+def test_adopt_orphans_by_design_skips_stay_quiet(tmp_path, caplog):
+    # Hourly-noise guard: adopt_orphans runs every hour over every filed folder, so its
+    # by-design skips (already in the ledger, done/failed records) must stay silent — only
+    # abnormal skips (unreadable file, collision) may warn.
+    led = Ledger(tmp_path / "l.db")
+    users = tmp_path / "users"
+    _write_status(users / "EJQ" / "exp-known", "exp-known", "queued")
+    led.insert(_job("exp-known", dest=str(users / "EJQ" / "exp-known")))  # dest matches: already known
+    _write_status(users / "EJQ" / "exp-done", "exp-done", "done")
+    _write_status(users / "Isaac" / "exp-failed", "exp-failed", "failed", user="Isaac")
+    _write_status(users / "Isaac" / "exp-fresh", "exp-fresh", "queued", user="Isaac")
+    with caplog.at_level(logging.WARNING, logger="ionomos.ledger"):
+        new = adopt_orphans(led, users)
+    assert len(new) == 1  # only the genuinely orphaned folder is adopted (positive control)
+    assert [j.inbox_name for j in led.list()] == ["exp-known", "exp-fresh"]
+    assert [r for r in caplog.records if r.levelno == logging.WARNING] == []
+
+
+def test_adopt_orphans_logs_unreadable_status_file(tmp_path, caplog):
+    # Abnormal skip: an unparseable ionomos.json stays unadopted but is named in a WARNING;
+    # the good folder beside it is still adopted.
+    led = Ledger(tmp_path / "l.db")
+    users = tmp_path / "users"
+    broken = users / "EJQ" / "20260903-TMT_EJQ-1-001"
+    broken.mkdir(parents=True)
+    (broken / "ionomos.json").write_text("{not json", encoding="utf-8")
+    _write_status(users / "Isaac" / "exp-good", "exp-good", "queued", user="Isaac")
+    with caplog.at_level(logging.WARNING, logger="ionomos.ledger"):
+        assert adopt_orphans(led, users) == [1]
+    assert [j.inbox_name for j in led.list()] == ["exp-good"]
+    warns = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warns) == 1 and "20260903-TMT_EJQ-1-001" in warns[0].getMessage()
