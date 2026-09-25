@@ -262,6 +262,14 @@ def test_step_failure_with_exit_code_zero_is_caught(bed, monkeypatch):
     assert job.status == "failed" and "step MSFragger failed (exit code 137)" in job.reason
 
 
+def test_step_failure_with_negative_exit_code_is_caught(bed, monkeypatch):
+    monkeypatch.setenv("IONOMOS_FAKE_FP_MODE", "step-fail-neg-exit0")
+    _queue(bed)
+    Worker(bed["cfg"], bed["ledger"]).run_once()
+    job = bed["ledger"].get(1)
+    assert job.status == "failed" and "step MSFragger failed (exit code -11)" in job.reason
+
+
 def test_empty_output_with_exit_zero_fails(bed, monkeypatch):
     monkeypatch.setenv("IONOMOS_FAKE_FP_MODE", "silent-exit0")
     _queue(bed)

@@ -176,7 +176,7 @@ def fake_fragpipe(argv: list[str]) -> int:
             say(f"ERROR: file in manifest does not exist: {r[0]}")
             return 1
     say(f"{len(rows)} files, workflow {Path(a.workflow).name}, database {Path(db).name}")
-    # IONOMOS_FAKE_FP_MODE simulates real failure modes: oom | msfragger | step-fail-exit0 | silent-exit0
+    # IONOMOS_FAKE_FP_MODE simulates real failure modes: oom | msfragger | step-fail-exit0 | step-fail-neg-exit0 | silent-exit0
     mode = os.environ.get("IONOMOS_FAKE_FP_MODE", "")
     if mode == "oom":
         print("Exception in thread \"main\" java.lang.OutOfMemoryError: Java heap space", flush=True)
@@ -187,6 +187,12 @@ def fake_fragpipe(argv: list[str]) -> int:
     if mode == "step-fail-exit0":
         print(f"MSFragger [Work dir: {a.workdir}]", flush=True)
         print("Process 'MSFragger' finished, exit code: 137", flush=True)
+        Path(a.workdir).mkdir(parents=True, exist_ok=True)
+        (Path(a.workdir) / "partial.txt").write_text("x", encoding="utf-8")
+        return 0
+    if mode == "step-fail-neg-exit0":
+        print(f"MSFragger [Work dir: {a.workdir}]", flush=True)
+        print("Process 'MSFragger' finished, exit code: -11", flush=True)
         Path(a.workdir).mkdir(parents=True, exist_ok=True)
         (Path(a.workdir) / "partial.txt").write_text("x", encoding="utf-8")
         return 0
