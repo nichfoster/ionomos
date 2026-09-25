@@ -71,7 +71,7 @@ class Kind(enum.StrEnum):
     USER = "user"
     METHOD = "method"
     RAWS = "raws"  # a file name's tail can't be parsed
-    LAYOUT = "layout"  # uneven fractions / mixed single+fractionated / duplicates
+    LAYOUT = "layout"  # uneven fractions / mixed single+fractionated / duplicates / raws in two places
     NO_RAWS = "no_raws"
     DEST = "dest"  # destination exists / already in ledger
     OVERRIDES = "overrides"  # experiment.yaml malformed
@@ -157,13 +157,29 @@ class Resolver(Protocol):
 
 
 def _find_raws(folder: Path) -> tuple[str, list[str], list[str]]:
-    """(raw_dir, raw filenames, other top-level files). Raws at top level or in raw/."""
+    """(raw_dir, raw filenames, other top-level files). Raws at top level or in raw/.
+
+    Raises IntakeError(Kind.LAYOUT) when .raw files sit in both places — the manifest
+    would silently cover just one of the two sets (issue #14).
+    """
     top = [p for p in folder.iterdir() if p.is_file() and not p.name.startswith((".", "~$"))]
     raws = [p.name for p in top if p.name.lower().endswith(RAW_SUFFIX)]
-    raw_dir = ""
     sub = folder / "raw"
-    if not raws and sub.is_dir():
-        raws = [p.name for p in sub.iterdir() if p.is_file() and p.name.lower().endswith(RAW_SUFFIX)]
+    sub_raws = (
+        [p.name for p in sub.iterdir() if p.is_file() and p.name.lower().endswith(RAW_SUFFIX)]
+        if sub.is_dir()
+        else []
+    )
+    if raws and sub_raws:
+        # A mixed drop would file a manifest of one set while the watcher counts both (#14).
+        raise IntakeError(
+            f"{len(raws)} .raw file(s) at the top level and {len(sub_raws)} in raw/ — "
+            "keep them in one place so the manifest is complete",
+            Kind.LAYOUT,
+        )
+    raw_dir = ""
+    if sub_raws:
+        raws = sub_raws
         raw_dir = "raw"
     others = sorted(p.name for p in top if not p.name.lower().endswith(RAW_SUFFIX))
     return raw_dir, sorted(raws), others
@@ -312,7 +328,13 @@ def draft(folder: Path, cfg: Config, error: IntakeError | None = None) -> Draft:
         ov = load_overrides(folder)
     except OverridesError:
         ov = Overrides()
-    _, raw_names, _ = _find_raws(folder)
+    try:
+        _, raw_names, _ = _find_raws(folder)
+    except IntakeError:
+        # Mixed top-level + raw/ layout: the naming window still gets the raws it can see.
+        raw_names = [p.name for p in folder.iterdir()
+                     if p.is_file() and not p.name.startswith((".", "~$"))
+                     and p.name.lower().endswith(RAW_SUFFIX)]
 
     method = ov.method or ""
     if not method:
