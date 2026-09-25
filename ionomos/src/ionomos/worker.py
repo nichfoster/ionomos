@@ -34,7 +34,7 @@ from pathlib import Path
 from ionomos import fragpipe
 from ionomos.config import Config
 from ionomos.intake import write_status
-from ionomos.ledger import Job, Ledger, now_iso
+from ionomos.ledger import Job, Ledger, LedgerError, now_iso
 
 log = logging.getLogger("ionomos.worker")
 
@@ -197,7 +197,14 @@ class Worker:
     def _run(self, job: Job, spec: fragpipe.RunSpec) -> None:
         dest = spec.dest
         _close(self.cfg, job, "search_waiting", "search_failed")
-        attempt = self.ledger.start_attempt(job.id)
+        try:
+            attempt = self.ledger.start_attempt(job.id)
+        except LedgerError as exc:
+            # D17: fail where the user will look, not just in the log — without this the
+            # job leaves the queue while its folder keeps claiming "queued" forever.
+            log.error("job %d: %s", job.id, exc)
+            self._fail(job, f"job vanished from the ledger: {exc}")
+            return
         self.current = job
         try:
             moved = fragpipe.write_inputs(spec)

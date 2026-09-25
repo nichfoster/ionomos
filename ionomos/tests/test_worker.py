@@ -174,6 +174,35 @@ def test_rerun_keeps_previous_output(bed):
     assert (dest / "fragpipe" / "combined_modified_peptide_label_quant.tsv").is_file()
 
 
+def test_worker_start_attempt_missing_id_fails_job_visibly(bed, monkeypatch):
+    # The ledger row vanishing between list("queued") and start_attempt (e.g. a repair raced
+    # the watcher) used to raise a raw TypeError that run_forever's catch-all swallowed: the
+    # job left the queue forever while its folder kept claiming "queued". D17: it must fail
+    # where the user looks — FAILED.txt, ionomos.json = failed, an attention item — and the
+    # worker loop must survive.
+    dest = _queue(bed, "iso_good")
+    led = bed["ledger"]
+    original_list = led.list
+
+    def list_then_vanish(status=None):
+        jobs = original_list(status)
+        if jobs:  # the row is gone by the time _run calls start_attempt
+            led._conn.execute("DELETE FROM jobs WHERE id=?", (jobs[0].id,))
+            led._conn.commit()
+        return jobs
+
+    monkeypatch.setattr(led, "list", list_then_vanish)
+
+    w = Worker(bed["cfg"], led)
+    assert w.run_once() is True  # the pass ran (failed the job visibly) and returns normally
+    assert (dest / "FAILED.txt").is_file()
+    assert "vanished from the ledger" in (dest / "FAILED.txt").read_text(encoding="utf-8")
+    assert _status(dest)["status"] == "failed"
+    items = [i for i in attention.items(bed["cfg"].log_dir, open_only=True) if i.job_id == 1]
+    assert len(items) == 1 and items[0].kind == "search_failed"
+    assert w.run_once() is False  # queue is now empty; the loop moved on without crashing
+
+
 def test_missing_workflow_holds_job_until_it_appears(bed):
     wf = bed["cfg"].workflow_dir / "isoDTB.workflow"
     saved = wf.read_text(encoding="utf-8")
