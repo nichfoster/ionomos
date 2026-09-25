@@ -17,7 +17,7 @@ Anything you like, as long as the name contains:
 |---|---|---|
 | **Method** | keyword anywhere in the folder name (case-insensitive): `isoDTB`, `TMT`, `DIA` (aliases configurable, e.g. `DIANN`). If the folder name has none, the **raw file names** are searched too | `20260902-isoDTB_EJQ-2-027`, `THB10ISODTB`, `KL6159A_9plex_TMT`, `EJQ_123_DIA` |
 | **User** | your initials or your folder name under `C:\Fragpipe_General\`. Matched as a token (split on `_ - . space ( )`) **or glued to an ID** (`IJD05`, `EJQ123`, `THB10`). Aliases live in `config.yaml` (`IJ` → `Isaac`); the resolver window can add them | `EJQ_isoDTB_…`, `IJD05_isoDTB`, `Taylor Elements TMT run 3` |
-| *(optional)* **Date** | `YYYYMMDD`, `YYYY-MM-DD`, `MMDDYYYY`, `MM-DD-YYYY` or `MMDDYY`. If absent, the drop date is recorded | `20260902`, `2026-09-02`, `08172026`, `081726` |
+| *(optional)* **Date** | `YYYYMMDD`, `YYYY-MM-DD`, `MMDDYYYY`, `MM-DD-YYYY` or `MMDDYY` — the six-digit `MMDDYY` form only when its year `20yy` falls within `[today.year − 25, today.year + 1]` (the last 25 years through next year; a run ID like `113056` is never a date). If absent, the drop date is recorded | `20260902`, `2026-09-02`, `08172026`, `081726` |
 
 Recommended shape (sorts well, unambiguous): `YYYYMMDD_<initials>_<method>_<whatever>`
 e.g. `20260902_EJQ_isoDTB_EJQ-2-027_1uM-3h`.
@@ -44,6 +44,16 @@ Separators before the numbers may be `_` or `-`. Optional prefixes are
 accepted: `R`, `rep`, `Rep_`, `bio`, `biorep`, `n` for replicates; `F`, `frac`,
 `fraction` for fractions (`X_R2_F7`, `X_rep2_frac7`, `X_bio2_F7` all mean rep 2,
 fraction 7).
+
+**Replicate and fraction numbers run 1–999.** A tail number outside that range
+rejects the file with a clear `NamingError` (`0` is out of range, as is anything
+above 999), and a digit run longer than three is never read as a number at all —
+a date-shaped tail cannot become a replicate or fraction. What happens then
+depends on the method: an **isoDTB** file must end in a valid
+`_<rep>[_<fraction>]` tail, so `X_20260902.raw` or `X_1_1000.raw` is rejected
+outright; **DIA and TMT** also accept a bare stem, so a date-like tail is
+absorbed into the condition/sample name (`DMSO_20260902.raw` → condition
+`DMSO_20260902`, bioreplicate 1 — no phantom number is minted).
 
 **Xcalibur timestamps are ignored.** When a file of that name already exists,
 Xcalibur appends `_YYYYMMDDhhmmss` (`X_DMSO_2_20260508204737.raw`). The tail is
