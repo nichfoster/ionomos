@@ -360,7 +360,13 @@ class TkResolver:
                           remember_alias=alias_v.get().strip() if remember_v.get() else "")
 
         def accept(*_):
-            refresh_files()
+            try:
+                refresh_files()
+            except (OSError, ValueError) as exc:
+                # IntakeError (a ValueError), e.g. a mixed raw layout (#14): say why on
+                # the error line and keep the window up instead of a Tk traceback.
+                err_v.set(str(exc))
+                return
             if not win.winfo_exists():
                 return
             a = answer()
@@ -399,8 +405,9 @@ class TkResolver:
                 if win.winfo_exists():
                     try:
                         refresh_files()
-                    except OSError:
-                        pass
+                    except (OSError, ValueError) as exc:
+                        # Same shape as accept: show the rejection, keep the dialog up.
+                        err_v.set(str(exc))
                     if win.winfo_exists():
                         win.after(500, poll)
 
