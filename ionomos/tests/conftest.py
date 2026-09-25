@@ -62,6 +62,31 @@ def iso_raws(reps=(1, 2, 3), fracs=range(1, 8), prefix="EJQ_PK_EJQ-2-027_isoDTB_
     return [f"{prefix}_{r}_{f}.raw" for r in reps for f in fracs]
 
 
+def make_tk_root(attempts: int = 4, first_delay: float = 0.25):
+    """Create a Tk root, retrying transient Tcl-init failures with escalating backoff.
+
+    GitHub's Windows runners occasionally fail interpreter startup ("init.tcl read
+    error") after many interpreters have lived in one process; the failure is
+    transient — a plain rerun clears it. Try up to `attempts` times, sleeping
+    first_delay, 2*first_delay, ... between tries (gc first, to release any
+    interpreter debris), instead of letting one flake turn the CI run red.
+    """
+    import time
+    import tkinter as tk
+
+    attempts = max(1, attempts)
+    delay = first_delay
+    for attempt in range(attempts):
+        try:
+            return tk.Tk()
+        except tk.TclError:
+            if attempt == attempts - 1:
+                raise
+            gc.collect()
+            time.sleep(delay)
+            delay *= 2
+
+
 @pytest.fixture(autouse=True)
 def _collect_garbage_on_the_main_thread():
     """Tk objects a test leaves behind are collected here, on the main thread, not later on a
