@@ -304,7 +304,6 @@ def prepare(job: Job, cfg: Config) -> RunSpec:
 def write_inputs(spec: RunSpec) -> str | None:
     """Create ionomos_run/ inputs and an empty workdir. Returns the name an old workdir was moved to, if any."""
     spec.run_dir.mkdir(parents=True, exist_ok=True)
-    (spec.run_dir / CANCEL_FILE).unlink(missing_ok=True)  # a cancel is for one run only
     moved = None
     if spec.workdir.exists() and any(spec.workdir.iterdir()):
         # FragPipe wants an empty output folder; keep the old attempt, never delete it
