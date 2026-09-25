@@ -465,7 +465,7 @@ def read_tail_text(path: Path, max_bytes: int = 400_000) -> str:
 
 # ------------------------------------------------------------ explanations --
 
-_FAILED_STEP = re.compile(r"Process '([^']+)' finished, exit code: ([1-9]\d*)")
+_FAILED_STEP = re.compile(r"Process '([^']+)' finished, exit code: (-?[1-9]\d*)")
 
 # (regex on FragPipe's console output, plain-English explanation + what to do). First match first.
 EXPLANATIONS: list[tuple[str, str]] = [
