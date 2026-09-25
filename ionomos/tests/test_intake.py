@@ -295,6 +295,7 @@ def test_move_tree_rejects_same_size_corrupt_copy(lab, monkeypatch):
     assert (src / "big.raw").read_bytes() == big  # source left in place, intact
     assert (src / "small.raw").is_file()
     assert (src / "sub" / "notes.txt").is_file()
+    assert not dst.exists()  # the half-copy is ours — remove it so re-filing is not wedged
 
 
 def test_move_tree_rejects_copy_with_missing_file(lab, monkeypatch):
@@ -316,6 +317,36 @@ def test_move_tree_rejects_copy_with_missing_file(lab, monkeypatch):
         _move_tree(src, dst)
     assert (src / "big.raw").read_bytes() == big  # source left in place, intact
     assert (src / "small.raw").read_bytes() == big
+    assert not dst.exists()  # the half-copy is ours — remove it so re-filing is not wedged
+
+
+def test_move_tree_names_leftover_destination_when_cleanup_fails(lab, monkeypatch):
+    big = b"A" * (1024 * 1024 + 5)
+    src = _crossvol_drop(lab["inbox"], "locked", big)
+    dst = lab["general"] / "_unsorted" / "locked"
+    monkeypatch.setattr("os.rename", _exdev)
+    real_copytree = shutil.copytree
+
+    def corrupting_copytree(s, d, *args, **kw):
+        real_copytree(s, d, *args, **kw)
+        if not args and not kw:  # top-level call from _move_tree only
+            victim = d / "big.raw"
+            victim.write_bytes(b"B" * victim.stat().st_size)  # same size, different content
+
+    monkeypatch.setattr(shutil, "copytree", corrupting_copytree)
+
+    def locked_rmtree(path, *args, **kw):
+        # Windows: Explorer/antivirus keeps a handle on the partial copy.
+        raise PermissionError(errno.EACCES, "being used by another process", str(path))
+
+    monkeypatch.setattr(shutil, "rmtree", locked_rmtree)
+    monkeypatch.setattr("ionomos.intake.time.sleep", lambda _s: None)  # skip _rmtree_retry backoff
+
+    with pytest.raises(IntakeError, match=r"copy verification failed for big\.raw") as excinfo:
+        _move_tree(src, dst)
+    assert str(dst) in str(excinfo.value)  # the rejection note must name the leftover
+    assert (src / "big.raw").read_bytes() == big  # source left in place, intact
+    assert dst.exists()  # cleanup failed — the leftover is named, not silently dropped
 
 
 # ---------------------------------------------------------------------------
