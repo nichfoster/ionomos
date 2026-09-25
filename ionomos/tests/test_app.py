@@ -6,6 +6,7 @@ import pytest
 
 from ionomos.config import load
 from ionomos.resolve import gui_available
+from tests.conftest import make_tk_root
 
 _ok, _why = gui_available()
 pytestmark = pytest.mark.skipif(not _ok, reason=f"no GUI: {_why}")
@@ -19,13 +20,7 @@ def app(tmp_path, monkeypatch):
 
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("APPDATA", str(tmp_path))
-    try:
-        root = tk.Tk()
-    except tk.TclError:  # GitHub's Windows runners sometimes fail Tcl init after many interpreters; once more
-        import gc
-
-        gc.collect()
-        root = tk.Tk()
+    root = make_tk_root()
     root.withdraw()
     a = App(root, tmp_path / "Auto" / "config.yaml")
     yield a

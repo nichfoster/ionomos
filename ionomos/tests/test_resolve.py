@@ -13,7 +13,7 @@ from ionomos.resolve import (
     to_overrides,
     validate,
 )
-from tests.conftest import iso_raws, make_drop
+from tests.conftest import iso_raws, make_drop, make_tk_root
 
 
 def _draft(folder="XYZ99_isoDTB_run", files=None, kind=Kind.USER, method="isoDTB", user=""):
@@ -123,8 +123,6 @@ def _drive_dialog(root, act, watchdog_ms=20000):
 
 @pytest.mark.skipif(not _ok, reason=f"no GUI: {_why}")
 def test_tk_dialog_accept_and_skip(lab):
-    import tkinter as tk
-
     from ionomos.resolve import TkResolver
 
     d = make_drop(lab["inbox"], "XYZ99_isoDTB_run", iso_raws([1, 2], [1, 2]))
@@ -132,7 +130,7 @@ def test_tk_dialog_accept_and_skip(lab):
         plan(d, lab["cfg"])
     dr = draft(d, lab["cfg"], e.value)
 
-    root = tk.Tk()
+    root = make_tk_root()
     root.withdraw()
     remembered = []
     res = TkResolver(root, remember=lambda u, a: remembered.append((u, a)))
@@ -164,7 +162,7 @@ def test_tk_resolver_from_worker_thread(lab):
 
     d = make_drop(lab["inbox"], "XYZ99_isoDTB_run", ["S_1_1.raw"])
     dr = draft(d, lab["cfg"], IntakeError("x", Kind.USER))
-    root = tk.Tk()
+    root = make_tk_root()
     root.withdraw()
     res = TkResolver(root)
     res.start(every_ms=50)
@@ -201,11 +199,10 @@ def test_tk_variables_can_be_garbage_collected_on_a_worker_thread():
     """With plain tkinter variables this aborts the process on Windows (Tcl called from the wrong thread)."""
     import gc
     import threading
-    import tkinter as tk
 
     from ionomos import tkutil
 
-    root = tk.Tk()
+    root = make_tk_root()
     root.withdraw()
     holder = [[tkutil.StringVar(master=root, value="x"), tkutil.BooleanVar(master=root)] for _ in range(50)]
     for pair in holder:
@@ -223,13 +220,11 @@ def test_tk_variables_can_be_garbage_collected_on_a_worker_thread():
 
 @pytest.mark.skipif(not _ok, reason=f"no GUI: {_why}")
 def test_dialog_closes_when_folder_removed(lab):
-    import tkinter as tk
-
     from ionomos.inbox import remove
     from ionomos.resolve import TkResolver
 
     folder = make_drop(lab['inbox'], 'bad', ['bad.raw'])
-    root = tk.Tk()
+    root = make_tk_root()
     root.withdraw()
     root.after(100, lambda: remove(lab['inbox'], folder))
     assert TkResolver(root).resolve(draft(folder, lab['cfg'])) is None
