@@ -364,8 +364,8 @@ def test_cancel_running_job(bed, monkeypatch):
 
 def test_stale_cancel_file_is_cleared_so_a_requeued_job_runs(bed, monkeypatch):
     """A CANCEL left in ionomos_run/ (a cancel that raced the startup, ionomos crashed right after
-    writing it, ...) is for one run only: write_inputs unlinks it, so the next attempt runs to done,
-    not to 'cancelled' (fragpipe.py write_inputs)."""
+    writing it, ...) is for one run only: the worker clears it at the attempt boundary (worker._run),
+    so the next attempt runs to done, not to 'cancelled'."""
     monkeypatch.setenv("IONOMOS_FAKE_FP_SECONDS", "3")
     dest = _queue(bed)
     run_dir = dest / fragpipe.RUN_DIR
@@ -376,12 +376,13 @@ def test_stale_cancel_file_is_cleared_so_a_requeued_job_runs(bed, monkeypatch):
     assert not (run_dir / fragpipe.CANCEL_FILE).exists()
 
 
-def test_cancel_in_the_startup_window_is_lost(bed, monkeypatch):
-    # CHARACTERIZATION (issue #17): request_cancel on a running job writes ionomos_run/CANCEL, but a
-    # cancel landing between worker.start_attempt and fragpipe.write_inputs is unlinked again before
-    # fragpipe.run ever polls it: the user is told FragPipe "will be stopped within a few seconds"
-    # yet the search runs to completion. Pinned deliberately — invert when #17 is fixed.
-    monkeypatch.setenv("IONOMOS_FAKE_FP_SECONDS", "0")
+def test_cancel_in_the_startup_window_is_honored(bed, monkeypatch):
+    """(issue #17) request_cancel on a running job writes ionomos_run/CANCEL; a cancel landing in
+    the startup window between worker.start_attempt and fragpipe.write_inputs used to be unlinked
+    again before fragpipe.run ever polled it, so the user was told FragPipe "will be stopped within
+    a few seconds" yet the search ran to completion. The stale-CANCEL cleanup now happens at the
+    attempt boundary (worker._run), so a cancel delivered after it survives into run()'s poll."""
+    monkeypatch.setenv("IONOMOS_FAKE_FP_SECONDS", "3")  # the search must outlive run()'s 1 s poll
     dest = _queue(bed)
     real_write_inputs = fragpipe.write_inputs
     seen = {}
@@ -394,9 +395,9 @@ def test_cancel_in_the_startup_window_is_lost(bed, monkeypatch):
     Worker(bed["cfg"], bed["ledger"]).run_once()
     job = bed["ledger"].get(1)
     assert "stopped within a few seconds" in seen["msg"]
-    assert job.status == "done", job.reason  # the cancel never took effect
+    assert job.status == "failed" and job.reason == "cancelled by user", job.reason
+    assert (dest / "FAILED.txt").is_file()
     assert not (dest / fragpipe.RUN_DIR / fragpipe.CANCEL_FILE).exists()
-    assert not (dest / "FAILED.txt").exists()
 
 
 def test_request_cancel_on_a_finished_job_is_a_noop(bed):

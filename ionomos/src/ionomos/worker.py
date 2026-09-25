@@ -197,6 +197,10 @@ class Worker:
     def _run(self, job: Job, spec: fragpipe.RunSpec) -> None:
         dest = spec.dest
         _close(self.cfg, job, "search_waiting", "search_failed")
+        # clear a stale CANCEL before the ledger flips to 'running' (issue #17): a cancel delivered
+        # after this point must survive into run()'s poll — this unlink used to live in
+        # write_inputs, which ate any cancel written in the startup window
+        (spec.run_dir / fragpipe.CANCEL_FILE).unlink(missing_ok=True)
         try:
             attempt = self.ledger.start_attempt(job.id)
         except LedgerError as exc:

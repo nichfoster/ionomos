@@ -144,6 +144,24 @@ def test_existing_user_annotation_txt_is_kept_with_a_warning(bed):
     assert spec.warnings == ["kept the existing annotation.txt (differs from experiment.yaml's tmt: map)"]
 
 
+def test_write_inputs_keeps_a_pre_existing_cancel_file(bed):
+    """(issue #17) write_inputs no longer unlinks CANCEL — that cleanup moved to the attempt boundary
+    in worker._run, so a cancel written once the ledger says 'running' survives into run()'s poll.
+    The worker still clears a stale CANCEL itself: a fresh attempt runs to done, not 'cancelled'."""
+    dest = _queue(bed, "iso_good")
+    spec = fragpipe.prepare(bed["ledger"].get(1), bed["cfg"])
+    run_dir = dest / fragpipe.RUN_DIR
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / fragpipe.CANCEL_FILE).write_text("cancel", encoding="utf-8")
+
+    fragpipe.write_inputs(spec)
+
+    assert (run_dir / fragpipe.CANCEL_FILE).exists()  # the unlink is gone from write_inputs
+    Worker(bed["cfg"], bed["ledger"]).run_once()
+    assert bed["ledger"].get(1).status == "done", bed["ledger"].get(1).reason
+    assert not (run_dir / fragpipe.CANCEL_FILE).exists()
+
+
 # ------------------------------------------------------------------- failures --
 
 
