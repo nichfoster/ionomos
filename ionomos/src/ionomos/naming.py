@@ -138,8 +138,14 @@ def _mk_date(y: int, m: int, d: int) -> date | None:
         return None
 
 
-def find_date(name_or_tokens) -> date | None:
-    """Find the first plausible date in a folder name. None if absent."""
+def find_date(name_or_tokens, *, today: date | None = None) -> date | None:
+    """Find the first plausible date in a folder name. None if absent.
+
+    The six-digit mdy2 form only fires when 2000+yy falls within
+    [today.year - 25, today.year + 1] — run IDs like 113056 (2056) mint no
+    phantom dates. Keyword-only `today` keeps every caller unchanged.
+    """
+    today = today or date.today()
     name = " ".join(name_or_tokens) if isinstance(name_or_tokens, tuple) else name_or_tokens
     for pat, kind in _DATE_PATTERNS:
         for m in pat.finditer(name):
@@ -149,7 +155,10 @@ def find_date(name_or_tokens) -> date | None:
             elif kind == "mdy":
                 d = _mk_date(c, a, b)
             else:
-                d = _mk_date(2000 + c, a, b)
+                y = 2000 + c
+                if not today.year - 25 <= y <= today.year + 1:
+                    continue
+                d = _mk_date(y, a, b)
             if d:
                 return d
     return None
