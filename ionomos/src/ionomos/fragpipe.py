@@ -248,18 +248,29 @@ def prepare(job: Job, cfg: Config) -> RunSpec:
 
     lines = []
     missing = []
+    empty = []
+    sizes: dict[str, int] = {}
     for m in plan.get("manifest") or []:
         raw = dest / m["file"]
+        lines.append((str(raw), str(m["experiment"]), int(m["bioreplicate"]), str(m["data_type"])))
         if not raw.is_file():
             missing.append(m["file"])
-        lines.append((str(raw), str(m["experiment"]), int(m["bioreplicate"]), str(m["data_type"])))
+            continue
+        try:
+            size = raw.stat().st_size  # the one stat per raw
+        except FileNotFoundError:
+            missing.append(m["file"])  # vanished since the is_file() check — same "missing" failure
+            continue
+        except OSError as exc:
+            raise JobError(f"could not check raw file {raw.name}: {exc}") from exc
+        sizes[str(raw)] = size
+        if raw.suffix.lower() == ".raw" and size == 0:
+            empty.append(raw.name)
     if not lines:
         raise JobError("job has no raw files in its plan")
     if missing:
         more = f" (+{len(missing) - 3} more)" if len(missing) > 3 else ""
         raise JobError(f"raw file(s) missing from {dest}: {', '.join(missing[:3])}{more}")
-    empty = [Path(line[0]).name for line in lines if Path(line[0]).suffix.lower() == ".raw"
-             and Path(line[0]).stat().st_size == 0]
     if empty:
         more = f" (+{len(empty) - 3} more)" if len(empty) > 3 else ""
         raise JobError(f"raw file(s) are empty (0 bytes): {', '.join(empty[:3])}{more} — an aborted acquisition or "
@@ -267,7 +278,7 @@ def prepare(job: Job, cfg: Config) -> RunSpec:
 
     need_free_gb = getattr(cfg, "min_free_gb", 0) or 0
     if need_free_gb:
-        raw_gb = sum(Path(line[0]).stat().st_size for line in lines) / 1e9
+        raw_gb = sum(sizes.values()) / 1e9
         need = need_free_gb + raw_gb  # FragPipe's intermediates are roughly the size of the raws
         free = _disk_free_gb(dest)
         if free is not None and free < need:

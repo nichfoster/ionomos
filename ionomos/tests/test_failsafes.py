@@ -277,12 +277,11 @@ def test_empty_output_with_exit_zero_fails(bed, monkeypatch):
     assert "wrote nothing" in bed["ledger"].get(1).reason
 
 
-def test_prepare_stat_race_leaves_the_job_queued_and_the_worker_alive(bed, monkeypatch):
-    # CHARACTERIZATION (issue #18): a raw removed between prepare's is_file() check and its later
-    # .stat() raises a bare FileNotFoundError out of fragpipe.prepare — neither Hold nor JobError —
-    # so run_once propagates it and the job stays queued with no signal at all; run_forever's outer
-    # catch just logs "worker error; continuing" and lives on. Pinned deliberately — invert when #18
-    # is fixed (a Hold-shaped signal with the job left queued is the expected post-fix behaviour).
+def test_prepare_stat_race_fails_the_job_and_the_worker_stays_alive(bed, monkeypatch):
+    # FIXED BEHAVIOUR (issue #18, inverted from the audit's characterization pin): a raw removed
+    # between prepare's is_file() check and its later .stat() is folded into the existing
+    # missing-raw JobError — run_once fails the job instead of leaking a bare FileNotFoundError
+    # into run_forever's catch-all, and the worker keeps serving the next passes.
     dest = _queue(bed)
     target = next(dest.glob("*.raw"))
     real_is_file, real_stat = Path.is_file, Path.stat
@@ -299,15 +298,16 @@ def test_prepare_stat_race_leaves_the_job_queued_and_the_worker_alive(bed, monke
     monkeypatch.setattr(Path, "stat", stat_vanished)
 
     w = Worker(bed["cfg"], bed["ledger"])
-    with pytest.raises(FileNotFoundError):  # escapes run_once: it is neither Hold nor JobError
-        w.run_once()
-    assert bed["ledger"].get(1).status == "queued"
+    assert w.run_once()  # the JobError is consumed by run_once: the job fails, nothing raises
+    job = bed["ledger"].get(1)
+    assert job.status == "failed" and "missing" in job.reason
+    assert (dest / "FAILED.txt").is_file()
 
     w2 = Worker(bed["cfg"], bed["ledger"], poll_seconds=0.05)
     t = threading.Thread(target=w2.run_forever, daemon=True)
     t.start()
-    time.sleep(0.3)  # several passes, each hitting the race — the worker survives every one
-    assert t.is_alive() and bed["ledger"].get(1).status == "queued"
+    time.sleep(0.3)  # several passes over a now-failed job — the worker survives every one
+    assert t.is_alive()
     w2.stop()
     t.join(timeout=10)
     assert not t.is_alive()
