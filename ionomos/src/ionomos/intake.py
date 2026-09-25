@@ -396,7 +396,21 @@ def _move_tree(src: Path, dst: Path) -> str:
         if a.is_file():
             b = dst / a.relative_to(src)
             if not b.is_file() or _sha256(a) != _sha256(b):
-                raise IntakeError(f"copy verification failed for {a.relative_to(src)}; source left in place")
+                # The half-copy is ours, not user data — remove it so re-filing is
+                # not wedged by "destination already exists". If cleanup fails
+                # (Windows handle), the error names the leftover.
+                try:
+                    _rmtree_retry(dst)
+                    leftover = ""
+                except OSError:
+                    leftover = (
+                        f" A partial copy remains at {dst} — "
+                        "delete it before retrying."
+                    )
+                raise IntakeError(
+                    f"copy verification failed for {a.relative_to(src)}; "
+                    f"source left in place.{leftover}"
+                )
     try:
         _rmtree_retry(src)
     except PermissionError as exc:
