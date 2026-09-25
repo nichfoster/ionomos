@@ -6,6 +6,7 @@ import pytest
 from ionomos.naming import (
     NamingError,
     build_user_lookup,
+    find_date,
     find_method,
     group_raws,
     parse_folder_name,
@@ -112,6 +113,44 @@ def test_method_fallback_from_raw_names():
 def test_parse_folder_ambiguous_user():
     with pytest.raises(NamingError, match="ambiguous user"):
         parse_folder_name("EJQ_Isaac_isoDTB", USERS)
+
+
+# ---------------------------------------------------------------------- dates --
+
+
+@pytest.mark.parametrize(
+    "name, expected",
+    [
+        # eight-digit ymd and four-digit-year mdy are unchanged
+        ("20260902", date(2026, 9, 2)),
+        ("2026-09-02", date(2026, 9, 2)),
+        ("09-02-2026", date(2026, 9, 2)),
+        # six-digit mdy2: plausible around today
+        ("090226", date(2026, 9, 2)),
+        # six-digit run IDs must not mint phantom dates decades out
+        ("run_113056", None),
+        ("batch_123199", None),
+        # an out-of-window candidate is skipped, not fatal: scanning continues
+        ("run_113056_090226", date(2026, 9, 2)),
+    ],
+)
+def test_find_date(name, expected):
+    assert find_date(name) == expected
+
+
+def test_find_date_mdy2_window_tracks_today():
+    # The window, not a constant, is under test: the same token parses when
+    # today is near it and finds nothing when today is decades away.
+    assert find_date("090226", today=date(2026, 9, 2)) == date(2026, 9, 2)
+    assert find_date("090226", today=date(2100, 1, 1)) is None
+
+
+def test_parse_folder_run_id_no_phantom_date():
+    # run IDs in folder names must not set the experiment date (issue #16)
+    f = parse_folder_name("run_113056_EJQ_DIA", USERS)
+    assert f.user == "EJQ"
+    assert f.method == "DIA"
+    assert f.date is None
 
 
 # ---------------------------------------------------------------------- raws --
