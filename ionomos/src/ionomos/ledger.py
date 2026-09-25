@@ -11,10 +11,14 @@ Statuses: queued | running | done | failed. Rejected folders never get a row —
 their .REJECTED.txt in the inbox is the record.
 
 The same `parsed` dict stored here is what intake writes to ionomos.json.
+
+Missing-id contracts: get() returns None; set_status()/requeue() are silent no-ops
+(pinned by tests); start_attempt() raises LedgerError.
 """
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -22,6 +26,8 @@ from pathlib import Path
 
 STATUSES = ("queued", "running", "done", "failed")
 MAX_ATTEMPTS = 3  # FragPipe starts per job before an interrupted job is failed instead of re-queued
+
+log = logging.getLogger("ionomos.ledger")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -40,6 +46,10 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 CREATE INDEX IF NOT EXISTS jobs_status ON jobs(status);
 """
+
+
+class LedgerError(Exception):
+    """A ledger operation hit a missing job row; raised instead of failing on a raw TypeError."""
 
 
 def now_iso() -> str:
@@ -108,6 +118,7 @@ class Ledger:
         return job.id
 
     def set_status(self, job_id: int, status: str, reason: str | None = None) -> None:
+        """Move a job to a new status. A missing job id is a silent no-op (pinned by tests)."""
         if status not in STATUSES:
             raise ValueError(f"bad status {status!r}")
         ts = now_iso()
@@ -121,11 +132,18 @@ class Ledger:
         self._conn.commit()
 
     def start_attempt(self, job_id: int) -> int:
-        """queued -> running and count the attempt. Returns the new attempt number."""
+        """queued -> running and count the attempt. Returns the new attempt number.
+
+        Raises LedgerError if the job row doesn't exist (e.g. the ledger was rebuilt
+        underneath a running watcher); get()/requeue()/set_status() stay silent no-ops.
+        """
+        row = self._conn.execute("SELECT attempts FROM jobs WHERE id=?", (job_id,)).fetchone()
+        if row is None:
+            raise LedgerError(f"job {job_id} is not in the ledger; cannot start an attempt")
         self._conn.execute("UPDATE jobs SET status='running', reason=NULL, started_at=?, finished_at=NULL,"
                            " attempts=attempts+1 WHERE id=?", (now_iso(), job_id))
         self._conn.commit()
-        return self._conn.execute("SELECT attempts FROM jobs WHERE id=?", (job_id,)).fetchone()["attempts"]
+        return row["attempts"] + 1
 
     def recover_on_startup(self) -> list[tuple[int, str]]:
         """Jobs left 'running' by a crash/reboot/stop: FragPipe died with us.
@@ -147,6 +165,7 @@ class Ledger:
         return out
 
     def requeue(self, job_id: int, reason: str | None = None, reset_attempts: bool = False) -> None:
+        """Send a job back to queued. A missing job id is a silent no-op (pinned by tests)."""
         sql = "UPDATE jobs SET status='queued', reason=?, finished_at=NULL" + (", attempts=0" if reset_attempts else "")
         self._conn.execute(sql + " WHERE id=?", (reason, job_id))
         self._conn.commit()
@@ -245,7 +264,8 @@ def rebuild_from_status_files(db_path: str | Path, users_root: str | Path) -> tu
             rec = json.loads(status_file.read_text(encoding="utf-8"))
             folder = rec["plan"]["folder"]
             records.append((rec.get("queued_at") or "", status_file.parent, rec, folder))
-        except (OSError, ValueError, KeyError, TypeError):
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            log.warning("rebuild: skipping unreadable status file %s: %s", status_file, exc)
             continue
     n = 0
     for queued_at, dest, rec, folder in sorted(records, key=lambda r: r[0]):
@@ -259,6 +279,8 @@ def rebuild_from_status_files(db_path: str | Path, users_root: str | Path) -> tu
             led.insert(job)
             n += 1
         except sqlite3.IntegrityError:
+            log.warning("rebuild: skipping %s — inbox name %r is already taken by another experiment",
+                        dest, job.inbox_name)
             continue
     led.close()
     return moved, n
@@ -286,12 +308,14 @@ def adopt_orphans(ledger: Ledger, users_root: str | Path) -> list[int]:
         try:
             rec = json.loads(status_file.read_text(encoding="utf-8"))
             folder = rec["plan"]["folder"]
-        except (OSError, ValueError, KeyError, TypeError):
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            log.warning("adopt: skipping unreadable status file %s: %s", status_file, exc)
             continue
         if rec.get("status") not in ("queued", "running"):
             continue
         name = folder.get("safe") or dest.name
         if name in known_names:
+            log.warning("adopt: skipping %s — inbox name %r is already taken", dest, name)
             continue
         job = Job(inbox_name=name, user=folder.get("user") or dest.parent.name, method=folder.get("method") or "?",
                   dest_dir=str(dest), parsed=rec, status="queued",
@@ -300,5 +324,6 @@ def adopt_orphans(ledger: Ledger, users_root: str | Path) -> list[int]:
             new.append(ledger.insert(job))
             known_names.add(name)
         except sqlite3.IntegrityError:
+            log.warning("adopt: skipping %s — inbox name %r raced with another adoption", dest, name)
             continue
     return new
