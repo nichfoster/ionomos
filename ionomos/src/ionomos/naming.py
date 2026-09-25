@@ -40,13 +40,15 @@ _FRAC = r"(?:(?:[Ff](?:rac(?:tion)?)?)[_-]?)?"
 
 _TAIL = {
     # sample, rep, frac  — frac may be missing for isoDTB (unfractionated)
+    # Digit runs are capped at three: a longer tail is a date or an instrument
+    # counter, never a replicate/fraction number (issue #15).
     "isoDTB": re.compile(
-        rf"^(?P<sample>.+?)(?:{_SEP}{_REP}(?P<rep>\d+))(?:{_SEP}{_FRAC}(?P<frac>\d+))?$"
+        rf"^(?P<sample>.+?)(?:{_SEP}{_REP}(?P<rep>\d{{1,3}}))(?:{_SEP}{_FRAC}(?P<frac>\d{{1,3}}))?$"
     ),
     # sample[, frac]; rep is always 1
-    "TMT": re.compile(rf"^(?P<sample>.+?)(?:{_SEP}[Tt][Mm][Tt])?(?:{_SEP}{_FRAC}(?P<frac>\d+))?$"),
+    "TMT": re.compile(rf"^(?P<sample>.+?)(?:{_SEP}[Tt][Mm][Tt])?(?:{_SEP}{_FRAC}(?P<frac>\d{{1,3}}))?$"),
     # condition, biorep
-    "DIA": re.compile(rf"^(?P<sample>.+?)(?:{_SEP}{_REP}(?P<rep>\d+))?$"),
+    "DIA": re.compile(rf"^(?P<sample>.+?)(?:{_SEP}{_REP}(?P<rep>\d{{1,3}}))?$"),
 }
 
 # Xcalibur appends _YYYYMMDDhhmmss when a file of that name already exists
@@ -293,6 +295,12 @@ def parse_raw_name(filename: str, method: str) -> RawName:
         )
     rep = m.groupdict().get("rep")
     frac = m.groupdict().get("frac")
+    # Regex caps digits at three, so only 0 can slip past this — but check
+    # anyway so the bound is enforced by value, not regex shape alone.
+    if rep is not None and not 1 <= int(rep) <= 999:
+        raise NamingError(f"{filename!r}: replicate {rep} is out of range (expected 1–999)")
+    if frac is not None and not 1 <= int(frac) <= 999:
+        raise NamingError(f"{filename!r}: fraction {frac} is out of range (expected 1–999)")
     return RawName(
         filename=filename,
         safe_filename=safe_stem + RAW_SUFFIX,
