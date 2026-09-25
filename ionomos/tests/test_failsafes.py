@@ -277,6 +277,42 @@ def test_empty_output_with_exit_zero_fails(bed, monkeypatch):
     assert "wrote nothing" in bed["ledger"].get(1).reason
 
 
+def test_prepare_stat_race_leaves_the_job_queued_and_the_worker_alive(bed, monkeypatch):
+    # CHARACTERIZATION (issue #18): a raw removed between prepare's is_file() check and its later
+    # .stat() raises a bare FileNotFoundError out of fragpipe.prepare — neither Hold nor JobError —
+    # so run_once propagates it and the job stays queued with no signal at all; run_forever's outer
+    # catch just logs "worker error; continuing" and lives on. Pinned deliberately — invert when #18
+    # is fixed (a Hold-shaped signal with the job left queued is the expected post-fix behaviour).
+    dest = _queue(bed)
+    target = next(dest.glob("*.raw"))
+    real_is_file, real_stat = Path.is_file, Path.stat
+
+    def is_file_present(self):
+        return True if self == target else real_is_file(self)  # the file is there at the is_file() check…
+
+    def stat_vanished(self, *a, **kw):
+        if self == target:
+            raise FileNotFoundError(f"vanishing mid-prepare: {self}")  # …and gone at the later .stat()
+        return real_stat(self, *a, **kw)
+
+    monkeypatch.setattr(Path, "is_file", is_file_present)
+    monkeypatch.setattr(Path, "stat", stat_vanished)
+
+    w = Worker(bed["cfg"], bed["ledger"])
+    with pytest.raises(FileNotFoundError):  # escapes run_once: it is neither Hold nor JobError
+        w.run_once()
+    assert bed["ledger"].get(1).status == "queued"
+
+    w2 = Worker(bed["cfg"], bed["ledger"], poll_seconds=0.05)
+    t = threading.Thread(target=w2.run_forever, daemon=True)
+    t.start()
+    time.sleep(0.3)  # several passes, each hitting the race — the worker survives every one
+    assert t.is_alive() and bed["ledger"].get(1).status == "queued"
+    w2.stop()
+    t.join(timeout=10)
+    assert not t.is_alive()
+
+
 def test_low_disk_holds_job(bed, monkeypatch):
     monkeypatch.setattr(fragpipe, "_disk_free_gb", lambda p: 1.0)
     cfg = replace(bed["cfg"], min_free_gb=20)
@@ -324,6 +360,58 @@ def test_cancel_running_job(bed, monkeypatch):
     job = bed["ledger"].get(1)
     assert job.status == "failed" and job.reason == "cancelled by user"
     assert not (dest / fragpipe.RUN_DIR / fragpipe.CANCEL_FILE).exists()
+
+
+def test_stale_cancel_file_is_cleared_so_a_requeued_job_runs(bed, monkeypatch):
+    """A CANCEL left in ionomos_run/ (a cancel that raced the startup, ionomos crashed right after
+    writing it, ...) is for one run only: write_inputs unlinks it, so the next attempt runs to done,
+    not to 'cancelled' (fragpipe.py write_inputs)."""
+    monkeypatch.setenv("IONOMOS_FAKE_FP_SECONDS", "3")
+    dest = _queue(bed)
+    run_dir = dest / fragpipe.RUN_DIR
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / fragpipe.CANCEL_FILE).write_text("stale", encoding="utf-8")
+    Worker(bed["cfg"], bed["ledger"]).run_once()
+    assert bed["ledger"].get(1).status == "done", bed["ledger"].get(1).reason
+    assert not (run_dir / fragpipe.CANCEL_FILE).exists()
+
+
+def test_cancel_in_the_startup_window_is_lost(bed, monkeypatch):
+    # CHARACTERIZATION (issue #17): request_cancel on a running job writes ionomos_run/CANCEL, but a
+    # cancel landing between worker.start_attempt and fragpipe.write_inputs is unlinked again before
+    # fragpipe.run ever polls it: the user is told FragPipe "will be stopped within a few seconds"
+    # yet the search runs to completion. Pinned deliberately — invert when #17 is fixed.
+    monkeypatch.setenv("IONOMOS_FAKE_FP_SECONDS", "0")
+    dest = _queue(bed)
+    real_write_inputs = fragpipe.write_inputs
+    seen = {}
+
+    def write_inputs_with_cancel_landing(spec):
+        seen["msg"] = request_cancel(bed["ledger"], spec.job_id)  # status is running; the search has not started
+        return real_write_inputs(spec)
+
+    monkeypatch.setattr(fragpipe, "write_inputs", write_inputs_with_cancel_landing)
+    Worker(bed["cfg"], bed["ledger"]).run_once()
+    job = bed["ledger"].get(1)
+    assert "stopped within a few seconds" in seen["msg"]
+    assert job.status == "done", job.reason  # the cancel never took effect
+    assert not (dest / fragpipe.RUN_DIR / fragpipe.CANCEL_FILE).exists()
+    assert not (dest / "FAILED.txt").exists()
+
+
+def test_request_cancel_on_a_finished_job_is_a_noop(bed):
+    """done/failed jobs answer 'nothing to cancel' and are left untouched."""
+    dest = _queue(bed, "fp_fail")
+    Worker(bed["cfg"], bed["ledger"]).run_once()
+    msg = request_cancel(bed["ledger"], 1)
+    assert "is failed" in msg and "nothing to cancel" in msg
+    assert bed["ledger"].get(1).status == "failed"
+    _queue(bed, "iso_good")
+    Worker(bed["cfg"], bed["ledger"]).run_once()
+    msg = request_cancel(bed["ledger"], 2)
+    assert "is done" in msg and "nothing to cancel" in msg
+    assert bed["ledger"].get(2).status == "done"
+    assert (dest / "FAILED.txt").is_file()  # untouched by the second cancel attempt
 
 
 # -------------------------------------------------- the real `ionomos run` --

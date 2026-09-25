@@ -5,6 +5,8 @@ workflow's database.db-path exists, every manifest file exists — so a job only
 reaches "done" if ionomos prepared the inputs correctly.
 """
 import json
+import logging
+import shutil
 import threading
 import time
 from dataclasses import replace
@@ -12,11 +14,11 @@ from pathlib import Path
 
 import pytest
 
-from ionomos import fragpipe, testbed
+from ionomos import attention, fragpipe, testbed
 from ionomos.config import load
 from ionomos.intake import intake
-from ionomos.ledger import Ledger
-from ionomos.worker import Worker
+from ionomos.ledger import Job, Ledger
+from ionomos.worker import Worker, _waiting_causes, request_cancel
 
 
 @pytest.fixture
@@ -94,6 +96,52 @@ def test_tmt_job_writes_annotation_from_experiment_yaml(bed):
     ann = list(dest.rglob("annotation.txt"))
     assert len(ann) == 1 and "126\t" in ann[0].read_text(encoding="utf-8")
     assert (dest / "fragpipe" / "tmt-report" / "abundance_gene_MD.tsv").is_file()
+
+
+def test_tmt_multiplex_prepares_one_annotation_per_plex_and_warns(bed):
+    """Several plexes in one folder: prepare names each file <experiment>_annotation.txt and attaches
+    the explicit 'unconfirmed FragPipe behaviour' warning (fragpipe.py TMT branch); write_inputs
+    writes exactly those files, never a generic annotation.txt. Behavior pin, not a bug pin."""
+    dest = bed["root"] / "plex_job"
+    dest.mkdir()
+    manifest = [{"file": "PLEXA_F1.raw", "experiment": "PLEXA", "bioreplicate": 1, "data_type": "DDA"},
+                {"file": "PLEXB_F1.raw", "experiment": "PLEXB", "bioreplicate": 1, "data_type": "DDA"}]
+    for m in manifest:
+        (dest / m["file"]).write_bytes(b"\0" * 64)
+    plexes = {exp: {"channels": {"126": f"{exp}_126", "127N": f"{exp}_127N"}} for exp in ("PLEXA", "PLEXB")}
+    plan = {"manifest": manifest, "overrides": {"tmt": {"plexes": plexes}}}
+    job = Job(inbox_name=dest.name, user="EJQ", method="TMT", dest_dir=str(dest), parsed={"plan": plan})
+
+    spec = fragpipe.prepare(job, bed["cfg"])
+    assert spec.annotations == {
+        "PLEXA_annotation.txt": "126\tPLEXA_126\n127N\tPLEXA_127N\n",
+        "PLEXB_annotation.txt": "126\tPLEXB_126\n127N\tPLEXB_127N\n",
+    }
+    assert spec.warnings == ["several TMT plexes share one folder; how FragPipe 24 headless picks each "
+                             "plex's annotation file is unconfirmed (docs/WORKFLOWS.md)"]
+
+    assert fragpipe.write_inputs(spec) is None
+    for exp in ("PLEXA", "PLEXB"):
+        assert f"126\t{exp}_126" in (dest / f"{exp}_annotation.txt").read_text(encoding="utf-8")
+    assert not (dest / "annotation.txt").exists()
+
+
+def test_existing_user_annotation_txt_is_kept_with_a_warning(bed):
+    """write_inputs never overwrites a differing annotation.txt — it may be the user's own file — and
+    records why the experiment.yaml map was not applied (fragpipe.py TMT annotation writing)."""
+    dest = bed["root"] / "tmt_user_edit"
+    dest.mkdir()
+    (dest / "PLEX_F1.raw").write_bytes(b"\0" * 64)
+    plan = {"manifest": [{"file": "PLEX_F1.raw", "experiment": "PLEX", "bioreplicate": 1, "data_type": "DDA"}],
+            "overrides": {"tmt": {"tag": "TMT-10", "channels": {"126": "DMSO_126", "127N": "DMSO_127N"}}}}
+    job = Job(inbox_name=dest.name, user="EJQ", method="TMT", dest_dir=str(dest), parsed={"plan": plan})
+
+    users_own = "126\tuser edit\n"
+    (dest / "annotation.txt").write_text(users_own, encoding="utf-8")
+    spec = fragpipe.prepare(job, bed["cfg"])
+    fragpipe.write_inputs(spec)
+    assert (dest / "annotation.txt").read_text(encoding="utf-8") == users_own
+    assert spec.warnings == ["kept the existing annotation.txt (differs from experiment.yaml's tmt: map)"]
 
 
 # ------------------------------------------------------------------- failures --
@@ -231,6 +279,78 @@ def test_watcher_and_worker_together(bed):
             t.join(timeout=20)
 
 
+# --------------------------------------------------- worker edge cases (audit) --
+
+
+def test_missing_expected_outputs_are_recorded_as_a_warning(bed, monkeypatch):
+    """A done search that produced none of the method's expected outputs is a warning, not a failure:
+    recorded in the ledger reason, ionomos.json's run.warnings and DONE.txt (fragpipe.missing_outputs)."""
+    dest = _queue(bed, "iso_good")
+    monkeypatch.setitem(fragpipe.EXPECTED_OUTPUTS, "isoDTB", ("no_such_table.tsv",))
+    Worker(bed["cfg"], bed["ledger"]).run_once()
+    job = bed["ledger"].get(1)
+    assert job.status == "done", job.reason
+    warning = "none of the expected isoDTB outputs found in fragpipe/: no_such_table.tsv"
+    assert warning in job.reason
+    assert warning in _status(dest)["run"]["warnings"]
+    assert f"Note: {warning}" in (dest / "DONE.txt").read_text(encoding="utf-8")
+
+
+def test_fail_with_destination_folder_deleted_still_fails_the_ledger_row(bed):
+    """prepare's 'experiment folder is gone' path: the ledger row fails and a person is told via an
+    attention item; the FAILED.txt write is skipped (nothing left to write into) without raising."""
+    dest = _queue(bed, "iso_good")
+    shutil.rmtree(dest)
+    w = Worker(bed["cfg"], bed["ledger"])
+    assert w.run_once()
+    job = bed["ledger"].get(1)
+    assert job.status == "failed" and "experiment folder is gone" in job.reason
+    failed = [i for i in attention.items(bed["cfg"].log_dir) if i.kind == "search_failed" and i.job_id == 1]
+    assert len(failed) == 1 and failed[0].is_open
+    assert "experiment folder is gone" in failed[0].message
+    assert not (dest / "FAILED.txt").exists()  # the folder is gone — and the swallow must not crash the queue
+
+
+def test_update_status_falls_back_to_the_ledger_record_when_ionomos_json_is_corrupt(bed):
+    """A hand-mangled ionomos.json must not break status updates: _update_status falls back to the
+    ledger row's parsed record and rewrites a valid file."""
+    dest = _queue(bed, "iso_good")
+    status_file = dest / "ionomos.json"
+    status_file.write_text("{not json", encoding="utf-8")
+    assert "cancelled" in request_cancel(bed["ledger"], 1)  # queued -> failed, rewrites the status file
+    assert bed["ledger"].get(1).status == "failed"
+    rec = json.loads(status_file.read_text(encoding="utf-8"))  # valid JSON again
+    assert rec["status"] == "failed"
+    assert rec["plan"]["folder"]["safe"]  # recovered from job.parsed, not lost with the corrupt file
+
+
+def test_hold_reason_is_reported_once_and_again_only_when_it_changes(bed, caplog):
+    """The same hold reason is reported once per job, not once per pass; a changed reason is reported
+    again and updates the search_waiting attention item in place."""
+    wf = bed["cfg"].workflow_dir / "isoDTB.workflow"
+    fasta = bed["cfg"].fasta_dir / "human_reviewed_decoys.fas"
+    saved_wf = wf.read_text(encoding="utf-8")
+    _queue(bed, "iso_good")
+    w = Worker(bed["cfg"], bed["ledger"])
+
+    wf.unlink()  # hold #1: workflow missing
+    with caplog.at_level(logging.WARNING, logger="ionomos.worker"):
+        assert not w.run_once()
+        assert not w.run_once()
+    assert len([r for r in caplog.records if r.name == "ionomos.worker" and "waiting" in r.getMessage()]) == 1
+    assert bed["ledger"].get(1).status == "queued"
+
+    wf.write_text(saved_wf, encoding="utf-8")  # hold #2: workflow back, FASTA gone
+    fasta.rename(bed["root"] / "fasta_moved.fas")
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="ionomos.worker"):
+        assert not w.run_once()
+    waiting = [r for r in caplog.records if r.name == "ionomos.worker" and "waiting" in r.getMessage()]
+    assert len(waiting) == 1 and "FASTA" in waiting[0].getMessage()
+    item = [i for i in attention.items(bed["cfg"].log_dir) if i.kind == "search_waiting" and i.job_id == 1]
+    assert len(item) == 1 and any("protein database" in c for c in item[0].causes)
+
+
 # ------------------------------------------------------------------ unit bits --
 
 
@@ -264,3 +384,19 @@ def test_fasta_falls_back_to_workflow_database(bed):
     Worker(cfg, bed["ledger"]).run_once()
     job = bed["ledger"].get(1)
     assert job.status == "done" and "using the workflow's own database" in (job.reason or "")
+
+
+@pytest.mark.parametrize(("reason", "expected"), [
+    ("FASTA for isoDTB missing: C:/x/h.fas",
+     "The method's protein database (FASTA) isn't set or the file was moved — tab 3 Methods"),
+    ("workflow file for isoDTB missing: C:/x/workflows/isoDTB.workflow",
+     "The method's FragPipe workflow file isn't there — tab 3 Methods → Import workflow…"),
+    ("low disk space: 12 GB free on C:, this search needs ~15 GB",
+     "Not enough free disk space for FragPipe's output — free space on the data drive"),
+    ("FragPipe launcher not found at C:/nope/fragpipe.bat",
+     "FragPipe isn't found — tab 1 Folders → Find FragPipe"),
+    ("method 'isoDTB' is not in config.yaml any more", None),  # fallback: the raw reason, verbatim
+])
+def test_waiting_causes_maps_hold_reasons_to_plain_english(reason, expected):
+    """Every hold keyword maps to its human cause; anything else falls back to the raw reason."""
+    assert _waiting_causes(reason) == [expected or reason]
