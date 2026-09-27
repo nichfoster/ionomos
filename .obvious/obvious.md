@@ -6,9 +6,13 @@ FragPipe headlessly on a Windows lab PC. Python 3.11+ package lives in
 `ARCHITECTURE.md`, `NAMING_CONVENTION.md`, `TESTING.md`) before touching code.
 See `CLAUDE.md` for project rules.
 
+**Agents open PRs and never merge them** — a person reviews and merges
+(docs/DECISIONS.md D31). Keep `CHANGELOG.md`, `docs/DECISIONS.md` and
+`docs/ROADMAP.md` in sync with every behavior change.
+
 ## Stack
 
-- **Language/runtime:** Python 3.11+ (sandbox runs 3.13). No Node, no web server.
+- **Language/runtime:** Python 3.11+ (CI: 3.11, 3.12, 3.14; the lab PC runs 3.14). No Node, no web server.
 - **Packaging:** setuptools, editable install into a venv at `ionomos/.venv` (pip).
 - **Lint/tests:** ruff + pytest (`pytest>=8`, `ruff>=0.5` in `[dev]` extras).
 - **Storage:** SQLite job ledger (no external DB). No Docker/Compose, no Postgres/Redis.
@@ -69,7 +73,7 @@ See [codebase-map.md](codebase-map.md).
 - dev_stack_healthy: **true** (2026-09-24)
 - Editable install: `pip install -e "ionomos[dev]"` → OK (Python 3.13)
 - ruff: `All checks passed!`
-- pytest: `350 passed, 23 skipped` in ~84s (`IONOMOS_OFFLINE=1`; skipped = GUI
+- pytest (2026-09-24 snapshot): `350 passed, 23 skipped` in ~84s (`IONOMOS_OFFLINE=1`; skipped = GUI
   tests without a display)
 - E2E primary flow: testbed init → watcher (`run --no-gui`, fake FragPipe) →
   dropped `iso_good` + `dia_good` → both jobs reached `done` in ~10s →

@@ -26,7 +26,7 @@ ionomos/.venv/bin/python -m ruff check ionomos/src ionomos/tests
 IONOMOS_OFFLINE=1 ionomos/.venv/bin/python -m pytest ionomos -q
 ```
 
-Expected: ruff clean; pytest `350 passed, 23 skipped` (~85s). The skips are
+Expected: ruff clean; pytest all passing (494 on 2026-09-27, ~100s). The skips are
 tkinter GUI tests — they skip automatically without a display.
 
 ## Primary flow (testbed e2e)

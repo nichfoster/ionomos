@@ -7,10 +7,11 @@ pr:
   merge:
     method: squash
 
-# Agents merge their own PRs once CI is green (the automerge workflow also does).
+# Agents open PRs; a person reviews and merges them (D31). The automerge
+# workflow was removed on 2026-09-27.
 merge:
   method: squash
-  require_human_merge: false   # legacy key; was true, which parked every PR for a human
+  require_human_merge: true
 
 reviews:
   automated:
