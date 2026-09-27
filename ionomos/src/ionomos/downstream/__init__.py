@@ -241,14 +241,8 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
         return out
     out.method = method = method if method and method != "auto" else detect_method(workdir)
     f.method = method
-    try:
-        settings = analysis.settings_from(analysis_cfg, overrides)
-    except analysis.AnalysisError as exc:
-        out.warnings.append(f"analysis settings ignored ({exc}); using defaults")
-        try:
-            settings = analysis.settings_from(analysis_cfg) if analysis_cfg else analysis.Settings()
-        except analysis.AnalysisError:
-            settings = analysis.Settings()
+    settings, snotes = analysis.settings_lenient(analysis_cfg, overrides)
+    out.warnings += snotes
     f.settings = settings
     notes: list[str] = []
     diffs: list[analysis.DiffResult] = []
@@ -258,8 +252,16 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     enr_notes: list[str] = []
     comps: list = []
 
+    def read():
+        try:
+            return load_quantities(method, workdir, results, record, mod_mass)
+        except isodtb.SiteError as exc:
+            f.read_problem = str(exc)
+            notes.append(f"the result table has nothing usable: {exc}")
+            return None
+
     say(f"reading {method or 'FragPipe'} results")
-    loaded = stage("read", load_quantities, method, workdir, results, record, mod_mass)
+    loaded = stage("read", read)
     m = None
     if loaded is not None:
         m, files, lnotes = loaded

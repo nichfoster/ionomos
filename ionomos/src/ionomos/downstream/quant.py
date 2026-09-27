@@ -132,11 +132,14 @@ def from_pg_matrix(path: Path, sample_map: dict[str, tuple[str, int]] | None = N
         return hits[0] if len(hits) == 1 else None
 
 
-    def numeric(h: str) -> bool:  # a run column holds numbers (or blanks); annotation columns hold text
+    def numeric(h: str, strict: bool = True) -> bool:
+        """A run column holds numbers (or blanks); annotation columns hold text. Not strict: mostly
+        numbers — a few junk cells mustn't silently drop a whole run (they become missing, with a note)."""
         vals = [r.get(h, "") for r in probe if r.get(h, "").strip() not in NA_STRINGS]
-        return all(num(v) is not None for v in vals)
+        ok = sum(num(v) is not None for v in vals)
+        return ok == len(vals) if strict else ok >= 0.9 * len(vals)  # an all-blank run is still a run
 
-    runs = [h for h in header if h not in _PG_META and (match_run(run_stem(h)) is not None or numeric(h))]
+    runs = [h for h in header if h not in _PG_META and (match_run(run_stem(h)) is not None or numeric(h, strict=False))]
     samples, cond, reps, colmap = [], {}, {}, {}
     unmatched: list[str] = []
     for h in runs:
@@ -152,6 +155,8 @@ def from_pg_matrix(path: Path, sample_map: dict[str, tuple[str, int]] | None = N
         else:
             clean = re.sub(r"_(?:uncalibrated|calibrated)$", "", stem, flags=re.IGNORECASE)
             s, c = stem, _dia_condition(clean)
+            if not numeric(h):
+                notes.append(f"Run {stem}: nonnumeric quantities were treated as missing")
             if sample_map:
                 notes.append(f"Run {stem} did not match the manifest; inferred condition {c!r}. Check sample labels.")
                 unmatched.append(stem)

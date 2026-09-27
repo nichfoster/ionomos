@@ -187,13 +187,17 @@ features × samples matrix of log2 values and runs the same statistics:
   | code | severity | when |
   |---|---|---|
   | NO_TABLE / EMPTY_TABLE | problem | FragPipe produced no (or an empty) result table for the method |
+  | UNUSABLE_TABLE | problem | the table exists but holds nothing usable (isoDTB: no probe-labelled peptides / ratio columns) |
+  | NO_QUANTITIES | problem | rows but not one measured value in the sample columns |
+  | ONE_SAMPLE | problem | a single sample was quantified — nothing to compare |
+  | NOTHING_LEFT | problem | every sample was left out, or the filters removed every feature |
   | MISSING_RUNS | problem | searched runs with no quantities in the table |
   | UNMATCHED_RUNS | decide | runs not in the experiment's file list (conditions guessed) |
   | DUPLICATE_SAMPLES | decide | two runs with the same sample name (re-acquisitions) |
   | ONE_CONDITION | decide | every sample in one condition — conditions suggested from the file names |
   | NO_CONTROL | decide | no condition looks like a control; the guess is used until confirmed |
   | BAD_COMPARISON | decide | chosen comparisons don't fit; defaults used meanwhile |
-  | SMALL_GROUP | decide | a group has fewer than `min_valid` samples |
+  | SMALL_GROUP | decide | a group has fewer than `min_valid` samples (any method, incl. an isoDTB ratio test vs 0) |
   | LOW_SAMPLE | decide | a sample has < 40 % of the median identifications (failed injection?) |
   | ZERO_TESTED / NO_VOLCANO / CRASH_* | problem | nothing testable, plot not written, a step crashed |
   | HIGH_IMPUTATION, FEW_FEATURES, NO_HITS, ENRICHMENT | note | worth knowing |

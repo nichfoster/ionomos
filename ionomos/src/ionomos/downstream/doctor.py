@@ -56,6 +56,7 @@ class Findings:
     volcanos: dict = field(default_factory=dict)          # comparison name -> Path or None
     stage_errors: dict = field(default_factory=dict)      # stage -> (message, traceback)
     load_notes: list = field(default_factory=list)
+    read_problem: str | None = None      # the result table exists but holds nothing usable (e.g. isoDTB SiteError)
     enrichment_notes: list = field(default_factory=list)
 
 
@@ -126,6 +127,16 @@ def check(f: Findings) -> list[Issue]:
                   {"stage": stage}))
 
     # ---- nothing to analyse
+    if m is None and f.read_problem:
+        add(Issue("UNUSABLE_TABLE", "error", "The result table has nothing Ionomos can use",
+                  f"{f.read_problem}, so there are no statistics or volcano plot.",
+                  ["The probe/label mass in the workflow differs from the one Ionomos looks for (isoDTB: 561.3387)",
+                   "Label quantification ran without the isoDTB labels, or found no labelled peptides",
+                   "The search failed quietly (wrong FASTA or species) and the table is empty"],
+                  ["Open the table in fragpipe/ and check the modification masses and ratio columns",
+                   "Check the workflow for this method (tab 3), then Retry the job"],
+                  {"method": method}))
+        return out
     if m is None:
         if "read" not in f.stage_errors:
             want, causes = EXPECTED.get(method, ("a FragPipe result table",
@@ -149,10 +160,35 @@ def check(f: Findings) -> list[Issue]:
                   ["Check the FASTA and workflow for this method (tab 3) and the raw files, then Retry"],
                   {"source": m.source}))
         return out
+    if not any(v is not None for row in m.values for v in row):
+        add(Issue("NO_QUANTITIES", "error", "The result table has no usable numbers",
+                  f"{Path(m.source).name} lists {len(m.features):,} features but not one measured value in the "
+                  f"sample columns ({', '.join(m.samples[:6]) or 'none found'}), so nothing can be analysed.",
+                  ["Quantification failed or was switched off (every value blank or zero)",
+                   "The sample columns hold text instead of numbers (edited or exported by another program)"],
+                  ["Open the table in fragpipe/ and check the sample columns, then Retry the job"],
+                  {"source": m.source, "samples": list(m.samples)}))
+        return out
 
     pm = p.m if p is not None else m
     conds = pm.conditions
     samples = list(pm.samples)
+    if not pm.features or not samples:
+        what = "sample" if not samples else "feature"
+        add(Issue("NOTHING_LEFT", "error", f"Every {what} was removed before the statistics",
+                  f"The table had {len(m.features):,} features in {len(m.samples)} samples, but after leaving out "
+                  f"samples and filtering missing values none were left.",
+                  ["Every sample is in 'Samples left out'", "The missing-value filter is stricter than the data allows"],
+                  ["Check 'Samples left out' and the filter settings here, then Run analysis"],
+                  {"excluded": list(getattr(s, "exclude_samples", []) or [])}))
+        return out
+    if len(samples) == 1:
+        add(Issue("ONE_SAMPLE", "error", "Only one sample was quantified",
+                  f"The table has a single sample ({samples[0]}), so there is nothing to compare and no volcano plot.",
+                  ["The other runs failed or are missing from the result table",
+                   "The experiment really is a single run"],
+                  ["Check the FragPipe log for the other runs; re-acquire or re-search them"],
+                  {"sample": samples[0]}))
 
     # ---- runs that didn't make it / didn't match
     missing = list(m.meta.get("missing_runs") or [])
@@ -215,16 +251,6 @@ def check(f: Findings) -> list[Issue]:
                       ["The control has a name Ionomos doesn't know (add it to Control keywords, Analysis tab)"],
                       ["Pick the control here and Run analysis (the choice is remembered for this experiment)"],
                       {"conditions": conds, "guessed": f.control_guessed}))
-        for t, c, groups in f.small_groups:
-            add(Issue("SMALL_GROUP", "input", f"Not enough replicates to test {t} vs {c}",
-                      "; ".join(f"{g} has {n} sample(s)" for g, n in groups) +
-                      f" — at least {s.min_valid if s else 2} per group are needed, so this comparison has no p-values.",
-                      ["A replicate's condition was mistyped, so it formed its own group",
-                       "Runs are missing (see above) or were left out",
-                       "The experiment really has a single replicate — then no statistics are possible"],
-                      ["Fix the samples' conditions here and Run analysis"],
-                      {"treatment": t, "control": c, "groups": groups}))
-
         # ---- sample quality
         counts = [sum(1 for r in (p.measured if p else pm.values) if r[j] is not None) for j in range(len(samples))]
         if len(counts) >= 3:
@@ -248,6 +274,16 @@ def check(f: Findings) -> list[Issue]:
                           ["Very different samples (e.g. pulldown vs input)", "Low identifications in some runs"],
                           ["Consider imputation 'none' for this experiment, or a stricter missing-value filter"],
                           {"percent": round(pct, 1)}))
+
+    for t, c, groups in f.small_groups:
+        add(Issue("SMALL_GROUP", "input", f"Not enough replicates to test {t} vs {c or 0}",
+                  "; ".join(f"{g} has {n} sample(s)" for g, n in groups) +
+                  f" — at least {s.min_valid if s else 2} per group are needed, so this comparison has no p-values.",
+                  ["A replicate's condition was mistyped, so it formed its own group",
+                   "Runs are missing (see above) or were left out",
+                   "The experiment really has a single replicate — then no statistics are possible"],
+                  ["Fix the samples' conditions here and Run analysis"],
+                  {"treatment": t, "control": c, "groups": groups}))
 
     if len(pm.features) < 100 and pm.kind == "intensity":
         add(Issue("FEW_FEATURES", "warning", f"Only {len(pm.features)} features in the analysis",

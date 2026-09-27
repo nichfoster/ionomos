@@ -159,12 +159,32 @@ def settings_from(*layers: dict | None) -> Settings:
             setattr(s, k, v)
     if not 0 < s.alpha < 1:
         raise AnalysisError("analysis.alpha must be between 0 and 1")
-    if s.log2fc < 0 or s.min_valid < 2:
-        raise AnalysisError("analysis.log2fc must be >= 0 and min_valid >= 2")
+    if s.log2fc < 0:
+        raise AnalysisError("analysis.log2fc must be >= 0")
+    if s.min_valid < 2:
+        raise AnalysisError("analysis.min_valid must be >= 2")
     for k in ("filter_global_pct", "filter_condition_pct"):
         if not 0 <= getattr(s, k) <= 100:
             raise AnalysisError(f"analysis.{k} must be between 0 and 100")
     return s
+
+
+def settings_lenient(*layers: dict | None) -> tuple[Settings, list[str]]:
+    """settings_from for a run that must go ahead: a bad value drops only that key (with a note)
+    instead of every setting. Validation of config.yaml / experiment.yaml stays strict (settings_from)."""
+    kept: list[dict] = []
+    notes: list[str] = []
+    for layer in layers:
+        good: dict = {}
+        for k, v in (layer or {}).items():
+            try:
+                settings_from(*kept, {**good, k: v})
+            except AnalysisError as exc:
+                notes.append(f"analysis setting {k!r} ignored ({exc}); the default is used")
+                continue
+            good[k] = v
+        kept.append(good)
+    return settings_from(*kept), notes
 
 
 def as_dict(s: Settings) -> dict:

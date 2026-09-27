@@ -165,3 +165,91 @@ def test_unwritable_volcano_is_an_error(tmp_path, monkeypatch):
 def test_suggest_conditions(names, want):
     got = doctor.suggest_conditions(names)
     assert [got[n] for n in names] == want
+
+
+# ---- inputs that used to come back "ok" (or as a crash) with nothing to show — 2026-09-27 sweep
+
+
+def _rewrite(path: Path, fn) -> None:
+    header, rows = read_tsv(path)
+    header, rows = fn(header, rows)
+    path.write_text("\n".join(["\t".join(header)] + ["\t".join(r.get(h, "") for h in header) for r in rows]) + "\n",
+                    encoding="utf-8")
+
+
+def test_all_blank_quantities_is_an_error_not_ok(tmp_path):
+    rec = _dia(tmp_path / "e")
+    pg = tmp_path / "e/fragpipe/report.pg_matrix.tsv"
+    runs = [h for h in read_tsv(pg)[0] if h.endswith(".raw")]
+    _rewrite(pg, lambda h, rows: (h, [{**r, **dict.fromkeys(runs, "")} for r in rows]))
+    out = downstream.analyze(tmp_path / "e", "DIA", {"enrichment": False}, record=rec)
+    assert out.summary["state"] == "failed" and "NO_QUANTITIES" in _codes(out)
+
+
+def test_single_sample_says_so(tmp_path):
+    _dia(tmp_path / "e", conds=("DMSO",), reps=(1,), record=False)
+    out = downstream.analyze(tmp_path / "e", "DIA", {"enrichment": False})
+    assert out.summary["state"] == "failed" and "ONE_SAMPLE" in _codes(out)
+
+
+def test_excluding_every_sample_is_reported(tmp_path):
+    rec = _dia(tmp_path / "e")
+    everyone = [f"{c}_{r}" for c in ("DMSO", "Drug") for r in (1, 2, 3)]
+    out = downstream.analyze(tmp_path / "e", "DIA", {"enrichment": False}, {"exclude_samples": everyone}, record=rec)
+    assert out.summary["state"] == "failed" and "NOTHING_LEFT" in _codes(out)
+
+
+def test_isodtb_table_without_probe_is_a_data_problem_not_a_crash(tmp_path):
+    lq = tmp_path / "e/fragpipe/combined_modified_peptide_label_quant.tsv"
+    simulate.isodtb_label_quant(lq, {"EJQ_2_027": [1, 2, 3]})
+    lq.write_text(lq.read_text(encoding="utf-8").replace("[561.3387]", "[57.0215]"), encoding="utf-8")
+    out = downstream.analyze(tmp_path / "e", "isoDTB", {"enrichment": False})
+    codes = _codes(out)
+    assert "UNUSABLE_TABLE" in codes and "CRASH_READ" not in codes
+    assert "561.3387" in codes["UNUSABLE_TABLE"].message
+    assert not (tmp_path / "e/results/analysis_error.txt").exists()
+
+
+def test_isodtb_single_replicate_asks_instead_of_silent_ok(tmp_path):
+    simulate.isodtb_label_quant(tmp_path / "e/fragpipe/combined_modified_peptide_label_quant.tsv", {"EJQ_2_027": [1]})
+    out = downstream.analyze(tmp_path / "e", "isoDTB", {"enrichment": False})
+    small = _codes(out)["SMALL_GROUP"]
+    assert out.summary["state"] != "ok" and "vs 0" in small.title
+
+
+def test_a_few_junk_cells_do_not_drop_a_run(tmp_path):
+    # without a manifest, run columns are recognised by holding numbers; one bad cell used to drop the run
+    _dia(tmp_path / "e", record=False)
+    pg = tmp_path / "e/fragpipe/report.pg_matrix.tsv"
+    first_run = next(h for h in read_tsv(pg)[0] if h.endswith(".raw"))
+    _rewrite(pg, lambda h, rows: (h, [{**r, first_run: "abc"} if k == 0 else r for k, r in enumerate(rows)]))
+    out = downstream.analyze(tmp_path / "e", "DIA", {"enrichment": False})
+    assert len(out.summary["samples"]) == 6
+    assert any("nonnumeric" in n for n in out.warnings)
+
+
+def test_one_bad_setting_keeps_the_others(tmp_path):
+    rec = _dia(tmp_path / "e")
+    out = downstream.analyze(tmp_path / "e", "DIA", {"enrichment": False},
+                             {"min_valid": 1, "log2fc": 0.5, "test": "welch"}, record=rec)
+    s = out.summary["settings"]
+    assert s["min_valid"] == 2 and s["log2fc"] == 0.5 and s["test"] == "welch"
+    assert any("'min_valid' ignored" in n and "log2fc" not in n for n in out.warnings)
+
+
+def test_real_dia_nn_uncalibrated_names_group_by_condition(tmp_path):
+    # Chris's 2026-09 22Rv1 run (Ionomos 0.5.3 made every run its own condition): DIA-NN column headers are
+    # the converted *_uncalibrated.mzML paths; one DMSO run against three MA25 runs.
+    stems = ["CS_22rv1_FLAG-AR_MA25-10uM_DMSO_3", "CS_22rv1_FLAG-AR_MA25-10uM_MA25_1",
+             "CS_22rv1_FLAG-AR_MA25-10uM_MA25_2", "CS_22rv1_FLAG-AR_MA25-10uM_MA25_3"]
+    base = "C:\\Fragpipe_Auto_Users\\Chris\\CS_22rv1_FLAG_AR_MA25\\fragpipe\\"
+    names = [(f"{base}{s}_uncalibrated.mzML", s.rsplit("_", 1)[0]) for s in stems]
+    simulate.dia_pg_matrix(tmp_path / "e/fragpipe/dia-quant-output/report.pg_matrix.tsv", names, seed=4, n_proteins=400)
+    for rec in (None, {"plan": {"manifest": [{"file": f"{s}.raw", "experiment": s.rsplit("_", 1)[0],
+                                              "bioreplicate": int(s.rsplit("_", 1)[1])} for s in stems]}}):
+        out = downstream.analyze(tmp_path / "e", "DIA", {"enrichment": False}, record=rec)
+        assert set(out.summary["samples"].values()) == {"CS_22rv1_FLAG-AR_MA25-10uM_DMSO",
+                                                        "CS_22rv1_FLAG-AR_MA25-10uM_MA25"}
+        assert [c["name"] for c in out.summary["comparisons"]] == [
+            "CS_22rv1_FLAG-AR_MA25-10uM_MA25 vs CS_22rv1_FLAG-AR_MA25-10uM_DMSO"]
+        assert "SMALL_GROUP" in _codes(out)  # one DMSO replicate: asked about, not silently tested
