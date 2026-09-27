@@ -11,7 +11,12 @@ keep them in sync with code changes (especially NAMING_CONVENTION.md ↔
   moves; failures leave everything in place.
 - `reference/` is read-only lab material (SOPs, R scripts, inventory output).
   Don't edit it; port from it.
-- Tests: `cd ionomos && .venv/bin/pytest`. Add table-driven cases using real
+- Agents open PRs; a person merges them (docs/DECISIONS.md D31). Keep
+  CHANGELOG.md, DECISIONS.md and ROADMAP.md in sync in the same PR.
+- CI runs Python 3.11, 3.12 and 3.14 (the lab PC runs 3.14). In tests, never
+  patch `os.name` globally to fake Windows; stub the module's `os` instead.
+- Tests: `cd ionomos && .venv/bin/pytest`. If the repo folder moved, delete
+  `ionomos/.venv` and re-run `scripts/test_mac.sh`: venv paths are absolute. Add table-driven cases using real
   names from `reference/pc-inventory/` when extending `naming.py`.
 - Log decisions in `docs/DECISIONS.md`; open questions in `docs/ROADMAP.md`.
 - The project was called LabWatch up to 0.4.0. Every on-disk/system name and

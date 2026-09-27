@@ -13,11 +13,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   codebase map, repo config, and a local-dev skill — generated from a verified
   dev stack (ruff clean, 350 passed / 23 skipped, testbed end-to-end with the
   fake FragPipe). (#1)
+- `runners/isodtb.py`: the isoDTB site-merge runner entry, a thin adapter over
+  the existing port in `downstream/isodtb.py`, with golden tests. (#9)
+- jsdom test harness for the report front end, run in CI on both OSes. (#8)
+- `docs/FIRST_REAL_RUN.md`: the runbook for the first real FragPipe run on the
+  PC (isoDTB, then DIA). (#31)
 
 ### Changed
 
 - Dev installs now pin `pip>=26.2` (`deploy/dev_install.ps1` and the `dev`
   extra). (#3)
+- CI tests Python 3.14 (what the lab PC runs) and 3.12 (the exe build) on
+  Windows, and 3.14 and 3.11 (the floor) on Linux; previously only 3.12. The
+  test job has a 15-minute timeout. (#21)
+- Agents no longer merge their own PRs: the automerge workflow (#10, #11) is
+  removed, `.obvious/config.yml` requires a human merge, and `.github/CODEOWNERS`
+  requests owner review on every PR (D31).
+- Naming: replicate and fraction tails are bounded to 1–999, and a digit run
+  longer than three is never read as one, so a date-shaped tail can't become a
+  replicate or fraction. (#32, #41)
+- Naming: the six-digit `MMDDYY` date only matches when its year is within the
+  last 25 years through next year, so run IDs like `113056` aren't read as
+  dates. (#35, #41)
 
 ### Fixed
 
@@ -43,3 +60,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   digest-less releases are never downloaded or installed, and a Downloads-found
   installer is verified against the release whose version it claims before it
   is run. (#6)
+- A cross-volume copy that fails hash verification now removes its own partial
+  destination (the source is untouched), so re-filing isn't wedged by
+  "destination already exists"; if removal fails, the rejection names the
+  leftover. (#34) The same cleanup now runs when the copy itself dies
+  partway (disk full, a locked file), which used to leave a half-copy that
+  got the retry rejected as "destination already exists".
+- Drops with `.raw` files both at the top level and in `raw/` are rejected
+  instead of silently filing a manifest of only one set; the app's Inbox view
+  and naming window show the reason instead of a Tk traceback. (#36, #42)
+- A raw file that vanishes (or can't be read) while a search is being prepared
+  fails the job with a clear reason instead of leaving it queued forever. (#39)
+- A cancel delivered while a search is starting is no longer discarded. (#38)
+- FragPipe steps that die with a negative exit code (killed by a signal) are
+  flagged as failed. (#27)
+- A job missing from the ledger when its attempt starts fails visibly
+  (`LedgerError`) instead of crashing the worker; ledger rebuild/adoption log
+  every status file they skip. (#37)
+- Tests: Windows CI hangs in the Tk dialog tests fixed (deterministic dialog
+  drive, leak-proof teardown, bounded Tk root retry); edge-behavior tests
+  pinned for ledger, watcher, worker, postprocess. (#12, #23, #25, #26, #28,
+  #29, #30, #33, #40, #43)
+- Tests: the two "raw vanishes during prepare" worker tests no longer depend on
+  how `Path.is_file()` is implemented, so they pass on Python 3.14 as well as
+  CI's 3.12. A testbed test that faked Windows by patching `os.name` globally
+  crashed the whole suite on Python 3.11; it now stubs the module instead.

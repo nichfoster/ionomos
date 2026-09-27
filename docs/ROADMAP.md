@@ -170,3 +170,5 @@ Collected from the other docs; resolve before/during Phase 1.
 **Software**
 - [ ] How does FragPipe 24.0 headless locate the TMT `annotation.txt`?
 - [ ] Does bundled DIA-NN suffice or is `--config-diann` needed for 2.3.2?
+- [x] Agent auto-merge: removed 2026-09-27; a person merges (D31).
+- [x] CI Python versions: 3.11 (floor), 3.12 (exe build), 3.14 (the PC) since 2026-09-27.

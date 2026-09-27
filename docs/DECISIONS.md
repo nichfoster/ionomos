@@ -321,3 +321,34 @@ source only when every hash matches; any mismatch or missing file raises
 IntakeError and the source is left in place. The EXDEV rename fast path is
 unchanged, and the disk-space check before copying still sizes the tree —
 it estimates capacity, it does not verify content.
+
+**2026-09-25 addendum.** When verification fails, `_move_tree` now removes
+its own partial destination before raising, so a re-drop isn't blocked by
+"destination already exists". This is the one place intake deletes on the
+destination side, and it's safe only because `shutil.copytree` refuses an
+existing `dst`: everything under `dst` was written by this call, and the
+source is still intact. Keep that invariant (never `dirs_exist_ok=True`) or
+the cleanup could remove real data. **2026-09-27:** a copy that dies partway
+through `copytree` itself (disk full, a locked file) is cleaned up the same
+way. The original error is re-raised so the watcher's retry logic applies,
+or it becomes an IntakeError naming the leftover if cleanup fails too.
+
+### D30 — Numbers read out of names must be plausible
+**2026-09-25.** A parser that accepts any digit run turns run IDs and dates
+into phantom data. Replicate/fraction tails are capped at three digits and
+1–999 by value (a longer run is part of the sample name for DIA/TMT, a
+rejection for isoDTB). The six-digit `MMDDYY` date only matches when
+`2000+yy` is within `[today.year − 25, today.year + 1]`. Consequence: the
+same folder name can parse differently in a different decade. That's
+acceptable because the parse is recorded in `ionomos.json` at intake and
+never re-derived.
+
+### D31 — Agents open PRs; a person merges them
+**2026-09-27.** Several coding agents (Obvious autobuild) work on this repo.
+From 2026-09-24 an automerge workflow squash-merged any green PR and agents
+could merge their own. In three days about 30 PRs landed unreviewed, including
+a new deletion path in intake (the D29 addendum) and docs that fell out of
+sync. CI can't see that kind of problem. The workflow is removed and
+`.obvious/config.yml` sets `require_human_merge: true`. `master` requires one
+approving review on PRs; the owner can still push directly. Every PR also asks
+@nichfoster for review (`.github/CODEOWNERS`).

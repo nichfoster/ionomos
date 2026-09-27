@@ -75,6 +75,7 @@ to put it on the PC.
 | [DEV_LOOP.md](docs/DEV_LOOP.md) | **Start here for prototyping:** Mac ↔ GitHub ↔ PC loop, updates and diagnostics |
 | [DEPLOY_WINDOWS.md](docs/DEPLOY_WINDOWS.md) | Step-by-step install of the finished tool on the proteomics PC |
 | [TESTING.md](docs/TESTING.md) | Test suite + testbed on macOS and Windows |
+| [FIRST_REAL_RUN.md](docs/FIRST_REAL_RUN.md) | Runbook for the first real FragPipe run on the PC (isoDTB, then DIA) |
 
 ## Quick start (dev, on this Mac)
 
