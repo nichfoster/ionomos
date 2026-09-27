@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-27
+
+### Analysis robustness (from a 58-case edge-case sweep and a replay of a real 22Rv1 DIA run)
+
+- Inputs that used to finish as `state: ok` with nothing to show now say what's
+  wrong: no measured values at all (`NO_QUANTITIES`), a single sample
+  (`ONE_SAMPLE`), every sample left out or filtered away (`NOTHING_LEFT`), and
+  an isoDTB ratio test with one replicate (`SMALL_GROUP` now applies to every
+  method).
+- An isoDTB table without probe-labelled peptides or ratio columns is reported
+  as a data problem (`UNUSABLE_TABLE`, naming the probe mass) instead of "the
+  read step crashed".
+- A few non-numeric cells in a DIA-NN run column no longer drop the whole run
+  when there's no manifest; they count as missing, with a note.
+- One invalid analysis setting (e.g. `min_valid: 1`) no longer throws away
+  every other setting for the run; only that key falls back to its default, and
+  the note names it. `config.yaml` / `experiment.yaml` validation stays strict.
+
 ### Added
 
 - Added an `.obvious` onboarding contract — agent guidance (`.obvious/obvious.md`),
