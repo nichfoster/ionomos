@@ -25,6 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every other setting for the run; only that key falls back to its default, and
   the note names it. `config.yaml` / `experiment.yaml` validation stays strict.
 
+### Fixed
+
+- `.REJECTED.txt` notes are written whole (temp file + rename), so a person or
+  the app never opens one that exists but is still empty. Windows CI caught the
+  gap on Python 3.14.
+
 ### Added
 
 - Added an `.obvious` onboarding contract — agent guidance (`.obvious/obvious.md`),

@@ -491,8 +491,20 @@ def _reject(folder: Path, reason: str) -> None:
         f"ionomos will try again automatically. Deleting this note also triggers a retry.\n"
         f"Naming rules: {NAMING_DOC}\n"
     )
-    note_path(folder).write_text(body, encoding="utf-8")
+    _write_note(note_path(folder), body)
     log.warning("REJECTED %s: %s", folder.name, reason)
+
+
+def _write_note(note: Path, body: str) -> None:
+    """Whole or not at all: a note that exists is never seen empty by a person or the app.
+    The temp name starts with '.', which intake ignores."""
+    tmp = note.with_name(f".{note.name}.tmp")
+    tmp.write_text(body, encoding="utf-8")
+    try:
+        os.replace(tmp, note)
+    except OSError:  # Windows: the old note is open in an editor — overwrite it in place instead
+        tmp.unlink(missing_ok=True)
+        note.write_text(body, encoding="utf-8")
 
 
 def _clear_note(folder: Path) -> None:
