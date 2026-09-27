@@ -412,23 +412,25 @@ def _move_tree(src: Path, dst: Path) -> str:
     need = sum(p.stat().st_size for p in src.rglob("*") if p.is_file())
     if free < need * 1.1:
         raise IntakeError(f"not enough space on {dst.parent}: need {need / 1e9:.1f} GB, have {free / 1e9:.1f} GB")
-    shutil.copytree(src, dst)
+    # Never dirs_exist_ok: copytree refusing an existing dst is what makes every
+    # cleanup of dst below safe — all of it was written by this call (D29).
+    try:
+        shutil.copytree(src, dst)
+    except FileExistsError:
+        raise  # dst is not ours; leave it alone
+    except OSError as exc:
+        # Disk full, a locked file mid-copy, ... The source is untouched; discard the
+        # half-copy so a retry isn't wedged by "destination already exists".
+        leftover = _discard_partial_copy(dst)
+        if leftover:
+            raise IntakeError(f"copy to {dst} failed ({exc}); source left in place.{leftover}") from exc
+        raise
     # Content hashes, not sizes — a same-size corrupt copy must never delete the source.
     for a in src.rglob("*"):
         if a.is_file():
             b = dst / a.relative_to(src)
             if not b.is_file() or _sha256(a) != _sha256(b):
-                # The half-copy is ours, not user data — remove it so re-filing is
-                # not wedged by "destination already exists". If cleanup fails
-                # (Windows handle), the error names the leftover.
-                try:
-                    _rmtree_retry(dst)
-                    leftover = ""
-                except OSError:
-                    leftover = (
-                        f" A partial copy remains at {dst} — "
-                        "delete it before retrying."
-                    )
+                leftover = _discard_partial_copy(dst)
                 raise IntakeError(
                     f"copy verification failed for {a.relative_to(src)}; "
                     f"source left in place.{leftover}"
@@ -442,6 +444,17 @@ def _move_tree(src: Path, dst: Path) -> str:
             "one (if you already renamed it, merge its contents into the filed copy)."
         ) from exc
     return "copy"
+
+
+def _discard_partial_copy(dst: Path) -> str:
+    """Remove a half-made copy at dst (ours, not user data). Returns "" or a note naming the leftover."""
+    if not dst.exists():
+        return ""
+    try:
+        _rmtree_retry(dst)
+        return ""
+    except OSError:  # a Windows handle outlived the retries
+        return f" A partial copy remains at {dst} — delete it before retrying."
 
 
 def _rmtree_retry(src: Path, attempts: int = 5) -> None:

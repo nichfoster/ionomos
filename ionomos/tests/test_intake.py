@@ -383,6 +383,67 @@ def test_move_tree_names_leftover_destination_when_cleanup_fails(lab, monkeypatc
     assert dst.exists()  # cleanup failed — the leftover is named, not silently dropped
 
 
+def _copytree_dying_midway(monkeypatch, exc):
+    """Top-level copytree writes one file into dst, then fails like a full disk or a locked file."""
+    real_copytree = shutil.copytree
+
+    def dying(s, d, *args, **kw):
+        if args or kw:
+            return real_copytree(s, d, *args, **kw)
+        Path(d).mkdir()
+        (Path(d) / "big.raw").write_bytes(b"partial")
+        raise exc
+
+    monkeypatch.setattr(shutil, "copytree", dying)
+
+
+def test_move_tree_discards_half_copy_when_copytree_fails(lab, monkeypatch):
+    big = b"A" * 64
+    src = _crossvol_drop(lab["inbox"], "diskfull", big)
+    dst = lab["general"] / "_unsorted" / "diskfull"
+    monkeypatch.setattr("os.rename", _exdev)
+    _copytree_dying_midway(monkeypatch, shutil.Error([(str(src / "small.raw"), str(dst / "small.raw"),
+                                                      "[Errno 28] No space left on device")]))
+
+    with pytest.raises(shutil.Error):  # original error kept, so the watcher's retry logic still applies
+        _move_tree(src, dst)
+    assert (src / "big.raw").read_bytes() == big  # source left in place, intact
+    assert (src / "small.raw").is_file()
+    assert not dst.exists()  # the half-copy is gone — a retry is not wedged by "destination exists"
+
+
+def test_move_tree_names_leftover_when_copytree_fails_and_cleanup_fails(lab, monkeypatch):
+    src = _crossvol_drop(lab["inbox"], "diskfull2", b"A" * 64)
+    dst = lab["general"] / "_unsorted" / "diskfull2"
+    monkeypatch.setattr("os.rename", _exdev)
+    _copytree_dying_midway(monkeypatch, OSError(errno.ENOSPC, "No space left on device"))
+
+    def locked_rmtree(path, *args, **kw):
+        raise PermissionError(errno.EACCES, "being used by another process", str(path))
+
+    monkeypatch.setattr(shutil, "rmtree", locked_rmtree)
+    monkeypatch.setattr("ionomos.intake.time.sleep", lambda _s: None)
+
+    with pytest.raises(IntakeError, match=r"copy to .* failed") as excinfo:
+        _move_tree(src, dst)
+    assert str(dst) in str(excinfo.value)
+    assert (src / "big.raw").is_file()
+    assert dst.exists()
+
+
+def test_move_tree_never_touches_a_preexisting_destination(lab, monkeypatch):
+    src = _crossvol_drop(lab["inbox"], "clash", b"A" * 64)
+    dst = lab["general"] / "_unsorted" / "clash"
+    dst.mkdir(parents=True)
+    (dst / "someone_elses.raw").write_bytes(b"real data")
+    monkeypatch.setattr("os.rename", _exdev)
+
+    with pytest.raises(FileExistsError):
+        _move_tree(src, dst)
+    assert (dst / "someone_elses.raw").read_bytes() == b"real data"
+    assert (src / "big.raw").is_file()
+
+
 # ---------------------------------------------------------------------------
 # Regression tests: a failure AFTER the folder moved must file it, not lose it (F1).
 # ---------------------------------------------------------------------------
