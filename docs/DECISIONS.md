@@ -349,6 +349,8 @@ From 2026-09-24 an automerge workflow squash-merged any green PR and agents
 could merge their own. In three days about 30 PRs landed unreviewed, including
 a new deletion path in intake (the D29 addendum) and docs that fell out of
 sync. CI can't see that kind of problem. The workflow is removed and
-`.obvious/config.yml` sets `require_human_merge: true`. `master` requires one
-approving review on PRs; the owner can still push directly. Every PR also asks
-@nichfoster for review (`.github/CODEOWNERS`).
+`.obvious/config.yml` sets `require_human_merge: true`. Every PR also asks
+@nichfoster for review (`.github/CODEOWNERS`). Those are instructions, not
+enforcement: an app with write access can still merge. To enforce this, turn
+on branch protection for `master` requiring one approving code-owner review,
+with admins exempt so the owner can still push directly.
