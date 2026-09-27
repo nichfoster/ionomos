@@ -1,3 +1,5 @@
+import types
+
 import pytest
 import yaml
 
@@ -87,5 +89,7 @@ def test_testbed_config_is_utf8_readable(tmp_path):
 def test_testbed_default_root_has_no_spaces_on_windows(monkeypatch):
     from ionomos import testbed
 
-    monkeypatch.setattr(testbed.os, "name", "nt")
+    # stub testbed.os rather than patching os.name globally: on Python 3.11 that
+    # makes every Path() built meanwhile a WindowsPath, which POSIX refuses
+    monkeypatch.setattr(testbed, "os", types.SimpleNamespace(name="nt"))
     assert " " not in str(testbed.default_root())

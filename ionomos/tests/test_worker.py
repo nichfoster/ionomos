@@ -269,23 +269,31 @@ def test_raw_files_removed_after_queueing_fails_job(bed):
     job = bed["ledger"].get(1)
     assert job.status == "failed" and "missing" in job.reason
 
+
+def _raws_break_after_is_file(monkeypatch, exc):
+    # is_file() sees every raw; every later raw stat() raises `exc`. Patching
+    # both (rather than counting stat calls) matters: Python 3.14's is_file()
+    # no longer goes through Path.stat, so a call count means different things.
+    real_is_file, real_stat = Path.is_file, Path.stat
+
+    def is_file(self, *args, **kwargs):
+        return True if self.suffix.lower() == ".raw" else real_is_file(self, *args, **kwargs)
+
+    def stat(self, *args, **kwargs):
+        if self.suffix.lower() == ".raw":
+            raise exc
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "is_file", is_file)
+    monkeypatch.setattr(Path, "stat", stat)
+
+
 def test_raw_vanishing_during_prepare_fails_job(bed, monkeypatch):
     # Issue #18: a raw that vanishes between prepare's is_file() check and the
     # size stat used to raise an uncaught FileNotFoundError, leaving the job
-    # queued forever. Per raw: stat access 1 is is_file()'s internal stat,
-    # access 2 is the size check — the raw disappears in between.
+    # queued forever.
     dest = _queue(bed, "iso_good")
-    real_stat = Path.stat
-    accesses: dict[str, int] = {}
-
-    def vanishing(self, *args, **kwargs):
-        if self.suffix.lower() == ".raw":
-            accesses[str(self)] = accesses.get(str(self), 0) + 1
-            if accesses[str(self)] >= 2:
-                raise FileNotFoundError(2, "No such file or directory", str(self))
-        return real_stat(self, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "stat", vanishing)
+    _raws_break_after_is_file(monkeypatch, FileNotFoundError(2, "No such file or directory"))
     Worker(bed["cfg"], bed["ledger"]).run_once()  # must not raise
     job = bed["ledger"].get(1)
     assert job.status == "failed" and "missing" in job.reason
@@ -296,17 +304,7 @@ def test_raw_stat_permission_error_fails_job(bed, monkeypatch):
     # Sibling of #18: the size stat breaks with another OSError after is_file()
     # saw the file — still fails the job, honestly labeled instead of crashing.
     dest = _queue(bed, "iso_good")
-    real_stat = Path.stat
-    accesses: dict[str, int] = {}
-
-    def denied(self, *args, **kwargs):
-        if self.suffix.lower() == ".raw":
-            accesses[str(self)] = accesses.get(str(self), 0) + 1
-            if accesses[str(self)] >= 2:
-                raise PermissionError(13, "Permission denied", str(self))
-        return real_stat(self, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "stat", denied)
+    _raws_break_after_is_file(monkeypatch, PermissionError(13, "Permission denied"))
     Worker(bed["cfg"], bed["ledger"]).run_once()  # must not raise
     job = bed["ledger"].get(1)
     assert job.status == "failed" and "could not check raw file" in job.reason
