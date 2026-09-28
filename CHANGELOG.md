@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-27
+
+### Added
+
+- **Every comparison gets a plot.** A group with one sample is tested anyway
+  (limma borrows the variance from the replicated groups; Welch becomes a
+  pooled t-test) and labelled *low confidence*. With no replicates anywhere,
+  the plot is *fold change only* (log2FC against abundance, or rank for ratio
+  data), with no invented p-values. Both labels appear in the report, the SVG,
+  `analysis.json` and the CLI output. (D32)
+- **Any table → volcano plots**: `ionomos analyze <file>` and Analysis tab →
+  **Table…** read TSV / CSV / TXT / Excel `.xlsx`. Quantity tables (MaxQuant,
+  Spectronaut, Proteome Discoverer, hand-made sheets) go through the full
+  pipeline; results tables (limma, Perseus, DESeq2, FragPipe-Analyst exports)
+  are plotted as given. Output goes to `<table>_ionomos/`, never beside the
+  file. (D33)
+- `EACH_OWN_CONDITION`: when every sample is its own condition (e.g. replicates
+  named `_a`/`_b`), a grouping is suggested for you to confirm.
+
+### Changed
+
+- `SMALL_GROUP` no longer blocks a comparison; it remains only when not even a
+  fold change can be computed. `ONE_SAMPLE` applies to intensity data only (a
+  single isoDTB replicate still gets its fold-change plot).
+
 ## [0.8.0] - 2026-09-27
 
 ### Analysis robustness (from a 58-case edge-case sweep and a replay of a real 22Rv1 DIA run)
