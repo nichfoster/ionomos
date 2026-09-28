@@ -18,6 +18,8 @@ the method:
              <sample>.raw                         (single fraction)
              every TMT run holds all replicates in channels -> bioreplicate 1
     DIA      <condition>_<biorep>.raw             e.g. DMSO_1.raw, Drug_R3.raw
+             <prefix>_<code><biorep>.raw          e.g. X_D1.raw = DMSO rep 1, X_C2.raw = Compound rep 2
+             (a 1-2 letter condition code glued to the number; codes from naming.condition_codes)
   Separators before the numbers may be '_' or '-'. Optional R/F prefixes.
 """
 from __future__ import annotations
@@ -50,6 +52,19 @@ _TAIL = {
     # condition, biorep
     "DIA": re.compile(rf"^(?P<sample>.+?)(?:{_SEP}{_REP}(?P<rep>\d{{1,3}}))?$"),
 }
+
+# DIA short form: a condition code glued to the replicate number, X_D1 / X_C2 / D3. Only 1-2 letter codes
+# (or codes listed in naming.condition_codes) — "HCD33" is a collision energy, not condition HCD rep 33.
+DEFAULT_CONDITION_CODES = {"D": "DMSO", "C": "Compound"}
+_CODED = re.compile(r"^(?:(?P<prefix>.+?)(?P<sep>[_-]))?(?P<code>[A-Za-z]{1,8})(?P<rep>\d{1,3})$")
+
+
+def expand_code(code: str, codes: dict[str, str] | None = None) -> str | None:
+    """'D' -> 'DMSO' with the default codes; None if the code isn't a condition code."""
+    codes = DEFAULT_CONDITION_CODES if codes is None else codes
+    full = next((v for k, v in codes.items() if k.lower() == code.lower()), None)
+    return full if full else (code if len(code) <= 2 else None)
+
 
 # Xcalibur appends _YYYYMMDDhhmmss when a file of that name already exists
 # (e.g. X_DMSO_1_20260508180610.raw). Ignored when reading the tail; the file keeps its name.
@@ -290,7 +305,8 @@ def parse_folder_name(
 # --------------------------------------------------------------------- raws --
 
 
-def parse_raw_name(filename: str, method: str) -> RawName:
+def parse_raw_name(filename: str, method: str, codes: dict[str, str] | None = None) -> RawName:
+    """codes: DIA condition codes (X_D1 -> DMSO rep 1); None = DEFAULT_CONDITION_CODES."""
     if not filename.lower().endswith(RAW_SUFFIX):
         raise NamingError(f"{filename!r} is not a {RAW_SUFFIX} file")
     if method not in _TAIL:
@@ -304,6 +320,13 @@ def parse_raw_name(filename: str, method: str) -> RawName:
         )
     rep = m.groupdict().get("rep")
     frac = m.groupdict().get("frac")
+    sample = m["sample"]
+    if method == "DIA" and rep is None:
+        c = _CODED.match(strip_acq_stamp(safe_stem))
+        full = expand_code(c["code"], codes) if c else None
+        if full:
+            sample = f"{c['prefix']}{c['sep']}{full}" if c["prefix"] else full
+            rep = c["rep"]
     # Regex caps digits at three, so only 0 can slip past this — but check
     # anyway so the bound is enforced by value, not regex shape alone.
     if rep is not None and not 1 <= int(rep) <= 999:
@@ -313,13 +336,14 @@ def parse_raw_name(filename: str, method: str) -> RawName:
     return RawName(
         filename=filename,
         safe_filename=safe_stem + RAW_SUFFIX,
-        sample=m["sample"],
+        sample=sample,
         rep=int(rep) if rep is not None else 1,
         fraction=int(frac) if frac is not None else None,
     )
 
 
-def group_raws(filenames: list[str], method: str, allow_uneven: bool = False) -> RawSet:
+def group_raws(filenames: list[str], method: str, allow_uneven: bool = False,
+               codes: dict[str, str] | None = None) -> RawSet:
     """Parse and validate all raws of one folder.
 
     * at least one file; every file parses
@@ -329,7 +353,7 @@ def group_raws(filenames: list[str], method: str, allow_uneven: bool = False) ->
     """
     if not filenames:
         raise NamingError("no .raw files found")
-    parsed = [parse_raw_name(f, method) for f in sorted(filenames)]
+    parsed = [parse_raw_name(f, method, codes) for f in sorted(filenames)]
     return group_from_parsed(parsed, method, allow_uneven)
 
 

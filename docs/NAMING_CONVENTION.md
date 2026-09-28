@@ -95,6 +95,22 @@ Drug_R3.raw                                 also fine
 `condition` → experiment; `biorep` → bioreplicate. A file with no trailing
 number is bioreplicate 1.
 
+**Short condition codes.** A 1–2 letter code glued to the replicate number is
+read as condition + replicate, with the lab's codes expanded:
+
+```
+KC_DIA_D1.raw  KC_DIA_D2.raw  KC_DIA_D3.raw  →  KC_DIA_DMSO, reps 1–3
+KC_DIA_C1.raw  KC_DIA_C2.raw  KC_DIA_C3.raw  →  KC_DIA_Compound, reps 1–3
+X_DM4.raw                                   →  X_DM, rep 4 (unknown code kept as it is)
+```
+
+The codes live in `config.yaml` → `naming.condition_codes` (default
+`D: DMSO`, `C: Compound`). Longer codes count only when they are listed there,
+so an instrument setting such as `…_DIA_HCD33.raw` is never read as
+"condition HCD, replicate 33". Because a short code can mean different things
+in different labs, every drop is shown in the review window (below) before it
+is filed.
+
 Raw files may sit at the top level or in a `raw\` subfolder. Anything else in
 the folder (`.xlsx`, notes, `.mzML`) is carried along untouched.
 
@@ -118,10 +134,38 @@ names (or the window asks). A folder is still the better habit — it keeps
 unrelated runs apart for sure. Non-raw loose files are left alone.
 `watcher.group_loose_files: false` turns this off (`ionomos/src/ionomos/loose.py`).
 
+## Before filing: the review window
+
+Every drop that parses is shown **before it is filed**, so a wrong reading is
+caught before FragPipe runs. This is on by default; turn it off with
+`gui.review_drops: false`. The window shows:
+
+- user, method and date;
+- each file's condition, replicate and fraction, all editable;
+- **What Ionomos will assume**: one line per condition with its role
+  (CONTROL / treated, or isoDTB's "ratio vs 0") and its replicates and
+  fractions, plus warnings for single replicates or a single condition;
+- a **Control** picker, which is the "vs" side of every volcano. It defaults
+  to the same guess the analysis would make: DMSO, vehicle, control and the
+  other control keywords, otherwise the alphabetically first condition. A
+  different choice is saved to `experiment.yaml` → `analysis.control`.
+
+**Accept & queue** files it. Your corrections are saved to `experiment.yaml`
+so they stick. **Not now** leaves it in the inbox with a note. If
+`gui.timeout_minutes` is set and nobody answers, a reviewed drop is filed as
+read. The window isn't shown again for a folder someone already answered for
+(`experiment.yaml` → `resolved_by: gui`). On a PC with no display, drops are
+filed as read.
+
+Users and aliases added in the app while the window is open appear in it
+within two seconds. A blank user is filled in as soon as an alias matches
+(e.g. `KC` → Kosuke). The running watcher re-reads `config.yaml` whenever it
+changes, so there's no need to restart it.
+
 ## When Ionomos can't tell: the resolver window
 
 If the user, method, a file's tail, or the fraction layout can't be worked
-out, a small window opens on the proteomics PC:
+out, the same window opens with the problem at the top:
 
 ```
  20260902-isoDTB_XYZ-2-027 (1uM 3h)
