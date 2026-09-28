@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-09-28
+
+Same features as 0.10.0, which was tagged but never released: its installer
+build stopped on a stress-test harness race.
+
+### Fixed
+
+- `ionomos testbed stress`: the "wait until settled" census no longer crashes
+  when intake moves a folder between listing a raw file and reading its size.
+  The final no-raw-lost check stays strict.
+
 ## [0.10.0] - 2026-09-28
 
 ### Added
