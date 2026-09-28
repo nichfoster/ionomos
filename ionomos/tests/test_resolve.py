@@ -360,14 +360,10 @@ def test_dialog_closes_when_folder_removed(lab):
 
 
 def _err_text(win) -> str:
-    """Text of the naming dialog's error line (the only Label bound to a StringVar)."""
-    import tkinter.ttk as ttk
-
+    """Text of the naming dialog's error line (the Label named "error")."""
     for w in _all(win):
-        if isinstance(w, ttk.Label):
-            name = str(w.cget("textvariable"))
-            if name:
-                return str(win.getvar(name))
+        if w.winfo_name() == "error":
+            return str(win.getvar(str(w.cget("textvariable"))))
     return ""
 
 

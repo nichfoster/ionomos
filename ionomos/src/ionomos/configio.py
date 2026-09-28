@@ -42,7 +42,8 @@ def defaults(root: str | None = None, users_root: str | None = None) -> dict:
         "watcher": {"poll_seconds": 10, "stable_seconds": 60, "min_raw_files": 1, "group_loose_files": True},
         "fragpipe": {"auto_run": True, "threads": 28, "ram_gb": 48, "timeout_minutes": 240, "min_free_gb": 20, "config_tools_folder": "",
                      "config_diann": ""},
-        "gui": {"enabled": True, "timeout_minutes": 0, "popups": True},
+        "gui": {"enabled": True, "review_drops": True, "timeout_minutes": 0, "popups": True},
+        "naming": {"condition_codes": {"D": "DMSO", "C": "Compound"}},
         "analysis": {"enabled": True, "test": "limma", "de_type": "control", "log2fc": 1.0, "alpha": 0.05,
                      "use_adjusted": True, "remove_contaminants": True, "filter_global_pct": 0,
                      "filter_condition_pct": 50, "normalize": "median", "imputation": "auto", "min_valid": 2,
@@ -67,7 +68,7 @@ def defaults(root: str | None = None, users_root: str | None = None) -> dict:
 def _merge(base: dict, over: dict) -> dict:
     out = copy.deepcopy(base)
     for k, v in (over or {}).items():
-        if isinstance(v, dict) and isinstance(out.get(k), dict) and k != "methods" and k != "aliases":
+        if isinstance(v, dict) and isinstance(out.get(k), dict) and k not in ("methods", "aliases", "condition_codes"):
             out[k] = _merge(out[k], v)
         else:
             out[k] = copy.deepcopy(v)
@@ -152,9 +153,18 @@ def dump_config(d: dict) -> str:
     a(f"  config_diann: {_y(f.get('config_diann', '') or '')}   # DIA only, path to DiaNN.exe if needed")
     a("")
     a("gui:")
-    a(f"  enabled: {_y(bool(g.get('enabled', True)))}   # resolver window on naming problems")
-    a(f"  timeout_minutes: {_y(g.get('timeout_minutes', 0))}   # 0 = wait for a person")
+    a(f"  enabled: {_y(bool(g.get('enabled', True)))}   # the naming window (problems, and reviews below)")
+    a(f"  review_drops: {_y(bool(g.get('review_drops', True)))}   # show every drop's reading (conditions, replicates, "
+      "control) before filing")
+    a(f"  timeout_minutes: {_y(g.get('timeout_minutes', 0))}   # 0 = wait for a person; N = a review files as read")
     a(f"  popups: {_y(bool(g.get('popups', True)))}   # windows when an analysis needs a decision or a search fails")
+    a("")
+    codes = (d.get("naming") or {}).get("condition_codes")
+    codes = codes if isinstance(codes, dict) else {"D": "DMSO", "C": "Compound"}
+    a("naming:")
+    a("  condition_codes:   # DIA short forms: X_D1 = DMSO rep 1; 1-2 letter codes, longer ones only if listed")
+    for k, v in codes.items():
+        a(f"    {_y(str(k))}: {_y(str(v))}")
     a("")
     an = d.get("analysis") or {}
     a("analysis:   # statistics + volcano plots + report after each search (per experiment: experiment.yaml analysis:)")

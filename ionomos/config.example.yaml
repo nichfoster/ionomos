@@ -47,12 +47,20 @@ users:
   default: ""                 # e.g. "_unsorted" — file unrecognised users there instead of rejecting
   # learned_aliases_file: C:/Fragpipe_Auto/learned_aliases.yaml   # written by the resolver window
 
-# The resolver window: opens when a folder can't be interpreted (unknown user,
-# no method, odd file names, uneven fractions). Needs the watcher to run in an
-# interactive session (Task Scheduler "run only when user is logged on").
+# The naming window: shows every drop for review before it is filed (review_drops), and asks when a
+# folder can't be interpreted (unknown user, no method, odd file names, uneven fractions). Needs the
+# watcher to run in an interactive session (Task Scheduler "run only when user is logged on").
 gui:
   enabled: true
-  timeout_minutes: 0          # 0 = wait for a person; N = auto-skip after N minutes
+  review_drops: true          # show how each drop was read (conditions, replicates, control) before filing
+  timeout_minutes: 0          # 0 = wait for a person; N = after N minutes a review files as read, a problem is skipped
+
+# DIA short forms: a 1-2 letter code glued to the replicate, X_D1 = DMSO rep 1, X_C2 = Compound rep 2.
+# Longer codes count only when listed here.
+naming:
+  condition_codes:
+    D: DMSO
+    C: Compound
 
 # One entry per method. The key is canonical; `aliases` are the keywords
 # searched for (case-insensitive) in folder names.

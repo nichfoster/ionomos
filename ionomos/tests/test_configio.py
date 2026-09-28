@@ -47,3 +47,18 @@ def test_empty_yaml_entries_come_back_typed(tmp_path):
     p.write_text("paths:\nwatcher:\nusers:\nmethods:\n", encoding="utf-8")
     back = configio.read_config(p)
     assert back["paths"]["inbox"] and back["methods"]["isoDTB"]
+
+
+def test_app_save_keeps_review_and_condition_codes(tmp_path):
+    # the app rewrites config.yaml from a template: new keys must survive a Save, and a lab's own code list
+    # must replace the defaults (not be merged with them, which would bring D / C back)
+    from ionomos.configio import dump_config, read_config
+
+    p = tmp_path / "config.yaml"
+    d = read_config(p)
+    assert d["gui"]["review_drops"] is True and d["naming"]["condition_codes"] == {"D": "DMSO", "C": "Compound"}
+    d["gui"]["review_drops"] = False
+    d["naming"]["condition_codes"] = {"V": "Vehicle"}
+    p.write_text(dump_config(d), encoding="utf-8")
+    back = read_config(p)
+    assert back["gui"]["review_drops"] is False and back["naming"]["condition_codes"] == {"V": "Vehicle"}

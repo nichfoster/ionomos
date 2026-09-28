@@ -380,3 +380,32 @@ D17 rule). The generic loader only runs when the method is unknown. A
 pipeline job that knows it's DIA still reports "no pg_matrix" instead of
 analysing a stray `psm.tsv`.
 
+### D34 — Every drop is shown before it is filed; config changes apply without a restart
+**2026-09-28.** D13 opened the window only when a name couldn't be parsed. A
+real drop (Kosuke, `KC_DIA_D1..C3`) showed that a clean parse can still be
+wrong: each file became its own condition, and nobody saw it before the
+search. So every parsed drop now opens the same window in review mode
+(`gui.review_drops`, on by default). It shows user, method, date, each file's
+condition / replicate / fraction, and one line per condition with its role
+and replicates. The Control picker uses the analysis's own rule; a different
+choice is pinned in `experiment.yaml` `analysis.control`. The answer is saved
+with `resolved_by: gui`, so a folder is never asked about twice. With no
+display, drops are filed as read (the headless watcher can't block). On a
+timeout, a review files as read while a problem is skipped; a clean reading
+is a better default than a stuck inbox.
+
+DIA names may glue a 1–2 letter condition code to the replicate (`_D1` =
+DMSO rep 1, `_C1` = Compound rep 1, from `naming.condition_codes`). Longer
+codes count only when listed, because the PC inventory has
+`…_DIA_HCD33.raw`, where HCD33 is a collision energy. Short codes differ
+between labs, which is one more reason for the review.
+
+The watcher now reads config through `config.LiveConfig`, which re-loads
+`config.yaml` and the learned aliases whenever either file changes. It keeps
+the last good copy if a file is caught mid-save, and keeps the folders it
+already has open. The window's user list refreshes every 2 s from the same
+source. A user or alias added in the app therefore counts for the open window
+and the next drop without restarting the watcher. The app's config writer
+keeps the new keys, and a lab's code list replaces the defaults instead of
+being merged with them.
+

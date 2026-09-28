@@ -9,13 +9,17 @@ warning elsewhere (so a testbed can live under "~/Code Projects/").
 """
 from __future__ import annotations
 
+import logging
 import os
+import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import yaml
 
-from ionomos.naming import DEFAULT_METHOD_ALIASES
+from ionomos.naming import DEFAULT_CONDITION_CODES, DEFAULT_METHOD_ALIASES
+
+log = logging.getLogger("ionomos.config")
 
 # users_root subfolders that are never people: FragPipe copies, FASTA stores, Explorer's "New folder"
 DEFAULT_USER_IGNORE = ("FragPipe*", "Fasta*", "New folder*", "~*")
@@ -70,6 +74,8 @@ class Config:
     user_ignore: tuple[str, ...] = DEFAULT_USER_IGNORE  # users_root subfolders that aren't people (glob patterns)
     warnings: tuple[str, ...] = ()  # non-fatal path problems (FragPipe bits missing, etc.)
     gui_popups: bool = True  # pop-up windows for analysis decisions / failed searches (attention.py)
+    review_drops: bool = True  # show every drop in the review window before it is filed (when a display exists)
+    condition_codes: dict = field(default_factory=lambda: dict(DEFAULT_CONDITION_CODES))  # DIA X_D1 -> DMSO rep 1
 
     @property
     def method_aliases(self) -> dict[str, list[str]]:
@@ -184,6 +190,15 @@ def load(path: str | Path, check_paths: bool = True) -> Config:
         user_aliases.setdefault(k, [])
         user_aliases[k] += [a for a in v if a not in user_aliases[k]]
     gui = raw.get("gui") or {}
+    naming = raw.get("naming") or {}
+    codes = naming.get("condition_codes") if isinstance(naming, dict) else None
+    if codes is None:
+        codes = dict(DEFAULT_CONDITION_CODES)
+    elif not isinstance(codes, dict) or not all(
+            re.fullmatch(r"[A-Za-z]{1,8}", str(k)) and str(v).strip() for k, v in codes.items()):
+        raise ConfigError("naming.condition_codes must map letter codes to condition names, e.g. {D: DMSO, C: Compound}")
+    else:
+        codes = {str(k): str(v).strip() for k, v in codes.items()}
 
     cfg = Config(
         **paths,
@@ -205,6 +220,8 @@ def load(path: str | Path, check_paths: bool = True) -> Config:
         gui_enabled=bool(gui.get("enabled", True)),
         gui_timeout_seconds=float(gui.get("timeout_minutes", 0) or 0) * 60,
         gui_popups=bool(gui.get("popups", True)),
+        review_drops=bool(gui.get("review_drops", True)),
+        condition_codes=codes,
         config_path=p,
         analysis=_analysis(raw.get("analysis")),
         user_ignore=tuple(str(x) for x in (users.get("ignore") if users.get("ignore") is not None else DEFAULT_USER_IGNORE)),
@@ -242,6 +259,46 @@ def _read_learned(path: Path) -> dict[str, list[str]]:
     except yaml.YAMLError:
         return {}
     return {str(k): [str(a) for a in (v or [])] for k, v in data.items()} if isinstance(data, dict) else {}
+
+
+class LiveConfig:
+    """The running watcher's view of config.yaml: re-read whenever it (or the learned-aliases file) changes,
+    so a user or alias added in the app counts for the next drop without restarting. A broken file mid-save
+    keeps the last good config. Folder paths are read at start (the watcher and ledger are already open)."""
+
+    def __init__(self, cfg: Config, check_paths: bool = True):
+        self._cfg = cfg
+        self._check = check_paths
+        self._stamp = self._mtimes(cfg)
+        self._bad: tuple | None = None
+
+    @staticmethod
+    def _mtimes(cfg: Config) -> tuple:
+        out = []
+        for p in (cfg.config_path, cfg.learned_aliases_file):
+            try:
+                out.append(p.stat().st_mtime_ns)
+            except OSError:
+                out.append(None)
+        return tuple(out)
+
+    def get(self) -> Config:
+        stamp = self._mtimes(self._cfg)
+        if stamp == self._stamp or stamp == self._bad:
+            return self._cfg
+        try:
+            new = load(self._cfg.config_path, check_paths=self._check)
+        except (ConfigError, OSError) as exc:
+            if stamp != self._bad:
+                log.warning("config changed but can't be read (%s); keeping the previous settings", exc)
+            self._bad = stamp
+            return self._cfg
+        if (new.inbox, new.database, new.log_dir) != (self._cfg.inbox, self._cfg.database, self._cfg.log_dir):
+            log.warning("inbox / database / log folder changed in config.yaml: restart the watcher to use them")
+            new = replace(new, inbox=self._cfg.inbox, database=self._cfg.database, log_dir=self._cfg.log_dir)
+        log.info("config.yaml changed: reloaded (users, aliases, methods, naming, analysis)")
+        self._cfg, self._stamp, self._bad = new, stamp, None
+        return new
 
 
 def remember_alias(cfg: Config, user: str, alias: str) -> None:

@@ -206,6 +206,8 @@ def save_overrides(folder: Path, ov: Overrides) -> Path:
     merged = {**existing, **ov.to_dict()}
     if "files" in existing and ov.files:
         merged["files"] = {**existing.get("files", {}), **ov.to_dict()["files"]}
+    if isinstance(existing.get("analysis"), dict) and ov.analysis:  # a new control keeps saved comparisons
+        merged["analysis"] = {**existing["analysis"], **ov.analysis}
     header = "# Written by ionomos. Edit freely; keys are documented in docs/NAMING_CONVENTION.md\n"
     p.write_text(header + yaml.safe_dump(merged, sort_keys=False, allow_unicode=True), encoding="utf-8")
     return p

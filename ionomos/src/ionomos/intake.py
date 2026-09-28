@@ -147,10 +147,16 @@ class Draft:
     layout_error: str = ""
     allow_uneven: bool = False
     source: str = ""
+    review: bool = False  # nothing is wrong: the person checks how the drop was read before it is filed
+    control: str = ""  # experiment.yaml analysis.control, if set
+    control_keywords: list[str] = field(default_factory=list)  # how the analysis recognises a control
+    condition_codes: dict[str, str] = field(default_factory=dict)  # DIA X_D1 -> DMSO rep 1
 
 
 class Resolver(Protocol):
     def resolve(self, d: Draft) -> Overrides | None: ...
+
+    # optional: review(d) -> Overrides | None, the "check before filing" window for drops that parsed cleanly
 
 
 # ------------------------------------------------------------------- plan --
@@ -222,10 +228,10 @@ def _resolve_user(name: str, cfg: Config, ov: Overrides) -> str:
         raise IntakeError(str(exc), Kind.USER) from exc
 
 
-def _lenient(filename: str, method: str) -> RawName:
+def _lenient(filename: str, method: str, codes: dict[str, str] | None = None) -> RawName:
     """Parse a raw name, falling back to (stem, rep 1, no fraction) so overrides can fill it in."""
     try:
-        return parse_raw_name(filename, method)
+        return parse_raw_name(filename, method, codes)
     except NamingError:
         stem = sanitize(filename[: -len(RAW_SUFFIX)])
         return RawName(filename=filename, safe_filename=stem + RAW_SUFFIX, sample=stem, rep=1, fraction=None)
@@ -281,14 +287,15 @@ def _plan(folder: Path, cfg: Config, ledger: Ledger | None = None) -> Plan:
     ov.files = {**learned, **ov.files}  # explicit experiment.yaml always wins
 
     try:
-        raws: RawSet = group_raws(raw_names, method, allow_uneven=ov.allow_uneven_fractions)
+        raws: RawSet = group_raws(raw_names, method, allow_uneven=ov.allow_uneven_fractions,
+                                  codes=cfg.condition_codes)
     except NamingError as exc:
         msg = str(exc)
         if not ov.files:
             kind = Kind.RAWS if ("must end" in msg or "not a .raw" in msg) else Kind.LAYOUT
             raise IntakeError(msg, kind) from exc
         # per-file overrides may fix a bad tail: parse leniently, then apply them
-        raws = RawSet(method=method, files=[_lenient(f, method) for f in raw_names])
+        raws = RawSet(method=method, files=[_lenient(f, method, cfg.condition_codes) for f in raw_names])
     try:
         raws = apply_file_overrides(raws, ov)
     except OverridesError as exc:
@@ -321,8 +328,9 @@ def _plan(folder: Path, cfg: Config, ledger: Ledger | None = None) -> Plan:
 # ------------------------------------------------------------------ draft --
 
 
-def draft(folder: Path, cfg: Config, error: IntakeError | None = None) -> Draft:
-    """What we *think* the folder means, with blanks where we failed. For the GUI."""
+def draft(folder: Path, cfg: Config, error: IntakeError | None = None, review: bool = False) -> Draft:
+    """What we *think* the folder means, with blanks where we failed. For the GUI.
+    review: nothing failed; the window shows the reading so a person can confirm or correct it."""
     folder = Path(folder)
     try:
         ov = load_overrides(folder)
@@ -355,7 +363,7 @@ def draft(folder: Path, cfg: Config, error: IntakeError | None = None) -> Draft:
         df = DraftFile(filename=f, experiment=_safe(f[: -len(RAW_SUFFIX)]), bioreplicate="1")
         if method:
             try:
-                r = parse_raw_name(f, method)
+                r = parse_raw_name(f, method, cfg.condition_codes)
                 df.experiment, df.bioreplicate = r.sample, str(r.rep)
                 df.fraction = "" if r.fraction is None else str(r.fraction)
             except NamingError as exc:
@@ -372,9 +380,12 @@ def draft(folder: Path, cfg: Config, error: IntakeError | None = None) -> Draft:
     layout_error = ""
     if method and all(not f.error for f in files):
         try:
-            group_raws(raw_names, method, allow_uneven=ov.allow_uneven_fractions)
+            group_raws(raw_names, method, allow_uneven=ov.allow_uneven_fractions, codes=cfg.condition_codes)
         except NamingError as exc:
             layout_error = str(exc)
+    from ionomos.downstream.analysis import DEFAULT_CONTROL_KEYWORDS
+
+    keywords = [str(k) for k in ((cfg.analysis or {}).get("control_keywords") or DEFAULT_CONTROL_KEYWORDS)]
 
     return Draft(
         folder=folder.name,
@@ -383,6 +394,8 @@ def draft(folder: Path, cfg: Config, error: IntakeError | None = None) -> Draft:
         user=user, method=method, date=d.isoformat() if d else "",
         known_users=cfg.known_users(), known_methods=list(cfg.methods),
         files=files, layout_error=layout_error, allow_uneven=ov.allow_uneven_fractions, source=str(folder),
+        review=review and error is None, control=str((ov.analysis or {}).get("control") or ""),
+        control_keywords=keywords, condition_codes=dict(cfg.condition_codes),
     )
 
 
@@ -585,40 +598,66 @@ def _tell_a_person(folder: Path, cfg: Config, res: IntakeResult) -> None:
         log.exception("could not record the rejection of %s for the app", folder.name)
 
 
+def _ask(folder: Path, cfg: Config, ledger: Ledger, resolver: Resolver, exc: IntakeError | None
+         ) -> Plan | IntakeResult:
+    """Show the folder to a person: exc = what went wrong, or None to review a clean reading before filing.
+    Returns the plan after their answer (saved to experiment.yaml, so it sticks), or what to tell the watcher."""
+    from ionomos.watcher import fingerprint
+
+    if exc is not None:
+        log.info("asking for help with %s (%s): %s", folder.name, exc.kind.value, exc)
+        ask = resolver.resolve
+    else:
+        log.info("showing %s in the review window before filing", folder.name)
+        ask = resolver.review
+    before = fingerprint(folder)
+    ov = ask(draft(folder, cfg, exc, review=exc is None))
+    if not folder.is_dir() or fingerprint(folder) != before:
+        _clear_note(folder)
+        return IntakeResult.RETRY
+    if ov is None:
+        _reject(folder, f"{exc} (skipped in the resolver window)" if exc is not None
+                else "skipped in the review window — fix anything that was read wrong, or delete this note to "
+                     "see the window again")
+        return IntakeResult.REJECTED
+    ov.resolved_by = ov.resolved_by or "gui"
+    save_overrides(folder, ov)
+    try:
+        p = plan(folder, cfg, ledger)
+    except IntakeError as exc2:
+        _reject(folder, f"after manual fix: {exc2}")
+        return IntakeResult.REJECTED
+    try:
+        from ionomos.naming_history import remember
+
+        confirmed = draft(folder, cfg)
+        remember(cfg, folder.name, p.folder.user, p.folder.method, confirmed.files)
+    except OSError:
+        log.exception("Could not save naming history")
+    return p
+
+
 def _intake(folder: Path, cfg: Config, ledger: Ledger, resolver: Resolver | None = None) -> IntakeResult:
     try:
         p = plan(folder, cfg, ledger)
     except IntakeError as exc:
         if exc.kind in RESOLVABLE and resolver is not None:
-            log.info("asking for help with %s (%s): %s", folder.name, exc.kind.value, exc)
-            from ionomos.watcher import fingerprint
-
-            before = fingerprint(folder)
-            ov = resolver.resolve(draft(folder, cfg, exc))
-            if not folder.is_dir() or fingerprint(folder) != before:
-                _clear_note(folder)
-                return IntakeResult.RETRY
-
-            if ov is None:
-                _reject(folder, f"{exc} (skipped in the resolver window)")
-                return IntakeResult.REJECTED
-            ov.resolved_by = ov.resolved_by or "gui"
-            save_overrides(folder, ov)
-            try:
-                p = plan(folder, cfg, ledger)
-            except IntakeError as exc2:
-                _reject(folder, f"after manual fix: {exc2}")
-                return IntakeResult.REJECTED
-            try:
-                from ionomos.naming_history import remember
-
-                confirmed = draft(folder, cfg)
-                remember(cfg, folder.name, p.folder.user, p.folder.method, confirmed.files)
-            except OSError:
-                log.exception("Could not save naming history")
+            got = _ask(folder, cfg, ledger, resolver, exc)
+            if isinstance(got, IntakeResult):
+                return got
+            p = got
         else:
             _reject(folder, str(exc))
             return IntakeResult.REJECTED
+    else:
+        # A clean reading can still be the wrong one (X_D1 read as its own condition, KC not known yet):
+        # a person sees it first, unless one already answered for this folder (experiment.yaml resolved_by gui).
+        if (resolver is not None and getattr(resolver, "review", None) is not None and cfg.review_drops
+                and (p.overrides or {}).get("resolved_by") != "gui"):
+            got = _ask(folder, cfg, ledger, resolver, None)
+            if isinstance(got, IntakeResult):
+                return got
+            p = got
 
     dest = Path(p.dest)
     try:

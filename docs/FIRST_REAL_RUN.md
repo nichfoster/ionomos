@@ -48,11 +48,14 @@ ionomos-cli.exe dry-run "C:\path\to\folder"
 
 Set *Run FragPipe automatically* **off** (tab 4 → **Save**). Over the next
 week, drop real folders into `C:\Fragpipe_Auto\inbox\` as the lab works. Each
-correctly named folder — ≥1 `.raw`, unchanged for 60 s — should land in
-`C:\Fragpipe_General\<user>\<experiment>\` within ~70 s, with `ionomos.json`
-saying `queued` and nothing else happening. A bad name gets a
-`.REJECTED.txt` next to the folder (and the resolver window asks when the
-app is open).
+correctly named folder — ≥1 `.raw`, unchanged for 60 s — opens the **review
+window** (user, conditions, replicates, which condition is the control). Check
+it, fix anything read wrong, **Accept & queue**; it should then land in
+`C:\Fragpipe_General\<user>\<experiment>\` with `ionomos.json` saying
+`queued` and nothing else happening. A bad name opens the same window with the
+problem at the top (or gets a `.REJECTED.txt` next to the folder when no one
+is logged on). Users or aliases added in the app show up in an open window
+within seconds — no watcher restart.
 
 > **Exit:** on the PC, dropping a correctly named folder of raws lands it in the
 > right user directory with `ionomos.json` saying `queued` and nothing else

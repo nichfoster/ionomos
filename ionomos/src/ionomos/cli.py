@@ -31,13 +31,12 @@ import signal
 import sys
 import threading
 import time
-from functools import partial
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from ionomos import __version__
-from ionomos.config import Config, ConfigError, load, remember_alias
-from ionomos.intake import IntakeError, intake, plan
+from ionomos.config import Config, ConfigError, LiveConfig, load, remember_alias
+from ionomos.intake import IntakeError, draft, intake, plan
 from ionomos.ledger import Ledger
 from ionomos.service import clear_pid, default_config_path, write_pid
 from ionomos.watcher import Watcher
@@ -187,6 +186,7 @@ def cmd_run(args) -> int:
                 _maintenance(cfg)
 
 
+    live = LiveConfig(cfg)  # users / aliases / naming added in the app count for the next drop, no restart
     resolver = None
     root = None
     if cfg.gui_enabled and not args.no_gui:
@@ -198,15 +198,18 @@ def cmd_run(args) -> int:
 
             root = tk.Tk()
             root.withdraw()
-            resolver = TkResolver(root, cfg.gui_timeout_seconds, remember=partial(remember_alias, cfg))
-            log.info("resolver window enabled (opens only when a folder can't be interpreted)")
+            resolver = TkResolver(root, cfg.gui_timeout_seconds,
+                                  remember=lambda user, alias: remember_alias(live.get(), user, alias),
+                                  refresh=lambda d: draft(Path(d.source), live.get(), review=d.review))
+            log.info("resolver window enabled (%s)", "every drop is shown for review before filing"
+                     if cfg.review_drops else "opens only when a folder can't be interpreted")
         else:
             log.warning("resolver window disabled: %s — problems will be rejected with a note", why)
 
     intake_ledger = ledger
 
     def on_stable(folder: Path):
-        return intake(folder, cfg, intake_ledger, resolver)
+        return intake(folder, live.get(), intake_ledger, resolver)
 
     w = Watcher(cfg.inbox, on_stable, cfg.poll_seconds, cfg.stable_seconds, cfg.min_raw_files, heartbeat=hb,
                 group_loose=cfg.group_loose_files)

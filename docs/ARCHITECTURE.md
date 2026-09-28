@@ -22,7 +22,7 @@
 | `watcher.py` | Poll the inbox; detect new **folders**; wait for copy to finish | `prior-work/watcher.py` (size-stability idea, generalised to a tree) |
 | `naming.py` | Pure functions: folder name → fields; raw filename → (sample, rep, fraction) | — |
 | `manifest.py` | Read/validate `experiment.yaml`; build `.fp-manifest` + TMT `annotation.txt` | `prior-work/fragpipe_runner.build_manifest` |
-| `intake.py` | Validate a stable folder, move it to the user dir, write `ionomos.json`, insert ledger row; hand unresolvable names to the resolver | — |
+| `intake.py` | Validate a stable folder, show it for review (or hand unresolvable names to the resolver), move it to the user dir, write `ionomos.json`, insert ledger row. The watcher passes a `config.LiveConfig`, so edits to config.yaml apply to the next drop | — |
 | `resolve.py` | tkinter window for fixing user/method/file tails; writes `experiment.yaml` + learned aliases | — |
 | `testbed.py` | Fake lab + sample drops + fake FragPipe for testing on any OS | — |
 | `app.py` | tkinter setup wizard / control panel: folders, users, methods, every parameter, start/stop, startup task, testbed | — |
@@ -184,8 +184,12 @@ users:
   # learned_aliases_file: C:/Fragpipe_Auto/learned_aliases.yaml   (written by the resolver window)
 
 gui:
-  enabled: true             # open the resolver window on naming problems (needs an interactive session)
-  timeout_minutes: 0        # 0 = wait for a human; N = auto-skip (reject with note) after N minutes
+  enabled: true             # the naming window: problems, and a review of every drop (needs an interactive session)
+  review_drops: true        # show each drop's reading (conditions, replicates, control) before filing
+  timeout_minutes: 0        # 0 = wait for a human; N = a review files as read, a problem is skipped (note)
+
+naming:
+  condition_codes: {D: DMSO, C: Compound}   # DIA X_D1 = DMSO rep 1
 
 methods:                    # keyed by canonical METHOD keyword; aliases are matched in folder names
   isoDTB:

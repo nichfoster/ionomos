@@ -1,8 +1,10 @@
 """
-GUI resolver — a small tkinter window that appears only when intake can't
-interpret a folder (unknown user, no method, unparseable file tails, uneven
-fractions). The person picks/edits the values; the result is written to
-experiment.yaml in the folder so the decision sticks.
+GUI resolver — a small tkinter window that shows how a drop was read: when intake
+can't interpret a folder (unknown user, no method, unparseable file tails, uneven
+fractions), and — as a review before filing — for every drop that did parse
+(gui.review_drops). The person sees user, method, date, each file's condition /
+replicate / fraction, and which condition is the control, and edits anything
+wrong; the result is written to experiment.yaml in the folder so it sticks.
 
 Threading: tkinter must run on the main thread. `TkResolver.resolve()` may be
 called from the watcher thread; it posts the Draft to a queue and blocks on an
@@ -94,18 +96,87 @@ def guess_alias_token(d: Draft) -> str:
     return ""
 
 
-def reparse(files: list[DraftFile], method: str) -> list[DraftFile]:
+def reparse(files: list[DraftFile], method: str, codes: dict[str, str] | None = None) -> list[DraftFile]:
     out = []
     for f in files:
         df = DraftFile(filename=f.filename, experiment=f.experiment, bioreplicate=f.bioreplicate or "1")
         try:
-            r = parse_raw_name(f.filename, method)
+            r = parse_raw_name(f.filename, method, codes)
             df.experiment, df.bioreplicate = r.sample, str(r.rep)
             df.fraction = "" if r.fraction is None else str(r.fraction)
         except NamingError as exc:
             df.error = str(exc)
         out.append(df)
     return out
+
+
+def has_control(method: str) -> bool:
+    """isoDTB is a ratio vs 0 per sample; TMT conditions live in the channel annotation, not the file names."""
+    return method not in ("isoDTB", "TMT")
+
+
+def conditions_of(files: list[DraftFile]) -> list[str]:
+    out: list[str] = []
+    for f in files:
+        e = f.experiment.strip()
+        if e and e not in out:
+            out.append(e)
+    return out
+
+
+def guess_control(conditions: list[str], keywords: list[str]) -> str:
+    """The analysis's own rule (downstream.analysis.find_control): a condition with a control keyword as a
+    token, e.g. KC_DIA_DMSO; otherwise the alphabetically first, which the analysis also falls back to."""
+    for kw in keywords:
+        for c in conditions:
+            if kw.lower() in re.split(r"[_\-\s.]+", c.lower()) or c.lower() == kw.lower():
+                return c
+    return sorted(conditions)[0] if conditions else ""
+
+
+def _ranges(nums: list[int]) -> str:
+    nums = sorted(set(nums))
+    parts, i = [], 0
+    while i < len(nums):
+        j = i
+        while j + 1 < len(nums) and nums[j + 1] == nums[j] + 1:
+            j += 1
+        parts.append(str(nums[i]) if i == j else f"{nums[i]}–{nums[j]}")
+        i = j + 1
+    return ", ".join(parts)
+
+
+def summarize(files: list[DraftFile], method: str, control: str) -> list[str]:
+    """One line per condition: its role, replicates and fractions — what the search and analysis will assume."""
+    lines = []
+    for c in sorted(conditions_of(files), key=lambda x: x != control):  # the control first
+        reps: dict[int, list[int]] = {}
+        for f in files:
+            if f.experiment.strip() != c:
+                continue
+            r = int(f.bioreplicate) if f.bioreplicate.strip().isdigit() else 0
+            reps.setdefault(r, [])
+            if f.fraction.strip().isdigit():
+                reps[r].append(int(f.fraction))
+        if method == "isoDTB":
+            role = "sample (heavy/light ratio vs 0)"
+        elif method == "TMT":
+            role = "plex (conditions come from the TMT channel annotation)"
+        else:
+            role = "CONTROL" if c == control else ("treated" if control else "?")
+        n = len(reps)
+        text = f"{c} — {role} · {n} replicate{'s' if n != 1 else ''} ({_ranges(list(reps))})"
+        fr = {r: tuple(sorted(v)) for r, v in reps.items() if v}
+        if fr:
+            sets = set(fr.values())
+            text += (f" · fractions {_ranges(list(next(iter(sets))))}" if len(sets) == 1
+                     else " · ⚠ replicates have different fractions")
+        if n == 1 and has_control(method):
+            text += " · ⚠ one replicate: statistics will be low confidence"
+        lines.append(text)
+    if has_control(method) and len(lines) == 1:
+        lines.append("⚠ only one condition: nothing to compare — check the condition names above")
+    return lines
 
 
 @dataclass
@@ -116,6 +187,7 @@ class Answer:
     allow_uneven: bool
     files: list[DraftFile]
     remember_alias: str = ""
+    control: str = ""
 
 
 def validate(a: Answer, known_methods: list[str]) -> str:
@@ -133,6 +205,8 @@ def validate(a: Answer, known_methods: list[str]) -> str:
             return "Date must be YYYY-MM-DD (or blank)"
     if not a.files:
         return "At least one raw file is required"
+    if a.control and has_control(a.method) and a.control not in conditions_of(a.files):
+        return f"Control {a.control!r} is not one of the conditions — pick it again"
     seen = set()
     for f in a.files:
         if not f.experiment.strip():
@@ -164,7 +238,7 @@ def to_overrides(a: Answer, d: Draft) -> Overrides:
     ov = Overrides(user=a.user.strip(), method=a.method, allow_uneven_fractions=a.allow_uneven)
     if a.date.strip():
         ov.date = date.fromisoformat(a.date.strip())
-    base = {f.filename: f for f in reparse(a.files, a.method)}
+    base = {f.filename: f for f in reparse(a.files, a.method, d.condition_codes or None)}
     for f in a.files:
         b = base[f.filename]
         exp, rep, frac = f.experiment.strip(), int(f.bioreplicate), f.fraction.strip()
@@ -172,6 +246,10 @@ def to_overrides(a: Answer, d: Draft) -> Overrides:
             ov.files[f.filename] = FileOverride(
                 experiment=exp, bioreplicate=rep, fraction=int(frac) if frac else -1
             )
+    if a.control and has_control(a.method):
+        automatic = guess_control(conditions_of(a.files), d.control_keywords)
+        if a.control != automatic or d.control:  # pin it only when it isn't what the analysis would pick anyway
+            ov.analysis["control"] = a.control
     return ov
 
 
@@ -184,14 +262,22 @@ class TkResolver:
         root,
         timeout_seconds: float = 0,
         remember: Callable[[str, str], None] | None = None,
+        refresh: Callable[[Draft], Draft] | None = None,
     ):
+        """refresh(d): a fresh reading of the same folder with the current config — the open window uses it to
+        pick up a user folder or alias added in the app meanwhile, without closing."""
         self.root = root
         self.timeout = timeout_seconds
         self.remember = remember
+        self.refresh = refresh
         self._q: queue.Queue[tuple[Draft, threading.Event, list]] = queue.Queue()
         self._busy = False
 
     # -- called from the watcher thread
+    def review(self, d: Draft) -> Overrides | None:
+        """The "check before filing" window for a drop that parsed cleanly (d.review is set)."""
+        return self.resolve(d)
+
     def resolve(self, d: Draft) -> Overrides | None:
         if threading.current_thread() is threading.main_thread():
             return self._dialog(d)
@@ -230,7 +316,7 @@ class TkResolver:
         if source is not None and not source.is_dir():
             return None
         win = tk.Toplevel(self.root)
-        win.title("ionomos — needs a hand")
+        win.title("ionomos — check before filing" if d.review else "ionomos — needs a hand")
         win.attributes("-topmost", True)
         win.resizable(True, True)
         result: list[Overrides | None] = [None]
@@ -243,22 +329,27 @@ class TkResolver:
         frm.columnconfigure(1, weight=1)
 
         ttk.Label(frm, text=d.folder, font=("", 11, "bold")).grid(row=0, column=0, columnspan=4, sticky="w", **pad)
-        ttk.Label(frm, text="⚠ " + d.problem, foreground="#b00020", wraplength=640).grid(
-            row=1, column=0, columnspan=4, sticky="w", **pad)
+        if d.review:
+            ttk.Label(frm, text="Nothing is wrong — this is how Ionomos read the drop. Check the user, the conditions, "
+                                "replicates and the control below; fix anything wrong, then Accept.",
+                      foreground="#1565c0", wraplength=640).grid(row=1, column=0, columnspan=4, sticky="w", **pad)
+        else:
+            ttk.Label(frm, text="⚠ " + d.problem, foreground="#b00020", wraplength=640).grid(
+                row=1, column=0, columnspan=4, sticky="w", **pad)
 
         # ---- header fields
         user_v = tkutil.StringVar(value=d.user)
         meth_v = tkutil.StringVar(value=d.method or (d.known_methods[0] if d.known_methods else ""))
         date_v = tkutil.StringVar(value=d.date)
         uneven_v = tkutil.BooleanVar(value=d.allow_uneven or d.kind == Kind.LAYOUT and "fractions" in d.problem)
-        alias_v = tkutil.StringVar(value=guess_alias_token(d) if d.kind == Kind.USER else "")
+        alias_v = tkutil.StringVar(value=guess_alias_token(d) if (d.kind == Kind.USER or not d.user) else "")
         remember_v = tkutil.BooleanVar(value=bool(alias_v.get()) and self.remember is not None)
 
         ttk.Label(frm, text="User").grid(row=2, column=0, sticky="e", **pad)
         user_cb = ttk.Combobox(frm, textvariable=user_v, values=d.known_users, width=24)
         user_cb.grid(row=2, column=1, sticky="w", **pad)
-        ttk.Label(frm, text="(type a new name to create a folder)", foreground="#666").grid(
-            row=2, column=2, columnspan=2, sticky="w", **pad)
+        ttk.Label(frm, text="(type a new name to create a folder; users added in the app appear here)",
+                  foreground="#666").grid(row=2, column=2, columnspan=2, sticky="w", **pad)
 
         ttk.Label(frm, text="Method").grid(row=3, column=0, sticky="e", **pad)
         meth_cb = ttk.Combobox(frm, textvariable=meth_v, values=d.known_methods, state="readonly", width=12)
@@ -277,7 +368,7 @@ class TkResolver:
             row=5, column=0, columnspan=4, sticky="w", **pad)
 
         # ---- file grid (scrollable)
-        ttk.Label(frm, text="Files — experiment / replicate / fraction  (edit anything that looks wrong)",
+        ttk.Label(frm, text="Files — condition / replicate / fraction  (edit anything that looks wrong)",
                   font=("", 9, "bold")).grid(row=6, column=0, columnspan=3, sticky="w", **pad)
         rows: list[tuple[DraftFile, tk.StringVar, tk.StringVar, tk.StringVar]] = []
 
@@ -295,10 +386,12 @@ class TkResolver:
             for w in grid.winfo_children():
                 w.destroy()
             rows.clear()
-            for c, h in enumerate(("file", "experiment", "rep", "frac")):
+            for c, h in enumerate(("file", "condition / sample", "rep", "frac")):
                 ttk.Label(grid, text=h, foreground="#666").grid(row=0, column=c, sticky="w", padx=4)
             for i, f in enumerate(files, start=1):
                 ev, rv, fv = tkutil.StringVar(value=f.experiment), tkutil.StringVar(value=f.bioreplicate), tkutil.StringVar(value=f.fraction)
+                for var in (ev, rv, fv):
+                    var.trace_add("write", lambda *_: update_summary())
                 ttk.Label(grid, text=f.filename, foreground="#b00020" if f.error else "").grid(
                     row=i, column=0, sticky="w", padx=4)
                 ttk.Entry(grid, textvariable=ev, width=34).grid(row=i, column=1, padx=4, pady=1)
@@ -331,15 +424,72 @@ class TkResolver:
             _, current, _ = _find_raws(source)
             saved = {f.filename: DraftFile(f.filename, ev.get(), rv.get(), fv.get()) for f, ev, rv, fv in rows}
             if set(current) != set(saved):
-                d.files = [saved.get(name, reparse([DraftFile(name)], meth_v.get())[0]) for name in current]
+                d.files = [saved.get(name, reparse([DraftFile(name)], meth_v.get(), d.condition_codes or None)[0])
+                           for name in current]
                 fill_grid(d.files)
+                update_summary()
             if not current:
                 skip()
 
+        # ---- what the search and the analysis will assume: conditions, roles, replicates, control
+        ctl_v = tkutil.StringVar(value="")
+        sumf = ttk.LabelFrame(frm, text="What Ionomos will assume", padding=6)
+        sumf.grid(row=11, column=0, columnspan=4, sticky="ew", **pad)
+        ctlrow = ttk.Frame(sumf)
+        ctlrow.pack(anchor="w", fill="x")
+        ctl_lbl = ttk.Label(ctlrow, text="Control (the 'vs' side of every volcano):")
+        ctl_cb = ttk.Combobox(ctlrow, textvariable=ctl_v, state="readonly", width=34)
+        ctl_note = ttk.Label(ctlrow, foreground="#666")
+        summary_v = tkutil.StringVar()
+        ttk.Label(sumf, textvariable=summary_v, justify="left", font=("", 9)).pack(anchor="w", pady=(4, 0))
+        codes_note = ttk.Label(sumf, foreground="#666", wraplength=640, justify="left")
+        codes_note.pack(anchor="w")
+        guessed_from: list[str] = [""]  # the automatic control for the current conditions
+
+        def current_files() -> list[DraftFile]:
+            return [DraftFile(filename=f.filename, experiment=ev.get(), bioreplicate=rv.get(), fraction=fv.get())
+                    for f, ev, rv, fv in rows]
+
+        def update_summary(*_):
+            try:
+                files, method = current_files(), meth_v.get()
+                conds = conditions_of(files)
+                for w in (ctl_lbl, ctl_cb, ctl_note):
+                    w.pack_forget()
+                if has_control(method):
+                    auto = guess_control(conds, d.control_keywords)
+                    keep = ctl_v.get() in conds and ctl_v.get() != guessed_from[0]  # a person's pick survives edits
+                    if not keep:
+                        ctl_v.set(d.control if d.control in conds else auto)
+                    guessed_from[0] = auto
+                    ctl_cb.configure(values=conds)
+                    ctl_lbl.pack(side="left")
+                    ctl_cb.pack(side="left", padx=4)
+                    found = any(kw.lower() in re.split(r"[_\-\s.]+", c.lower()) for c in conds
+                                for kw in d.control_keywords)
+                    ctl_note.configure(text="" if found or not conds else
+                                       "no DMSO / vehicle / control name found — guessed; please check")
+                    ctl_note.pack(side="left", padx=6)
+                else:
+                    ctl_v.set("")
+                    ctl_note.configure(text="isoDTB: every sample is its own heavy/light ratio vs 0 — no control"
+                                       if method == "isoDTB" else "TMT: conditions come from the channel annotation")
+                    ctl_note.pack(side="left")
+                summary_v.set("\n".join("• " + line for line in summarize(files, method, ctl_v.get())) or "—")
+                codes = d.condition_codes or {}
+                codes_note.configure(text=("Short codes in DIA file names: " + ", ".join(
+                    f"{k}1 = {v} rep 1" for k, v in codes.items()) + " (config: naming.condition_codes)")
+                    if method == "DIA" and codes else "")
+            except Exception:  # noqa: BLE001 - a summary glitch must never block the answer
+                log.exception("review summary failed")
+
+        ctl_cb.bind("<<ComboboxSelected>>", update_summary)
         fill_grid(d.files)
+        update_summary()
 
         def on_method_change(*_):
-            fill_grid(reparse(d.files, meth_v.get()))
+            fill_grid(reparse(d.files, meth_v.get(), d.condition_codes or None))
+            update_summary()
 
         meth_cb.bind("<<ComboboxSelected>>", on_method_change)
         ttk.Button(frm, text="Re-read from file names", command=on_method_change).grid(
@@ -347,17 +497,15 @@ class TkResolver:
 
         # ---- buttons + error line
         err_v = tkutil.StringVar()
-        ttk.Label(frm, textvariable=err_v, foreground="#b00020", wraplength=640).grid(
-            row=8, column=0, columnspan=4, sticky="w", **pad)
+        ttk.Label(frm, textvariable=err_v, foreground="#b00020", wraplength=640, name="error").grid(
+            row=12, column=0, columnspan=4, sticky="w", **pad)
         btns = ttk.Frame(frm)
-        btns.grid(row=9, column=0, columnspan=4, sticky="e", **pad)
+        btns.grid(row=13, column=0, columnspan=4, sticky="e", **pad)
 
         def answer() -> Answer:
-            files = [DraftFile(filename=f.filename, experiment=ev.get(), bioreplicate=rv.get(), fraction=fv.get())
-                     for f, ev, rv, fv in rows]
             return Answer(user=user_v.get(), method=meth_v.get(), date=date_v.get(),
-                          allow_uneven=uneven_v.get(), files=files,
-                          remember_alias=alias_v.get().strip() if remember_v.get() else "")
+                          allow_uneven=uneven_v.get(), files=current_files(),
+                          remember_alias=alias_v.get().strip() if remember_v.get() else "", control=ctl_v.get())
 
         def accept(*_):
             try:
@@ -399,7 +547,7 @@ class TkResolver:
         if source is not None:
             ttk.Button(btns, text="Delete from inbox", command=delete_folder).pack(side="left", padx=4)
             ttk.Label(frm, text="Deleted items are recoverable in inbox/.removed. Changes restart intake.").grid(
-                row=10, column=0, columnspan=4, sticky="w")
+                row=14, column=0, columnspan=4, sticky="w")
 
             def poll():
                 if win.winfo_exists():
@@ -413,14 +561,40 @@ class TkResolver:
 
             win.after(500, poll)
 
-        ttk.Button(btns, text="Skip (leave in inbox)", command=skip).pack(side="left", padx=4)
+        def live():
+            """Users / aliases added in the app while this window is open: offer them, fill a blank user."""
+            if not win.winfo_exists():
+                return
+            try:
+                fresh = self.refresh(d)
+                user_cb.configure(values=fresh.known_users)
+                if not user_v.get().strip() and fresh.user:
+                    user_v.set(fresh.user)
+                    err_v.set(f"User recognised as {fresh.user} (added meanwhile) — check and Accept")
+            except Exception:  # noqa: BLE001 - a failed refresh just leaves the window as it was
+                log.debug("resolver refresh failed", exc_info=True)
+            if win.winfo_exists():
+                win.after(2000, live)
+
+        if self.refresh is not None:
+            win.after(2000, live)
+
+        ttk.Button(btns, text="Not now (leave in inbox)" if d.review else "Skip (leave in inbox)",
+                   command=skip).pack(side="left", padx=4)
         ttk.Button(btns, text="Accept & queue  ⏎", command=accept).pack(side="left", padx=4)
         win.bind("<Return>", accept)
         win.bind("<Escape>", skip)
         win.protocol("WM_DELETE_WINDOW", skip)
 
+        def timed_out():
+            # nobody answered: a review files the drop as read (it parsed); a problem stays in the inbox
+            if d.review and win.winfo_exists():
+                accept()
+            if win.winfo_exists():
+                skip()
+
         if self.timeout:
-            win.after(int(self.timeout * 1000), skip)
+            win.after(int(self.timeout * 1000), timed_out)
 
         win.update_idletasks()
         w, h = win.winfo_reqwidth(), win.winfo_reqheight()
