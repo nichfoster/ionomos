@@ -29,9 +29,9 @@ SEQ = ["#cde2fb", "#b7d3f6", "#9ec5f4", "#86b6ef", "#6da7ec", "#5598e7", "#3987e
        "#1c5cab", "#184f95", "#104281", "#0d366b"]
 
 _TOKENS_LIGHT = """--vz-surface:#fcfcfb;--vz-text:#0b0b0b;--vz-text2:#52514e;--vz-muted:#898781;
---vz-grid:#e1e0d9;--vz-axis:#c3c2b7;--vz-up:#e34948;--vz-down:#2a78d6;--vz-ns:#c3c2b7;"""
+--vz-grid:#e1e0d9;--vz-axis:#c3c2b7;--vz-up:#e34948;--vz-down:#2a78d6;--vz-ns:#c3c2b7;--vz-warn:#a15c07;"""
 _TOKENS_DARK = """--vz-surface:#1a1a19;--vz-text:#ffffff;--vz-text2:#c3c2b7;--vz-muted:#898781;
---vz-grid:#2c2c2a;--vz-axis:#383835;--vz-up:#e66767;--vz-down:#3987e5;--vz-ns:#52514e;"""
+--vz-grid:#2c2c2a;--vz-axis:#383835;--vz-up:#e66767;--vz-down:#3987e5;--vz-ns:#52514e;--vz-warn:#f2b64a;"""
 
 
 def _cat_tokens(dark: bool) -> str:
@@ -50,6 +50,7 @@ STYLE = f"""
 .vz .atitle{{fill:var(--vz-text2);font-size:13px}}
 .vz .lbl{{fill:var(--vz-text2);font-size:12px}}
 .vz .lgd{{fill:var(--vz-text2);font-size:13px}}
+.vz .warn{{fill:var(--vz-warn);font-size:12.5px;font-weight:600}}
 .vz .up{{fill:var(--vz-up);stroke:var(--vz-surface);stroke-width:1.5}}
 .vz .down{{fill:var(--vz-down);stroke:var(--vz-surface);stroke-width:1.5}}
 .vz .ns{{fill:var(--vz-ns);opacity:.7}}
@@ -101,7 +102,98 @@ def condition_slots(m: QuantMatrix) -> dict[str, int]:
 # ------------------------------------------------------------------- volcano --
 
 
+def _conf_banner(d: DiffResult, x: float, y: float) -> str:
+    """The label every low-confidence / fold-change-only plot carries, so a copied SVG can't lose it."""
+    text = {"low": "LOW CONFIDENCE — a group has one sample; p-values borrowed",
+            "none": "FOLD CHANGE ONLY — no replicates, no p-values"}.get(d.confidence)
+    return f'<text class="warn" x="{_f(x)}" y="{_f(y)}" text-anchor="end">{text}</text>' if text else ""
+
+
+def fold_change_plot(d: DiffResult, standalone: bool = False, width: int = 760, height: int = 520) -> str:
+    """For comparisons with no replicates: log2FC (y) against mean log2 abundance (x), or against rank for
+    ratio data. Candidates are |log2FC| >= the cut-off; nothing here is a p-value."""
+    s = d.settings
+    lfc = s.log2fc or 1.0
+    ml, mr, mt, mb = 64, 24, 40, 52
+    pw, ph = width - ml - mr, height - mt - mb
+    pts = [r for r in d.rows if r["log2fc"] is not None and math.isfinite(r["log2fc"])]
+    ratio = d.control is None or not any(r["mean_treatment"] is not None and r["mean_control"] is not None
+                                         for r in pts)  # no abundances: rank instead
+    if ratio:
+        ordered = sorted(pts, key=lambda r: r["log2fc"])
+        xs = {id(r): k + 1 for k, r in enumerate(ordered)}
+    else:
+        xs = {id(r): ((r["mean_treatment"] + r["mean_control"]) / 2 if r["mean_treatment"] is not None
+                      and r["mean_control"] is not None else None) for r in pts}
+        pts = [r for r in pts if xs[id(r)] is not None and math.isfinite(xs[id(r)])]
+    xv = [xs[id(r)] for r in pts] or [0.0, 1.0]
+    x0, x1 = min(xv), max(xv)
+    if x1 - x0 < 1e-9:
+        x0, x1 = x0 - 1, x1 + 1
+    ymax = max([abs(r["log2fc"]) for r in pts] + [lfc + 0.5]) * 1.08
+    xt, yt = nice_ticks(x0, x1), nice_ticks(-ymax, ymax)
+    x0, x1 = min(x0, xt[0]), max(x1, xt[-1])
+    ymax = max(ymax, abs(yt[0]), abs(yt[-1]))
+
+    def X(v):
+        return ml + (v - x0) / (x1 - x0) * pw
+
+    def Y(v):
+        return mt + ph - (v + ymax) / (2 * ymax) * ph
+
+    b = []
+    for v in xt:
+        b.append(f'<line class="grid" x1="{_f(X(v))}" x2="{_f(X(v))}" y1="{mt}" y2="{mt + ph}"/>')
+        b.append(f'<text class="tick" x="{_f(X(v))}" y="{mt + ph + 16}" text-anchor="middle">{_tick_label(v)}</text>')
+    for v in yt:
+        b.append(f'<line class="grid" x1="{ml}" x2="{ml + pw}" y1="{_f(Y(v))}" y2="{_f(Y(v))}"/>')
+        b.append(f'<text class="tick" x="{ml - 8}" y="{_f(Y(v) + 4)}" text-anchor="end">{_tick_label(v)}</text>')
+    b.append(f'<line class="axis" x1="{ml}" x2="{ml + pw}" y1="{mt + ph}" y2="{mt + ph}"/>')
+    b.append(f'<line class="axis" x1="{ml}" x2="{ml}" y1="{mt}" y2="{mt + ph}"/>')
+    for v in (-lfc, lfc):
+        b.append(f'<line class="thr" x1="{ml}" x2="{ml + pw}" y1="{_f(Y(v))}" y2="{_f(Y(v))}"/>')
+    xlabel = ("rank (sorted by log2 H/L)" if d.control is None else "rank (sorted by log2 fold change)") if ratio \
+        else "mean log2 abundance"
+    ylabel = "log2 ratio heavy / light" if d.control is None else \
+        f"log2 fold change ({escape(d.treatment)} / {escape(d.control)})"
+    b.append(f'<text class="atitle" x="{ml + pw / 2}" y="{height - 12}" text-anchor="middle">{xlabel}</text>')
+    b.append(f'<text class="atitle" transform="translate(16 {mt + ph / 2}) rotate(-90)" text-anchor="middle">'
+             f'{ylabel}</text>')
+    order = {"": 0, "down": 1, "up": 2}
+    for r in sorted(pts, key=lambda r: order[r["significant"]]):
+        cls = r["significant"] or "ns"
+        tip = f"{r['label']}  log2FC {r['log2fc']:.2f}  (fold change only)"
+        b.append(f'<circle class="{cls}" cx="{_f(X(xs[id(r)]))}" cy="{_f(Y(r["log2fc"]))}" r="{4 if cls != "ns" else 3}" '
+                 f'data-l="{escape(r["label"])}" data-fc="{r["log2fc"]:.3f}"><title>{escape(tip)}</title></circle>')
+    placed: list[tuple[float, float, float, float]] = []
+    for r in [r for r in pts if r["significant"]][: s.top_labels]:  # rows are sorted by |log2FC|
+        cx, cy = X(xs[id(r)]), Y(r["log2fc"])
+        text = r["label"][:24]
+        w = 7.0 * len(text)
+        for x0_, dy in ((cx + 7, 4), (cx - 7 - w, 4), (cx + 7, -8), (cx - 7 - w, 16)):
+            box = (x0_, cy + dy - 10, x0_ + w, cy + dy + 3)
+            inside = ml <= box[0] and box[2] <= ml + pw and mt <= box[1] and box[3] <= mt + ph
+            if inside and not any(not (box[2] < p[0] or box[0] > p[2] or box[3] < p[1] or box[1] > p[3]) for p in placed):
+                placed.append(box)
+                b.append(f'<text class="lbl" x="{_f(x0_)}" y="{_f(cy + dy)}">{escape(text)}</text>')
+                break
+    if not pts:
+        b.append(f'<text class="atitle" x="{ml + pw / 2}" y="{mt + ph / 2}" text-anchor="middle">No fold changes '
+                 f'could be computed — see the issues in report.html</text>')
+    x = ml
+    for cls, name, n in (("up", "Up", d.up), ("down", "Down", d.down)):
+        b.append(f'<circle class="{cls}" cx="{x + 5}" cy="{mt - 16}" r="5"/>')
+        label = f"{name} {n:,} (|log2FC| ≥ {lfc:g})"
+        b.append(f'<text class="lgd" x="{x + 14}" y="{mt - 12}">{label}</text>')
+        x += 30 + 7 * len(label)
+    b.append(_conf_banner(d, ml + pw, mt + 14))
+    return _svg(width, height, "".join(b), f"Fold-change plot (no statistics), {d.name}: {d.up} up, {d.down} down",
+                standalone)
+
+
 def volcano(d: DiffResult, standalone: bool = False, width: int = 760, height: int = 520) -> str:
+    if getattr(d, "confidence", "") == "none":
+        return fold_change_plot(d, standalone, width, height)
     s = d.settings
     ml, mr, mt, mb = 64, 24, 40, 52
     pw, ph = width - ml - mr, height - mt - mb
@@ -184,6 +276,7 @@ def volcano(d: DiffResult, standalone: bool = False, width: int = 760, height: i
         label = f"{name} {n:,}"
         b.append(f'<text class="lgd" x="{x + 14}" y="{mt - 12}">{label}</text>')
         x += 30 + 7 * len(label)
+    b.append(_conf_banner(d, ml + pw, mt + 14))
     return _svg(width, height, "".join(b), f"Volcano plot, {d.name}: {d.up} up, {d.down} down", standalone)
 
 

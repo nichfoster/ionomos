@@ -128,14 +128,20 @@ def check(f: Findings) -> list[Issue]:
 
     # ---- nothing to analyse
     if m is None and f.read_problem:
+        if method == "table":
+            causes = ["The file isn't one row per protein/peptide with a numeric column per sample",
+                      "It has results but no recognisable fold-change and p-value columns",
+                      "It is a long-format table (one row per PSM / precursor) or a log, not a matrix"]
+            fixes = ["Export one row per protein with one numeric column per sample (names like DMSO_1, Drug_2), "
+                     "or columns named log2FC and p-value, then Run analysis again"]
+        else:
+            causes = ["The probe/label mass in the workflow differs from the one Ionomos looks for (isoDTB: 561.3387)",
+                      "Label quantification ran without the isoDTB labels, or found no labelled peptides",
+                      "The search failed quietly (wrong FASTA or species) and the table is empty"]
+            fixes = ["Open the table in fragpipe/ and check the modification masses and ratio columns",
+                     "Check the workflow for this method (tab 3), then Retry the job"]
         add(Issue("UNUSABLE_TABLE", "error", "The result table has nothing Ionomos can use",
-                  f"{f.read_problem}, so there are no statistics or volcano plot.",
-                  ["The probe/label mass in the workflow differs from the one Ionomos looks for (isoDTB: 561.3387)",
-                   "Label quantification ran without the isoDTB labels, or found no labelled peptides",
-                   "The search failed quietly (wrong FASTA or species) and the table is empty"],
-                  ["Open the table in fragpipe/ and check the modification masses and ratio columns",
-                   "Check the workflow for this method (tab 3), then Retry the job"],
-                  {"method": method}))
+                  f"{f.read_problem}, so there are no statistics or volcano plot.", causes, fixes, {"method": method}))
         return out
     if m is None:
         if "read" not in f.stage_errors:
@@ -160,6 +166,9 @@ def check(f: Findings) -> list[Issue]:
                   ["Check the FASTA and workflow for this method (tab 3) and the raw files, then Retry"],
                   {"source": m.source}))
         return out
+    if m.meta.get("precomputed"):  # a results table: no samples to check, only what it plots
+        _result_checks(f, s, add)
+        return out
     if not any(v is not None for row in m.values for v in row):
         add(Issue("NO_QUANTITIES", "error", "The result table has no usable numbers",
                   f"{Path(m.source).name} lists {len(m.features):,} features but not one measured value in the "
@@ -182,7 +191,7 @@ def check(f: Findings) -> list[Issue]:
                   ["Check 'Samples left out' and the filter settings here, then Run analysis"],
                   {"excluded": list(getattr(s, "exclude_samples", []) or [])}))
         return out
-    if len(samples) == 1:
+    if len(samples) == 1 and pm.kind == "intensity":  # a single ratio sample still has a fold-change plot
         add(Issue("ONE_SAMPLE", "error", "Only one sample was quantified",
                   f"The table has a single sample ({samples[0]}), so there is nothing to compare and no volcano plot.",
                   ["The other runs failed or are missing from the result table",
@@ -238,6 +247,18 @@ def check(f: Findings) -> list[Issue]:
                        "The conditions were typed the same in the naming window"],
                       ["Give each sample its condition here ('Guess from names' fills in a suggestion) and Run analysis"],
                       {"samples": samples, "runs": runs, "suggested": suggested}))
+        if len(conds) == len(samples) >= 4 and not s.sample_conditions:
+            lettered = {x: re.sub(r"[_\-. ][A-Za-z]$", "", x) for x in samples}  # DMSO_a, DMSO_b -> DMSO
+            by = suggest_conditions(list(lettered.values()))
+            suggested = {x: by[lettered[x]] for x in samples}
+            if 2 <= len(set(suggested.values())) < len(samples):
+                add(Issue("EACH_OWN_CONDITION", "input", "Every sample is its own condition",
+                          f"The {len(samples)} sample names carry no replicate numbers Ionomos recognises, so each "
+                          "became its own condition and every comparison is fold change only. They look like "
+                          f"{len(set(suggested.values()))} conditions with replicates.",
+                          ["Replicates are marked with letters or words instead of _1, _2, _3"],
+                          ["Check the suggested conditions here and Run analysis — replicates give real statistics"],
+                          {"samples": samples, "suggested": suggested}))
         if f.comparison_error:
             add(Issue("BAD_COMPARISON", "input", "The chosen comparisons don't fit this experiment",
                       f"{f.comparison_error}. Ionomos compared each condition with the control instead, so the "
@@ -275,7 +296,10 @@ def check(f: Findings) -> list[Issue]:
                           ["Consider imputation 'none' for this experiment, or a stricter missing-value filter"],
                           {"percent": round(pct, 1)}))
 
+    labelled = {(d.treatment, d.control) for d in f.diffs if getattr(d, "confidence", "")}
     for t, c, groups in f.small_groups:
+        if (t, c) in labelled:
+            continue  # tested anyway and labelled low confidence / fold change only (see below)
         add(Issue("SMALL_GROUP", "input", f"Not enough replicates to test {t} vs {c or 0}",
                   "; ".join(f"{g} has {n} sample(s)" for g, n in groups) +
                   f" — at least {s.min_valid if s else 2} per group are needed, so this comparison has no p-values.",
@@ -292,16 +316,38 @@ def check(f: Findings) -> list[Issue]:
                   ["Check the identifications per sample in the report's QC section"], {"n": len(pm.features)}))
 
     # ---- statistics and plots
+    _result_checks(f, s, add)
+    return out
+
+
+def _result_checks(f: Findings, s, add) -> None:
+    """Per-comparison checks: confidence labels, nothing tested, no hits, missing plots, enrichment."""
     small = {(t, c) for t, c, _ in f.small_groups}
     for d in f.diffs:
-        if d.tested == 0 and (d.treatment, d.control) not in small:
+        conf = getattr(d, "confidence", "")
+        if conf == "low":
+            add(Issue("LOW_CONFIDENCE", "warning", f"{d.name}: low confidence (a group has one sample)",
+                      d.confidence_note,
+                      ["The experiment has a single replicate of a condition",
+                       "A replicate's condition was mistyped, so it formed its own group", "Runs are missing or left out"],
+                      ["If replicates exist, fix the samples' conditions on the Analysis tab and Run analysis",
+                       "Otherwise confirm hits by another experiment before relying on them"],
+                      {"comparison": d.name}))
+        elif conf == "none":
+            add(Issue("FOLD_CHANGE_ONLY", "warning", f"{d.name}: fold change only — no statistics possible",
+                      d.confidence_note,
+                      ["Every group in this comparison has a single sample, with no replicates anywhere to borrow from",
+                       "The results table has no usable p-value column"],
+                      ["Add replicates for statistics; meanwhile the plot ranks features by fold change"],
+                      {"comparison": d.name}))
+        if d.tested == 0 and not conf and (d.treatment, d.control) not in small:
             add(Issue("ZERO_TESTED", "error", f"{d.name}: nothing could be tested",
                       "Not a single feature had enough values in both groups, so the volcano plot is empty.",
                       ["Most values are missing in one of the groups (and imputation is off)",
                        "The missing-value filter removed everything", "Samples were assigned to the wrong conditions"],
                       ["Check the conditions here; try imputation 'auto' for this experiment; Run analysis"],
                       {"comparison": d.name}))
-        elif d.tested and d.up + d.down == 0:
+        elif d.tested and d.up + d.down == 0 and conf != "none":
             add(Issue("NO_HITS", "warning", f"{d.name}: no significant changes",
                       f"{d.tested:,} features were tested and none passed {s.describe() if s else 'the cut-offs'}. "
                       "The volcano plot is still made.",
@@ -318,7 +364,6 @@ def check(f: Findings) -> list[Issue]:
         add(Issue("ENRICHMENT", "warning", "Enrichment was incomplete", "; ".join(f.enrichment_notes),
                   ["No internet the first time a gene-set library is needed"],
                   ["Re-run analysis when the PC is online; after that it works offline"], {}))
-    return out
 
 
 def popups(issues: list[Issue]) -> list[Issue]:

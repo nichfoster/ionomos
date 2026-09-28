@@ -111,6 +111,7 @@
   function score(c, i) { return ST.adj ? c.q[i] : c.p[i]; }
   function sigOf(c, i) {
     const s = score(c, i), fc = c.fc[i];
+    if (c.conf === "none") return fc == null || isNaN(fc) || Math.abs(fc) < (ST.lfc || 1) ? "" : (fc > 0 ? "up" : "down");
     if (s == null || fc == null || isNaN(s) || isNaN(fc)) return "";
     return s <= ST.alpha && Math.abs(fc) >= ST.lfc ? (fc > 0 ? "up" : "down") : "";
   }
@@ -123,7 +124,7 @@
   function counts(c) {
     let up = 0, down = 0, tested = 0;
     for (let i = 0; i < nF; i++) {
-      if (c.p[i] != null) tested++;
+      if (c.p[i] != null || (c.conf === "none" && c.fc[i] != null)) tested++;
       const s = sigOf(c, i);
       if (s === "up") up++; else if (s === "down") down++;
     }
@@ -135,6 +136,11 @@
     const q = ST.search.toLowerCase();
     return (D.f.label[i] || "").toLowerCase().includes(q) || (D.f.id[i] || "").toLowerCase().includes(q) ||
       (D.f.desc[i] || "").toLowerCase().includes(q);
+  }
+
+  function confBadge(c) {
+    const t = { low: "Low confidence", none: "Fold change only" }[c.conf];
+    return t ? "<div class='notes' style='margin:6px 0 0;padding:3px 8px;font-size:12px'>" + t + "</div>" : "";
   }
 
   // ------------------------------------------------------------- overview
@@ -149,7 +155,7 @@
       const n = counts(c);
       h += '<div class="tile" style="cursor:pointer" data-ci="' + k + '"><div class="k">' + esc(c.name) + '</div><div class="v">' +
         fmtInt(n.up + n.down) + '</div><div class="d"><span class="dot up"></span> ' + fmtInt(n.up) + ' up · <span class="dot down"></span> ' +
-        fmtInt(n.down) + " down of " + fmtInt(n.tested) + "</div></div>";
+        fmtInt(n.down) + " down of " + fmtInt(n.tested) + "</div>" + confBadge(c) + "</div>";
     });
     host.innerHTML = h;
     $$(".tile[data-ci]", host).forEach((t) => (t.onclick = () => { ST.ci = +t.dataset.ci; syncControls(); renderDiff(); goTo("differential"); }));
@@ -163,12 +169,13 @@
     const W = widthOf(host), H = Math.round(Math.min(520, Math.max(360, W * 0.62)));
     const L = 56, R = 18, T = 26, B = 44;
     const root = frame(host, W, H);
-    const ma = ST.mode === "ma";
+    const fco = c.conf === "none";  // no replicates: fold change against abundance (or rank), no p-values
+    const ma = ST.mode === "ma" || fco;
     const pts = [];
     let xmax = 1, ymax = 1, amin = Infinity, amax = -Infinity;
     for (let i = 0; i < nF; i++) {
       const fc = c.fc[i], p = c.p[i];
-      if (fc == null || p == null) continue;
+      if (fc == null || (p == null && !fco)) continue;
       const y = ma ? fc : -Math.log10(Math.max(p, 1e-300));
       const x = ma ? c.a[i] : fc;
       if (x == null) continue;
@@ -184,7 +191,7 @@
     const Y = (v) => H - B - ((v - y0) / (y1 - y0)) * (H - T - B);
     const g = svg("g", {}, root);
     axes(g, X, Y, niceTicks(x0, x1, 8), niceTicks(y0, y1, 6), L, R, T, B, W, H,
-      ma ? "mean log2 abundance" : (D.kind === "ratio" ? "log2 H/L" : "log2 fold change"),
+      ma ? (c.aRank ? (c.t2 ? "rank (sorted by log2 fold change)" : "rank (sorted by log2 H/L)") : "mean log2 abundance") : (D.kind === "ratio" ? "log2 H/L" : "log2 fold change"),
       ma ? "log2 fold change" : (ST.adj ? "−log10 p (line: adjusted p cut-off)" : "−log10 p"));
     const clip = svg("clipPath", { id: "vclip" }, svg("defs", {}, root));
     svg("rect", { x: L, y: T, width: W - L - R, height: H - T - B }, clip);
@@ -218,7 +225,7 @@
     if (ST.focus != null) ring(ST.focus, css("--accent"), 8, 2.5);
     // labels: top hits by p + pinned + focus, greedy non-overlap
     const want = [];
-    const ranked = pts.filter((p) => sigs.get(p[0])).sort((a, b) => c.p[a[0]] - c.p[b[0]]).slice(0, ST.labels).map((p) => p[0]);
+    const ranked = pts.filter((p) => sigs.get(p[0])).sort((a, b) => fco ? Math.abs(c.fc[b[0]]) - Math.abs(c.fc[a[0]]) : c.p[a[0]] - c.p[b[0]]).slice(0, ST.labels).map((p) => p[0]);
     ST.pinned.concat(ST.focus != null ? [ST.focus] : []).concat(ranked).forEach((i) => { if (!want.includes(i)) want.push(i); });
     const boxes = [];
     want.forEach((i) => {
@@ -291,8 +298,10 @@
       tools.insertBefore(z, tools.firstChild);
     }
     const n = counts(c);
-    $("#vcount").innerHTML = '<span class="dot up"></span> <b>' + fmtInt(n.up) + '</b> up &nbsp; <span class="dot down"></span> <b>' +
-      fmtInt(n.down) + "</b> down &nbsp;<span class='muted'>of " + fmtInt(n.tested) + " tested · drag to zoom, double-click to reset, shift-click to pin</span>";
+    $("#vcount").innerHTML = (c.conf ? "<div class='notes' style='margin:0 0 8px'><b>" + (fco ? "Fold change only" : "Low confidence") +
+      ":</b> " + esc(c.confNote || "") + "</div>" : "") + '<span class="dot up"></span> <b>' + fmtInt(n.up) + '</b> up &nbsp; <span class="dot down"></span> <b>' +
+      fmtInt(n.down) + "</b> down &nbsp;<span class='muted'>of " + fmtInt(n.tested) + (fco ? " ranked by fold change" : " tested") +
+      " · drag to zoom, double-click to reset, shift-click to pin</span>";
   }
   function featureTip(i) {
     const c = C();
@@ -799,7 +808,8 @@
       note.innerHTML = changed ? "Cut-offs changed here only — the TSV files, heatmap and enrichment use the saved settings (|log2FC| ≥ " + D.settings.log2fc +
         ", " + (D.settings.use_adjusted ? "adj. p" : "p") + " ≤ " + D.settings.alpha + ")." : "";
     }
-    $("#ma").disabled = D.kind === "ratio" || !c.t2;
+    $("#ma").disabled = D.kind === "ratio" || !c.t2 || c.conf === "none";
+    $("#volc").disabled = c.conf === "none";
   }
   function setup() {
     if (!D.comps.length) {

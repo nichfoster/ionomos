@@ -363,12 +363,15 @@ def test_dia_missing_controls_warns_in_report(tmp_path):
     assert any('DMSO has 1 sample' in w for w in out.warnings)
     codes = {i.code: i for i in out.issues}
     assert codes["MISSING_RUNS"].severity == "error" and "DMSO_1" in codes["MISSING_RUNS"].data["runs"]
-    assert codes["SMALL_GROUP"].severity == "input" and out.summary["state"] == "failed"
+    # 1 vs 3 is still tested (p borrowed from the replicated group), labelled low confidence everywhere
+    assert "SMALL_GROUP" not in codes and codes["LOW_CONFIDENCE"].severity == "warning"
+    assert out.summary["state"] == "failed"  # the missing runs are still an error
+    comp = out.summary["comparisons"][0]
+    assert comp["confidence"] == "low" and comp["tested"] > 0
     html = out.report.read_text(encoding='utf-8')
-    assert 'Not enough replicates to test Drug vs DMSO' in html and 'Most likely' in html
-    # the volcano is still drawn (empty, with an explanation)
-    svg = (dest / out.summary["comparisons"][0]["volcano"]).read_text(encoding='utf-8')
-    assert 'No features could be tested' in svg
+    assert 'low confidence (a group has one sample)' in html and 'Most likely' in html
+    svg = (dest / comp["volcano"]).read_text(encoding='utf-8')
+    assert 'LOW CONFIDENCE' in svg
 
 
 def test_dia_nan_does_not_drop_unmapped_column(tmp_path):

@@ -139,12 +139,13 @@ def welch_t(a: Sequence[float], b: Sequence[float]) -> tuple[float, float, float
 
 
 def student_t(a: Sequence[float], b: Sequence[float]) -> tuple[float, float, float]:
-    """Two-sample t-test with pooled variance, two-sided."""
+    """Two-sample t-test with pooled variance, two-sided. A group of one is allowed when the other group
+    gives the variance (df >= 1): the 1-vs-N low-confidence case."""
     na, nb = len(a), len(b)
-    if na < 2 or nb < 2:
+    if na < 1 or nb < 1 or na + nb - 2 < 1:
         return float("nan"), float("nan"), float("nan")
     df = na + nb - 2
-    sp = ((na - 1) * var(a) + (nb - 1) * var(b)) / df
+    sp = ((na - 1) * (var(a) if na > 1 else 0.0) + (nb - 1) * (var(b) if nb > 1 else 0.0)) / df
     diff = mean(a) - mean(b)
     if sp == 0:
         return (float("nan"), float("nan"), float("nan")) if diff == 0 else (math.copysign(math.inf, diff), float(df), 0.0)

@@ -95,7 +95,13 @@ def payload(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: li
             cols["nc"][i] = r["n_control"]
             mt, mc = r["mean_treatment"], r["mean_control"]
             cols["a"][i] = _r((mt + mc) / 2, 4) if mt is not None and mc is not None else _r(mt, 4)
-        d["comps"].append({"name": dr.name, "slug": dr.slug(), "t1": dr.treatment, "t2": dr.control, **cols})
+        rank = dr.confidence == "none" and (dr.control is None or all(v is None for v in cols["a"]))
+        if rank:  # fold change only with no abundance (ratio data, a bare fold-change table): plot against rank
+            order = sorted((i for i in range(n) if cols["fc"][i] is not None), key=lambda i: cols["fc"][i])
+            for k, i in enumerate(order, 1):
+                cols["a"][i] = k
+        d["comps"].append({"name": dr.name, "slug": dr.slug(), "t1": dr.treatment, "t2": dr.control,
+                           "conf": dr.confidence, "confNote": dr.confidence_note, "aRank": rank, **cols})
     if qcd:
         cv = {c: {"hist": qc.histogram(v["cvs"], 0.0, 1.0, 20), "median": _r(v["median"], 4)}
               for c, v in (qcd.get("cv") or {}).items()}

@@ -30,13 +30,12 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 import traceback
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from ionomos.downstream import analysis, charts, isodtb, quant, report, tmt
+from ionomos.downstream import analysis, anytable, charts, isodtb, quant, report, tmt
 from ionomos.downstream.tables import read_header, write_tsv
 
 log = logging.getLogger("ionomos.downstream")
@@ -74,6 +73,8 @@ def detect_method(workdir: Path) -> str | None:
         return "DIA"
     if _find(workdir, "combined_protein.tsv"):
         return "LFQ"
+    if anytable.find_table(workdir):
+        return "table"
     return None
 
 
@@ -108,11 +109,18 @@ def _merge_ratio(mats: list[quant.QuantMatrix]) -> quant.QuantMatrix:
 
 
 def load_quantities(method: str | None, workdir: Path, results: Path, record: dict | None,
-                    mod_mass: str = "561.3387") -> tuple[quant.QuantMatrix | None, list[Path], list[str]]:
-    """Method prep + loading. Returns (matrix or None, files written, notes)."""
+                    mod_mass: str = "561.3387", table: Path | None = None
+                    ) -> tuple[quant.QuantMatrix | None, list[Path], list[str]]:
+    """Method prep + loading. Returns (matrix or None, files written, notes). table: a file to read with
+    the any-format loader (anytable.py) instead of looking for FragPipe's tables."""
     files: list[Path] = []
     notes: list[str] = []
     results.mkdir(parents=True, exist_ok=True)
+    if table is not None or method == "table":
+        path = Path(table) if table is not None else anytable.find_table(workdir)
+        if path is None:
+            return None, files, [f"no protein or result table found in {workdir.name}/"]
+        return anytable.load(path), files, notes
     if method == "isoDTB":
         lq = _find(workdir, isodtb.LABEL_FILE)
         if lq is None:
@@ -156,14 +164,11 @@ def _guard(p, comps, settings) -> tuple[list[tuple[int, str]], list[str], list]:
         if few:
             bad.append((k, "small"))
             small.append((t, c, few))
-            notes.append(f"Cannot test {t} vs {c or '0'}: " + ", ".join(f"{g} has {n} sample(s)" for g, n in few) +
-                         f"; at least {settings.min_valid} per group are required. Check missing runs and sample labels.")
     return bad, notes, small
 
 
-def _blank(r) -> None:
-    n = len(r.diff)
-    r.t, r.p, r.q, r.ci_low, r.ci_high = ([math.nan] * n for _ in range(5))
+def _few_text(groups) -> str:
+    return ", ".join(f"{g} has {n} sample{'s' if n != 1 else ''}" for g, n in groups)
 
 
 def _enrichment(diffs, p, settings, notes) -> list[dict]:
@@ -189,7 +194,7 @@ def _enrichment(diffs, p, settings, notes) -> list[dict]:
 
 def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = None, overrides: dict | None = None,
             record: dict | None = None, context: dict | None = None, mod_mass: str = "561.3387",
-            progress=None) -> Outcome:
+            progress=None, table: Path | None = None) -> Outcome:
     """Run every downstream stage for one experiment folder. Never raises.
 
     Each stage is isolated: if QC, enrichment or an export fails, the volcano plots and the report are
@@ -239,6 +244,8 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
                                    f"{results}: {exc}", ["The disk is full", "The folder is read-only or open elsewhere"],
                                    ["Free disk space / close programs using the folder, then Re-run analysis"])]
         return out
+    if table is not None:
+        method = "table"
     out.method = method = method if method and method != "auto" else detect_method(workdir)
     f.method = method
     settings, snotes = analysis.settings_lenient(analysis_cfg, overrides)
@@ -254,8 +261,8 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
 
     def read():
         try:
-            return load_quantities(method, workdir, results, record, mod_mass)
-        except isodtb.SiteError as exc:
+            return load_quantities(method, workdir, results, record, mod_mass, table)
+        except (isodtb.SiteError, anytable.TableError) as exc:
             f.read_problem = str(exc)
             notes.append(f"the result table has nothing usable: {exc}")
             return None
@@ -270,7 +277,25 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
         if m is not None:
             notes += m.notes
     f.loaded = m
-    if m is not None and m.features:
+    precomputed = (m.meta.get("precomputed") or []) if m is not None and m.features else []
+    if precomputed:  # a results table: plot what it says, nothing to process or test
+        say("plotting the results in " + m.meta.get("table", "the table"))
+        for d in stage("statistics", analysis.precomputed_diffs, m, settings) or []:
+            diffs.append(d)
+            tsv = results / f"{d.slug()}_differential.tsv"
+            if stage("tables", write_tsv, tsv, analysis.DIFF_COLUMNS, d.rows):
+                out.files.append(tsv)
+            f.volcanos[d.name] = _write_volcano(results, d, stage)
+            if f.volcanos[d.name]:
+                out.files.append(f.volcanos[d.name])
+        if diffs and settings.enrichment:
+            say("enrichment")
+            enrichment = stage("enrichment", _enrichment, diffs, None, settings, enr_notes) or []
+            if enrichment:
+                et = stage("enrichment", export.enrichment_table, results / "enrichment.tsv", enrichment)
+                if et:
+                    out.files.append(et)
+    elif m is not None and m.features:
         files_mx = results / f"{m.level}_matrix_log2.tsv"
         if stage("tables", write_tsv, files_mx, ["id", "label", "description", *m.samples],
                  [[x.id, x.label, x.description, *vals] for x, vals in zip(m.features, m.values, strict=True)]):
@@ -315,20 +340,29 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
         notes += gnotes
         if comps:
             say("statistics (" + ", ".join(analysis.comparison_name(t, c) for t, c in comps) + ")")
-            results_ = stage("statistics", analysis.run_contrasts, processed, comps, settings)
+            low = {comps[k] for k, _ in bad}
+            small_of = {(t, c): few for t, c, few in f.small_groups}
+            results_ = stage("statistics", analysis.run_contrasts, processed, comps, settings, low)
             if results_ is None and settings.test == "limma":
                 notes.append("limma failed on this data; a Welch t-test was used instead")
                 welch = analysis.Settings(**{**settings.__dict__, "test": "welch"})
-                results_ = stage("statistics-fallback", analysis.run_contrasts, processed, comps, welch)
-            for k, _ in bad:
-                if results_ is not None:
-                    _blank(results_[k])
+                results_ = stage("statistics-fallback", analysis.run_contrasts, processed, comps, welch, low)
             for k, (_t, c) in enumerate(comps):
                 r = results_[k] if results_ is not None else None
                 d = stage("statistics", analysis.to_diff, processed, r, c, settings) if r is not None else None
                 if d is None:
                     continue
-                if d.tested == 0 and not any(i == k for i, _ in bad):
+                if comps[k] in low:
+                    few = _few_text(small_of[comps[k]])
+                    if d.tested:
+                        d.confidence = "low"
+                        d.confidence_note = (f"Low confidence: {few}. The p-values borrow the replicate spread from the "
+                                             "rest of the experiment, so treat hits as leads to confirm.")
+                    elif any(x["log2fc"] is not None or x["mean_treatment"] is not None for x in d.rows):
+                        analysis.fold_change_only(d, few[:1].upper() + few[1:] if few else "No replicates")
+                    if d.confidence:
+                        notes.append(f"{d.name}: {d.confidence_note}")
+                if d.tested == 0 and not d.confidence and comps[k] not in low:
                     notes.append(f"{d.name}: zero features could be tested. No valid volcano can be drawn; "
                                  "check replicate grouping and missing quantities.")
                 diffs.append(d)
@@ -391,6 +425,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
         "level": m.level if m else None,
         "samples": {x: pm.condition[x] for x in pm.samples} if pm else {},
         "comparisons": [{"name": d.name, "up": d.up, "down": d.down, "tested": d.tested,
+                         "confidence": d.confidence or "normal", "confidence_note": d.confidence_note,
                          "table": f"{RESULTS}/{d.slug()}_differential.tsv",
                          "volcano": (f"{RESULTS}/{Path(f.volcanos[d.name]).name}" if f.volcanos.get(d.name) else None)}
                         for d in diffs],

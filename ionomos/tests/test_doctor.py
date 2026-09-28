@@ -136,10 +136,10 @@ def test_limma_failure_falls_back_to_welch(tmp_path, monkeypatch):
     rec = _dia(tmp_path / "e")
     real = analysis.run_contrasts
 
-    def flaky(p, comps, s):
+    def flaky(p, comps, s, low=frozenset()):
         if s.test == "limma":
             raise ValueError("simulated limma failure")
-        return real(p, comps, s)
+        return real(p, comps, s, low)
 
     monkeypatch.setattr(analysis, "run_contrasts", flaky)
     out = downstream.analyze(tmp_path / "e", "DIA", {"enrichment": False}, record=rec)
@@ -210,11 +210,15 @@ def test_isodtb_table_without_probe_is_a_data_problem_not_a_crash(tmp_path):
     assert not (tmp_path / "e/results/analysis_error.txt").exists()
 
 
-def test_isodtb_single_replicate_asks_instead_of_silent_ok(tmp_path):
+def test_isodtb_single_replicate_is_a_labelled_fold_change_plot(tmp_path):
     simulate.isodtb_label_quant(tmp_path / "e/fragpipe/combined_modified_peptide_label_quant.tsv", {"EJQ_2_027": [1]})
     out = downstream.analyze(tmp_path / "e", "isoDTB", {"enrichment": False})
-    small = _codes(out)["SMALL_GROUP"]
-    assert out.summary["state"] != "ok" and "vs 0" in small.title
+    comp = out.summary["comparisons"][0]
+    assert comp["confidence"] == "none" and comp["tested"] == 0 and comp["up"] > 0
+    assert "FOLD_CHANGE_ONLY" in _codes(out) and "SMALL_GROUP" not in _codes(out) and "ONE_SAMPLE" not in _codes(out)
+    assert out.summary["state"] == "ok"
+    svg = (tmp_path / "e" / comp["volcano"]).read_text(encoding="utf-8")
+    assert "FOLD CHANGE ONLY" in svg and "rank (sorted by log2 H/L)" in svg
 
 
 def test_a_few_junk_cells_do_not_drop_a_run(tmp_path):
@@ -252,4 +256,48 @@ def test_real_dia_nn_uncalibrated_names_group_by_condition(tmp_path):
                                                         "CS_22rv1_FLAG-AR_MA25-10uM_MA25"}
         assert [c["name"] for c in out.summary["comparisons"]] == [
             "CS_22rv1_FLAG-AR_MA25-10uM_MA25 vs CS_22rv1_FLAG-AR_MA25-10uM_DMSO"]
-        assert "SMALL_GROUP" in _codes(out)  # one DMSO replicate: asked about, not silently tested
+        # one DMSO replicate: tested with the MA25 replicates' spread, labelled low confidence
+        comp = out.summary["comparisons"][0]
+        assert comp["confidence"] == "low" and comp["tested"] > 0 and "LOW_CONFIDENCE" in _codes(out)
+
+
+# ---- 1 vs N and 1 vs 1: every comparison gets a plot, labelled by what the data can support
+
+
+def test_one_vs_one_alone_is_fold_change_only(tmp_path):
+    _dia(tmp_path / "e", reps=(1,), record=False)
+    out = downstream.analyze(tmp_path / "e", "DIA", {"enrichment": False})
+    comp = out.summary["comparisons"][0]
+    assert comp["name"] == "Drug vs DMSO" and comp["confidence"] == "none"
+    assert comp["tested"] == 0 and comp["up"] + comp["down"] > 0  # candidates by fold change, no p-values
+    rows = read_tsv(tmp_path / "e" / comp["table"])[1]
+    assert all(r["pvalue"] == "NA" for r in rows)
+    assert all(abs(float(r["log2fc"])) >= 1 for r in rows if r["significant"])
+    svg = (tmp_path / "e" / comp["volcano"]).read_text(encoding="utf-8")
+    assert "FOLD CHANGE ONLY" in svg and "mean log2 abundance" in svg
+    html = out.report.read_text(encoding="utf-8")
+    assert '"conf":"none"' in html
+
+
+def test_one_vs_one_borrows_variance_from_a_replicated_condition(tmp_path):
+    names = [("/x/DMSO_1.raw", "DMSO"), ("/x/DrugA_1.raw", "DrugA")] + [(f"/x/DrugB_{r}.raw", "DrugB") for r in (1, 2, 3)]
+    _dia(tmp_path / "e", names=names, record=False)
+    out = downstream.analyze(tmp_path / "e", "DIA", {"enrichment": False})
+    by = {c["name"]: c for c in out.summary["comparisons"]}
+    assert by["DrugA vs DMSO"]["confidence"] == "low" and by["DrugA vs DMSO"]["tested"] > 0
+    assert by["DrugB vs DMSO"]["confidence"] == "low"
+
+
+def test_welch_with_a_group_of_one_uses_a_pooled_t_test(tmp_path):
+    names = [("/x/DMSO_1.raw", "DMSO")] + [(f"/x/Drug_{r}.raw", "Drug") for r in (1, 2, 3)]
+    _dia(tmp_path / "e", names=names, record=False)
+    out = downstream.analyze(tmp_path / "e", "DIA", {"enrichment": False}, {"test": "welch"})
+    comp = out.summary["comparisons"][0]
+    assert comp["confidence"] == "low" and comp["tested"] > 0
+
+
+def test_replicated_comparisons_are_unlabelled(tmp_path):
+    rec = _dia(tmp_path / "e")
+    out = downstream.analyze(tmp_path / "e", "DIA", {"enrichment": False}, record=rec)
+    assert out.summary["comparisons"][0]["confidence"] == "normal"
+    assert "LOW CONFIDENCE" not in (tmp_path / "e" / out.summary["comparisons"][0]["volcano"]).read_text(encoding="utf-8")

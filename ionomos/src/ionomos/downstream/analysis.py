@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import math
 import re
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, replace
 
 from ionomos.downstream import fpa, stats
 from ionomos.downstream.enrich import DEFAULT_LIBRARIES, LIBRARIES
@@ -252,6 +252,8 @@ class DiffResult:
     y_threshold_p: float | None   # the p-value where significance starts (the volcano's horizontal line)
     test_used: str = ""
     prior: tuple[float, float] = (math.nan, math.nan)  # limma: (prior df, prior variance)
+    confidence: str = ""          # "" normal | "low": a group of one, p borrowed | "none": fold change only
+    confidence_note: str = ""
 
     @property
     def up(self) -> int:
@@ -306,22 +308,26 @@ def _classic(p: fpa.Processed, a: str, b: str, s: Settings) -> fpa.ContrastResul
     return fpa.ContrastResult(a, b, diff, nan, list(nan), t, pv, stats.bh_adjust(pv), na, nb, ma, mb)
 
 
-def run_contrasts(p: fpa.Processed, comps: list[tuple[str, str | None]], s: Settings) -> list[fpa.ContrastResult]:
+def run_contrasts(p: fpa.Processed, comps: list[tuple[str, str | None]], s: Settings,
+                  low: frozenset | set = frozenset()) -> list[fpa.ContrastResult]:
+    """low: comparisons with a group smaller than min_valid. They are still tested where the model has
+    residual df (limma borrows it from every condition; Welch becomes a pooled t-test), labelled low confidence."""
     m = p.m
     pairs = [(a, b) for a, b in comps if b not in (None, "others")]
     out: dict[tuple, fpa.ContrastResult] = {}
     if s.test == "limma":
-        if pairs:
-            mv = 0 if p.imputation != "none" else s.min_valid
-            for r in fpa.limma_contrasts(m.values, m.samples, m.condition, pairs, min_valid=mv):
-                out[(r.treatment, r.control)] = r
+        mv = 0 if p.imputation != "none" else s.min_valid
+        for group, gmv in (([c for c in pairs if c not in low], mv), ([c for c in pairs if c in low], 0)):
+            if group:  # eBayes is fitted on every condition's residuals, so splitting contrasts changes nothing else
+                for r in fpa.limma_contrasts(m.values, m.samples, m.condition, group, min_valid=gmv):
+                    out[(r.treatment, r.control)] = r
         if any(b == "others" for _, b in comps):
             for r in fpa.limma_others(m.values, m.samples, m.condition):
                 out[(r.treatment, "others")] = r
     else:
         for a, b in comps:
             if b is not None:
-                out[(a, b)] = _classic(p, a, b, s)
+                out[(a, b)] = _classic(p, a, b, replace(s, min_valid=1, test="student") if (a, b) in low else s)
     for a, b in comps:
         if b is None:
             cols = [j for j, x in enumerate(m.samples) if m.condition[x] == a]
@@ -381,6 +387,63 @@ def to_diff(p: fpa.Processed, r: fpa.ContrastResult, control: str | None, s: Set
     d.test_used = s.test
     d.prior = r.prior
     return d
+
+
+def _split_name(name: str) -> tuple[str, str]:
+    """'DrugA_vs_DMSO' / 'DrugA vs DMSO' / 'DrugA-DMSO' -> ('DrugA', 'DMSO'); otherwise (name, '')."""
+    if name.count("_") == 1 and not re.search(r"\svs\.?\s", name):  # Perseus: DrugA_DMSO
+        a, b = name.split("_")
+        if a and b and not b.isdigit():
+            return a, b
+    for sep in (r"\s*[_ .-]vs\.?[_ .-]\s*", r"\s*[_ ]over[_ ]\s*", r" - ", r"(?<=\w)-(?=\w)"):
+        parts = re.split(sep, name, maxsplit=1, flags=re.I)
+        if len(parts) == 2 and all(p.strip() for p in parts):
+            return parts[0].strip(), parts[1].strip()
+    return name, ""
+
+
+def precomputed_diffs(m: QuantMatrix, s: Settings) -> list[DiffResult]:
+    """Results tables (anytable.py): fold change and p (and q, or BH from p) as given, with this lab's cut-offs."""
+    out = []
+    for c in m.meta.get("precomputed") or []:
+        q = c["q"] if c["q"] is not None else stats.bh_adjust([math.nan if v is None else v for v in c["p"]])
+        rows, thr_p = [], None
+        for i, f in enumerate(m.features):
+            fc, pv, qv = c["fc"][i], c["p"][i], _nan(q[i])
+            score = qv if s.use_adjusted else pv
+            sig = fpa.significant(fc if fc is not None else math.nan, score, s.alpha, s.log2fc)
+            if score is not None and score <= s.alpha and pv is not None:
+                thr_p = pv if thr_p is None else max(thr_p, pv)
+            rows.append({"index": i, "id": f.id, "label": f.label, "description": f.description, "log2fc": fc,
+                         "ci_low": None, "ci_high": None, "pvalue": pv, "qvalue": qv, "significant": sig, "t": None,
+                         "n_treatment": None, "n_control": None, "imputed": 0, "mean_treatment": None,
+                         "mean_control": None})
+        if not s.use_adjusted:
+            thr_p = s.alpha
+        rows.sort(key=lambda x: (x["pvalue"] is None, x["pvalue"] if x["pvalue"] is not None else 1.0))
+        treatment, control = _split_name(c["name"])
+        d = DiffResult(c["name"] or "comparison", treatment, control or "reference", "given", rows, s, thr_p)
+        d.test_used = "as given"
+        if not any(r["pvalue"] is not None for r in rows):
+            fold_change_only(d, f"The table has no usable p-values for {d.name}")
+        out.append(d)
+    return out
+
+
+def fold_change_only(d: DiffResult, reason: str) -> None:
+    """No replicates anywhere to estimate variance: rank by fold change and call candidates on |log2FC| alone.
+    No p-values are invented; every output labels these as fold change only."""
+    lfc = d.settings.log2fc or 1.0
+    for r in d.rows:
+        fc = r["log2fc"]
+        if fc is None and d.control is None:  # ratio vs 0 with one replicate: the value itself
+            fc = r["log2fc"] = r["mean_treatment"]
+        r["significant"] = "" if fc is None or abs(fc) < lfc else ("up" if fc > 0 else "down")
+    d.rows.sort(key=lambda x: (x["log2fc"] is None, -abs(x["log2fc"] or 0.0)))
+    d.y_threshold_p = None
+    d.confidence = "none"
+    d.confidence_note = (f"{reason} — no statistics are possible, so this is fold change only: "
+                         f"candidates are |log2FC| ≥ {lfc:g}, with no p-values. Treat them as leads to confirm.")
 
 
 DIFF_COLUMNS = ["id", "label", "description", "log2fc", "ci_low", "ci_high", "pvalue", "qvalue", "significant", "t",
