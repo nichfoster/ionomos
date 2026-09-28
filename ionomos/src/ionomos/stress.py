@@ -86,14 +86,23 @@ class Report:
         return "\n".join(lines)
 
 
-def _raw_census(*roots: Path) -> tuple[int, int]:
+def _raw_census(*roots: Path, moving: bool = False) -> tuple[int, int]:
+    """(number of .raw files, total bytes). moving=True while the watcher still runs: a file intake moves
+    away between the walk and the stat is skipped (it is counted where it lands). The final no-raw-lost
+    check runs after the watcher stopped, with moving=False, so a real loss still fails loudly."""
     n = size = 0
     for root in roots:
         for dirpath, _dirs, files in os.walk(root):
             for f in files:
                 if f.lower().endswith(".raw"):
+                    try:
+                        st = (Path(dirpath) / f).stat()
+                    except FileNotFoundError:
+                        if not moving:
+                            raise
+                        continue
                     n += 1
-                    size += (Path(dirpath) / f).stat().st_size
+                    size += st.st_size
     return n, size
 
 
@@ -299,7 +308,7 @@ def run(n: int = 60, seed: int = 1, root: Path | None = None, keep: bool = False
         time.sleep(0.5)
         inbox_left = [p for p in cfg.inbox.iterdir() if p.is_dir()]
         unsettled = [p for p in inbox_left
-                     if not (cfg.inbox / f"{p.name}.REJECTED.txt").exists() and _raw_census(p)[0] > 0]
+                     if not (cfg.inbox / f"{p.name}.REJECTED.txt").exists() and _raw_census(p, moving=True)[0] > 0]
         busy = led.list("queued") + led.list("running")
         if not unsettled and not busy and time.monotonic() - t0 > 5:
             break
