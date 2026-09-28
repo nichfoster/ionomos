@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-28
+
+### Added
+
+- **Review before filing**: every drop that parses opens the naming window in
+  review mode. It shows user, method, date, each file's condition / replicate /
+  fraction (all editable), and one line per condition marking the CONTROL and
+  the treated ones with their replicates and fractions. A Control picker pins
+  a different control in `experiment.yaml`. On by default
+  (`gui.review_drops`); drops are filed as read when there's no display. (D34)
+- **DIA condition codes**: `X_D1.raw` = DMSO rep 1, `X_C2.raw` = Compound
+  rep 2 (1–2 letter codes; `naming.condition_codes`, default `D: DMSO`,
+  `C: Compound`). Instrument tails like `HCD33` are unaffected.
+
+### Fixed
+
+- A user or alias added in the app now counts without restarting the watcher:
+  it re-reads `config.yaml` when it changes (keeping the last good copy if a
+  file is mid-save), and an open naming window refreshes its user list and
+  fills in a blank user when an alias like `KC` → Kosuke appears.
+- Saving settings in the app keeps `gui.review_drops` and `naming:`, and a
+  saved window answer that sets a control no longer wipes other
+  `experiment.yaml` analysis settings.
+
 ## [0.9.0] - 2026-09-27
 
 ### Added
