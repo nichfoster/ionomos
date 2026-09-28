@@ -63,17 +63,28 @@ def prepare(dest: Path, cfg, method: str | None = None, extra: dict | None = Non
             "context": context_for(dest, record, method or "?"), "mod_mass": mod_mass}
 
 
-def run_for_folder(dest: Path, cfg, method: str | None = None, extra: dict | None = None, progress=None):
+def table_workspace(table: Path) -> Path:
+    """Where a table's analysis goes: <table stem>_ionomos/ next to it — a folder Ionomos owns, so results/ and
+    experiment.yaml can never overwrite files of the same name that already sit beside someone's table."""
+    table = Path(table)
+    ws = table.parent / f"{table.stem}_ionomos"
+    ws.mkdir(exist_ok=True)
+    return ws
+
+
+def run_for_folder(dest: Path, cfg, method: str | None = None, extra: dict | None = None, progress=None,
+                   table: Path | None = None):
     """Analyse one experiment folder (used after a job, by `ionomos analyze` and the Analysis tab).
+    table: analyse this file with the any-format loader (results go to results/ next to it).
     Returns downstream.Outcome."""
     from ionomos import downstream
 
     p = prepare(dest, cfg, method, extra)
     return downstream.analyze(p["dest"], p["method"], p["lab"], p["overrides"], p["record"], p["context"],
-                              p["mod_mass"], progress=progress)
+                              p["mod_mass"], progress=progress, table=table)
 
 
-def inspect_folder(dest: Path, cfg, method: str | None = None) -> dict:
+def inspect_folder(dest: Path, cfg, method: str | None = None, table: Path | None = None) -> dict:
     """What the Analysis tab shows before running: method, source table, samples with their conditions
     (as the data says, before this experiment's sample overrides), and the current overrides."""
     from ionomos import downstream
@@ -81,8 +92,13 @@ def inspect_folder(dest: Path, cfg, method: str | None = None) -> dict:
     p = prepare(dest, cfg, method)
     dest = p["dest"]
     workdir = dest / "fragpipe" if (dest / "fragpipe").is_dir() else dest
-    found = p["method"] if p["method"] and p["method"] != "auto" else downstream.detect_method(workdir)
-    m, _files, notes = downstream.load_quantities(found, workdir, dest / downstream.RESULTS, p["record"], p["mod_mass"])
+    found = "table" if table is not None else (
+        p["method"] if p["method"] and p["method"] != "auto" else downstream.detect_method(workdir))
+    try:
+        m, _files, notes = downstream.load_quantities(found, workdir, dest / downstream.RESULTS, p["record"],
+                                                      p["mod_mass"], table)
+    except ValueError as exc:  # isodtb.SiteError / anytable.TableError: the table holds nothing usable
+        m, notes = None, [str(exc)]
     samples = []
     if m is not None:
         from ionomos.downstream.quant import run_stem

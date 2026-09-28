@@ -540,8 +540,16 @@ def cmd_analyze(args) -> int:
         dest = Path(job.dest_dir)
     else:
         dest = Path(target)
+    table = None
+    if dest.is_file():  # any protein / results table (csv, tsv, txt, xlsx): results go to <stem>_ionomos/
+        table = dest.resolve()
+        try:
+            dest = postprocess.table_workspace(table)
+        except OSError as exc:
+            print(f"cannot create a results folder next to {table}: {exc}", file=sys.stderr)
+            return 2
     if not dest.is_dir():
-        print(f"not a folder: {dest}", file=sys.stderr)
+        print(f"not a folder or table: {dest}", file=sys.stderr)
         return 2
     extra = {}
     if args.control:
@@ -559,10 +567,12 @@ def cmd_analyze(args) -> int:
     if args.no_enrichment:
         extra["enrichment"] = False
     out = postprocess.run_for_folder(dest, cfg, args.method, extra,
-                                     progress=(lambda m: print(f"  … {m}", flush=True)) if not args.quiet else None)
+                                     progress=(lambda m: print(f"  … {m}", flush=True)) if not args.quiet else None,
+                                     table=table)
     print(f"method: {out.method or 'unknown'}")
     for c in out.summary.get("comparisons", []):
-        print(f"  {c['name']}: {c['up']} up, {c['down']} down of {c['tested']} tested  ({c['table']})")
+        conf = {"low": "  [LOW CONFIDENCE]", "none": "  [FOLD CHANGE ONLY]"}.get(c.get("confidence"), "")
+        print(f"  {c['name']}: {c['up']} up, {c['down']} down of {c['tested']} tested  ({c['table']}){conf}")
     for w in out.warnings:
         print(f"  note: {w}")
     for i in out.issues:
@@ -711,8 +721,9 @@ def main(argv: list[str] | None = None) -> int:
     it.add_argument("--force", action="store_true", help="overwrite an existing config with defaults (a backup is kept)")
     it.set_defaults(fn=cmd_init)
     az = sub.add_parser("analyze", help="(re)run statistics, volcano plots and the report for a job or folder")
-    az.add_argument("target", help="job id, experiment folder, or any FragPipe output folder")
-    az.add_argument("--method", choices=["isoDTB", "TMT", "DIA", "LFQ", "auto"], default=None,
+    az.add_argument("target", help="job id, experiment folder, any FragPipe output folder, or any protein / results "
+                                   "table (.csv .tsv .txt .xlsx)")
+    az.add_argument("--method", choices=["isoDTB", "TMT", "DIA", "LFQ", "table", "auto"], default=None,
                     help="default: from ionomos.json, else detected from the files")
     az.add_argument("--control", help="control condition (default: recognised by name, e.g. DMSO)")
     az.add_argument("--compare", action="append", metavar="'A vs B'", help="comparison; repeatable")

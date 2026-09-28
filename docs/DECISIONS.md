@@ -354,3 +354,29 @@ sync. CI can't see that kind of problem. The workflow is removed and
 enforcement: an app with write access can still merge. To enforce this, turn
 on branch protection for `master` requiring one approving code-owner review,
 with admins exempt so the owner can still push directly.
+
+### D32 — Small groups are tested and labelled, never refused; p-values are never invented
+**2026-09-27.** A real run (Chris, 22Rv1 FLAG-AR, one DMSO against three
+MA25) ended with "not enough replicates" and an empty volcano. The lab wants a
+plot from whatever it has. A group of one is now tested: limma's group-means
+model pools residual variance across every condition, and a Welch test falls
+back to a pooled t-test. The comparison is labelled *low confidence* wherever
+it appears. When nothing in the experiment has replicates, there's nothing to
+estimate variance from, so the result is *fold change only*: candidates by
+|log2FC|, no p-values, and a fold-change-vs-abundance plot instead of a
+volcano. The label travels with every output (report, SVG, TSV notes,
+`analysis.json`, CLI), so a copied plot can't lose it. `min_valid` stays the
+line between "normal" and "low".
+
+### D33 — Any table in, a volcano out; results go in a folder Ionomos owns
+**2026-09-27.** People bring MaxQuant, Spectronaut, Perseus, limma, DESeq2 and
+Excel sheets, not only FragPipe. `downstream/anytable.py` reads any of them
+(stdlib only, including `.xlsx`) and hands the pipeline the same QuantMatrix
+the FragPipe loaders make. A table that already holds results is plotted as
+given and never recomputed. Such a table can sit in any folder, and that
+folder may already have its own `results/`. So its analysis writes to
+`<table name>_ionomos/` next to it and never touches the files beside it (the
+D17 rule). The generic loader only runs when the method is unknown. A
+pipeline job that knows it's DIA still reports "no pg_matrix" instead of
+analysing a stray `psm.tsv`.
+

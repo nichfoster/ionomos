@@ -191,7 +191,7 @@ class ExperimentEditor:
 
     # ----------------------------------------------------------------- load --
 
-    def load(self, dest: Path, method: str | None, job_id: int | None = None) -> None:
+    def load(self, dest: Path, method: str | None, job_id: int | None = None, table: Path | None = None) -> None:
         from ionomos import postprocess
 
         cfg = self._cfg()
@@ -201,18 +201,20 @@ class ExperimentEditor:
 
         def go():
             try:
-                info, err = postprocess.inspect_folder(dest, cfg, method), None
+                info, err = postprocess.inspect_folder(dest, cfg, method, table), None
             except Exception as exc:  # noqa: BLE001
                 info, err = None, f"{type(exc).__name__}: {exc}"
-            self.host.post(lambda: self._show(dest, method, job_id, info, err))
+            self.host.post(lambda: self._show(dest, method, job_id, info, err, table))
 
         threading.Thread(target=go, daemon=True).start()
 
-    def _show(self, dest: Path, method: str | None, job_id, info: dict | None, err: str | None) -> None:
+    def _show(self, dest: Path, method: str | None, job_id, info: dict | None, err: str | None,
+              table: Path | None = None) -> None:
         if err or info is None:
             self.info.configure(text=f"Could not read {dest}: {err}", foreground="#c62828")
             return
-        self.target = {"dest": dest, "method": info.get("method") or method, "info": info, "job_id": job_id}
+        self.target = {"dest": dest, "method": info.get("method") or method, "info": info, "job_id": job_id,
+                       "table": table}
         ov = dict(info.get("overrides") or {})
         self._samples = info["samples"]
         self._cond = dict(ov.pop("sample_conditions", None) or {})
@@ -438,7 +440,8 @@ class ExperimentEditor:
 
         def go():
             try:
-                out, err = postprocess.run_for_folder(dest, cfg, method, progress=progress), None
+                out, err = postprocess.run_for_folder(dest, cfg, method, progress=progress,
+                                                      table=self.target.get("table")), None
                 postprocess.record_issues(self.host.log_dir(), dest, out, job_id)
             except Exception as exc:  # noqa: BLE001 - analyze() never raises; belt and braces
                 out, err = None, f"{type(exc).__name__}: {exc}"
@@ -498,6 +501,12 @@ class ExperimentEditor:
     def choose_folder(self) -> Path | None:
         d = filedialog.askdirectory(title="Experiment or FragPipe output folder", parent=self.frame)
         return Path(d) if d else None
+
+    def choose_table(self) -> Path | None:
+        f = filedialog.askopenfilename(
+            title="A protein or results table (MaxQuant, Spectronaut, Perseus, limma, Excel, CSV …)", parent=self.frame,
+            filetypes=[("Tables", "*.tsv *.csv *.txt *.xlsx *.tab"), ("All files", "*.*")])
+        return Path(f) if f else None
 
 
 def _win() -> bool:

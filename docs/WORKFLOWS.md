@@ -182,6 +182,37 @@ features × samples matrix of log2 values and runs the same statistics:
   `fragpipe-analyst/` (annotation + `reproduce_in_R.R`), `analysis.json`
   (settings and every processing step).
 
+- **Small groups** (D32). A comparison is never refused for having too few
+  replicates. When a group has one sample, limma still fits the model over
+  every sample, so it borrows the variance from the replicated groups (a Welch
+  test becomes a pooled t-test). The comparison is labelled **low confidence**
+  in the report, on the volcano SVG, in `analysis.json` (`"confidence":
+  "low"`) and on the command line. With no replicates anywhere (1 vs 1, a
+  single isoDTB replicate), there's nothing to estimate variance from, so the
+  plot is **fold change only**. It shows log2FC against mean abundance (or
+  rank, for ratio data), and candidates are features with |log2FC| ≥ the
+  cut-off. No p-values are invented.
+
+- **Any table** (`downstream/anytable.py`, D33): `ionomos analyze <file>` or
+  Analysis tab → **Table…**. TSV, CSV (including `;` with decimal commas),
+  TXT and Excel `.xlsx` (first sheet). Two shapes are recognised:
+  - Quantities: an ID column plus one numeric column per sample. This covers
+    MaxQuant `proteinGroups.txt` (LFQ intensity; `+`-flagged rows dropped),
+    Spectronaut `.PG.Quantity`, Proteome Discoverer abundances, FragPipe or
+    DIA-NN matrices, and any hand-made sheet. Raw intensities are
+    log2-transformed; log2 values are kept. They go through the full pipeline.
+  - Results: a fold-change column and a p-value column per comparison, e.g.
+    limma topTable, Perseus (`-Log p-value`), DESeq2 (linear FoldChange →
+    log2), or a FragPipe-Analyst export with several comparisons. These are
+    plotted as given, with the lab's cut-offs; q is BH-computed if missing.
+
+  Output goes to `<table name>_ionomos/` next to the file, never beside it,
+  so nothing of the user's is overwritten. With no file given, a folder
+  without FragPipe tables is scanned for the best table. Long-format
+  intermediates (`psm.tsv`, `report.tsv`, …) and files over 100 MB are
+  skipped. A file that is neither shape gets an `UNUSABLE_TABLE` note saying
+  what to export.
+
 - **Checks after every analysis** (`downstream/doctor.py`, shown at the top of
   the report; *decide* and *problem* ones also pop up a window with the fix):
   | code | severity | when |
@@ -189,7 +220,7 @@ features × samples matrix of log2 values and runs the same statistics:
   | NO_TABLE / EMPTY_TABLE | problem | FragPipe produced no (or an empty) result table for the method |
   | UNUSABLE_TABLE | problem | the table exists but holds nothing usable (isoDTB: no probe-labelled peptides / ratio columns) |
   | NO_QUANTITIES | problem | rows but not one measured value in the sample columns |
-  | ONE_SAMPLE | problem | a single sample was quantified — nothing to compare |
+  | ONE_SAMPLE | problem | a single sample of intensity data was quantified — nothing to compare |
   | NOTHING_LEFT | problem | every sample was left out, or the filters removed every feature |
   | MISSING_RUNS | problem | searched runs with no quantities in the table |
   | UNMATCHED_RUNS | decide | runs not in the experiment's file list (conditions guessed) |
@@ -197,7 +228,10 @@ features × samples matrix of log2 values and runs the same statistics:
   | ONE_CONDITION | decide | every sample in one condition — conditions suggested from the file names |
   | NO_CONTROL | decide | no condition looks like a control; the guess is used until confirmed |
   | BAD_COMPARISON | decide | chosen comparisons don't fit; defaults used meanwhile |
-  | SMALL_GROUP | decide | a group has fewer than `min_valid` samples (any method, incl. an isoDTB ratio test vs 0) |
+  | EACH_OWN_CONDITION | decide | every sample is its own condition (replicates named with letters?) — grouping suggested |
+  | SMALL_GROUP | decide | a group is too small and not even a fold change could be computed |
+  | LOW_CONFIDENCE | note | a group has one sample: tested anyway, p borrowed from the replicated groups (D32) |
+  | FOLD_CHANGE_ONLY | note | no replicates anywhere (1 vs 1, one isoDTB replicate, a table without p): fold change only |
   | LOW_SAMPLE | decide | a sample has < 40 % of the median identifications (failed injection?) |
   | ZERO_TESTED / NO_VOLCANO / CRASH_* | problem | nothing testable, plot not written, a step crashed |
   | HIGH_IMPUTATION, FEW_FEATURES, NO_HITS, ENRICHMENT | note | worth knowing |

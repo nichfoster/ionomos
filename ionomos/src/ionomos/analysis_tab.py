@@ -81,6 +81,7 @@ class AnalysisTab:
         bb = ttk.Frame(p)
         bb.grid(row=0, column=2, sticky="w")
         ttk.Button(bb, text="Folder…", command=self.choose_folder).pack(side="left", padx=2)
+        ttk.Button(bb, text="Table…", command=self.choose_table).pack(side="left", padx=2)
         ttk.Button(bb, text="Reload", command=self.reload_target).pack(side="left", padx=2)
         host = EditorHost(post=self.app.post, open_path=lambda x: self.app._open(x),
                           config_path=lambda: self.app.config_path, log_dir=self._log_dir,
@@ -88,7 +89,8 @@ class AnalysisTab:
                           status=self.app.set_status)
         self.editor = ExperimentEditor(p, host, on_done=lambda out: self.app.refresh_attention())
         self.editor.frame.grid(row=1, column=0, columnspan=3, sticky="nsew")
-        self.editor.info.configure(text="Pick a finished job, or a folder with FragPipe output.")
+        self.editor.info.configure(text="Pick a finished job, a folder with FragPipe output, or any protein / "
+                                        "results table (MaxQuant, Spectronaut, Perseus, limma, Excel, CSV …).")
 
     def _log_dir(self):
         try:
@@ -126,6 +128,19 @@ class AnalysisTab:
             self.pick.set(str(d))
             self.editor.load(d, None)
 
+    def choose_table(self):
+        from ionomos.postprocess import table_workspace
+
+        f = self.editor.choose_table()
+        if f:
+            try:
+                ws = table_workspace(f)
+            except OSError as exc:
+                self.app.set_status(f"cannot create a results folder next to {f.name}: {exc}")
+                return
+            self.pick.set(str(f))
+            self.editor.load(ws, "table", None, table=f)
+
     def select_job(self, job) -> None:
         """From the Jobs tab: open this job here."""
         self.app.nb.select(self.frame)
@@ -145,7 +160,7 @@ class AnalysisTab:
     def reload_target(self):
         t = self.editor.target
         if t:
-            self.editor.load(t["dest"], t["method"], t.get("job_id"))
+            self.editor.load(t["dest"], t["method"], t.get("job_id"), t.get("table"))
 
     # ----------------------------------------------------- page 2: defaults --
 

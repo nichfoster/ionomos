@@ -129,6 +129,7 @@ own (see [ROADMAP.md](ROADMAP.md)).
 - `results\analysis.json` — the machine-readable summary: `state` (`ok` / `needs_input` / `failed`) and every comparison's up/down/tested counts.
 - isoDTB: `results\<prefix>_sites.tsv`, one per sample prefix — the Phase 2 exit table.
 - `results\fragpipe-analyst\` — `experiment_annotation.tsv` and `reproduce_in_R.R`, for reproducing the analysis in the lab's FragPipe-Analyst sessions. Comparing those against this report on a real experiment is a ROADMAP open item.
+- **Any other table** (MaxQuant, Spectronaut, Perseus, limma, Excel…): `ionomos-cli.exe analyze <file>` or tab 7 → **Table…**; results land in `<file>_ionomos\` beside it.
 - **Re-runs without re-searching**: `ionomos-cli.exe analyze <folder> --test welch` (also `--control`, `--compare 'A vs B'`, `--log2fc`, `--alpha`), or tab 7 → **Analyse an experiment** / **Analyse a folder…**. Expect to tune here: the analysis defaults (imputation, control keywords, the LOW_SAMPLE threshold) are provisional until real data says otherwise.
 
 ## The Phase 2 exit test — `_sites.tsv` vs the R output
