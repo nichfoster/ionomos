@@ -164,6 +164,7 @@ py -3.14 -c "import tkinter; print('ok')"
 | stop / start the watcher | tab 5 buttons; the startup task restarts it at next logon |
 | add a user | tab 2 → Add; or just create the folder under `C:\Fragpipe_General` |
 | see what a folder would do | `ionomos-cli.exe dry-run "C:\path\to\folder"` |
+| check how names are read (after changing `naming:`) | tab 3 → **Test names…**, or `ionomos-cli.exe names test <folder name> <file.raw> …` |
 | upgrade | tab 5 → **Get the latest version** → download → **Install update** (bottom bar); config/data untouched |
 | uninstall | Settings → Apps → Ionomos → Uninstall (data stays). Full reset: `deploy\clean_slate.ps1`. |
 

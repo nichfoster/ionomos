@@ -29,7 +29,8 @@ Preferred: build `Ionomos.exe` on a Windows machine with
 
 | Module | State |
 |---|---|
-| `naming.py` | ✅ keyword/user/date matching, per-method raw tails |
+| `naming.py` | ✅ keyword/user/date matching, per-method raw tails (configurable: `naming:` in config.yaml) |
+| `namecheck.py` | ✅ `ionomos names test`: how the config reads a list of names |
 | `config.py` | ✅ YAML load + validation (FragPipe paths are warnings until Phase 2) |
 | `watcher.py` | ✅ inbox polling with tree-fingerprint stability |
 | `ledger.py` | ✅ SQLite jobs table, startup recovery |
@@ -39,7 +40,7 @@ Preferred: build `Ionomos.exe` on a Windows machine with
 | `app.py` | ✅ setup wizard / control panel (`ionomos setup`, or the exe with no args) |
 | `configio.py` | ✅ commented config.yaml writer used by the app |
 | `service.py` | ✅ child watcher process, PID file, Task Scheduler, exe routing |
-| `cli.py` | ✅ `setup`, `run [--no-gui]`, `check`, `status`, `dry-run`, `retry`, `testbed` |
+| `cli.py` | ✅ `setup`, `run [--no-gui]`, `check`, `status`, `dry-run`, `names test`, `retry`, `testbed` |
 | `manifest.py` | stub |
 | `worker.py` | stub |
 | `runners/fragpipe.py` | stub (port from `reference/prior-work`) |

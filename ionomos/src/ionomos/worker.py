@@ -31,7 +31,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from ionomos import fragpipe
+from ionomos import fragpipe, runner
 from ionomos.config import Config
 from ionomos.intake import write_status
 from ionomos.ledger import Job, Ledger, LedgerError, now_iso
@@ -168,7 +168,7 @@ class Worker:
             if self._stop.is_set():
                 return False
             try:
-                spec = fragpipe.prepare(job, self.cfg)
+                spec = runner.prepare(job, self.cfg)
             except fragpipe.Hold as exc:
                 self._hold(job, str(exc))
                 continue
@@ -211,14 +211,14 @@ class Worker:
             return
         self.current = job
         try:
-            moved = fragpipe.write_inputs(spec)
+            moved = runner.write_inputs(spec)
         except OSError as exc:
             self.current = None
-            self._fail(job, f"could not prepare FragPipe inputs: {exc}")
+            self._fail(job, f"could not prepare {spec.engine_name} inputs: {exc}")
             return
         if moved:
             spec.warnings.append(f"previous attempt's output kept as {moved}/")
-        log.info("job %d: FragPipe %s on %s (%d raw files, attempt %d)", job.id, job.method, dest,
+        log.info("job %d: %s %s on %s (%d raw files, attempt %d)", job.id, spec.engine_name, job.method, dest,
                  len(spec.manifest_lines), attempt)
         for w in spec.warnings:
             log.warning("job %d: %s", job.id, w)
@@ -232,7 +232,7 @@ class Worker:
         (dest / FAILED_NOTE).unlink(missing_ok=True)
 
         def started(pid, cmd):
-            log.info("job %d: FragPipe pid %d: %s", job.id, pid, " ".join(cmd))
+            log.info("job %d: %s pid %d: %s", job.id, spec.engine_name, pid, " ".join(cmd))
             _update_status(job, run={"pid": pid})
 
         last = [0.0]
@@ -278,8 +278,8 @@ class Worker:
         hits = "".join(f"  {c['name']}: {c['up']} up, {c['down']} down of {c['tested']}\n"
                        for c in summary.get("comparisons", []))
         _note(dest, DONE_NOTE,
-              f"FragPipe finished {datetime.now():%Y-%m-%d %H:%M}.\n{report}"
-              f"FragPipe output: {spec.workdir}\n"
+              f"{spec.engine_name} finished {datetime.now():%Y-%m-%d %H:%M}.\n{report}"
+              f"{spec.engine_name} output: {spec.workdir}\n"
               + (f"Hits:\n{hits}" if hits else "")
               + ("".join(f"Note: {w}\n" for w in warnings)))
         log.info("job %d: done%s", job.id, f" ({len(warnings)} warning(s))" if warnings else "")
@@ -297,18 +297,19 @@ class Worker:
     def _fail(self, job: Job, reason: str, spec: fragpipe.RunSpec | None = None, hints: list[str] | None = None) -> None:
         self.ledger.set_status(job.id, "failed", reason)
         _update_status(job, status="failed", reason=reason)
+        engine = spec.engine_name if spec else "The search"
         if reason != "cancelled by user":
             tail = fragpipe.read_tail_text(spec.console_log, 8000) if spec else ""
-            _tell(self.cfg, "search_failed", job, f"FragPipe failed on {job.user}/{job.inbox_name}", reason,
+            _tell(self.cfg, "search_failed", job, f"{engine} failed on {job.user}/{job.inbox_name}", reason,
                   severity="error", causes=list(hints or []) or [
-                      "See the last lines of FragPipe's log below — the first ERROR / Exception line is usually the cause"],
+                      f"See the last lines of {engine}'s log below — the first ERROR / Exception line is usually the cause"],
                   fixes=["Fix the cause, then press Retry here (or Jobs tab → Retry)",
                          "If it's unclear: Report a problem sends the log with everything needed"],
                   details="\n".join(tail.splitlines()[-40:]),
                   data={"console_log": str(spec.console_log) if spec else None})
         dest = Path(job.dest_dir)
         if dest.is_dir():
-            log_hint = f"\nFragPipe console output: {spec.console_log}\n" if spec else "\n"
+            log_hint = f"\n{engine} console output: {spec.console_log}\n" if spec else "\n"
             likely = "".join(f"  - {h}\n" for h in hints or [])
             _note(dest, FAILED_NOTE,
                   f"ionomos could not finish this experiment ({datetime.now():%Y-%m-%d %H:%M}).\n\n"

@@ -78,6 +78,20 @@ EXPECTED = {
     "LFQ": ("combined_protein.tsv",
             ["IonQuant / label-free quantification is off in the workflow",
              "FragPipe stopped before quantification — check the FragPipe log"]),
+    # other engines' results (engines.py)
+    "DIA-NN": ("a DIA-NN report (report.tsv, report.parquet) or …pg_matrix.tsv",
+               ["DIA-NN stopped early (see its .log.txt)", "The results are in another folder than the one given"]),
+    "MaxQuant": ("combined/txt/proteinGroups.txt",
+                 ["MaxQuant stopped before the protein step (see combined/proc)",
+                  "Only the combined/txt folder was copied without proteinGroups.txt"]),
+    "Spectronaut": ("a Spectronaut report (PG.Quantity columns, or the long BGS report)",
+                    ["The report was exported with a schema that has no PG.Quantity",
+                     "The export is a peptide / precursor-only report"]),
+    "AlphaDIA": ("AlphaDIA's pg.matrix.tsv", ["AlphaDIA stopped before the protein step (see its log)"]),
+    "MSstats": ("an MSstats-format table (ProteinName, Run, Condition, BioReplicate, Intensity)",
+                ["The converter wrote another format (e.g. MSstatsTMT: not supported yet)"]),
+    "PD": ("a Proteome Discoverer Proteins export (Accession + Abundance columns)",
+           ["The Proteins table was exported without abundance columns"]),
 }
 
 

@@ -62,6 +62,9 @@ from ionomos.naming import (
 log = logging.getLogger("ionomos.intake")
 
 NAMING_DOC = "docs/NAMING_CONVENTION.md"
+# NamingError texts that mean "one file's name doesn't fit its method's rule" (fixable per file in the window)
+RAW_NAME_PROBLEMS = ("must end", "must look like", "must match the pattern", "not a .raw", "is not a number",
+                     "no sample name left")
 REJECT_SUFFIX = ".REJECTED.txt"
 
 
@@ -151,6 +154,7 @@ class Draft:
     control: str = ""  # experiment.yaml analysis.control, if set
     control_keywords: list[str] = field(default_factory=list)  # how the analysis recognises a control
     condition_codes: dict[str, str] = field(default_factory=dict)  # DIA X_D1 -> DMSO rep 1
+    file_rules: dict = field(default_factory=dict)  # method -> naming.FileRule (config naming.methods); {} = built-in
 
 
 class Resolver(Protocol):
@@ -228,10 +232,10 @@ def _resolve_user(name: str, cfg: Config, ov: Overrides) -> str:
         raise IntakeError(str(exc), Kind.USER) from exc
 
 
-def _lenient(filename: str, method: str, codes: dict[str, str] | None = None) -> RawName:
+def _lenient(filename: str, method: str, codes: dict[str, str] | None = None, rules=None) -> RawName:
     """Parse a raw name, falling back to (stem, rep 1, no fraction) so overrides can fill it in."""
     try:
-        return parse_raw_name(filename, method, codes)
+        return parse_raw_name(filename, method, codes, rules)
     except NamingError:
         stem = sanitize(filename[: -len(RAW_SUFFIX)])
         return RawName(filename=filename, safe_filename=stem + RAW_SUFFIX, sample=stem, rep=1, fraction=None)
@@ -271,7 +275,7 @@ def _plan(folder: Path, cfg: Config, ledger: Ledger | None = None) -> Plan:
 
     method = _resolve_method(folder.name, cfg, raw_names, ov)
     user = _resolve_user(folder.name, cfg, ov)
-    d = ov.date or find_date(folder.name)
+    d = ov.date or find_date(folder.name, formats=cfg.date_formats)
     fn = FolderName(
         original=folder.name, safe=sanitize(folder.name), method=method, user=user, date=d,
         tokens=tokens_of(folder.name),
@@ -288,14 +292,14 @@ def _plan(folder: Path, cfg: Config, ledger: Ledger | None = None) -> Plan:
 
     try:
         raws: RawSet = group_raws(raw_names, method, allow_uneven=ov.allow_uneven_fractions,
-                                  codes=cfg.condition_codes)
+                                  codes=cfg.condition_codes, rules=cfg.file_rules)
     except NamingError as exc:
         msg = str(exc)
         if not ov.files:
-            kind = Kind.RAWS if ("must end" in msg or "not a .raw" in msg) else Kind.LAYOUT
+            kind = Kind.RAWS if any(s in msg for s in RAW_NAME_PROBLEMS) else Kind.LAYOUT
             raise IntakeError(msg, kind) from exc
         # per-file overrides may fix a bad tail: parse leniently, then apply them
-        raws = RawSet(method=method, files=[_lenient(f, method, cfg.condition_codes) for f in raw_names])
+        raws = RawSet(method=method, files=[_lenient(f, method, cfg.condition_codes, cfg.file_rules) for f in raw_names])
     try:
         raws = apply_file_overrides(raws, ov)
     except OverridesError as exc:
@@ -356,14 +360,14 @@ def draft(folder: Path, cfg: Config, error: IntakeError | None = None, review: b
             user = find_user(folder.name, _users(cfg), cfg.method_aliases)
         except NamingError:
             user = ""
-    d = ov.date or find_date(folder.name)
+    d = ov.date or find_date(folder.name, formats=cfg.date_formats)
 
     files: list[DraftFile] = []
     for f in raw_names:
         df = DraftFile(filename=f, experiment=_safe(f[: -len(RAW_SUFFIX)]), bioreplicate="1")
         if method:
             try:
-                r = parse_raw_name(f, method, cfg.condition_codes)
+                r = parse_raw_name(f, method, cfg.condition_codes, cfg.file_rules)
                 df.experiment, df.bioreplicate = r.sample, str(r.rep)
                 df.fraction = "" if r.fraction is None else str(r.fraction)
             except NamingError as exc:
@@ -380,7 +384,7 @@ def draft(folder: Path, cfg: Config, error: IntakeError | None = None, review: b
     layout_error = ""
     if method and all(not f.error for f in files):
         try:
-            group_raws(raw_names, method, allow_uneven=ov.allow_uneven_fractions, codes=cfg.condition_codes)
+            group_raws(raw_names, method, allow_uneven=ov.allow_uneven_fractions, codes=cfg.condition_codes, rules=cfg.file_rules)
         except NamingError as exc:
             layout_error = str(exc)
     from ionomos.downstream.analysis import DEFAULT_CONTROL_KEYWORDS
@@ -395,7 +399,7 @@ def draft(folder: Path, cfg: Config, error: IntakeError | None = None, review: b
         known_users=cfg.known_users(), known_methods=list(cfg.methods),
         files=files, layout_error=layout_error, allow_uneven=ov.allow_uneven_fractions, source=str(folder),
         review=review and error is None, control=str((ov.analysis or {}).get("control") or ""),
-        control_keywords=keywords, condition_codes=dict(cfg.condition_codes),
+        control_keywords=keywords, condition_codes=dict(cfg.condition_codes), file_rules=dict(cfg.file_rules),
     )
 
 

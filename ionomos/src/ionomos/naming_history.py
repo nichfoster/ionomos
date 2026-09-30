@@ -44,7 +44,7 @@ def suggestions(cfg, user, method, filenames):
                 key = strip_acq_stamp(f["filename"][:-4])
                 exact.setdefault(key, set()).add(value)
                 try:
-                    parsed = parse_raw_name(f["filename"], method)
+                    parsed = parse_raw_name(f["filename"], method, cfg.condition_codes, cfg.file_rules)
                 except NamingError:
                     continue
                 if (parsed.rep, parsed.fraction or -1) == value[1:]:
@@ -58,7 +58,7 @@ def suggestions(cfg, user, method, filenames):
             result[filename] = FileOverride(*next(iter(choices)))
         elif not choices:
             try:
-                parsed = parse_raw_name(filename, method)
+                parsed = parse_raw_name(filename, method, cfg.condition_codes, cfg.file_rules)
             except NamingError:
                 continue
             labels = samples.get(parsed.sample, set())

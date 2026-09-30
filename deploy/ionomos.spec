@@ -29,7 +29,7 @@ a = Analysis(
                    "ionomos.experiment_editor", "ionomos.downstream.doctor"],
     hookspath=[],
     runtime_hooks=[],
-    excludes=["pandas", "numpy", "matplotlib", "scipy", "PIL", "pytest", "ruff"],
+    excludes=["pandas", "numpy", "matplotlib", "scipy", "PIL", "pytest", "ruff", "pyarrow"],  # pyarrow: optional (engines.py)
     noarchive=False,
 )
 pyz = PYZ(a.pure)

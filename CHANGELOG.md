@@ -27,6 +27,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A table analysed on its own gets none. Checked with the official validator
   (`sdrf-pipelines`, dev-only, installed in CI on Linux).
 
+- **Configurable naming** (`config.yaml` `naming:`, D37; ROADMAP Phase 5A).
+  Another lab's convention is now a config change, not a code change:
+  - `naming.methods.<name>`: each method's `.raw` rule as a template
+    (`'{condition}_rep{rep}'`, `'{sample}_R{rep}_F{fraction}'`, `[ ]` for
+    optional parts, `{any}` to skip text), a regex with named groups
+    (`pattern:`), or `like: isoDTB | TMT | DIA`. New method keys get file
+    rules this way.
+  - `naming.date_formats`: `YYYYMMDD`, `MMDDYYYY`, `DDMMYYYY`, `MMDDYY`,
+    `DDMMYY`, `YYMMDD`, tried in order.
+
+  The built-in rules are now templates that compile to the same regexes as
+  before, so nothing changes without the block. Mistakes are config errors
+  that name the setting: a bad template, a regex without a `sample` group, an
+  unknown field or date format, or a method keyword listed under two methods
+  (or blank). Numbers read by any rule must be 1–999 (D30). The app's Save
+  keeps the new settings.
+- **`ionomos names test <names…>`** (`namecheck.py`): prints how the live
+  config reads folder names, `.raw` names or folders on disk (user, method,
+  file rule, date, and each file's sample / replicate / fraction), or why a
+  name is rejected. `.raw` names after a folder name are read as its files.
+  The app's Methods tab has the same check (**Test names…**), using the
+  unsaved settings.
+- A `.raw` name for a method with no file rule now says how to add one
+  (`naming.methods.<name>`).
+
+- **Results from other engines** (`downstream/engines.py`, docs/ENGINES.md,
+  D36). `ionomos analyze` (and the Analysis tab's Table…) recognises and
+  loads:
+  - DIA-NN standalone: `pg_matrix`, the 1.x `report.tsv`, and the 2.x
+    `report.parquet` with the optional `pip install ionomos[parquet]`
+  - MaxQuant `proteinGroups.txt` (LFQ / Intensity / TMT reporters)
+  - Spectronaut pivot and long reports
+  - AlphaDIA `pg.matrix.tsv`
+  - MSstats-format tables (quantms, Skyline, …), summarised by Tukey median
+    polish
+  - Proteome Discoverer protein exports
+
+  Long reports are filtered at 1% precursor and protein FDR, and conditions
+  and replicates are taken from the engine when it records them.
+- **Data source in every report and in `analysis.json` (`engine`)**: engine,
+  version, tools (MSFragger / IonQuant / DIA-NN versions under FragPipe),
+  table, quantity, FDR filter, FASTA and parameter files, when the folder
+  records them. The Methods paragraph names the engine that produced the
+  numbers.
+- MaxQuant `CON__` contaminants are removed like FragPipe's `contam_`.
+- **The watcher can run DIA-NN** instead of FragPipe for a DIA method
+  (`engine: diann`, `diann_exe`, optional `library` / `diann_args`; D39,
+  docs/ENGINES.md):
+  - each job's settings are written to `ionomos_run/diann.cfg`
+  - results go to `diann/`
+  - cancel / Retry / pop-ups / previous-attempt folders work as for FragPipe
+  - the setup checklist checks the DIA-NN install and FASTA / library
+
+  Done notes, failure pop-ups and logs name the engine that ran.
+
+### Changed
+
+- ROADMAP Phase 5 and D36: the plan for making Ionomos useful to other labs
+  (pip-installable analysis, engine adapters, SDRF, configurable naming, more
+  engines and analyses).
+
 ## [0.11.0] - 2026-09-30
 
 ### Added

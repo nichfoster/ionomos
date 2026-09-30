@@ -187,10 +187,28 @@ def _insight_payload(ins: dict) -> dict:
 # --------------------------------------------------------------------- text --
 
 
+def _source_sentence(method: str, fragpipe_note: str, engine: dict) -> str:
+    """Who produced the numbers: FragPipe run by Ionomos, or another engine's results read by it (engines.py)."""
+    name = engine.get("engine") or ("FragPipe" if fragpipe_note or method in ("isoDTB", "TMT", "DIA", "LFQ") else "")
+    ver = f" {engine['version']}" if engine.get("version") else ""
+    tools = ", ".join(f"{k} {v}" for k, v in (engine.get("tools") or {}).items())
+    if name == "FragPipe":
+        extra = "; ".join(x for x in (fragpipe_note, tools) if x)
+        if fragpipe_note:
+            return (f"Raw files were searched with FragPipe{escape(ver)}{(' (' + escape(extra) + ')') if extra else ''} "
+                    f"using the lab's pinned {escape(method)} workflow, run automatically by Ionomos.")
+        return f"Raw files were searched with FragPipe{escape(ver)}{(' (' + escape(tools) + ')') if tools else ''}."
+    what = f"{name}{ver}" if name and name != "a table" else "a results table"
+    table = f" ({engine['table']})" if engine.get("table") else ""
+    qty = f", using {engine['quantity']}" if engine.get("quantity") else ""
+    fdr = f" at {engine['fdr']}" if engine.get("fdr") else ""
+    return f"Quantities from {escape(what)}{escape(table)} were read by Ionomos{escape(qty)}{escape(fdr)}."
+
+
 def methods_text(m: QuantMatrix | None, p: fpa.Processed | None, diffs: list[DiffResult], s: Settings, method: str,
-                 fragpipe_note: str, enrichment: list[dict], ranked: list[dict] | None = None) -> str:
-    parts = [f"Raw files were searched with FragPipe{(' (' + escape(fragpipe_note) + ')') if fragpipe_note else ''} "
-             f"using the lab's pinned {escape(method)} workflow, run automatically by Ionomos."]
+                 fragpipe_note: str, enrichment: list[dict], ranked: list[dict] | None = None,
+                 engine: dict | None = None) -> str:
+    parts = [_source_sentence(method, fragpipe_note, engine or {})]
     if m is None:
         return " ".join(parts)
     if m.kind == "ratio":
@@ -270,6 +288,20 @@ def _pipeline(p: fpa.Processed | None, diffs: list[DiffResult]) -> str:
     if diffs:
         chips.append(f"<span class='step'>tested <b>{tested:,}</b></span>")
     return "<div class='pipeline'>" + "<span class='arrow'>→</span>".join(chips) + "</div>"
+
+
+def _provenance_table(engine: dict) -> str:
+    """Where the numbers came from (engines.provenance): an audit trail printed with every report."""
+    rows = [("Engine", engine.get("engine", "")), ("Version", engine.get("version", "") or engine.get("note", "")),
+            ("Tools", ", ".join(f"{k} {v}" for k, v in (engine.get("tools") or {}).items())),
+            ("Result table", engine.get("table", "")), ("Quantity", engine.get("quantity", "")),
+            ("FDR filter", engine.get("fdr", "")), ("FASTA", engine.get("fasta", "")),
+            ("Parameter / log files", ", ".join(engine.get("files") or []))]
+    rows = [(k, v) for k, v in rows if v]
+    if not rows:
+        return ""
+    return "<h3>Data source</h3><div class='kv card'>" + "".join(
+        f"<div>{escape(k)}</div><div>{escape(str(v))}</div>" for k, v in rows) + "</div>"
 
 
 def _settings_table(s: Settings, p: fpa.Processed | None) -> str:
@@ -400,7 +432,8 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
     b.append("<section id='quality'><h2>Quality control</h2><div id='qc'></div></section>")
     method = ctx.get("method", "")
     b.append(f"<section id='methods'><h2>Methods</h2><p class='methods'>"
-             f"{methods_text(pm, p, diffs, s, method, ctx.get('fragpipe', ''), enrichment, ranked)}</p>")
+             f"{methods_text(pm, p, diffs, s, method, ctx.get('fragpipe', ''), enrichment, ranked, ctx.get('engine'))}</p>")
+    b.append(_provenance_table(ctx.get("engine") or {}))
     b.append("<h3>Settings used</h3>" + _settings_table(s, p))
     if any(f.startswith("fragpipe-analyst/") for f in files):
         b.append("<h3>Cross-check in FragPipe-Analyst</h3><p class='sub'>The folder <a href='fragpipe-analyst/'>"
