@@ -287,9 +287,13 @@ def test_msstats_long_format(tmp_path):
     assert _recall(_hits(out), {by_gene[g]: v for g, v in truth.items()}) > 0.7
 
 
-def test_msstats_tmt_is_refused_clearly(tmp_path):
-    _write(tmp_path / "t.csv", ["ProteinName", "PeptideSequence", "Charge", "PSM", "Mixture", "TechRepMixture", "Run",
-                                "Channel", "Condition", "BioReplicate", "Intensity"], [["P1"] + ["x"] * 10], sep=",")
+def test_msstats_tmt_goes_to_its_own_adapter(tmp_path):
+    """MSstatsTMT format has its own importer now (test_plexes.py); a file without usable numbers says so."""
+    head = ["ProteinName", "PeptideSequence", "Charge", "PSM", "Mixture", "TechRepMixture", "Run", "Channel",
+            "Condition", "BioReplicate", "Intensity"]
+    _write(tmp_path / "t.csv", head, [["P1"] + ["x"] * 10], sep=",")
+    assert engines._msstats_score(tmp_path / "t.csv") == 0 and engines._msstats_tmt_score(tmp_path / "t.csv") > 0.9
+    assert engines.detect(tmp_path).method == "MSstatsTMT"
     with pytest.raises(anytable.TableError, match="MSstatsTMT"):
         engines.load_msstats(tmp_path / "t.csv")
 

@@ -24,7 +24,9 @@ Pipeline stages, each a module:
     method prep   isodtb.py / tmt.py           (ports of the lab R scripts)
     quantities    quant.py   -> QuantMatrix    (one shape for every method)
                   engines.py                   (other engines' outputs: DIA-NN, MaxQuant, Spectronaut, AlphaDIA,
-                                                MSstats format, Proteome Discoverer; provenance of any result)
+                                                MSstats / MSstatsTMT format, Proteome Discoverer; provenance)
+    design        design.py                    (an SDRF in the folder sets conditions / replicates / plexes)
+    TMT plexes    plex.py                      (IRS: several plexes on one scale, before the processing)
     statistics    analysis.py + stats.py       (comparisons, Welch / one-sample t, BH)
     QC, insights  qc.py + insights.py + enrich.py  (PCA, scorecard, batch, missingness, on/off, gene sets)
     metadata      sdrf.py                      (SDRF-Proteomics, from the manifest, workflow and FASTA)
@@ -43,7 +45,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from ionomos.downstream import analysis, anytable, charts, engines, isodtb, quant, report, tmt
+from ionomos.downstream import analysis, anytable, charts, design, engines, isodtb, plex, quant, report, tmt
 from ionomos.downstream.tables import read_header, write_tsv
 
 log = logging.getLogger("ionomos.downstream")
@@ -120,10 +122,25 @@ def _merge_ratio(mats: list[quant.QuantMatrix]) -> quant.QuantMatrix:
 
 
 def load_quantities(method: str | None, workdir: Path, results: Path, record: dict | None,
-                    mod_mass: str = "561.3387", table: Path | None = None
-                    ) -> tuple[quant.QuantMatrix | None, list[Path], list[str]]:
+                    mod_mass: str = "561.3387", table: Path | None = None, sdrf_factor=None,
+                    dest: Path | None = None) -> tuple[quant.QuantMatrix | None, list[Path], list[str]]:
     """Method prep + loading. Returns (matrix or None, files written, notes). table: a file to read with
-    the any-format loader (anytable.py) instead of looking for FragPipe's tables."""
+    the any-format loader (anytable.py) instead of looking for FragPipe's tables. An SDRF the user put in the
+    experiment folder (or next to the table) then sets the design (design.py, D47); sdrf_factor picks its
+    factor value column(s). dest: the experiment folder (default: the folder holding fragpipe/)."""
+    workdir = Path(workdir)
+    m, files, notes = _load_quantities(method, workdir, results, record, mod_mass, table)
+    if m is not None:
+        if dest is None:
+            dest = workdir.parent if workdir.name == "fragpipe" else workdir
+        m, dnotes = design.load_into(m, Path(dest), workdir, Path(table) if table is not None else None, sdrf_factor)
+        notes += dnotes
+    return m, files, notes
+
+
+def _load_quantities(method: str | None, workdir: Path, results: Path, record: dict | None,
+                     mod_mass: str = "561.3387", table: Path | None = None
+                     ) -> tuple[quant.QuantMatrix | None, list[Path], list[str]]:
     files: list[Path] = []
     notes: list[str] = []
     results.mkdir(parents=True, exist_ok=True)
@@ -368,7 +385,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
 
     def read():
         try:
-            return load_quantities(method, workdir, results, record, mod_mass, table)
+            return load_quantities(method, workdir, results, record, mod_mass, table, settings.sdrf_factor, dest)
         except (isodtb.SiteError, anytable.TableError) as exc:
             f.read_problem = str(exc)
             notes.append(f"the result table has nothing usable: {exc}")
@@ -383,7 +400,14 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
         notes += lnotes
         if m is not None:
             notes += m.notes
+    tmt_info = None
+    if m is not None and m.features and not m.meta.get("precomputed"):  # TMT plexes on one scale (plex.py, D48)
+        bridged = stage("plex", plex.normalise, m, settings)
+        if bridged is not None:
+            m, tmt_info, pnotes = bridged
+            notes += pnotes
     f.loaded = m
+    f.tmt = tmt_info
     precomputed = (m.meta.get("precomputed") or []) if m is not None and m.features else []
     if precomputed:  # a results table: plot what it says, nothing to process or test
         say("plotting the results in " + m.meta.get("table", "the table"))
@@ -567,6 +591,8 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
                            for b in ranked],
         "quality": _quality_summary(insight),
         "sdrf": sdrf_info,
+        "design": _design_summary(m, settings),
+        "tmt": tmt_info,
         "source": m.source if m else None,
         "engine": ctx.get("engine") or {},
         "generated_at": datetime.now().isoformat(timespec="seconds"),
@@ -579,6 +605,21 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
         (results / "analysis.json").write_text(json.dumps(out.summary, indent=2, default=str), encoding="utf-8")
     except OSError as exc:
         out.warnings.append(f"could not write analysis.json: {exc}")
+    return out
+
+
+def _design_summary(m, settings) -> dict:
+    """Where each sample's condition came from, highest first (D47): sample_conditions, an input SDRF, the
+    engine's own columns, the ionomos.json manifest, the names."""
+    if m is None:
+        return {}
+    src = m.meta.get("conditions_from") or ("ionomos.json manifest" if m.meta.get("manifest_run") else "sample names")
+    out: dict = {"conditions_from": "the engine's table" if src == "engine" else src}
+    if m.meta.get("sdrf"):
+        out["sdrf"] = m.meta["sdrf"]
+    over = [x for x in (getattr(settings, "sample_conditions", {}) or {}) if x in m.condition]
+    if over:
+        out["overridden_by_sample_conditions"] = over
     return out
 
 
@@ -661,6 +702,7 @@ def _qc(p, diffs, settings) -> dict:
     before = p.before_filter or pm
     out = {
         "pca": qc.pca(pm.values, settings.pca_features),
+        "pca_before": plex.pca_before(p, settings) if pm.meta.get("bridge_before") else None,
         "correlation": qc.correlation(pm.values),
         "cv": qc.cv_by_condition(pm.values, pm.samples, pm.condition),
         "features_per_sample": qc.feature_numbers(before.values),

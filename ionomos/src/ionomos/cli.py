@@ -802,9 +802,9 @@ def main(argv: list[str] | None = None) -> int:
     az.add_argument("target", help="job id, experiment folder, a results folder from FragPipe, DIA-NN, MaxQuant, "
                                    "Spectronaut, AlphaDIA, or any protein / results table (.csv .tsv .txt .xlsx .parquet)")
     az.add_argument("--method", choices=["isoDTB", "TMT", "DIA", "LFQ", "DIA-NN", "MaxQuant", "Spectronaut", "AlphaDIA",
-                                         "MSstats", "PD", "table", "auto"], default=None,
+                                         "MSstats", "MSstatsTMT", "PD", "table", "auto"], default=None,
                     help="default: from ionomos.json, else detected from the files (FragPipe, DIA-NN, MaxQuant, "
-                         "Spectronaut, AlphaDIA, MSstats format, Proteome Discoverer, any table)")
+                         "Spectronaut, AlphaDIA, MSstats / MSstatsTMT format, Proteome Discoverer, any table)")
     az.add_argument("--control", help="control condition (default: recognised by name, e.g. DMSO)")
     az.add_argument("--compare", action="append", metavar="'A vs B'", help="comparison; repeatable")
     az.add_argument("--log2fc", type=float, help="fold-change threshold (log2)")

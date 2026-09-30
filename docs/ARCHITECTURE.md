@@ -40,7 +40,7 @@
 | `attention.py` | Durable "needs a person" queue (`<log_dir>/attention/*.json`): raised by intake, worker, analysis; closed when fixed | — |
 | `popups.py` | Pop-up windows + the "needs attention" list, in the app or (app closed) the watcher's own Tk loop | — |
 | `downstream/doctor.py` | The analysis check-up: issues with severity, likely causes, fixes; condition suggestions from file names | — |
-| `downstream/` | FragPipe tables → `QuantMatrix` → FragPipe-Analyst processing + limma → interactive `results/report.html`. `isodtb.py`/`tmt.py` (R ports), `quant.py` (loaders), `engines.py` (other engines' outputs — DIA-NN standalone incl. 2.x Parquet, MaxQuant, Spectronaut, AlphaDIA, MSstats format, Proteome Discoverer — and the provenance of any result; ENGINES.md, D36), `fpa.py` (FragPipeAnalystR port: filter, normalise, impute, `test_limma`), `rrandom.py` (R's RNG), `analysis.py` (settings, comparisons), `qc.py` (PCA, clustering, CV, missingness), `insights.py` (sample scorecard, PC ↔ condition/replicate, missingness vs intensity, p-value shape + π0, on/off features, imputation-driven hits, power; D35), `enrich.py` (local ORA and a correlation-adjusted rank test on Enrichr libraries), `export.py` (result tables, FragPipe-Analyst annotation + R script), `sdrf.py` (SDRF-Proteomics sample metadata; D38), `report.py` + `assets/report.js`, `charts.py` (static SVG volcano), `stats.py`, `simulate.py` | the lab's R scripts; FragPipeAnalystR; limma |
+| `downstream/` | FragPipe tables → `QuantMatrix` → FragPipe-Analyst processing + limma → interactive `results/report.html`. `isodtb.py`/`tmt.py` (R ports), `quant.py` (loaders), `engines.py` (other engines' outputs — DIA-NN standalone incl. 2.x Parquet, MaxQuant, Spectronaut, AlphaDIA, MSstats and MSstatsTMT format, Proteome Discoverer — and the provenance of any result; ENGINES.md, D36), `design.py` (an input SDRF as the design; D47), `plex.py` (IRS across TMT plexes; D48), `fpa.py` (FragPipeAnalystR port: filter, normalise, impute, `test_limma`), `rrandom.py` (R's RNG), `analysis.py` (settings, comparisons), `qc.py` (PCA, clustering, CV, missingness), `insights.py` (sample scorecard, PC ↔ condition/replicate, missingness vs intensity, p-value shape + π0, on/off features, imputation-driven hits, power; D35), `enrich.py` (local ORA and a correlation-adjusted rank test on Enrichr libraries), `export.py` (result tables, FragPipe-Analyst annotation + R script), `sdrf.py` (SDRF-Proteomics sample metadata; D38), `report.py` + `assets/report.js`, `charts.py` (static SVG volcano), `stats.py`, `simulate.py` | the lab's R scripts; FragPipeAnalystR; limma |
 | `setupcheck.py` | The setup checklist (app ✓ Setup tab, `ionomos init`) | — |
 | `names.py` | Every on-disk / system name, with its LabWatch-era twin; readers accept both, writers use the new one | — |
 | `buildinfo.py` | `Ionomos 0.5.0 (build 3f2a9c1, date, installed)` — `--version`, app footer, every report | — |
@@ -302,6 +302,43 @@ statistics and before the report:
 Unknown values are `not available`. `analysis.json` → `sdrf` lists the columns
 a repository still needs filled (`fill_in`), and the report's Methods says so.
 A table analysed on its own (D33) gets no SDRF: it names no raw files.
+
+**The design can come in as an SDRF too** (`downstream/design.py`, D47). When
+the experiment folder (two levels deep) or the folder of the table given to
+`ionomos analyze` holds a `*.sdrf.tsv` / `sdrf.tsv`, `load_quantities` matches
+each sample of the quant table to its rows and sets condition
+(`factor value[...]`, or the ones `analysis.sdrf_factor` names), biological
+replicate, and for TMT the plex and the pooled reference. `results/`, old runs
+and `<table>_ionomos/` folders are never searched, so Ionomos' own
+`results/sdrf.tsv` is never read back. Matching:
+
+| Table | Matched on |
+|---|---|
+| label-free (DIA-NN, Spectronaut, MSstats, FragPipe) | the run column's raw-file stem ↔ `comment[data file]`, with the manifest's rules (exact, FragPipe's `_calibrated` suffix, Xcalibur stamp) |
+| TMT (MSstatsTMT, MaxQuant with `summary.txt`, PD) | one of the plex's raw files + the channel ↔ `comment[data file]` + `comment[label]` (`TMT127N`); files sharing one channel → source map are one plex |
+| anything else | the sample name ↔ `source name` / `assay name` |
+
+Precedence: `sample_conditions` > SDRF > the engine's own condition column >
+`ionomos.json` manifest > names. Samples keep the table's names. `analysis.json`
+→ `design` records where the conditions came from, the SDRF's match counts and
+the samples `sample_conditions` overrode; runs the SDRF doesn't describe are the
+doctor's `SDRF_UNMATCHED_RUNS`.
+
+**Several TMT plexes are put on one scale before the processing**
+(`downstream/plex.py`, D48; an isolated `plex` stage between reading and
+`fpa.process`). Each sample may carry a plex (MaxQuant experiment, MSstatsTMT
+mixture, PD file `F1`, SDRF file group) and a channel. IRS (Plubell et al.
+2017) scales every protein in every plex so that the plex's reference channels
+(the geometric mean of them) agree; the references then leave the matrix.
+References come from `analysis.tmt_reference` (or experiment.yaml
+`tmt.reference_channel`), else the SDRF's pooled rows, else names like
+`Pool` / `bridge` / `Norm`. Without one, the plexes' own means are used only
+when every plex holds the same mix of conditions; otherwise nothing is scaled
+and the doctor warns (`TMT_PLEXES_NOT_NORMALISED`). TMT-Integrator abundances
+(already ratios to the reference) and MSstatsTMT input (normalised to its Norm
+channels by the loader, as MSstatsTMT does) are never scaled again. The values
+before IRS are kept in `meta["bridge_before"]`, so the report's PCA can show
+before / after and colour by plex; `analysis.json` → `tmt` says what was done.
 
 ## Packaging, updates, support (0.5.0)
 

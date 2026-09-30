@@ -88,6 +88,9 @@ def payload(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: li
         d["f"]["pep"] = [f.peptides for f in pm.features]
         d["evidence"] = pm.meta.get("evidence") or "peptides"
     d["rep"] = [pm.replicate.get(x) for x in pm.samples]
+    plexes = pm.meta.get("plex") or {}
+    if len({plexes.get(x) for x in pm.samples} - {None}) > 1:  # TMT plexes: the PCA can colour by them (D48)
+        d["plex"] = [plexes.get(x) for x in pm.samples]
     insight = insight or {}
     d["v"] = [[_r(v, 4) for v in row] for row in pm.values]
     if p and p.n_imputed:
@@ -137,6 +140,11 @@ def payload(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: li
             "box_before": [{k: _r(v, 4) for k, v in b.items()} if b else None for b in qcd.get("box_before", [])],
             "box_after": [{k: _r(v, 4) for k, v in b.items()} if b else None for b in qcd.get("box_after", [])],
         }
+        before = qcd.get("pca_before") or {}
+        if before.get("scores"):  # the same PCA before the plexes were put on one scale (plex.py)
+            d["qc"]["pcaBefore"] = {"scores": [[_r(x, 4) for x in row] for row in before["scores"]],
+                                    "percent": [_r(x, 2) for x in before.get("percent", [])], "n": before.get("n", 0),
+                                    "label": (pm.meta.get("bridge") or {}).get("method", "plex normalisation")}
         d["qc"].update(_insight_payload(insight))
         hm = qcd.get("heatmap")
         if hm:
@@ -236,6 +244,7 @@ def methods_text(m: QuantMatrix | None, p: fpa.Processed | None, diffs: list[Dif
         elif imp != "none":
             steps.append(f"missing values imputed ({fpa.IMPUTATION_LABELS[imp]})")
         parts.append(", ".join(steps) + ".")
+        parts += _design_sentences(m)
         if s.test == "limma":
             parts.append("Differential abundance was tested with limma (linear model ~0 + condition, empirical-Bayes "
                          "moderated t-statistics, 95% confidence intervals), following FragPipe-Analyst's test_limma.")
@@ -263,6 +272,29 @@ def methods_text(m: QuantMatrix | None, p: fpa.Processed | None, diffs: list[Dif
     parts.append("Processing and statistics port FragPipeAnalystR / FragPipe-Analyst (Hsiao et al., J. Proteome Res. "
                  "2024, doi:10.1021/acs.jproteome.4c00294) and limma (Ritchie et al., Nucleic Acids Res. 2015).")
     return " ".join(parts)
+
+
+def _design_sentences(m: QuantMatrix) -> list[str]:
+    """Methods: where the design came from (an input SDRF, D47) and how TMT plexes were joined (D48)."""
+    out = []
+    sd = m.meta.get("sdrf") or {}
+    if sd.get("used"):
+        out.append(f"Sample conditions and replicates were taken from the SDRF-Proteomics file {escape(sd['file'])}"
+                   + (f" (factor {escape(', '.join(sd['factors']))})" if sd.get("factors") else "") + ".")
+    b = m.meta.get("bridge") or {}
+    if b.get("applied"):
+        n = len(b.get("plexes") or {})
+        if b["method"].startswith("MSstatsTMT"):
+            out.append(f"The {n} TMT mixtures were normalised to their reference (Norm) channels as in MSstatsTMT "
+                       "(Huang et al., Mol Cell Proteomics 2020).")
+        elif b["method"] == "IRS (reference channel)":
+            out.append(f"The {n} TMT plexes were put on one scale by internal reference scaling (IRS; Plubell et al., "
+                       "Mol Cell Proteomics 2017) on the pooled reference channel"
+                       f"{'s' if len(b.get('reference') or []) > 1 else ''}, which were then left out.")
+        else:
+            out.append(f"The {n} TMT plexes were put on one scale by internal reference scaling (IRS; Plubell et al., "
+                       "Mol Cell Proteomics 2017) on each plex's mean, as every plex holds the same mix of conditions.")
+    return out
 
 
 def _pipeline(p: fpa.Processed | None, diffs: list[DiffResult]) -> str:

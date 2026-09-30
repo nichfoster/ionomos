@@ -107,6 +107,8 @@ def read_table(path: str | Path) -> tuple[list[str], list[list[str]]]:
             else raw.decode("utf-16")
         first = next((ln for ln in text.splitlines() if ln.strip()), "")
         delim = max(("\t", ",", ";"), key=first.count) if first else "\t"
+        if "\t" in first and path.suffix.lower() in (".tsv", ".txt", ".tab"):  # a tab file whose headers hold
+            delim = "\t"  # commas: Proteome Discoverer's 'Abundance: F1: 126, Sample, DMSO'
         grid = list(csv.reader(io.StringIO(text, newline=""), delimiter=delim))
         if delim == ";":  # European exports: 1,5 means 1.5
             grid = [grid[0]] + [[re.sub(r"^(-?\d+),(\d+)$", r"\1.\2", c.strip()) for c in r] for r in grid[1:]]
@@ -347,6 +349,7 @@ def find_table(folder: str | Path) -> Path | None:
         rel = p.relative_to(folder).parts
         if (len(rel) > 4 or not p.is_file() or p.suffix.lower() not in TABLE_SUFFIXES or p.name.startswith((".", "~$"))
                 or p.name.lower() in SKIP_NAMES or re.match(r"(?i)^log[_-]", p.name)
+                or p.name.lower().endswith((".sdrf.tsv", "_sdrf.tsv", "-sdrf.tsv", ".sdrf"))  # a design (design.py)
                 or any(x in SKIP_DIRS or "_previous_" in x for x in rel[:-1])):
             continue
         try:

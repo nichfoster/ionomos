@@ -21,6 +21,9 @@ results from any supported engine can be analysed with `ionomos analyze <folder>
     MSstats format      long ProteinName / PeptideSequence / PrecursorCharge / FragmentIon / ProductCharge /
                         IsotopeLabelType / Condition / BioReplicate / Run / Intensity (quantms, Skyline, and any
                         engine with an MSstats converter): proteins summarised by Tukey median polish
+    MSstatsTMT format   long ProteinName / PeptideSequence / Charge / PSM / Mixture / TechRepMixture / Run / Channel /
+                        Condition / BioReplicate / Intensity: summarised as MSstatsTMT's proteinSummarization
+                        (MedianPolish), one sample per mixture and channel, plexes on the Norm channels' scale
     Proteome Discoverer a Proteins table exported as text (Abundance / Abundances (Normalized) columns)
     any table           the fallback (anytable.py, D33)
 
@@ -32,6 +35,7 @@ from __future__ import annotations
 import csv
 import math
 import re
+from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -80,6 +84,8 @@ def _header(path: Path) -> list[str]:
         return []
     delim = "\t" if line.count("\t") >= max(line.count(","), line.count(";")) else (
         "," if line.count(",") >= line.count(";") else ";")
+    if "\t" in line and Path(path).suffix.lower() in (".tsv", ".txt", ".tab"):  # headers with commas (PD TMT)
+        delim = "\t"
     return [h.strip().strip('"') for h in line.rstrip("\r\n").split(delim)]
 
 
@@ -134,6 +140,8 @@ def _matrix_from_long(path: Path, feats: dict[str, Feature], cells: dict[tuple[s
         if s not in reps and s.rsplit("_", 1)[-1].isdigit():
             reps[s] = int(s.rsplit("_", 1)[1])
     values = [[_log2(cells.get((i, colmap[s]))) for s in samples] for i in ids]
+    if cond:
+        meta = {**meta, "conditions_from": "engine"}
     return QuantMatrix("intensity", "protein", [feats[i] for i in ids], samples, values, cond_s, str(path),
                        notes=notes, exp=exp, replicate=reps, columns=colmap, meta=meta)
 
@@ -231,6 +239,56 @@ def load_maxquant(path: Path) -> QuantMatrix:
     fam = "Reporter intensity corrected" if reporter else (
         "LFQ intensity" if any(h.startswith("LFQ intensity ") for h in header) else "Intensity")
     m.meta["quantity"] = fam
+    if reporter:
+        m = _maxquant_plexes(m, path)
+    return m
+
+
+_MQ_REPORTER = re.compile(r"^Reporter intensity corrected (\d+)(?: (.+))?$")
+
+
+def _maxquant_plexes(m: QuantMatrix, path: Path) -> QuantMatrix:
+    """MaxQuant TMT: 'Reporter intensity corrected 3 Exp1' is channel 3 of experiment (plex) Exp1. With several
+    experiments MaxQuant also writes the channel totals over experiments ('... corrected 3'): those are left out.
+    Channels are numbered in kit order (from 0 in old versions); combined/txt/summary.txt names each
+    experiment's raw files, which the SDRF import matches."""
+    from ionomos.downstream.plex import channel_from_index, keep_samples
+
+    hit = {s: _MQ_REPORTER.match(m.columns.get(s, "")) for s in m.samples}
+    if any(x and x.group(2) for x in hit.values()):
+        keep = [j for j, s in enumerate(m.samples) if not (hit[s] and not hit[s].group(2))]
+        if len(keep) < len(m.samples):
+            m.notes.append(f"{len(m.samples) - len(keep)} reporter columns summed over experiments were left out "
+                           "(each experiment's own channels are used)")
+            m = keep_samples(m, keep)
+    idx = sorted({int(x.group(1)) for s, x in hit.items() if x and s in m.condition})
+    if not idx:
+        return m
+    base, n = min(idx), len(idx)
+    channel, plex = {}, {}
+    for s in m.samples:
+        x = hit.get(s)
+        if not x:
+            continue
+        channel[s] = channel_from_index(int(x.group(1)) - base, n)
+        if x.group(2):
+            plex[s] = x.group(2).strip()
+    m.meta["channel"] = channel
+    if plex:
+        m.meta["plex"] = plex
+        summary = path.parent / "summary.txt"
+        if summary.is_file():
+            try:
+                head, rows = anytable.read_table(summary)
+            except (anytable.TableError, OSError, UnicodeError, csv.Error):
+                head, rows = [], []
+            if "Raw file" in head and "Experiment" in head:
+                rf, ex = head.index("Raw file"), head.index("Experiment")
+                files: dict[str, list[str]] = defaultdict(list)
+                for r in rows:
+                    if r[rf].strip() and r[ex].strip() and r[rf].strip().lower() != "total":
+                        files[r[ex].strip()].append(run_stem(r[rf].strip()))
+                m.meta["runs"] = {s: files.get(p, []) for s, p in plex.items()}
     return m
 
 
@@ -323,7 +381,7 @@ _MSSTATS_NEED = {"ProteinName", "Run", "Intensity", "Condition", "BioReplicate"}
 
 def _msstats_score(path: Path) -> float:
     h = set(_header(path))
-    if not _MSSTATS_NEED <= h:
+    if not _MSSTATS_NEED <= h or {"Channel", "Mixture"} <= h:  # MSstatsTMT has its own adapter
         return 0.0
     return 0.9 if ("PeptideSequence" in h or "PeptideModifiedSequence" in h) else 0.6
 
@@ -376,9 +434,8 @@ def load_msstats(path: Path) -> QuantMatrix:
     L) only; heavy-labelled reference rows are left out."""
     h = _header(path)
     if "Channel" in h and "Mixture" in h:
-        raise anytable.TableError(f"{path.name} is MSstatsTMT format (Channel / Mixture); only label-free MSstats "
-                                  "input is supported so far")
-    pep = "PeptideModifiedSequence" if "PeptideModifiedSequence" in h else "PeptideSequence"
+        return load_msstats_tmt(path)
+    pep ="PeptideModifiedSequence" if "PeptideModifiedSequence" in h else "PeptideSequence"
     want = ["ProteinName", pep, "PrecursorCharge", "FragmentIon", "ProductCharge", "IsotopeLabelType", "Condition",
             "BioReplicate", "Run", "Intensity"]
     cols, rows = _read_long(path, want)
@@ -423,9 +480,263 @@ def load_msstats(path: Path) -> QuantMatrix:
                              {"engine": "MSstats format", "evidence": "peptides", "quantity": "median polish (TMP)"})
 
 
+# ------------------------------------------------------- MSstatsTMT format --
+
+_MSSTATS_TMT_NEED = {"ProteinName", "Mixture", "Run", "Channel", "Intensity"}
+_TMT_SKIP = ("norm", "empty")  # MSstatsTMT's reference channels (Condition 'Norm') and empty channels
+
+
+def _msstats_tmt_score(path: Path) -> float:
+    h = set(_header(path))
+    if not _MSSTATS_TMT_NEED <= h:
+        return 0.0
+    return 0.92 if {"Condition", "BioReplicate"} <= h and ("PeptideSequence" in h or "PSM" in h) else 0.7
+
+
+def _channel_labels(channels: list[str]) -> dict[str, str]:
+    """MSstatsTMT Channel values -> kit labels: '127N' stays; OpenMS / quantms write 1..n (or channel.1): the n-th
+    channel of the kit."""
+    from ionomos.downstream.plex import TMT_ORDERS, channel_key
+
+    idx = {c: re.fullmatch(r"(?i)(?:channel[._ ]?)?(\d{1,2})", c.strip()) for c in channels}
+    if channels and all(idx.values()):
+        n = max(int(x.group(1)) for x in idx.values())
+        n = next((k for k in sorted(TMT_ORDERS) if k >= n and k != 8 and k != 4), n)
+        return {c: (TMT_ORDERS[n][int(idx[c].group(1)) - 1] if n in TMT_ORDERS and 1 <= int(idx[c].group(1)) <= n
+                    else c) for c in channels}
+    return {c: channel_key(c) or c for c in channels}
+
+
+def msstats_tmt_summary(cols: list[str], rows: list[list[str]]) -> dict:
+    """MSstatsTMT's proteinSummarization(method = "MedianPolish", global_norm = TRUE, reference_norm = TRUE) on
+    MSstatsTMT-format rows, before its Norm / Empty channels are removed. Checked against MSstatsTMT 2.20 in
+    tests (tests/golden/msstatstmt/). Steps, as in MSstatsTMT / MSstatsConvert:
+
+      features         PeptideSequence + Charge; several PSMs of a feature in one run: the one with the largest
+                       total intensity is kept; intensities <= 0 are missing
+      fractions        runs of one Mixture + TechRepMixture are fractions (MSstatsConvert .handleFractionsTMT): a
+                       feature seen in several keeps the fraction with the largest mean (then sum, then max)
+                       intensity, and the run becomes '<Mixture>_<TechRepMixture>'
+      log2, global     every run x channel median of log2 intensities is moved to the median of those medians;
+      norm             values below log2(1) after it are missing
+      summary          per protein and run, Tukey median polish of features x channels: overall + channel effect
+      reference norm   per protein, each run is shifted so the mean of its Norm channels equals the median of
+                       those means over runs (only for proteins with Norm values in more than one run; a run
+                       without one then has no values)
+    Not ported: MSstats' model-based imputation of censored values (MBimpute; MSstatsTMT's default "msstats"
+    summary); missing values stay missing, like method = "MedianPolish".
+
+    Returns {"abundance": {protein: {(run, channel): log2}}, "before": same before reference norm,
+             "annotation": {(run, channel): (mixture, techrep, condition, bioreplicate)}, "runs_of": {run: [stems]},
+             "channels": [...], "notes": [...], "normalised": bool}."""
+    import statistics
+
+    ix = {c: j for j, c in enumerate(cols)}
+    charge = "Charge" if "Charge" in ix else "PrecursorCharge" if "PrecursorCharge" in ix else None
+
+    def get(r, c, default=""):
+        return r[ix[c]].strip() if c in ix else default
+
+    psms: dict[tuple, dict[str, dict[str, float]]] = defaultdict(lambda: defaultdict(dict))
+    annot: dict[tuple, tuple] = {}
+    run_info: dict[str, tuple] = {}
+    channels: list[str] = []
+    for r in rows:
+        prot, run, ch = get(r, "ProteinName"), get(r, "Run"), get(r, "Channel")
+        if not prot or not run or not ch:
+            continue
+        mix, tech = get(r, "Mixture"), get(r, "TechRepMixture", "1") or "1"
+        run_info.setdefault(run, (mix, tech, get(r, "Fraction", "") or "1"))
+        if ch not in channels:
+            channels.append(ch)
+        annot.setdefault((f"{mix}_{tech}", ch), (mix, tech, get(r, "Condition"), get(r, "BioReplicate")))
+        feat = "_".join(x for x in (get(r, "PeptideSequence"), get(r, charge) if charge else "") if x) or get(r, "PSM")
+        psm = get(r, "PSM") or feat
+        v = num(get(r, "Intensity"))
+        if v is not None and v > 0:
+            cell = psms[(run, prot, feat)][psm]
+            cell[ch] = max(v, cell.get(ch, 0.0))
+    notes: list[str] = []
+    # one PSM per feature and run: the one with the largest total intensity
+    feat_run: dict[tuple, dict[str, float]] = {}
+    multi = 0
+    for key, by_psm in psms.items():
+        if len(by_psm) > 1:
+            multi += 1
+        feat_run[key] = max(by_psm.values(), key=lambda d: sum(d.values()))
+    if multi:
+        notes.append(f"{multi:,} features had several PSMs in a run; the one with the largest total intensity was kept")
+    # fractions: runs of one mixture + technical replicate
+    by_tech: dict[str, list[str]] = defaultdict(list)
+    for run, (mix, tech, _f) in run_info.items():
+        by_tech[f"{mix}_{tech}"].append(run)
+    data: dict[tuple, dict[str, float]] = {}  # (techrun, protein, feature) -> {channel: linear}
+    cand: dict[tuple, list[dict[str, float]]] = defaultdict(list)
+    for (run, prot, feat), vals in feat_run.items():
+        mix, tech, _f = run_info[run]
+        cand[(f"{mix}_{tech}", prot, feat)].append(vals)
+    merged = 0
+    for key, options in cand.items():
+        if len(options) == 1:
+            data[key] = options[0]
+            continue
+        merged += 1
+        chosen = options
+        for agg in (lambda d: sum(d.values()) / len(d), lambda d: sum(d.values()), lambda d: max(d.values())):
+            best = max(agg(d) for d in chosen)
+            chosen = [d for d in chosen if agg(d) == best]
+            if len(chosen) == 1:
+                break
+        if len(chosen) == 1:
+            data[key] = chosen[0]
+        else:  # still tied: the mean per channel
+            data[key] = {c: sum(d[c] for d in chosen if c in d) / sum(c in d for d in chosen)
+                         for c in {c for d in chosen for c in d}}
+    fractionated = sorted(t for t, rs in by_tech.items() if len(rs) > 1)
+    if fractionated:
+        notes.append(f"fractions combined within {len(fractionated)} mixture run(s) ({merged:,} features seen in "
+                     "several fractions kept the fraction with the largest mean intensity, as MSstatsConvert)")
+    # log2 and global median normalisation between run x channel
+    logv = {k: {c: math.log2(v) for c, v in d.items() if v >= 1} for k, d in data.items()}  # < 1: NA in MSstatsTMT
+    per: dict[tuple, list[float]] = defaultdict(list)
+    for (tr, _p, _f), d in logv.items():
+        for c, v in d.items():
+            per[(tr, c)].append(v)
+    meds = {k: statistics.median(v) for k, v in per.items() if v}
+    base = statistics.median(meds.values()) if meds else 0.0
+    for (tr, _p, _f), d in logv.items():
+        for c in list(d):
+            x = d[c] + base - meds[(tr, c)]
+            if x < 0:  # 2^x < 1: MSstatsTMT turns it into NA
+                del d[c]
+            else:
+                d[c] = x
+    # median polish per protein and run
+    order = list(channels)
+    by_prot: dict[str, dict[str, list[dict[str, float]]]] = defaultdict(lambda: defaultdict(list))
+    for (tr, p, _f), d in logv.items():
+        if d:
+            by_prot[p][tr].append(d)
+    before: dict[str, dict[tuple, float]] = {}
+    for p, runs in by_prot.items():
+        out: dict[tuple, float] = {}
+        for tr, feats in runs.items():
+            summ = median_polish([[d.get(c) for c in order] for d in feats])
+            for c, v in zip(order, summ, strict=True):
+                if v is not None:
+                    out[(tr, c)] = v
+        before[p] = out
+    # reference normalisation between runs on the Norm channels
+    is_norm = {k: (a[2].lower() == "norm") for k, a in annot.items()}
+    after: dict[str, dict[tuple, float]] = {}
+    normalised = len(by_tech) > 1 and any(is_norm.values())
+    for p, ab in before.items():
+        if not normalised:
+            after[p] = dict(ab)
+            continue
+        runs_with = {tr for (tr, c) in ab}
+        norm_by_run: dict[str, list[float]] = defaultdict(list)
+        for (tr, c), v in ab.items():
+            if is_norm.get((tr, c)):
+                norm_by_run[tr].append(v)
+        if len(runs_with) > 1 and len(norm_by_run) > 1:
+            nab = {tr: sum(v) / len(v) for tr, v in norm_by_run.items()}
+            med = statistics.median(nab.values())
+            after[p] = {(tr, c): v + med - nab[tr] for (tr, c), v in ab.items() if tr in nab}
+        else:
+            after[p] = dict(ab)
+    if len(by_tech) > 1 and not any(is_norm.values()):
+        notes.append("no 'Norm' channel (Condition Norm) in the MSstatsTMT table, so MSstatsTMT's normalisation "
+                     "between runs could not be applied")
+    runs_of: dict[str, list[str]] = defaultdict(list)
+    for run, (mix, _t, _f) in run_info.items():
+        runs_of[mix].append(run_stem(run))
+    return {"abundance": after, "before": before, "annotation": annot, "runs_of": dict(runs_of),
+            "channels": order, "notes": notes, "normalised": normalised, "runs": len(by_tech)}
+
+
+def load_msstats_tmt(path: Path) -> QuantMatrix:
+    """MSstatsTMT format (ProteinName, PeptideSequence, Charge, PSM, Mixture, TechRepMixture, Run, Channel,
+    Condition, BioReplicate, Intensity; from MSstatsTMT's converters, quantms / OpenMS, FragPipe's
+    philosopher): proteins summarised as msstats_tmt_summary() does, then one sample per mixture and channel:
+    technical replicates of a mixture are averaged (log2), Norm and Empty channels are left out. The plexes are
+    already on one scale (the reference normalisation), so the IRS step (plex.py) is not applied again."""
+    want = ["ProteinName", "PeptideSequence", "Charge", "PrecursorCharge", "PSM", "Mixture", "TechRepMixture", "Run",
+            "Fraction", "Channel", "Condition", "BioReplicate", "Intensity"]
+    cols, rows = _read_long(path, want)
+    if not {"ProteinName", "Mixture", "Run", "Channel", "Intensity"} <= set(cols):
+        raise anytable.TableError(f"{path.name}: not MSstatsTMT format (needs ProteinName, Mixture, Run, Channel, "
+                                  "Intensity)")
+    s = msstats_tmt_summary(cols, rows)
+    if not any(s["abundance"].values()):
+        raise anytable.TableError(f"{path.name}: MSstatsTMT format, but no protein has a usable intensity")
+    labels = _channel_labels(s["channels"])
+    keys: list[tuple[str, str]] = []  # (mixture, channel) samples, in mixture order then channel order
+    info: dict[tuple, tuple] = {}
+    for (_tr, ch), (mix, _tech, cond, bio) in s["annotation"].items():
+        if cond.strip().lower() in _TMT_SKIP:
+            continue
+        if (mix, ch) not in info:
+            keys.append((mix, ch))
+            info[(mix, ch)] = (cond, bio)
+    mix_order = list(dict.fromkeys(a[0] for a in s["annotation"].values()))
+    keys.sort(key=lambda k: (mix_order.index(k[0]), s["channels"].index(k[1])))
+    name = {k: f"{k[0]}_{labels[k[1]]}" for k in keys}
+
+    def per_sample(table: dict) -> dict[tuple[str, str], float]:
+        """(protein, sample) -> linear, technical replicates of a mixture averaged in log2."""
+        acc: dict[tuple, list[float]] = defaultdict(list)
+        for p, ab in table.items():
+            for (tr, ch), v in ab.items():
+                mix = s["annotation"][(tr, ch)][0]
+                if (mix, ch) in name:
+                    acc[(p, name[(mix, ch)])].append(v)
+        return {k: 2 ** (sum(v) / len(v)) for k, v in acc.items()}
+
+    feats = {p: Feature(id=p, label=p.split("|")[-1].split("_")[0] if "|" in p else p.split(";")[0])
+             for p in s["abundance"]}
+    peps: dict[str, set[str]] = defaultdict(set)
+    pix = cols.index("PeptideSequence") if "PeptideSequence" in cols else None
+    if pix is not None:
+        prix = cols.index("ProteinName")
+        for r in rows:
+            peps[r[prix].strip()].add(r[pix])
+        for p, f in feats.items():
+            f.peptides = len(peps.get(p, ())) or None
+    techreps = s["runs"] > len(mix_order)
+    notes = [f"MSstatsTMT-format {path.name}: {len(feats):,} proteins in {len(mix_order)} mixture(s), summarised "
+             "as MSstatsTMT's proteinSummarization (median polish per run, global median and reference-channel "
+             "normalisation; no model-based imputation)"] + s["notes"]
+    if techreps:
+        notes.append("technical replicates of a mixture were averaged (log2) into one sample per channel")
+    samples = [name[k] for k in keys]
+    cond = {name[k]: info[k][0] for k in keys if info[k][0]}
+    m = _matrix_from_long(path, feats, per_sample(s["abundance"]), samples, cond, {}, "TMT", notes,
+                          {"engine": "MSstatsTMT format", "evidence": "peptides",
+                           "quantity": "median polish (MSstatsTMT MedianPolish)"})
+    counts: dict[str, int] = defaultdict(int)
+    for k in keys:
+        c, bio = info[k]
+        counts[c] += 1
+        m.replicate[name[k]] = int(bio) if bio.isdigit() else counts[c]
+    m.meta.update({"plex": {name[k]: k[0] for k in keys}, "channel": {name[k]: labels[k[1]] for k in keys},
+                   "runs": {name[k]: s["runs_of"].get(k[0], []) for k in keys}, "conditions_from": "engine"})
+    if s["normalised"]:
+        bef = per_sample(s["before"])
+        ids = list(feats)
+        m.meta["bridge_before"] = {"ids": ids, "samples": list(samples),
+                                   "values": [[_log2(bef.get((i, x))) for x in samples] for i in ids]}
+        m.meta["bridge"] = {"method": "MSstatsTMT reference normalisation (Norm channels)", "applied": True,
+                            "plexes": {mx: sum(1 for k in keys if k[0] == mx) for mx in mix_order},
+                            "reference": ["Condition Norm"], "reference_from": "MSstatsTMT Condition",
+                            "center": "median of the runs' Norm means (MSstatsTMT)"}
+    return m
+
+
 # ---------------------------------------------------------- Proteome Discoverer --
 
-_PD_COL = re.compile(r"^Abundances? (?:\(Normalized\)|\(Grouped\))?:?\s*(F\d+):\s*([^,]+)(?:,\s*(.*))?$", re.I)
+# 'Abundances (Normalized): F1: Sample, DMSO' and 'Abundance: F1: 126, Sample, DMSO' (TMT: file F1, channel 126)
+_PD_COL = re.compile(r"^Abundances?(?: \((?:Normalized|Grouped)\))?:\s*(F\d+):\s*([^,]+)(?:,\s*(.*))?$", re.I)
 
 
 def _pd_score(path: Path) -> float:
@@ -458,6 +769,14 @@ def load_pd(path: Path) -> QuantMatrix:
         m.replicate = {rename[s][0]: rename[s][2] for s in m.samples if s in rename}
         m.samples = new
     m.exp = "TMT" if any(re.search(r"\b1[23]\d[NC]?\b", c) for c in m.columns.values()) else "LFQ"
+    if rename:
+        m.meta["conditions_from"] = "engine"
+    if m.exp == "TMT":  # 'Abundance: F1: 126, ...': file F1 is the plex, 126 the channel (plex.py IRS)
+        from ionomos.downstream.plex import channel_key
+
+        cols = {s: _PD_COL.match(m.columns.get(s, "")) for s in m.samples}
+        m.meta["channel"] = {s: channel_key(x.group(2)) for s, x in cols.items() if x and channel_key(x.group(2))}
+        m.meta["plex"] = {s: x.group(1) for s, x in cols.items() if x and s in m.meta["channel"]}
     m.meta["engine"] = "Proteome Discoverer"
     m.meta["quantity"] = "Abundances (Normalized)" if any("normalized" in c.lower() for c in m.columns.values()) else "Abundance"
     return m
@@ -473,6 +792,8 @@ ADAPTERS = [
     ("AlphaDIA", "AlphaDIA", lambda p: p.name.lower() in ("pg.matrix.tsv", "protein_groups.tsv"),
      _alphadia_score, load_alphadia),
     ("MSstats format", "MSstats", lambda p: p.suffix.lower() in (".csv", ".tsv", ".txt"), _msstats_score, load_msstats),
+    ("MSstatsTMT format", "MSstatsTMT", lambda p: p.suffix.lower() in (".csv", ".tsv", ".txt"), _msstats_tmt_score,
+     load_msstats_tmt),
     ("Proteome Discoverer", "PD", lambda p: p.suffix.lower() in (".txt", ".tsv", ".csv"), _pd_score, load_pd),
     ("DIA-NN", "DIA-NN", lambda p: p.name.lower() in ("report.tsv", "report.parquet") or
      p.name.lower().endswith((".report.tsv", ".report.parquet")), _diann_long_score, load_diann_long),
@@ -596,7 +917,7 @@ def provenance(workdir: Path, method: str | None, source: str = "", meta: dict |
         if cfg:
             out["files"].append(rel(cfg))
             out["version"] = _first_match(cfg, r"^version:\s*['\"]?([^'\"\s]+)")
-    elif method in ("Spectronaut", "PD", "MSstats"):
+    elif method in ("Spectronaut", "PD", "MSstats", "MSstatsTMT"):
         out["note"] = "the export does not record the engine version"
         if method == "Spectronaut":
             out["fdr"] = f"q ≤ {LONG_FDR:g} (long report)" if "long" in (source or "") else ""

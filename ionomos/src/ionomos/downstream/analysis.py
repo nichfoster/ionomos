@@ -28,6 +28,11 @@ experiment.yaml `analysis:` block:
       sdrf:                       # sample metadata for results/sdrf.tsv (sdrf.py): lab-wide in config.yaml,
         instrument: Orbitrap Eclipse   # per experiment in experiment.yaml (keys merge; the experiment's win)
         organism: homo sapiens    # default: the FASTA's OS=; also organism_part, cell_type, disease, cleavage_agent
+      sdrf_factor: [compound]     # an SDRF in the folder sets the design (design.py): which factor value column(s)
+                                  #   make the condition (default: all of them, joined with " | ")
+      irs: auto                   # several TMT plexes on one scale (plex.py): auto | reference | sum | none
+      tmt_reference: [126]        # IRS reference (pooled / bridge) channel(s) or sample(s); default: the SDRF's
+                                  #   pooled rows, else samples named pool / bridge / reference / norm
 """
 from __future__ import annotations
 
@@ -73,6 +78,10 @@ class Settings:
     pca_features: int = 500
     heatmap_max: int = 300
     sdrf: dict[str, str] = field(default_factory=dict)  # SDRF metadata: organism, instrument, ... (downstream/sdrf.py)
+    # design import and TMT plexes (design.py, plex.py; D47, D48)
+    sdrf_factor: list[str] = field(default_factory=list)  # factor value column(s) of an input SDRF; [] = all, joined
+    tmt_reference: list[str] = field(default_factory=list)  # IRS reference channel(s) (126) or sample(s); [] = found
+    irs: str = "auto"  # auto | reference | sum | none: put several TMT plexes on one scale
 
     def describe(self) -> str:
         which = "adjusted p" if self.use_adjusted else "p"
@@ -173,6 +182,15 @@ def settings_from(*layers: dict | None) -> Settings:
                     v = str(v)
                 elif k == "sdrf":
                     v = {**s.sdrf, **_sdrf_meta(v)}  # a later layer adds to / overrides the lab's values
+                elif k in ("sdrf_factor", "tmt_reference"):
+                    v = _list(v)
+                elif k == "irs":
+                    from ionomos.downstream.plex import IRS_MODES
+
+                    v = str(v).strip().lower()
+                    v = {"off": "none", "false": "none", "no": "none", "on": "auto", "true": "auto"}.get(v, v)
+                    if v not in IRS_MODES:
+                        raise AnalysisError("irs must be auto, reference, sum or none")
             except (TypeError, ValueError) as exc:
                 if isinstance(exc, AnalysisError):
                     raise

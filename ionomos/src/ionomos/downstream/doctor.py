@@ -59,6 +59,7 @@ class Findings:
     read_problem: str | None = None      # the result table exists but holds nothing usable (e.g. isoDTB SiteError)
     enrichment_notes: list = field(default_factory=list)
     insights: dict = field(default_factory=dict)          # insights.py: scorecard, pcs, missingness, phist, ...
+    tmt: dict | None = None                               # plex.py: what IRS did (or why not) across TMT plexes
 
 
 # the tables each method needs, and why they might be missing
@@ -89,7 +90,9 @@ EXPECTED = {
                      "The export is a peptide / precursor-only report"]),
     "AlphaDIA": ("AlphaDIA's pg.matrix.tsv", ["AlphaDIA stopped before the protein step (see its log)"]),
     "MSstats": ("an MSstats-format table (ProteinName, Run, Condition, BioReplicate, Intensity)",
-                ["The converter wrote another format (e.g. MSstatsTMT: not supported yet)"]),
+                ["The converter wrote another format"]),
+    "MSstatsTMT": ("an MSstatsTMT-format table (ProteinName, Mixture, Run, Channel, Condition, BioReplicate, "
+                   "Intensity)", ["The converter wrote the label-free MSstats format instead"]),
     "PD": ("a Proteome Discoverer Proteins export (Accession + Abundance columns)",
            ["The Proteins table was exported without abundance columns"]),
 }
@@ -235,6 +238,34 @@ def check(f: Findings) -> list[Issue]:
                   ["Files were renamed after they were filed", "FragPipe converted the files and changed their names"],
                   ["Check each sample's condition in this window and Run analysis"],
                   {"runs": unmatched}))
+
+    sd = m.meta.get("sdrf") or {}
+    if sd and sd.get("unmatched"):
+        none = not sd.get("used")
+        add(Issue("SDRF_UNMATCHED_RUNS", "input",
+                  "The SDRF doesn't describe these runs" if none else "Some runs aren't in the SDRF",
+                  (f"{sd.get('file')} names none of the {len(sd['unmatched'])} runs in the table, so it was not used "
+                   "and the conditions come from the names." if none else
+                   f"{len(sd['unmatched'])} run(s) have no row in {sd.get('file')} (matched by comment[data file] "
+                   "and label), so they kept the condition from their name: " + ", ".join(sd["unmatched"][:8]) +
+                   ("…" if len(sd["unmatched"]) > 8 else "") + "."),
+                  ["The SDRF belongs to another experiment or another search of it",
+                   "Files were renamed or converted after the SDRF was written (its data files must match the runs)",
+                   "TMT: the SDRF's comment[label] channels don't match the table's channels"],
+                  ["Fix the data file names in the SDRF, or give these samples their condition here and Run analysis"],
+                  {"runs": list(sd["unmatched"]), "sdrf": sd.get("file")}))
+    tmt_ = f.tmt or {}
+    if tmt_ and not tmt_.get("applied") and len(tmt_.get("plexes") or {}) > 1 and \
+            "irs: none" not in (tmt_.get("reason") or ""):
+        add(Issue("TMT_PLEXES_NOT_NORMALISED", "warning", "The TMT plexes are not on one scale",
+                  f"This experiment has {len(tmt_['plexes'])} TMT plexes, and they were not normalised to each other: "
+                  f"{tmt_.get('reason')}. Differences between plexes will look like differences between samples "
+                  "(the PCA, coloured by plex, shows it).",
+                  ["No pooled reference (bridge) channel is named for the experiment",
+                   "Each plex holds a different mix of conditions, so the plexes' own means can't be used"],
+                  ["Set analysis.tmt_reference to the pooled channel (e.g. 126) in experiment.yaml, or mark it "
+                   "'pooled' in the SDRF, then Run analysis"],
+                  {"plexes": tmt_.get("plexes")}))
 
     # ---- duplicates (two runs of one sample)
     dups = sorted(x for x in samples if re.search(r"\.\d+$", x))

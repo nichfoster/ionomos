@@ -17,6 +17,7 @@ decision made once is remembered if the folder is re-dropped.
       tag: TMT-10
       channels: {126: DMSO_126, 127N: DMSO_127N, ...}     # one plex
       # or, several plexes:  plexes: {plex1: {channels: {...}}, plex2: {...}}
+      reference_channel: 126         # the pooled / bridge channel for IRS across plexes (= analysis.tmt_reference)
     notes: free text
 """
 from __future__ import annotations
@@ -172,7 +173,7 @@ def parse_overrides(data: dict | None) -> Overrides:
         if not isinstance(tmt, dict):
             raise OverridesError("tmt: must be a mapping")
         plexes = tmt.get("plexes") or ({"default": tmt} if tmt.get("channels") else {})
-        if not plexes:
+        if not plexes and tmt.get("reference_channel") in (None, ""):
             raise OverridesError("tmt: needs either channels: {...} or plexes: {name: {channels: {...}}}")
         for plex, spec in plexes.items():
             ch = (spec or {}).get("channels")
@@ -266,7 +267,7 @@ def tmt_annotation_files(ov: Overrides, experiments: list[str]) -> dict[str, str
     '<channel>\\t<sample>' per line.
     """
     tmt = ov.tmt or {}
-    if not tmt:
+    if not tmt or not (tmt.get("plexes") or tmt.get("channels")):  # e.g. only reference_channel: no annotation
         return {}
     if "plexes" in tmt:
         plexes = tmt["plexes"]

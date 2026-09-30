@@ -328,6 +328,7 @@ tmt:                        # TMT only; one block per plex (= experiment name)
     126:  DMSO_1_126        #   annotation script (and the report's conditions) key on it
     127N: DMSO_1_127N
     127C: Drug_1_127C
+  reference_channel: 126    # the pooled / bridge channel that joins several plexes (IRS; = analysis.tmt_reference)
 
 analysis:                   # results/report.html for this experiment (lab defaults: app tab 7)
   comparisons: ["Drug vs DMSO", "Drug2 vs DMSO"]   # treatment vs control; default: all vs the control
@@ -336,6 +337,9 @@ analysis:                   # results/report.html for this experiment (lab defau
   enrichment_gmt: sets.gmt  # extra gene sets; a relative path is read from this folder first
   sdrf:                     # sample metadata for results/sdrf.tsv (lab-wide values: config.yaml analysis.sdrf)
     cell_type: HEK293T      # also: organism, organism_part, disease, instrument, cleavage_agent
+  sdrf_factor: [compound]   # an SDRF put in this folder sets the design: which factor value column(s) are the
+                            #   condition (default: all, joined); see docs/ENGINES.md
+  irs: auto                 # several TMT plexes on one scale: auto | reference | sum | none
 
 notes: "24 h treatment, 1 µM"   # copied into ionomos.json for provenance
 ```
@@ -351,6 +355,8 @@ notes: "24 h treatment, 1 µM"   # copied into ionomos.json for provenance
    DIA `DMSO_1.raw` → condition `DMSO`; TMT sample `Drug_1_128N` → `Drug`;
    isoDTB: each sample prefix is tested on its own (ratios vs 0). Edit
    `analysis:` in `experiment.yaml` and press *Re-run analysis* to change them.
+   An SDRF (`*.sdrf.tsv`) put in the experiment folder beats the names (not
+   `sample_conditions`): its `factor value[...]` is the condition (D47).
 
 ## Still to confirm with the lab
 

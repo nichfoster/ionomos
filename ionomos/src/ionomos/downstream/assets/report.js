@@ -1408,14 +1408,22 @@
     host.innerHTML = h + "</tbody></table></div>";
   }
   function qcPCA(host) {
-    const P = D.qc.pca;
+    const st = host._st || (qcPCA._st = qcPCA._st || { x: 0, y: 1, names: nS <= 24, by: "condition", when: "after" });
+    host._st = st;
+    const PB = D.qc.pcaBefore; // TMT plexes: the same PCA before they were put on one scale (plex.py)
+    const P = st.when === "before" && PB ? PB : D.qc.pca;
     if (!P || !P.scores.length) { host.innerHTML = "<div class='empty'>Not enough complete features for a PCA.</div>"; return; }
     const hasRep = D.rep && D.rep.some((r) => r != null);
-    const st = host._st || (qcPCA._st = qcPCA._st || { x: 0, y: 1, names: nS <= 24, by: "condition" });
-    host._st = st;
+    const hasPlex = D.plex && D.plex.some((p) => p != null);
     const opts = (sel) => P.percent.map((p, k) => "<option value='" + k + "'" + (k === sel ? " selected" : "") + ">PC" + (k + 1) + " (" + p.toFixed(1) + "%)</option>").join("");
     const reps = hasRep ? [...new Set(D.rep.filter((r) => r != null))].sort((a, b) => a - b) : [];
-    const colorOf = (j) => (st.by === "replicate" && hasRep ? css("--c" + (reps.indexOf(D.rep[j]) % 8)) : condColor(D.cond[j]));
+    const plexes = hasPlex ? [...new Set(D.plex.filter((p) => p != null))] : [];
+    const colorOf = (j) => (st.by === "replicate" && hasRep ? css("--c" + (reps.indexOf(D.rep[j]) % 8)) : st.by === "plex" && hasPlex ? css("--c" + (plexes.indexOf(D.plex[j]) % 8)) : condColor(D.cond[j]));
+    const sel = (v, label) => "<option value='" + v + "'" + (st.by === v ? " selected" : "") + ">" + label + "</option>";
+    const byCtl = hasRep || hasPlex ? " <label class='ctl'>colour by <select id='pcby'>" + sel("condition", "condition") + (hasRep ? sel("replicate", "replicate number") : "") + (hasPlex ? sel("plex", "plex") : "") + "</select></label>" : "";
+    const whenCtl = PB ? " <label class='ctl'>values <select id='pcw'><option value='after'" + (st.when !== "before" ? " selected" : "") + ">after " + esc(PB.label) + "</option><option value='before'" + (st.when === "before" ? " selected" : "") + ">before " + esc(PB.label) + "</option></select></label>" : "";
+    const keyOf = st.by === "replicate" && hasRep ? "<div class='legend'>" + reps.map((r, k) => "<span><span class='sw' style='background:" + css("--c" + (k % 8)) + "'></span>replicate " + r + "</span>").join("") + "</div>"
+      : st.by === "plex" && hasPlex ? "<div class='legend'>" + plexes.map((p, k) => "<span><span class='sw' style='background:" + css("--c" + (k % 8)) + "'></span>" + esc(p) + "</span>").join("") + "</div>" : legend();
     let assoc = "";
     const pcs = D.qc.pcs;
     if (pcs && pcs.pcs && pcs.pcs.length) {
@@ -1424,16 +1432,18 @@
         (pcs.pcs.some((p) => p.r2_replicate != null) ? "<tr><td>explained by replicate number</td>" + pcs.pcs.map((p) => "<td class='n" + (p.r2_replicate != null && p.r2_replicate >= 0.5 && p.r2_replicate > (p.r2_condition || 0) ? " zbad" : "") + "'>" + (p.r2_replicate == null ? "–" : pct(p.r2_replicate)) + "</td>").join("") + "</tr>" : "") +
         "</tbody></table><p class='muted'>One-way ANOVA R² of each component's scores. Condition should explain the top components; replicate number explaining one hints at a batch (samples of the same replicate number prepared or run together).</p>";
     }
-    host.innerHTML = "<p class='sub'>Top " + fmtInt(P.n) + " most variable features with no missing values (FragPipe-Analyst plot_pca). Replicates should sit together.</p>" +
+    host.innerHTML = "<p class='sub'>Top " + fmtInt(P.n) + " most variable features with no missing values (FragPipe-Analyst plot_pca). Replicates should sit together." +
+      (PB ? " Several TMT plexes: colour by plex and compare the values before and after " + esc(PB.label) + "; before it the samples usually group by plex." : "") + "</p>" +
       "<div class='row'><label class='ctl'>x <select id='pcx'>" + opts(st.x) + "</select></label> <label class='ctl'>y <select id='pcy'>" + opts(st.y) + "</select></label> <label class='ctl'><input type='checkbox' id='pcn'" + (st.names ? " checked" : "") + "> names</label>" +
-      (hasRep ? " <label class='ctl'>colour by <select id='pcby'><option value='condition'" + (st.by === "condition" ? " selected" : "") + ">condition</option><option value='replicate'" + (st.by === "replicate" ? " selected" : "") + ">replicate number</option></select></label>" : "") + "</div>" +
-      (st.by === "replicate" && hasRep ? "<div class='legend'>" + reps.map((r, k) => "<span><span class='sw' style='background:" + css("--c" + (k % 8)) + "'></span>replicate " + r + "</span>").join("") + "</div>" : legend()) +
-      "<div class='chart card' id='pcachart'></div>" + assoc;
+      byCtl + whenCtl + "</div>" + keyOf +
+      "<div class='chart card' id='pcachart'></div>" + (P === D.qc.pca ? assoc : "");
     $("#pcx").onchange = (e) => { st.x = +e.target.value; qcPCA(host); };
     $("#pcy").onchange = (e) => { st.y = +e.target.value; qcPCA(host); };
     $("#pcn").onchange = (e) => { st.names = e.target.checked; qcPCA(host); };
     const by = $("#pcby");
     if (by) by.onchange = (e) => { st.by = e.target.value; qcPCA(host); };
+    const when = $("#pcw");
+    if (when) when.onchange = (e) => { st.when = e.target.value; qcPCA(host); };
     const ch = $("#pcachart"), W = widthOf(ch), H = Math.min(520, Math.round(W * 0.6)), L = 56, R = 20, T = 16, B = 44;
     const xs = P.scores.map((s) => s[st.x]), ys = P.scores.map((s) => s[st.y]);
     const pad = (a) => { const lo = Math.min(...a), hi = Math.max(...a), p = (hi - lo) * 0.12 || 1; return [lo - p, hi + p]; };
@@ -1444,7 +1454,7 @@
     const flagged = new Set((D.qc.scorecard || []).filter((r) => r.status !== "ok").map((r) => r.sample));
     P.scores.forEach((s, j) => {
       const c = svg("circle", { cx: X(s[st.x]), cy: Y(s[st.y]), r: 7, fill: colorOf(j), stroke: flagged.has(D.samples[j]) ? css("--text") : css("--surface"), "stroke-width": flagged.has(D.samples[j]) ? 2.5 : 1.5 }, g);
-      c.addEventListener("mousemove", (e) => showTip(e, "<b>" + esc(D.samples[j]) + "</b><br>" + esc(D.cond[j]) + (D.rep && D.rep[j] != null ? " · replicate " + D.rep[j] : "") + (flagged.has(D.samples[j]) ? "<br>flagged in the scorecard" : "")));
+      c.addEventListener("mousemove", (e) => showTip(e, "<b>" + esc(D.samples[j]) + "</b><br>" + esc(D.cond[j]) + (D.rep && D.rep[j] != null ? " · replicate " + D.rep[j] : "") + (hasPlex && D.plex[j] != null ? " · plex " + esc(D.plex[j]) : "") + (flagged.has(D.samples[j]) ? "<br>flagged in the scorecard" : "")));
       c.addEventListener("mouseleave", hideTip);
       if (st.names) text(g, X(s[st.x]) + 9, Y(s[st.y]) + 4, D.samples[j], { "font-size": 11, fill: css("--text2") });
     });

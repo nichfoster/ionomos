@@ -389,6 +389,12 @@ def tmt_channels(record: dict | None, dest: Path, m, experiments: list[str]) -> 
         else:
             maps = {None: {str(c): str(s) for c, s in tmt["channels"].items()}}
         return {k: v for k, v in maps.items() if v}, "experiment.yaml tmt:"
+    plex, chan = ((m.meta.get("plex") or {}), (m.meta.get("channel") or {})) if m is not None else ({}, {})
+    if chan and len(set(plex.values())) > 1:  # several plexes the engine named (MSstatsTMT, MaxQuant, PD; plex.py)
+        maps: dict = {}
+        for s, ch in chan.items():
+            maps.setdefault(plex.get(s), {})[ch] = s
+        return maps, "the quant table's plexes"
     if m is not None and len(set(experiments)) <= 1:
         from ionomos.downstream import tmt as tmt_mod
 
