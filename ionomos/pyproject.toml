@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ionomos"
-version = "0.11.0"
+version = "0.12.0"
 description = "Proteomics results to an interactive report (statistics, volcano plots, QC, enrichment) from FragPipe, DIA-NN or any protein table, plus a drop-folder watcher that runs FragPipe headlessly"
 readme = "README.md"
 license = "GPL-3.0-or-later"
