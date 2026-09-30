@@ -473,6 +473,38 @@ server. The view lives in the address hash, so a link reopens it. Protein
 complexes (CORUM: non-commercial licence), CysDB for isoDTB sites, and
 PSM-level QC from `psm.tsv` were left for later (ROADMAP).
 
+### D36 — Ionomos is for other labs too: engines are adapters, analysis installs from pip
+**2026-09-30.** The goal is now that other labs can use Ionomos (ROADMAP
+Phase 5).
+
+The research found that no open tool automates the path from a lab's Windows
+instrument PC to a finished, trustworthy report without a bioinformatician:
+- quantms, Frag'n'Flow and ProtPipe need Linux, containers and HPC.
+- AlphaPept watches folders only for its own engine.
+- MSAID's `watch` is a commercial cloud product.
+- Downstream tools start from an uploaded table.
+
+So Ionomos stays on-premise and Windows-native for the watcher, and adds:
+
+1. **An analysis-only install from pip that runs anywhere.** The pure-Python
+   analysis has one dependency, and the literature on tool adoption says
+   installation decides whether a tool is tried at all.
+2. **Engines as adapters.** A registry of adapters can each recognise their
+   outputs, load one canonical quantity matrix and report provenance.
+   FragPipe is the first; the any-table loader is the fallback. Import comes
+   before running, because it is useful immediately and carries no licence
+   risk.
+3. **Ionomos never bundles an engine with a restrictive licence.** MSFragger
+   is academic-only, DIA-NN is not redistributable from 1.9 on, and MaxQuant
+   is not redistributable either. Each lab installs and accepts its own.
+   Sage (MIT) is the only candidate for bundling.
+4. **SDRF-Proteomics for sample metadata** (export first). mzTab is not used
+   internally: it has stalled for quantification and adds nothing over the
+   TSVs.
+
+Priorities are in ROADMAP Phase 5. Whether numpy may become an optional
+speed-up is left open until dose-response or a limpa-style model needs it.
+
 ### D39 — The watcher can run DIA-NN itself
 **2026-09-30.** A lab that searches DIA with DIA-NN alone (no FragPipe)
 couldn't use the watcher. A method can now say `engine: diann`.
