@@ -30,6 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   numbers.
 - MaxQuant `CON__` contaminants are removed like FragPipe's `contam_`.
 
+### Changed
+
+- ROADMAP Phase 5 and D36: the plan for making Ionomos useful to other labs
+  (pip-installable analysis, engine adapters, SDRF, configurable naming, more
+  engines and analyses).
+
 ## [0.11.0] - 2026-09-30
 
 ### Added
