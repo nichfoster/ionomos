@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Help for users** (D46, [docs/HELP.md](docs/HELP.md)). One set of plain
+  Markdown texts in `ionomos/help/` covers getting started, reading the
+  report chart by chart, a glossary, troubleshooting (every analysis issue
+  code, pop-up kind, rejected folder and held or failed search), what Ionomos
+  never does to your data, and common questions. It is shown in three places:
+  - **every report**: **Help** in the top bar, a **?** beside each section
+    title, QC tab and issue box that opens its text in place, and a Help
+    section at the end with the glossary and what to do about the issues in
+    that report (offline, inside the file);
+  - **`help.html`**, the whole help with a search box: the app's new **Help**
+    button, **More help** in each pop-up (opened at the topic that explains
+    it) and `ionomos help --open`;
+  - **`ionomos help [TOPIC]`** prints one topic (`NO_TABLE`, `pca`,
+    `glossary`, …).
+
+  Tests fail when an issue code, attention kind, intake rejection or held-search
+  reason has no help entry.
+
 - **Analysis-only install from pip** (ROADMAP Phase 5A, D40). `pip install
   ionomos`, then `ionomos analyze <table or folder>`, on Windows, macOS or
   Linux with no Tk; a test runs the analysis in a Python where `import

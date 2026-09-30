@@ -72,6 +72,7 @@ to put it on the PC.
 
 | Doc | Purpose |
 |---|---|
+| [HELP.md](docs/HELP.md) | The help lab members see (every report's **?** and Help section, the app's Help button, `ionomos help`): where it lives and how to edit it |
 | [QUICKSTART.md](docs/QUICKSTART.md) | **New here?** `pip install ionomos`, `ionomos demo`, then `ionomos analyze` on your own table: what it reads and what the report shows |
 | [SCOPE.md](docs/SCOPE.md) | Problem statement, in/out of scope, users, constraints |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, data flow, job state machine, on-disk layout |
