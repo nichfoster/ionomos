@@ -1,17 +1,41 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]  # 77: SPDX `license` + `license-files` (PEP 639)
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "ionomos"
 version = "0.11.0"
-description = "Drop-folder watcher that files lab experiment folders and runs FragPipe headlessly"
+description = "Proteomics results to an interactive report (statistics, volcano plots, QC, enrichment) from FragPipe, DIA-NN or any protein table, plus a drop-folder watcher that runs FragPipe headlessly"
 readme = "README.md"
-license = {text = "GPL-3.0-or-later"}
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]  # a copy of ../LICENSE (a test keeps them identical)
 requires-python = ">=3.11"
+keywords = ["proteomics", "mass spectrometry", "FragPipe", "DIA-NN", "limma", "volcano plot",
+            "differential expression", "chemoproteomics", "isoDTB", "TMT", "gene set enrichment"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Chemistry",
+]
 dependencies = [
     "PyYAML>=6.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/nichfoster/ionomos"
+Documentation = "https://github.com/nichfoster/ionomos/blob/master/docs/QUICKSTART.md"
+Source = "https://github.com/nichfoster/ionomos"
+Issues = "https://github.com/nichfoster/ionomos/issues"
+Changelog = "https://github.com/nichfoster/ionomos/blob/master/CHANGELOG.md"
 
 [project.optional-dependencies]
 dev = [
@@ -19,6 +43,7 @@ dev = [
     "ruff>=0.5",
     "pyinstaller>=6.10",
     "pip>=26.2",
+    "build>=1.2",
 ]
 
 [project.scripts]
@@ -28,7 +53,7 @@ ionomos = "ionomos.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-"ionomos.downstream" = ["assets/*"]
+"ionomos.downstream" = ["assets/*"]  # report.js, report.css, demo_gene_sets.gmt (tests/test_packaging.py)
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

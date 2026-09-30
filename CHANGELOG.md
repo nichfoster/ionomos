@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Analysis-only install from pip** (ROADMAP Phase 5A, D37). `pip install
+  ionomos`, then `ionomos analyze <table or folder>`, on Windows, macOS or
+  Linux with no Tk; a test runs the analysis in a Python where `import
+  tkinter` fails. New [docs/QUICKSTART.md](docs/QUICKSTART.md): a 10-minute
+  guide for someone new, covering what `analyze` reads and what the report
+  shows.
+- **`ionomos demo [FOLDER] [--open]`**: writes a simulated DIA experiment and
+  analyses it, offline. It has DMSO / DrugA / DrugB × 4 replicates, planted
+  hits, on/off proteins and gene-set shifts, with a bundled demo `.gmt`. The
+  default folder is `./ionomos_demo`, then `_2`, `_3`, ... if taken; the demo
+  never writes into a folder that holds anything.
+- PyPI metadata in `ionomos/pyproject.toml`: SPDX licence, classifiers,
+  keywords, project URLs, and a short PyPI-facing `ionomos/README.md`.
+- `.github/workflows/publish-pypi.yml`. On `v*` tags or by hand, it builds the
+  wheel and sdist, runs `twine check`, installs them into fresh venvs on
+  Windows / macOS / Linux and runs `demo` and `analyze` from them. It uploads
+  with PyPI trusted publishing only once the maintainer has configured it
+  (steps at the top of the file).
+
+### Changed
+
+- A relative `enrichment_gmt` (in `experiment.yaml` or the lab config) is read
+  from the experiment folder when the file is there.
+- `simulate.dia_pg_matrix` can name the proteins, plant chosen effects and
+  leave proteins out of whole conditions. Output for existing seeds is
+  unchanged.
+
 ## [0.11.0] - 2026-09-30
 
 ### Added

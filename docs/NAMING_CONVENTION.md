@@ -216,6 +216,7 @@ analysis:                   # results/report.html for this experiment (lab defau
   comparisons: ["Drug vs DMSO", "Drug2 vs DMSO"]   # treatment vs control; default: all vs the control
   control: DMSO             # default: recognised by name (DMSO, vehicle, ctrl, WT, ...)
   log2fc: 1                 # also: alpha, use_adjusted, min_valid, normalize, test, top_labels
+  enrichment_gmt: sets.gmt  # extra gene sets; a relative path is read from this folder first
 
 notes: "24 h treatment, 1 µM"   # copied into ionomos.json for provenance
 ```

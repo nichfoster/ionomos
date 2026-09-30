@@ -473,3 +473,34 @@ server. The view lives in the address hash, so a link reopens it. Protein
 complexes (CORUM: non-commercial licence), CysDB for isoDTB sites, and
 PSM-level QC from `psm.tsv` were left for later (ROADMAP).
 
+### D37 — `pip install ionomos` is the analysis; the demo is simulated, offline and writes only new folders
+**2026-09-30.** First step of ROADMAP Phase 5A (the plan in D36): a stranger
+can `pip install ionomos`, run `ionomos demo`, then `ionomos analyze` on their
+own table, on Windows, macOS or Linux (docs/QUICKSTART.md).
+
+- **One package, no split.** The watcher and the app ship in the same wheel.
+  Only the window modules import Tk, and the CLI loads them only for commands
+  that open windows, so the analysis path never loads Tk (Windows-only calls
+  are likewise made inside the functions that need them). A test runs `demo` and `analyze` in a
+  Python where `import tkinter` fails, so this can't quietly regress.
+- **The demo is simulated until a real anonymised experiment exists**
+  (`downstream/simulate.py`). It has three conditions, four replicates, planted
+  hits, on/off proteins, and gene sets moved strongly (found by the hit lists)
+  or slightly (found only by the rank test), so every section of the report has
+  something true to show. Its gene sets are a small bundled `.gmt` of real
+  symbols, labelled as simplified. The demo downloads nothing, so it works
+  offline and gives the same result every time.
+- **The demo never writes into anything that exists.** The default
+  `./ionomos_demo` moves on to `_2`, `_3`, ... and a folder given by the user
+  must be new or empty. The name has no spaces (the FragPipe rule, although no
+  FragPipe runs here).
+- **A relative `enrichment_gmt` is read from the experiment folder first**, so
+  a folder that carries its own gene sets (the demo, a shared experiment) can
+  be moved and re-analysed from anywhere.
+- **Publishing is the maintainer's step.** `publish-pypi.yml` builds the
+  package on every `v*` tag and installs it into a fresh venv on all three
+  platforms. It uploads only after PyPI trusted publishing is configured and
+  the `PYPI_PUBLISH` variable is set, so no token is stored and an
+  unconfigured repository never fails a release. On 2026-09-30 the name
+  `ionomos` was free on PyPI.
+

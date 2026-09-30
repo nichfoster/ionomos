@@ -13,6 +13,7 @@ Command line.
     ionomos analyze  JOB_ID|FOLDER [--control C] [--compare 'A vs B'] [--de-type all] [--imputation none]
                      [--exclude SAMPLE] [--log2fc F] [--open]
                                                    statistics + volcano plots + results/report.html
+    ionomos demo     [FOLDER] [--open]            a simulated experiment + its report (offline, no lab setup)
     ionomos init     [--root DIR] [--users DIR]   create folders + a config without the app (headless setup)
     ionomos cancel   JOB_ID                       stop a running search / drop a queued job
     ionomos pause | resume                        hold / release the FragPipe queue
@@ -572,6 +573,29 @@ def cmd_analyze(args) -> int:
     out = postprocess.run_for_folder(dest, cfg, args.method, extra,
                                      progress=(lambda m: print(f"  … {m}", flush=True)) if not args.quiet else None,
                                      table=table)
+    _print_outcome(out)
+    if cfg is not None:
+        job_id = int(target) if target.isdigit() else None
+        postprocess.record_issues(cfg.log_dir, dest, out, job_id)
+    if out.report:
+        print(f"report: {out.report}")
+        if args.open:
+            _open_report(out.report)
+    return 0 if out.report else 1
+
+
+def _open_report(report) -> None:
+    """--open: the report in the default browser. A machine without one (a server, no xdg-open) gets a note."""
+    from ionomos.service import open_path
+
+    try:
+        open_path(report)
+    except OSError as exc:
+        print(f"could not open it here ({exc}); copy report.html to a computer with a browser", file=sys.stderr)
+
+
+def _print_outcome(out) -> None:
+    """What `analyze` and `demo` print about a downstream.Outcome (comparisons, notes, issues)."""
     print(f"method: {out.method or 'unknown'}")
     for c in out.summary.get("comparisons", []):
         conf = {"low": "  [LOW CONFIDENCE]", "none": "  [FOLD CHANGE ONLY]"}.get(c.get("confidence"), "")
@@ -590,16 +614,34 @@ def cmd_analyze(args) -> int:
         print(f"  [{i.severity}] {i.title}: {i.message}")
         for fix in i.fixes[:2]:
             print(f"      → {fix}")
-    if cfg is not None:
-        job_id = int(target) if target.isdigit() else None
-        postprocess.record_issues(cfg.log_dir, dest, out, job_id)
-    if out.report:
-        print(f"report: {out.report}")
-        if args.open:
-            from ionomos.service import open_path
 
-            open_path(out.report)
-    return 0 if out.report else 1
+
+def cmd_demo(args) -> int:
+    """Write a small simulated experiment, analyse it and print where the report is. Offline, no lab config."""
+    from ionomos import demo
+
+    try:
+        folder = demo.pick_folder(args.folder)
+    except demo.DemoError as exc:
+        print(exc, file=sys.stderr)
+        return 2
+    try:
+        demo.write_demo(folder)
+    except (OSError, demo.DemoError) as exc:
+        print(f"cannot write the demo into {folder}: {exc}", file=sys.stderr)
+        return 2
+    print(f"demo experiment (simulated DIA, 3 conditions x 4 replicates): {folder}")
+    out = demo.analyze(folder, progress=(lambda m: print(f"  … {m}", flush=True)) if not args.quiet else None)
+    _print_outcome(out)
+    if not out.report:
+        return 1
+    print(f"report: {out.report}")
+    print(f"what is planted and what to look for: {folder / 'README.txt'}")
+    if args.open:
+        _open_report(out.report)
+    else:
+        print("open it in a browser, or run again with --open")
+    return 0
 
 
 def cmd_attention(args) -> int:
@@ -755,6 +797,12 @@ def main(argv: list[str] | None = None) -> int:
     az.add_argument("--quiet", action="store_true", help="no progress lines")
     az.add_argument("--open", action="store_true", help="open the report when done")
     az.set_defaults(fn=cmd_analyze)
+    dm = sub.add_parser("demo", help="write a small simulated experiment and its report (offline; try this first)")
+    dm.add_argument("folder", nargs="?", help="a new or empty folder (default: ./ionomos_demo, or ionomos_demo_2, "
+                                              "... if taken; nothing existing is touched)")
+    dm.add_argument("--quiet", action="store_true", help="no progress lines")
+    dm.add_argument("--open", action="store_true", help="open the report when done")
+    dm.set_defaults(fn=cmd_demo)
     at = sub.add_parser("attention", help="what needs a person (analysis decisions, failed searches, ...)")
     at.add_argument("action", nargs="?", choices=["list", "show", "dismiss"], default="list")
     at.add_argument("item", nargs="?", help="item id (from the list)")

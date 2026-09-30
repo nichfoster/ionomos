@@ -80,9 +80,20 @@ def isodtb_label_quant(path: Path, experiments: dict[str, list[int]], seed: int 
 
 
 def dia_pg_matrix(path: Path, runs: list[tuple[str, str]], seed: int = 1, n_proteins: int = 600,
-                  changed_fraction: float = 0.1, effect: float = 2.0) -> dict[str, dict[str, int]]:
-    """runs = [(run file path as FragPipe gives it, condition)]. Returns {condition: {gene: +1/-1}} vs control."""
+                  changed_fraction: float = 0.1, effect: float = 2.0, genes: list[str] | None = None,
+                  planted: dict[str, dict[str, float]] | None = None,
+                  absent: dict[str, list[str]] | None = None) -> dict[str, dict[str, int]]:
+    """runs = [(run file path as FragPipe gives it, condition)]. Returns {condition: {gene: +1/-1}} vs control.
+
+    genes: names for the first proteins (the rest are GENE<i>); planted: {condition: {gene: log2 effect}} on top
+    of the random changes (and winning over them); absent: {condition: [gene]} never measured in that condition
+    (on/off proteins, not in the returned truth). Without these three the output is unchanged for a seed."""
     rng = random.Random(seed)
+    planted = planted or {}
+    absent_in: dict[str, set[str]] = {}
+    for c, gs in (absent or {}).items():
+        for g in gs:
+            absent_in.setdefault(g, set()).add(c)
     conds = list(dict.fromkeys(c for _, c in runs))
     ctrl = _control(conds)
     truth: dict[str, dict[str, int]] = {c: {} for c in conds if c != ctrl}
@@ -91,7 +102,7 @@ def dia_pg_matrix(path: Path, runs: list[tuple[str, str]], seed: int = 1, n_prot
               "N.Sequences", "N.Proteotypic.Sequences", *[r for r, _ in runs]]
     lines = []
     for i in range(n_proteins):
-        g = _gene(i)
+        g = genes[i] if genes and i < len(genes) else _gene(i)
         base = rng.gauss(22, 2.2)
         eff = {}
         for c in truth:
@@ -99,12 +110,19 @@ def dia_pg_matrix(path: Path, runs: list[tuple[str, str]], seed: int = 1, n_prot
                 sign = rng.choice((1, -1))
                 eff[c] = sign * effect
                 truth[c][g] = sign
+            if g in planted.get(c, {}):
+                eff[c] = planted[c][g]
+                if eff[c]:
+                    truth[c][g] = 1 if eff[c] > 0 else -1
+                else:
+                    truth[c].pop(g, None)
         peptides = max(1, round((base - 17) * 1.5) + i % 3)  # more abundant, more peptides (no rng draw)
         row = [f"P{20000 + i}", f"P{20000 + i}", f"{g}_HUMAN", g, f"{g} protein", str(peptides), str(peptides)]
         for r, c in runs:
             v = base + eff.get(c, 0.0) + shift[r] + rng.gauss(0, 0.3)
             p_missing = 0.02 + max(0.0, (19 - v)) * 0.15  # low abundance goes missing more often
-            row.append("" if rng.random() < p_missing else f"{2 ** v:.1f}")
+            gone = rng.random() < p_missing or c in absent_in.get(g, ())
+            row.append("" if gone else f"{2 ** v:.1f}")
         lines.append(row)
     _write(path, header, lines)
     return truth
