@@ -2,12 +2,11 @@
 // nothing they contain may reach a parsing context. The sinks that matter:
 // table rows, tiles, the detail panel, every showTip() caller (tip.innerHTML
 // is assigned directly — report.js's central XSS invariant), and the CSV
-// export. The skipped test at the end is the reproduction for finding F-01
-// (report.py's `</` escaping does not neutralise `<!--` in the data script).
+// export. The last test guards finding F-01 (a `<!--` in the data used to break the data script).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { loadReport, baseData, withData, loadReportRaw, blobText, readFixture } from "../lib/harness.mjs";
+import { loadReport, baseData, withData, loadReportRaw, blobText, readFixture, embedData } from "../lib/harness.mjs";
 
 const BASE = baseData();
 const SCRIPT = "<script>window.__xss=1</script>";
@@ -137,19 +136,19 @@ test("raw-mode load of the shipped fixture runs setup (regression guard on the e
   assert.equal(window.__xss, undefined, "fixture is clean");
 });
 
-test.skip("F-01 repro: a data string containing <!-- breaks script-data tokenization", async () => {
-  // report.py:296 escapes `</` but not `<!--`. In the HTML script-data state,
-  // `<!--` starts a double-escaped tokenization; the later `</script>` of the
-  // report code tag is then not a real end tag, the data script swallows the
-  // report script, and the page renders empty. Skipped until F-01 is fixed:
-  // the fix (escape `<` as \u003c in report.py) flips this test on.
+test("F-01: a data string containing <!-- can't break script-data tokenization", async () => {
+  // In the HTML script-data state `<!--` starts a double-escaped tokenization; the later `</script>` of the
+  // report code tag is then not a real end tag and the data script swallows the report script. report.py
+  // now writes `<!--` as `<\u0021--` (and `</` as `<\/`); the harness embeds data the same way.
   const data = JSON.parse(JSON.stringify(baseData()));
   data.f.label[0] = "<!--<script>window.__xss=1</script>";
   const html = readFixture().replace(
     /(<script id='ionomos-data' type='application\/json'>)[\s\S]*?(<\/script>)/,
-    (_m, open, close) => open + JSON.stringify(data) + close
+    (_m, open, close) => open + embedData(data) + close
   );
   const { window, document } = await loadReportRaw({ html });
-  assert.equal(window.__xss, undefined, "no execution expected either way");
-  assert.ok(document.querySelector("#differential-body svg"), "report still renders (fails while F-01 is open)");
+  assert.equal(window.__xss, undefined, "nothing executes");
+  assert.ok(document.querySelector("#differential-body svg"), "the report still renders");
+  const embedded = JSON.parse(document.querySelector("#ionomos-data").textContent);
+  assert.equal(embedded.f.label[0], "<!--<script>window.__xss=1</script>", "the label survives as data");
 });

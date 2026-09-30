@@ -29,6 +29,7 @@ class Feature:
     id: str
     label: str
     description: str = ""
+    peptides: int | None = None  # peptide (DIA-NN, FragPipe) or PSM (TMT-Integrator) evidence, when the table has it
 
 
 @dataclass
@@ -61,6 +62,12 @@ class QuantMatrix:
 
     def samples_of(self, cond: str) -> list[str]:
         return [s for s in self.samples if self.condition[s] == cond]
+
+
+def _count(v: str | None) -> int | None:
+    """A peptide / PSM count cell ('3', '3.0'); None when blank or not a number."""
+    x = num(v)
+    return int(x) if x is not None and x >= 0 and x == int(x) else None
 
 
 def _log2(v: float | None) -> float | None:
@@ -171,7 +178,8 @@ def from_pg_matrix(path: Path, sample_map: dict[str, tuple[str, int]] | None = N
         genes = r.get("Genes") or ""
         gid = r.get("Protein.Group") or r.get("Protein.Ids") or ""
         feats.append(Feature(id=gid, label=genes.split(";")[0] or (r.get("Protein.Names") or gid).split(";")[0],
-                             description=r.get("First.Protein.Description", "")))
+                             description=r.get("First.Protein.Description", ""),
+                             peptides=_count(r.get("N.Sequences"))))
         vals.append([_log2(num(r.get(h))) for h in runs])
     missing = sorted(set(sample_map) - matched)
     if missing:
@@ -181,7 +189,8 @@ def from_pg_matrix(path: Path, sample_map: dict[str, tuple[str, int]] | None = N
         if s not in reps and s.rsplit("_", 1)[-1].isdigit():
             reps[s] = int(s.rsplit("_", 1)[1])
     return QuantMatrix("intensity", "protein", feats, samples, vals, cond, str(path), notes=notes, exp="DIA",
-                       replicate=reps, columns=colmap, meta={"missing_runs": missing, "unmatched_runs": unmatched})
+                       replicate=reps, columns=colmap, meta={"missing_runs": missing, "unmatched_runs": unmatched,
+                                                             "evidence": "peptides"})
 
 
 def _dia_condition(stem: str) -> str:
@@ -204,13 +213,15 @@ def from_combined_protein(path: Path) -> QuantMatrix:
     suffix = " MaxLFQ Intensity" if maxlfq else " Intensity"
     samples = [c[: -len(suffix)] for c in cols]
     cond = {s: (re.match(r"^(.*)_\d+$", s).group(1) if re.match(r"^(.*)_\d+$", s) else s) for s in samples}
+    peps = next((h for h in ("Combined Total Peptides", "Total Peptides", "Combined Peptides") if h in header), None)
     feats = [Feature(id=r.get("Protein ID") or r.get("Protein", ""), label=r.get("Gene") or r.get("Entry Name") or "",
-                     description=r.get("Description") or r.get("Protein Description") or "") for r in rows]
+                     description=r.get("Description") or r.get("Protein Description") or "",
+                     peptides=_count(r.get(peps)) if peps else None) for r in rows]
     vals = [[_log2(num(r.get(c))) for c in cols] for r in rows]
     reps = {x: int(x.rsplit("_", 1)[1]) for x in samples if x.rsplit("_", 1)[-1].isdigit()}
     return QuantMatrix("intensity", "protein", feats, samples, vals, cond, str(path),
                        notes=[f"quantity: {suffix.strip()}"], exp="LFQ", replicate=reps,
-                       columns=dict(zip(samples, cols, strict=True)))
+                       columns=dict(zip(samples, cols, strict=True)), meta={"evidence": "peptides"} if peps else {})
 
 
 # ------------------------------------------------------------------- TMT --
@@ -228,7 +239,7 @@ def from_tmt_abundance(path: Path, annotation: list[dict] | None = None) -> Quan
     cols = [c for c in cols if sum(num(r.get(c)) is not None for r in rows[:200]) > 0] or cols
     cond = {c: (by_sample[c]["condition"] if c in by_sample else condition_of(c)) for c in cols}
     feats = [Feature(id=r.get("Index") or r.get("ProteinID", ""), label=r.get("Index") or r.get("Gene") or "",
-                     description=r.get("ProteinID", "")) for r in rows]
+                     description=r.get("ProteinID", ""), peptides=_count(r.get("NumberPSM"))) for r in rows]
     vals = [[num(r.get(c)) for c in cols] for r in rows]
     reps = {}
     for c in cols:
@@ -238,4 +249,4 @@ def from_tmt_abundance(path: Path, annotation: list[dict] | None = None) -> Quan
             reps[c] = int(r)
     return QuantMatrix("intensity", "gene" if "gene" in Path(path).name else "protein", feats, cols, vals, cond,
                        str(path), notes=["TMT-Integrator values are log2 ratios to the reference channel"],
-                       exp="TMT", replicate=reps, columns={c: c for c in cols})
+                       exp="TMT", replicate=reps, columns={c: c for c in cols}, meta={"evidence": "PSMs"})

@@ -409,3 +409,67 @@ and the next drop without restarting the watcher. The app's config writer
 keeps the new keys, and a lab's code list replaces the defaults instead of
 being merged with them.
 
+### D35 — Every report checks its samples and looks past the volcano
+**2026-09-30.** A volcano plot answers one question at one cut-off. The
+questions that decide whether it can be trusted, and where the rest of the
+biology is, were left to whoever reads the report. The report now answers
+them every time, each in pure Python (`downstream/insights.py`), bounded by
+features × samples, run as an isolated stage.
+
+**Is each sample fine?** A scorecard of robust z-scores (median/MAD, with the
+MAD floored so six near-identical samples can't make noise look extreme)
+covers:
+- identifications
+- correlation with its replicates
+- spread around its group
+- MS-DAP's leave-one-out CV
+
+A sample fails on two flags, or on the existing "far fewer identifications"
+rule.
+
+**Is there a batch?** A one-way ANOVA R² relates each principal component to
+condition and to replicate number. Replicate number is the lab's de facto
+batch (rep 1 of every condition is usually prepared together). It is only
+used when every condition has two or more replicates.
+
+**Does the imputation fit?** Detection rate is compared with mean intensity:
+- a Spearman ρ
+- the gap between complete and incomplete features, in SDs of the feature
+  means
+
+Missingness that doesn't depend on intensity makes Perseus-type imputation
+invent fold changes.
+
+**Can the p-values be read at face value?** The histogram's shape is
+classified and Storey's π0 is estimated. The other two warnings:
+- **imputation-driven hits**: half or more of a group imputed
+- **presence/absence features**: at least 75% (and at least 2) of one group,
+  none of the other
+
+These produce **warnings, never pop-ups**. They are advice about data that
+may be fine, and the thresholds haven't met real lab data yet. The clean
+simulated experiments raise none of them (`tests/test_insights.py`).
+
+Enrichment gains a **rank-based test on every protein**, because
+over-representation only sees the hits and misses a pathway whose members
+all move a little. It is a Wilcoxon rank-sum on the moderated t, as limma's
+geneSetTest / wilcoxGST. Its variance is inflated by 1 + (k − 1)·r̄, where
+r̄ is the set's mean inter-gene correlation of residuals. That is camera's
+idea, applied to ranks, and computed in O(k·samples) with unit vectors.
+Without it, co-regulated sets look far more significant than they are.
+fgsea-style permutations were rejected as too slow in pure Python.
+
+The page gains what analysts otherwise do by hand:
+- search by list / wildcard / regex / gene set, with "not found" reported
+- box selection
+- highlight groups
+- comparison-vs-comparison quadrants and an UpSet chart
+- correlated proteins
+- abundance rank, mean–variance, a power curve
+
+Groups live in the browser's localStorage, so a lab member's "E3 ligases"
+list follows them across reports. Pinning them into a report would need a
+server. The view lives in the address hash, so a link reopens it. Protein
+complexes (CORUM: non-commercial licence), CysDB for isoDTB sites, and
+PSM-level QC from `psm.tsv` were left for later (ROADMAP).
+

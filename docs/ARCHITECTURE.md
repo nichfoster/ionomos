@@ -37,7 +37,7 @@
 | `attention.py` | Durable "needs a person" queue (`<log_dir>/attention/*.json`): raised by intake, worker, analysis; closed when fixed | — |
 | `popups.py` | Pop-up windows + the "needs attention" list, in the app or (app closed) the watcher's own Tk loop | — |
 | `downstream/doctor.py` | The analysis check-up: issues with severity, likely causes, fixes; condition suggestions from file names | — |
-| `downstream/` | FragPipe tables → `QuantMatrix` → FragPipe-Analyst processing + limma → interactive `results/report.html`. `isodtb.py`/`tmt.py` (R ports), `quant.py` (loaders), `fpa.py` (FragPipeAnalystR port: filter, normalise, impute, `test_limma`), `rrandom.py` (R's RNG), `analysis.py` (settings, comparisons), `qc.py` (PCA, clustering, CV, missingness), `enrich.py` (local ORA on Enrichr libraries), `export.py` (result tables, FragPipe-Analyst annotation + R script), `report.py` + `assets/report.js`, `charts.py` (static SVG volcano), `stats.py`, `simulate.py` | the lab's R scripts; FragPipeAnalystR; limma |
+| `downstream/` | FragPipe tables → `QuantMatrix` → FragPipe-Analyst processing + limma → interactive `results/report.html`. `isodtb.py`/`tmt.py` (R ports), `quant.py` (loaders), `fpa.py` (FragPipeAnalystR port: filter, normalise, impute, `test_limma`), `rrandom.py` (R's RNG), `analysis.py` (settings, comparisons), `qc.py` (PCA, clustering, CV, missingness), `insights.py` (sample scorecard, PC ↔ condition/replicate, missingness vs intensity, p-value shape + π0, on/off features, imputation-driven hits, power; D35), `enrich.py` (local ORA and a correlation-adjusted rank test on Enrichr libraries), `export.py` (result tables, FragPipe-Analyst annotation + R script), `report.py` + `assets/report.js`, `charts.py` (static SVG volcano), `stats.py`, `simulate.py` | the lab's R scripts; FragPipeAnalystR; limma |
 | `setupcheck.py` | The setup checklist (app ✓ Setup tab, `ionomos init`) | — |
 | `names.py` | Every on-disk / system name, with its LabWatch-era twin; readers accept both, writers use the new one | — |
 | `buildinfo.py` | `Ionomos 0.5.0 (build 3f2a9c1, date, installed)` — `--version`, app footer, every report | — |
@@ -256,7 +256,17 @@ fragpipe/ ─▶ method prep ─▶ QuantMatrix ─▶ fpa.process ────�
              tmt.py         samples, log2  contaminants, % filters       model, eBayes,    missingness, CV,    report.js), TSVs,
              quant.py       + condition    median / GN normalisation     CIs, BH           heatmap, ORA        volcano_*.svg,
                                            Perseus / MinProb / … impute  add_rejections                        fragpipe-analyst/
+                                                                                   insights (D35):
+                                                                                   scorecard, batch,
+                                                                                   missingness, π0,
+                                                                                   on/off, power;
+                                                                                   rank-based sets
 ```
+
+The insights stage writes `sample_qc.tsv`, `presence_absence.tsv` and
+`gene_set_ranks.tsv`, adds a `quality` block to `analysis.json`, and feeds
+the doctor's warnings (`SAMPLE_OUTLIER`, `BATCH_SUSPECT`, …). Like QC, it is
+isolated: if it crashes, the volcano plots and the report are still made.
 
 Settings: `config.yaml analysis:` (lab defaults, Analysis tab → Lab defaults)
 overridden by `experiment.yaml analysis:` (Analysis tab → Analyse an

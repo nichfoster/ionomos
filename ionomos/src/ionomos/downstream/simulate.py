@@ -88,7 +88,7 @@ def dia_pg_matrix(path: Path, runs: list[tuple[str, str]], seed: int = 1, n_prot
     truth: dict[str, dict[str, int]] = {c: {} for c in conds if c != ctrl}
     shift = {r: rng.gauss(0, 0.4) for r, _ in runs}  # loading differences -> median normalisation matters
     header = ["Protein.Group", "Protein.Ids", "Protein.Names", "Genes", "First.Protein.Description",
-              *[r for r, _ in runs]]
+              "N.Sequences", "N.Proteotypic.Sequences", *[r for r, _ in runs]]
     lines = []
     for i in range(n_proteins):
         g = _gene(i)
@@ -99,7 +99,8 @@ def dia_pg_matrix(path: Path, runs: list[tuple[str, str]], seed: int = 1, n_prot
                 sign = rng.choice((1, -1))
                 eff[c] = sign * effect
                 truth[c][g] = sign
-        row = [f"P{20000 + i}", f"P{20000 + i}", f"{g}_HUMAN", g, f"{g} protein"]
+        peptides = max(1, round((base - 17) * 1.5) + i % 3)  # more abundant, more peptides (no rng draw)
+        row = [f"P{20000 + i}", f"P{20000 + i}", f"{g}_HUMAN", g, f"{g} protein", str(peptides), str(peptides)]
         for r, c in runs:
             v = base + eff.get(c, 0.0) + shift[r] + rng.gauss(0, 0.3)
             p_missing = 0.02 + max(0.0, (19 - v)) * 0.15  # low abundance goes missing more often

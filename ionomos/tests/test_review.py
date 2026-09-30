@@ -15,7 +15,7 @@ from ionomos.intake import DraftFile, IntakeError, IntakeResult, Kind, draft, in
 from ionomos.ledger import Ledger
 from ionomos.manifest import load_overrides, save_overrides
 from ionomos.naming import DEFAULT_CONDITION_CODES, NamingError, parse_raw_name
-from ionomos.resolve import Answer, guess_control, gui_available, summarize, to_overrides, validate
+from ionomos.resolve import Answer, guess_control, summarize, to_overrides, validate
 from tests.conftest import make_drop, make_tk_root
 
 KC_RAWS = [f"KC_DIA_{c}{r}.raw" for c in "DC" for r in (1, 2, 3)]
@@ -228,7 +228,9 @@ def test_control_must_be_a_condition():
 
 # ------------------------------------------------------------ real tkinter --
 
-_ok, _why = gui_available()
+from tests.conftest import gui_tests  # noqa: E402
+
+_ok, _why = gui_tests()
 
 
 def _widgets(w):
