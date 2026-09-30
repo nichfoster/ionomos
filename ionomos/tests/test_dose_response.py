@@ -222,7 +222,7 @@ def test_planted_ec50s_are_recovered_and_flat_features_are_not_called():
             if r["class"] == t["class"]:
                 called += 1
                 err.append(abs(r["pec50"] - t["pec50"]))
-                assert r["pec50_ci_low"] < r["pec50"] < r["pec50_ci_high"]
+                assert r["pec50_ci_low"] <= r["pec50"] <= r["pec50_ci_high"]  # a fit at the bound: its clipped edge
         elif r["class"] in ("up", "down"):
             false += 1
     assert called >= 0.85 * planted, (called, planted)
@@ -358,3 +358,17 @@ def test_dose_response_can_be_switched_off(tmp_path):
     dest = _dose_experiment(tmp_path, [1, 10, 100, 1000, 10000], seed=4, n=40)
     out = downstream.analyze(dest, "DIA", overrides={"dose_response": False})
     assert out.summary["dose_response"]["ran"] is False and "switched off" in out.summary["dose_response"]["reason"]
+
+
+def test_a_pec50_interval_never_reaches_outside_the_range_a_fit_may_take(tmp_path):
+    """A steep curve between two doses has no local error estimate: the Jacobian gave 'intervals' like
+    -907792 .. 907806. Intervals are clipped to the pEC50 bounds of the fit, so they read 'somewhere in the
+    tested range' and still cover the truth."""
+    d = tmp_path / "e"
+    simulate.dose_pg_matrix(d / "fragpipe" / "report.pg_matrix.tsv", [1, 10, 100, 1000, 10000], seed=3, n=400)
+    downstream.analyze(d, "DIA", analysis_cfg={"enrichment": False})
+    _h, rows = read_tsv(d / "results" / "dose_response.tsv")
+    lo, hi = dr.bounds([math.log10(x * 1e-9) for x in (1, 10, 100, 1000, 10000)])
+    got = [(num(r["pec50_ci_low"]), num(r["pec50_ci_high"])) for r in rows if num(r["pec50_ci_low"]) is not None]
+    assert got and all(lo[0] - 1e-9 <= a <= b <= hi[0] + 1e-9 for a, b in got)
+    assert any(abs(a - lo[0]) < 1e-9 or abs(b - hi[0]) < 1e-9 for a, b in got)  # some were clipped

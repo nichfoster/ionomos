@@ -35,6 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `simulate.dose_titration` / `dose_pg_matrix` make titrations with known
   pEC50s.
 
+  The 95% pEC50 interval is clipped to the range a fit may take: a steep curve between two doses has no
+  local error estimate, and it read like -907792 – 907806.
 - **Help for users** (D46, [docs/HELP.md](docs/HELP.md)). One set of plain
   Markdown texts in `ionomos/help/` covers getting started, reading the
   report chart by chart, a glossary, troubleshooting (every analysis issue

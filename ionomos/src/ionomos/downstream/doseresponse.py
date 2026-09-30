@@ -26,7 +26,8 @@ What CurveCurator does, and so what this does (its defaults: OLS, "standard" spe
   "unclear" otherwise (CurveCurator leaves those blank on purpose). Defaults alpha 0.05, fc_lim 0.45
   (CurveCurator's decryptM settings).
 - Added here: a BH q-value of the curve p-values (CurveCurator's own q-values need its decoys), and a
-  95% interval for pEC50 from the Jacobian (CurveCurator's pEC50 error x Student t, n - 4 df).
+  95% interval for pEC50 from the Jacobian (CurveCurator's pEC50 error x Student t, n - 4 df), clipped to
+  the pEC50 range a fit may take (a steep curve between two doses has no local error estimate).
 
 Doses come from analysis.doses (condition -> "10 nM"), else from condition names (Cmpd_10nM, 0p1uM,
 10 µM); the control (DMSO / vehicle, analysis.find_control) is dose 0. A series (one compound) needs
@@ -565,6 +566,7 @@ def fit_series(m, measured, sr: Series, alpha: float, fc_lim: float, progress=No
     ctrl = [j for j in cols if dose[j] == 0]
     order = sorted((j for j in cols if dose[j] > 0), key=lambda j: dose[j])  # stable: replicates keep their order
     xs_all = [math.log10(d) for d in sr.doses]
+    lo_b, hi_b = bounds(xs_all)  # the pEC50 range a fit may take
     out = Curves(sr, cols, [dose[j] for j in cols])
     tq = {}
     for i, row in enumerate(measured):
@@ -586,6 +588,8 @@ def fit_series(m, measured, sr: Series, alpha: float, fc_lim: float, progress=No
         t = tq.get(k) or tq.setdefault(k, stats.qt_upper(0.05, k))
         e = fit["pec50_error"]
         ci = (fit["pec50"] - t * e, fit["pec50"] + t * e) if math.isfinite(e) else (math.nan, math.nan)
+        if math.isfinite(e):  # a pEC50 can't leave the fit's bounds, so neither can its interval (a steep curve
+            ci = (max(ci[0], lo_b[0]), min(ci[1], hi_b[0]))  # between two doses: "somewhere in the tested range")
         f = m.features[i]
         out.rows.append({
             "index": i, "series": sr.name, "id": f.id, "label": f.label, "description": f.description,

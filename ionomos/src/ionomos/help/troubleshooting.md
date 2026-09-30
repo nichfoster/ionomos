@@ -382,6 +382,21 @@ number then becomes a blocking factor in the model, so each comparison is
 made within a batch ([How to re-run](#faq.rerun)). Next time, randomise the
 preparation and run order.
 
+## Dose-response: the doses need a look {#issue.DOSES}
+
+Ionomos found what looks like a titration but couldn't read every dose, so
+some conditions were left out of the [dose-response curves](#report.dose),
+or none were fitted. The message names the condition. Common causes:
+- `analysis.doses` names a condition that isn't in this experiment (a typo,
+  or a renamed condition), or gives a number without a unit (`10` instead
+  of `10 nM`).
+- A condition name holds two doses (a combination, e.g. `A_1uM_B_10nM`).
+- The vehicle isn't recognisable as the control (not named DMSO, vehicle, …).
+
+List every condition's dose under `analysis:` in the experiment's
+`experiment.yaml`, e.g. `doses: {DMSO: 0, Cmpd_A: 10 nM, Cmpd_B: 100 nM}`, and
+re-run the analysis ([How?](#faq.rerun)).
+
 ## The experimental design couldn't be used {#issue.DESIGN_NOT_USED}
 
 The experiment asks for blocks or covariates (`block`, `block_from` or
