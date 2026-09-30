@@ -40,7 +40,7 @@
 | `attention.py` | Durable "needs a person" queue (`<log_dir>/attention/*.json`): raised by intake, worker, analysis; closed when fixed | — |
 | `popups.py` | Pop-up windows + the "needs attention" list, in the app or (app closed) the watcher's own Tk loop | — |
 | `downstream/doctor.py` | The analysis check-up: issues with severity, likely causes, fixes; condition suggestions from file names | — |
-| `downstream/` | FragPipe tables → `QuantMatrix` → FragPipe-Analyst processing + limma → interactive `results/report.html`. `isodtb.py`/`tmt.py` (R ports), `quant.py` (loaders), `engines.py` (other engines' outputs — DIA-NN standalone incl. 2.x Parquet, MaxQuant, Spectronaut, AlphaDIA, MSstats format, Proteome Discoverer — and the provenance of any result; ENGINES.md, D36), `fpa.py` (FragPipeAnalystR port: filter, normalise, impute, `test_limma`), `rrandom.py` (R's RNG), `analysis.py` (settings, comparisons), `qc.py` (PCA, clustering, CV, missingness), `insights.py` (sample scorecard, PC ↔ condition/replicate, missingness vs intensity, p-value shape + π0, on/off features, imputation-driven hits, power; D35), `enrich.py` (local ORA and a correlation-adjusted rank test on Enrichr libraries), `export.py` (result tables, FragPipe-Analyst annotation + R script), `sdrf.py` (SDRF-Proteomics sample metadata; D38), `report.py` + `assets/report.js`, `charts.py` (static SVG volcano), `stats.py`, `simulate.py` | the lab's R scripts; FragPipeAnalystR; limma |
+| `downstream/` | FragPipe tables → `QuantMatrix` → FragPipe-Analyst processing + limma → interactive `results/report.html`. `isodtb.py`/`tmt.py` (R ports), `quant.py` (loaders), `engines.py` (other engines' outputs — DIA-NN standalone incl. 2.x Parquet, MaxQuant, Spectronaut, AlphaDIA, MSstats format, Proteome Discoverer — and the provenance of any result; ENGINES.md, D36), `fpa.py` (FragPipeAnalystR port: filter, normalise, impute, `test_limma`), `design.py` (limma designs with blocks and covariates, the moderated F; D42), `deqms.py` (R's loess and DEqMS' peptide-count prior; D43), `rrandom.py` (R's RNG), `analysis.py` (settings, comparisons), `qc.py` (PCA, clustering, CV, missingness), `insights.py` (sample scorecard, PC ↔ condition/replicate, missingness vs intensity, p-value shape + π0, on/off features, imputation-driven hits, power; D35), `enrich.py` (local ORA and a correlation-adjusted rank test on Enrichr libraries), `export.py` (result tables, FragPipe-Analyst annotation + R script), `sdrf.py` (SDRF-Proteomics sample metadata; D38), `report.py` + `assets/report.js`, `charts.py` (static SVG volcano), `stats.py`, `simulate.py` | the lab's R scripts; FragPipeAnalystR; limma |
 | `setupcheck.py` | The setup checklist (app ✓ Setup tab, `ionomos init`) | — |
 | `names.py` | Every on-disk / system name, with its LabWatch-era twin; readers accept both, writers use the new one | — |
 | `buildinfo.py` | `Ionomos 0.5.0 (build 3f2a9c1, date, installed)` — `--version`, app footer, every report | — |
@@ -282,6 +282,32 @@ notes in the report and warnings on the job, and `ionomos analyze` / Jobs →
 Re-run analysis / the Analysis tab redo it with new settings.
 `results/fragpipe-analyst/` holds an `experiment_annotation.tsv` and a
 `reproduce_in_R.R` that repeat the analysis in FragPipeAnalystR (D24).
+
+**Designs, the F-test and DEqMS** (`downstream/design.py`, `deqms.py`; D42,
+D43). With no `block` / `block_from` / `covariates` / `variance_prior` set,
+the comparisons are FragPipe-Analyst's `~0 + condition` path, unchanged.
+Otherwise `analysis.make_model` builds the design for the processed samples
+and the comparisons use limma's general path:
+
+```
+settings ─▶ make_model ─────▶ design.build ─▶ X = [condition | block dummies | covariates]
+            (block: replicate │                 checks: every sample has a value, full rank, residual df > 0
+             / {sample: b} /  │                 fails ─▶ Model.problem ─▶ doctor DESIGN_NOT_USED (input),
+             block_from,      │                          plain ~0 + condition used instead
+             covariates)      ▼
+                   lm_fit (per row, NA dropped, lm.fit pivoting) ─▶ contrasts_fit ─▶ squeeze ─▶ topTable
+                                                                                  │ limma: squeezeVar (fpa._ebayes)
+                                                                                  │ deqms: loess of log s² on
+                                                                                  │  log2 peptide count (DEqMS)
+                   f_test (3+ conditions, every design incl. the plain one) ─▶ F, F_p, F_p_adj
+```
+
+The F-test columns go in `<level>_results.tsv`, `analysis.json` → `f_test`,
+and the report (an "Any change (F)" tile and a table column). `analysis.json`
+→ `model` has the formula, the terms and the variance prior; the Methods
+paragraph describes the same. FragPipeAnalystR's `test_limma` can't fit a
+blocked model, so with a design `reproduce_in_R.R` says it repeats the plain
+model, and `reproduce_design_in_R.R` repeats Ionomos's model in limma.
 
 `results/sdrf.tsv` (`downstream/sdrf.py`, D38) is the experiment's sample
 sheet in SDRF-Proteomics v1.1.0 (template `ms-proteomics`), the format PRIDE

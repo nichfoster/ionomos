@@ -26,6 +26,7 @@ Pipeline stages, each a module:
                   engines.py                   (other engines' outputs: DIA-NN, MaxQuant, Spectronaut, AlphaDIA,
                                                 MSstats format, Proteome Discoverer; provenance of any result)
     statistics    analysis.py + stats.py       (comparisons, Welch / one-sample t, BH)
+                  design.py + deqms.py         (blocks / covariates, the moderated F, DEqMS; D42, D43)
     QC, insights  qc.py + insights.py + enrich.py  (PCA, scorecard, batch, missingness, on/off, gene sets)
     metadata      sdrf.py                      (SDRF-Proteomics, from the manifest, workflow and FASTA)
     presentation  charts.py + report.py        (SVG + HTML)
@@ -365,6 +366,8 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     insight: dict = {}
     enr_notes: list[str] = []
     comps: list = []
+    model = analysis.Model()
+    ftest = None
 
     def read():
         try:
@@ -451,7 +454,17 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
             say("statistics (" + ", ".join(analysis.comparison_name(t, c) for t, c in comps) + ")")
             low = {comps[k] for k, _ in bad}
             small_of = {(t, c): few for t, c, few in f.small_groups}
-            results_ = stage("statistics", analysis.run_contrasts, processed, comps, settings, low)
+            model = stage("design", analysis.make_model, pm, settings, comps) or analysis.Model()
+            notes += model.notes
+            f.model = model
+            results_ = stage("statistics", analysis.run_contrasts, processed, comps, settings, low, model)
+            if results_ is None and model.design is not None:  # the design itself failed: the plain model
+                model.problem = f.stage_errors.pop("statistics", ("the fit failed",))[0]
+                model.design = None
+                notes.append(f"the experimental design failed ({model.problem}); the comparisons use ~0 + condition")
+                results_ = stage("statistics", analysis.run_contrasts, processed, comps, settings, low, model)
+            if results_ is not None:
+                ftest = stage("F-test", analysis.f_test, processed, comps, settings, model)
             if results_ is None and settings.test == "limma":
                 notes.append("limma failed on this data; a Welch t-test was used instead")
                 welch = analysis.Settings(**{**settings.__dict__, "test": "welch"})
@@ -486,7 +499,8 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
             if pmx:
                 out.files.append(pmx)
             if diffs:
-                rt = stage("tables", export.results_table, results / f"{m.level}_results.tsv", processed, diffs)
+                rt = stage("tables", export.results_table, results / f"{m.level}_results.tsv", processed, diffs,
+                           ftest)
                 if rt:
                     out.files.append(rt)
             say("quality control (PCA, correlation, missing values)")
@@ -507,7 +521,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
             ranked = stage("enrichment", _rank_enrichment, diffs, processed, libs) or []
             _write_enrichment(results, enrichment, ranked, stage, out)
         exported = stage("export", export.fragpipe_analyst, results / "fragpipe-analyst", m, processed, diffs,
-                         settings, comps)
+                         settings, comps, model)
         out.files += exported or []
     say("sample metadata (SDRF)")
     sdrf_info = stage("sdrf", _sdrf, method, dest, workdir, record, m, processed, settings, __version__, results,
@@ -526,6 +540,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     ctx["enrichment_notes"] = enr_notes
     ctx["issues"] = [i.as_dict() for i in out.issues]
     ctx["sdrf"] = sdrf_info
+    ctx["model"], ctx["ftest"] = model, ftest
     say("writing the report")
     rel = [str(p.relative_to(results)).replace("\\", "/") if p.is_relative_to(results) else p.name
            for p in out.files]
@@ -556,6 +571,8 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
                         for d in diffs],
         "processing": processed.steps if processed else [],
         "imputation": processed.imputation if processed else None,
+        "model": model.as_dict(settings) if processed is not None and comps else {},
+        "f_test": _f_summary(ftest, settings),
         "settings": analysis.as_dict(settings),
         "issues": [i.as_dict() for i in out.issues],
         "state": _state(out.issues),
@@ -622,6 +639,16 @@ def _quality_summary(insight: dict) -> dict:
         "only_in_one_condition": {k: len(v) for k, v in (insight.get("onoff") or {}).items()},
         "imputation_driven_hits": {k: len(v) for k, v in (insight.get("imputation_driven") or {}).items()},
     }
+
+
+def _f_summary(ftest, settings) -> dict | None:
+    """analysis.json "f_test": the moderated F across the conditions (3+ conditions with limma)."""
+    if ftest is None:
+        return None
+    qs = [q for q in ftest.q if q == q]
+    return {"reference": ftest.reference, "conditions": ftest.conditions, "df1": ftest.df1, "tested": len(qs),
+            "any_change": sum(1 for q in qs if q <= settings.alpha), "alpha_adjusted": settings.alpha,
+            "table": "the F, F_p and F_p_adj columns of <level>_results.tsv"}
 
 
 def _state(issues) -> str:

@@ -198,7 +198,8 @@ def dump_config(d: dict) -> str:
     a(f"  enrichment_gmt: {_y(an.get('enrichment_gmt', '') or '')}   # optional extra gene sets (.gmt file)")
     a(f"  top_labels: {_y(an.get('top_labels', 15))}   # hit names written on each volcano")
     a(f"  control_keywords: {_y(list(an.get('control_keywords') or []))}   # how the control condition is recognised")
-    for k in ("impute_shift", "impute_scale", "seed", "pca_features", "heatmap_max", "control"):
+    for k in ("impute_shift", "impute_scale", "seed", "pca_features", "heatmap_max", "control", "variance_prior",
+              "block", "block_from", "covariates"):  # DEqMS and the design (downstream/design.py)
         if an.get(k) not in (None, ""):
             a(f"  {k}: {_y(an[k])}")
     meta = an.get("sdrf") if isinstance(an.get("sdrf"), dict) else {}

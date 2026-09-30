@@ -120,6 +120,10 @@ def payload(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: li
         d["comps"].append({"name": dr.name, "slug": dr.slug(), "t1": dr.treatment, "t2": dr.control,
                            "conf": dr.confidence, "confNote": dr.confidence_note, "aRank": rank, **cols,
                            "pi0": _r(ph.get("pi0"), 3), "pshape": ph.get("shape", ""), "onoff": onoff})
+    ft = ctx.get("ftest")
+    if ft is not None and len(ft.q) == n:  # the moderated F (3+ conditions): "any change" tile + table column
+        d["F"] = {"f": [_r(x, 4) for x in ft.f], "p": [_r(x, 8) for x in ft.p], "q": [_r(x, 8) for x in ft.q],
+                  "df1": ft.df1, "ref": ft.reference, "conds": ft.conditions}
     if qcd:
         cv = {c: {"hist": qc.histogram(v["cvs"], 0.0, 1.0, 20), "median": _r(v["median"], 4)}
               for c, v in (qcd.get("cv") or {}).items()}
@@ -207,7 +211,8 @@ def _source_sentence(method: str, fragpipe_note: str, engine: dict) -> str:
 
 def methods_text(m: QuantMatrix | None, p: fpa.Processed | None, diffs: list[DiffResult], s: Settings, method: str,
                  fragpipe_note: str, enrichment: list[dict], ranked: list[dict] | None = None,
-                 engine: dict | None = None) -> str:
+                 engine: dict | None = None, model=None, ftest=None) -> str:
+    """model: analysis.Model (the design and variance prior used); ftest: design.FTest (3+ conditions)."""
     parts = [_source_sentence(method, fragpipe_note, engine or {})]
     if m is None:
         return " ".join(parts)
@@ -236,10 +241,31 @@ def methods_text(m: QuantMatrix | None, p: fpa.Processed | None, diffs: list[Dif
         elif imp != "none":
             steps.append(f"missing values imputed ({fpa.IMPUTATION_LABELS[imp]})")
         parts.append(", ".join(steps) + ".")
-        if s.test == "limma":
+        des = getattr(model, "design", None)
+        prior = getattr(model, "prior", None) or {}
+        if s.test == "limma" and des is None:
             parts.append("Differential abundance was tested with limma (linear model ~0 + condition, empirical-Bayes "
                          "moderated t-statistics, 95% confidence intervals), following FragPipe-Analyst's test_limma.")
-        else:
+        elif s.test == "limma":
+            parts.append(f"Differential abundance was tested with limma: a linear model {escape(des.formula)}, with "
+                         f"{escape(des.describe())} (fixed effects), fitted per feature with missing values dropped "
+                         "(lmFit), each comparison a contrast between conditions (contrasts.fit), with empirical-Bayes "
+                         "moderated t-statistics and 95% confidence intervals (eBayes).")
+        if s.test == "limma" and getattr(model, "problem", ""):
+            parts.append(f"The requested design could not be used ({escape(model.problem)}), so the comparisons use "
+                         "~0 + condition.")
+        if s.test == "limma" and prior.get("deqms_used"):
+            parts.append(f"Each feature's prior variance came from a loess fit of log residual variance against log2 "
+                         f"of its number of {escape(m.meta.get('evidence') or 'peptides')} (DEqMS spectraCounteBayes, "
+                         "Zhu et al., "
+                         f"Mol. Cell. Proteomics 2020; prior df {prior['d0']:g})"
+                         + (f"; {prior['limma_prior_features']:,} features without a count kept limma's single prior"
+                            if prior.get("limma_prior_features") else "") + ".")
+        if ftest is not None:
+            parts.append(f"Whether a feature changes between any of the {len(ftest.conditions)} conditions was tested "
+                         f"with limma's moderated F-statistic on the contrasts of every condition against "
+                         f"{escape(ftest.reference)} (topTableF, {ftest.df1} numerator df), BH-adjusted.")
+        if s.test != "limma":
             parts.append(f"Conditions were compared with a two-sided {TESTS[s.test]}.")
     parts.append(f"P-values were adjusted with the Benjamini–Hochberg procedure; features were called significant at "
                  f"{escape(s.describe())}.")
@@ -304,9 +330,18 @@ def _provenance_table(engine: dict) -> str:
         f"<div>{escape(k)}</div><div>{escape(str(v))}</div>" for k, v in rows) + "</div>"
 
 
-def _settings_table(s: Settings, p: fpa.Processed | None) -> str:
-    rows = [("Test", TESTS[s.test]), ("Comparisons", {"control": "each condition vs the control", "all": "all pairs",
-                                                      "others": "each condition vs all others"}[s.de_type]
+def _settings_table(s: Settings, p: fpa.Processed | None, model=None) -> str:
+    rows = [("Test", TESTS[s.test])]
+    if model is not None and (model.design is not None or model.problem):
+        rows.append(("Model", model.design.formula if model.design is not None
+                     else f"~0 + condition (the design asked for wasn't used: {model.problem})"))
+    if s.test == "limma" and s.variance_prior != "limma":
+        used = (getattr(model, "prior", None) or {}).get("deqms_used")
+        rows.append(("Variance prior", "DEqMS (by peptide count)" if used else
+                     "limma (DEqMS asked for, but " + ((getattr(model, "prior", None) or {}).get("reason") or
+                                                       "not applicable") + ")"))
+    rows += [("Comparisons", {"control": "each condition vs the control", "all": "all pairs",
+                              "others": "each condition vs all others"}[s.de_type]
              + (f" (control: {s.control})" if s.control else "")),
             ("Cut-offs", s.describe()),
             ("Contaminants", "removed" if s.remove_contaminants else "kept"),
@@ -431,10 +466,11 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
     b.append("<section id='enrichment'><h2>Enrichment</h2><div id='enrich'></div></section>")
     b.append("<section id='quality'><h2>Quality control</h2><div id='qc'></div></section>")
     method = ctx.get("method", "")
-    b.append(f"<section id='methods'><h2>Methods</h2><p class='methods'>"
-             f"{methods_text(pm, p, diffs, s, method, ctx.get('fragpipe', ''), enrichment, ranked, ctx.get('engine'))}</p>")
+    text = methods_text(pm, p, diffs, s, method, ctx.get("fragpipe", ""), enrichment, ranked, ctx.get("engine"),
+                        ctx.get("model"), ctx.get("ftest"))
+    b.append(f"<section id='methods'><h2>Methods</h2><p class='methods'>{text}</p>")
     b.append(_provenance_table(ctx.get("engine") or {}))
-    b.append("<h3>Settings used</h3>" + _settings_table(s, p))
+    b.append("<h3>Settings used</h3>" + _settings_table(s, p, ctx.get("model")))
     if any(f.startswith("fragpipe-analyst/") for f in files):
         b.append("<h3>Cross-check in FragPipe-Analyst</h3><p class='sub'>The folder <a href='fragpipe-analyst/'>"
                  "fragpipe-analyst/</a> holds an experiment_annotation.tsv for the quant table, so the same data can be "

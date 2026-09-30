@@ -97,6 +97,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - the setup checklist checks the DIA-NN install and FASTA / library
 
   Done notes, failure pop-ups and logs name the engine that ran.
+- **Experimental designs** (ROADMAP 5C #1, D42): blocks (batch, plex, pair,
+  patient) as fixed effects and numeric or factor covariates, in limma's
+  general linear model (`downstream/design.py`). Set under `analysis:`:
+  `block: replicate`, `block: {sample: block}`, `block_from: <regex>`,
+  `covariates: {name: {sample: value}}`. It is fitted like lmFit →
+  contrasts.fit → eBayes, with missing values per row, and checked against
+  limma 3.68.5 to 1e-8 (`tests/test_design.py`). A design that can't be used
+  raises `DESIGN_NOT_USED` and falls back to `~0 + condition`.
+  `BATCH_SUSPECT` now suggests `block: replicate`. `fragpipe-analyst/`
+  gains `reproduce_design_in_R.R`, since `test_limma` can't fit a block.
+- **Moderated F-test** for experiments with 3+ conditions: "any change between
+  the conditions" (limma topTableF). It appears as the `F` / `F_p` /
+  `F_p_adj` columns of `<level>_results.tsv`, `analysis.json` → `f_test`,
+  and an "Any change (F)" tile and table column in the report.
+- **DEqMS** (ROADMAP 5C #4, D43): `variance_prior: deqms` gives each
+  protein a prior variance from its peptide (or PSM) count. It is a port of
+  DEqMS 1.30 spectraCounteBayes, including R's loess, and matches the package
+  to 1e-8. Features without a count keep limma's prior; a table without counts
+  warns `DEQMS_NOT_USED`.
+- The report's Methods paragraph and Settings table and `analysis.json` →
+  `model` describe the model used (formula, blocks, covariates, variance
+  prior, F-test).
 
 ### Changed
 
