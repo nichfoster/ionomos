@@ -988,6 +988,126 @@ button to the full help above it. The help is English only; translations would
 be one file set per language, and nobody has asked yet.
 
 
+### D47 — An SDRF in the folder is the design; only sample_conditions beat it
+**2026-09-30.** ROADMAP 5B #3 (design import) and 5A (SDRF). A lab that
+already has its samples in SDRF-Proteomics (for PRIDE, or from quantms)
+shouldn't have to type the conditions again. `downstream/sdrfdesign.py` reads a
+`*.sdrf.tsv` / `sdrf.tsv` from the experiment folder (two levels deep) or from
+the folder of the table given to `ionomos analyze`. It runs inside
+`load_quantities`, so the Analysis tab shows the same conditions the analysis
+uses.
+
+Choices:
+- **Precedence**, highest first:
+  1. `sample_conditions` (the Analysis tab / experiment.yaml)
+  2. the SDRF
+  3. the engine's own condition column (Spectronaut, MSstats, MSstatsTMT,
+     Proteome Discoverer)
+  4. the `ionomos.json` manifest
+  5. the names
+
+  The SDRF sits above the engine because it is the document the lab wrote
+  about its samples. The engine's columns are usually typed in from the same
+  sheet, or generated from it (quantms). A person's explicit correction always
+  wins. `analysis.json` → `design` records which source was used and which
+  samples `sample_conditions` overrode.
+- **Matching** is by `comment[data file]` stem, with the manifest's rules:
+  exact, then FragPipe's `_calibrated` / `_uncalibrated` suffix, then a
+  unique Xcalibur stamp. The helper moved to `quant.match_run_stem`, so both
+  use one. TMT matches a plex's raw files plus `comment[label]`. Files
+  carrying the same channel → source map are one plex, so fractions and
+  technical replicates group without a plex column (the spec has none).
+  Otherwise the sample name must equal a source or assay name.
+- **Sample names don't change**; only condition and replicate do. Renaming
+  them to `<condition>_<rep>`, as the manifest does, would invalidate
+  `sample_conditions` keys written before the SDRF was added.
+- **Several factor columns are joined** with ` | `. The quantms examples
+  repeat `factor value[spiked compound]` four times. `analysis.sdrf_factor`
+  picks columns instead; an unknown name is a note, not an error.
+- **`results/` is output.** It is never searched, and neither are old runs
+  or `<table>_ionomos/`. A copy of Ionomos' own SDRF that a person puts in the
+  experiment folder is read, since that is a deliberate act.
+- **Runs the SDRF doesn't name** become `SDRF_UNMATCHED_RUNS` (input, like
+  `UNMATCHED_RUNS`). An SDRF that names none of the runs is not used, and the
+  report says so. Technical replicates stay separate samples, and label-free
+  fractions stay separate columns, each with a note: the engines combine
+  fractions before Ionomos sees them.
+
+
+### D48 — TMT plexes are joined by IRS before the processing; nothing is normalised twice
+**2026-09-30.** ROADMAP 5C #5, and the MSstatsTMT import from 5B #3. Between
+TMT plexes the same protein's level moves with the peptides each plex happened
+to sample, so a PCA of several plexes separates them by plex. A bridge
+(reference) channel present in every plex puts them on one scale.
+
+- **IRS as in Plubell et al. 2017** (`downstream/plex.py`). Per protein and
+  plex, the reference is the log2 linear mean of the plex's reference
+  channels. The target is their mean across plexes (the geometric mean). Every
+  channel of the plex is shifted by the difference. The reference channels
+  then leave the matrix, as MSstatsTMT removes its Norm channels. A plex
+  without a reference value for a protein gets missing values for it, rather
+  than unscaled ones.
+- **Where it runs**: an isolated `plex` stage between reading and
+  `fpa.process`, not inside it. Removing the reference channels changes the
+  samples, and fpa.process's before-filter matrices must keep their shape. It
+  also leaves fpa.py (where the limma model is changing) untouched. Plubell's
+  order is SL → IRS. In log2 both are additive shifts, so IRS followed by the
+  median centring equals SL → IRS → centring up to a constant per sample,
+  which the centring removes. This also holds for `gn`, whose MAD scaling is
+  shift-invariant.
+- **Reference channels**, in order:
+  1. `analysis.tmt_reference`: a channel (e.g. `126`) or a sample name.
+     experiment.yaml `tmt.reference_channel` is the same setting, and the
+     `tmt:` block now allows it without `channels`, for engines FragPipe
+     didn't run.
+  2. The SDRF's pooled rows.
+  3. Names: pool, pooled, bridge, reference, norm.
+- **Without a reference**: pwilmart's notebooks use each plex's own sum. That
+  is valid only when every plex holds the same mix of samples; otherwise it
+  scales real biology away. So `irs: auto` uses it only for such balanced
+  designs (conditions after `sample_conditions`, left-out samples ignored).
+  Otherwise it leaves the plexes alone and warns
+  (`TMT_PLEXES_NOT_NORMALISED`). That is a warning, not a pop-up, since the
+  data may still be usable with a blocking design. `irs: sum` forces the plex
+  means; `none` switches IRS off.
+- **Never twice**: TMT-Integrator abundances are already ratios to the
+  reference or virtual reference (`meta["ratio_to_reference"]`), so they are
+  never scaled. That is recorded, and noted when plexes are known or IRS was
+  asked for.
+- **MSstatsTMT format is summarised as MSstatsTMT does it**
+  (`engines.msstats_tmt_summary`). It is transcribed from MSstatsTMT 2.20 /
+  MSstatsConvert 1.22 and identical to them to 1e-9 on
+  `tests/golden/msstatstmt/`:
+  - fractions of a Mixture × TechRepMixture combined as the converters do
+    (largest mean, then sum, then max intensity)
+  - global median normalisation of every run × channel
+  - Tukey median polish per protein and run
+  - Norm-channel normalisation between runs (the median of the runs' Norm
+    means)
+
+  Simplifications:
+  - `method = "MedianPolish"`, not the default `"msstats"`. The latter needs
+    MSstats' AFT model to impute censored values; here, missing stays missing.
+  - When a feature has several PSMs in a run, the one with the largest total
+    intensity is kept. The converters do something similar, and MSstatsTMT
+    format files have usually been through them already.
+  - Technical-replicate mixtures are averaged into one sample per channel.
+    MSstatsTMT models them as a random effect instead.
+
+  The loader applies MSstatsTMT's normalisation and marks it, so the IRS
+  stage leaves it alone.
+- **Plexes from each engine**:
+  - MaxQuant `Reporter intensity corrected N <experiment>`. The totals over
+    experiments are dropped, and `summary.txt` gives each experiment's raw
+    files for SDRF matching.
+  - MSstatsTMT `Mixture`.
+  - Proteome Discoverer's file `F1`.
+  - SDRF file groups.
+- **The report** gets `plex` per sample and the PCA of the same data before
+  IRS. The PCA can colour by plex and switch between before and after. The
+  change to report.js is small and local.
+
+
 ### D49 — The assistant on the PC is local, grounded, and can only propose
 **2026-09-30.** The owner wants a local AI that helps lab members troubleshoot
 and work with their data in plain language. The plan is ROADMAP Phase 6,

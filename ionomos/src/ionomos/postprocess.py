@@ -44,6 +44,10 @@ def prepare(dest: Path, cfg, method: str | None = None, extra: dict | None = Non
 
         current = load_overrides(dest)
         overrides = current.analysis or overrides
+        tmt = current.tmt or ((record.get("plan") or {}).get("overrides") or {}).get("tmt") or {}
+        if isinstance(tmt, dict) and tmt.get("reference_channel") not in (None, "") and \
+                "tmt_reference" not in overrides:  # experiment.yaml tmt.reference_channel = analysis.tmt_reference
+            overrides = {**overrides, "tmt_reference": tmt["reference_channel"]}
         from ionomos.downstream.quant import run_stem
 
         by_stem = {run_stem(name): value for name, value in current.files.items()}
@@ -101,8 +105,9 @@ def inspect_folder(dest: Path, cfg, method: str | None = None, table: Path | Non
     found = "table" if table is not None else (
         p["method"] if p["method"] and p["method"] != "auto" else downstream.detect_method(workdir))
     try:
+        factor = {**p["lab"], **p["overrides"]}.get("sdrf_factor")
         m, _files, notes = downstream.load_quantities(found, workdir, dest / downstream.RESULTS, p["record"],
-                                                      p["mod_mass"], table)
+                                                      p["mod_mass"], table, factor, dest)
     except ValueError as exc:  # isodtb.SiteError / anytable.TableError: the table holds nothing usable
         m, notes = None, [str(exc)]
     samples = []

@@ -143,6 +143,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - the setup checklist checks the DIA-NN install and FASTA / library
 
   Done notes, failure pop-ups and logs name the engine that ran.
+- **An SDRF as the design** (`downstream/sdrfdesign.py`, D47, docs/ENGINES.md). A
+  `*.sdrf.tsv` / `sdrf.tsv` in the experiment folder, or next to the table
+  given to `ionomos analyze`, sets each run's condition (`factor value[...]`;
+  several joined, or picked with the new `analysis.sdrf_factor`), biological
+  replicate, TMT plex and pooled reference. Runs are matched by
+  `comment[data file]` (and `comment[label]` for TMT). `sample_conditions`
+  still wins; the SDRF beats the engine's own columns, the manifest and the
+  names. `results/sdrf.tsv` is never read back. `analysis.json` → `design`
+  says where the conditions came from; runs the SDRF doesn't name raise
+  `SDRF_UNMATCHED_RUNS`.
+- **MSstatsTMT format import** (`engines.load_msstats_tmt`, D48): summarised
+  as MSstatsTMT's `proteinSummarization(method = "MedianPolish")` (fractions
+  combined, global median normalisation, median polish per run, Norm-channel
+  normalisation between runs), identical to MSstatsTMT 2.20 to 1e-9 on a
+  golden file; one sample per mixture and channel.
+- **TMT across plexes: IRS** (`downstream/plex.py`, ROADMAP 5C #5, D48).
+  Several plexes (MaxQuant experiments, MSstatsTMT mixtures, Proteome
+  Discoverer files, SDRF file groups) are put on one scale on their reference
+  channel (new `analysis.tmt_reference`, experiment.yaml
+  `tmt.reference_channel`, the SDRF's pooled rows, or names like Pool / Norm),
+  or on the plex means when every plex holds the same conditions (new
+  `analysis.irs: auto | reference | sum | none`). Otherwise the doctor warns
+  (`TMT_PLEXES_NOT_NORMALISED`). TMT-Integrator abundances are never scaled
+  twice. The report's PCA colours by plex and shows the values before and
+  after IRS; `analysis.json` → `tmt` records what was done.
+- `ionomos analyze --method MSstatsTMT`.
+
 - **Experimental designs** (ROADMAP 5C #1, D42): blocks (batch, plex, pair,
   patient) as fixed effects and numeric or factor covariates, in limma's
   general linear model (`downstream/design.py`). Set under `analysis:`:
@@ -227,6 +254,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   55; they are now three samples. The same applies to `X_CV35` (was condition
   code CV, rep 35) and TMT `…_CV-40` (was fraction 40). isoDTB names ending
   in a setting are refused with a hint.
+- MaxQuant TMT with several experiments no longer analyses the channel totals
+  over experiments (`Reporter intensity corrected 1`) as extra samples.
+- Proteome Discoverer TMT columns `Abundance: F1: 126, Sample, DMSO` are
+  recognised (the pattern needed a space before the colon), and tab-separated
+  files whose headers hold many commas are no longer read as comma-separated.
 
 ## [0.11.0] - 2026-09-30
 

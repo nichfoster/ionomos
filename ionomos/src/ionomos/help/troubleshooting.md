@@ -397,6 +397,39 @@ List every condition's dose under `analysis:` in the experiment's
 `experiment.yaml`, e.g. `doses: {DMSO: 0, Cmpd_A: 10 nM, Cmpd_B: 100 nM}`, and
 re-run the analysis ([How?](#faq.rerun)).
 
+## Some runs aren't in the SDRF {#issue.SDRF_UNMATCHED_RUNS}
+
+The experiment folder holds an SDRF (`*.sdrf.tsv`), which Ionomos uses as the
+design: each run's condition and replicate. Some runs of the quant table have
+no row in it, so they kept the condition read from their names. If the SDRF
+names none of the runs, it wasn't used at all. Runs are matched by the SDRF's
+`comment[data file]` column (the raw file name, without its extension), and
+for TMT also by `comment[label]` (`TMT126`, …). Common causes:
+- The SDRF belongs to another experiment, or to an older search of this one.
+- The raw files were renamed or converted after the SDRF was written.
+- TMT: the SDRF's channels don't match the table's channels.
+
+Fix the file names in the SDRF, or give the runs their condition in
+`sample_conditions` (the Analysis tab, or `experiment.yaml`), which always
+wins over the SDRF. Then re-run the analysis ([How?](#faq.rerun)).
+
+## The TMT plexes are not on one scale {#issue.TMT_PLEXES_NOT_NORMALISED}
+
+The experiment has several TMT plexes, and Ionomos couldn't put them on one
+scale (internal reference scaling, IRS). Differences between plexes will then
+look like differences between samples: colour the report's PCA by plex to see
+it. IRS needs one of these:
+- a pooled reference (bridge) channel in every plex: set
+  `analysis.tmt_reference: [126]` (the channel, or the sample's name) in
+  `experiment.yaml`, or mark the row `pooled` in the SDRF's biological
+  replicate column;
+- or the same mix of conditions in every plex, so each plex's own mean can
+  serve as the reference.
+
+Then re-run the analysis ([How?](#faq.rerun)). If the plexes can't be joined,
+compare conditions within a plex, or block on the plex
+(`analysis.block: {sample: plex}`).
+
 ## The experimental design couldn't be used {#issue.DESIGN_NOT_USED}
 
 The experiment asks for blocks or covariates (`block`, `block_from` or

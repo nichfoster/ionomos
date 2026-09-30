@@ -90,6 +90,21 @@ def run_stem(col: str) -> str:
     return name
 
 
+def match_run_stem(stem: str, keys) -> str | None:
+    """The key (a raw-file stem) a quant-table run belongs to: the exact stem first, then without FragPipe's
+    _calibrated / _uncalibrated conversion suffix, then ignoring an Xcalibur acquisition stamp (only when that
+    leaves exactly one candidate). None when nothing matches. Used for the manifest and for SDRF data files."""
+    from ionomos.naming import strip_acq_stamp
+
+    candidates = [stem, re.sub(r"_(?:uncalibrated|calibrated)$", "", stem, flags=re.IGNORECASE)]
+    for candidate in candidates:  # preserve exact identity first; only then remove known conversion suffixes
+        if candidate in keys:
+            return candidate
+    canonical = strip_acq_stamp(candidates[-1])
+    hits = [key for key in keys if strip_acq_stamp(key) == canonical]
+    return hits[0] if len(hits) == 1 else None
+
+
 # ---------------------------------------------------------------- isoDTB --
 
 
@@ -127,17 +142,7 @@ def from_pg_matrix(path: Path, sample_map: dict[str, tuple[str, int]] | None = N
     matched = set()
 
     def match_run(stem):
-        # Preserve exact identity first; only then remove known conversion suffixes.
-        from ionomos.naming import strip_acq_stamp
-
-        candidates = [stem, re.sub(r"_(?:uncalibrated|calibrated)$", "", stem, flags=re.IGNORECASE)]
-        for candidate in candidates:
-            if candidate in sample_map:
-                return candidate
-        canonical = strip_acq_stamp(candidates[-1])
-        hits = [key for key in sample_map if strip_acq_stamp(key) == canonical]
-        return hits[0] if len(hits) == 1 else None
-
+        return match_run_stem(stem, sample_map)
 
     def numeric(h: str, strict: bool = True) -> bool:
         """A run column holds numbers (or blanks); annotation columns hold text. Not strict: mostly
@@ -250,6 +255,9 @@ def from_tmt_abundance(path: Path, annotation: list[dict] | None = None) -> Quan
         r = a.get("replicate") or (c.split("_")[1] if len(c.split("_")) > 2 else "")
         if str(r).isdigit():
             reps[c] = int(r)
+    # ratio_to_reference: TMT-Integrator already put every plex on its reference (or virtual reference) channel,
+    # so the plex normalisation (plex.py, IRS) must not be applied a second time
     return QuantMatrix("intensity", "gene" if "gene" in Path(path).name else "protein", feats, cols, vals, cond,
                        str(path), notes=["TMT-Integrator values are log2 ratios to the reference channel"],
-                       exp="TMT", replicate=reps, columns={c: c for c in cols}, meta={"evidence": "PSMs"})
+                       exp="TMT", replicate=reps, columns={c: c for c in cols},
+                       meta={"evidence": "PSMs", "ratio_to_reference": "TMT-Integrator"})

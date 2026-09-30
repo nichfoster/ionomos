@@ -358,6 +358,7 @@ tmt:                        # TMT only; one block per plex (= experiment name)
     126:  DMSO_1_126        #   annotation script (and the report's conditions) key on it
     127N: DMSO_1_127N
     127C: Drug_1_127C
+  reference_channel: 126    # the pooled / bridge channel that joins several plexes (IRS; = analysis.tmt_reference)
 
 analysis:                   # results/report.html for this experiment (lab defaults: app tab 7)
   comparisons: ["Drug vs DMSO", "Drug2 vs DMSO"]   # treatment vs control; default: all vs the control
@@ -373,6 +374,9 @@ analysis:                   # results/report.html for this experiment (lab defau
   variance_prior: deqms     # limma (default) | deqms: each protein's prior variance from its peptide count
   sdrf:                     # sample metadata for results/sdrf.tsv (lab-wide values: config.yaml analysis.sdrf)
     cell_type: HEK293T      # also: organism, organism_part, disease, instrument, cleavage_agent
+  sdrf_factor: [compound]   # an SDRF put in this folder sets the design: which factor value column(s) are the
+                            #   condition (default: all, joined); see docs/ENGINES.md
+  irs: auto                 # several TMT plexes on one scale: auto | reference | sum | none
   doses:                    # a titration's doses (dose-response curves, D44); default: read from the
     DMSO: 0                 #   condition names (Cmpd_10nM, Cmpd_0p1uM); the control is dose 0
     Cmpd_low: 10 nM         #   units pM, nM, uM / µM, mM, M; a bare number needs dose_unit
@@ -405,6 +409,8 @@ more conditions every report also has a moderated F-test ("any change").
    DIA `DMSO_1.raw` → condition `DMSO`; TMT sample `Drug_1_128N` → `Drug`;
    isoDTB: each sample prefix is tested on its own (ratios vs 0). Edit
    `analysis:` in `experiment.yaml` and press *Re-run analysis* to change them.
+   An SDRF (`*.sdrf.tsv`) put in the experiment folder beats the names (not
+   `sample_conditions`): its `factor value[...]` is the condition (D47).
 7. titrations: a condition whose name holds one concentration is a dose of
    the compound named by the rest (`Cmpd_10nM`, `10nM_Cmpd`, `Cmpd10nM` →
    compound `Cmpd`, 10 nM). Units `pM`, `nM`, `uM` / `µM`, `mM`, `M`; write a
