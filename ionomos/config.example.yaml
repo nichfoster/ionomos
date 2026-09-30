@@ -104,3 +104,11 @@ methods:
   #   data_type: DIA
   #   library: human_lib.parquet         # optional, in workflow_dir or fasta_dir; else predicted from the FASTA
   #   diann_args: "--var-mods 1 --var-mod UniMod:35,15.994915,M"   # added to Ionomos' defaults
+  # DDA label-free searched by the lab's own MaxQuant (docs/ENGINES.md, D50). A new method key also
+  # needs a file rule: naming: {methods: {LFQ: {like: isoDTB}}} for <sample>_<rep>[_<fraction>] names.
+  # LFQ:
+  #   engine: maxquant                   # fragpipe (default) | diann | maxquant
+  #   maxquant_exe: C:/MaxQuant/2.6.7.0/bin/MaxQuantCmd.exe
+  #   fasta: human_reviewed.fasta
+  #   data_type: DDA
+  #   mqpar: lab_lfq_mqpar.xml           # optional, in workflow_dir: your GUI settings; else MaxQuant's defaults + LFQ
