@@ -211,16 +211,17 @@ installed.
   place" rule) follows once import works.
 - [x] **Provenance in every report** (2026-09-30: Methods → Data source, `analysis.json` `engine`) (MS-DAP-style audit trail): engine and
   version, workflow / parameter file, FDR filters, Ionomos settings.
-- [x] **SDRF-Proteomics export** (2026-09-30, D38; SDRF *import* as a design still open) (`results/sdrf.tsv`), the PSI sample-metadata
+- [x] **SDRF-Proteomics export and import** (2026-09-30: export D38, `results/sdrf.tsv`; import as the design D47, `downstream/sdrfdesign.py`, #60) (`results/sdrf.tsv`), the PSI sample-metadata
   standard PRIDE promotes. Built from what the file names already say:
-  condition, replicate, fraction, label channel. Later: accept SDRF as a
-  design import.
+  condition, replicate, fraction, label channel. An SDRF put in the
+  experiment folder is read back as the design (conditions, replicates, TMT
+  plexes and pooled channels).
 - [x] **Configurable naming.** (2026-09-30, D37: `naming.methods`, `ionomos names test`, Methods tab → Test names…) Each method's file pattern and the condition
   codes become editable config, with a "test your names" check (CLI + setup
   window), so another lab's convention needs no code change. Keep
   NAMING_CONVENTION.md ↔ naming.py in sync.
-- [ ] **Docs for a stranger:** (2026-09-30: QUICKSTART.md, ENGINES.md and the simulated demo done; still to do: a real-data example, and a "never done to your data" page)
-- [ ] **Help users can see** (D46, in progress 2026-09-30): one help source shown in two
+- [ ] **Docs for a stranger:** (2026-09-30: QUICKSTART.md, ENGINES.md, the simulated demo and the "never done to your data" page (`help/safety.md`, #57) done; still to do: a real-data example)
+- [x] **Help users can see** (2026-09-30, D46, #57; the report's help added for designs, dose-response and TMT in #58–#60): one help source shown in two
   places. In the report: a Help entry, "?" buttons on each section and QC tab, a glossary,
   and troubleshooting for the issues in that report. From the app and CLI: a full offline
   `help.html` (`ionomos help`), linked from pop-ups. It covers:
@@ -240,8 +241,8 @@ installed.
 | # | Engine | Mode | Notes |
 |---|---|---|---|
 | 1 ✅ | DIA-NN standalone (1.9 / 2.x) | import ✅, run ✅ (`engine: diann`, D39) | `pg_matrix` parser exists; 2.x `report.parquet` needs an optional Parquet reader. DIA-NN can't be redistributed from 1.9 on (Academia / Enterprise editions): the lab supplies the binary. |
-| 2 | MaxQuant | import ✅ `proteinGroups.txt`; run still to do | Free incl. commercial use; not redistributable. Run mode patches an `mqpar.xml` made by the installed version (`--create`), never a shipped template. |
-| 3 | MSstats long format + SDRF design | import ✅ label-free MSstats (MSstatsTMT, SDRF design still to do) | One importer covers quantms, Skyline and anything with an MSstats converter; protein summary by Tukey median polish (MSstats' default). |
+| 2 ✅ | MaxQuant | import ✅ `proteinGroups.txt`; run ✅ (`engine: maxquant`, D50, #54; tested against a stand-in MaxQuant only) | Free incl. commercial use; not redistributable. Run mode patches an `mqpar.xml` made by the installed version (`--create`), never a shipped template. |
+| 3 ✅ | MSstats long format + SDRF design | import ✅ label-free MSstats, MSstatsTMT (D48) and an SDRF as the design (D47), #60 | One importer covers quantms, Skyline and anything with an MSstats converter; protein summary by Tukey median polish (MSstats' default). |
 | 4 ✅ | Spectronaut | import ✅ pivot + long reports (the `.rs` schema still to ship) | Common in cores; ship an Ionomos report schema (`.rs`), read `PG.Quantity` pivots or the long BGS report. |
 | 5 | Sage | run + import | MIT and cross-platform: the only engine Ionomos could bundle. Needs ThermoRawFileParser (.raw → mzML) and a protein roll-up of `lfq.tsv`. |
 | 6 ✅ | AlphaDIA | import ✅ `pg.matrix.tsv` | Apache-2.0, pip-installable; column names changed between 1.x and 2.x. |
@@ -261,12 +262,36 @@ Found while building 5A/5B (2026-09-30), to fix:
 - The demo's clean simulated data sometimes flags one sample as "warn". That
   is borderline: check the scorecard floors on real data.
 
+Found while building 5A–5C (2026-09-30, #54–#60), to check with the lab or on
+real data:
+- The QC-trend metric column names (DIA-NN `report.stats.tsv`, FragPipe
+  `psm.tsv`) come from the docs and small hand-made tables; confirm them on
+  the PC's own HeLa runs.
+- Dose-response values are ratios to the control's mean before the fit, as
+  CurveCurator does; confirm that suits the lab's titrations (vs. the
+  processed, normalised values alone).
+- `DESIGN_NOT_USED` is an input issue (the report still comes out, with
+  ~0 + condition). Decide whether a design the user asked for should instead
+  stop the analysis.
+- The moderated F-test runs whenever limma compares 3+ conditions of
+  intensity data; there is no setting to switch it off.
+- Proteome Discoverer and MaxQuant TMT layouts are from the documentation;
+  a real export of each is still needed.
+- `irs: auto` falls back to the plex means only for balanced plexes; check
+  that suits real multi-plex experiments.
+- The help's names for UI elements (tabs, buttons) should be read by
+  someone in the lab.
+- A re-analysis rewrites `results/` (Ionomos' own output, not user data);
+  decide whether earlier results should be kept, as runs are.
+- The help files bundled into the Windows exe (`deploy/ionomos.spec`) are
+  untested until the next tagged build.
+
 ### 5C — More analysis (value × feasibility; all possible in pure Python)
 
-1. [ ] **Experimental designs**: paired samples, blocks (batch / plex /
+1. [x] **Experimental designs** (2026-09-30, D42, #58; time courses still to do): paired samples, blocks (batch / plex /
    patient as fixed effects, Smyth's advice), covariates, time courses, and a
-   moderated F-test. Every lab needs this.
-2. [ ] **Dose-response** (CurveCurator, Apache-2.0):
+   moderated F-test. Every lab needs this. Checked against limma 3.68.5.
+2. [x] **Dose-response** (2026-09-30, D44, #59; checked against CurveCurator 0.6.0) (CurveCurator, Apache-2.0):
    - a 4-parameter log-logistic fit
    - pEC50 with a confidence interval
    - the recalibrated F statistic and relevance score
@@ -278,12 +303,12 @@ Found while building 5A/5B (2026-09-30), to fix:
    - site changes corrected for protein abundance (MSstatsPTM formulas)
    - a site × compound selectivity map and a liganded fraction per compound
    - an optional CysDB annotation the user downloads (AGPL: not bundled)
-4. [ ] **DEqMS** (variance tied to peptide count, which is now read). Later, a
+4. [x] **DEqMS** (2026-09-30, D43, #58; checked against DEqMS 1.30.0; limpa still to do) (variance tied to peptide count, which is now read). Later, a
    limpa-style detection-probability model, which would replace imputation
    for DIA and probably wants optional numpy.
-5. [ ] **TMT across plexes**: IRS / bridge-channel normalisation, with a PCA
+5. [x] **TMT across plexes** (2026-09-30, D48, #60): IRS / bridge-channel normalisation, with a PCA
    by plex before and after.
-6. [ ] **Instrument QC trending** on the recurring HeLa standard:
+6. [x] **Instrument QC trending** (2026-09-30, D45, #56; metric columns still to check on real runs) on the recurring HeLa standard:
    - IDs, signal, peak width, mass error, RT drift
    - Levey-Jennings charts with run rules
 
