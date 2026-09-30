@@ -732,10 +732,12 @@ def main(argv: list[str] | None = None) -> int:
     it.add_argument("--force", action="store_true", help="overwrite an existing config with defaults (a backup is kept)")
     it.set_defaults(fn=cmd_init)
     az = sub.add_parser("analyze", help="(re)run statistics, volcano plots and the report for a job or folder")
-    az.add_argument("target", help="job id, experiment folder, any FragPipe output folder, or any protein / results "
-                                   "table (.csv .tsv .txt .xlsx)")
-    az.add_argument("--method", choices=["isoDTB", "TMT", "DIA", "LFQ", "table", "auto"], default=None,
-                    help="default: from ionomos.json, else detected from the files")
+    az.add_argument("target", help="job id, experiment folder, a results folder from FragPipe, DIA-NN, MaxQuant, "
+                                   "Spectronaut, AlphaDIA, or any protein / results table (.csv .tsv .txt .xlsx .parquet)")
+    az.add_argument("--method", choices=["isoDTB", "TMT", "DIA", "LFQ", "DIA-NN", "MaxQuant", "Spectronaut", "AlphaDIA",
+                                         "MSstats", "PD", "table", "auto"], default=None,
+                    help="default: from ionomos.json, else detected from the files (FragPipe, DIA-NN, MaxQuant, "
+                         "Spectronaut, AlphaDIA, MSstats format, Proteome Discoverer, any table)")
     az.add_argument("--control", help="control condition (default: recognised by name, e.g. DMSO)")
     az.add_argument("--compare", action="append", metavar="'A vs B'", help="comparison; repeatable")
     az.add_argument("--log2fc", type=float, help="fold-change threshold (log2)")
