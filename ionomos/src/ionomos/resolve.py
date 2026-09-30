@@ -96,12 +96,14 @@ def guess_alias_token(d: Draft) -> str:
     return ""
 
 
-def reparse(files: list[DraftFile], method: str, codes: dict[str, str] | None = None) -> list[DraftFile]:
+def reparse(files: list[DraftFile], method: str, codes: dict[str, str] | None = None,
+            rules: dict | None = None) -> list[DraftFile]:
+    """rules: the config's file rules (Draft.file_rules); None = the built-in ones."""
     out = []
     for f in files:
         df = DraftFile(filename=f.filename, experiment=f.experiment, bioreplicate=f.bioreplicate or "1")
         try:
-            r = parse_raw_name(f.filename, method, codes)
+            r = parse_raw_name(f.filename, method, codes, rules)
             df.experiment, df.bioreplicate = r.sample, str(r.rep)
             df.fraction = "" if r.fraction is None else str(r.fraction)
         except NamingError as exc:
@@ -238,7 +240,7 @@ def to_overrides(a: Answer, d: Draft) -> Overrides:
     ov = Overrides(user=a.user.strip(), method=a.method, allow_uneven_fractions=a.allow_uneven)
     if a.date.strip():
         ov.date = date.fromisoformat(a.date.strip())
-    base = {f.filename: f for f in reparse(a.files, a.method, d.condition_codes or None)}
+    base = {f.filename: f for f in reparse(a.files, a.method, d.condition_codes or None, d.file_rules or None)}
     for f in a.files:
         b = base[f.filename]
         exp, rep, frac = f.experiment.strip(), int(f.bioreplicate), f.fraction.strip()
@@ -424,7 +426,8 @@ class TkResolver:
             _, current, _ = _find_raws(source)
             saved = {f.filename: DraftFile(f.filename, ev.get(), rv.get(), fv.get()) for f, ev, rv, fv in rows}
             if set(current) != set(saved):
-                d.files = [saved.get(name, reparse([DraftFile(name)], meth_v.get(), d.condition_codes or None)[0])
+                d.files = [saved.get(name, reparse([DraftFile(name)], meth_v.get(), d.condition_codes or None,
+                                                   d.file_rules or None)[0])
                            for name in current]
                 fill_grid(d.files)
                 update_summary()
@@ -488,7 +491,7 @@ class TkResolver:
         update_summary()
 
         def on_method_change(*_):
-            fill_grid(reparse(d.files, meth_v.get(), d.condition_codes or None))
+            fill_grid(reparse(d.files, meth_v.get(), d.condition_codes or None, d.file_rules or None))
             update_summary()
 
         meth_cb.bind("<<ComboboxSelected>>", on_method_change)

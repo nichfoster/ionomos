@@ -7,7 +7,7 @@ folder names, strict raw-file tails*:
 Folder name — anything, as long as somewhere in it we can find
     * a METHOD keyword   (isoDTB | TMT | DIA, matched via config aliases)
     * a USER token       (a known user dir name or a configured alias/initials)
-    * optionally a DATE  (YYYYMMDD, MMDDYYYY or MMDDYY token)
+    * optionally a DATE  (YYYYMMDD, MMDDYYYY or MMDDYY token by default; naming.date_formats)
   Spaces and odd punctuation are tolerated here and sanitised on move.
 
 Raw file name — the END of the stem is reserved and its meaning depends on
@@ -21,6 +21,11 @@ the method:
              <prefix>_<code><biorep>.raw          e.g. X_D1.raw = DMSO rep 1, X_C2.raw = Compound rep 2
              (a 1-2 letter condition code glued to the number; codes from naming.condition_codes)
   Separators before the numbers may be '_' or '-'. Optional R/F prefixes.
+
+Another lab's convention is config, not code (config.yaml `naming:`, D37): each method's file
+rule is a template ("{sample}_{rep}[_{fraction}]", compile_template) or a named-group regex
+(compile_pattern). The defaults above are those templates and compile to the same regexes as
+before. Date formats and DIA condition codes are config too.
 """
 from __future__ import annotations
 
@@ -40,17 +45,17 @@ _SEP = r"[_-]"
 _REP = r"(?:(?:[Rr](?:ep)?|[Bb]io(?:[Rr]ep)?|[Nn])[_-]?)?"
 _FRAC = r"(?:(?:[Ff](?:rac(?:tion)?)?)[_-]?)?"
 
-_TAIL = {
-    # sample, rep, frac  — frac may be missing for isoDTB (unfractionated)
-    # Digit runs are capped at three: a longer tail is a date or an instrument
-    # counter, never a replicate/fraction number (issue #15).
-    "isoDTB": re.compile(
-        rf"^(?P<sample>.+?)(?:{_SEP}{_REP}(?P<rep>\d{{1,3}}))(?:{_SEP}{_FRAC}(?P<frac>\d{{1,3}}))?$"
-    ),
-    # sample[, frac]; rep is always 1
-    "TMT": re.compile(rf"^(?P<sample>.+?)(?:{_SEP}[Tt][Mm][Tt])?(?:{_SEP}{_FRAC}(?P<frac>\d{{1,3}}))?$"),
-    # condition, biorep
-    "DIA": re.compile(rf"^(?P<sample>.+?)(?:{_SEP}{_REP}(?P<rep>\d{{1,3}}))?$"),
+# The built-in file rules, as templates (see compile_template). They compile to exactly the
+# regexes used before naming became configurable (tests/test_naming_config.py pins them):
+#   isoDTB  sample, rep, frac — frac may be missing (unfractionated)
+#   TMT     sample[, frac]; rep is always 1
+#   DIA     condition, biorep (plus the short condition codes below)
+# Digit runs are capped at three: a longer tail is a date or an instrument counter, never a
+# replicate/fraction number (issue #15, D30).
+DEFAULT_FILE_TEMPLATES: dict[str, str] = {
+    "isoDTB": "{sample}_{rep}[_{fraction}]",
+    "TMT": "{sample}[_TMT][_{fraction}]",
+    "DIA": "{sample}[_{rep}]",
 }
 
 # DIA short form: a condition code glued to the replicate number, X_D1 / X_C2 / D3. Only 1-2 letter codes
@@ -117,6 +122,204 @@ class RawSet:
         return sorted(self.layout)
 
 
+# ------------------------------------------------------------- file rules --
+
+# Template fields -> regex group. Several spellings, so a lab can write what it says.
+_FIELDS: dict[str, str | None] = {
+    "sample": "sample", "condition": "sample",
+    "rep": "rep", "replicate": "rep", "biorep": "rep",
+    "fraction": "frac", "frac": "frac",
+    "any": None,  # text that is matched but ignored
+}
+_FIELD_REGEX: dict[str | None, str] = {
+    "sample": "(?P<sample>.+?)",
+    "rep": rf"{_REP}(?P<rep>\d{{1,3}})",
+    "frac": rf"{_FRAC}(?P<frac>\d{{1,3}})",
+    None: ".+?",
+}
+# Group names a power user's regex may use, and what they mean.
+_PATTERN_GROUPS = {"sample": "sample", "condition": "sample", "rep": "rep", "replicate": "rep",
+                   "biorep": "rep", "fraction": "frac", "frac": "frac"}
+_TPL_TOKEN = re.compile(r"\{([^{}]*)\}|\[|\]|[_-]+|.", re.S)
+_FIELD_HELP = "{sample}, {rep}, {fraction} or {any}"
+
+
+def compile_template(template: str) -> re.Pattern[str]:
+    """A readable file-name template -> the regex that reads it. Raises NamingError.
+
+    {sample} (or {condition}) is the FragPipe experiment, {rep} the bioreplicate (1-3 digits after
+    an optional R/rep/bio/n prefix), {fraction} the fraction (1-3 digits after an optional
+    F/frac prefix), {any} text that is skipped. [ ... ] is optional. '_' and '-' each stand for
+    either separator; letters match either case; a trailing '.raw' is ignored.
+    Example: "{sample}_{rep}[_{fraction}]" (the isoDTB default).
+    """
+    if not isinstance(template, str) or not template.strip():
+        raise NamingError("a file template can't be empty; e.g. {sample}_{rep}")
+    t = template.strip()
+    if t.lower().endswith(RAW_SUFFIX):
+        t = t[: -len(RAW_SUFFIX)]
+    out: list[str] = []
+    lit = ""  # literal text since the last field, at the top level
+    group: list[str] | None = None  # inside [ ... ]
+    seen: dict[str, bool] = {}  # field -> sits inside an optional part
+    prev_number = False  # the last token was {rep} or {fraction}
+    for m in _TPL_TOKEN.finditer(t):
+        tok = m.group(0)
+        if m.group(1) is not None:
+            name = m.group(1).strip().lower()
+            if name not in _FIELDS:
+                raise NamingError(f"unknown field {tok} in {template!r}; use {_FIELD_HELP}")
+            fld = _FIELDS[name]
+            if fld is not None:
+                if fld in seen:
+                    raise NamingError(f"{template!r} has the {fld} field twice")
+                seen[fld] = group is not None
+            number = fld in ("rep", "frac")
+            if number and prev_number:
+                raise NamingError(f"{template!r}: put a letter or separator between two numbers "
+                                  "({rep}{fraction} can't be told apart)")
+            rx = _FIELD_REGEX[fld]
+            if group is not None:
+                group.append(rx)
+            elif number:  # a number and the text before it are one unit, as in the built-in regexes
+                out.append(f"(?:{lit}{rx})")
+                lit = ""
+            else:
+                out.append(lit + rx)
+                lit = ""
+            prev_number = number
+            continue
+        prev_number = False
+        if tok == "[":
+            if group is not None:
+                raise NamingError(f"{template!r}: optional parts [ ] can't be nested")
+            out.append(lit)
+            lit, group = "", []
+            continue
+        if tok == "]":
+            if group is None:
+                raise NamingError(f"{template!r}: ']' without a matching '['")
+            if not group:
+                raise NamingError(f"{template!r}: empty optional part []")
+            out.append(f"(?:{''.join(group)})?")
+            group = None
+            continue
+        if tok[0] in "_-":
+            rx = _SEP  # a run of separators: sanitize() collapses them to one
+        elif tok.isascii() and tok.isalpha():
+            rx = f"[{tok.upper()}{tok.lower()}]"
+        elif tok.isascii() and tok.isdigit():
+            rx = tok
+        elif tok == ".":
+            rx = r"\."
+        elif tok in "{}":
+            raise NamingError(f"{template!r}: unmatched {tok!r}; fields look like {_FIELD_HELP}")
+        else:
+            raise NamingError(f"{template!r}: {tok!r} can't be in a file name after clean-up; use letters, "
+                              f"digits, '_', '-', '.', {_FIELD_HELP} and [optional parts]")
+        if group is not None:
+            group.append(rx)
+        else:
+            lit += rx
+    if group is not None:
+        raise NamingError(f"{template!r}: '[' without a matching ']'")
+    out.append(lit)
+    if "sample" not in seen or seen["sample"]:
+        raise NamingError(f"{template!r} needs {{sample}} once, outside [ ] (it names the experiment)")
+    return re.compile("^" + "".join(out) + "$")
+
+
+def compile_pattern(pattern: str) -> tuple[re.Pattern[str], dict[str, str]]:
+    """A power user's regex -> (compiled, {group name: sample|rep|frac}). Raises NamingError.
+
+    Needs a named group `sample` (or `condition`); `rep` and `fraction` are optional. The whole
+    cleaned-up file stem must match. Numbers are checked by value when read (1-999, D30).
+    """
+    if not isinstance(pattern, str) or not pattern.strip():
+        raise NamingError("a file pattern can't be empty")
+    flags = re.match(r"^\(\?[aiLmsux]+\)", pattern)  # (?i) etc. must stay in front
+    lead, body = (flags.group(0), pattern[flags.end():]) if flags else ("", pattern)
+    try:
+        rx = re.compile(f"{lead}^(?:{body})$")
+    except re.error as exc:
+        raise NamingError(f"pattern '{pattern}' is not a valid regular expression: {exc}") from None
+    groups: dict[str, str] = {}
+    for name in rx.groupindex:
+        canon = _PATTERN_GROUPS.get(name.lower())
+        if canon is None:
+            raise NamingError(f"pattern '{pattern}': unknown group (?P<{name}>...); use sample, rep, fraction")
+        if canon in groups.values():
+            raise NamingError(f"pattern '{pattern}' has two groups for {canon}")
+        groups[name] = canon
+    if "sample" not in groups.values():
+        raise NamingError(f"pattern '{pattern}' needs a (?P<sample>...) group (it names the experiment)")
+    return rx, groups
+
+
+@dataclass(frozen=True)
+class FileRule:
+    """How one method's raw file names are read."""
+
+    regex: re.Pattern[str]
+    source: str  # the template or regex as written
+    must: str  # what the error says when a name doesn't fit ("must end in ...")
+    codes: bool = False  # DIA short forms: X_D1 = condition code D, rep 1 (naming.condition_codes)
+    groups: tuple[tuple[str, str], ...] = (("sample", "sample"), ("rep", "rep"), ("frac", "frac"))
+
+    def read(self, m: re.Match[str]) -> tuple[str | None, str | None, str | None]:
+        """(sample, rep, frac) from a match; None where the rule has no such part or it was absent."""
+        got: dict[str, str | None] = {"sample": None, "rep": None, "frac": None}
+        found = m.groupdict()
+        for name, canon in self.groups:
+            if name in found:
+                got[canon] = found[name] or None  # an empty capture counts as absent
+        return got["sample"], got["rep"], got["frac"]
+
+
+def file_rule(method: str, *, like: str | None = None, files: str | None = None,
+              pattern: str | None = None, codes: bool | None = None) -> FileRule:
+    """Build a method's file rule. Raises NamingError.
+
+    like: start from a built-in method (isoDTB | TMT | DIA; default: the method itself).
+    files: a template, or pattern: a regex, replaces its shape. codes: DIA short forms on/off
+    (default: on for DIA-like methods)."""
+    base = like or method
+    if files is not None and pattern is not None:
+        raise NamingError("give files: (a template) or pattern: (a regex), not both")
+    if base not in DEFAULT_FILE_TEMPLATES and files is None and pattern is None:
+        raise NamingError(f"no file rule for {method!r}: give files: (a template like {{sample}}_{{rep}}), "
+                          f"pattern: (a regex) or like: {' | '.join(DEFAULT_FILE_TEMPLATES)}")
+    use_codes = (base == "DIA") if codes is None else bool(codes)
+    if pattern is not None:
+        rx, groups = compile_pattern(pattern)
+        return FileRule(rx, pattern, f"must match the pattern '{pattern}'", use_codes, tuple(groups.items()))
+    template = files if files is not None else DEFAULT_FILE_TEMPLATES[base]
+    rx = compile_template(template)
+    if template.strip() == DEFAULT_FILE_TEMPLATES["isoDTB"]:
+        must = "must end in _<rep>_<fraction>.raw or _<rep>.raw"  # the message users already know
+    else:
+        t = template.strip()
+        must = f"must look like {t[:-len(RAW_SUFFIX)] if t.lower().endswith(RAW_SUFFIX) else t}.raw"
+    return FileRule(rx, template, must, use_codes)
+
+
+DEFAULT_FILE_RULES: dict[str, FileRule] = {m: file_rule(m) for m in DEFAULT_FILE_TEMPLATES}
+
+
+def check_method_aliases(aliases: dict[str, list[str]]) -> None:
+    """Every method keyword belongs to one method and isn't blank. Raises NamingError."""
+    owner: dict[str, str] = {}
+    for method, als in aliases.items():
+        for a in als:
+            k = str(a).strip().lower()
+            if not k:
+                raise NamingError(f"method {method!r} has a blank keyword; every alias needs a letter or digit")
+            if owner.get(k, method) != method:
+                raise NamingError(f"keyword {a!r} is listed for both {owner[k]} and {method}; a folder name "
+                                  "with it would be ambiguous. Keep each keyword under one method")
+            owner[k] = method
+
+
 # ------------------------------------------------------------------ helpers --
 
 
@@ -138,12 +341,20 @@ def tokens_of(name: str) -> tuple[str, ...]:
     return tuple(t for t in _TOKEN_SPLIT.split(name) if t)
 
 
-# Date formats, tried in order. All must sit at token boundaries.
-_DATE_PATTERNS = (
-    (re.compile(r"(?<![0-9])(20\d{2})[-_.]?(\d{2})[-_.]?(\d{2})(?![0-9])"), "ymd"),  # 20260902, 2026-09-02
-    (re.compile(r"(?<![0-9])(\d{2})[-_.]?(\d{2})[-_.]?(20\d{2})(?![0-9])"), "mdy"),  # 09022026, 09-02-2026
-    (re.compile(r"(?<![0-9])(\d{2})(\d{2})(\d{2})(?![0-9])"), "mdy2"),               # 090226
-)
+# Date formats a folder name may use (config: naming.date_formats), tried in the listed order.
+# All must sit at digit boundaries. Four-digit-year forms may have - _ . between the parts.
+_YEAR_FIRST = re.compile(r"(?<![0-9])(20\d{2})[-_.]?(\d{2})[-_.]?(\d{2})(?![0-9])")  # 20260902, 2026-09-02
+_YEAR_LAST = re.compile(r"(?<![0-9])(\d{2})[-_.]?(\d{2})[-_.]?(20\d{2})(?![0-9])")  # 09022026, 09-02-2026
+_SIX = re.compile(r"(?<![0-9])(\d{2})(\d{2})(\d{2})(?![0-9])")  # 090226
+DATE_FORMATS: dict[str, tuple[re.Pattern[str], str]] = {
+    "YYYYMMDD": (_YEAR_FIRST, "ymd"),
+    "MMDDYYYY": (_YEAR_LAST, "mdy"),
+    "DDMMYYYY": (_YEAR_LAST, "dmy"),
+    "MMDDYY": (_SIX, "mdy2"),
+    "DDMMYY": (_SIX, "dmy2"),
+    "YYMMDD": (_SIX, "ymd2"),
+}
+DEFAULT_DATE_FORMATS: tuple[str, ...] = ("YYYYMMDD", "MMDDYYYY", "MMDDYY")
 
 
 def _mk_date(y: int, m: int, d: int) -> date | None:
@@ -153,27 +364,48 @@ def _mk_date(y: int, m: int, d: int) -> date | None:
         return None
 
 
-def find_date(name_or_tokens, *, today: date | None = None) -> date | None:
+def check_date_formats(formats) -> tuple[str, ...]:
+    """Validate a naming.date_formats list. Raises NamingError."""
+    if not isinstance(formats, (list, tuple)):
+        raise NamingError(f"date formats must be a list, e.g. [{', '.join(DEFAULT_DATE_FORMATS)}]")
+    out: list[str] = []
+    for f in formats:
+        key = str(f).strip().upper()
+        if key not in DATE_FORMATS:
+            raise NamingError(f"unknown date format {f!r}; use {', '.join(DATE_FORMATS)}")
+        if key in out:
+            raise NamingError(f"date format {key} is listed twice")
+        out.append(key)
+    return tuple(out)
+
+
+def find_date(name_or_tokens, *, today: date | None = None,
+              formats: tuple[str, ...] | list[str] | None = None) -> date | None:
     """Find the first plausible date in a folder name. None if absent.
 
-    The six-digit mdy2 form only fires when 2000+yy falls within
-    [today.year - 25, today.year + 1] — run IDs like 113056 (2056) mint no
-    phantom dates. Keyword-only `today` keeps every caller unchanged.
+    formats: names from DATE_FORMATS, tried in order (default DEFAULT_DATE_FORMATS).
+    The six-digit forms only fire when 2000+yy falls within [today.year - 25, today.year + 1]
+    — run IDs like 113056 (2056) mint no phantom dates (D30). Keyword-only arguments keep every
+    caller unchanged.
     """
     today = today or date.today()
     name = " ".join(name_or_tokens) if isinstance(name_or_tokens, tuple) else name_or_tokens
-    for pat, kind in _DATE_PATTERNS:
+    for fmt in (DEFAULT_DATE_FORMATS if formats is None else formats):
+        pat, kind = DATE_FORMATS[fmt]
         for m in pat.finditer(name):
             a, b, c = (int(x) for x in m.groups())
             if kind == "ymd":
                 d = _mk_date(a, b, c)
             elif kind == "mdy":
                 d = _mk_date(c, a, b)
+            elif kind == "dmy":
+                d = _mk_date(c, b, a)
             else:
-                y = 2000 + c
+                y = 2000 + (a if kind == "ymd2" else c)
                 if not today.year - 25 <= y <= today.year + 1:
                     continue
-                d = _mk_date(y, a, b)
+                d = (_mk_date(y, a, b) if kind == "mdy2" else _mk_date(y, b, a) if kind == "dmy2"
+                     else _mk_date(y, b, c))
             if d:
                 return d
     return None
@@ -286,6 +518,8 @@ def parse_folder_name(
     users: dict[str, str],
     method_aliases: dict[str, list[str]] | None = None,
     raw_names: list[str] | None = None,
+    *,
+    date_formats: tuple[str, ...] | None = None,
 ) -> FolderName:
     if not name.strip():
         raise NamingError("empty folder name")
@@ -297,7 +531,7 @@ def parse_folder_name(
         safe=sanitize(name),
         method=method,
         user=user,
-        date=find_date(name),
+        date=find_date(name, formats=date_formats),
         tokens=toks,
     )
 
@@ -305,23 +539,28 @@ def parse_folder_name(
 # --------------------------------------------------------------------- raws --
 
 
-def parse_raw_name(filename: str, method: str, codes: dict[str, str] | None = None) -> RawName:
-    """codes: DIA condition codes (X_D1 -> DMSO rep 1); None = DEFAULT_CONDITION_CODES."""
+def parse_raw_name(filename: str, method: str, codes: dict[str, str] | None = None,
+                   rules: dict[str, FileRule] | None = None) -> RawName:
+    """codes: DIA condition codes (X_D1 -> DMSO rep 1); None = DEFAULT_CONDITION_CODES.
+    rules: method -> FileRule (config naming.methods); None = DEFAULT_FILE_RULES."""
     if not filename.lower().endswith(RAW_SUFFIX):
         raise NamingError(f"{filename!r} is not a {RAW_SUFFIX} file")
-    if method not in _TAIL:
-        raise NamingError(f"unknown method {method!r}")
+    rule = (DEFAULT_FILE_RULES if rules is None else rules).get(method)
+    if rule is None:
+        raise NamingError(f"unknown method {method!r}: its file names have no rule; add naming.methods.{method} "
+                          "to config.yaml (e.g. files: '{sample}_{rep}', or like: DIA)")
     stem = filename[: -len(RAW_SUFFIX)]
     safe_stem = sanitize(stem)
-    m = _TAIL[method].match(strip_acq_stamp(safe_stem))
-    if not m:  # only reachable for isoDTB (others accept a bare stem)
-        raise NamingError(
-            f"{filename!r}: isoDTB files must end in _<rep>_<fraction>.raw or _<rep>.raw"
-        )
-    rep = m.groupdict().get("rep")
-    frac = m.groupdict().get("frac")
-    sample = m["sample"]
-    if method == "DIA" and rep is None:
+    m = rule.regex.match(strip_acq_stamp(safe_stem))
+    if not m:  # built-in rules: only reachable for isoDTB (the others accept a bare stem)
+        raise NamingError(f"{filename!r}: {method} files {rule.must}")
+    sample, rep, frac = rule.read(m)
+    if not sample:
+        raise NamingError(f"{filename!r}: no sample name left once the {method} rule is applied")
+    for what, v in (("replicate", rep), ("fraction", frac)):
+        if v is not None and not v.isdigit():  # only a hand-written pattern can capture non-digits
+            raise NamingError(f"{filename!r}: {what} {v!r} is not a number")
+    if rule.codes and rep is None:
         c = _CODED.match(strip_acq_stamp(safe_stem))
         full = expand_code(c["code"], codes) if c else None
         if full:
@@ -343,7 +582,7 @@ def parse_raw_name(filename: str, method: str, codes: dict[str, str] | None = No
 
 
 def group_raws(filenames: list[str], method: str, allow_uneven: bool = False,
-               codes: dict[str, str] | None = None) -> RawSet:
+               codes: dict[str, str] | None = None, rules: dict[str, FileRule] | None = None) -> RawSet:
     """Parse and validate all raws of one folder.
 
     * at least one file; every file parses
@@ -353,7 +592,7 @@ def group_raws(filenames: list[str], method: str, allow_uneven: bool = False,
     """
     if not filenames:
         raise NamingError("no .raw files found")
-    parsed = [parse_raw_name(f, method, codes) for f in sorted(filenames)]
+    parsed = [parse_raw_name(f, method, codes, rules) for f in sorted(filenames)]
     return group_from_parsed(parsed, method, allow_uneven)
 
 

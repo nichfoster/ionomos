@@ -7,6 +7,7 @@ Command line.
     ionomos check    [--config PATH]              doctor: config, paths, users, GUI, ledger
     ionomos status   [--config PATH] [--all]      jobs from the ledger
     ionomos dry-run  FOLDER [--config PATH]       parse + validate + show the plan; touches nothing
+    ionomos names test NAME... [--method M]       how folder / .raw names are read with this config (naming:)
     ionomos retry    JOB_ID [--config PATH]       failed -> queued
     ionomos testbed  ...                          build/drive a fake lab for testing (see testbed.py)
     ionomos diagnose [--zip [PATH]]               everything needed to report a problem (text, or a .zip bundle)
@@ -438,6 +439,22 @@ def cmd_dry_run(args) -> int:
     return 0
 
 
+def cmd_names(args) -> int:
+    """names test: how the config reads each name (user, method, date, sample, replicate, fraction)."""
+    from ionomos.namecheck import check_names, format_readings
+
+    cfg = _load(args, check_paths=False)
+    method = None
+    if args.method:
+        method = next((k for k in cfg.methods if k.lower() == args.method.lower()), None)
+        if method is None:
+            print(f"--method {args.method!r} is not one of {', '.join(cfg.methods)}", file=sys.stderr)
+            return 2
+    readings = check_names(args.names, cfg, method)
+    print(format_readings(readings), end="")
+    return 0 if all(r.ok for r in readings) else 1
+
+
 def cmd_retry(args) -> int:
     cfg = _load(args, check_paths=False)
     ledger = Ledger(cfg.database)
@@ -715,6 +732,14 @@ def main(argv: list[str] | None = None) -> int:
     d = sub.add_parser("dry-run", help="show what would happen to a folder; touches nothing")
     d.add_argument("folder")
     d.set_defaults(fn=cmd_dry_run)
+    nm = sub.add_parser("names", help="check how folder and .raw names are read with this config")
+    nms = nm.add_subparsers(dest="names_cmd", required=True)
+    nt = nms.add_parser("test", help="print how each name parses, or why it is rejected; touches nothing")
+    nt.add_argument("names", nargs="+", metavar="NAME",
+                    help="folder names, .raw file names, or folders on disk; .raw names after a folder name are "
+                         "read as that folder's files")
+    nt.add_argument("--method", help="read .raw names as this method (default: from the folder or file name)")
+    nt.set_defaults(fn=cmd_names)
     rt = sub.add_parser("retry", help="re-queue a failed job")
     rt.add_argument("job_id", type=int)
     rt.set_defaults(fn=cmd_retry)

@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Configurable naming** (`config.yaml` `naming:`, D37; ROADMAP Phase 5A).
+  Another lab's convention is now a config change, not a code change:
+  - `naming.methods.<name>`: each method's `.raw` rule as a template
+    (`'{condition}_rep{rep}'`, `'{sample}_R{rep}_F{fraction}'`, `[ ]` for
+    optional parts, `{any}` to skip text), a regex with named groups
+    (`pattern:`), or `like: isoDTB | TMT | DIA`. New method keys get file
+    rules this way.
+  - `naming.date_formats`: `YYYYMMDD`, `MMDDYYYY`, `DDMMYYYY`, `MMDDYY`,
+    `DDMMYY`, `YYMMDD`, tried in order.
+
+  The built-in rules are now templates that compile to the same regexes as
+  before, so nothing changes without the block. Mistakes are config errors
+  that name the setting: a bad template, a regex without a `sample` group, an
+  unknown field or date format, or a method keyword listed under two methods
+  (or blank). Numbers read by any rule must be 1–999 (D30). The app's Save
+  keeps the new settings.
+- **`ionomos names test <names…>`** (`namecheck.py`): prints how the live
+  config reads folder names, `.raw` names or folders on disk (user, method,
+  file rule, date, and each file's sample / replicate / fraction), or why a
+  name is rejected. `.raw` names after a folder name are read as its files.
+  The app's Methods tab has the same check (**Test names…**), using the
+  unsaved settings.
+- A `.raw` name for a method with no file rule now says how to add one
+  (`naming.methods.<name>`).
+
 - **Results from other engines** (`downstream/engines.py`, docs/ENGINES.md,
   D36). `ionomos analyze` (and the Analysis tab's Table…) recognises and
   loads:

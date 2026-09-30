@@ -165,6 +165,18 @@ def dump_config(d: dict) -> str:
     a("  condition_codes:   # DIA short forms: X_D1 = DMSO rep 1; 1-2 letter codes, longer ones only if listed")
     for k, v in codes.items():
         a(f"    {_y(str(k))}: {_y(str(v))}")
+    nm = d.get("naming") or {}
+    if nm.get("date_formats") is not None:  # another lab's convention (D37); the app doesn't edit these
+        a(f"  date_formats: {_y(list(nm['date_formats']))}   # tried in order")
+    if isinstance(nm.get("methods"), dict) and nm["methods"]:
+        a("  methods:   # how each method's raw file names are read (docs/NAMING_CONVENTION.md)")
+        for key, spec in nm["methods"].items():
+            if isinstance(spec, dict):
+                a(f"    {_y(str(key))}:")
+                for k, v in spec.items():
+                    a(f"      {_y(str(k))}: {_y(v)}")
+            else:
+                a(f"    {_y(str(key))}: {_y(spec)}")
     a("")
     an = d.get("analysis") or {}
     a("analysis:   # statistics + volcano plots + report after each search (per experiment: experiment.yaml analysis:)")

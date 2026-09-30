@@ -505,6 +505,63 @@ So Ionomos stays on-premise and Windows-native for the watcher, and adds:
 Priorities are in ROADMAP Phase 5. Whether numpy may become an optional
 speed-up is left open until dose-response or a limpa-style model needs it.
 
+### D37 — Another lab's names are config: templates per method, a regex for power users
+**2026-09-30.** ROADMAP Phase 5A. The naming rules were tuned to this lab in
+code: the per-method raw-file tails, the date formats, the DIA condition
+codes. Another lab needs its convention to be a `config.yaml` change it can
+check before the first drop. (D36, the Phase 5 plan, is in a separate PR.)
+
+`naming:` now holds, besides `condition_codes`:
+- **`methods.<name>`**: how that method's `.raw` names are read. It can be:
+  - a readable **template** (`'{sample}_R{rep}_F{fraction}'`, with `[ ]` for
+    optional parts); a plain string is short for `files:`
+  - a **regex** with named groups `sample` / `rep` / `fraction` (`pattern:`)
+  - **`like: isoDTB | TMT | DIA`**, which borrows a built-in rule
+- **`date_formats`**: which of six named formats to try, in order.
+
+Choices:
+- **The built-in rules are templates too.** These three compile to exactly the
+  old regular expressions, character for character (a test pins them):
+  - `{sample}_{rep}[_{fraction}]`
+  - `{sample}[_TMT][_{fraction}]`
+  - `{sample}[_{rep}]`
+
+  With no `naming:` block every name reads as before, and every earlier test
+  passes unchanged.
+- **Templates before regexes.** A template is what a lab would write on a
+  whiteboard. `_` and `-` stay interchangeable, letters match either case, and
+  `{rep}` / `{fraction}` keep the R/F prefixes. The regex is there for names a
+  template can't describe.
+- **D30 holds for every rule:**
+  - Template numbers are 1–3 digits.
+  - Every rule's numbers are checked 1–999 by value when they are read, so a
+    hand-written `\d+` can't mint replicate 1000.
+  - A group that captures letters is an error, not a guess.
+  - The Xcalibur stamp is stripped and the fraction-set check runs as before.
+- **Keywords stay in `methods.<name>.aliases`.** The app's Methods tab edits
+  them there, and a second place would drift. A keyword listed under two
+  methods is now a config error, because every folder containing it would be
+  ambiguous. So is a blank keyword, which would match every folder.
+- **`like:` is about names only.** The analysis after FragPipe still branches
+  on the method's name (isoDTB sites, TMT annotation, DIA `pg_matrix`), so a
+  renamed DIA method gets the generic analysis. The documented way to use
+  another word for DIA is to add it to `methods.DIA.aliases`. Carrying `like`
+  into the pipeline is left open.
+- **Mistakes fail at load and name the setting** (`naming.methods.DIA:
+  '{rep}_{fraction}' needs {sample} once, outside [ ]`). The watcher then
+  keeps its last good config (D34) and the app won't save. Unknown keys under
+  `naming:` are errors, as they are under `analysis:`.
+- **"Test your names" is one read-only function** (`namecheck.py`). It sits
+  behind `ionomos names test <folder> <file.raw> …` and the app's Methods tab
+  → **Test names…**. For each name it prints user, method, rule and date, and
+  each file's sample, replicate and fraction, or why the file is rejected. It
+  uses the same parser and fraction check as intake, so what it says is what a
+  drop will do.
+
+The app's config writer keeps `naming.methods` and `naming.date_formats`,
+but the app has no editor for them. They are rare, one-off settings, and the
+comments in the config file and the check cover them.
+
 ### D39 — The watcher can run DIA-NN itself
 **2026-09-30.** A lab that searches DIA with DIA-NN alone (no FragPipe)
 couldn't use the watcher. A method can now say `engine: diann`.

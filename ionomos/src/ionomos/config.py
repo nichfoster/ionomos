@@ -17,7 +17,18 @@ from pathlib import Path
 
 import yaml
 
-from ionomos.naming import DEFAULT_CONDITION_CODES, DEFAULT_METHOD_ALIASES
+from ionomos.naming import (
+    DEFAULT_CONDITION_CODES,
+    DEFAULT_DATE_FORMATS,
+    DEFAULT_FILE_RULES,
+    DEFAULT_FILE_TEMPLATES,
+    DEFAULT_METHOD_ALIASES,
+    FileRule,
+    NamingError,
+    check_date_formats,
+    check_method_aliases,
+    file_rule,
+)
 
 log = logging.getLogger("ionomos.config")
 
@@ -76,6 +87,8 @@ class Config:
     gui_popups: bool = True  # pop-up windows for analysis decisions / failed searches (attention.py)
     review_drops: bool = True  # show every drop in the review window before it is filed (when a display exists)
     condition_codes: dict = field(default_factory=lambda: dict(DEFAULT_CONDITION_CODES))  # DIA X_D1 -> DMSO rep 1
+    file_rules: dict[str, FileRule] = field(default_factory=lambda: dict(DEFAULT_FILE_RULES))  # naming.methods
+    date_formats: tuple[str, ...] = DEFAULT_DATE_FORMATS  # naming.date_formats
 
     @property
     def method_aliases(self) -> dict[str, list[str]]:
@@ -187,6 +200,10 @@ def load(path: str | Path, check_paths: bool = True) -> Config:
             aliases=tuple(str(a) for a in aliases),
             extra=extra,
         )
+    try:
+        check_method_aliases({k: list(m.aliases) for k, m in methods.items()})
+    except NamingError as exc:
+        raise ConfigError(f"methods: {exc}") from None
 
     users = raw.get("users") or {}
     user_aliases = {str(k): [str(a) for a in (v or [])] for k, v in (users.get("aliases") or {}).items()}
@@ -196,7 +213,18 @@ def load(path: str | Path, check_paths: bool = True) -> Config:
         user_aliases[k] += [a for a in v if a not in user_aliases[k]]
     gui = raw.get("gui") or {}
     naming = raw.get("naming") or {}
-    codes = naming.get("condition_codes") if isinstance(naming, dict) else None
+    if not isinstance(naming, dict):
+        raise ConfigError("'naming:' must be a mapping (condition_codes, date_formats, methods)")
+    unknown = sorted(set(naming) - {"condition_codes", "date_formats", "methods"})
+    if unknown:
+        raise ConfigError(f"naming.{unknown[0]}: unknown setting (known: condition_codes, date_formats, methods)")
+    file_rules = _file_rules(naming.get("methods"), methods)
+    try:
+        date_formats = (DEFAULT_DATE_FORMATS if naming.get("date_formats") is None
+                        else check_date_formats(naming["date_formats"]))
+    except NamingError as exc:
+        raise ConfigError(f"naming.date_formats: {exc}") from None
+    codes = naming.get("condition_codes")
     if codes is None:
         codes = dict(DEFAULT_CONDITION_CODES)
     elif not isinstance(codes, dict) or not all(
@@ -227,6 +255,8 @@ def load(path: str | Path, check_paths: bool = True) -> Config:
         gui_popups=bool(gui.get("popups", True)),
         review_drops=bool(gui.get("review_drops", True)),
         condition_codes=codes,
+        file_rules=file_rules,
+        date_formats=date_formats,
         config_path=p,
         analysis=_analysis(raw.get("analysis")),
         user_ignore=tuple(str(x) for x in (users.get("ignore") if users.get("ignore") is not None else DEFAULT_USER_IGNORE)),
@@ -239,6 +269,51 @@ def load(path: str | Path, check_paths: bool = True) -> Config:
             raise ConfigError("config problems:\n  - " + "\n  - ".join(errors))
         warnings += more
     return replace(cfg, warnings=tuple(warnings)) if warnings else cfg
+
+
+_RULE_KEYS = ("like", "files", "pattern", "condition_codes")
+
+
+def _file_rules(raw, methods: dict[str, MethodConfig]) -> dict[str, FileRule]:
+    """naming.methods: how each method's raw file names are read (D37). Absent = the built-in rules.
+
+    A method's entry is a template string (shorthand for files:), or a mapping of
+    like (isoDTB | TMT | DIA), files (template), pattern (regex), condition_codes (true/false)."""
+    rules = dict(DEFAULT_FILE_RULES)
+    if raw is None:
+        return rules
+    if not isinstance(raw, dict):
+        raise ConfigError("naming.methods must map method names to file rules, e.g. {DIA: '{sample}_{rep}'}")
+    for key, spec in raw.items():
+        key = str(key)
+        where = f"naming.methods.{key}"
+        if key not in methods:
+            raise ConfigError(f"{where}: there is no methods.{key} (add it with workflow, fasta and data_type, "
+                              f"or use one of {', '.join(methods)})")
+        if isinstance(spec, str):
+            spec = {"files": spec}
+        if not isinstance(spec, dict) or not spec:
+            raise ConfigError(f"{where}: give files: (a template), pattern: (a regex) or like: "
+                              f"{' | '.join(DEFAULT_FILE_TEMPLATES)}")
+        bad = sorted(set(map(str, spec)) - set(_RULE_KEYS))
+        if bad:
+            raise ConfigError(f"{where}.{bad[0]}: unknown setting (known: {', '.join(_RULE_KEYS)})")
+        like = spec.get("like")
+        if like is not None and str(like) not in DEFAULT_FILE_TEMPLATES:
+            raise ConfigError(f"{where}.like: {like!r} is not a built-in method; use "
+                              f"{' | '.join(DEFAULT_FILE_TEMPLATES)}")
+        use_codes = spec.get("condition_codes")
+        if use_codes is not None and not isinstance(use_codes, bool):
+            raise ConfigError(f"{where}.condition_codes must be true or false")
+        for k in ("files", "pattern"):
+            if spec.get(k) is not None and not isinstance(spec[k], str):
+                raise ConfigError(f"{where}.{k} must be a text (quote it in YAML: '{{sample}}_{{rep}}')")
+        try:
+            rules[key] = file_rule(key, like=str(like) if like is not None else None, files=spec.get("files"),
+                                   pattern=spec.get("pattern"), codes=use_codes)
+        except NamingError as exc:
+            raise ConfigError(f"{where}: {exc}") from None
+    return rules
 
 
 def _analysis(raw) -> dict:

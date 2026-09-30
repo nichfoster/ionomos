@@ -61,6 +61,17 @@ naming:
   condition_codes:
     D: DMSO
     C: Compound
+  # Another lab's convention (docs/NAMING_CONVENTION.md "Other conventions"). Leave these out to keep
+  # the built-in rules; check a change with `ionomos names test <folder> <file.raw> ...`.
+  # date_formats: [YYYYMMDD, MMDDYYYY, MMDDYY]   # also DDMMYYYY, DDMMYY, YYMMDD; tried in order
+  # methods:                                     # how each method's .raw names are read (quote templates)
+  #   isoDTB: '{sample}_{rep}[_{fraction}]'      # the built-in rules, written out
+  #   TMT: '{sample}[_TMT][_{fraction}]'
+  #   DIA: '{sample}[_{rep}]'
+  #   (or, for WT-a_rep1.raw / KO-b_rep2.raw:  DIA: '{condition}_rep{rep}')
+  #   LFQ: {files: '{sample}_R{rep}_F{fraction}'}   # a new method (add methods.LFQ below too)
+  #   SWATH: {like: DIA}                         # DIA's rule under another method name
+  #   PLATE: {pattern: '(?P<sample>[A-H]\d{2})-(?P<rep>\d+)'}   # a regex with named groups
 
 # One entry per method. The key is canonical; `aliases` are the keywords
 # searched for (case-insensitive) in folder names.
