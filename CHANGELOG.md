@@ -34,6 +34,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A `.raw` name for a method with no file rule now says how to add one
   (`naming.methods.<name>`).
 
+- **Results from other engines** (`downstream/engines.py`, docs/ENGINES.md,
+  D36). `ionomos analyze` (and the Analysis tab's Table…) recognises and
+  loads:
+  - DIA-NN standalone: `pg_matrix`, the 1.x `report.tsv`, and the 2.x
+    `report.parquet` with the optional `pip install ionomos[parquet]`
+  - MaxQuant `proteinGroups.txt` (LFQ / Intensity / TMT reporters)
+  - Spectronaut pivot and long reports
+  - AlphaDIA `pg.matrix.tsv`
+  - MSstats-format tables (quantms, Skyline, …), summarised by Tukey median
+    polish
+  - Proteome Discoverer protein exports
+
+  Long reports are filtered at 1% precursor and protein FDR, and conditions
+  and replicates are taken from the engine when it records them.
+- **Data source in every report and in `analysis.json` (`engine`)**: engine,
+  version, tools (MSFragger / IonQuant / DIA-NN versions under FragPipe),
+  table, quantity, FDR filter, FASTA and parameter files, when the folder
+  records them. The Methods paragraph names the engine that produced the
+  numbers.
+- MaxQuant `CON__` contaminants are removed like FragPipe's `contam_`.
+- **The watcher can run DIA-NN** instead of FragPipe for a DIA method
+  (`engine: diann`, `diann_exe`, optional `library` / `diann_args`; D39,
+  docs/ENGINES.md):
+  - each job's settings are written to `ionomos_run/diann.cfg`
+  - results go to `diann/`
+  - cancel / Retry / pop-ups / previous-attempt folders work as for FragPipe
+  - the setup checklist checks the DIA-NN install and FASTA / library
+
+  Done notes, failure pop-ups and logs name the engine that ran.
+
+### Changed
+
+- ROADMAP Phase 5 and D36: the plan for making Ionomos useful to other labs
+  (pip-installable analysis, engine adapters, SDRF, configurable naming, more
+  engines and analyses).
+
 ## [0.11.0] - 2026-09-30
 
 ### Added

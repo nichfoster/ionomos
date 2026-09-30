@@ -95,3 +95,12 @@ methods:
     fasta: human_reviewed_decoys.fas
     data_type: DIA
     postprocess: []
+  # DIA searched by the lab's own DIA-NN instead of FragPipe (docs/ENGINES.md, D39). Replace the DIA
+  # entry above with this, or add it under another key with its own aliases:
+  # DIA:
+  #   engine: diann                      # fragpipe (default) | diann
+  #   diann_exe: C:/DIA-NN/2.2.0/diann.exe
+  #   fasta: human_reviewed.fasta        # in fasta_dir (no decoys needed: DIA-NN makes its own)
+  #   data_type: DIA
+  #   library: human_lib.parquet         # optional, in workflow_dir or fasta_dir; else predicted from the FASTA
+  #   diann_args: "--var-mods 1 --var-mod UniMod:35,15.994915,M"   # added to Ionomos' defaults

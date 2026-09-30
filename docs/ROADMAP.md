@@ -126,6 +126,11 @@ the R goldens and wired into the live pipeline); new runner tests compare both
 sandbox scope; what remains is the exit test above — the first real FragPipe
 run on the PC.
 
+2026-09-30: the maintainer reports a series of real runs done on the PC. Record
+any differences from the GUI / R / FragPipe-Analyst path here, and keep one
+small anonymised real experiment as a test fixture and public example data
+(Phase 5A).
+
 ## Phase 3 — DIA, then TMT
 
 - DIA: pin workflow, `data_type: DIA`, sort out DIA-NN version/`--config-diann`.
@@ -166,6 +171,132 @@ run on the PC.
 - Optional: auto-pull from `C:\Proteomics_File_Sharing` (reversing D3) once
   the convention is trusted.
 
+## Phase 5 — Beyond one lab (plan of 2026-09-30, D36)
+
+Goal: other labs can use Ionomos. Research (2026-09-30) found no open tool
+covering the whole path. The open pipelines need Linux, containers and a
+bioinformatician: nf-core/quantms, Frag'n'Flow (headless FragPipe on
+Nextflow), ProtPipe. AlphaPept has a watcher but only for its own engine.
+MSAID's `watch` command is commercial and cloud-based. Downstream tools
+(FragPipe-Analyst, MSstatsShiny, MS-DAP, AlphaPeptStats) all start from an
+uploaded table.
+
+**Positioning:**
+- The open, on-premise, Windows-native last mile from instrument PC to a
+  trustworthy report.
+- Licence-clean: GPL, never bundles a restricted engine.
+- Chemoproteomics (isoDTB / ABPP) is the niche nobody else automates.
+
+Order of work: 5A → 5B, then 5C by need; 5D once 5A ships.
+
+### 5A — Not one lab's tool
+
+Installation and configuration kill lab tools: in one study, 28% of omics
+tools failed to install within 2 hours, and tools on package managers always
+installed.
+
+- [ ] **Analysis-only install from pip.** `pip install ionomos`, then
+  `ionomos analyze <table or folder>` and `ionomos demo`, on Windows / macOS /
+  Linux, with no Tk needed. The analysis has one dependency (PyYAML), so this
+  is the cheapest adoption lever. Publishing to PyPI is the maintainer's step
+  (trusted publishing from a tag).
+- [ ] **Engine adapters** (import side first). One registry; each adapter can:
+  - recognise its results folder / tables (with a confidence score)
+  - load one canonical quantity matrix
+  - report provenance: engine, version, settings, FDR filters
+
+  FragPipe (isoDTB / TMT / DIA / LFQ) is adapter #1; the any-table loader is
+  the fallback. The run side (build the command, locate outputs; the core
+  runner keeps locking, logging, cancellation and the "failures leave data in
+  place" rule) follows once import works.
+- [ ] **Provenance in every report** (MS-DAP-style audit trail): engine and
+  version, workflow / parameter file, FDR filters, Ionomos settings.
+- [ ] **SDRF-Proteomics export** (`results/sdrf.tsv`), the PSI sample-metadata
+  standard PRIDE promotes. Built from what the file names already say:
+  condition, replicate, fraction, label channel. Later: accept SDRF as a
+  design import.
+- [ ] **Configurable naming.** Each method's file pattern and the condition
+  codes become editable config, with a "test your names" check (CLI + setup
+  window), so another lab's convention needs no code change. Keep
+  NAMING_CONVENTION.md ↔ naming.py in sync.
+- [ ] **Docs for a stranger:**
+  - a 10-minute quickstart
+  - demo data, from the real fixture once it exists (simulated until then)
+  - "what Ionomos will never do to your data"
+  - a page per supported engine
+
+### 5B — More engines (value ÷ effort ÷ licence risk)
+
+| # | Engine | Mode | Notes |
+|---|---|---|---|
+| 1 | DIA-NN standalone (1.9 / 2.x) | import, then run | `pg_matrix` parser exists; 2.x `report.parquet` needs an optional Parquet reader. DIA-NN can't be redistributed from 1.9 on (Academia / Enterprise editions): the lab supplies the binary. |
+| 2 | MaxQuant | import `proteinGroups.txt`; later run | Free incl. commercial use; not redistributable. Run mode patches an `mqpar.xml` made by the installed version (`--create`), never a shipped template. |
+| 3 | MSstats long format + SDRF design | import | One importer covers quantms, Skyline and anything with an MSstats converter; protein summary by Tukey median polish (MSstats' default). |
+| 4 | Spectronaut | import | Common in cores; ship an Ionomos report schema (`.rs`), read `PG.Quantity` pivots or the long BGS report. |
+| 5 | Sage | run + import | MIT and cross-platform: the only engine Ionomos could bundle. Needs ThermoRawFileParser (.raw → mzML) and a protein roll-up of `lfq.tsv`. |
+| 6 | AlphaDIA | import | Apache-2.0, pip-installable; column names changed between 1.x and 2.x. |
+| 7 | Proteome Discoverer | import | Protein-table text export only; no supported headless mode. |
+
+Skipped unless asked: MSFragger / Philosopher outside FragPipe, PEAKS,
+CHIMERYS, our own search engine. MSFragger and DIA-NN licences make
+bundling impossible, and each lab accepts its own; that is a selling point,
+not a gap.
+
+### 5C — More analysis (value × feasibility; all possible in pure Python)
+
+1. [ ] **Experimental designs**: paired samples, blocks (batch / plex /
+   patient as fixed effects, Smyth's advice), covariates, time courses, and a
+   moderated F-test. Every lab needs this.
+2. [ ] **Dose-response** (CurveCurator, Apache-2.0):
+   - a 4-parameter log-logistic fit
+   - pEC50 with a confidence interval
+   - the recalibrated F statistic and relevance score
+
+   Compound titrations are central to chemoproteomics.
+3. [ ] **Cysteine chemoproteomics:**
+   - liganded-site calls with configurable thresholds (R ≥ 4 in ≥ 2 of 3
+     replicates)
+   - site changes corrected for protein abundance (MSstatsPTM formulas)
+   - a site × compound selectivity map and a liganded fraction per compound
+   - an optional CysDB annotation the user downloads (AGPL: not bundled)
+4. [ ] **DEqMS** (variance tied to peptide count, which is now read). Later, a
+   limpa-style detection-probability model, which would replace imputation
+   for DIA and probably wants optional numpy.
+5. [ ] **TMT across plexes**: IRS / bridge-channel normalisation, with a PCA
+   by plex before and after.
+6. [ ] **Instrument QC trending** on the recurring HeLa standard:
+   - IDs, signal, peak width, mass error, RT drift
+   - Levey-Jennings charts with run rules
+
+   Intake already sees every run.
+7. [ ] Phospho: localisation filter and KSEA kinase activity. Only if a lab
+   runs phospho; PhosphoSitePlus is non-commercial, so it is a user download.
+8. [ ] STRING / CORUM overlays: low priority.
+
+Stay deterministic. The one credible published "AI interpretation"
+(GeneAgent, Nat Methods 2025) verifies every claim against databases. Plain
+templated summaries, like the key findings, are easier to trust.
+
+### 5D — Adoption
+
+- [ ] 2–3 pilot labs, ideally chemoproteomics groups already on FragPipe
+  isoDTB / ABPP workflows.
+- [ ] A J. Proteome Res. technical note once pilots exist. It should include
+  the limma / FragPipeAnalystR parity tests and real-data comparisons. JOSS
+  (2026 criteria) wants at least 6 months of public use.
+- [ ] Interoperate rather than compete: open in FragPipe-Analyst (already
+  exported), optional pmultiqc-compatible QC, SDRF.
+
+### Risks
+
+- **Engine dependency.** FragPipe is academic-only, and its headless interface
+  changes between releases. Nesvilab could automate this themselves. Engine
+  adapters are the hedge.
+- **One maintainer.** Keep scope tight: no web server, cloud, or multi-user
+  permissions.
+- **Trust in a Python limma.** Publish the parity tests against R, and keep
+  real-data fixtures in CI.
+
 ## Open questions (need a human)
 
 Collected from the other docs; resolve before/during Phase 1.
@@ -197,5 +328,9 @@ Collected from the other docs; resolve before/during Phase 1.
 - [ ] isoDTB: which ratio direction and threshold call a cysteine "liganded" (e.g. R ≥ 4)? Then add ratio classes.
 - [ ] Is a review window on every drop right long-term, or only for new users / methods / code patterns?
       Watch how it feels on the PC for a few weeks (`gui.review_drops`).
+- [ ] Phase 5: allow numpy as an *optional* speed-up (dose-response, limpa)? The base install stays
+      dependency-free either way.
+- [ ] Phase 5: which pilot labs can we reach? Does this lab run titrations or phospho? (Orders 5C.)
+- [ ] Phase 5: publish on PyPI as `ionomos` (needs a PyPI account / trusted publisher set up by the maintainer).
 - [x] Agent auto-merge: removed 2026-09-27; a person merges (D31).
 - [x] CI Python versions: 3.11 (floor), 3.12 (exe build), 3.14 (the PC) since 2026-09-27.

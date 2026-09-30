@@ -473,6 +473,38 @@ server. The view lives in the address hash, so a link reopens it. Protein
 complexes (CORUM: non-commercial licence), CysDB for isoDTB sites, and
 PSM-level QC from `psm.tsv` were left for later (ROADMAP).
 
+### D36 — Ionomos is for other labs too: engines are adapters, analysis installs from pip
+**2026-09-30.** The goal is now that other labs can use Ionomos (ROADMAP
+Phase 5).
+
+The research found that no open tool automates the path from a lab's Windows
+instrument PC to a finished, trustworthy report without a bioinformatician:
+- quantms, Frag'n'Flow and ProtPipe need Linux, containers and HPC.
+- AlphaPept watches folders only for its own engine.
+- MSAID's `watch` is a commercial cloud product.
+- Downstream tools start from an uploaded table.
+
+So Ionomos stays on-premise and Windows-native for the watcher, and adds:
+
+1. **An analysis-only install from pip that runs anywhere.** The pure-Python
+   analysis has one dependency, and the literature on tool adoption says
+   installation decides whether a tool is tried at all.
+2. **Engines as adapters.** A registry of adapters can each recognise their
+   outputs, load one canonical quantity matrix and report provenance.
+   FragPipe is the first; the any-table loader is the fallback. Import comes
+   before running, because it is useful immediately and carries no licence
+   risk.
+3. **Ionomos never bundles an engine with a restrictive licence.** MSFragger
+   is academic-only, DIA-NN is not redistributable from 1.9 on, and MaxQuant
+   is not redistributable either. Each lab installs and accepts its own.
+   Sage (MIT) is the only candidate for bundling.
+4. **SDRF-Proteomics for sample metadata** (export first). mzTab is not used
+   internally: it has stalled for quantification and adds nothing over the
+   TSVs.
+
+Priorities are in ROADMAP Phase 5. Whether numpy may become an optional
+speed-up is left open until dose-response or a limpa-style model needs it.
+
 ### D37 — Another lab's names are config: templates per method, a regex for power users
 **2026-09-30.** ROADMAP Phase 5A. The naming rules were tuned to this lab in
 code: the per-method raw-file tails, the date formats, the DIA condition
@@ -529,4 +561,24 @@ Choices:
 The app's config writer keeps `naming.methods` and `naming.date_formats`,
 but the app has no editor for them. They are rare, one-off settings, and the
 comments in the config file and the check cover them.
+
+### D39 — The watcher can run DIA-NN itself
+**2026-09-30.** A lab that searches DIA with DIA-NN alone (no FragPipe)
+couldn't use the watcher. A method can now say `engine: diann`.
+- `runner.py` picks FragPipe or DIA-NN per method.
+- `diann.py` builds the job: the lab's `diann_exe`, FASTA or spectral library,
+  and `ionomos_run/diann.cfg`, run as `diann --cfg …`.
+- Both engines share `fragpipe.run`'s start / cancel / stop / timeout loop and
+  `check_raws()`, so holds, failures, Retry, pop-ups and "never delete an old
+  attempt" (`diann_previous_*`) behave the same.
+
+The cfg file, not a long command line, is the job's settings. It is
+readable, kept with the results, and one option per line. The price is that
+paths can't have spaces; Ionomos already requires that for FragPipe. The
+defaults follow DIA-NN's GUI defaults for a tryptic search, and a lab adds
+its own with `diann_args`. DIA-NN is never shipped: from 1.9 it can't be
+redistributed, and each lab installs its own edition (Academia / Enterprise).
+MaxQuant and Sage runners would slot into `runner.py` the same way (ROADMAP
+5B). Tested end to end with a fake DIA-NN (`ionomos fake-diann`) that reads
+the cfg and fails like the real one on missing inputs.
 
