@@ -20,7 +20,8 @@
 |---|---|---|
 | `config.py` | Load + validate `config.yaml`; resolve per-method defaults | `prior-work/config_loader.py` |
 | `watcher.py` | Poll the inbox; detect new **folders**; wait for copy to finish | `prior-work/watcher.py` (size-stability idea, generalised to a tree) |
-| `naming.py` | Pure functions: folder name → fields; raw filename → (sample, rep, fraction) | — |
+| `naming.py` | Pure functions: folder name → fields; raw filename → (sample, rep, fraction). Per-method file rules are templates or regexes, date formats a list, both from `config.yaml` `naming:` (D37) | — |
+| `namecheck.py` | "Test your names": how the live config reads folder / `.raw` names (`ionomos names test`, app Methods tab → **Test names…**); read-only | — |
 | `manifest.py` | Read/validate `experiment.yaml`; build `.fp-manifest` + TMT `annotation.txt` | `prior-work/fragpipe_runner.build_manifest` |
 | `intake.py` | Validate a stable folder, show it for review (or hand unresolvable names to the resolver), move it to the user dir, write `ionomos.json`, insert ledger row. The watcher passes a `config.LiveConfig`, so edits to config.yaml apply to the next drop | — |
 | `resolve.py` | tkinter window for fixing user/method/file tails; writes `experiment.yaml` + learned aliases | — |
@@ -49,7 +50,7 @@
 | `runners/isodtb.py` | Post-proc: modified-peptide → site merge — thin entry point delegating to `downstream/isodtb.py`, which holds the algorithm | port of `lab-scripts/isoDTB_…R` |
 | `runners/tmt.py` | Post-proc: experimental annotation fix | port of `lab-scripts/correct_experimental_annotation…R` |
 | `runners/dia.py` | Post-proc: (TBD — probably nothing beyond copying `report.tsv` up) | — |
-| `cli.py` | `ionomos setup / run / check / status / dry-run / retry / testbed / diagnose / update`; no args → app; hidden `fake-fragpipe` for the testbed | — |
+| `cli.py` | `ionomos setup / run / check / status / dry-run / names test / retry / testbed / diagnose / update`; no args → app; hidden `fake-fragpipe` for the testbed | — |
 
 ## Data flow for one job
 
