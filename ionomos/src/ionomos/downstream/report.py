@@ -289,6 +289,20 @@ def _settings_table(s: Settings, p: fpa.Processed | None) -> str:
     return "<div class='kv card'>" + "".join(f"<div>{escape(k)}</div><div>{escape(str(v))}</div>" for k, v in rows) + "</div>"
 
 
+def _sdrf_note(info: dict) -> str:
+    """Methods → Sample metadata: what sdrf.tsv is and what to fill in before depositing it."""
+    if not info.get("file"):
+        return ""
+    name = info["file"].split("/")[-1]
+    text = (f"<a href='{escape(name)}'>{escape(name)}</a> describes the samples and raw files in SDRF-Proteomics "
+            f"({escape(info.get('spec', ''))}, {info.get('rows', 0)} rows, {info.get('data_files', 0)} raw files), "
+            "the sample sheet PRIDE and reanalysis pipelines read.")
+    if info.get("fill_in"):
+        text += (" Fill in " + escape(", ".join(info["fill_in"])) + " before depositing it (\"not available\" "
+                 "there fails the validator); set them once in the lab's analysis settings (analysis.sdrf).")
+    return f"<h3>Sample metadata (SDRF)</h3><p class='sub'>{text}</p>"
+
+
 def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: list[DiffResult], notes: list[str],
            files: list[str], s: Settings | None = None, qcd: dict | None = None,
            enrichment: list[dict] | None = None, ranked: list[dict] | None = None, insight: dict | None = None) -> str:
@@ -392,6 +406,7 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
         b.append("<h3>Cross-check in FragPipe-Analyst</h3><p class='sub'>The folder <a href='fragpipe-analyst/'>"
                  "fragpipe-analyst/</a> holds an experiment_annotation.tsv for the quant table, so the same data can be "
                  "opened in FragPipe-Analyst, and reproduce_in_R.R, which repeats this analysis with FragPipeAnalystR.</p>")
+    b.append(_sdrf_note(ctx.get("sdrf") or {}))
     b.append("</section>")
     if files:
         b.append("<section id='files'><h2>Files</h2><ul class='files'>" + "".join(

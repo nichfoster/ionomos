@@ -37,7 +37,7 @@
 | `attention.py` | Durable "needs a person" queue (`<log_dir>/attention/*.json`): raised by intake, worker, analysis; closed when fixed | — |
 | `popups.py` | Pop-up windows + the "needs attention" list, in the app or (app closed) the watcher's own Tk loop | — |
 | `downstream/doctor.py` | The analysis check-up: issues with severity, likely causes, fixes; condition suggestions from file names | — |
-| `downstream/` | FragPipe tables → `QuantMatrix` → FragPipe-Analyst processing + limma → interactive `results/report.html`. `isodtb.py`/`tmt.py` (R ports), `quant.py` (loaders), `fpa.py` (FragPipeAnalystR port: filter, normalise, impute, `test_limma`), `rrandom.py` (R's RNG), `analysis.py` (settings, comparisons), `qc.py` (PCA, clustering, CV, missingness), `insights.py` (sample scorecard, PC ↔ condition/replicate, missingness vs intensity, p-value shape + π0, on/off features, imputation-driven hits, power; D35), `enrich.py` (local ORA and a correlation-adjusted rank test on Enrichr libraries), `export.py` (result tables, FragPipe-Analyst annotation + R script), `report.py` + `assets/report.js`, `charts.py` (static SVG volcano), `stats.py`, `simulate.py` | the lab's R scripts; FragPipeAnalystR; limma |
+| `downstream/` | FragPipe tables → `QuantMatrix` → FragPipe-Analyst processing + limma → interactive `results/report.html`. `isodtb.py`/`tmt.py` (R ports), `quant.py` (loaders), `fpa.py` (FragPipeAnalystR port: filter, normalise, impute, `test_limma`), `rrandom.py` (R's RNG), `analysis.py` (settings, comparisons), `qc.py` (PCA, clustering, CV, missingness), `insights.py` (sample scorecard, PC ↔ condition/replicate, missingness vs intensity, p-value shape + π0, on/off features, imputation-driven hits, power; D35), `enrich.py` (local ORA and a correlation-adjusted rank test on Enrichr libraries), `export.py` (result tables, FragPipe-Analyst annotation + R script), `sdrf.py` (SDRF-Proteomics sample metadata; D38), `report.py` + `assets/report.js`, `charts.py` (static SVG volcano), `stats.py`, `simulate.py` | the lab's R scripts; FragPipeAnalystR; limma |
 | `setupcheck.py` | The setup checklist (app ✓ Setup tab, `ionomos init`) | — |
 | `names.py` | Every on-disk / system name, with its LabWatch-era twin; readers accept both, writers use the new one | — |
 | `buildinfo.py` | `Ionomos 0.5.0 (build 3f2a9c1, date, installed)` — `--version`, app footer, every report | — |
@@ -122,6 +122,8 @@ C:\Fragpipe_General\<user>\<experiment>\    ← where jobs land
   results\                           ← post-processing output
     <experiment>_sites.tsv           (isoDTB)
     experimental_annotation.tsv      (TMT)
+    report.html, analysis.json, …    (the analysis; see "Downstream pipeline")
+    sdrf.tsv                         SDRF-Proteomics sample metadata, one row per raw file (and label)
   DONE.txt | FAILED.txt              ← human-facing one-line status
 ```
 
@@ -277,6 +279,26 @@ notes in the report and warnings on the job, and `ionomos analyze` / Jobs →
 Re-run analysis / the Analysis tab redo it with new settings.
 `results/fragpipe-analyst/` holds an `experiment_annotation.tsv` and a
 `reproduce_in_R.R` that repeat the analysis in FragPipeAnalystR (D24).
+
+`results/sdrf.tsv` (`downstream/sdrf.py`, D38) is the experiment's sample
+sheet in SDRF-Proteomics v1.1.0 (template `ms-proteomics`), the format PRIDE
+and reanalysis pipelines read. It is its own isolated stage, after the
+statistics and before the report:
+
+| Column(s) | Source |
+|---|---|
+| rows | one per raw file in `ionomos.json` `plan.manifest` (experiment.yaml corrections applied); TMT: one per file × channel; isoDTB: a light and a heavy row per file (`ICAT light` / `ICAT heavy`, sharing the assay name). Without a manifest: the quant table's run columns, else the raws in the folder |
+| `source name`, `characteristics[biological replicate]` | the sample (`DMSO_1`; TMT: the channel's sample name) and its replicate; a replicate number is never reused within a condition (a sample moved to another condition gets the next free one) |
+| `comment[fraction identifier]` | read from the file name (`_<rep>_<fraction>`), else 1 |
+| `comment[label]` | `label free sample`, `TMT126`…, `ICAT light/heavy`; TMT channels from `annotation.txt` next to the raws, else experiment.yaml `tmt:`, else names like `DMSO_1_126` |
+| `factor value[condition]` | the condition the analysis used (after `sample_conditions`); samples left out are still listed with theirs |
+| `characteristics[organism]` | `analysis.sdrf.organism`, else the FASTA's UniProt `OS=` (one species ≥ 90 % of targets) |
+| `comment[cleavage agent details]`, `comment[modification parameters]` | `analysis.sdrf.cleavage_agent`, else the MSFragger enzyme in `fragpipe/fragpipe.workflow`; enabled fixed/variable mods mapped to Unimod (unknown masses keep `MM=`) |
+| `comment[instrument]`, organism part, cell type, disease | `analysis.sdrf` only (config.yaml lab-wide, experiment.yaml per experiment) |
+
+Unknown values are `not available`. `analysis.json` → `sdrf` lists the columns
+a repository still needs filled (`fill_in`), and the report's Methods says so.
+A table analysed on its own (D33) gets no SDRF: it names no raw files.
 
 ## Packaging, updates, support (0.5.0)
 

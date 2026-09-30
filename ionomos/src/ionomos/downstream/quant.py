@@ -148,6 +148,7 @@ def from_pg_matrix(path: Path, sample_map: dict[str, tuple[str, int]] | None = N
 
     runs = [h for h in header if h not in _PG_META and (match_run(run_stem(h)) is not None or numeric(h, strict=False))]
     samples, cond, reps, colmap = [], {}, {}, {}
+    run_of: dict[str, str] = {}  # sample -> the manifest run (file stem) it was matched to
     unmatched: list[str] = []
     for h in runs:
         stem = run_stem(h)
@@ -173,6 +174,8 @@ def from_pg_matrix(path: Path, sample_map: dict[str, tuple[str, int]] | None = N
         samples.append(s)
         cond[s] = c
         colmap[s] = h
+        if key is not None:
+            run_of[s] = key
     feats, vals = [], []
     for r in rows:
         genes = r.get("Genes") or ""
@@ -190,7 +193,7 @@ def from_pg_matrix(path: Path, sample_map: dict[str, tuple[str, int]] | None = N
             reps[s] = int(s.rsplit("_", 1)[1])
     return QuantMatrix("intensity", "protein", feats, samples, vals, cond, str(path), notes=notes, exp="DIA",
                        replicate=reps, columns=colmap, meta={"missing_runs": missing, "unmatched_runs": unmatched,
-                                                             "evidence": "peptides"})
+                                                             "evidence": "peptides", "manifest_run": run_of})
 
 
 def _dia_condition(stem: str) -> str:
