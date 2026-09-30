@@ -58,6 +58,7 @@ class Findings:
     load_notes: list = field(default_factory=list)
     read_problem: str | None = None      # the result table exists but holds nothing usable (e.g. isoDTB SiteError)
     enrichment_notes: list = field(default_factory=list)
+    insights: dict = field(default_factory=dict)          # insights.py: scorecard, pcs, missingness, phist, ...
 
 
 # the tables each method needs, and why they might be missing
@@ -167,6 +168,7 @@ def check(f: Findings) -> list[Issue]:
                   {"source": m.source}))
         return out
     if m.meta.get("precomputed"):  # a results table: no samples to check, only what it plots
+        _insight_checks(f, None, add)
         _result_checks(f, s, add)
         return out
     if not any(v is not None for row in m.values for v in row):
@@ -315,9 +317,75 @@ def check(f: Findings) -> list[Issue]:
                   ["Low sample amount or a short gradient", "A strict missing-value filter"],
                   ["Check the identifications per sample in the report's QC section"], {"n": len(pm.features)}))
 
+    _insight_checks(f, p, add)
+
     # ---- statistics and plots
     _result_checks(f, s, add)
     return out
+
+
+LEFT_CENSORED = ("perseus", "mindet", "minprob", "min", "zero")
+
+
+def _insight_checks(f: Findings, p, add) -> None:
+    """The deeper QC (insights.py): outlier samples, a batch-like structure, imputation that doesn't fit the
+    missingness. Warnings only: they are shown in the report and the attention list, never a pop-up."""
+    ins = f.insights or {}
+    card = [r for r in ins.get("scorecard") or [] if r["status"] == "fail"
+            and not any(fl.startswith("far fewer identifications") for fl in r["flags"])]  # LOW_SAMPLE covers those
+    if card:
+        add(Issue("SAMPLE_OUTLIER", "warning", f"{len(card)} sample(s) look like outliers",
+                  "; ".join(f"{r['sample']}: {', '.join(r['flags'])}" for r in card[:4]) +
+                  ". An outlier replicate hides real changes and can create false ones.",
+                  ["A failed or partial injection, or a sample handled differently in prep",
+                   "A sample swap: it behaves like another condition (check the PCA)",
+                   "The sample really is different (then keep it)"],
+                  ["Look at the report's Sample scorecard and PCA; if it is a technical failure, leave it out on "
+                   "the Analysis tab and Run analysis (you can always add it back)"],
+                  {"samples": [r["sample"] for r in card]}))
+    batch = (ins.get("pcs") or {}).get("batch")
+    if batch:
+        rc = batch.get("r2_condition")
+        add(Issue("BATCH_SUSPECT", "warning", "Samples group by replicate number, not only by condition",
+                  f"PC{batch['pc']} ({batch['percent']:.0f}% of the variance) is {100 * batch['r2_replicate']:.0f}% "
+                  f"explained by the replicate number and {100 * (rc or 0):.0f}% by condition. Replicates with the "
+                  "same number were probably prepared or run together, and that batch shows in the data.",
+                  ["Replicates prepared, digested or acquired on different days / columns",
+                   "Instrument drift over a long queue"],
+                  ["Check the PCA coloured by replicate in the report; randomise the run order next time",
+                   "If the design is balanced, the comparisons are still valid but less sensitive"],
+                  dict(batch)))
+    miss = ins.get("missingness") or {}
+    if (p is not None and p.imputation in LEFT_CENSORED and miss.get("verdict") == "random"
+            and p.n_imputed > 0.05 * max(1, len(p.m.values) * len(p.m.samples))):
+        add(Issue("IMPUTATION_MISMATCH", "warning", "Missing values look random, but were imputed as low values",
+                  f"{p.n_imputed:,} values were imputed with {p.imputation} (as if they were below detection), yet "
+                  "proteins go missing at every abundance in this data. Imputed low values then create fold changes.",
+                  ["Missing values from run failures or identification transfer rather than low abundance"],
+                  ["Try imputation 'knn' or 'none' for this experiment on the Analysis tab, and compare the hits"],
+                  {"imputation": p.imputation, "rho": miss.get("rho"), "gap": miss.get("gap")}))
+    for name, h in (ins.get("phist") or {}).items():
+        if h.get("shape") in ("conservative", "hump"):
+            what = ("piles up near p = 1" if h["shape"] == "conservative" else "bulges in the middle")
+            add(Issue("P_VALUE_SHAPE", "warning", f"{name}: the p-value histogram looks unusual",
+                      f"The histogram {what} instead of being flat with a peak near 0, so the p-values (and the "
+                      "adjusted ones) may not mean what they say.",
+                      ["Many tied values from imputation (identical imputed numbers in both groups)"
+                       if h["shape"] == "conservative" else "An outlier sample or a hidden batch inflating the variance",
+                       "Groups of very different sizes, or a condition mislabelled"],
+                      ["Check the Sample scorecard and PCA; try a stricter missing-value filter"],
+                      {"comparison": name, "shape": h["shape"]}))
+    for name, idx in (ins.get("imputation_driven") or {}).items():
+        d = next((x for x in f.diffs if x.name == name), None)
+        hits = (d.up + d.down) if d else 0
+        if len(idx) >= 5 and hits and len(idx) / hits >= 0.3:
+            add(Issue("IMPUTATION_DRIVEN", "warning", f"{name}: {len(idx)} of {hits} hits rest on imputed values",
+                      "At least half of one group's values were imputed for these hits, so their fold changes come "
+                      "partly from the imputation, not from measurements.",
+                      ["Proteins present in one condition only (real on/off changes: see 'Only in one condition')",
+                       "Low-abundance proteins near the detection limit"],
+                      ["In the report, tick 'hide imputation-driven' to see the hits that stand on measured values"],
+                      {"comparison": name, "count": len(idx)}))
 
 
 def _result_checks(f: Findings, s, add) -> None:

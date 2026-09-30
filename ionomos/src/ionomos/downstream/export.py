@@ -5,6 +5,9 @@ Result tables, and the files to open the same data in FragPipe-Analyst / FragPip
                                                  (the layout of FragPipe-Analyst's "Results" download)
     processed_matrix()     <level>_matrix_processed.tsv   the values the statistics used (+ which were imputed)
     enrichment_table()     enrichment.tsv
+    rank_enrichment_table() gene_set_ranks.tsv   rank-based gene-set test on every protein (no cut-off)
+    sample_qc_table()      sample_qc.tsv         the per-sample scorecard (identifications, correlation, flags)
+    presence_absence_table() presence_absence.tsv features measured in one group and never in the other
     fragpipe_analyst()     fragpipe-analyst/experiment_annotation.tsv + reproduce_in_R.R
                            upload the quant table + annotation to https://fragpipe-analyst.org, or run the
                            script with FragPipeAnalystR installed, to cross-check Ionomos's numbers.
@@ -75,6 +78,35 @@ def enrichment_table(path: Path, enrichment: list[dict]) -> Path:
 
 
 # ------------------------------------------------------------ FragPipe-Analyst --
+
+
+def rank_enrichment_table(path: Path, ranked: list[dict]) -> Path:
+    header = ["comparison", "library", "term", "direction", "genes_measured", "z", "p", "p_adj", "median_score",
+              "inter_gene_correlation", "leading_genes"]
+    rows = [[b["comparison"], b["library"], t["term"], t["direction"], t["n"], t["z"], t["p"], t["q"], t["median"],
+             t["corr"], ";".join(t["leading"])] for b in ranked for t in b["terms"]]
+    return write_tsv(path, header, rows)
+
+
+def sample_qc_table(path: Path, card: list[dict]) -> Path:
+    header = ["sample", "condition", "status", "identifications", "missing_pct", "median_log2_before_norm",
+              "shift_from_median", "median_r_own_group", "median_r_all", "median_abs_dev_from_group",
+              "leave_one_out_cv_change", "flags"]
+    rows = [[r["sample"], r["condition"], r["status"], r["ids"], r["missing_pct"], r["median"], r["shift"],
+             r["corr_group"], r["corr_all"], r["spread"], r["loo_cv"], "; ".join(r["flags"])] for r in card]
+    return write_tsv(path, header, rows)
+
+
+def presence_absence_table(path: Path, arg) -> Path:
+    p, onoff = arg
+    m = p.m
+    header = ["comparison", "only_in", "id", "label", "description", "detected", "of", "mean_log2"]
+    rows = []
+    for comp, items in onoff.items():
+        for x in items:
+            f = m.features[x["index"]]
+            rows.append([comp, x["group"], f.id, f.label, f.description, x["detected"], x["of"], x["mean"]])
+    return write_tsv(path, header, rows)
 
 
 def _r_str(s: str) -> str:

@@ -576,6 +576,14 @@ def cmd_analyze(args) -> int:
     for c in out.summary.get("comparisons", []):
         conf = {"low": "  [LOW CONFIDENCE]", "none": "  [FOLD CHANGE ONLY]"}.get(c.get("confidence"), "")
         print(f"  {c['name']}: {c['up']} up, {c['down']} down of {c['tested']} tested  ({c['table']}){conf}")
+        q = out.summary.get("quality") or {}
+        more = []
+        if (q.get("only_in_one_condition") or {}).get(c["name"]):
+            more.append(f"{q['only_in_one_condition'][c['name']]} only in one condition")
+        if (q.get("pi0") or {}).get(c["name"]) is not None:
+            more.append(f"~{100 * (1 - q['pi0'][c['name']]):.0f}% changed (pi0)")
+        if more:
+            print("      " + " · ".join(more))
     for w in out.warnings:
         print(f"  note: {w}")
     for i in out.issues:
