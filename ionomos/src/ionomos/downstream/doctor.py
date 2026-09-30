@@ -59,6 +59,7 @@ class Findings:
     read_problem: str | None = None      # the result table exists but holds nothing usable (e.g. isoDTB SiteError)
     enrichment_notes: list = field(default_factory=list)
     insights: dict = field(default_factory=dict)          # insights.py: scorecard, pcs, missingness, phist, ...
+    dose_problems: list = field(default_factory=list)     # [(severity, message)] from doseresponse.plan_series
 
 
 # the tables each method needs, and why they might be missing
@@ -332,6 +333,14 @@ def check(f: Findings) -> list[Issue]:
                   ["Check the identifications per sample in the report's QC section"], {"n": len(pm.features)}))
 
     _insight_checks(f, p, add)
+
+    # ---- dose-response (doseresponse.py): doses that can't be read, a titration without a control
+    for sev, msg in f.dose_problems:
+        add(Issue("DOSES", sev, "Dose-response: the doses need a look", msg,
+                  ["analysis.doses names a condition that isn't in this experiment, or a dose without a unit",
+                   "A condition name holds two doses (a combination), or the vehicle isn't named DMSO / vehicle"],
+                  ["List every condition's dose in experiment.yaml analysis.doses (DMSO: 0, Cmpd_A: 10 nM, ...) "
+                   "and Run analysis"], {"message": msg}))
 
     # ---- statistics and plots
     _result_checks(f, s, add)

@@ -114,3 +114,9 @@ translation of [FragPipeAnalystR](https://github.com/Nesvilab/FragPipeAnalystR)
 and [FragPipe-Analyst](https://github.com/MonashProteomics/FragPipe-Analyst)
 (GPL-3); please cite Hsiao et al., *J. Proteome Res.* 2024,
 doi:10.1021/acs.jproteome.4c00294, and limma (Ritchie et al., *Nucleic Acids Res.* 2015).
+The dose-response curves in `downstream/doseresponse.py` are a Python
+translation of [CurveCurator](https://github.com/kusterlab/curve_curator)
+(Apache-2.0, © 2023 Florian P. Bayer; the optimiser was changed from scipy's
+L-BFGS-B to a pure-Python Levenberg-Marquardt, and q-values / pEC50 intervals
+were added); please cite Bayer et al., *Nat. Commun.* 14, 7902 (2023),
+doi:10.1038/s41467-023-43696-z.

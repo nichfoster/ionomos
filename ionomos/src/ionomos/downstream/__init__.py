@@ -17,6 +17,7 @@ Layout it reads and writes (inside the experiment folder):
       sample_qc.tsv                 the per-sample scorecard (insights.py)
       presence_absence.tsv          features measured in one group and never in the other
       gene_set_ranks.tsv            rank-based gene-set test on every protein (enrichment on)
+      dose_response.tsv             a titration (4+ doses): a fitted curve per feature, pEC50, F, p, class
       sdrf.tsv                      SDRF-Proteomics sample metadata: a row per raw file (and label), for PRIDE
       analysis.json                what was done, with which settings (reproducibility), + "quality"
 
@@ -27,6 +28,7 @@ Pipeline stages, each a module:
                                                 MSstats format, Proteome Discoverer; provenance of any result)
     statistics    analysis.py + stats.py       (comparisons, Welch / one-sample t, BH)
     QC, insights  qc.py + insights.py + enrich.py  (PCA, scorecard, batch, missingness, on/off, gene sets)
+    dose-response doseresponse.py              (CurveCurator's curves, when the conditions are doses)
     metadata      sdrf.py                      (SDRF-Proteomics, from the manifest, workflow and FASTA)
     presentation  charts.py + report.py        (SVG + HTML)
 
@@ -365,6 +367,8 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     insight: dict = {}
     enr_notes: list[str] = []
     comps: list = []
+    dose_info: dict = {"ran": False, "reason": "no processed quantities to fit"}
+    dose_view: dict | None = None
 
     def read():
         try:
@@ -500,6 +504,12 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
                     t = stage("tables", fn, results / name, arg)
                     if t:
                         out.files.append(t)
+            dose = stage("dose_response", _dose_response, processed, settings, results, out, say)
+            if dose is None:
+                dose_info = {"ran": False, "reason": "the dose-response step failed (see analysis_error.txt)"}
+            else:
+                dose_info, dose_view, f.dose_problems, dnotes = dose
+                notes += dnotes
         if diffs and settings.enrichment:
             say("enrichment (hits, and every protein ranked)")
             libs = stage("enrichment", _libraries, settings, enr_notes, dest) or {}
@@ -531,7 +541,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
            for p in out.files]
     out.report = results / "report.html"
     html = stage("report", report.render, ctx, m, processed, diffs, out.warnings, rel, settings, qcd, enrichment,
-                 ranked, insight)
+                 ranked, insight, dose=dose_view)
     if html is None:  # the fallback page: issues, notes and the volcano plots themselves
         out.issues = doctor.check(f)
         ctx["issues"] = [i.as_dict() for i in out.issues]
@@ -566,6 +576,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
                             "top": [f"{t['term']} ({t['direction']})" for t in b["terms"][:5] if t["q"] <= 0.05]}
                            for b in ranked],
         "quality": _quality_summary(insight),
+        "dose_response": dose_info,
         "sdrf": sdrf_info,
         "source": m.source if m else None,
         "engine": ctx.get("engine") or {},
@@ -580,6 +591,27 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     except OSError as exc:
         out.warnings.append(f"could not write analysis.json: {exc}")
     return out
+
+
+def _dose_response(p, settings, results: Path, out: Outcome, say) -> tuple[dict, dict, list, list[str]]:
+    """results/dose_response.tsv when the conditions are a titration (doseresponse.py). Returns (analysis.json
+    summary, the report's payload, problems for the doctor, notes)."""
+    from ionomos.downstream import doseresponse as dr
+
+    if not settings.dose_response:
+        off = "dose-response is switched off (analysis.dose_response)"
+        return {"ran": False, "reason": off}, {"ran": False, "found": False, "reason": off}, [], []
+    try:
+        control = analysis.find_control(p.m.conditions, settings)
+    except analysis.AnalysisError:
+        control = None
+    res, plan = dr.run(p, settings, control, progress=lambda i: say(f"dose-response curves ({i:,} features)"))
+    table = None
+    if res is not None:
+        out.files.append(write_tsv(results / "dose_response.tsv", dr.COLUMNS, dr.table_rows(res)))
+        table = f"{RESULTS}/dose_response.tsv"
+    return (dr.summary(res, plan, table), dr.report_payload(res, plan), plan.problems,
+            res.notes if res is not None else plan.notes)
 
 
 def _sdrf(method, dest: Path, workdir: Path, record, m, processed, settings, version: str, results: Path,

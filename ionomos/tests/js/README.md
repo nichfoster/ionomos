@@ -39,6 +39,10 @@ VirtualConsole; tests assert the list stays empty.
   (localStorage, .gmt export), hit filters, key findings, compare
   (quadrants + UpSet), only-in-one-condition, rank-based enrichment and its
   barcode, every QC tab, and a broken section staying contained.
+- `test/dose.test.mjs` — the Dose-response section: the fixture's empty state
+  (no titration), the "too few doses" reason, and a synthetic `dose` payload
+  (table, class and text filters, sorting, two compounds, a clicked row or
+  point drawing its curve, the report search ringing curves, CSV export).
 
 ## Running
 

@@ -198,9 +198,14 @@ def dump_config(d: dict) -> str:
     a(f"  enrichment_gmt: {_y(an.get('enrichment_gmt', '') or '')}   # optional extra gene sets (.gmt file)")
     a(f"  top_labels: {_y(an.get('top_labels', 15))}   # hit names written on each volcano")
     a(f"  control_keywords: {_y(list(an.get('control_keywords') or []))}   # how the control condition is recognised")
-    for k in ("impute_shift", "impute_scale", "seed", "pca_features", "heatmap_max", "control"):
+    for k in ("impute_shift", "impute_scale", "seed", "pca_features", "heatmap_max", "control",
+              "dose_response", "dose_min_doses", "dose_alpha", "dose_fc_lim", "dose_unit"):  # dose-response: D44
         if an.get(k) not in (None, ""):
             a(f"  {k}: {_y(an[k])}")
+    if isinstance(an.get("doses"), dict) and an["doses"]:
+        a("  doses:   # condition -> dose (usually per experiment, in experiment.yaml)")
+        for k, v in an["doses"].items():
+            a(f"    {_y(str(k))}: {_y(v)}")
     meta = an.get("sdrf") if isinstance(an.get("sdrf"), dict) else {}
     a("  sdrf:   # results/sdrf.tsv sample metadata: instrument, organism (default: from the FASTA), organism_part, "
       "cell_type, disease, cleavage_agent (default: from the workflow)")

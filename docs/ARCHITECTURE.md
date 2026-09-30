@@ -40,7 +40,7 @@
 | `attention.py` | Durable "needs a person" queue (`<log_dir>/attention/*.json`): raised by intake, worker, analysis; closed when fixed | — |
 | `popups.py` | Pop-up windows + the "needs attention" list, in the app or (app closed) the watcher's own Tk loop | — |
 | `downstream/doctor.py` | The analysis check-up: issues with severity, likely causes, fixes; condition suggestions from file names | — |
-| `downstream/` | FragPipe tables → `QuantMatrix` → FragPipe-Analyst processing + limma → interactive `results/report.html`. `isodtb.py`/`tmt.py` (R ports), `quant.py` (loaders), `engines.py` (other engines' outputs — DIA-NN standalone incl. 2.x Parquet, MaxQuant, Spectronaut, AlphaDIA, MSstats format, Proteome Discoverer — and the provenance of any result; ENGINES.md, D36), `fpa.py` (FragPipeAnalystR port: filter, normalise, impute, `test_limma`), `rrandom.py` (R's RNG), `analysis.py` (settings, comparisons), `qc.py` (PCA, clustering, CV, missingness), `insights.py` (sample scorecard, PC ↔ condition/replicate, missingness vs intensity, p-value shape + π0, on/off features, imputation-driven hits, power; D35), `enrich.py` (local ORA and a correlation-adjusted rank test on Enrichr libraries), `export.py` (result tables, FragPipe-Analyst annotation + R script), `sdrf.py` (SDRF-Proteomics sample metadata; D38), `report.py` + `assets/report.js`, `charts.py` (static SVG volcano), `stats.py`, `simulate.py` | the lab's R scripts; FragPipeAnalystR; limma |
+| `downstream/` | FragPipe tables → `QuantMatrix` → FragPipe-Analyst processing + limma → interactive `results/report.html`. `isodtb.py`/`tmt.py` (R ports), `quant.py` (loaders), `engines.py` (other engines' outputs — DIA-NN standalone incl. 2.x Parquet, MaxQuant, Spectronaut, AlphaDIA, MSstats format, Proteome Discoverer — and the provenance of any result; ENGINES.md, D36), `fpa.py` (FragPipeAnalystR port: filter, normalise, impute, `test_limma`), `rrandom.py` (R's RNG), `analysis.py` (settings, comparisons), `qc.py` (PCA, clustering, CV, missingness), `insights.py` (sample scorecard, PC ↔ condition/replicate, missingness vs intensity, p-value shape + π0, on/off features, imputation-driven hits, power; D35), `enrich.py` (local ORA and a correlation-adjusted rank test on Enrichr libraries), `export.py` (result tables, FragPipe-Analyst annotation + R script), `sdrf.py` (SDRF-Proteomics sample metadata; D38), `doseresponse.py` (CurveCurator's dose-response curves for titrations; D44), `report.py` + `assets/report.js`, `charts.py` (static SVG volcano), `stats.py`, `simulate.py` | the lab's R scripts; FragPipeAnalystR; limma |
 | `setupcheck.py` | The setup checklist (app ✓ Setup tab, `ionomos init`) | — |
 | `names.py` | Every on-disk / system name, with its LabWatch-era twin; readers accept both, writers use the new one | — |
 | `buildinfo.py` | `Ionomos 0.5.0 (build 3f2a9c1, date, installed)` — `--version`, app footer, every report | — |
@@ -302,6 +302,26 @@ statistics and before the report:
 Unknown values are `not available`. `analysis.json` → `sdrf` lists the columns
 a repository still needs filled (`fill_in`), and the report's Methods says so.
 A table analysed on its own (D33) gets no SDRF: it names no raw files.
+
+`results/dose_response.tsv` (`downstream/doseresponse.py`, D44) is made when
+the conditions are a titration: names like `Cmpd_10nM` (or
+`analysis.doses`) and at least `dose_min_doses` (4) doses above the control.
+It runs after the insights stage, isolated like it, on the processed
+matrix's *measured* values (no imputed ones):
+
+```
+conditions ─▶ plan_series ─▶ per compound, per feature:              ─▶ dose_response.tsv, analysis.json
+ names or     dose per        ratio = 2^log2 / mean(2^log2 control)      dose_response, report section
+ doses:       condition,      control = one point, ratio 1 at dose 0     (table, curve over its points,
+              control = 0     4PL fit (CurveCurator's guesses + bounds,  potency vs effect)
+                              bounded Levenberg-Marquardt)
+                              F (n/k), p ~ F(5, dfd; loc .12), BH q,
+                              relevance (s0), up / down / not / unclear
+```
+
+Fewer doses, no dose in the names, or `dose_response: false` skip it (a
+note when doses were found); doses that can't be read become a `DOSES`
+issue. The report never refits: it draws the curves from the parameters.
 
 ## Packaging, updates, support (0.5.0)
 

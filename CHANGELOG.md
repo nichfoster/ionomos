@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Dose-response curves for titrations** (ROADMAP 5C #2, D44;
+  `downstream/doseresponse.py`). When the conditions are doses of a compound
+  (`Cmpd_10nM`, `Cmpd_0p1uM`, … or experiment.yaml `analysis.doses`) and a
+  compound has at least 4 doses above the control, every feature gets
+  CurveCurator's fit (Bayer et al., *Nat. Commun.* 2023; Apache-2.0), ported
+  to pure Python:
+  - a 4-parameter log-logistic curve on ratios to the control, with pEC50
+    and a 95% interval, EC50 in the doses' unit, slope and plateaus
+  - the recalibrated F-statistic and its p-value, a BH q-value, the curve
+    fold change and the relevance score
+  - up / down / not / unclear classes with CurveCurator's defaults (alpha
+    0.05, |log2 fold change| 0.45)
+
+  Output: `results/dose_response.tsv`, `analysis.json` → `dose_response`, and
+  a report section with a sortable, filterable table, each curve drawn over
+  its measured points (control at the left), and a potency vs effect scatter;
+  SVG / PNG export, and the report search rings matching curves. Works for
+  intensities (ratio to the mean of the DMSO runs) and isoDTB ratios. New
+  settings: `doses`, `dose_unit`, `dose_response`, `dose_min_doses`,
+  `dose_alpha`, `dose_fc_lim`. Fewer doses: a note, no curves. Unreadable
+  doses: a `DOSES` issue. Checked against CurveCurator 0.6.0 itself on 600
+  simulated curves: identical classes, pEC50 within 0.05 for 263 of 266
+  regulated curves (`tests/golden/dose_response/`, `tests/test_dose_response.py`).
+  `simulate.dose_titration` / `dose_pg_matrix` make titrations with known
+  pEC50s.
 - **Analysis-only install from pip** (ROADMAP Phase 5A, D40). `pip install
   ionomos`, then `ionomos analyze <table or folder>`, on Windows, macOS or
   Linux with no Tk; a test runs the analysis in a Python where `import

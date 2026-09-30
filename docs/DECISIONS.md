@@ -680,3 +680,62 @@ isoDTB requires a replicate, so a name ending in a setting is refused with a
 hint instead of guessed. `CE` is left out on purpose: as a condition it is
 too plausible.
 
+### D44 — Titrations get CurveCurator's dose-response curves, ported and checked against CurveCurator
+**2026-09-30.** ROADMAP 5C #2. Chemoproteomics and drug labs titrate a
+compound (DMSO + several concentrations); a volcano per dose answers the
+wrong question. When the conditions are doses, the analysis now fits a curve
+per feature (`downstream/doseresponse.py`, an isolated stage like the others)
+and writes `results/dose_response.tsv`, an `analysis.json` `dose_response`
+block and a report section.
+
+- **CurveCurator's statistics, not a new method.** CurveCurator (Bayer et al.,
+  *Nat. Commun.* 2023; Apache-2.0, compatible with GPL-3) is the published,
+  calibrated answer to "is this curve real": a 4-parameter log-logistic fit
+  within its bounds, the mean model as the null, the recalibrated F-statistic
+  (n/k scaling, F(5, dfd) with loc 0.12), the curve fold change, and the
+  SAM-style relevance score with s0 from alpha and fc_lim. Up / down / not
+  follow its rules; its blank class is shown as "unclear". Defaults are its
+  decryptM settings (alpha 0.05, fc_lim 0.45; `dose_alpha`, `dose_fc_lim`).
+- **Same starts, a different local optimiser.** CurveCurator's "standard" fit
+  (its default) refines the best of its alternative guesses from slopes 0.01,
+  1 and 10 with scipy's L-BFGS-B. Ionomos uses the same guesses and slopes
+  with a bounded Levenberg-Marquardt in pure Python, so the base install
+  stays numpy-free. Against CurveCurator 0.6.0 on 600 simulated curves (two
+  designs; `tests/golden/dose_response/`): 600/600 classes identical, pEC50
+  within 0.05 for 263 of the 266 regulated curves, and median F and
+  log10 p differences below 1e-3. In the three exceptions Ionomos found a
+  lower sum of squares (flat valleys where pEC50 is poorly determined).
+  About 5–10 ms per feature.
+- **Added to CurveCurator:** a BH q-value on the curve p-values
+  (CurveCurator's own q-values need its decoy simulation, which is not
+  ported) and a 95% interval for pEC50 (its Jacobian standard error × t with
+  n − 4 df). The interval is approximate, and the report says a pEC50 is only
+  worth reading for up / down curves.
+- **Doses from names, or from `analysis.doses`.** A condition name holding
+  one concentration (`Cmpd_10nM`, `Cmpd_0p1uM`, `10 µM`) is a dose of the
+  compound named by the rest, so two compounds in one experiment get two
+  series sharing the control (`find_control`, dose 0). Units are required:
+  a bare number is refused unless `dose_unit` says what it means, because
+  a wrong unit silently shifts every EC50 by 1000×. A name with two doses (a
+  combination) is left out with a warning; a configured dose naming a
+  missing condition is an `input` issue (a window asks).
+- **Only real titrations.** A compound needs `dose_min_doses` (4) doses above
+  zero; fewer gives a note and the section explains why. A two-condition
+  experiment shows nothing new. Intensities are divided by the mean of the
+  control samples, measured values only (no imputation: an imputed low value
+  would invent a curve), after Ionomos' filters and median normalisation.
+  isoDTB ratios are already to DMSO: the control point is ratio 1, or a
+  control condition re-centres them when there is one.
+- **The report draws, never refits.** The page carries each curve's
+  parameters and its measured ratios, and draws the fitted curve over the
+  points (log dose, control at the left), a potency vs effect scatter
+  coloured by class, and a sortable, filterable table; the report search
+  rings matching curves.
+
+Not ported: CurveCurator's decoy FDR, MAD outlier analysis, imputation,
+interpolation points, MLE fits, fixed parameters and weights. They can come
+later behind settings if a lab needs them. Open: median normalisation assumes
+most proteins don't move; a compound that changes a large share of the
+proteome at high doses would bias the flat curves (seen in simulation with
+40% responders), and CurveCurator's own normalisation is off by default.
+

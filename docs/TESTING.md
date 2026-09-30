@@ -10,6 +10,7 @@ Three layers, all runnable on macOS and Windows:
 | Downstream | other engines (`tests/test_engines.py`): each format with its real column names, FDR / reverse / contaminant filters, provenance, and the same simulated experiment giving identical hits through DIA-NN, MaxQuant and Spectronaut files; D35 insights: outlier / batch / missingness / p-value-shape detection on planted data and no false alarms on clean data, rank-based gene sets, end to end into the TSVs, analysis.json and the report (`tests/test_insights.py`); R-script ports byte-identical to the real scripts; t-tests/BH vs scipy; moderated t vs limma; planted-effect recovery for isoDTB/DIA/TMT; report self-contained with its data, SVG valid | `tests/test_downstream.py`, golden files in `tests/golden/` |
 | JS harness (report front end) | dev-only jsdom tests of `report.js`: every section against the payload shapes that have bitten before (zero comparisons, one sample, ratio/isoDTB, 10k features × 50 samples, all p-values missing, dark/light) and hostile `<`/`&`/quote names through every dynamic-HTML sink incl. tooltips and the CSV export; the search grammar (lists, wildcards, regex, `desc:`, `term:`), suggestions, box selection, highlight groups, the address state, hit filters and every discovery / QC section (`discovery.test.mjs`); a pytest check fails when `tests/js/fixture.html` drifts from the shipped assets | `cd ionomos/tests/js && npm ci && npm test`; sync check runs with pytest |
 | SDRF export | `results/sdrf.tsv` for DIA (manifest, exclusions, renamed conditions, no manifest), isoDTB (light/heavy rows), TMT (annotation.txt, `tmt:` plexes, channels from sample names), a table alone (none written), a failing stage; checked against the spec's structure rules every run, and with the official validator `sdrf-pipelines` when it is installed (dev-only; CI installs it on Linux) | `tests/test_sdrf.py`; `pip install sdrf-pipelines` to add the validator |
+| Dose-response (D44) | the CurveCurator port against CurveCurator 0.6.0's own output on two simulated designs (classes, pEC50, F, p; CurveCurator is not needed to run the test); the F tail and quantile vs scipy; planted pEC50s recovered, flat features not called; dose parsing (units, µ/u, `0p1`, two doses in a name); fewer than 4 doses skipped with a note; isoDTB-style ratios; bad `analysis.doses` → an issue; a crash in the stage still gives the report; the report section in jsdom (`tests/js/test/dose.test.mjs`) | `tests/test_dose_response.py`, `tests/golden/dose_response/` |
 | FragPipe-Analyst port | R's RNG and Perseus imputation exact; `test_limma` all/control/others/missing vs limma; whole pipeline vs the real FragPipeAnalystR 1.1.1; PCA/hclust vs R; hypergeometric vs `phyper` | `tests/test_fpa.py`, `tests/golden/fpa/` |
 | Stress | `ionomos testbed stress --n 150`: messy drops (unicode/emoji/huge names, no raws, empty raws, bad tails, duplicates, slow copies, failing searches) + chaos (worker killed mid-run, ledger locked, corrupt status file, pause/resume, cancel), then invariant checks; plus a 5000-name parser fuzz | any machine; a smaller run is in pytest |
 | GitHub Actions | the pytest suite and the JS report-harness on Linux **and Windows** on every push; on a version tag also the frozen exe (pipeline + stress) and the **installer**: install, retire a fake LabWatch, upgrade, uninstall, data kept | Actions tab |
@@ -192,6 +193,22 @@ a simulated DIA-NN matrix with the `reproduce_in_R.R` Ionomos writes (how:
 `e2e/README.md`). Installing FragPipeAnalystR into a scratch library:
 `BiocManager::install(c("limma", "SummarizedExperiment", "MSnbase", ...))` then
 `remotes::install_github("Nesvilab/FragPipeAnalystR@v1.1.1")` — see its README.
+
+### Dose-response port (`tests/test_dose_response.py`, `tests/golden/dose_response/`)
+
+```bash
+cd ionomos
+.venv/bin/python tests/golden/dose_response/make_dose_inputs.py     # simulated titrations A and B
+uv venv --python 3.12 /tmp/ccvenv && uv pip install --python /tmp/ccvenv/bin/python curve-curator==0.6.0
+/tmp/ccvenv/bin/python tests/golden/dose_response/run_curvecurator.py   # -> <design>_curvecurator.tsv
+```
+
+CurveCurator needs Python 3.11–3.13 and numpy / scipy / pandas, so it lives in
+its own throwaway venv, never in Ionomos' dependencies. `run_curvecurator.py`
+calls its pipeline functions with the defaults its TOML parser fills in (OLS,
+"standard" speed) plus alpha 0.05 and fc_lim 0.45. Design A is decryptM-like
+(8 doses, one replicate), B replicated (5 doses × 3); both keep ≤ 16 dosed
+samples, so numpy's argsort keeps replicates in order as the port does.
 
 **Windows during tests.** Tests that drive real Tk windows (the app, the naming
 / review window) skip on a dev machine so they don't cover the screen while you

@@ -28,6 +28,15 @@ experiment.yaml `analysis:` block:
       sdrf:                       # sample metadata for results/sdrf.tsv (sdrf.py): lab-wide in config.yaml,
         instrument: Orbitrap Eclipse   # per experiment in experiment.yaml (keys merge; the experiment's win)
         organism: homo sapiens    # default: the FASTA's OS=; also organism_part, cell_type, disease, cleavage_agent
+      doses:                      # dose-response curves (doseresponse.py); default: read from the condition names
+        DMSO: 0                   #   (Cmpd_10nM, Cmpd_0p1uM, 10 µM); the control is dose 0
+        Cmpd_A: 10 nM
+        Cmpd_B: 100 nM            #   ... at least dose_min_doses doses above 0, or no curves are fitted
+      dose_unit: nM               # unit for bare numbers in doses (default: none, so every dose names its unit)
+      dose_response: true         # false: never fit curves
+      dose_min_doses: 4           # doses above 0 a compound needs before curves are fitted
+      dose_alpha: 0.05            # CurveCurator's significance asymptote
+      dose_fc_lim: 0.45           # CurveCurator's |log2 curve fold change| asymptote
 """
 from __future__ import annotations
 
@@ -73,6 +82,12 @@ class Settings:
     pca_features: int = 500
     heatmap_max: int = 300
     sdrf: dict[str, str] = field(default_factory=dict)  # SDRF metadata: organism, instrument, ... (downstream/sdrf.py)
+    doses: dict[str, str | float] = field(default_factory=dict)  # condition -> dose ("10 nM"); doseresponse.py
+    dose_unit: str = ""
+    dose_response: bool = True
+    dose_min_doses: int = 4
+    dose_alpha: float = 0.05
+    dose_fc_lim: float = 0.45
 
     def describe(self) -> str:
         which = "adjusted p" if self.use_adjusted else "p"
@@ -129,11 +144,12 @@ def settings_from(*layers: dict | None) -> Settings:
             if v is None or (v == "" and k not in ("enrichment_gmt",)):
                 continue
             try:
-                if k in ("log2fc", "alpha", "impute_shift", "impute_scale", "filter_global_pct", "filter_condition_pct"):
+                if k in ("log2fc", "alpha", "impute_shift", "impute_scale", "filter_global_pct", "filter_condition_pct",
+                         "dose_alpha", "dose_fc_lim"):
                     v = float(v)
-                elif k in ("min_valid", "top_labels", "seed", "pca_features", "heatmap_max"):
+                elif k in ("min_valid", "top_labels", "seed", "pca_features", "heatmap_max", "dose_min_doses"):
                     v = int(v)
-                elif k in ("use_adjusted", "remove_contaminants", "enrichment"):
+                elif k in ("use_adjusted", "remove_contaminants", "enrichment", "dose_response"):
                     v = _bool(v)
                 elif k == "test":
                     v = str(v).lower()
@@ -173,6 +189,13 @@ def settings_from(*layers: dict | None) -> Settings:
                     v = str(v)
                 elif k == "sdrf":
                     v = {**s.sdrf, **_sdrf_meta(v)}  # a later layer adds to / overrides the lab's values
+                elif k == "doses":
+                    if not isinstance(v, dict):
+                        raise AnalysisError("doses must map a condition to its dose, e.g. {DMSO: 0, Cmpd_1: 10 nM}")
+                    v = {str(a): (b if isinstance(b, (int, float)) and not isinstance(b, bool) else str(b))
+                         for a, b in v.items()}
+                elif k == "dose_unit":
+                    v = _dose_unit(v)
             except (TypeError, ValueError) as exc:
                 if isinstance(exc, AnalysisError):
                     raise
@@ -187,7 +210,34 @@ def settings_from(*layers: dict | None) -> Settings:
     for k in ("filter_global_pct", "filter_condition_pct"):
         if not 0 <= getattr(s, k) <= 100:
             raise AnalysisError(f"analysis.{k} must be between 0 and 100")
+    if not 0 < s.dose_alpha < 1:
+        raise AnalysisError("analysis.dose_alpha must be between 0 and 1")
+    if s.dose_fc_lim < 0:
+        raise AnalysisError("analysis.dose_fc_lim must be >= 0")
+    if s.dose_min_doses < 3:
+        raise AnalysisError("analysis.dose_min_doses must be >= 3 (a curve has 4 parameters)")
+    _check_doses(s)
     return s
+
+
+def _dose_unit(v) -> str:
+    from ionomos.downstream.doseresponse import DoseError, normalize_unit
+
+    try:
+        return normalize_unit(str(v))
+    except DoseError as exc:
+        raise AnalysisError(f"analysis.dose_unit: {exc}") from exc
+
+
+def _check_doses(s: Settings) -> None:
+    """Every analysis.doses value must read as a dose (after the layers, so dose_unit can come in any order)."""
+    from ionomos.downstream.doseresponse import DoseError, parse_dose
+
+    for c, v in s.doses.items():
+        try:
+            parse_dose(v, s.dose_unit)
+        except DoseError as exc:
+            raise AnalysisError(f"analysis.doses {c}: {exc}") from exc
 
 
 def settings_lenient(*layers: dict | None) -> tuple[Settings, list[str]]:
@@ -197,7 +247,7 @@ def settings_lenient(*layers: dict | None) -> tuple[Settings, list[str]]:
     notes: list[str] = []
     for layer in layers:
         good: dict = {}
-        for k, v in (layer or {}).items():
+        for k, v in sorted((layer or {}).items(), key=lambda kv: kv[0] == "doses"):  # doses read dose_unit
             try:
                 settings_from(*kept, {**good, k: v})
             except AnalysisError as exc:
