@@ -51,6 +51,9 @@ def defaults(root: str | None = None, users_root: str | None = None) -> dict:
                      "enrichment_gmt": "", "top_labels": 15,
                      "control_keywords": ["DMSO", "vehicle", "veh", "ctrl", "control", "mock", "untreated", "NT",
                                           "WT", "EV", "scr", "scramble", "siNT", "PBS"]},
+        "qc_trend": {"enabled": True, "match": ["hela", "k562", "qc_std", "qcstd", "_qc_"], "exclude": [],
+                     "methods": [], "instrument": "", "baseline_runs": 10, "baseline_from": "", "baseline_to": "",
+                     "popup": False},
         "users": {"aliases": {}, "default": "", "learned_aliases_file": f"{root}/learned_aliases.yaml",
                   "ignore": ["FragPipe*", "Fasta*", "New folder*", "~*"]},
         "methods": {
@@ -198,14 +201,35 @@ def dump_config(d: dict) -> str:
     a(f"  enrichment_gmt: {_y(an.get('enrichment_gmt', '') or '')}   # optional extra gene sets (.gmt file)")
     a(f"  top_labels: {_y(an.get('top_labels', 15))}   # hit names written on each volcano")
     a(f"  control_keywords: {_y(list(an.get('control_keywords') or []))}   # how the control condition is recognised")
-    for k in ("impute_shift", "impute_scale", "seed", "pca_features", "heatmap_max", "control"):
+    for k in ("impute_shift", "impute_scale", "seed", "pca_features", "heatmap_max", "control", "variance_prior",
+              "block", "block_from", "covariates",  # DEqMS and the design (downstream/design.py)
+              "dose_response", "dose_min_doses", "dose_alpha", "dose_fc_lim", "dose_unit"):  # dose-response: D44
         if an.get(k) not in (None, ""):
             a(f"  {k}: {_y(an[k])}")
+    if isinstance(an.get("doses"), dict) and an["doses"]:
+        a("  doses:   # condition -> dose (usually per experiment, in experiment.yaml)")
+        for k, v in an["doses"].items():
+            a(f"    {_y(str(k))}: {_y(v)}")
     meta = an.get("sdrf") if isinstance(an.get("sdrf"), dict) else {}
     a("  sdrf:   # results/sdrf.tsv sample metadata: instrument, organism (default: from the FASTA), organism_part, "
       "cell_type, disease, cleavage_agent (default: from the workflow)")
     for k, v in meta.items():
         a(f"    {_y(str(k))}: {_y(str(v))}")
+    a("")
+    q = d.get("qc_trend") if isinstance(d.get("qc_trend"), dict) else {}
+    a("qc_trend:   # instrument QC: runs of the lab's QC standard (HeLa, K562 ...) trended in logs/qc_trend.html")
+    a(f"  enabled: {_y(bool(q.get('enabled', True)))}   # does nothing until a QC-standard run is searched")
+    a(f"  match: {_y(list(q.get('match') or []))}   # words in a folder or .raw name that mean 'QC standard'")
+    a(f"  exclude: {_y(list(q.get('exclude') or []))}   # names with these words are never QC runs")
+    a(f"  methods: {_y(list(q.get('methods') or []))}   # every run of these methods is a QC run (a dedicated QC method)")
+    a(f"  instrument: {_y(q.get('instrument', '') or '')}   # a label for the page, e.g. Eclipse")
+    a(f"  baseline_runs: {_y(q.get('baseline_runs', 10))}   # the first N runs of a series set its mean and SD")
+    a(f"  baseline_from: {_y(str(q.get('baseline_from', '') or ''))}   # or pin the baseline to runs acquired "
+      "between two dates (YYYY-MM-DD)")
+    a(f"  baseline_to: {_y(str(q.get('baseline_to', '') or ''))}")
+    a(f"  popup: {_y(bool(q.get('popup', False)))}   # true: a broken rule opens a window (default: the attention list only)")
+    if q.get("max_file_mb") not in (None, ""):
+        a(f"  max_file_mb: {_y(q['max_file_mb'])}   # larger tables are skipped")
     a("")
     a("users:   # users are the subfolders of users_root; aliases map initials -> folder")
     a("  aliases:")

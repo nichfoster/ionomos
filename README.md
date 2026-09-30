@@ -72,6 +72,7 @@ to put it on the PC.
 
 | Doc | Purpose |
 |---|---|
+| [HELP.md](docs/HELP.md) | The help lab members see (every report's **?** and Help section, the app's Help button, `ionomos help`): where it lives and how to edit it |
 | [QUICKSTART.md](docs/QUICKSTART.md) | **New here?** `pip install ionomos`, `ionomos demo`, then `ionomos analyze` on your own table: what it reads and what the report shows |
 | [SCOPE.md](docs/SCOPE.md) | Problem statement, in/out of scope, users, constraints |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, data flow, job state machine, on-disk layout |
@@ -84,6 +85,7 @@ to put it on the PC.
 | [DEPLOY_WINDOWS.md](docs/DEPLOY_WINDOWS.md) | Step-by-step install of the finished tool on the proteomics PC |
 | [TESTING.md](docs/TESTING.md) | Test suite + testbed on macOS and Windows |
 | [FIRST_REAL_RUN.md](docs/FIRST_REAL_RUN.md) | Runbook for the first real FragPipe run on the PC (isoDTB, then DIA) |
+| [QC_TREND.md](docs/QC_TREND.md) | Instrument QC: how runs of the lab's QC standard (HeLa, K562) are recognised, measured, judged (Levey-Jennings, Westgard rules) and shown in `logs/qc_trend.html` |
 | [ENGINES.md](docs/ENGINES.md) | Results from other engines Ionomos can analyse (DIA-NN, MaxQuant, Spectronaut, AlphaDIA, MSstats / MSstatsTMT format, Proteome Discoverer) and what it reads from each; an SDRF as the design; TMT across plexes |
 
 ## Try the analysis on any computer
@@ -114,3 +116,9 @@ translation of [FragPipeAnalystR](https://github.com/Nesvilab/FragPipeAnalystR)
 and [FragPipe-Analyst](https://github.com/MonashProteomics/FragPipe-Analyst)
 (GPL-3); please cite Hsiao et al., *J. Proteome Res.* 2024,
 doi:10.1021/acs.jproteome.4c00294, and limma (Ritchie et al., *Nucleic Acids Res.* 2015).
+The dose-response curves in `downstream/doseresponse.py` are a Python
+translation of [CurveCurator](https://github.com/kusterlab/curve_curator)
+(Apache-2.0, © 2023 Florian P. Bayer; the optimiser was changed from scipy's
+L-BFGS-B to a pure-Python Levenberg-Marquardt, and q-values / pEC50 intervals
+were added); please cite Bayer et al., *Nat. Commun.* 14, 7902 (2023),
+doi:10.1038/s41467-023-43696-z.

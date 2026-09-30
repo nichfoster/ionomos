@@ -231,6 +231,36 @@ touches nothing. Exit code 0 means every name was read. The app's **Methods**
 tab has the same check (**Test names…**), using the settings in the window
 whether or not they are saved.
 
+## QC standard runs
+
+Runs of the lab's recurring QC standard (a HeLa or K562 digest) are filed and
+searched like any drop, then also trended on the instrument QC page
+([QC_TREND.md](QC_TREND.md), D45). Nothing about the name has to change. A
+run counts when its `.raw` name or folder name contains one of
+`qc_trend.match`, or when its method is listed in `qc_trend.methods`:
+
+- The default words are `hela`, `k562`, `qc_std`, `qcstd` and `_qc_`.
+- Case is ignored, and `_ - .` and spaces all count as one separator. So
+  `_qc_` matches QC as a word: `…_QC_…`, `QC-HeLa`, `…_qc.raw`, but not
+  `QCtest`.
+- A folder that is an experiment (two or more samples with two or more
+  replicates each) is not a QC standard, even when a name matches. HeLa is
+  also a cell line people experiment on.
+- `qc_trend.exclude` words win over everything.
+
+| Folder / file | QC run? | Series |
+|---|---|---|
+| `20260930_EJQ_DIA_HeLa-200ng-QC` / `HeLa_200ng_1.raw` | yes (`hela`) | DIA · HeLa · 200ng |
+| `20260930_EJQ_DIA_instrument-check` / `K562-50ng_1.raw` | yes (the file name) | DIA · K562 · 50ng |
+| `20260930_EJQ_DIA_QC` / `run_1.raw` | yes (`_qc_`) | DIA · QC |
+| `20260930_EJQ_DIA_QCtest` / `run_1.raw` | no (`QC` is not a word here) | – |
+| `20260930_EJQ_DIA_HeLa_KO-vs-WT` / `KO_1`, `KO_2`, `WT_1`, `WT_2` | no (an experiment) | – |
+
+The amount (`200ng`, `50ng`, `1ug`) is read from the name, so standards at
+different loads are trended separately. An Xcalibur stamp at the end of the
+name (`…_20260930143015.raw`) gives the acquisition time; without one, the raw
+file's own time is used.
+
 ## Raw files dropped without a folder
 
 Dragging just the `.raw` files into the inbox works too. Once they have stopped
@@ -335,14 +365,38 @@ analysis:                   # results/report.html for this experiment (lab defau
   control: DMSO             # default: recognised by name (DMSO, vehicle, ctrl, WT, ...)
   log2fc: 1                 # also: alpha, use_adjusted, min_valid, normalize, test, top_labels
   enrichment_gmt: sets.gmt  # extra gene sets; a relative path is read from this folder first
+  block: replicate          # the design (limma, D42): a block as a fixed effect — the replicate number
+                            #   (rep 1 of every condition prepared together; pairs, patients), or
+                            #   {DMSO_1: A, Drug_1: A, DMSO_2: B, Drug_2: B} (every sample listed), or
+  # block_from: '_(P\d+)_'  #   a regex on the sample names: group "block" if named, else group 1
+  covariates:               # optional, one value per sample: numbers -> a slope, text -> a factor
+    age: {DMSO_1: 54, DMSO_2: 61, DMSO_3: 47, Drug_1: 49, Drug_2: 66, Drug_3: 58}
+  variance_prior: deqms     # limma (default) | deqms: each protein's prior variance from its peptide count
   sdrf:                     # sample metadata for results/sdrf.tsv (lab-wide values: config.yaml analysis.sdrf)
     cell_type: HEK293T      # also: organism, organism_part, disease, instrument, cleavage_agent
   sdrf_factor: [compound]   # an SDRF put in this folder sets the design: which factor value column(s) are the
                             #   condition (default: all, joined); see docs/ENGINES.md
   irs: auto                 # several TMT plexes on one scale: auto | reference | sum | none
+  doses:                    # a titration's doses (dose-response curves, D44); default: read from the
+    DMSO: 0                 #   condition names (Cmpd_10nM, Cmpd_0p1uM); the control is dose 0
+    Cmpd_low: 10 nM         #   units pM, nM, uM / µM, mM, M; a bare number needs dose_unit
+    Cmpd_mid: 100 nM
+    Cmpd_high: 1 uM
+    Cmpd_top: 10 uM
+  dose_min_doses: 4         # doses above 0 a compound needs before curves are fitted (default 4)
 
 notes: "24 h treatment, 1 µM"   # copied into ionomos.json for provenance
 ```
+
+The sample names in `block:` and `covariates:` are the analysis' samples:
+`condition_replicate` for DIA / LFQ (`DMSO_1`), the TMT sample names
+(`DMSO_1_126`), a table's column names. Names that aren't samples are ignored
+with a note. Keys under `covariates:` are free text (SDRF-style names such as
+`characteristics[age]` are fine); a single `{sample: value}` mapping is one
+covariate. A design that can't be used (a block equal to the condition, a
+sample without a value, more parameters than samples) is explained in a
+pop-up and the comparisons use the plain `~0 + condition` model. With three or
+more conditions every report also has a moderated F-test ("any change").
 
 ## What the watcher derives
 
@@ -357,6 +411,15 @@ notes: "24 h treatment, 1 µM"   # copied into ionomos.json for provenance
    `analysis:` in `experiment.yaml` and press *Re-run analysis* to change them.
    An SDRF (`*.sdrf.tsv`) put in the experiment folder beats the names (not
    `sample_conditions`): its `factor value[...]` is the condition (D47).
+7. titrations: a condition whose name holds one concentration is a dose of
+   the compound named by the rest (`Cmpd_10nM`, `10nM_Cmpd`, `Cmpd10nM` →
+   compound `Cmpd`, 10 nM). Units `pM`, `nM`, `uM` / `µM`, `mM`, `M`; write a
+   decimal point as `p` (`Cmpd_0p1uM`), since a `.` in a raw file name is
+   awkward. The control (DMSO, vehicle, …, or `analysis.control`) is dose 0
+   and shared by every compound. With 4 or more doses above 0 (`dose_min_doses`)
+   the report gets dose-response curves (`results/dose_response.tsv`). A name
+   with two doses (`A_1uM_B_10nM`, a combination) is left out with a warning;
+   list the doses in `analysis.doses` instead.
 
 ## Still to confirm with the lab
 

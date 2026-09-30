@@ -33,14 +33,17 @@
 | `ledger.py` | SQLite job table + status transitions; source of truth for "what's queued" | `prior-work/store.py` |
 | `worker.py` | Thread inside `ionomos run`: first runnable `queued` job → FragPipe or DIA-NN (runner.py) → done/failed; holds jobs whose setup files are missing. Sequential. | `prior-work/queue_worker.py` |
 | `fragpipe.py` | Prepare a job (launcher, workflow with `database.db-path` patched to the method's FASTA, manifest, TMT annotation), run headless with timeout/stop, kill the process tree | `prior-work/fragpipe_runner.py` |
+| `maxquant.py` | `engine: maxquant` methods: the lab's `mqpar` or MaxQuant's own `--create` template, patched with the job's raws, experiments, fractions, FASTA, threads and output folder into `ionomos_run/mqpar.xml`; output in `maxquant/` (D50) | — |
 | `diann.py`, `runner.py` | `engine: diann` methods: prepare a DIA-NN job (the lab's `diann_exe`, FASTA or spectral library, `ionomos_run/diann.cfg`), output in `diann/`; `runner` picks FragPipe or DIA-NN per method, and both use `fragpipe.run`'s start / cancel / stop / timeout loop (D39) | — |
-| `postprocess.py` | After a done job: runs `downstream` (or only the R-port prep steps when analysis is off); `ionomos analyze` and the Analysis tab use it too (`prepare`, `inspect_folder`) | — |
+| `postprocess.py` | After a done job: runs `downstream` (or only the R-port prep steps when analysis is off); `ionomos analyze` and the Analysis tab use it too (`prepare`, `inspect_folder`); then instrument QC trending for jobs with QC-standard runs | — |
+| `qctrend.py` | Instrument QC trending (D45, [QC_TREND.md](QC_TREND.md)): which runs are the QC standard (`qc_trend.match` / `methods`), the metric store `<log_dir>/qc_trend.jsonl`, per-series baselines, Levey-Jennings z-scores, Westgard rules + CUSUM, plain-English verdicts, a `qc_trend` attention item; `after_job` (postprocess hook, never raises), `scan` (read-only, `ionomos qc-trend --rebuild`), `page_for` (the app's **Jobs → Instrument QC**). Metrics from the searches' own tables (`downstream/qcmetrics.py`: DIA-NN `stats.tsv` / `pg_matrix` / `report.tsv`, FragPipe `psm.tsv` / `combined_protein.tsv`, streamed and size-bounded); the page `<log_dir>/qc_trend.html` (`downstream/qcpage.py`: static SVG, report.css, no script) | `prior-work/parsers/`, `store.py` |
 | `analysis_tab.py` | App tab 7: analyse one experiment (samples, conditions, comparisons → experiment.yaml, Run) and the lab defaults | — |
 | `experiment_editor.py` | One experiment's analysis choices as a Tk panel (samples, conditions, comparisons, cut-offs, Run, issues); used by tab 7 and the pop-ups | — |
-| `attention.py` | Durable "needs a person" queue (`<log_dir>/attention/*.json`): raised by intake, worker, analysis; closed when fixed | — |
-| `popups.py` | Pop-up windows + the "needs attention" list, in the app or (app closed) the watcher's own Tk loop | — |
+| `attention.py` | Durable "needs a person" queue (`<log_dir>/attention/*.json`): raised by intake, worker, analysis, QC trending (`qc_trend`, a warning: no pop-up unless `qc_trend.popup`); closed when fixed | — |
+| `popups.py` | Pop-up windows + the "needs attention" list, in the app or (app closed) the watcher's own Tk loop; **More help** opens the help page at the item's topic | — |
+| `help/` | The help for users (D46, HELP.md): `*.md` content (getting started, the report, glossary, troubleshooting, never-do, FAQ) parsed and rendered with the stdlib; `report_payload()` for every report, `page()` = `help.html` (`ionomos help`, the app's Help button, pop-ups), `text()` for the terminal, `topic()` / `topic_for_item()` | — |
 | `downstream/doctor.py` | The analysis check-up: issues with severity, likely causes, fixes; condition suggestions from file names | — |
-| `downstream/` | FragPipe tables → `QuantMatrix` → FragPipe-Analyst processing + limma → interactive `results/report.html`. `isodtb.py`/`tmt.py` (R ports), `quant.py` (loaders), `engines.py` (other engines' outputs — DIA-NN standalone incl. 2.x Parquet, MaxQuant, Spectronaut, AlphaDIA, MSstats and MSstatsTMT format, Proteome Discoverer — and the provenance of any result; ENGINES.md, D36), `design.py` (an input SDRF as the design; D47), `plex.py` (IRS across TMT plexes; D48), `fpa.py` (FragPipeAnalystR port: filter, normalise, impute, `test_limma`), `rrandom.py` (R's RNG), `analysis.py` (settings, comparisons), `qc.py` (PCA, clustering, CV, missingness), `insights.py` (sample scorecard, PC ↔ condition/replicate, missingness vs intensity, p-value shape + π0, on/off features, imputation-driven hits, power; D35), `enrich.py` (local ORA and a correlation-adjusted rank test on Enrichr libraries), `export.py` (result tables, FragPipe-Analyst annotation + R script), `sdrf.py` (SDRF-Proteomics sample metadata; D38), `report.py` + `assets/report.js`, `charts.py` (static SVG volcano), `stats.py`, `simulate.py` | the lab's R scripts; FragPipeAnalystR; limma |
+| `downstream/` | FragPipe tables → `QuantMatrix` → FragPipe-Analyst processing + limma → interactive `results/report.html`. `isodtb.py`/`tmt.py` (R ports), `quant.py` (loaders), `engines.py` (other engines' outputs — DIA-NN standalone incl. 2.x Parquet, MaxQuant, Spectronaut, AlphaDIA, MSstats and MSstatsTMT format, Proteome Discoverer — and the provenance of any result; ENGINES.md, D36), `fpa.py` (FragPipeAnalystR port: filter, normalise, impute, `test_limma`), `design.py` (limma designs with blocks and covariates, the moderated F; D42), `deqms.py` (R's loess and DEqMS' peptide-count prior; D43), `doseresponse.py` (CurveCurator's dose-response curves for titrations; D44), `sdrfdesign.py` (an input SDRF as the design; D47), `plex.py` (IRS across TMT plexes; D48), `rrandom.py` (R's RNG), `analysis.py` (settings, comparisons), `qc.py` (PCA, clustering, CV, missingness), `insights.py` (sample scorecard, PC ↔ condition/replicate, missingness vs intensity, p-value shape + π0, on/off features, imputation-driven hits, power; D35), `enrich.py` (local ORA and a correlation-adjusted rank test on Enrichr libraries), `export.py` (result tables, FragPipe-Analyst annotation + R script), `sdrf.py` (SDRF-Proteomics sample metadata; D38), `report.py` + `assets/report.js`, `charts.py` (static SVG volcano), `stats.py`, `simulate.py` | the lab's R scripts; FragPipeAnalystR; limma |
 | `setupcheck.py` | The setup checklist (app ✓ Setup tab, `ionomos init`) | — |
 | `names.py` | Every on-disk / system name, with its LabWatch-era twin; readers accept both, writers use the new one | — |
 | `buildinfo.py` | `Ionomos 0.5.0 (build 3f2a9c1, date, installed)` — `--version`, app footer, every report | — |
@@ -52,7 +55,7 @@
 | `runners/isodtb.py` | Post-proc: modified-peptide → site merge — thin entry point delegating to `downstream/isodtb.py`, which holds the algorithm | port of `lab-scripts/isoDTB_…R` |
 | `runners/tmt.py` | Post-proc: experimental annotation fix | port of `lab-scripts/correct_experimental_annotation…R` |
 | `runners/dia.py` | Post-proc: (TBD — probably nothing beyond copying `report.tsv` up) | — |
-| `cli.py` | `ionomos setup / run / check / status / dry-run / names test / retry / testbed / diagnose / update`; no args → app; hidden `fake-fragpipe` for the testbed | — |
+| `cli.py` | `ionomos setup / run / check / status / dry-run / names test / retry / testbed / diagnose / update / help`; no args → app; hidden `fake-fragpipe` for the testbed | — |
 
 ## Data flow for one job
 
@@ -106,6 +109,9 @@ C:\Fragpipe_Auto\                    ← the app lives here (no spaces!)
   fasta\                             ← pinned databases with decoys
   logs\
     ionomos.log                     ← rotating
+    qc_trend.jsonl                  ← instrument QC: one line per QC-standard run (D45)
+    qc_trend.html                   ← the QC trend page (Levey-Jennings charts, Westgard rules)
+    help\help.html                  ← the help page, rewritten each time it is opened (D46)
   ionomos.db                        ← SQLite ledger
 
 C:\Fragpipe_General\<user>\<experiment>\    ← where jobs land
@@ -248,6 +254,7 @@ that database and (b) record provenance. See WORKFLOWS.md.
 | Invalid config saved from the app | validated as a candidate file first; the good file is never replaced; every save backed up to `config-backups/` |
 | FragPipe says exit 0 but a step failed / wrote nothing | parsed from the console (`Process 'X' finished, exit code: N`) → failed |
 | An analysis stage crashes (QC, enrichment, export, report) | isolated: recorded in `analysis_error.txt` + an issue; the rest (volcanos, tables, report or its fallback page) is still made |
+| Instrument QC trending crashes, or a QC table can't be read | isolated after the analysis: a note on the run's row, a log line; the job is done regardless |
 | The analysis can't decide (one condition, no control, a group of 1, unmatched runs) | runs on the best guess, then a pop-up with the experiment editor asks; the answer goes to experiment.yaml |
 | A search fails / is held / a folder is rejected / a raw file is 0 bytes | an attention item → pop-up with likely causes, log tail, Retry; closes itself when fixed |
 | A GUI button throws | `report_callback_exception` → dialog + crash file; the app keeps running |
@@ -283,6 +290,38 @@ Re-run analysis / the Analysis tab redo it with new settings.
 `results/fragpipe-analyst/` holds an `experiment_annotation.tsv` and a
 `reproduce_in_R.R` that repeat the analysis in FragPipeAnalystR (D24).
 
+**Designs, the F-test and DEqMS** (`downstream/design.py`, `deqms.py`; D42,
+D43). With no `block` / `block_from` / `covariates` / `variance_prior` set,
+the comparisons are FragPipe-Analyst's `~0 + condition` path, unchanged.
+Otherwise `analysis.make_model` builds the design for the processed samples
+and the comparisons use limma's general path:
+
+```
+settings ─▶ make_model ─────▶ design.build ─▶ X = [condition | block dummies | covariates]
+            (block: replicate │                 checks: every sample has a value, full rank, residual df > 0
+             / {sample: b} /  │                 fails ─▶ Model.problem ─▶ doctor DESIGN_NOT_USED (input),
+             block_from,      │                          plain ~0 + condition used instead
+             covariates)      ▼
+                   lm_fit (per row, NA dropped, lm.fit pivoting) ─▶ contrasts_fit ─▶ squeeze ─▶ topTable
+                                                                                  │ limma: squeezeVar (fpa._ebayes)
+                                                                                  │ deqms: loess of log s² on
+                                                                                  │  log2 peptide count (DEqMS)
+                   f_test (3+ conditions, every design incl. the plain one) ─▶ F, F_p, F_p_adj
+```
+
+The F-test columns go in `<level>_results.tsv`, `analysis.json` → `f_test`,
+and the report (an "Any change (F)" tile and a table column). `analysis.json`
+→ `model` has the formula, the terms and the variance prior; the Methods
+paragraph describes the same. FragPipeAnalystR's `test_limma` can't fit a
+blocked model, so with a design `reproduce_in_R.R` says it repeats the plain
+model, and `reproduce_design_in_R.R` repeats Ionomos's model in limma.
+
+Every report also carries its help (D46): `report.py` embeds
+`help.report_payload(issues)`, the report / QC / glossary entries of
+`ionomos/help/*.md` and the entries for the issues found, as escaped HTML;
+report.js adds a **?** beside each section title, QC tab and issue box and
+builds the Help section at the end.
+
 `results/sdrf.tsv` (`downstream/sdrf.py`, D38) is the experiment's sample
 sheet in SDRF-Proteomics v1.1.0 (template `ms-proteomics`), the format PRIDE
 and reanalysis pipelines read. It is its own isolated stage, after the
@@ -303,7 +342,7 @@ Unknown values are `not available`. `analysis.json` → `sdrf` lists the columns
 a repository still needs filled (`fill_in`), and the report's Methods says so.
 A table analysed on its own (D33) gets no SDRF: it names no raw files.
 
-**The design can come in as an SDRF too** (`downstream/design.py`, D47). When
+**The design can come in as an SDRF too** (`downstream/sdrfdesign.py`, D47). When
 the experiment folder (two levels deep) or the folder of the table given to
 `ionomos analyze` holds a `*.sdrf.tsv` / `sdrf.tsv`, `load_quantities` matches
 each sample of the quant table to its rows and sets condition
@@ -339,6 +378,26 @@ and the doctor warns (`TMT_PLEXES_NOT_NORMALISED`). TMT-Integrator abundances
 channels by the loader, as MSstatsTMT does) are never scaled again. The values
 before IRS are kept in `meta["bridge_before"]`, so the report's PCA can show
 before / after and colour by plex; `analysis.json` → `tmt` says what was done.
+
+`results/dose_response.tsv` (`downstream/doseresponse.py`, D44) is made when
+the conditions are a titration: names like `Cmpd_10nM` (or
+`analysis.doses`) and at least `dose_min_doses` (4) doses above the control.
+It runs after the insights stage, isolated like it, on the processed
+matrix's *measured* values (no imputed ones):
+
+```
+conditions ─▶ plan_series ─▶ per compound, per feature:              ─▶ dose_response.tsv, analysis.json
+ names or     dose per        ratio = 2^log2 / mean(2^log2 control)      dose_response, report section
+ doses:       condition,      control = one point, ratio 1 at dose 0     (table, curve over its points,
+              control = 0     4PL fit (CurveCurator's guesses + bounds,  potency vs effect)
+                              bounded Levenberg-Marquardt)
+                              F (n/k), p ~ F(5, dfd; loc .12), BH q,
+                              relevance (s0), up / down / not / unclear
+```
+
+Fewer doses, no dose in the names, or `dose_response: false` skip it (a
+note when doses were found); doses that can't be read become a `DOSES`
+issue. The report never refits: it draws the curves from the parameters.
 
 ## Packaging, updates, support (0.5.0)
 

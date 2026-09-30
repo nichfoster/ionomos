@@ -408,18 +408,18 @@ def _toptable(coef, su, post, dft, level: float = 0.95):
 
 
 def limma_contrasts(values: Matrix, samples: list[str], condition: dict[str, str],
-                    contrasts: list[tuple[str, str]], min_valid: int = 0) -> list[ContrastResult]:
+                    contrasts: list[tuple[str, str]], min_valid: int = 0, squeeze=None) -> list[ContrastResult]:
     """FragPipeAnalystR test_limma(type = "all" | "control" | "manual"): one model over all conditions
     (~ 0 + condition), each contrast refitted from its two coefficients, one eBayes for all contrasts.
     min_valid > 0 additionally leaves a feature untested in a contrast when either group has fewer
-    measured values (used when nothing is imputed)."""
+    measured values (used when nothing is imputed). squeeze replaces eBayes' variance prior (design.squeezer: DEqMS)."""
     conds = []
     for s in samples:
         if condition[s] not in conds:
             conds.append(condition[s])
     groups = [[j for j, s in enumerate(samples) if condition[s] == c] for c in conds]
     ns, means, s2, df = _group_fit(values, groups)
-    post, dft, d0, s0 = _ebayes(s2, df)
+    post, dft, d0, s0 = (squeeze or _ebayes)(s2, df)
     out = []
     for a, b in contrasts:
         ia, ib = conds.index(a), conds.index(b)
@@ -434,7 +434,7 @@ def limma_contrasts(values: Matrix, samples: list[str], condition: dict[str, str
     return out
 
 
-def limma_others(values: Matrix, samples: list[str], condition: dict[str, str]) -> list[ContrastResult]:
+def limma_others(values: Matrix, samples: list[str], condition: dict[str, str], squeeze=None) -> list[ContrastResult]:
     """test_limma(type = "others"): each condition against all other samples, a separate model each."""
     conds = []
     for s in samples:
@@ -444,7 +444,7 @@ def limma_others(values: Matrix, samples: list[str], condition: dict[str, str]) 
     for c in conds:
         g = [[j for j, s in enumerate(samples) if condition[s] == c], [j for j, s in enumerate(samples) if condition[s] != c]]
         ns, means, s2, df = _group_fit(values, g)
-        post, dft, d0, s0 = _ebayes(s2, df)
+        post, dft, d0, s0 = (squeeze or _ebayes)(s2, df)
         coef = [m[0] - m[1] if n[0] and n[1] else math.nan for n, m in zip(ns, means, strict=True)]
         su = [math.sqrt(1 / n[0] + 1 / n[1]) if n[0] and n[1] else math.nan for n in ns]
         t, p, lo, hi, q = _toptable(coef, su, post, dft)

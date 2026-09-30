@@ -349,7 +349,7 @@ def find_table(folder: str | Path) -> Path | None:
         rel = p.relative_to(folder).parts
         if (len(rel) > 4 or not p.is_file() or p.suffix.lower() not in TABLE_SUFFIXES or p.name.startswith((".", "~$"))
                 or p.name.lower() in SKIP_NAMES or re.match(r"(?i)^log[_-]", p.name)
-                or p.name.lower().endswith((".sdrf.tsv", "_sdrf.tsv", "-sdrf.tsv", ".sdrf"))  # a design (design.py)
+                or p.name.lower().endswith((".sdrf.tsv", "_sdrf.tsv", "-sdrf.tsv", ".sdrf"))  # a design (sdrfdesign.py)
                 or any(x in SKIP_DIRS or "_previous_" in x for x in rel[:-1])):
             continue
         try:

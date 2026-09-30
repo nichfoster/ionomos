@@ -15,10 +15,13 @@ The page carries its data as JSON and draws everything in the browser
     Only in one    features measured in one group and never in the other (the hits a t-test can't see)
     Heatmap        significant features, row-centred, clustered
     Enrichment     over-represented gene sets among the hits, and a rank-based test on every protein
+    Dose-response  (a titration) CurveCurator's curves: a table by class, each curve over its points, potency vs effect
     QC             sample scorecard, PCA (with what explains each PC), correlation, missing values, missingness
                    against intensity, distributions, CV, mean-variance, abundance rank, identifications,
                    imputation, power (minimum detectable fold change against replicates)
     Methods        a paragraph ready for a notebook, the exact settings, and FragPipe-Analyst export files
+    Help           what each section shows (also behind a "?" beside each title and QC tab), a glossary, and
+                   what to do about the issues found in this report (content: ionomos/help/*.md)
 
 The page state (comparison, cut-offs, search) is kept in the address (#...), so a link or a bookmark
 reopens the same view. The static volcano_*.svg files next to it are for slides and for viewing without scripts.
@@ -61,7 +64,7 @@ def _level_word(m: QuantMatrix | None) -> tuple[str, str]:
 
 def payload(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: list[DiffResult], notes: list[str],
             files: list[str], s: Settings, qcd: dict, enrichment: list[dict], ranked: list[dict] | None = None,
-            insight: dict | None = None) -> dict:
+            insight: dict | None = None, dose: dict | None = None) -> dict:
     pm = p.m if p else m
     title, word = _level_word(pm)
     d: dict = {
@@ -79,6 +82,8 @@ def payload(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: li
                      "normalize": s.normalize, "test": s.test},
         "imputationLabel": fpa.IMPUTATION_LABELS.get(p.imputation, "") if p else "",
         "qc": {}, "enr": [], "enrNote": "", "gsea": [], "evidence": "", "rep": [],
+        "dose": dose or {"ran": False, "found": False, "reason": "No dose-response curves were fitted."},
+        "help": _help_payload(ctx.get("issues")),
     }
     if pm is None:
         return d
@@ -123,6 +128,10 @@ def payload(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: li
         d["comps"].append({"name": dr.name, "slug": dr.slug(), "t1": dr.treatment, "t2": dr.control,
                            "conf": dr.confidence, "confNote": dr.confidence_note, "aRank": rank, **cols,
                            "pi0": _r(ph.get("pi0"), 3), "pshape": ph.get("shape", ""), "onoff": onoff})
+    ft = ctx.get("ftest")
+    if ft is not None and len(ft.q) == n:  # the moderated F (3+ conditions): "any change" tile + table column
+        d["F"] = {"f": [_r(x, 4) for x in ft.f], "p": [_r(x, 8) for x in ft.p], "q": [_r(x, 8) for x in ft.q],
+                  "df1": ft.df1, "ref": ft.reference, "conds": ft.conditions}
     if qcd:
         cv = {c: {"hist": qc.histogram(v["cvs"], 0.0, 1.0, 20), "median": _r(v["median"], 4)}
               for c, v in (qcd.get("cv") or {}).items()}
@@ -166,6 +175,17 @@ def payload(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: li
     elif ctx.get("enrichment_notes"):
         d["enrNote"] = "; ".join(ctx["enrichment_notes"])
     return d
+
+
+def _help_payload(issues) -> dict:
+    """The plain-language help the page shows (ionomos/help: its sections, QC tabs, the glossary and this
+    report's issues). Help must never cost a report, so any problem leaves it out."""
+    try:
+        from ionomos import help as helpdoc
+
+        return helpdoc.report_payload(issues or [])
+    except Exception:  # noqa: BLE001
+        return {}
 
 
 def _insight_payload(ins: dict) -> dict:
@@ -215,7 +235,8 @@ def _source_sentence(method: str, fragpipe_note: str, engine: dict) -> str:
 
 def methods_text(m: QuantMatrix | None, p: fpa.Processed | None, diffs: list[DiffResult], s: Settings, method: str,
                  fragpipe_note: str, enrichment: list[dict], ranked: list[dict] | None = None,
-                 engine: dict | None = None) -> str:
+                 engine: dict | None = None, model=None, ftest=None) -> str:
+    """model: analysis.Model (the design and variance prior used); ftest: design.FTest (3+ conditions)."""
     parts = [_source_sentence(method, fragpipe_note, engine or {})]
     if m is None:
         return " ".join(parts)
@@ -245,10 +266,31 @@ def methods_text(m: QuantMatrix | None, p: fpa.Processed | None, diffs: list[Dif
             steps.append(f"missing values imputed ({fpa.IMPUTATION_LABELS[imp]})")
         parts.append(", ".join(steps) + ".")
         parts += _design_sentences(m)
-        if s.test == "limma":
+        des = getattr(model, "design", None)
+        prior = getattr(model, "prior", None) or {}
+        if s.test == "limma" and des is None:
             parts.append("Differential abundance was tested with limma (linear model ~0 + condition, empirical-Bayes "
                          "moderated t-statistics, 95% confidence intervals), following FragPipe-Analyst's test_limma.")
-        else:
+        elif s.test == "limma":
+            parts.append(f"Differential abundance was tested with limma: a linear model {escape(des.formula)}, with "
+                         f"{escape(des.describe())} (fixed effects), fitted per feature with missing values dropped "
+                         "(lmFit), each comparison a contrast between conditions (contrasts.fit), with empirical-Bayes "
+                         "moderated t-statistics and 95% confidence intervals (eBayes).")
+        if s.test == "limma" and getattr(model, "problem", ""):
+            parts.append(f"The requested design could not be used ({escape(model.problem)}), so the comparisons use "
+                         "~0 + condition.")
+        if s.test == "limma" and prior.get("deqms_used"):
+            parts.append(f"Each feature's prior variance came from a loess fit of log residual variance against log2 "
+                         f"of its number of {escape(m.meta.get('evidence') or 'peptides')} (DEqMS spectraCounteBayes, "
+                         "Zhu et al., "
+                         f"Mol. Cell. Proteomics 2020; prior df {prior['d0']:g})"
+                         + (f"; {prior['limma_prior_features']:,} features without a count kept limma's single prior"
+                            if prior.get("limma_prior_features") else "") + ".")
+        if ftest is not None:
+            parts.append(f"Whether a feature changes between any of the {len(ftest.conditions)} conditions was tested "
+                         f"with limma's moderated F-statistic on the contrasts of every condition against "
+                         f"{escape(ftest.reference)} (topTableF, {ftest.df1} numerator df), BH-adjusted.")
+        if s.test != "limma":
             parts.append(f"Conditions were compared with a two-sided {TESTS[s.test]}.")
     parts.append(f"P-values were adjusted with the Benjamini–Hochberg procedure; features were called significant at "
                  f"{escape(s.describe())}.")
@@ -297,6 +339,16 @@ def _design_sentences(m: QuantMatrix) -> list[str]:
     return out
 
 
+def _dose_methods(dose: dict) -> str:
+    names = ", ".join(escape(x["name"] or "the compound") for x in dose.get("series") or [])
+    return (f"Dose-response curves ({names}) were fitted per feature as in CurveCurator (Bayer et al., Nat. Commun. "
+            "2023, doi:10.1038/s41467-023-43696-z): values as ratios to the mean of the control, a 4-parameter "
+            "log-logistic model by least squares within CurveCurator's bounds, significance from its recalibrated "
+            f"F-statistic, and up / down / not classes from the relevance score (alpha {dose.get('alpha', 0.05):g}, "
+            f"|log2 curve fold change| ≥ {dose.get('fcLim', 0.45):g}). 95% intervals for pEC50 are from the fit's "
+            "Jacobian; q-values are Benjamini–Hochberg on the curve p-values.")
+
+
 def _pipeline(p: fpa.Processed | None, diffs: list[DiffResult]) -> str:
     if p is None:
         return ""
@@ -336,9 +388,18 @@ def _provenance_table(engine: dict) -> str:
         f"<div>{escape(k)}</div><div>{escape(str(v))}</div>" for k, v in rows) + "</div>"
 
 
-def _settings_table(s: Settings, p: fpa.Processed | None) -> str:
-    rows = [("Test", TESTS[s.test]), ("Comparisons", {"control": "each condition vs the control", "all": "all pairs",
-                                                      "others": "each condition vs all others"}[s.de_type]
+def _settings_table(s: Settings, p: fpa.Processed | None, model=None) -> str:
+    rows = [("Test", TESTS[s.test])]
+    if model is not None and (model.design is not None or model.problem):
+        rows.append(("Model", model.design.formula if model.design is not None
+                     else f"~0 + condition (the design asked for wasn't used: {model.problem})"))
+    if s.test == "limma" and s.variance_prior != "limma":
+        used = (getattr(model, "prior", None) or {}).get("deqms_used")
+        rows.append(("Variance prior", "DEqMS (by peptide count)" if used else
+                     "limma (DEqMS asked for, but " + ((getattr(model, "prior", None) or {}).get("reason") or
+                                                       "not applicable") + ")"))
+    rows += [("Comparisons", {"control": "each condition vs the control", "all": "all pairs",
+                              "others": "each condition vs all others"}[s.de_type]
              + (f" (control: {s.control})" if s.control else "")),
             ("Cut-offs", s.describe()),
             ("Contaminants", "removed" if s.remove_contaminants else "kept"),
@@ -369,25 +430,29 @@ def _sdrf_note(info: dict) -> str:
 
 def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: list[DiffResult], notes: list[str],
            files: list[str], s: Settings | None = None, qcd: dict | None = None,
-           enrichment: list[dict] | None = None, ranked: list[dict] | None = None, insight: dict | None = None) -> str:
+           enrichment: list[dict] | None = None, ranked: list[dict] | None = None, insight: dict | None = None,
+           dose: dict | None = None) -> str:
     s = s or Settings()
     enrichment = enrichment or []
     ranked = [b for b in ranked or [] if b["terms"]]
     title = ctx.get("experiment") or "Experiment"
     meta = " · ".join(x for x in (ctx.get("user"), ctx.get("method"), ctx.get("date"),
                                   f"generated {datetime.now():%Y-%m-%d %H:%M}", f"Ionomos {ctx.get('version', '')}") if x)
-    data = json.dumps(payload(ctx, m, p, diffs, notes, files, s, qcd or {}, enrichment, ranked, insight),
+    data = json.dumps(payload(ctx, m, p, diffs, notes, files, s, qcd or {}, enrichment, ranked, insight, dose),
                       separators=(",", ":"), allow_nan=False).replace("</", "<\\/").replace("<!--", "<\\u0021--")
     pm = p.m if p else m
     ratio = pm is not None and pm.kind == "ratio"
+    dose_shown = bool(dose and (dose.get("ran") or dose.get("found")))
     b = [f"<main><div class='top'><div><h1>{escape(title)}</h1><div class='meta'>{escape(meta)}</div></div>"
          "<div><button id='theme' title='Light / dark'>◐</button> <button id='share' title='Copy a link to this view "
          "(comparison, cut-offs, search)'>Link</button> <button onclick='window.print()'>Print</button></div></div>",
          "<nav class='toc'><a href='#overview'>Overview</a><a href='#differential'>Differential</a>"
          + "<a href='#compare' id='navcompare'" + ("" if len(diffs) >= 2 else " hidden") + ">Compare</a>"
          + ("" if ratio else "<a href='#onoff'>Only in one</a>")
-         + "<a href='#heat'>Heatmap</a><a href='#enrichment'>Enrichment</a><a href='#quality'>Quality control</a>"
-         "<a href='#methods'>Methods</a><a href='#files'>Files</a></nav>",
+         + "<a href='#heat'>Heatmap</a><a href='#enrichment'>Enrichment</a>"
+         + "<a href='#dose' id='navdose'" + ("" if dose_shown else " hidden") + ">Dose-response</a>"
+         + "<a href='#quality'>Quality control</a>"
+         "<a href='#methods'>Methods</a><a href='#files'>Files</a><a href='#help'>Help</a></nav>",
          "<noscript><div class='notes'>This report draws its charts with JavaScript. The volcano_*.svg and *.tsv "
          "files in this folder hold the same results.</div></noscript>",
          "<section id='overview'><div class='tiles' id='tiles'></div><div id='findings'></div>"]
@@ -461,12 +526,19 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
              "mean, so colour shows where a feature is high or low across samples.</p>"
              "<div class='card chart' id='heatmap'></div><div class='legend' id='heatlegend'></div></section>")
     b.append("<section id='enrichment'><h2>Enrichment</h2><div id='enrich'></div></section>")
+    b.append("<section id='dose'" + ("" if dose_shown else " hidden") + "><h2>Dose-response</h2><p class='sub'>"
+             "A curve per feature across the doses (CurveCurator's 4-parameter log-logistic fit, ratio to the "
+             "control). Only curves classed up or down have a potency worth reading; click a row or a point to "
+             "draw its curve over the measured values.</p><div id='dosebody'></div></section>")
     b.append("<section id='quality'><h2>Quality control</h2><div id='qc'></div></section>")
     method = ctx.get("method", "")
-    b.append(f"<section id='methods'><h2>Methods</h2><p class='methods'>"
-             f"{methods_text(pm, p, diffs, s, method, ctx.get('fragpipe', ''), enrichment, ranked, ctx.get('engine'))}</p>")
+    text = methods_text(pm, p, diffs, s, method, ctx.get("fragpipe", ""), enrichment, ranked, ctx.get("engine"),
+                        ctx.get("model"), ctx.get("ftest"))
+    b.append(f"<section id='methods'><h2>Methods</h2><p class='methods'>{text}</p>")
+    if dose and dose.get("ran"):
+        b.append(f"<p class='methods'>{_dose_methods(dose)}</p>")
     b.append(_provenance_table(ctx.get("engine") or {}))
-    b.append("<h3>Settings used</h3>" + _settings_table(s, p))
+    b.append("<h3>Settings used</h3>" + _settings_table(s, p, ctx.get("model")))
     if any(f.startswith("fragpipe-analyst/") for f in files):
         b.append("<h3>Cross-check in FragPipe-Analyst</h3><p class='sub'>The folder <a href='fragpipe-analyst/'>"
                  "fragpipe-analyst/</a> holds an experiment_annotation.tsv for the quant table, so the same data can be "
@@ -476,6 +548,9 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
     if files:
         b.append("<section id='files'><h2>Files</h2><ul class='files'>" + "".join(
             f"<li><a href='{escape(f)}'>{escape(f)}</a></li>" for f in files) + "</ul></section>")
+    b.append("<section id='help'><h2>Help</h2><p class='sub'>What each part of this report shows, what the words "
+             "mean, and what to do about the issues found here. A <b>?</b> beside a title opens its part.</p>"
+             "<div id='helpbody'></div></section>")
     b.append("</main><div id='tip'></div>")
     return (f"<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' "
             f"content='width=device-width,initial-scale=1'><meta name='generator' content='{MARKER}'>"

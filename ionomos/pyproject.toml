@@ -58,6 +58,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "ionomos.downstream" = ["assets/*"]  # report.js, report.css, demo_gene_sets.gmt (tests/test_packaging.py)
+"ionomos.help" = ["*.md"]  # the help content: reports, help.html, `ionomos help` (tests/test_help.py)
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

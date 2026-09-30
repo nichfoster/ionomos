@@ -137,6 +137,48 @@ command line at the top of its log. Paths must not contain spaces, since
 `diann.cfg` is split on them, and the experiment folders already can't have
 any.
 
+## Running MaxQuant directly (instead of FragPipe)
+
+A DDA method can be searched by the lab's own MaxQuant (D50):
+
+```yaml
+methods:
+  LFQ:
+    engine: maxquant
+    maxquant_exe: C:/MaxQuant/2.6.7.0/bin/MaxQuantCmd.exe   # or MaxQuantCmd.dll (run with dotnet)
+    fasta: human_reviewed.fasta                             # in fasta_dir
+    data_type: DDA
+    mqpar: lab_lfq_mqpar.xml   # optional: File -> Save parameters in the MaxQuant GUI, put in workflow_dir
+naming:
+  methods:
+    LFQ: {like: isoDTB}        # <sample>_<rep>[_<fraction>] names (or your own template, D37)
+```
+
+Ionomos never writes an `mqpar.xml` from scratch, because its layout
+changes between MaxQuant versions. A job starts from one of two templates:
+- the lab's own parameters (`mqpar:`), saved from a run that worked
+- MaxQuant's default template, made by the installed MaxQuant itself
+  (`MaxQuantCmd --create`) with label-free quantification switched on
+
+Only the job's parts are replaced:
+- the raw files
+- the experiment names (`<condition>_<replicate>`, so the analysis reads
+  `LFQ intensity DMSO_1` …)
+- the fractions, read from the file names with the lab's naming rules
+- the FASTA, threads and output folder
+
+The result is `ionomos_run/mqpar.xml`, run as
+`MaxQuantCmd ionomos_run/mqpar.xml`. Results go to
+`<experiment>/maxquant/combined/txt/`, and the analysis reads
+`proteinGroups.txt` with the version from `parameters.txt`. MaxQuant writes
+its per-raw working folders next to the raw files, as it always does. A
+second run keeps the first as `maxquant_previous_<time>/`.
+
+This has been tested only against a stand-in MaxQuant
+(`ionomos fake-maxquant`). Check the first real run's
+`ionomos_run/mqpar.xml` in the MaxQuant GUI: open it with File → Load
+parameters.
+
 **Not supported yet:**
 - MSstatsTMT's default summary (`method = "msstats"`) imputes censored values
   with a model (MBimpute); Ionomos summarises as `method = "MedianPolish"`
@@ -144,8 +186,8 @@ any.
 - Spectronaut's peptide-only reports.
 - AlphaDIA's Parquet matrices: read `pg.matrix.tsv`, which holds the same
   numbers.
-- Running MaxQuant or Sage from the watcher (ROADMAP Phase 5B). DIA-NN can be
-  run: see above.
+- Running Sage from the watcher (ROADMAP Phase 5B). DIA-NN and MaxQuant can
+  be run: see above.
 
 The formats were built from each vendor's documentation and tested with files
 using the real column names (`tests/test_engines.py`, `tests/test_plexes.py`); the MSstatsTMT summary is checked against MSstatsTMT 2.20 itself. The Proteome Discoverer

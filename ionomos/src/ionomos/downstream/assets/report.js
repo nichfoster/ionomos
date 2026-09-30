@@ -364,6 +364,12 @@
         fmtInt(n.up + n.down) + '</div><div class="d"><span class="dot up"></span> ' + fmtInt(n.up) + ' up · <span class="dot down"></span> ' +
         fmtInt(n.down) + " down of " + fmtInt(n.tested) + "</div>" + confBadge(c) + "</div>";
     });
+    if (D.F) { // the moderated F (3+ conditions): features that change between any of the conditions
+      let nf = 0, tf = 0;
+      for (let i = 0; i < nF; i++) if (D.F.q[i] != null) { tf++; if (D.F.q[i] <= ST.alpha) nf++; }
+      h += '<div class="tile" title="limma moderated F on every condition against ' + esc(D.F.ref) + ' (adjusted p; no fold-change cut-off)"><div class="k">Any change (F)</div><div class="v">' +
+        fmtInt(nf) + '</div><div class="d">adj. p ≤ ' + esc(String(ST.alpha)) + " across " + D.F.conds.length + " conditions, of " + fmtInt(tf) + "</div></div>";
+    }
     host.innerHTML = h;
     $$(".tile[data-ci]", host).forEach((t) => (t.onclick = () => { ST.ci = +t.dataset.ci; syncControls(); renderDiff(); goTo("differential"); }));
     $$(".tile[data-go]", host).forEach((t) => (t.onclick = () => { qcTab = "card"; renderQC(); goTo(t.dataset.go); }));
@@ -421,6 +427,7 @@
     $$("a.gl", host).forEach((a) => (a.onclick = (e) => { e.preventDefault(); setFocus(+a.dataset.i); goTo("differential"); }));
     $$("a.oo", host).forEach((a) => (a.onclick = () => { onoffCi = +a.dataset.ci; renderOnOff(); }));
     $$("a.gs", host).forEach((a) => (a.onclick = (e) => { e.preventDefault(); setSearch("term:" + a.dataset.term); goTo("differential"); }));
+    addHelp($("h3", host), "report.findings");
   }
 
   // -------------------------------------------------------------- volcano
@@ -626,7 +633,7 @@
     ST.highlight = null;
     syncControls();
     renderSearchInfo();
-    renderVolcano(); renderTable(true); renderCompare(); safe(renderHeatmap, "#heatmap");
+    renderVolcano(); renderTable(true); renderCompare(); safe(renderHeatmap, "#heatmap"); safe(doseOnSearch, "#dosebody");
     writeHash();
   }
   function setHighlight(set, name) {
@@ -634,7 +641,7 @@
     ST.highlightName = name || "";
     syncControls();
     renderSearchInfo();
-    renderVolcano(); renderTable(true); renderCompare(); safe(renderHeatmap, "#heatmap");
+    renderVolcano(); renderTable(true); renderCompare(); safe(renderHeatmap, "#heatmap"); safe(doseOnSearch, "#dosebody");
   }
   function markedList() {
     const out = [];
@@ -908,7 +915,7 @@
     { k: "p", t: "p", n: 1, f: (c, i) => fmtP(c.p[i]), v: (c, i) => (c.p[i] == null ? 2 : c.p[i]) },
     { k: "q", t: "adj. p", n: 1, f: (c, i) => fmtP(c.q[i]), v: (c, i) => (c.q[i] == null ? 2 : c.q[i]) },
     { k: "n", t: "measured", n: 1, f: (c, i) => (c.nt[i] == null ? "" : c.nt[i] + (c.nc[i] != null && c.t2 ? " / " + c.nc[i] : "")), v: (c, i) => (c.nt[i] || 0) + (c.nc[i] || 0) },
-  ].concat(D.f.pep ? [{ k: "pep", t: D.evidence || "peptides", n: 1, f: (c, i) => (D.f.pep[i] == null ? "" : String(D.f.pep[i])), v: (c, i) => (D.f.pep[i] == null ? -1 : D.f.pep[i]) }] : []).concat([
+  ].concat(D.F ? [{ k: "F", t: "any change (F) adj. p", n: 1, f: (c, i) => fmtP(D.F.q[i]), v: (c, i) => (D.F.q[i] == null ? 2 : D.F.q[i]) }] : []).concat(D.f.pep ? [{ k: "pep", t: D.evidence || "peptides", n: 1, f: (c, i) => (D.f.pep[i] == null ? "" : String(D.f.pep[i])), v: (c, i) => (D.f.pep[i] == null ? -1 : D.f.pep[i]) }] : []).concat([
     { k: "desc", t: "Description", f: (c, i) => esc((D.f.desc[i] || "").slice(0, 120)), v: (c, i) => D.f.desc[i] || "", cls: "desc" },
   ]);
   function tableRows() {
@@ -974,11 +981,11 @@
   }
   function exportCSV() {
     const c = C(), rows = tableRows();
-    const head = ["id", "label", "description", "log2fc", "ci_low", "ci_high", "p", "adj_p", "significant", "imputation_driven"].concat(D.f.pep ? [D.evidence || "peptides"] : [], D.samples);
+    const head = ["id", "label", "description", "log2fc", "ci_low", "ci_high", "p", "adj_p", "significant", "imputation_driven"].concat(D.F ? ["any_change_F_adj_p"] : [], D.f.pep ? [D.evidence || "peptides"] : [], D.samples);
     const q = (s) => '"' + String(s == null ? "" : s).replace(/"/g, '""') + '"';
     const imp = impDriven(c);
     const lines = [head.map(q).join(",")].concat(rows.map((i) => [q(D.f.id[i]), q(D.f.label[i]), q(D.f.desc[i]), c.fc[i], c.ciL[i], c.ciR[i], c.p[i], c.q[i], sigOf(c, i), imp[i] ? "yes" : ""]
-      .concat(D.f.pep ? [D.f.pep[i]] : [], D.v[i]).map((v) => (v == null ? "" : v)).join(",")));
+      .concat(D.F ? [D.F.q[i]] : [], D.f.pep ? [D.f.pep[i]] : [], D.v[i]).map((v) => (v == null ? "" : v)).join(",")));
     download(c.slug + "_filtered.csv", lines.join("\n"), "text/csv");
   }
   function copyGenes(dir) {
@@ -1392,6 +1399,7 @@
     $$(".tabs button", host).forEach((b) => (b.onclick = () => { qcTab = b.dataset.k; renderQC(); }));
     const body = $("#qcbody");
     safe(() => ({ card: qcCard, pca: qcPCA, corr: qcCorr, missing: qcMissing, mnar: qcMNAR, dist: qcDist, cv: qcCV, mv: qcMV, rank: qcRank, ids: qcIds, imp: qcImp, power: qcPower })[qcTab](body), body);
+    addHelp($(":scope > .sub", body), "qc." + qcTab);
   }
   function legend() { return "<div class='legend'>" + D.conditions.map((c) => "<span><span class='sw' style='background:" + condColor(c) + "'></span>" + esc(c) + "</span>").join("") + "</div>"; }
   function qcCard(host) {
@@ -1742,6 +1750,268 @@
     svgTools(ch, root, "power");
   }
 
+  // -------------------------------------------------------- dose-response
+  // D.dose (doseresponse.py report_payload): per series the curves as columns (i = feature, cls, pec50, ciL/ciR,
+  // ec50, slope, front, back, fc, p, q, rel, r2, n) and y = each curve's log2 ratios to the control per series
+  // sample (samples, sdose: molar, 0 = control). The fit is CurveCurator's; the page only draws it.
+  const DS = { s: 0, cls: "all", q: "", sortKey: "rel", sortDir: -1, page: 0, focus: null };
+  const DOSE_CLS = ["up", "down", "not", "unclear"];
+  const MOLAR = { pM: 1e-12, nM: 1e-9, "µM": 1e-6, mM: 1e-3, M: 1 };
+  const doseColor = (c) => css(c === "up" ? "--up" : c === "down" ? "--down" : c === "not" ? "--ns" : "--muted");
+  function fmtDose(molar, unit) {  // the unit that keeps the number >= 1
+    unit = unit || ["M", "mM", "µM", "nM"].find((u) => molar >= MOLAR[u] * (1 - 1e-9)) || "pM";
+    return String(+(molar / MOLAR[unit]).toPrecision(3)) + " " + unit;
+  }
+  function doseSeries() { const X = D.dose; return X && X.ran && X.series && X.series.length ? X.series[Math.min(DS.s, X.series.length - 1)] : null; }
+  function doseCurve(S, k, x) { return (S.front[k] - S.back[k]) / (1 + Math.pow(10, S.slope[k] * (x + S.pec50[k]))) + S.back[k]; }
+  const DOSE_COLS = [
+    { k: "name", t: D.kind === "ratio" ? "Site" : "Gene", f: (S, k) => esc(nameOf(S.i[k])) },
+    { k: "cls", t: "class", f: (S, k) => "<span class='dot' style='background:" + doseColor(S.cls[k]) + "'></span> " + esc(S.cls[k]) },
+    { k: "pec50", t: "pEC50", n: 1, f: (S, k) => fmt(S.pec50[k]) },
+    { k: "ciL", t: "95% CI", n: 1, f: (S, k) => (S.ciL[k] == null ? "–" : fmt(S.ciL[k]) + " – " + fmt(S.ciR[k])) },
+    { k: "ec50", t: "EC50", n: 1, f: (S, k) => (S.ec50[k] == null ? "–" : +S.ec50[k].toPrecision(3) + " " + esc(S.unit)) },
+    { k: "fc", t: "log2 FC", n: 1, f: (S, k) => fmt(S.fc[k]) },
+    { k: "p", t: "p", n: 1, f: (S, k) => fmtP(S.p[k]) },
+    { k: "q", t: "q (BH)", n: 1, f: (S, k) => fmtP(S.q[k]) },
+    { k: "rel", t: "relevance", n: 1, f: (S, k) => fmt(S.rel[k]) },
+    { k: "r2", t: "R²", n: 1, f: (S, k) => fmt(S.r2[k]) },
+    { k: "n", t: "points", n: 1, f: (S, k) => String(S.n[k]) },
+  ];
+  function doseRows(S, withText) {
+    const q = withText ? DS.q.trim().toLowerCase() : "";
+    const out = [];
+    for (let k = 0; k < S.i.length; k++) {
+      if (DS.cls !== "all" && S.cls[k] !== DS.cls) continue;
+      if (q) {
+        const i = S.i[k], t = ((D.f.label[i] || "") + " " + (D.f.id[i] || "") + " " + (D.f.desc[i] || "")).toLowerCase();
+        if (!t.includes(q)) continue;
+      }
+      out.push(k);
+    }
+    const key = DS.sortKey, val = (k) => (key === "name" ? nameOf(S.i[k]).toLowerCase() : key === "cls" ? DOSE_CLS.indexOf(S.cls[k]) : S[key][k]);
+    out.sort((a, b) => {
+      const x = val(a), y = val(b);
+      if (x == null || y == null) return x == null ? (y == null ? 0 : 1) : -1;
+      return (x > y ? 1 : x < y ? -1 : 0) * DS.sortDir;
+    });
+    return out;
+  }
+  function renderDose() {
+    const host = $("#dosebody");
+    if (!host) return;
+    const X = D.dose || {};
+    const S = doseSeries();
+    if (X.ran || X.found) ["#dose", "#navdose"].forEach((s) => { const e = $(s); if (e) e.hidden = false; });
+    if (!S) { host.innerHTML = "<div class='empty'>" + esc(X.reason || "No dose-response curves were fitted.") + "</div>"; return; }
+    DS.s = X.series.indexOf(S);
+    const count = {};
+    S.cls.forEach((c) => (count[c] = (count[c] || 0) + 1));
+    let h = "<div class='row'>";
+    if (X.series.length > 1) h += "<label class='ctl'>Compound <select id='dseries'>" + X.series.map((x, k) => "<option value='" + k + "'" + (k === DS.s ? " selected" : "") + ">" + esc(x.name || "dose-response") + "</option>").join("") + "</select></label>";
+    h += "<label class='ctl'>Class <select id='dcls'>" + ["all"].concat(DOSE_CLS).map((c) => "<option value='" + c + "'" + (c === DS.cls ? " selected" : "") + ">" + c + " (" + (c === "all" ? S.i.length : count[c] || 0) + ")</option>").join("") + "</select></label>" +
+      "<input type='search' id='dq' placeholder='Find a curve' aria-label='Find a curve' value='" + esc(DS.q) + "'> <button id='dcsv'>Download CSV</button>" +
+      "<span class='muted'>" + S.doses.length + " doses, " + esc(fmtDose(S.doses[0])) + " – " + esc(fmtDose(S.doses[S.doses.length - 1])) +
+      (S.controls && S.controls.length ? " · control " + esc(S.controls.join(", ")) : " · ratios to 1") + " · alpha " + X.alpha + ", |log2 FC| ≥ " + X.fcLim +
+      (S.skipped ? " · " + fmtInt(S.skipped) + " not fitted (too few doses measured)" : "") + "</span></div>" +
+      "<div id='dosehl' class='muted'></div><div class='split'><div><div class='card chart' id='dosescatter'></div><div class='legend'>" + DOSE_CLS.map((c) => "<span><span class='sw' style='background:" + doseColor(c) + "'></span>" + c + "</span>").join("") + "</div></div>" +
+      "<div class='card detail'><div id='dosehead'></div><div class='chart' id='dosecurve'></div></div></div><div id='dosetable'></div>";
+    host.innerHTML = h;
+    const ser = $("#dseries");
+    if (ser) ser.onchange = (e) => { DS.s = +e.target.value; DS.focus = null; DS.page = 0; renderDose(); };
+    $("#dcls").onchange = (e) => { DS.cls = e.target.value; DS.page = 0; safe(renderDoseScatter, "#dosescatter"); safe(renderDoseTable, "#dosetable"); };
+    $("#dq").oninput = (e) => { DS.q = e.target.value; DS.page = 0; safe(renderDoseTable, "#dosetable"); };
+    $("#dcsv").onclick = () => exportDoseCSV(S);
+    if (DS.focus == null || DS.focus >= S.i.length) DS.focus = S.i.length ? 0 : null;
+    const marked = anyMark() ? S.i.filter((i) => matches(i)).length : 0;
+    $("#dosehl").textContent = anyMark() ? marked + " of these curves match the search (ringed)" : "";
+    safe(renderDoseScatter, "#dosescatter");
+    safe(renderDoseCurve, "#dosecurve");
+    safe(renderDoseTable, "#dosetable");
+  }
+  function doseFocus(k) { DS.focus = k; safe(renderDoseScatter, "#dosescatter"); safe(renderDoseCurve, "#dosecurve"); safe(renderDoseTable, "#dosetable"); }
+  // the report's search marks curves too, and the first match is drawn
+  function doseOnSearch() {
+    const S = doseSeries();
+    if (!S) return;
+    if (anyMark()) { const k = S.i.findIndex((i) => matches(i)); if (k >= 0) DS.focus = k; }
+    renderDose();
+  }
+  function renderDoseScatter() {
+    const S = doseSeries(), host = $("#dosescatter");
+    if (!S || !host) return;
+    const ks = doseRows(S, false).filter((k) => S.pec50[k] != null && S.fc[k] != null);
+    const W = widthOf(host, 700), H = 380, L = 56, R = 16, T = 16, B = 44;
+    const root = frame(host, W, H);
+    if (!ks.length) { text(root, W / 2, H / 2, "No curves in this class", { "text-anchor": "middle" }); return; }
+    const xs = ks.map((k) => S.pec50[k]), ys = ks.map((k) => S.fc[k]).concat([D.dose.fcLim, -D.dose.fcLim]);
+    let x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs), y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
+    const px = (x1 - x0) * 0.05 || 0.5, py = (y1 - y0) * 0.06 || 0.5;
+    x0 -= px; x1 += px; y0 -= py; y1 += py;
+    const X = (v) => L + ((v - x0) / (x1 - x0)) * (W - L - R), Y = (v) => T + (1 - (v - y0) / (y1 - y0)) * (H - T - B);
+    const g = svg("g", {}, root);
+    axes(g, X, Y, niceTicks(x0, x1, 7), niceTicks(y0, y1, 6), L, R, T, B, W, H, "pEC50 (−log10 M; higher = more potent)", "log2 curve fold change");
+    const muted = css("--muted");
+    [-D.dose.fcLim, D.dose.fcLim].forEach((v) => svg("line", { x1: L, x2: W - R, y1: Y(v), y2: Y(v), stroke: muted, "stroke-dasharray": "4 4" }, g));
+    const order = ks.slice().sort((a, b) => (S.cls[a] === "up" || S.cls[a] === "down" ? 1 : 0) - (S.cls[b] === "up" || S.cls[b] === "down" ? 1 : 0));
+    const mark = anyMark(), sel = css("--sel");
+    order.forEach((k) => {
+      const reg = S.cls[k] === "up" || S.cls[k] === "down", hit = mark && matches(S.i[k]);
+      const c = svg("circle", { cx: X(S.pec50[k]), cy: Y(S.fc[k]), r: reg ? 3.6 : 2.6, fill: doseColor(S.cls[k]), "fill-opacity": reg ? 0.85 : 0.45,
+        stroke: hit ? sel : null, "stroke-width": hit ? 1.6 : null, "data-k": k, style: "cursor:pointer" }, g);
+      c.onmouseenter = (e) => showTip(e, "<b>" + esc(nameOf(S.i[k])) + "</b> · " + esc(S.cls[k]) + "<br>pEC50 " + fmt(S.pec50[k]) + " · log2 FC " + fmt(S.fc[k]) + " · relevance " + fmt(S.rel[k]));
+      c.onmouseleave = hideTip;
+      c.onclick = () => doseFocus(k);
+    });
+    if (DS.focus != null && S.pec50[DS.focus] != null && S.fc[DS.focus] != null)
+      svg("circle", { cx: X(S.pec50[DS.focus]), cy: Y(S.fc[DS.focus]), r: 6.5, fill: "none", stroke: sel, "stroke-width": 2 }, g);
+    svgTools(host, root, "dose_potency_" + (S.name || "curves"));
+  }
+  function renderDoseCurve() {
+    const S = doseSeries(), host = $("#dosecurve"), head = $("#dosehead");
+    if (!S || !host) return;
+    const k = DS.focus;
+    if (k == null) { host.innerHTML = "<div class='empty'>Click a curve.</div>"; if (head) head.innerHTML = ""; return; }
+    const i = S.i[k];
+    if (head) head.innerHTML = "<h4>" + esc(nameOf(i)) + " <span class='badge' style='color:" + doseColor(S.cls[k]) + ";border-color:" + doseColor(S.cls[k]) + "'>" + esc(S.cls[k]) + "</span></h4>" +
+      "<div class='id'>" + esc(D.f.id[i] || "") + "</div>" + (D.f.desc[i] ? "<div class='desc'>" + esc(D.f.desc[i].slice(0, 120)) + "</div>" : "") +
+      "<div class='meta'>pEC50 " + fmt(S.pec50[k]) + (S.ciL[k] != null ? " (" + fmt(S.ciL[k]) + " – " + fmt(S.ciR[k]) + ")" : "") +
+      (S.ec50[k] != null ? " · EC50 " + +S.ec50[k].toPrecision(3) + " " + esc(S.unit) : "") + "<br>log2 FC " + fmt(S.fc[k]) + " · slope " + fmt(S.slope[k]) +
+      " · p " + fmtP(S.p[k]) + " · relevance " + fmt(S.rel[k]) + "</div>" +
+      (S.cls[k] === "up" || S.cls[k] === "down" ? "" : "<div class='muted'>Not a regulated curve: don't read its pEC50.</div>");
+    const lx = S.doses.map((d) => Math.log10(d));
+    const xa = Math.min.apply(null, lx) - 0.5, xb = Math.max.apply(null, lx) + 0.5, gap = Math.max(0.6, (xb - xa) * 0.12), xc = xa - gap;
+    const pts = [];
+    S.samples.forEach((_j, jj) => {
+      const v = S.y[k][jj];
+      if (v != null) pts.push([S.sdose[jj] > 0 ? Math.log10(S.sdose[jj]) : xc, Math.pow(2, v), S.sdose[jj] === 0]);
+    });
+    const W = widthOf(host, 320), H = 260, L = 44, R = 10, T = 12, B = 40;
+    const ymax = Math.max(1.4, S.front[k], S.back[k], ...pts.map((p) => p[1])) * 1.08;
+    const X = (v) => L + ((v - (xc - gap * 0.4)) / (xb - (xc - gap * 0.4))) * (W - L - R), Y = (v) => T + (1 - v / ymax) * (H - T - B);
+    const root = frame(host, W, H), g = svg("g", {}, root);
+    const xt = [];
+    for (let v = Math.ceil(xa); v <= Math.floor(xb); v++) xt.push(v);
+    axes(g, X, Y, [], niceTicks(0, ymax, 5), L, R, T, B, W, H, "dose", "ratio to control");
+    xt.forEach((v) => { svg("line", { x1: X(v), x2: X(v), y1: T, y2: H - B, stroke: css("--grid") }, g); text(g, X(v), H - B + 16, fmtDose(Math.pow(10, v)).replace(/^(\S+) /, "$1 "), { "text-anchor": "middle", "font-size": 10.5 }); });
+    text(g, X(xc), H - B + 16, "ctrl", { "text-anchor": "middle", "font-size": 10.5 });
+    const bx = X(xc + gap / 2);
+    svg("path", { d: "M" + (bx - 4) + " " + (H - B + 4) + "l4 -8m0 8l4 -8", stroke: css("--axis"), fill: "none" }, g);
+    const muted = css("--muted");
+    svg("line", { x1: L, x2: W - R, y1: Y(1), y2: Y(1), stroke: muted, "stroke-dasharray": "3 3" }, g);
+    if (-S.pec50[k] >= xa && -S.pec50[k] <= xb) svg("line", { x1: X(-S.pec50[k]), x2: X(-S.pec50[k]), y1: T, y2: H - B, stroke: muted, "stroke-dasharray": "2 4" }, g);
+    const col = doseColor(S.cls[k]);
+    let d = "";
+    for (let n = 0; n <= 120; n++) { const x = xa + ((xb - xa) * n) / 120; d += (n ? "L" : "M") + X(x).toFixed(1) + " " + Y(Math.max(0, Math.min(ymax, doseCurve(S, k, x)))).toFixed(1); }
+    svg("path", { d: d, fill: "none", stroke: col, "stroke-width": 2 }, g);
+    svg("line", { x1: X(xc) - 10, x2: X(xc) + 10, y1: Y(S.front[k]), y2: Y(S.front[k]), stroke: col, "stroke-width": 2, "stroke-opacity": 0.6 }, g);
+    pts.forEach((p) => title(svg("circle", { cx: X(p[0]), cy: Y(Math.min(p[1], ymax)), r: 3.4, fill: p[2] ? "none" : css("--text2"), stroke: css("--text2"), "stroke-width": 1.2 }, g),
+      (p[2] ? "control" : fmtDose(Math.pow(10, p[0]))) + ": ratio " + fmt(p[1])));
+    svgTools(host, root, "dose_curve_" + nameOf(i));
+  }
+  function renderDoseTable() {
+    const S = doseSeries(), host = $("#dosetable");
+    if (!S || !host) return;
+    const rows = doseRows(S, true), per = 50, pages = Math.max(1, Math.ceil(rows.length / per));
+    DS.page = Math.min(DS.page, pages - 1);
+    const mark = anyMark();
+    let h = "<div class='tablewrap'><table><thead><tr>" + DOSE_COLS.map((c) => "<th data-k='" + c.k + "'" + (c.k === DS.sortKey ? " data-dir='" + (DS.sortDir > 0 ? "asc" : "desc") + "'" : "") + ">" + esc(c.t) + "</th>").join("") + "</tr></thead><tbody>";
+    rows.slice(DS.page * per, DS.page * per + per).forEach((k) => {
+      const hit = mark && matches(S.i[k]);
+      h += "<tr data-k='" + k + "'" + (k === DS.focus ? " class='focus'" : "") + (hit ? " style='font-weight:650'" : "") + ">" + DOSE_COLS.map((c) => "<td" + (c.n ? " class='n'" : "") + ">" + c.f(S, k) + "</td>").join("") + "</tr>";
+    });
+    if (!rows.length) h += "<tr><td colspan='" + DOSE_COLS.length + "' class='muted'>No curve matches.</td></tr>";
+    host.innerHTML = h + "</tbody></table></div><div class='pager'>" + fmtInt(rows.length) + " curves · page " + (DS.page + 1) + " of " + pages + " <button id='dprev'>‹</button><button id='dnext'>›</button></div>";
+    $$("th", host).forEach((th) => (th.onclick = () => { if (DS.sortKey === th.dataset.k) DS.sortDir *= -1; else { DS.sortKey = th.dataset.k; DS.sortDir = th.dataset.k === "name" || th.dataset.k === "cls" || th.dataset.k === "p" || th.dataset.k === "q" ? 1 : -1; } DS.page = 0; renderDoseTable(); }));
+    $$("tbody tr[data-k]", host).forEach((tr) => (tr.onclick = () => doseFocus(+tr.dataset.k)));
+    $("#dprev").onclick = () => { DS.page = Math.max(0, DS.page - 1); renderDoseTable(); };
+    $("#dnext").onclick = () => { DS.page = Math.min(pages - 1, DS.page + 1); renderDoseTable(); };
+  }
+  function exportDoseCSV(S) {
+    const q = (v) => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"';
+    const lines = [["series", "id", "label", "class", "pEC50", "pEC50_ci_low", "pEC50_ci_high", "EC50", "unit", "log2_curve_fold_change", "p", "q", "relevance", "R2", "points"].join(",")];
+    doseRows(S, true).forEach((k) => {
+      const i = S.i[k];
+      lines.push([S.name, D.f.id[i], D.f.label[i], S.cls[k], S.pec50[k], S.ciL[k], S.ciR[k], S.ec50[k], S.unit, S.fc[k], S.p[k], S.q[k], S.rel[k], S.r2[k], S.n[k]].map(q).join(","));
+    });
+    download("dose_response_" + (S.name || "curves") + ".csv", lines.join("\n") + "\n", "text/csv");
+  }
+
+  // ----------------------------------------------------------------- help
+  // Plain-language help from ionomos/help/*.md, rendered to safe HTML in Python (report.py _help_payload):
+  // a "?" beside each section title, QC tab and issue opens its entry inline, and the Help section at the
+  // end lists every entry, the glossary and the issues of this report. Entry HTML is ours; anything that
+  // comes from the data (issue titles) goes through esc().
+  const H = Object.assign({ entries: {}, report: [], glossary: [], more: [], issues: [] }, D.help || {});
+  const HELP_AT = [["#differential > h2", "report.differential"], ["#differential > p.sub", "report.search"],
+    ["#differential-body > .bar", "report.cutoffs"], ["#differential-body > h3", "report.phist"],
+    ["#differential-body > .tablebar", "report.table"], ["#compare > h2", "report.compare"], ["#onoff > h2", "report.onoff"],
+    ["#heat > h2", "report.heatmap"], ["#enrichment > h2", "report.enrichment"], ["#dose > h2", "report.dose"], ["#quality > h2", "report.quality"],
+    ["#methods > h2", "report.methods"], ["#files > h2", "report.files"]];
+  const HELP_H = { "Data source": "report.source", "Settings used": "report.methods", "Sample metadata": "report.sdrf",
+    "Cross-check": "report.fpa", "Highlight groups": "report.groups", "Hits": "report.hitfilters" };
+  /** A "?" button in `host` that opens entry `id` in a panel placed after `after` (default: host). */
+  function addHelp(host, id, after) {
+    const e = H.entries[id];
+    if (!host || !e || $(":scope > .qhelp", host)) return;
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "qhelp"; b.textContent = "?";
+    b.title = "What is this?"; b.setAttribute("aria-label", "Help: " + e.t); b.setAttribute("aria-expanded", "false");
+    b.dataset.help = id;
+    b.onclick = (ev) => { ev.stopPropagation(); toggleHelp(b, id, after || host); };
+    host.appendChild(b);
+  }
+  function toggleHelp(b, id, after) {
+    const old = b._panel;
+    if (old && old.isConnected) { old.remove(); b._panel = null; b.setAttribute("aria-expanded", "false"); return; }
+    const e = H.entries[id], p = document.createElement("div");
+    p.className = "helppanel"; p.setAttribute("role", "note");
+    p.innerHTML = "<div class='hh'><b>" + esc(e.t) + "</b> <button type='button' class='hclose' aria-label='Close help'>×</button></div>" +
+      e.h + "<p class='muted'><a href='#help-" + esc(id) + "' data-help='" + esc(id) + "'>More in the Help section</a></p>";
+    $(".hclose", p).onclick = () => toggleHelp(b, id, after);
+    after.insertAdjacentElement("afterend", p);
+    b._panel = p; b.setAttribute("aria-expanded", "true");
+    wireHelpLinks(p);
+  }
+  function openHelp(id) {
+    const el = document.getElementById("help-" + id);
+    if (!el) return;
+    el.open = true;
+    goTo(el.id);
+  }
+  function wireHelpLinks(root) {
+    $$("a[data-help]", root).forEach((a) => (a.onclick = (ev) => { ev.preventDefault(); openHelp(a.dataset.help); }));
+  }
+  function helpItem(id, extra) {
+    const e = H.entries[id];
+    return e ? "<details class='helpitem' id='help-" + esc(id) + "'><summary>" + esc(e.t) + "</summary><div class='hbody'>" + (extra || "") + e.h + "</div></details>" : "";
+  }
+  function renderHelp() {
+    const host = $("#helpbody");
+    if (!host) return;
+    HELP_AT.forEach(([sel, id]) => addHelp($(sel), id));
+    $$("#methods > h3, .optpanel h4").forEach((h) => { const k = Object.keys(HELP_H).find((t) => h.textContent.indexOf(t) === 0); if (k) addHelp(h, HELP_H[k]); });
+    $$(".issues > .issue").forEach((box) => {
+      const t = ($(":scope > b", box) || {}).textContent, x = H.issues.find((i) => i.title === t && i.id);
+      if (x) addHelp($(".sev", box), x.id, box.lastElementChild);
+    });
+    if (!Object.keys(H.entries).length) { host.innerHTML = "<div class='empty'>The help could not be included in this report.</div>"; return; }
+    let h = "";
+    const byId = new Map();
+    H.issues.forEach((x) => { const k = x.id || ""; if (!byId.has(k)) byId.set(k, []); byId.get(k).push(x); });
+    if (byId.size) {
+      h += "<h3>The issues in this report</h3>";
+      byId.forEach((xs, id) => {
+        const list = "<ul class='hin'>" + xs.map((x) => "<li>" + esc(x.title) + " <span class='muted'>" + esc(x.code) + "</span></li>").join("") + "</ul>";
+        h += id ? helpItem(id, "<p class='muted'>In this report:</p>" + list) : "<div class='helpitem'>" + list + "<p class='muted'>No help for this one yet.</p></div>";
+      });
+    }
+    const group = (ttl, ids) => (ids.length ? "<h3>" + ttl + "</h3>" + ids.map((i) => helpItem(i)).join("") : "");
+    h += group("Reading this report", H.report) + group("Glossary", H.glossary) + group("More answers", H.more.filter((i) => !byId.has(i)));
+    h += "<p class='muted'>Everything else (naming folders, the inbox, failed searches, what Ionomos never does to your data) is in the full help: the Help button in the Ionomos app, or <code>ionomos help --open</code>.</p>";
+    host.innerHTML = h;
+    wireHelpLinks(host);
+  }
+
   // ------------------------------------------------------------- controls
   function syncControls() {
     const sel = $("#comp");
@@ -1824,7 +2094,7 @@
       $("#adj").onchange = (e) => { ST.adj = e.target.checked; renderDiff(); };
       $("#labels").oninput = (e) => { ST.labels = Math.max(0, parseInt(e.target.value, 10) || 0); renderVolcano(); };
       const box = $("#search");
-      box.oninput = () => { ST.search = box.value.trim(); ST.q = parseQuery(ST.search); ST.highlight = null; syncControls(); renderSearchInfo(); renderVolcano(); renderTable(true); suggest(); writeHash(); };
+      box.oninput = () => { ST.search = box.value.trim(); ST.q = parseQuery(ST.search); ST.highlight = null; syncControls(); renderSearchInfo(); renderVolcano(); renderTable(true); suggest(); safe(doseOnSearch, "#dosebody"); writeHash(); };
       box.onkeydown = (e) => {
         if (e.key === "ArrowDown") { if (moveSug(1)) e.preventDefault(); }
         else if (e.key === "ArrowUp") { if (moveSug(-1)) e.preventDefault(); }
@@ -1876,7 +2146,9 @@
     safe(renderOnOff, "#onoffbody");
     safe(renderHeatmap, "#heatmap");
     safe(renderEnrichment, "#enrich");
+    safe(renderDose, "#dosebody");
     safe(renderQC, "#qc");
+    safe(renderHelp, "#helpbody");
     const theme = $("#theme");
     if (theme) theme.onclick = () => {
       const r = document.documentElement, cur = r.getAttribute("data-theme");
@@ -1893,7 +2165,7 @@
   }
   function redraw() {
     if (D.comps.length) { safe(renderVolcano, "#volcano"); safe(renderPHist, "#phist"); safe(renderDetail, "#detail"); safe(renderCompare, "#comparebody"); }
-    safe(renderHeatmap, "#heatmap"); safe(renderEnrichment, "#enrich"); safe(renderQC, "#qc");
+    safe(renderHeatmap, "#heatmap"); safe(renderEnrichment, "#enrich"); safe(renderDose, "#dosebody"); safe(renderQC, "#qc");
   }
   let rt = null;
   window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(redraw, 150); });

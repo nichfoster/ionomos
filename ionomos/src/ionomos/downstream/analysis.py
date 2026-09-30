@@ -25,14 +25,28 @@ experiment.yaml `analysis:` block:
       enrichment: true
       enrichment_libraries: [Hallmark, GO Biological Process, Reactome]
       top_labels: 15              # names drawn on each static volcano
+      block: replicate            # a block (batch, plex, pair, patient) as a fixed effect: replicate | {sample: block}
+      block_from: '_(P\\d+)_'     # ... or read from the sample names (a regex group, or (?P<block>...))
+      covariates: {age: {DMSO_1: 54, Drug_1: 61}}   # numeric -> a slope, text -> a factor ({sample: value} = one)
+      variance_prior: limma       # limma (one prior, eBayes) | deqms (a prior per peptide count, DEqMS)
       sdrf:                       # sample metadata for results/sdrf.tsv (sdrf.py): lab-wide in config.yaml,
         instrument: Orbitrap Eclipse   # per experiment in experiment.yaml (keys merge; the experiment's win)
         organism: homo sapiens    # default: the FASTA's OS=; also organism_part, cell_type, disease, cleavage_agent
-      sdrf_factor: [compound]     # an SDRF in the folder sets the design (design.py): which factor value column(s)
+      sdrf_factor: [compound]     # an SDRF in the folder sets the design (sdrfdesign.py): which factor value column(s)
                                   #   make the condition (default: all of them, joined with " | ")
       irs: auto                   # several TMT plexes on one scale (plex.py): auto | reference | sum | none
       tmt_reference: [126]        # IRS reference (pooled / bridge) channel(s) or sample(s); default: the SDRF's
                                   #   pooled rows, else samples named pool / bridge / reference / norm
+
+      doses:                      # dose-response curves (doseresponse.py); default: read from the condition names
+        DMSO: 0                   #   (Cmpd_10nM, Cmpd_0p1uM, 10 µM); the control is dose 0
+        Cmpd_A: 10 nM
+        Cmpd_B: 100 nM            #   ... at least dose_min_doses doses above 0, or no curves are fitted
+      dose_unit: nM               # unit for bare numbers in doses (default: none, so every dose names its unit)
+      dose_response: true         # false: never fit curves
+      dose_min_doses: 4           # doses above 0 a compound needs before curves are fitted
+      dose_alpha: 0.05            # CurveCurator's significance asymptote
+      dose_fc_lim: 0.45           # CurveCurator's |log2 curve fold change| asymptote
 """
 from __future__ import annotations
 
@@ -48,7 +62,6 @@ DEFAULT_CONTROL_KEYWORDS = ("DMSO", "vehicle", "veh", "ctrl", "control", "mock",
                             "scr", "scramble", "siNT", "PBS")
 TESTS = {"limma": "limma moderated t-test", "welch": "Welch t-test", "student": "Student t-test"}
 DE_TYPES = ("control", "all", "others")
-
 
 @dataclass
 class Settings:
@@ -78,19 +91,32 @@ class Settings:
     pca_features: int = 500
     heatmap_max: int = 300
     sdrf: dict[str, str] = field(default_factory=dict)  # SDRF metadata: organism, instrument, ... (downstream/sdrf.py)
-    # design import and TMT plexes (design.py, plex.py; D47, D48)
+    # design import and TMT plexes (sdrfdesign.py, plex.py; D47, D48)
     sdrf_factor: list[str] = field(default_factory=list)  # factor value column(s) of an input SDRF; [] = all, joined
     tmt_reference: list[str] = field(default_factory=list)  # IRS reference channel(s) (126) or sample(s); [] = found
     irs: str = "auto"  # auto | reference | sum | none: put several TMT plexes on one scale
+
+    doses: dict[str, str | float] = field(default_factory=dict)  # condition -> dose ("10 nM"); doseresponse.py
+    dose_unit: str = ""
+    dose_response: bool = True
+    dose_min_doses: int = 4
+    dose_alpha: float = 0.05
+    dose_fc_lim: float = 0.45
+    block: str | dict[str, str] = ""   # "" | "replicate" | {sample: block} (design.py)
+    block_from: str = ""               # regex on sample names: the block is group "block", else group 1
+    covariates: dict[str, dict] = field(default_factory=dict)   # name -> {sample: value}
+    variance_prior: str = "limma"      # limma | deqms
+
+    @property
+    def has_design(self) -> bool:
+        return bool(self.block or self.block_from or self.covariates)
 
     def describe(self) -> str:
         which = "adjusted p" if self.use_adjusted else "p"
         return f"|log2FC| ≥ {self.log2fc:g} and {which} ≤ {self.alpha:g} ({TESTS[self.test]})"
 
-
 class AnalysisError(ValueError):
     pass
-
 
 def parse_comparison(c) -> tuple[str, str]:
     if isinstance(c, (list, tuple)) and len(c) == 2:
@@ -100,15 +126,12 @@ def parse_comparison(c) -> tuple[str, str]:
         raise AnalysisError(f"comparison {c!r} must look like 'Drug vs DMSO' or [Drug, DMSO]")
     return m.group(1), m.group(2)
 
-
 def _bool(v) -> bool:
     return v if isinstance(v, bool) else str(v).strip().lower() in ("1", "true", "yes", "on")
-
 
 def _list(v) -> list[str]:
     items = v if isinstance(v, (list, tuple)) else str(v).split(",")
     return [str(x).strip() for x in items if str(x).strip()]
-
 
 def _sdrf_meta(v) -> dict[str, str]:
     from ionomos.downstream.sdrf import SETTINGS
@@ -124,13 +147,64 @@ def _sdrf_meta(v) -> dict[str, str]:
             out[k] = str(val).strip()
     return out
 
+VARIANCE_PRIORS = ("limma", "deqms")
+
+def _block(v) -> str | dict[str, str]:
+    if isinstance(v, dict):
+        out = {str(a).strip(): str(b).strip() for a, b in v.items() if b is not None and str(b).strip()}
+        if not out:
+            raise AnalysisError("block: give each sample its block, e.g. {DMSO_1: A, Drug_1: A, DMSO_2: B, Drug_2: B}")
+        return out
+    t = str(v).strip()
+    if t.lower() in ("", "none", "no", "false"):
+        return ""
+    if t.lower() in ("replicate", "replicates", "rep"):
+        return "replicate"
+    raise AnalysisError(f"block {t!r}: use 'replicate' (the replicate number is the block, e.g. a batch or a pair), "
+                        "a mapping {sample: block}, or block_from with a pattern on the sample names")
+
+def _block_from(v) -> str:
+    t = str(v)
+    if not t.strip():
+        return ""
+    try:
+        rx = re.compile(t)
+    except re.error as exc:
+        raise AnalysisError(f"block_from {t!r} is not a valid regular expression ({exc})") from None
+    if not rx.groups:
+        raise AnalysisError(f"block_from {t!r} needs a group in ( ) for the block, e.g. '_(P\\d+)_' or "
+                            "'(?P<block>[A-Z]+)$'")
+    return t
+
+def _covariates(v) -> dict[str, dict]:
+    if not isinstance(v, dict) or not v:
+        raise AnalysisError("covariates must map a name to {sample: value}, e.g. {age: {DMSO_1: 54, Drug_1: 61}}"
+                            " (or be one {sample: value} mapping)")
+    if all(isinstance(x, dict) for x in v.values()):
+        named = v
+    elif not any(isinstance(x, dict) for x in v.values()):
+        named = {"covariate": v}
+    else:
+        raise AnalysisError("covariates: either one {sample: value} mapping, or name: {sample: value} for each")
+    out = {}
+    for name, spec in named.items():
+        n = str(name).strip()
+        if not n or n.lower() in ("condition", "replicate", "block"):
+            raise AnalysisError(f"covariate name {name!r} is reserved or empty; call it e.g. 'age' or 'batch'")
+        if not spec:
+            raise AnalysisError(f"covariate {n!r} has no values")
+        out[n] = {str(a).strip(): b for a, b in spec.items()}
+    return out
 
 def settings_from(*layers: dict | None) -> Settings:
     """Later layers win. Unknown keys are an error (typos shouldn't silently do nothing)."""
     s = Settings()
     names = {f.name for f in fields(Settings)}
     for layer in layers:
-        for k, v in (layer or {}).items():
+        layer = layer or {}
+        if layer.get("block") not in (None, "") and layer.get("block_from") not in (None, ""):
+            raise AnalysisError("set either block or block_from, not both")
+        for k, v in layer.items():
             if k == "enabled":
                 continue
             if k not in names:
@@ -138,11 +212,12 @@ def settings_from(*layers: dict | None) -> Settings:
             if v is None or (v == "" and k not in ("enrichment_gmt",)):
                 continue
             try:
-                if k in ("log2fc", "alpha", "impute_shift", "impute_scale", "filter_global_pct", "filter_condition_pct"):
+                if k in ("log2fc", "alpha", "impute_shift", "impute_scale", "filter_global_pct", "filter_condition_pct",
+                         "dose_alpha", "dose_fc_lim"):
                     v = float(v)
-                elif k in ("min_valid", "top_labels", "seed", "pca_features", "heatmap_max"):
+                elif k in ("min_valid", "top_labels", "seed", "pca_features", "heatmap_max", "dose_min_doses"):
                     v = int(v)
-                elif k in ("use_adjusted", "remove_contaminants", "enrichment"):
+                elif k in ("use_adjusted", "remove_contaminants", "enrichment", "dose_response"):
                     v = _bool(v)
                 elif k == "test":
                     v = str(v).lower()
@@ -191,6 +266,28 @@ def settings_from(*layers: dict | None) -> Settings:
                     v = {"off": "none", "false": "none", "no": "none", "on": "auto", "true": "auto"}.get(v, v)
                     if v not in IRS_MODES:
                         raise AnalysisError("irs must be auto, reference, sum or none")
+
+                elif k == "doses":
+                    if not isinstance(v, dict):
+                        raise AnalysisError("doses must map a condition to its dose, e.g. {DMSO: 0, Cmpd_1: 10 nM}")
+                    v = {str(a): (b if isinstance(b, (int, float)) and not isinstance(b, bool) else str(b))
+                         for a, b in v.items()}
+                elif k == "dose_unit":
+                    v = _dose_unit(v)
+                elif k == "block":
+                    v = _block(v)
+                    s.block_from = ""  # an experiment's block replaces the lab's block_from, and vice versa
+                elif k == "block_from":
+                    v = _block_from(v)
+                    s.block = ""
+                elif k == "covariates":
+                    v = _covariates(v)
+                elif k == "variance_prior":
+                    v = str(v).strip().lower()
+                    v = "limma" if v == "ebayes" else v
+                    if v not in VARIANCE_PRIORS:
+                        raise AnalysisError("variance_prior must be limma (one prior for every feature) or deqms "
+                                            "(a prior that depends on the peptide count)")
             except (TypeError, ValueError) as exc:
                 if isinstance(exc, AnalysisError):
                     raise
@@ -205,8 +302,32 @@ def settings_from(*layers: dict | None) -> Settings:
     for k in ("filter_global_pct", "filter_condition_pct"):
         if not 0 <= getattr(s, k) <= 100:
             raise AnalysisError(f"analysis.{k} must be between 0 and 100")
+    if not 0 < s.dose_alpha < 1:
+        raise AnalysisError("analysis.dose_alpha must be between 0 and 1")
+    if s.dose_fc_lim < 0:
+        raise AnalysisError("analysis.dose_fc_lim must be >= 0")
+    if s.dose_min_doses < 3:
+        raise AnalysisError("analysis.dose_min_doses must be >= 3 (a curve has 4 parameters)")
+    _check_doses(s)
     return s
 
+def _dose_unit(v) -> str:
+    from ionomos.downstream.doseresponse import DoseError, normalize_unit
+
+    try:
+        return normalize_unit(str(v))
+    except DoseError as exc:
+        raise AnalysisError(f"analysis.dose_unit: {exc}") from exc
+
+def _check_doses(s: Settings) -> None:
+    """Every analysis.doses value must read as a dose (after the layers, so dose_unit can come in any order)."""
+    from ionomos.downstream.doseresponse import DoseError, parse_dose
+
+    for c, v in s.doses.items():
+        try:
+            parse_dose(v, s.dose_unit)
+        except DoseError as exc:
+            raise AnalysisError(f"analysis.doses {c}: {exc}") from exc
 
 def settings_lenient(*layers: dict | None) -> tuple[Settings, list[str]]:
     """settings_from for a run that must go ahead: a bad value drops only that key (with a note)
@@ -215,7 +336,7 @@ def settings_lenient(*layers: dict | None) -> tuple[Settings, list[str]]:
     notes: list[str] = []
     for layer in layers:
         good: dict = {}
-        for k, v in (layer or {}).items():
+        for k, v in sorted((layer or {}).items(), key=lambda kv: kv[0] == "doses"):  # doses read dose_unit
             try:
                 settings_from(*kept, {**good, k: v})
             except AnalysisError as exc:
@@ -224,7 +345,6 @@ def settings_lenient(*layers: dict | None) -> tuple[Settings, list[str]]:
             good[k] = v
         kept.append(good)
     return settings_from(*kept), notes
-
 
 def as_dict(s: Settings) -> dict:
     out = {}
@@ -236,7 +356,6 @@ def as_dict(s: Settings) -> dict:
             v = list(v)
         out[f.name] = v
     return out
-
 
 def find_control(conditions: list[str], s: Settings) -> str | None:
     if s.control:
@@ -250,7 +369,6 @@ def find_control(conditions: list[str], s: Settings) -> str | None:
             if kw.lower() in tokens or c.lower() == kw.lower():
                 return c
     return None
-
 
 def choose_comparisons(m: QuantMatrix, s: Settings) -> tuple[list[tuple[str, str | None]], list[str]]:
     """[(treatment, control)]; control None = ratio data vs 0, "others" = one-vs-rest. Plus notes."""
@@ -278,7 +396,6 @@ def choose_comparisons(m: QuantMatrix, s: Settings) -> tuple[list[tuple[str, str
         notes.append(f"no control condition recognised; using {ctrl!r} as control (alphabetically first). "
                      f"Choose it on the Analysis tab or set analysis.control in experiment.yaml.")
     return [(c, ctrl) for c in conds if c != ctrl], notes
-
 
 @dataclass
 class DiffResult:
@@ -309,7 +426,6 @@ class DiffResult:
     def slug(self) -> str:
         return re.sub(r"[^A-Za-z0-9._-]+", "_", self.name).strip("_") or "comparison"
 
-
 def comparison_name(treatment: str, control: str | None) -> str:
     if control is None:
         return f"{treatment} (log2 H/L vs 0)"
@@ -317,10 +433,8 @@ def comparison_name(treatment: str, control: str | None) -> str:
         return f"{treatment} vs others"
     return f"{treatment} vs {control}"
 
-
 def _nan(v) -> float | None:
     return None if v is None or (isinstance(v, float) and math.isnan(v)) else v
-
 
 def _classic(p: fpa.Processed, a: str, b: str, s: Settings) -> fpa.ContrastResult:
     """Welch / Student t-test per feature (the pre-0.6 tests, kept as options)."""
@@ -346,22 +460,105 @@ def _classic(p: fpa.Processed, a: str, b: str, s: Settings) -> fpa.ContrastResul
     nan = [math.nan] * len(diff)
     return fpa.ContrastResult(a, b, diff, nan, list(nan), t, pv, stats.bh_adjust(pv), na, nb, ma, mb)
 
+@dataclass
+class Model:
+    """The linear model the comparisons used (design.py): for Methods, analysis.json and the doctor."""
+    design: object = None            # design.Design, or None for ~0 + condition
+    problem: str = ""                # why an asked-for design wasn't used ("" = none asked, or used)
+    notes: list[str] = field(default_factory=list)
+    prior: dict = field(default_factory=dict)   # the variance prior: DEqMS used or not, d0, ...
+
+    @property
+    def formula(self) -> str:
+        return self.design.formula if self.design is not None else "~0 + condition"
+
+    def as_dict(self, s: Settings) -> dict:
+        out = {"formula": self.formula, "blocks_or_covariates": self.design.describe() if self.design else "",
+               "variance_prior": self.prior.get("variance_prior", "limma" if s.test == "limma" else "")}
+        if self.design is not None:
+            out.update(self.design.as_dict())
+        if self.problem:
+            out["not_used"] = self.problem
+        if self.prior:
+            out["prior"] = {k: v for k, v in self.prior.items() if k != "variance_prior"}
+        return out
+
+def make_model(m: QuantMatrix, s: Settings, comps: list[tuple[str, str | None]]) -> Model:
+    """The design asked for in the settings, checked against these samples. A design that can't be used
+    leaves Model.problem set (the doctor raises DESIGN_NOT_USED) and the plain model is used."""
+    from ionomos.downstream import design
+
+    out = Model()
+    if s.variance_prior == "deqms" and (s.test != "limma" or m.kind != "intensity"):
+        out.notes.append("variance_prior: deqms applies to limma comparisons between conditions; not used here")
+    if not s.has_design:
+        return out
+    if s.test != "limma":
+        out.notes.append(f"block / covariates apply to the limma model; the {TESTS[s.test]} ignores them")
+        return out
+    if m.kind != "intensity":
+        out.notes.append("block / covariates apply to comparisons between conditions; ratios tested against 0 "
+                         "(isoDTB) use the one-sample model")
+        return out
+    for what, spec in (("block", s.block if isinstance(s.block, dict) else {}),
+                       *((f"covariate {k!r}", v) for k, v in s.covariates.items())):
+        extra = [x for x in spec if x not in m.samples]
+        if extra:
+            out.notes.append(f"{what}: not a sample here, ignored: " + ", ".join(extra[:5]))
+    try:
+        d = design.build(m, s.block, s.block_from, s.covariates)
+        if any(b == "others" for _, b in comps):
+            k = len(d.conditions)
+            for ci, c in enumerate(d.conditions):
+                try:
+                    design.cov_unscaled([[row[ci], 1.0 - row[ci], *row[k:]] for row in d.x])
+                except design.DesignError:
+                    raise design.DesignError(f"{c} vs others: the blocks or covariates are confounded with {c}") \
+                        from None
+        out.design = d
+    except design.DesignError as exc:
+        out.problem = str(exc)
+        out.notes.append(f"the experimental design wasn't used: {exc}; the comparisons use ~0 + condition")
+    return out
+
+def _counts(m: QuantMatrix, s: Settings) -> list[int | None] | None:
+    return [f.peptides for f in m.features] if s.variance_prior == "deqms" else None
 
 def run_contrasts(p: fpa.Processed, comps: list[tuple[str, str | None]], s: Settings,
-                  low: frozenset | set = frozenset()) -> list[fpa.ContrastResult]:
+                  low: frozenset | set = frozenset(), model: Model | None = None) -> list[fpa.ContrastResult]:
     """low: comparisons with a group smaller than min_valid. They are still tested where the model has
-    residual df (limma borrows it from every condition; Welch becomes a pooled t-test), labelled low confidence."""
+    residual df (limma borrows it from every condition; Welch becomes a pooled t-test), labelled low confidence.
+    model: the design (make_model); its .prior is filled with what the variance prior did."""
+    from ionomos.downstream import design as dz
+
     m = p.m
     pairs = [(a, b) for a, b in comps if b not in (None, "others")]
     out: dict[tuple, fpa.ContrastResult] = {}
+    des = model.design if model is not None else None
+    counts = _counts(m, s)
     if s.test == "limma":
         mv = 0 if p.imputation != "none" else s.min_valid
+        sq = dz.squeezer(counts, s.variance_prior) if counts is not None else None
         for group, gmv in (([c for c in pairs if c not in low], mv), ([c for c in pairs if c in low], 0)):
             if group:  # eBayes is fitted on every condition's residuals, so splitting contrasts changes nothing else
-                for r in fpa.limma_contrasts(m.values, m.samples, m.condition, group, min_valid=gmv):
+                if des is not None:
+                    res, info = dz.limma_design(m.values, des, group, gmv, counts, s.variance_prior)
+                else:
+                    res = fpa.limma_contrasts(m.values, m.samples, m.condition, group, min_valid=gmv, squeeze=sq)
+                    info = sq.info if sq else {}
+                if model is not None and info:
+                    model.prior = info
+                for r in res:
                     out[(r.treatment, r.control)] = r
         if any(b == "others" for _, b in comps):
-            for r in fpa.limma_others(m.values, m.samples, m.condition):
+            if des is not None:
+                res, info = dz.limma_design_others(m.values, des, counts, s.variance_prior)
+            else:
+                res = fpa.limma_others(m.values, m.samples, m.condition, squeeze=sq)
+                info = sq.info if sq else {}
+            if model is not None and info and not model.prior:
+                model.prior = info
+            for r in res:
                 out[(r.treatment, "others")] = r
     else:
         for a, b in comps:
@@ -374,6 +571,23 @@ def run_contrasts(p: fpa.Processed, comps: list[tuple[str, str | None]], s: Sett
                               else _one_sample_classic(m, cols, a, s))
     return [out[(a, b)] for a, b in comps]
 
+def f_test(p: fpa.Processed, comps: list[tuple[str, str | None]], s: Settings, model: Model | None = None):
+    """The moderated F ("any change between the conditions") for 3+ conditions with limma, on the same
+    model and variance prior as the comparisons. None when it doesn't apply."""
+    from ionomos.downstream import design as dz
+
+    m = p.m
+    conds = m.conditions
+    if s.test != "limma" or m.kind != "intensity" or len(conds) < 3:
+        return None
+    ref = next((b for _, b in comps if b not in (None, "others")), None)
+    if ref not in conds:
+        ref = find_control(conds, replace(s, control=None))
+    if ref not in conds:
+        ref = conds[0]
+    des = model.design if model is not None and model.design is not None else dz.plain(m)
+    mv = 0 if p.imputation != "none" else s.min_valid
+    return dz.f_test(m.values, des, ref, mv, _counts(m, s), s.variance_prior)
 
 def _one_sample_classic(m: QuantMatrix, cols: list[int], name: str, s: Settings) -> fpa.ContrastResult:
     diff, t, pv, n_ = [], [], [], []
@@ -390,7 +604,6 @@ def _one_sample_classic(m: QuantMatrix, cols: list[int], name: str, s: Settings)
     nan = [math.nan] * len(diff)
     return fpa.ContrastResult(name, "", diff, nan, list(nan), t, pv, stats.bh_adjust(pv), n_, [0] * len(diff),
                               list(diff), list(nan))
-
 
 def to_diff(p: fpa.Processed, r: fpa.ContrastResult, control: str | None, s: Settings) -> DiffResult:
     """A ContrastResult as table rows with add_rejections() significance."""
@@ -427,7 +640,6 @@ def to_diff(p: fpa.Processed, r: fpa.ContrastResult, control: str | None, s: Set
     d.prior = r.prior
     return d
 
-
 def _split_name(name: str) -> tuple[str, str]:
     """'DrugA_vs_DMSO' / 'DrugA vs DMSO' / 'DrugA-DMSO' -> ('DrugA', 'DMSO'); otherwise (name, '')."""
     if name.count("_") == 1 and not re.search(r"\svs\.?\s", name):  # Perseus: DrugA_DMSO
@@ -439,7 +651,6 @@ def _split_name(name: str) -> tuple[str, str]:
         if len(parts) == 2 and all(p.strip() for p in parts):
             return parts[0].strip(), parts[1].strip()
     return name, ""
-
 
 def precomputed_diffs(m: QuantMatrix, s: Settings) -> list[DiffResult]:
     """Results tables (anytable.py): fold change and p (and q, or BH from p) as given, with this lab's cut-offs."""
@@ -468,7 +679,6 @@ def precomputed_diffs(m: QuantMatrix, s: Settings) -> list[DiffResult]:
         out.append(d)
     return out
 
-
 def fold_change_only(d: DiffResult, reason: str) -> None:
     """No replicates anywhere to estimate variance: rank by fold change and call candidates on |log2FC| alone.
     No p-values are invented; every output labels these as fold change only."""
@@ -483,7 +693,6 @@ def fold_change_only(d: DiffResult, reason: str) -> None:
     d.confidence = "none"
     d.confidence_note = (f"{reason} — no statistics are possible, so this is fold change only: "
                          f"candidates are |log2FC| ≥ {lfc:g}, with no p-values. Treat them as leads to confirm.")
-
 
 DIFF_COLUMNS = ["id", "label", "description", "log2fc", "ci_low", "ci_high", "pvalue", "qvalue", "significant", "t",
                 "n_treatment", "n_control", "imputed", "mean_treatment", "mean_control"]

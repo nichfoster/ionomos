@@ -13,6 +13,8 @@ a way a person must see) raises an item here instead of only writing a log line:
     search_failed         FragPipe failed                                   likely causes, log tail, Retry, open log
     search_waiting        a search is held (FASTA / workflow / disk ...)    what's missing, open the right tab
     intake_rejected       a dropped folder couldn't be taken in             the note, open inbox
+    qc_trend              the QC standard broke a Westgard rule (warning;   open the QC trend page
+                          a window only with qc_trend.popup: true, D45)
 
 Items are JSON files in <log_dir>/attention/, so they survive restarts and are
 seen by every process: the watcher's own window (when the app isn't open), the
@@ -37,7 +39,7 @@ log = logging.getLogger("ionomos.attention")
 
 DIR = "attention"
 APP_ALIVE = "app.alive"  # the app touches this while open; the watcher then leaves pop-ups to it
-KINDS = ("analysis_input", "analysis_failed", "search_failed", "search_waiting", "intake_rejected")
+KINDS = ("analysis_input", "analysis_failed", "search_failed", "search_waiting", "intake_rejected", "qc_trend")
 POPUP_KINDS = {"analysis_input", "analysis_failed", "search_failed", "search_waiting", "intake_rejected"}
 
 

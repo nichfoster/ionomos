@@ -861,7 +861,7 @@ def provenance(workdir: Path, method: str | None, source: str = "", meta: dict |
     meta = meta or {}
     root = workdir if workdir.is_dir() else workdir.parent
     out: dict = {"engine": meta.get("engine") or "", "version": "", "files": [], "quantity": meta.get("quantity", "")}
-    files = list(_files(root, depth=3)) if root.is_dir() else []
+    files = list(_files(root, depth=4)) if root.is_dir() else []
 
     def rel(p: Path) -> str:
         try:

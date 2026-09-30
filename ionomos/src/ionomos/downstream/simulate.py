@@ -6,6 +6,8 @@ Column names and layouts follow the real files:
     DIA     diann-output/report.pg_matrix.tsv           (Protein.Group, Genes, ..., one column per run path)
     TMT     tmt-report/abundance_gene_MD.tsv            (Index, NumberPSM, ProteinID, MaxPepProb,
                                                          ReferenceIntensity, one log2 column per sample)
+    doses   dose_titration / dose_pg_matrix             (a compound titration: DMSO + Cmpd_<dose> runs, planted
+                                                         log-logistic curves with known pEC50s, flat and noisy features)
 
 Each writer returns the planted truth so a test can measure recall and false
 discoveries of the whole downstream pipeline.
@@ -148,6 +150,70 @@ def tmt_abundance(path: Path, samples: list[str], seed: int = 1, n_genes: int = 
                 truth[c][g] = sign
         vals = [f"{rng.gauss(eff.get(cond_of[s], 0.0), 0.25):.4f}" if rng.random() > 0.03 else "" for s in samples]
         lines.append([g, str(rng.randint(2, 80)), f"P{30000 + i}", "1.0000", f"{rng.gauss(18, 1.5):.3f}", *vals])
+    _write(path, header, lines)
+    return truth
+
+
+def dose_label(nM: float) -> str:
+    """10 -> '10nM', 3000 -> '3uM', 0.3 -> '0.3nM' (how a lab names its conditions)."""
+    return f"{nM / 1000:g}uM" if nM >= 1000 else f"{nM:g}nM"
+
+
+def dose_titration(doses_nm: list[float], replicates: int = 3, controls: int = 3, n: int = 300, seed: int = 1,
+                   curve_fraction: float = 0.15, noisy_fraction: float = 0.15, noise: float = 0.15,
+                   missing: float = 0.02, ratio: bool = False, compound: str = "Cmpd"):
+    """A compound titration with known truth. Returns (samples, condition {sample: condition}, dose_nm {sample:
+    dose, 0 = DMSO}, rows [(id, gene, [log2 value per sample or None])], truth {id: {"class": up | down | flat |
+    noisy, "pec50": float | None, "back": ratio at top dose}}).
+
+    Curves follow CurveCurator's model with front = 1: ratio = back + (1 - back) / (1 + 10^(slope (x + pEC50))),
+    x = log10 M, pEC50 inside the dose range. ratio=True gives log2 ratios to DMSO (isoDTB-like, no DMSO runs);
+    otherwise log2 intensities with a per-protein base level and DMSO runs as the control."""
+    rng = random.Random(seed)
+    samples, cond, dose = [], {}, {}
+    for r in range(1, (0 if ratio else controls) + 1):
+        s = f"DMSO_{r}"
+        samples.append(s)
+        cond[s], dose[s] = "DMSO", 0.0
+    for d in doses_nm:
+        for r in range(1, replicates + 1):
+            c = f"{compound}_{dose_label(d)}"
+            s = f"{c}_{r}"
+            samples.append(s)
+            cond[s], dose[s] = c, float(d)
+    lo = -math.log10(max(doses_nm) * 1e-9) + 0.3
+    hi = -math.log10(min(doses_nm) * 1e-9) - 0.3
+    rows, truth = [], {}
+    for i in range(n):
+        u = rng.random()
+        kind = ("down" if rng.random() < 0.6 else "up") if u < curve_fraction else \
+            ("noisy" if u < curve_fraction + noisy_fraction else "flat")
+        pec50 = rng.uniform(lo, hi) if kind in ("up", "down") else None
+        back = rng.uniform(0.05, 0.45) if kind == "down" else rng.uniform(2.2, 5.0) if kind == "up" else 1.0
+        slope = rng.uniform(0.8, 2.5)
+        sd = noise * (4 if kind == "noisy" else 1)
+        base = 0.0 if ratio else rng.gauss(22, 1.5)
+        vals = []
+        for s in samples:
+            x = math.log10(dose[s] * 1e-9) if dose[s] > 0 else -math.inf
+            r_true = back + (1 - back) / (1 + 10 ** (slope * (x + pec50))) if pec50 is not None and x > -math.inf else 1.0
+            v = base + math.log2(r_true) + rng.gauss(0, sd)
+            vals.append(None if dose[s] > 0 and rng.random() < missing else round(v, 5))
+        g = _gene(i)
+        pid = f"P{40000 + i}"
+        rows.append((pid, g, vals))
+        truth[pid] = {"class": kind, "pec50": pec50, "back": back}
+    return samples, cond, dose, rows, truth
+
+
+def dose_pg_matrix(path: Path, doses_nm: list[float], seed: int = 1, n: int = 300, **kw) -> dict:
+    """A DIA-NN report.pg_matrix.tsv of a titration (dose_titration; runs named <condition>_<rep>.raw).
+    Returns the truth."""
+    samples, _cond, _dose, rows, truth = dose_titration(doses_nm, seed=seed, n=n, **kw)
+    header = ["Protein.Group", "Protein.Ids", "Protein.Names", "Genes", "First.Protein.Description",
+              "N.Sequences", "N.Proteotypic.Sequences", *[f"C:\\raw\\{s}.raw" for s in samples]]
+    lines = [[pid, pid, f"{g}_HUMAN", g, f"{g} protein", "5", "5",
+              *["" if v is None else f"{2 ** v:.2f}" for v in vals]] for pid, g, vals in rows]
     _write(path, header, lines)
     return truth
 

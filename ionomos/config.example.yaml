@@ -37,6 +37,21 @@ analysis:
   normalize: median          # median | none (intensities only)
   top_labels: 15             # hit names written on each volcano
   control_keywords: [DMSO, vehicle, veh, ctrl, control, mock, untreated, NT, WT, EV, scr, scramble, siNT, PBS]
+  # block: replicate         # the replicate number as a block (batch / pair) in the limma model (D42)
+  # variance_prior: deqms    # limma (default) | deqms: prior variance by peptide count (D43)
+
+# Instrument QC (docs/QC_TREND.md): runs of the lab's QC standard (a HeLa / K562 digest) are trended
+# in logs/qc_trend.html, with Levey-Jennings charts and Westgard rules. Does nothing until one is searched.
+qc_trend:
+  enabled: true
+  match: [hela, k562, qc_std, qcstd, _qc_]   # words in a folder or .raw name (any case; _ - . and spaces alike)
+  exclude: []                 # names with these words are never QC runs, e.g. [hela-ko]
+  methods: []                 # every run of these methods is a QC run (a dedicated QC method)
+  instrument: ""              # a label for the page, e.g. Eclipse
+  baseline_runs: 10           # the first N runs of a series set its mean and SD ...
+  baseline_from: ""           # ... or pin it to the runs acquired between two dates (YYYY-MM-DD)
+  baseline_to: ""
+  popup: false                # true: a broken rule opens a window (default: only the attention list)
 
 # Who is who. Users are the subfolders of users_root; a new user = a new folder.
 # Aliases let initials in a folder name resolve to that folder.
@@ -104,3 +119,11 @@ methods:
   #   data_type: DIA
   #   library: human_lib.parquet         # optional, in workflow_dir or fasta_dir; else predicted from the FASTA
   #   diann_args: "--var-mods 1 --var-mod UniMod:35,15.994915,M"   # added to Ionomos' defaults
+  # DDA label-free searched by the lab's own MaxQuant (docs/ENGINES.md, D50). A new method key also
+  # needs a file rule: naming: {methods: {LFQ: {like: isoDTB}}} for <sample>_<rep>[_<fraction>] names.
+  # LFQ:
+  #   engine: maxquant                   # fragpipe (default) | diann | maxquant
+  #   maxquant_exe: C:/MaxQuant/2.6.7.0/bin/MaxQuantCmd.exe
+  #   fasta: human_reviewed.fasta
+  #   data_type: DDA
+  #   mqpar: lab_lfq_mqpar.xml           # optional, in workflow_dir: your GUI settings; else MaxQuant's defaults + LFQ

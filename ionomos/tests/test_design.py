@@ -1,239 +1,357 @@
-"""An SDRF in the experiment folder as the design (downstream/design.py, D47).
+"""Experimental designs (blocks, covariates), the moderated F and DEqMS (downstream/design.py, deqms.py) against R.
 
-The SDRFs here use the spec's real layout, copied from the quantms test datasets (bigbio/quantms-test-datasets:
-testdata/lfq_ci/PXD026600, testdata-aws/tmt_full/PXD005486): mixed-case headers ("Source Name",
-"Characteristics[...]", "Factor Value[...]"), repeated comment[modification parameters] columns,
-"AC=MS:1002038;NT=label free sample" labels, TMT labels TMT126 ... TMT131 and fraction identifiers."""
-from __future__ import annotations
-
-import csv
-import json
+Golden files in tests/golden/design/ come from make_design_inputs.py + run_design_reference.R
+(limma 3.68.5: lmFit → contrasts.fit → eBayes → topTable / topTableF; DEqMS 1.30.0 spectraCounteBayes).
+"""
+import math
 from pathlib import Path
 
 import pytest
 
-from ionomos import downstream
-from ionomos.downstream import design, engines, plex, simulate
+from ionomos.downstream import analysis, deqms, design, fpa
+from ionomos.downstream.quant import Feature, QuantMatrix
+from ionomos.downstream.tables import read_tsv
 
-CFG = {"enrichment": False}
-LFQ_HEAD = ["Source Name", "Characteristics[organism]", "Characteristics[organism part]", "Characteristics[disease]",
-            "Characteristics[biological replicate]", "Material Type", "assay name", "technology type",
-            "comment[data file]", "comment[file uri]", "comment[technical replicate]", "comment[fraction identifier]",
-            "comment[proteomics data acquisition method]", "comment[label]", "comment[instrument]",
-            "comment[modification parameters]", "comment[modification parameters]", "comment[cleavage agent details]",
-            "Factor Value[compound]", "Factor Value[dose]"]
-LABEL_FREE = "AC=MS:1002038;NT=label free sample"
-RUNS = [f"20260930_EXP_{k:02d}" for k in range(1, 7)]  # names that don't say the condition
-TRUE = {r: ("DMSO" if k < 3 else "Drug") for k, r in enumerate(RUNS)}
+GOLD = Path(__file__).parent / "golden" / "design"
+VS = [("DrugA", "DMSO"), ("DrugB", "DMSO")]
+PAIRS = [*VS, ("DrugB", "DrugA")]
 
 
-def _write(path: Path, head: list[str], rows: list[list]) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\t".join(head) + "\n" + "\n".join("\t".join(str(x) for x in r) for r in rows) + "\n",
-                    encoding="utf-8")
-    return path
+def _f(x: str) -> float:
+    x = x.strip()
+    return math.nan if x in ("NA", "NaN", "") else float(x)
 
 
-def _lfq_rows(runs=RUNS, cond=TRUE, dose=None) -> list[list]:
-    rows = []
-    for k, run in enumerate(runs):
-        c = cond[run]
-        rep = sum(1 for r in runs[: k + 1] if cond[r] == c)
-        rows.append([f"Sample {k + 1}", "Homo sapiens", "not available", "not available", rep, "cell",
-                     f"run {k + 1}", "proteomic profiling by mass spectrometry", f"{run}.raw",
-                     f"ftp://example.org/{run}.raw", 1, 1, "NT=Data-Independent Acquisition;AC=NCIT:C161786",
-                     LABEL_FREE, "NT=Orbitrap Eclipse;AC=MS:1003029", "NT=Carbamidomethyl;TA=C;MT=fixed;AC=UNIMOD:4",
-                     "NT=Oxidation;MT=Variable;TA=M;AC=Unimod:35", "AC=MS:1001251;NT=Trypsin", c,
-                     (dose or {}).get(run, "not applicable")])
-    return rows
+def _close(a: float, b: float, rel: float = 1e-8, abs_: float = 1e-12) -> bool:
+    if math.isnan(a) or math.isnan(b):
+        return math.isnan(a) and math.isnan(b)
+    return abs(a - b) <= max(abs_, rel * max(abs(a), abs(b)))
 
 
-def _dia(dest: Path, seed: int = 4):
-    truth = simulate.dia_pg_matrix(dest / "fragpipe" / "diann-output" / "report.pg_matrix.tsv",
-                                   [(f"C:\\Fragpipe_General\\X\\exp\\raw\\{r}.raw", TRUE[r]) for r in RUNS],
-                                   seed=seed, n_proteins=200)
-    return truth["Drug"]
+def _matrix(name: str = "design_matrix.tsv") -> QuantMatrix:
+    header, rows = read_tsv(GOLD / name)
+    samples = header[1:]
+    _, srows = read_tsv(GOLD / "design_samples.tsv")
+    info = {r["sample"]: r for r in srows}
+    _, crows = read_tsv(GOLD / "design_counts.tsv")
+    counts = {r["ID"]: int(r["count"]) for r in crows}
+    vals = [[None if r[s].strip() == "NA" else float(r[s]) for s in samples] for r in rows]
+    m = QuantMatrix("intensity", "protein", [Feature(r["ID"], r["ID"], peptides=counts[r["ID"]]) for r in rows],
+                    samples, vals, {s: info[s]["condition"] for s in samples}, str(GOLD / name))
+    m.replicate = {s: int(info[s]["replicate"]) for s in samples}
+    m.meta["age"] = {s: float(info[s]["age"]) for s in samples}
+    m.meta["sex"] = {s: info[s]["sex"] for s in samples}
+    return m
 
 
-def _json(out) -> dict:
-    return json.loads((out.results_dir / "analysis.json").read_text(encoding="utf-8"))
+def _gold(name: str, key: str = "comparison") -> dict:
+    _, rows = read_tsv(GOLD / name)
+    return {((r[key].strip() if key in r else ""), r["ID"].strip()): {k: _f(v) for k, v in r.items()
+                                                                     if k not in (key, "ID")} for r in rows}
 
 
-def _hits(out) -> set[str]:
-    with open(out.results_dir / "Drug_vs_DMSO_differential.tsv", encoding="utf-8") as fh:
-        return {r["label"] for r in csv.DictReader(fh, delimiter="\t") if r["significant"]}
+def _priors() -> dict:
+    _, rows = read_tsv(GOLD / "design_priors.tsv")
+    return {r["model"]: (_f(r["df.prior"]), _f(r["s2.prior"])) for r in rows}
 
 
-# ------------------------------------------------------------------- reading --
+def _rname(a: str, b: str) -> str:
+    return f"condition{a} - condition{b}"
 
 
-def test_read_real_layout_and_factors(tmp_path):
-    dose = {r: ("0 uM" if TRUE[r] == "DMSO" else "1 uM") for r in RUNS}
-    p = _write(tmp_path / "PXD999999.sdrf.tsv", LFQ_HEAD, _lfq_rows(dose=dose))
-    d = design.read(p)
-    assert d.factors == ["compound", "dose"] and not d.labelled
-    r = d.rows[3]
-    assert (r.stem, r.condition, r.biorep, r.channel, r.techrep, r.fraction) == (RUNS[3], "Drug | 1 uM", 1, "", 1, 1)
-    assert design.read(p, factor="Factor Value[compound]").rows[3].condition == "Drug"
-    d2 = design.read(p, factor=["cell line"])  # not a factor column: say so, use them all
-    assert d2.rows[3].condition == "Drug | 1 uM" and "not a factor value column" in d2.notes[0]
-    with pytest.raises(design.DesignError, match="not an SDRF"):
-        design.read(_write(tmp_path / "x.sdrf.tsv", ["a", "b"], [[1, 2]]))
+def _check(results, m, gold, name=_rname) -> int:
+    n = 0
+    for c in results:
+        for i, f in enumerate(m.features):
+            g = gold[(name(c.treatment, c.control), f.id)]
+            for ours, key in ((c.diff[i], "logFC"), (c.ci_low[i], "CI.L"), (c.ci_high[i], "CI.R"), (c.t[i], "t"),
+                              (c.p[i], "P.Value"), (c.q[i], "adj.P.Val")):
+                assert _close(ours, g[key]), (c.treatment, c.control, f.id, key, ours, g[key])
+            n += 1
+    return n
 
 
-def test_tmt_sdrf_plexes_labels_and_pools(tmp_path):
-    """Two plexes x two fractions; TMT131 of a 10-plex; the pool marked as the spec says (biological replicate
-    'pooled')."""
-    head = ["Source Name", "Characteristics[organism]", "Characteristics[biological replicate]", "assay name",
-            "comment[data file]", "comment[technical replicate]", "comment[fraction identifier]", "comment[label]",
-            "Factor Value[treatment]"]
-    rows = []
-    for x in (1, 2):
-        for f in (1, 2):
-            for k, ch in enumerate(plex.TMT_ORDERS[10]):
-                pooled = ch in ("126", "131")
-                cond = "pool" if pooled else ("control" if k < 5 else "treatment")
-                rows.append([f"plex{x} pool" if pooled else f"S{x}_{k}", "Homo sapiens", "pooled" if pooled else k,
-                             f"run {x}{f}", f"P{x}_Fr{f}.raw", 1, f, f"TMT{ch}", cond])
-    d = design.read(_write(tmp_path / "t.sdrf.tsv", head, rows))
-    assert d.labelled and d.plex_of == {"P1_Fr1": "plex1", "P1_Fr2": "plex1", "P2_Fr1": "plex2", "P2_Fr2": "plex2"}
-    assert d.rows[9].channel == "131" and d.rows[0].pooled and not d.rows[1].pooled
-    assert d.rows[3].fraction == 1 and d.rows[13].fraction == 2
+@pytest.mark.parametrize("matrix, gold, prior", [("design_matrix.tsv", "design_block.tsv", "block"),
+                                                 ("design_matrix_missing.tsv", "design_block_missing.tsv",
+                                                  "block_missing")])
+def test_blocked_design_matches_limma(matrix, gold, prior):
+    m = _matrix(matrix)
+    d = design.build(m, block="replicate")
+    assert d.formula == "~0 + condition + replicate" and d.columns[3:] == ["replicate2", "replicate3", "replicate4"]
+    res, info = design.limma_design(m.values, d, PAIRS)
+    assert res[0].prior == pytest.approx(_priors()[prior], rel=1e-9) and info == {}
+    assert _check(res, m, _gold(gold)) == 3 * len(m.features)
+    if "missing" in matrix:  # absent from DMSO: its contrasts can't be estimated, DrugB - DrugA still can
+        i = next(i for i, r in enumerate(m.values) if all(v is None for v in r[:4]))
+        assert math.isnan(res[0].p[i]) and not math.isnan(res[2].p[i])
 
 
-def test_find_skips_results_and_ionomos_folders(tmp_path):
-    dest = tmp_path / "exp"
-    _write(dest / "results" / "sdrf.tsv", LFQ_HEAD, _lfq_rows())  # Ionomos' own output
-    _write(dest / "old_ionomos" / "a.sdrf.tsv", LFQ_HEAD, _lfq_rows())
-    _write(dest / "fragpipe_previous_2026" / "b.sdrf.tsv", LFQ_HEAD, _lfq_rows())
-    assert design.find(dest, dest / "fragpipe")[0] is None
-    _write(dest / "fragpipe" / "deep.sdrf.tsv", LFQ_HEAD, _lfq_rows())
-    top = _write(dest / "design.sdrf.tsv", LFQ_HEAD, _lfq_rows())
-    path, notes = design.find(dest, dest / "fragpipe")
-    assert path == top and "several SDRF files" in notes[0]
-    table = _write(tmp_path / "tables" / "matrix.tsv", ["id", "a"], [["p", 1]])
-    beside = _write(tmp_path / "tables" / "m.sdrf.tsv", LFQ_HEAD, _lfq_rows())
-    assert design.find(tmp_path / "tables" / "matrix_ionomos", None, table)[0] == beside
+def test_covariates_numeric_and_factor_match_limma():
+    m = _matrix()
+    d = design.build(m, block="replicate", covariates={"age": m.meta["age"], "sex": m.meta["sex"]})
+    assert d.formula == "~0 + condition + replicate + age + sex" and d.columns[-2:] == ["age", "sexM"]
+    assert [t["kind"] for t in d.terms] == ["block", "numeric", "factor"]
+    res, _ = design.limma_design(m.values, d, VS)
+    assert res[0].prior == pytest.approx(_priors()["covariates"], rel=1e-9)
+    _check(res, m, _gold("design_covariates.tsv"))
 
 
-# ------------------------------------------------------------------ analysis --
+def test_one_vs_others_with_a_block_matches_limma():
+    m = _matrix()
+    res, _ = design.limma_design_others(m.values, design.build(m, block="replicate"))
+    pri = _priors()
+    for r in res:
+        assert r.prior == pytest.approx(pri[f"others_{r.treatment}"], rel=1e-9)
+        assert r.n_control[0] == 8
+    _check(res, m, _gold("design_block_others.tsv"), lambda a, b: f"{a}_vs_others")
 
 
-def test_sdrf_sets_the_design_of_a_dia_experiment(tmp_path):
-    dest = tmp_path / "exp"
-    truth = _dia(dest)
-    _write(dest / "PXD999999.sdrf.tsv", LFQ_HEAD, _lfq_rows())
-    out = downstream.analyze(dest, "DIA", analysis_cfg=CFG)
-    s = _json(out)
-    assert s["samples"] == {r: TRUE[r] for r in RUNS}  # names kept; conditions from the SDRF
-    assert s["design"]["conditions_from"] == "SDRF PXD999999.sdrf.tsv"
-    assert s["design"]["sdrf"]["matched"] == 6 and s["design"]["sdrf"]["factors"] == ["compound", "dose"]
-    assert any("from the SDRF PXD999999.sdrf.tsv for 6 of 6 samples" in n for n in s["notes"])
-    hits = _hits(out)
-    assert len(hits & set(truth)) >= 0.7 * len(truth)
-    assert "taken from the SDRF-Proteomics file PXD999999.sdrf.tsv" in out.report.read_text(encoding="utf-8")
-    # the SDRF Ionomos wrote is output: it is never read back as a design
-    assert (out.results_dir / "sdrf.tsv").is_file()
-    (dest / "PXD999999.sdrf.tsv").unlink()
-    s2 = _json(downstream.analyze(dest, "DIA", analysis_cfg=CFG))
-    assert "sdrf" not in s2["design"] and s2["design"]["conditions_from"] == "sample names"
+@pytest.mark.parametrize("matrix, gold, block", [
+    ("design_matrix.tsv", "block", "replicate"), ("design_matrix_missing.tsv", "block_missing", "replicate"),
+    ("design_matrix.tsv", "covariates", "replicate"), ("design_matrix.tsv", "plain", ""),
+    ("design_matrix_missing.tsv", "plain_missing", "")])
+def test_moderated_f_matches_topTableF(matrix, gold, block):
+    m = _matrix(matrix)
+    cov = {"age": m.meta["age"], "sex": m.meta["sex"]} if gold == "covariates" else None
+    d = design.build(m, block=block, covariates=cov) or design.plain(m)
+    ft = design.f_test(m.values, d, "DMSO")
+    assert ft.df1 == 2 and ft.reference == "DMSO"
+    g = _gold(f"design_F_{gold}.tsv")
+    for i, f in enumerate(m.features):
+        want = g[("", f.id)]
+        for ours, key in ((ft.f[i], "F"), (ft.p[i], "P.Value"), (ft.q[i], "adj.P.Val")):
+            assert _close(ours, want[key]), (f.id, key, ours, want[key])
+    assert sum(q <= 0.05 for q in ft.q if not math.isnan(q)) > 5  # the planted changes are found
 
 
-def test_the_analysis_tab_sees_the_sdrf_conditions(tmp_path):
-    from ionomos import postprocess
-
-    dest = tmp_path / "exp"
-    _dia(dest)
-    _write(dest / "d.sdrf.tsv", LFQ_HEAD, _lfq_rows(dose={r: "1 uM" for r in RUNS}))
-    (dest / "experiment.yaml").write_text("analysis:\n  sdrf_factor: [compound]\n", encoding="utf-8")
-    info = postprocess.inspect_folder(dest, None, "DIA")
-    assert {x["sample"]: x["condition"] for x in info["samples"]} == TRUE
-
-
-def test_precedence_sample_conditions_then_sdrf_then_manifest(tmp_path):
-    dest = tmp_path / "exp"
-    _dia(dest)
-    manifest = [{"file": f"raw/{r}.raw", "experiment": "wrong", "bioreplicate": k + 1} for k, r in enumerate(RUNS)]
-    record = {"plan": {"manifest": manifest}}
-    _write(dest / "d.sdrf.tsv", LFQ_HEAD, _lfq_rows())
-    out = downstream.analyze(dest, "DIA", analysis_cfg=CFG, record=record)
-    s = _json(out)
-    assert set(s["samples"].values()) == {"DMSO", "Drug"}  # the SDRF beats the manifest
-    sample = next(x for x in s["samples"] if s["samples"][x] == "Drug")
-    out2 = downstream.analyze(dest, "DIA", analysis_cfg=CFG, record=record,
-                              overrides={"sample_conditions": {sample: "DMSO"}})
-    s2 = _json(out2)
-    assert s2["samples"][sample] == "DMSO"  # sample_conditions beat the SDRF
-    assert s2["design"]["overridden_by_sample_conditions"] == [sample]
+def test_plain_design_equals_the_group_means_model():
+    """With no block, the design machinery and FragPipe-Analyst's ~0 + condition agree (the F uses the former)."""
+    m = _matrix("design_matrix_missing.tsv")
+    ours, _ = design.limma_design(m.values, design.plain(m), VS)
+    fpa_res = fpa.limma_contrasts(m.values, m.samples, m.condition, VS)
+    for a, b in zip(ours, fpa_res, strict=True):
+        for x, y in zip(a.p + a.ci_low, b.p + b.ci_low, strict=True):
+            assert _close(x, y, rel=1e-11)
 
 
-def test_unmatched_runs_and_an_sdrf_for_something_else(tmp_path):
-    dest = tmp_path / "exp"
-    _dia(dest)
-    _write(dest / "d.sdrf.tsv", LFQ_HEAD, _lfq_rows(RUNS[:5], TRUE))
-    s = _json(downstream.analyze(dest, "DIA", analysis_cfg=CFG))
-    issue = next(i for i in s["issues"] if i["code"] == "SDRF_UNMATCHED_RUNS")
-    assert issue["severity"] == "input" and issue["data"]["runs"] == [RUNS[5]]
-    other = [f"OTHER_{k}" for k in range(6)]
-    _write(dest / "d.sdrf.tsv", LFQ_HEAD, _lfq_rows(other, {r: "A" for r in other}))
-    s = _json(downstream.analyze(dest, "DIA", analysis_cfg=CFG))
-    issue = next(i for i in s["issues"] if i["code"] == "SDRF_UNMATCHED_RUNS")
-    assert "names none of the 6 runs" in issue["message"] and s["design"]["sdrf"]["used"] is False
+# ------------------------------------------------------------------- DEqMS --
 
 
-def test_fragpipe_calibrated_names_match_the_sdrf(tmp_path):
-    """DIA-NN inside FragPipe reports the converted <run>_uncalibrated.mzML; the SDRF names <run>.raw."""
-    dest = tmp_path / "exp"
-    simulate.dia_pg_matrix(dest / "fragpipe" / "diann-output" / "report.pg_matrix.tsv",
-                           [(f"/data/{r}_uncalibrated.mzML", TRUE[r]) for r in RUNS], seed=4, n_proteins=60)
-    _write(dest / "d.sdrf.tsv", LFQ_HEAD, _lfq_rows())
-    m, _f, notes = downstream.load_quantities("DIA", dest / "fragpipe", dest / "results", None)
-    assert {m.condition[s] for s in m.samples} == {"DMSO", "Drug"} and not m.meta["sdrf"]["unmatched"]
+def test_loess_matches_r_on_count_like_data():
+    _, rows = read_tsv(GOLD / "design_deqms_block.tsv")
+    first = [r for r in rows if r["comparison"] == _rname("DrugA", "DMSO")]
+    m = _matrix()
+    fit = design.lm_fit(m.values, design.build(m, block="replicate").x)
+    counts = [f.peptides for f in m.features]
+    y = deqms.loess([math.log2(c) for c in counts], [math.log(v) for v in fit.s2])
+    for yi, r in zip(y, first, strict=True):
+        assert _close(yi, _f(r["loess"]), rel=1e-10)
 
 
-def test_sdrf_with_maxquant_plexes_gives_conditions_and_the_irs_reference(tmp_path):
-    """MaxQuant TMT across three experiments, its summary.txt naming each experiment's raw files, and an SDRF
-    marking channels 126 / 131 pooled: conditions from the SDRF, IRS on the pools, the pools left out."""
-    from tests.test_plexes import POOL, TMT10, _cond, _maxquant, _sim
-
-    prots, sim, hits = _sim(n=150, hits=15)
-    mq = tmp_path / "mq"
-    _maxquant(mq, prots, sim)
-    head = ["Source Name", "Characteristics[organism]", "Characteristics[biological replicate]", "assay name",
-            "technology type", "comment[data file]", "comment[technical replicate]", "comment[fraction identifier]",
-            "comment[label]", "Factor Value[compound]"]
-    rows = []
-    for e in sim:
-        for f in (1, 2):
-            for ch in TMT10:
-                pooled = ch in POOL
-                rows.append([f"{e} pool {ch}" if pooled else f"{e}_{ch}", "Homo sapiens", "pooled" if pooled else 1,
-                             f"{e} F{f}", "proteomic profiling by mass spectrometry", f"{e}_F{f}.raw", 1, f,
-                             f"TMT{ch}", "not applicable" if pooled else _cond(ch)])
-    _write(mq / "design.sdrf.tsv", head, rows)
-    out = downstream.analyze(mq, analysis_cfg=CFG)
-    s = _json(out)
-    assert s["method"] == "MaxQuant" and s["design"]["sdrf"]["matched"] == 30
-    assert s["tmt"]["applied"] and s["tmt"]["reference_from"].startswith("SDRF design.sdrf.tsv")
-    assert set(s["samples"].values()) == {"DMSO", "Drug"} and len(s["samples"]) == 24
-    with open(out.results_dir / "Drug_vs_DMSO_differential.tsv", encoding="utf-8") as fh:
-        sig = {r["id"] for r in csv.DictReader(fh, delimiter="\t") if r["significant"]}
-    assert len(sig & hits) >= 0.8 * len(hits)
+@pytest.mark.parametrize("matrix, gold", [("design_matrix.tsv", "block"), ("design_matrix_missing.tsv",
+                                                                           "block_missing")])
+def test_deqms_matches_spectraCounteBayes(matrix, gold):
+    m = _matrix(matrix)
+    counts = [f.peptides for f in m.features]
+    res, info = design.limma_design(m.values, design.build(m, block="replicate"), VS, counts=counts,
+                                    variance_prior="deqms")
+    assert info["deqms_used"] and info["d0"] == _priors()[f"deqms_{gold}"][0]
+    g = _gold(f"design_deqms_{gold}.tsv")
+    for c in res:
+        for i, f in enumerate(m.features):
+            want = g[(_rname(c.treatment, c.control), f.id)]
+            assert _close(c.diff[i], want["logFC"]), f.id
+            assert _close(c.t[i], want["sca.t"]), (f.id, c.t[i], want["sca.t"])
+            assert _close(c.p[i], want["sca.P.Value"]), f.id
+            assert _close(c.q[i], want["sca.adj.pval"]), f.id
 
 
-def test_sdrf_beats_the_engines_own_conditions(tmp_path):
-    """MSstatsTMT's Condition column says A / B; the SDRF says what the channels are."""
-    from tests.test_plexes import TMT10, _sim, _write_msstats_tmt
+def test_deqms_on_the_plain_model_and_fallbacks():
+    m = _matrix()
+    counts = [f.peptides for f in m.features]
+    res = fpa.limma_contrasts(m.values, m.samples, m.condition, VS[:1],
+                              squeeze=design.squeezer(counts, "deqms"))
+    g = _gold("design_deqms_plain.tsv", key="-")
+    for i, f in enumerate(m.features):
+        assert _close(res[0].t[i], g[("", f.id)]["sca.t"]), f.id
+        assert _close(res[0].p[i], g[("", f.id)]["sca.P.Value"]), f.id
+    # a feature without a count keeps limma's prior; too few counts -> limma's prior for all
+    counts[0] = None
+    mod = design.squeeze(design.lm_fit(m.values, design.plain(m).x).s2, [8] * len(counts), counts, "deqms")
+    plain = design.squeeze(design.lm_fit(m.values, design.plain(m).x).s2, [8] * len(counts))
+    assert mod.post[0] == plain.post[0] and mod.post[1] != plain.post[1]
+    few = design.squeeze([0.1] * 30, [4] * 30, [1, 2] * 15, "deqms")
+    assert few.info["deqms_used"] is False
 
-    prots, sim, _ = _sim(n=40, plexes=2)
-    f = _write_msstats_tmt(tmp_path / "q" / "msstatstmt.csv", prots, sim)
-    text = f.read_text(encoding="utf-8").replace(",DMSO,", ",A,").replace(",Drug,", ",B,")
-    f.write_text(text, encoding="utf-8")
-    head = ["source name", "characteristics[biological replicate]", "comment[data file]", "comment[label]",
-            "factor value[compound]"]
-    rows = [[f"{e}_{ch}", 1, f"{e}_T1.raw", f"TMT{ch}", "DMSO" if ch < "129" else "Drug"]
-            for e in sim for ch in TMT10]
-    _write(tmp_path / "q" / "x.sdrf.tsv", head, rows)
-    m, _files, _n = downstream.load_quantities("MSstatsTMT", tmp_path / "q", tmp_path / "q" / "results", None)
-    assert {m.condition[s] for s in m.samples} == {"DMSO", "Drug"} and m.meta["conditions_from"] == "SDRF x.sdrf.tsv"
-    assert engines.load_msstats_tmt(f).condition["Exp1_127N"] == "A"  # the engine alone
+
+# --------------------------------------------------------- designs that fail --
+
+
+def test_confounded_and_incomplete_designs_are_explained_not_crashed():
+    m = _matrix()
+    with pytest.raises(design.DesignError, match="single condition"):
+        design.build(m, block={s: m.condition[s] for s in m.samples})
+    with pytest.raises(design.DesignError, match="no block"):
+        design.build(m, block={"DMSO_1": "a"})
+    with pytest.raises(design.DesignError, match="doesn't match"):
+        design.build(m, block_from=r"^Drug")
+    with pytest.raises(design.DesignError, match="residual degrees of freedom"):
+        rng = __import__("random").Random(1)
+        design.build(m, block="replicate", covariates={f"c{k}": {s: rng.gauss(0, 1) for s in m.samples}
+                                                       for k in range(6)})  # 12 samples, 12 parameters
+    m2 = _matrix()
+    m2.replicate.pop("DMSO_1")
+    with pytest.raises(design.DesignError, match="replicate number"):
+        design.build(m2, block="replicate")
+    with pytest.raises(design.DesignError, match="same value"):
+        design.build(m, covariates={"age": {s: 3 for s in m.samples}})
+    d = design.build(m, block_from=r"_(?P<block>\d)$")
+    assert d.terms[0]["levels"] == ["1", "2", "3", "4"]
+    assert design.build(m) is None
+
+
+# ------------------------------------------------------------------ settings --
+
+
+def test_design_settings_validate_with_friendly_errors():
+    s = analysis.settings_from({"block": "replicate", "variance_prior": "DEqMS"})
+    assert s.block == "replicate" and s.variance_prior == "deqms" and s.has_design
+    s = analysis.settings_from({"block": {"DMSO_1": "A", "Drug_1": 1}})
+    assert s.block == {"DMSO_1": "A", "Drug_1": "1"}
+    assert analysis.settings_from({"covariates": {"DMSO_1": 54, "Drug_1": 61}}).covariates == {
+        "covariate": {"DMSO_1": 54, "Drug_1": 61}}
+    assert analysis.settings_from({"covariates": {"age": {"DMSO_1": 54}, "sex": {"DMSO_1": "F"}}}).covariates["sex"]
+    # a later layer's block_from replaces the lab's block (and vice versa)
+    s = analysis.settings_from({"block": "replicate"}, {"block_from": r"_(P\d+)_"})
+    assert s.block == "" and s.block_from == r"_(P\d+)_"
+    for bad, msg in (({"block": "batch"}, "use 'replicate'"), ({"block_from": "_P\\d+"}, "needs a group"),
+                     ({"block_from": "(["}, "not a valid regular expression"),
+                     ({"block": "replicate", "block_from": "(x)"}, "not both"),
+                     ({"variance_prior": "robust"}, "limma .* or deqms"),
+                     ({"covariates": {"age": {"a": 1}, "b": 2}}, "either one"),
+                     ({"covariates": {"condition": {"a": 1}}}, "reserved")):
+        with pytest.raises(analysis.AnalysisError, match=msg):
+            analysis.settings_from(bad)
+    s, notes = analysis.settings_lenient({"block": "batch", "log2fc": 2})
+    assert s.block == "" and s.log2fc == 2 and "block" in notes[0]
+    d = analysis.as_dict(analysis.settings_from({}))
+    assert d["block"] == "" and d["covariates"] == {} and d["variance_prior"] == "limma"
+
+
+# ---------------------------------------------------------------- end to end --
+
+
+def _run(tmp_path, name, cfg, **kw):
+    from ionomos import downstream
+    from tests.test_insights import _dia
+
+    dest, rec, truth = _dia(tmp_path / name, **kw)
+    out = downstream.analyze(dest, "DIA", {"enrichment": False, "normalize": "none", **cfg}, record=rec)
+    return dest, out, truth
+
+
+def test_block_on_replicate_end_to_end(tmp_path):
+    import json
+
+    from tests.test_insights import _payload
+
+    kw = {"batch": 1.6, "conds": ("DMSO", "Drug", "Drug2")}
+    _, plain, truth = _run(tmp_path, "plain", {}, **kw)
+    dest, out, _ = _run(tmp_path, "block", {"block": "replicate"}, **kw)
+    codes = {i.code: i for i in out.issues}
+    assert "DESIGN_NOT_USED" not in codes
+    assert "already block" in codes["BATCH_SUSPECT"].fixes[0] and codes["BATCH_SUSPECT"].data["blocked"]
+    assert "block: replicate" in {i.code: i for i in plain.issues}["BATCH_SUSPECT"].fixes[0]
+    summary = json.loads((dest / "results/analysis.json").read_text(encoding="utf-8"))
+    assert summary["model"]["formula"] == "~0 + condition + replicate" and summary["model"]["residual_df"] == 6
+    assert summary["settings"]["block"] == "replicate"
+    ft = summary["f_test"]
+    assert ft["reference"] == "DMSO" and ft["df1"] == 2 and ft["any_change"] > 0
+    header = (dest / "results/protein_results.tsv").read_text(encoding="utf-8").splitlines()[0].split("\t")
+    assert header[header.index("F"):header.index("F") + 3] == ["F", "F_p", "F_p_adj"]
+
+    def found(o, comp):
+        rows = next(d for d in o.summary["comparisons"] if d["name"] == comp)
+        return rows["up"] + rows["down"]
+    # the batch sits in the residuals of the plain model; blocking takes it out
+    assert found(out, "Drug vs DMSO") > found(plain, "Drug vs DMSO")
+    html = out.report.read_text(encoding="utf-8")
+    assert "~0 + condition + replicate" in html and "moderated F-statistic" in html
+    d = _payload(html)
+    assert d["F"]["ref"] == "DMSO" and len(d["F"]["q"]) == len(d["f"]["id"])
+    fa = dest / "results/fragpipe-analyst"
+    assert "repeats the PLAIN model" in (fa / "reproduce_in_R.R").read_text(encoding="utf-8")
+    script = (fa / "reproduce_design_in_R.R").read_text(encoding="utf-8")
+    assert "model.matrix(~0 + condition + replicate)" in script
+
+
+def test_a_confounded_block_falls_back_to_the_plain_model(tmp_path):
+    conds = ("DMSO", "Drug")
+    cfg = {"block": {f"{c}_{r}": c for c in conds for r in range(1, 5)}}  # the "batch" is the condition
+    dest, out, _ = _run(tmp_path, "conf", cfg)
+    pdest, plain, _ = _run(tmp_path, "plain", {})
+    issue = next(i for i in out.issues if i.code == "DESIGN_NOT_USED")
+    assert issue.severity == "input" and "single condition" in issue.message
+    assert out.summary["state"] == "needs_input"
+    same = "Drug_vs_DMSO_differential.tsv"
+    assert (dest / "results" / same).read_bytes() == (pdest / "results" / same).read_bytes()
+    assert "could not be used" in out.report.read_text(encoding="utf-8")
+
+
+def test_deqms_end_to_end_and_without_counts(tmp_path):
+    dest, out, _ = _run(tmp_path, "dq", {"variance_prior": "deqms"}, conds=("DMSO", "Drug", "Drug2"))
+    model = out.summary["model"]
+    assert model["variance_prior"] == "deqms" and model["prior"]["deqms_used"] and model["prior"]["d0"] > 0
+    assert "DEqMS" in out.report.read_text(encoding="utf-8")
+    assert not [i for i in out.issues if i.code == "DEQMS_NOT_USED"]
+    # a bare table has no peptide counts: limma's prior, with a warning
+    from ionomos import downstream
+
+    table = tmp_path / "t.tsv"
+    lines = ["Gene\t" + "\t".join(f"{c}_{r}" for c in ("A", "B") for r in (1, 2, 3))]
+    for g in range(60):
+        lines.append(f"G{g}\t" + "\t".join(f"{20 + (g % 7) * 0.3 + (0.9 if c == 'B' and g < 6 else 0) + r * 0.05:.3f}"
+                                           for c in ("A", "B") for r in (1, 2, 3)))
+    table.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    out = downstream.analyze(tmp_path / "tbl", table=table, analysis_cfg={"enrichment": False,
+                                                                           "variance_prior": "deqms"})
+    issue = next(i for i in out.issues if i.code == "DEQMS_NOT_USED")
+    assert issue.severity == "warning" and "no peptide" in issue.message
+
+
+def test_exported_design_script_reproduces_the_model_in_r(tmp_path):
+    """Dev-only: runs reproduce_design_in_R.R when R with limma is found (IONOMOS_R_LIBS names a library)."""
+    import os
+    import shutil
+    import subprocess
+
+    lib = os.environ.get("IONOMOS_R_LIBS", "")
+    if not shutil.which("Rscript") or subprocess.run(
+            ["Rscript", "-e", f".libPaths(c('{lib}', .libPaths())); library(limma)"] if lib else
+            ["Rscript", "-e", "library(limma)"], capture_output=True).returncode:
+        pytest.skip("R with limma not available (set IONOMOS_R_LIBS to its library)")
+    conds = ("DMSO", "Drug", "Drug2")
+    cov = {"age": {f"{c}_{r}": 30 + (7 * k + 3 * r) % 23 for k, c in enumerate(conds) for r in range(1, 5)},
+           "sex": {f"{c}_{r}": "FM"[(k + r) % 2] for k, c in enumerate(conds) for r in range(1, 5)}}
+    dest, out, _ = _run(tmp_path, "r", {"block": "replicate", "covariates": cov, "de_type": "all"}, batch=1.0,
+                        conds=conds)
+    assert out.summary["model"]["formula"] == "~0 + condition + replicate + age + sex"
+    fa = dest / "results/fragpipe-analyst"
+    script = fa / "reproduce_design_in_R.R"
+    if lib:
+        script.write_text(f".libPaths(c('{lib}', .libPaths()))\n" + script.read_text(encoding="utf-8"),
+                          encoding="utf-8")
+    subprocess.run(["Rscript", script.name], cwd=fa, check=True, capture_output=True)
+    _, rows = read_tsv(fa / "limma_design_results.tsv")
+    theirs = {(r["comparison"], r["id"]): r for r in rows}
+    n = 0
+    for d in out.summary["comparisons"]:
+        _, ours = read_tsv(dest / d["table"])
+        key = d["name"].replace(" vs ", "_vs_")
+        for o in ours:
+            t = theirs[(key, o["id"])]
+            for a, b in (("log2fc", "logFC"), ("pvalue", "P.Value"), ("qvalue", "adj.P.Val"), ("ci_low", "CI.L")):
+                if o[a] != "":
+                    assert _close(float(o[a]), float(t[b]), rel=1e-6), (key, o["id"], a)
+                    n += 1
+    assert n > 1000
