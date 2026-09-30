@@ -680,3 +680,79 @@ isoDTB requires a replicate, so a name ending in a setting is refused with a
 hint instead of guessed. `CE` is left out on purpose: as a condition it is
 too plausible.
 
+### D45 — The QC standard is trended from the searches Ionomos already runs
+**2026-09-30.** ROADMAP 5C #6. Labs inject a QC standard (a HeLa or K562
+digest) on a schedule to watch the LC and the mass spectrometer. The numbers
+usually end up in a spreadsheet, if anywhere. Ionomos files and searches every
+one of those runs, so it now trends them (`qctrend.py`, docs/QC_TREND.md).
+
+- **Recognised by name, not by a new folder.** A run counts when its folder
+  or `.raw` name contains a `qc_trend.match` word, or when its method is in
+  `qc_trend.methods`. The default words are `hela`, `k562`, `qc_std`, `qcstd`
+  and `_qc_`. `_ - .` and spaces are one separator, so `_qc_` means QC as a
+  word. HeLa is also a cell line people experiment on, so a folder with two
+  or more samples of two or more replicates each is an experiment, not a
+  standard. `exclude` covers the rest. Trending is on by default because it
+  is inert until a matching run is searched, and it never changes what
+  happens to the job.
+- **Numbers from the engines' own tables.** Every number is read from what
+  the search wrote:
+  - DIA-NN's per-run `stats.tsv`: IDs, total quantity, FWHM, and median
+    MS1/MS2 mass accuracy before its recalibration, so instrument drift shows
+  - the `pg_matrix`
+  - FragPipe's `psm.tsv` and `combined_protein.tsv`
+
+  Nothing is recomputed from spectra, and no raw-file reader is needed. The
+  DDA mass error is Observed vs Calculated Peptide Mass, isotope-error
+  corrected; more than 50 ppm counts as a mass offset and is ignored.
+  Tables are streamed and size-capped, and a broken one leaves a note on the
+  run. RT drift uses the standard's own 200 most intense peptides against
+  their baseline RTs (median over ≥ 5 shared peptides), so no iRT spike-in is
+  needed. Acquisition time comes from the Xcalibur stamp in the name, else
+  the raw file's modification time (intake keeps it), and the row records
+  which.
+- **One store per lab, next to the ledger.** `<log_dir>/qc_trend.jsonl`
+  (names.py) holds one JSON object per line and is appended. The last line
+  for a run (experiment folder + run name) wins when read, so a re-run
+  updates its row, and the file is compacted when mostly superseded. JSON
+  lines beat a second SQLite file here: they are readable, need no schema,
+  and survive a half-written last line. Experiment folders are only read.
+  `--rebuild` merges what it finds and keeps rows for runs no longer on
+  disk, for example experiments archived elsewhere.
+- **Classic laboratory QC, not a model.** Each series (instrument · method ·
+  standard · amount) has a baseline: the first `baseline_runs` (10), or the
+  runs between two pinned dates, for example after a column change. It gives
+  each metric's mean and SD, with the SD floored at 2 % of the mean for
+  counts so near-identical baseline runs can't turn noise into alarms.
+  Later runs get:
+  - Levey-Jennings z-scores
+  - the Westgard rules 1-3s, 2-2s, R-4s and 10-x, with 1-2s as a warning
+  - a tabular CUSUM (k = 0.5, h = 5 SD) for the slow drift single-run rules
+    miss
+
+  The CUSUM starts after the baseline, clips each z at ±3 and restarts after
+  a run another rule rejected. Without that, one failed injection read as
+  "drift" for weeks, which a test pins. These are the rules every clinical
+  and proteomics core already knows, so a verdict can be checked by hand.
+- **Direction matters.** Fewer IDs, less signal, broader peaks and more
+  missed cleavages are problems; any shift in mass error, RT or charge is a
+  problem either way; R-4s (imprecision) is always one. More IDs after a new
+  column is "watch", with a hint to pin a new baseline, not a warning.
+- **A warning, not a pop-up.** A broken rule on a series' newest run raises
+  an attention item (kind `qc_trend`, severity warning) with the likely
+  causes. The next run back within the baseline closes it. The instrument
+  still works, and nobody's experiment is blocked, so no window interrupts
+  whoever is at the PC. `qc_trend.popup: true` makes it one, like a failed
+  search.
+- **The page is static.** `<log_dir>/qc_trend.html` is SVG drawn in Python
+  with `<title>` tooltips and the report's stylesheet inlined. It has no
+  script, so it needs no JS harness and opens anywhere. It is rewritten after
+  each QC run and by `ionomos qc-trend`; the app's Jobs tab opens it.
+- **Isolated.** `postprocess.run_all` calls `qctrend.after_job` after the
+  analysis, even when the analysis crashed. `after_job` never raises, and its
+  verdicts go in the job's `ionomos.json` (`results.qc_trend`).
+
+Left open: TMT QC runs, the RT shift from DIA-NN 2.x `report.parquet`,
+telling instruments apart within one config, and tuning the SD floor and
+CUSUM h on real QC data.
+

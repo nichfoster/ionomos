@@ -16,6 +16,7 @@ Command line.
                                                    statistics + volcano plots + results/report.html
     ionomos demo     [FOLDER] [--open]            a simulated experiment + its report (offline, no lab setup)
     ionomos init     [--root DIR] [--users DIR]   create folders + a config without the app (headless setup)
+    ionomos qc-trend [--rebuild] [--open]         instrument QC: the QC-standard runs trended (logs/qc_trend.html)
     ionomos cancel   JOB_ID                       stop a running search / drop a queued job
     ionomos pause | resume                        hold / release the FragPipe queue
     ionomos repair-ledger [--force]               rebuild the job list from the experiment folders
@@ -692,6 +693,43 @@ def cmd_attention(args) -> int:
     return 0
 
 
+def cmd_qc_trend(args) -> int:
+    """(Re)build logs/qc_trend.html from the QC store; --rebuild (or an empty store) first re-reads every past
+    QC-standard run under users_root (read-only)."""
+    from ionomos import qctrend
+
+    cfg = _load(args, check_paths=False)
+    s = qctrend.settings_of(cfg)
+    rows = qctrend.load(cfg.log_dir)
+    if args.rebuild or not rows:
+        print(f"looking for QC-standard runs under {cfg.users_root} (read-only) …", flush=True)
+        found, notes = qctrend.scan(cfg)
+        for n in notes[:20]:
+            print(f"  note: {n}")
+        try:
+            qctrend.append(cfg.log_dir, found)
+            if found:
+                qctrend.compact(cfg.log_dir)
+        except OSError as exc:
+            print(f"cannot write the QC store in {cfg.log_dir}: {exc}", file=sys.stderr)
+            return 2
+        print(f"  {len(found)} QC run(s) found")
+        rows = qctrend.load(cfg.log_dir)
+    try:
+        page = qctrend.write_page(cfg.log_dir, s, rows)
+    except OSError as exc:
+        print(f"cannot write the QC page in {cfg.log_dir}: {exc}", file=sys.stderr)
+        return 2
+    for ser in qctrend.analyse(rows, s):
+        print(f"  {ser['name']}: {len(ser['runs'])} run(s), {ser['status']} — {ser['verdict']}")
+    if not rows:
+        print("  no QC-standard runs yet (qc_trend.match: " + ", ".join(s["match"]) + ")")
+    print(f"page: {page}")
+    if args.open:
+        _open_report(page)
+    return 0
+
+
 def cmd_cancel(args) -> int:
     from ionomos.worker import request_cancel
 
@@ -834,6 +872,11 @@ def main(argv: list[str] | None = None) -> int:
     at.add_argument("action", nargs="?", choices=["list", "show", "dismiss"], default="list")
     at.add_argument("item", nargs="?", help="item id (from the list)")
     at.set_defaults(fn=cmd_attention)
+    qt = sub.add_parser("qc-trend", help="instrument QC: trend the QC-standard runs (HeLa, K562 ...) in logs/qc_trend.html")
+    qt.add_argument("--rebuild", action="store_true",
+                    help="re-read every past QC run under users_root first (read-only; kept runs are updated)")
+    qt.add_argument("--open", action="store_true", help="open the page when done")
+    qt.set_defaults(fn=cmd_qc_trend)
     cn = sub.add_parser("cancel", help="cancel a queued or running job")
     cn.add_argument("job_id", type=int)
     cn.set_defaults(fn=cmd_cancel)

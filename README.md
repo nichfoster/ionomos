@@ -84,6 +84,7 @@ to put it on the PC.
 | [DEPLOY_WINDOWS.md](docs/DEPLOY_WINDOWS.md) | Step-by-step install of the finished tool on the proteomics PC |
 | [TESTING.md](docs/TESTING.md) | Test suite + testbed on macOS and Windows |
 | [FIRST_REAL_RUN.md](docs/FIRST_REAL_RUN.md) | Runbook for the first real FragPipe run on the PC (isoDTB, then DIA) |
+| [QC_TREND.md](docs/QC_TREND.md) | Instrument QC: how runs of the lab's QC standard (HeLa, K562) are recognised, measured, judged (Levey-Jennings, Westgard rules) and shown in `logs/qc_trend.html` |
 | [ENGINES.md](docs/ENGINES.md) | Results from other engines Ionomos can analyse (DIA-NN, MaxQuant, Spectronaut, AlphaDIA, MSstats format, Proteome Discoverer) and what it reads from each |
 
 ## Try the analysis on any computer

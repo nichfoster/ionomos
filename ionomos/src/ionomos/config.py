@@ -89,6 +89,7 @@ class Config:
     condition_codes: dict = field(default_factory=lambda: dict(DEFAULT_CONDITION_CODES))  # DIA X_D1 -> DMSO rep 1
     file_rules: dict[str, FileRule] = field(default_factory=lambda: dict(DEFAULT_FILE_RULES))  # naming.methods
     date_formats: tuple[str, ...] = DEFAULT_DATE_FORMATS  # naming.date_formats
+    qc_trend: dict = field(default_factory=dict)  # instrument QC trending (qctrend.py, D45); {} = defaults
 
     @property
     def method_aliases(self) -> dict[str, list[str]]:
@@ -259,6 +260,7 @@ def load(path: str | Path, check_paths: bool = True) -> Config:
         date_formats=date_formats,
         config_path=p,
         analysis=_analysis(raw.get("analysis")),
+        qc_trend=_qc_trend(raw.get("qc_trend")),
         user_ignore=tuple(str(x) for x in (users.get("ignore") if users.get("ignore") is not None else DEFAULT_USER_IGNORE)),
     )
 
@@ -329,6 +331,16 @@ def _analysis(raw) -> dict:
     except AnalysisError as exc:
         raise ConfigError(f"analysis: {exc}") from exc
     return {"enabled": True, **raw}
+
+
+def _qc_trend(raw) -> dict:
+    """qc_trend: section (instrument QC trending, D45), validated by the module that uses it."""
+    from ionomos.qctrend import QCTrendError, settings_from
+
+    try:
+        return settings_from(raw)
+    except QCTrendError as exc:
+        raise ConfigError(f"qc_trend.{exc}" if not str(exc).startswith("must") else f"qc_trend: {exc}") from None
 
 
 def _read_learned(path: Path) -> dict[str, list[str]]:
