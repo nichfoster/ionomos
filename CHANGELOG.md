@@ -105,6 +105,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `simulate.dia_pg_matrix` can name the proteins, plant chosen effects and
   leave proteins out of whole conditions. Output for existing seeds is
   unchanged.
+- ROADMAP Phase 5: 5A and most of the 5B imports ticked off; issues found on the way listed.
 - ROADMAP Phase 5 and D36: the plan for making Ionomos useful to other labs
   (pip-installable analysis, engine adapters, SDRF, configurable naming, more
   engines and analyses).
