@@ -98,6 +98,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Done notes, failure pop-ups and logs name the engine that ran.
 
+- **The watcher can run MaxQuant** for a DDA method (`engine: maxquant`,
+  `maxquant_exe`, optional lab `mqpar`; D50, docs/ENGINES.md). Each job's
+  `ionomos_run/mqpar.xml` starts from the lab's saved parameters or MaxQuant's
+  own `--create` template. The job's raws, `<condition>_<replicate>`
+  experiments, fractions from the names, FASTA, threads and output folder are
+  filled in. Results go to `maxquant/`, and the analysis reads
+  `proteinGroups.txt`.
+
 ### Changed
 
 - ROADMAP Phase 6 (D49): a local AI assistant on the proteomics PC. It runs local-first, grounded in citations,

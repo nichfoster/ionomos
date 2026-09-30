@@ -59,8 +59,12 @@ def prepare(dest: Path, cfg, method: str | None = None, extra: dict | None = Non
     mod_mass = "561.3387"
     if cfg is not None and method in getattr(cfg, "methods", {}):
         mod_mass = str(cfg.methods[method].extra.get("isodtb_mod_mass", mod_mass))
-    return {"dest": dest, "method": method, "lab": lab, "overrides": {**overrides, **(extra or {})}, "record": record,
-            "context": context_for(dest, record, method or "?"), "mod_mass": mod_mass}
+    analysis_method = method
+    if cfg is not None and method in getattr(cfg, "methods", {}) and \
+            str(cfg.methods[method].extra.get("engine", "")).lower() == "maxquant":
+        analysis_method = "MaxQuant"  # read proteinGroups.txt whatever the lab calls the method (engines.py)
+    return {"dest": dest, "method": analysis_method, "lab": lab, "overrides": {**overrides, **(extra or {})},
+            "record": record, "context": context_for(dest, record, method or "?"), "mod_mass": mod_mass}
 
 
 def table_workspace(table: Path) -> Path:
