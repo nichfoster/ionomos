@@ -14,8 +14,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+parquet = [  # DIA-NN 2.x report.parquet (downstream/engines.py); everything else needs no extra package
+    "pyarrow>=14",
+]
 dev = [
     "pytest>=8",
+    "pyarrow>=14",
     "ruff>=0.5",
     "pyinstaller>=6.10",
     "pip>=26.2",

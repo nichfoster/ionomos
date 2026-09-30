@@ -98,8 +98,10 @@ def choose_samples(m: QuantMatrix, exclude: list[str] | None = None,
 
 
 def remove_contaminants(m: QuantMatrix) -> tuple[QuantMatrix, int]:
-    """FragPipe-Analyst: rows whose protein contains "contam" (FragPipe's contam_ prefix) are dropped."""
-    keep = [i for i, f in enumerate(m.features) if "contam" not in f.id and "contam_" not in f.label]
+    """FragPipe-Analyst: rows whose protein contains "contam" (FragPipe's contam_ prefix) are dropped; MaxQuant's
+    CON__ prefix too."""
+    keep = [i for i, f in enumerate(m.features)  # FragPipe contam_, MaxQuant CON__
+            if "contam" not in f.id and "contam_" not in f.label and not f.id.startswith("CON__")]
     if len(keep) == len(m.features):
         return m, 0
     return _copy(m, [m.features[i] for i in keep], [list(m.values[i]) for i in keep]), len(m.features) - len(keep)

@@ -90,7 +90,9 @@ def test_maxquant_protein_groups(tmp_path):
         lfq = [0 if rng.random() < 0.05 else round(_intensity(rng, c, g)) for c, _ in SAMPLES]
         rows.append([f"P{k}", f"{g} protein", g, 4, sum(lfq), *lfq, *lfq, "+" if k == 299 else "", ""])
     ws, out = _analyze(_write(tmp_path / "txt" / "proteinGroups.txt", h, rows))
-    assert out.summary["method"] == "table" and len(out.summary["samples"]) == 6
+    # recognised as MaxQuant (engines.py, D36), read by the same any-table loader
+    assert out.summary["method"] == "MaxQuant" and len(out.summary["samples"]) == 6
+    assert out.summary["engine"]["engine"] == "MaxQuant"
     assert set(out.summary["samples"].values()) == {"DMSO", "Drug"}
     assert out.summary["features"] == 299  # the Reverse '+' row is left out
     assert any("LFQ intensity" in n for n in out.warnings) and any("log2-transformed" in n for n in out.warnings)
@@ -190,7 +192,7 @@ def test_folder_scan_finds_the_matrix_and_skips_long_tables(tmp_path):
            [[g, *[round(_intensity(rng, c, g)) for c, _ in SAMPLES]] for g in GENES])
     assert anytable.find_table(tmp_path).name == "proteinGroups.txt"
     out = downstream.analyze(tmp_path, analysis_cfg={"enrichment": False})
-    assert out.summary["method"] == "table" and len(out.summary["samples"]) == 6
+    assert out.summary["method"] == "MaxQuant" and len(out.summary["samples"]) == 6
 
 
 def test_analysing_a_table_never_touches_files_beside_it(tmp_path):

@@ -22,6 +22,8 @@ Layout it reads and writes (inside the experiment folder):
 Pipeline stages, each a module:
     method prep   isodtb.py / tmt.py           (ports of the lab R scripts)
     quantities    quant.py   -> QuantMatrix    (one shape for every method)
+                  engines.py                   (other engines' outputs: DIA-NN, MaxQuant, Spectronaut, AlphaDIA,
+                                                MSstats format, Proteome Discoverer; provenance of any result)
     statistics    analysis.py + stats.py       (comparisons, Welch / one-sample t, BH)
     QC, insights  qc.py + insights.py + enrich.py  (PCA, scorecard, batch, missingness, on/off, gene sets)
     presentation  charts.py + report.py        (SVG + HTML)
@@ -39,7 +41,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from ionomos.downstream import analysis, anytable, charts, isodtb, quant, report, tmt
+from ionomos.downstream import analysis, anytable, charts, engines, isodtb, quant, report, tmt
 from ionomos.downstream.tables import read_header, write_tsv
 
 log = logging.getLogger("ionomos.downstream")
@@ -77,6 +79,9 @@ def detect_method(workdir: Path) -> str | None:
         return "DIA"
     if _find(workdir, "combined_protein.tsv"):
         return "LFQ"
+    found = engines.detect(workdir)  # DIA-NN standalone, MaxQuant, Spectronaut, AlphaDIA, MSstats format, PD
+    if found:
+        return found.method
     if anytable.find_table(workdir):
         return "table"
     return None
@@ -120,6 +125,9 @@ def load_quantities(method: str | None, workdir: Path, results: Path, record: di
     files: list[Path] = []
     notes: list[str] = []
     results.mkdir(parents=True, exist_ok=True)
+    if method in engines.METHODS:  # results from another engine (engines.py)
+        m, enotes = engines.load(method, Path(table) if table is not None else workdir)
+        return m, files, notes + enotes
     if table is not None or method == "table":
         path = Path(table) if table is not None else anytable.find_table(workdir)
         if path is None:
@@ -333,8 +341,9 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
                                    f"{results}: {exc}", ["The disk is full", "The folder is read-only or open elsewhere"],
                                    ["Free disk space / close programs using the folder, then Re-run analysis"])]
         return out
-    if table is not None:
-        method = "table"
+    if table is not None:  # a file: another engine's own format when recognised, else any table
+        found = engines.detect(Path(table))
+        method = found.method if found else "table"
     out.method = method = method if method and method != "auto" else detect_method(workdir)
     f.method = method
     settings, snotes = analysis.settings_lenient(analysis_cfg, overrides)
@@ -499,6 +508,8 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     out.issues = doctor.check(f)
     out.warnings += notes
     ctx = {"version": __version__, **(context or {})}
+    ctx["engine"] = stage("provenance", engines.provenance, Path(table) if table is not None else workdir, method,
+                          m.source if m is not None else "", m.meta if m is not None else {}) or {}
     if not ctx.get("method") or ctx["method"] == "?":
         ctx["method"] = method or "unknown method"
     ctx.setdefault("experiment", dest.name)
@@ -545,6 +556,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
                            for b in ranked],
         "quality": _quality_summary(insight),
         "source": m.source if m else None,
+        "engine": ctx.get("engine") or {},
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "ionomos_version": __version__,
         "notes": out.warnings,
