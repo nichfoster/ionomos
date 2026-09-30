@@ -686,6 +686,7 @@ class App:
         ttk.Button(b, text="Apply changes", command=self.apply_method).pack(side="left", padx=4)
         ttk.Button(b, text="New method", command=self.new_method).pack(side="left", padx=4)
         ttk.Button(b, text="Remove method", command=self.remove_method).pack(side="left", padx=4)
+        ttk.Button(b, text="Test names…", command=self.test_names).pack(side="left", padx=4)
         ttk.Button(b, text="Import workflow…", command=self.import_workflow).pack(side="left", padx=12)
         ttk.Button(b, text="Open workflows folder", command=lambda: self._open(self.v("paths.workflow_dir").get())).pack(side="left", padx=4)
         ttk.Button(b, text="Open FASTA folder", command=lambda: self._open(self.v("paths.fasta_dir").get())).pack(side="left", padx=4)
@@ -813,6 +814,36 @@ class App:
         if messagebox.askyesno("Remove method", f"Remove {sel[0]}?"):
             self.data["methods"].pop(sel[0], None)
             self._refresh_methods()
+
+    def test_names(self):
+        """A small window: type names, see how the settings in this app read them (namecheck, D37)."""
+        from ionomos.namecheck import report_from_data
+
+        win = tk.Toplevel(self.root)
+        win.title("Test your names")
+        win.transient(self.root)
+        f = ttk.Frame(win, padding=10)
+        f.pack(fill="both", expand=True)
+        ttk.Label(f, text="One name per line: a folder name, then its .raw file names (or a folder's path). "
+                          "Uses the settings in this window, saved or not; nothing is moved.",
+                  wraplength=640).pack(anchor="w")
+        inp = tk.Text(f, width=90, height=6)
+        inp.pack(fill="x", pady=4)
+        inp.insert("1.0", "20260902_EJQ_isoDTB_EJQ-2-027\nEJQ_PK_EJQ-2-027_isoDTB_1uM_3h_1_1.raw\n")
+        out = tk.Text(f, width=90, height=18, wrap="none", state="disabled")
+
+        def run():
+            try:
+                text = report_from_data(self._collect(), inp.get("1.0", "end"), self.config_path)
+            except ConfigError as exc:
+                text = f"config problem: {exc}\n"
+            out.configure(state="normal")
+            out.delete("1.0", "end")
+            out.insert("1.0", text)
+            out.configure(state="disabled")
+
+        ttk.Button(f, text="Test", command=run).pack(anchor="w")
+        out.pack(fill="both", expand=True, pady=(6, 0))
 
     # ----------------------------------------------------- tab: advanced ----
 

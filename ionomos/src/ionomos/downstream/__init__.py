@@ -17,13 +17,17 @@ Layout it reads and writes (inside the experiment folder):
       sample_qc.tsv                 the per-sample scorecard (insights.py)
       presence_absence.tsv          features measured in one group and never in the other
       gene_set_ranks.tsv            rank-based gene-set test on every protein (enrichment on)
-      analysis.json                 what was done, with which settings (reproducibility), + "quality"
+      sdrf.tsv                      SDRF-Proteomics sample metadata: a row per raw file (and label), for PRIDE
+      analysis.json                what was done, with which settings (reproducibility), + "quality"
 
 Pipeline stages, each a module:
     method prep   isodtb.py / tmt.py           (ports of the lab R scripts)
     quantities    quant.py   -> QuantMatrix    (one shape for every method)
+                  engines.py                   (other engines' outputs: DIA-NN, MaxQuant, Spectronaut, AlphaDIA,
+                                                MSstats format, Proteome Discoverer; provenance of any result)
     statistics    analysis.py + stats.py       (comparisons, Welch / one-sample t, BH)
     QC, insights  qc.py + insights.py + enrich.py  (PCA, scorecard, batch, missingness, on/off, gene sets)
+    metadata      sdrf.py                      (SDRF-Proteomics, from the manifest, workflow and FASTA)
     presentation  charts.py + report.py        (SVG + HTML)
 
 Adding a method or an output means adding one loader or one renderer; the
@@ -39,7 +43,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from ionomos.downstream import analysis, anytable, charts, isodtb, quant, report, tmt
+from ionomos.downstream import analysis, anytable, charts, engines, isodtb, quant, report, tmt
 from ionomos.downstream.tables import read_header, write_tsv
 
 log = logging.getLogger("ionomos.downstream")
@@ -77,6 +81,9 @@ def detect_method(workdir: Path) -> str | None:
         return "DIA"
     if _find(workdir, "combined_protein.tsv"):
         return "LFQ"
+    found = engines.detect(workdir)  # DIA-NN standalone, MaxQuant, Spectronaut, AlphaDIA, MSstats format, PD
+    if found:
+        return found.method
     if anytable.find_table(workdir):
         return "table"
     return None
@@ -120,6 +127,9 @@ def load_quantities(method: str | None, workdir: Path, results: Path, record: di
     files: list[Path] = []
     notes: list[str] = []
     results.mkdir(parents=True, exist_ok=True)
+    if method in engines.METHODS:  # results from another engine (engines.py)
+        m, enotes = engines.load(method, Path(table) if table is not None else workdir)
+        return m, files, notes + enotes
     if table is not None or method == "table":
         path = Path(table) if table is not None else anytable.find_table(workdir)
         if path is None:
@@ -338,8 +348,9 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
                                    f"{results}: {exc}", ["The disk is full", "The folder is read-only or open elsewhere"],
                                    ["Free disk space / close programs using the folder, then Re-run analysis"])]
         return out
-    if table is not None:
-        method = "table"
+    if table is not None:  # a file: another engine's own format when recognised, else any table
+        found = engines.detect(Path(table))
+        method = found.method if found else "table"
     out.method = method = method if method and method != "auto" else detect_method(workdir)
     f.method = method
     settings, snotes = analysis.settings_lenient(analysis_cfg, overrides)
@@ -498,17 +509,23 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
         exported = stage("export", export.fragpipe_analyst, results / "fragpipe-analyst", m, processed, diffs,
                          settings, comps)
         out.files += exported or []
+    say("sample metadata (SDRF)")
+    sdrf_info = stage("sdrf", _sdrf, method, dest, workdir, record, m, processed, settings, __version__, results,
+                      out) or {"file": None, "reason": "the SDRF step failed (see analysis_error.txt)"}
     f.diffs = diffs
     f.enrichment_notes = enr_notes
     f.insights = insight
     out.issues = doctor.check(f)
     out.warnings += notes
     ctx = {"version": __version__, **(context or {})}
+    ctx["engine"] = stage("provenance", engines.provenance, Path(table) if table is not None else workdir, method,
+                          m.source if m is not None else "", m.meta if m is not None else {}) or {}
     if not ctx.get("method") or ctx["method"] == "?":
         ctx["method"] = method or "unknown method"
     ctx.setdefault("experiment", dest.name)
     ctx["enrichment_notes"] = enr_notes
     ctx["issues"] = [i.as_dict() for i in out.issues]
+    ctx["sdrf"] = sdrf_info
     say("writing the report")
     rel = [str(p.relative_to(results)).replace("\\", "/") if p.is_relative_to(results) else p.name
            for p in out.files]
@@ -549,7 +566,9 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
                             "top": [f"{t['term']} ({t['direction']})" for t in b["terms"][:5] if t["q"] <= 0.05]}
                            for b in ranked],
         "quality": _quality_summary(insight),
+        "sdrf": sdrf_info,
         "source": m.source if m else None,
+        "engine": ctx.get("engine") or {},
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "ionomos_version": __version__,
         "notes": out.warnings,
@@ -561,6 +580,18 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     except OSError as exc:
         out.warnings.append(f"could not write analysis.json: {exc}")
     return out
+
+
+def _sdrf(method, dest: Path, workdir: Path, record, m, processed, settings, version: str, results: Path,
+          out: Outcome) -> dict:
+    """results/sdrf.tsv (SDRF-Proteomics sample metadata) and its analysis.json entry."""
+    from ionomos.downstream import sdrf
+
+    sd, reason = sdrf.build(method, dest, workdir, record, m, processed, settings, version)
+    if sd is None:
+        return sdrf.summary(None, reason, "")
+    out.files.append(sdrf.write(results / "sdrf.tsv", sd))
+    return sdrf.summary(sd, "", f"{RESULTS}/sdrf.tsv")
 
 
 def _write_enrichment(results: Path, enrichment, ranked, stage, out) -> None:

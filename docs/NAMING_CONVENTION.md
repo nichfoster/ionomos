@@ -7,7 +7,13 @@ name is reserved for replicate/fraction numbers, and what those numbers mean
 depends on the method.
 
 Implemented in `ionomos/src/ionomos/naming.py`; `ionomos dry-run <folder>`
-shows exactly how a folder will be interpreted without touching it.
+shows exactly how a folder will be interpreted without touching it, and
+`ionomos names test <names…>` shows how any list of names is read.
+
+Everything below is this lab's convention, which is the default. Another lab
+can change the file patterns, date formats and condition codes in
+`config.yaml` without touching code: see
+[Other conventions (config)](#other-conventions-config).
 
 ## Folder name
 
@@ -17,7 +23,7 @@ Anything you like, as long as the name contains:
 |---|---|---|
 | **Method** | keyword anywhere in the folder name (case-insensitive): `isoDTB`, `TMT`, `DIA` (aliases configurable, e.g. `DIANN`). If the folder name has none, the **raw file names** are searched too | `20260902-isoDTB_EJQ-2-027`, `THB10ISODTB`, `KL6159A_9plex_TMT`, `EJQ_123_DIA` |
 | **User** | your initials or your folder name under `C:\Fragpipe_General\`. Matched as a token (split on `_ - . space ( )`) **or glued to an ID** (`IJD05`, `EJQ123`, `THB10`). Aliases live in `config.yaml` (`IJ` → `Isaac`); the resolver window can add them | `EJQ_isoDTB_…`, `IJD05_isoDTB`, `Taylor Elements TMT run 3` |
-| *(optional)* **Date** | `YYYYMMDD`, `YYYY-MM-DD`, `MMDDYYYY`, `MM-DD-YYYY` or `MMDDYY` — the six-digit `MMDDYY` form only when its year `20yy` falls within `[today.year − 25, today.year + 1]` (the last 25 years through next year; a run ID like `113056` is never a date). If absent, the drop date is recorded | `20260902`, `2026-09-02`, `08172026`, `081726` |
+| *(optional)* **Date** | `YYYYMMDD`, `YYYY-MM-DD`, `MMDDYYYY`, `MM-DD-YYYY` or `MMDDYY`, tried in that order (`naming.date_formats`) — the six-digit `MMDDYY` form only when its year `20yy` falls within `[today.year − 25, today.year + 1]` (the last 25 years through next year; a run ID like `113056` is never a date). If absent, the drop date is recorded | `20260902`, `2026-09-02`, `08172026`, `081726` |
 
 Recommended shape (sorts well, unambiguous): `YYYYMMDD_<initials>_<method>_<whatever>`
 e.g. `20260902_EJQ_isoDTB_EJQ-2-027_1uM-3h`.
@@ -113,6 +119,98 @@ is filed.
 
 Raw files may sit at the top level or in a `raw\` subfolder. Anything else in
 the folder (`.xlsx`, notes, `.mzML`) is carried along untouched.
+
+## Other conventions (config)
+
+Another lab's names are a `config.yaml` change, not a code change (D37).
+With no `naming:` block, or with the defaults written out, everything above
+applies exactly as described.
+
+```yaml
+naming:
+  date_formats: [YYYYMMDD, DDMMYYYY]   # tried in order; default [YYYYMMDD, MMDDYYYY, MMDDYY]
+  condition_codes: {V: Vehicle, T: Treated}   # DIA short forms; replaces the default D / C list
+  methods:                     # how each method's .raw names are read
+    DIA: '{condition}_rep{rep}'            # a template (shorthand for files:)
+    LFQ:                                   # a method of your own (it also needs a methods.LFQ entry)
+      files: '{sample}_R{rep}_F{fraction}'
+    SWATH: {like: DIA}                     # DIA's rule and short codes, under another name
+    PLATE:                                 # a regex, for names a template can't describe
+      pattern: '(?P<sample>[A-H]\d{2})-(?P<rep>\d+)(?:_(?P<fraction>\d+))?'
+```
+
+**Templates.** Quote them in YAML (a bare `{` starts a YAML mapping).
+
+| In a template | Means |
+|---|---|
+| `{sample}` or `{condition}` | the FragPipe experiment (required, once, not inside `[ ]`) |
+| `{rep}` (`{replicate}`, `{biorep}`) | the bioreplicate: 1–3 digits, after an optional `R`, `rep`, `bio`, `biorep` or `n` |
+| `{fraction}` (`{frac}`) | the fraction: 1–3 digits, after an optional `F`, `frac` or `fraction` |
+| `{any}` | text that is skipped (e.g. an instrument setting after the numbers) |
+| `[ … ]` | an optional part (not nested) |
+| `_` or `-` | either separator |
+| letters, digits, `.` | themselves; letters match either case |
+
+A method whose template has no `{rep}` is always bioreplicate 1 (as TMT);
+one without `{fraction}` is single-shot. The built-in rules are templates
+too, and compile to the same regular expressions as before:
+
+| Method | Built-in template |
+|---|---|
+| isoDTB | `{sample}_{rep}[_{fraction}]` |
+| TMT | `{sample}[_TMT][_{fraction}]` |
+| DIA | `{sample}[_{rep}]` (plus the short condition codes) |
+
+**Regular expressions** (`pattern:`) must have a named group `sample` (or
+`condition`) and may have `rep` and `fraction`. The whole file name, without
+`.raw`, must match; put `(?i)` in front to ignore case.
+
+**The same checks apply to every rule.** A replicate or fraction must be
+1–999 (D30); a template never reads more than three digits as a number; the
+Xcalibur `_YYYYMMDDhhmmss` stamp is ignored; every replicate needs the same
+fractions. A method's keywords stay in `methods.<name>.aliases` (the app's
+Methods tab edits them), and one keyword can belong to only one method.
+
+**`like:`** borrows a built-in method's rule (and, for `DIA`, its short
+condition codes; `condition_codes: false` turns those off). It only changes
+how names are read. After FragPipe, the lab's isoDTB / TMT / DIA analysis still
+follows the method's name, so a method with a new name gets the generic
+analysis (`combined_protein.tsv`). To call DIA by another word, add the word to
+`methods.DIA.aliases` instead of renaming the method.
+
+Date formats: `YYYYMMDD`, `MMDDYYYY`, `DDMMYYYY` (separators `-`, `_` or
+`.` allowed), and the six-digit `MMDDYY`, `DDMMYY`, `YYMMDD` (only within the
+D30 year window). Ambiguous names (`03042026`) take the first format that fits.
+
+A mistake in the block stops the config from loading, with the reason
+(`naming.methods.DIA: '{rep}_{fraction}' needs {sample} once, outside [ ]
+(it names the experiment)`), so the watcher keeps the last good config and
+the app refuses to save it.
+
+### Test your names
+
+```
+ionomos names test 2026-09-30__jdoe__DIA__liver WT-a_rep1.raw KO-b_rep2.raw KO-b_2.raw
+
+REJECT  folder 2026-09-30__jdoe__DIA__liver
+  renamed to : 2026-09-30_jdoe_DIA_liver
+  user       : jdoe
+  method     : DIA
+  file rule  : {condition}_rep{rep}
+  date       : 2026-09-30
+  files      :
+    WT-a_rep1.raw   sample WT-a · replicate 1 · no fraction   [DIA]
+    KO-b_rep2.raw   sample KO-b · replicate 2 · no fraction   [DIA]
+    KO-b_2.raw   ✗ 'KO-b_2.raw': DIA files must look like {condition}_rep{rep}.raw
+```
+
+Each argument is a folder name, a `.raw` name, or a folder on disk (its name
+and its raws). `.raw` names after a folder name are read as that folder's
+files. A `.raw` name on its own is read by the method keyword in it, or
+`--method`, or else once per method. It uses the live `config.yaml` and
+touches nothing. Exit code 0 means every name was read. The app's **Methods**
+tab has the same check (**Test names…**), using the settings in the window
+whether or not they are saved.
 
 ## Raw files dropped without a folder
 
@@ -217,6 +315,8 @@ analysis:                   # results/report.html for this experiment (lab defau
   control: DMSO             # default: recognised by name (DMSO, vehicle, ctrl, WT, ...)
   log2fc: 1                 # also: alpha, use_adjusted, min_valid, normalize, test, top_labels
   enrichment_gmt: sets.gmt  # extra gene sets; a relative path is read from this folder first
+  sdrf:                     # sample metadata for results/sdrf.tsv (lab-wide values: config.yaml analysis.sdrf)
+    cell_type: HEK293T      # also: organism, organism_part, disease, instrument, cleavage_agent
 
 notes: "24 h treatment, 1 µM"   # copied into ionomos.json for provenance
 ```

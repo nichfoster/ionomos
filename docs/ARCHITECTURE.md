@@ -20,7 +20,8 @@
 |---|---|---|
 | `config.py` | Load + validate `config.yaml`; resolve per-method defaults | `prior-work/config_loader.py` |
 | `watcher.py` | Poll the inbox; detect new **folders**; wait for copy to finish | `prior-work/watcher.py` (size-stability idea, generalised to a tree) |
-| `naming.py` | Pure functions: folder name → fields; raw filename → (sample, rep, fraction) | — |
+| `naming.py` | Pure functions: folder name → fields; raw filename → (sample, rep, fraction). Per-method file rules are templates or regexes, date formats a list, both from `config.yaml` `naming:` (D37) | — |
+| `namecheck.py` | "Test your names": how the live config reads folder / `.raw` names (`ionomos names test`, app Methods tab → **Test names…**); read-only | — |
 | `manifest.py` | Read/validate `experiment.yaml`; build `.fp-manifest` + TMT `annotation.txt` | `prior-work/fragpipe_runner.build_manifest` |
 | `intake.py` | Validate a stable folder, show it for review (or hand unresolvable names to the resolver), move it to the user dir, write `ionomos.json`, insert ledger row. The watcher passes a `config.LiveConfig`, so edits to config.yaml apply to the next drop | — |
 | `resolve.py` | tkinter window for fixing user/method/file tails; writes `experiment.yaml` + learned aliases | — |
@@ -30,15 +31,16 @@
 | `configio.py` | config.yaml as a dict; writes a commented file | — |
 | `service.py` | child processes, PID file, Task Scheduler, remembered config path, exe routing; dev install: git update, diagnostics bundle | — |
 | `ledger.py` | SQLite job table + status transitions; source of truth for "what's queued" | `prior-work/store.py` |
-| `worker.py` | Thread inside `ionomos run`: first runnable `queued` job → FragPipe → done/failed; holds jobs whose setup files are missing. Sequential. | `prior-work/queue_worker.py` |
+| `worker.py` | Thread inside `ionomos run`: first runnable `queued` job → FragPipe or DIA-NN (runner.py) → done/failed; holds jobs whose setup files are missing. Sequential. | `prior-work/queue_worker.py` |
 | `fragpipe.py` | Prepare a job (launcher, workflow with `database.db-path` patched to the method's FASTA, manifest, TMT annotation), run headless with timeout/stop, kill the process tree | `prior-work/fragpipe_runner.py` |
+| `diann.py`, `runner.py` | `engine: diann` methods: prepare a DIA-NN job (the lab's `diann_exe`, FASTA or spectral library, `ionomos_run/diann.cfg`), output in `diann/`; `runner` picks FragPipe or DIA-NN per method, and both use `fragpipe.run`'s start / cancel / stop / timeout loop (D39) | — |
 | `postprocess.py` | After a done job: runs `downstream` (or only the R-port prep steps when analysis is off); `ionomos analyze` and the Analysis tab use it too (`prepare`, `inspect_folder`) | — |
 | `analysis_tab.py` | App tab 7: analyse one experiment (samples, conditions, comparisons → experiment.yaml, Run) and the lab defaults | — |
 | `experiment_editor.py` | One experiment's analysis choices as a Tk panel (samples, conditions, comparisons, cut-offs, Run, issues); used by tab 7 and the pop-ups | — |
 | `attention.py` | Durable "needs a person" queue (`<log_dir>/attention/*.json`): raised by intake, worker, analysis; closed when fixed | — |
 | `popups.py` | Pop-up windows + the "needs attention" list, in the app or (app closed) the watcher's own Tk loop | — |
 | `downstream/doctor.py` | The analysis check-up: issues with severity, likely causes, fixes; condition suggestions from file names | — |
-| `downstream/` | FragPipe tables → `QuantMatrix` → FragPipe-Analyst processing + limma → interactive `results/report.html`. `isodtb.py`/`tmt.py` (R ports), `quant.py` (loaders), `fpa.py` (FragPipeAnalystR port: filter, normalise, impute, `test_limma`), `rrandom.py` (R's RNG), `analysis.py` (settings, comparisons), `qc.py` (PCA, clustering, CV, missingness), `insights.py` (sample scorecard, PC ↔ condition/replicate, missingness vs intensity, p-value shape + π0, on/off features, imputation-driven hits, power; D35), `enrich.py` (local ORA and a correlation-adjusted rank test on Enrichr libraries), `export.py` (result tables, FragPipe-Analyst annotation + R script), `report.py` + `assets/report.js`, `charts.py` (static SVG volcano), `stats.py`, `simulate.py` | the lab's R scripts; FragPipeAnalystR; limma |
+| `downstream/` | FragPipe tables → `QuantMatrix` → FragPipe-Analyst processing + limma → interactive `results/report.html`. `isodtb.py`/`tmt.py` (R ports), `quant.py` (loaders), `engines.py` (other engines' outputs — DIA-NN standalone incl. 2.x Parquet, MaxQuant, Spectronaut, AlphaDIA, MSstats format, Proteome Discoverer — and the provenance of any result; ENGINES.md, D36), `fpa.py` (FragPipeAnalystR port: filter, normalise, impute, `test_limma`), `rrandom.py` (R's RNG), `analysis.py` (settings, comparisons), `qc.py` (PCA, clustering, CV, missingness), `insights.py` (sample scorecard, PC ↔ condition/replicate, missingness vs intensity, p-value shape + π0, on/off features, imputation-driven hits, power; D35), `enrich.py` (local ORA and a correlation-adjusted rank test on Enrichr libraries), `export.py` (result tables, FragPipe-Analyst annotation + R script), `sdrf.py` (SDRF-Proteomics sample metadata; D38), `report.py` + `assets/report.js`, `charts.py` (static SVG volcano), `stats.py`, `simulate.py` | the lab's R scripts; FragPipeAnalystR; limma |
 | `setupcheck.py` | The setup checklist (app ✓ Setup tab, `ionomos init`) | — |
 | `names.py` | Every on-disk / system name, with its LabWatch-era twin; readers accept both, writers use the new one | — |
 | `buildinfo.py` | `Ionomos 0.5.0 (build 3f2a9c1, date, installed)` — `--version`, app footer, every report | — |
@@ -50,7 +52,7 @@
 | `runners/isodtb.py` | Post-proc: modified-peptide → site merge — thin entry point delegating to `downstream/isodtb.py`, which holds the algorithm | port of `lab-scripts/isoDTB_…R` |
 | `runners/tmt.py` | Post-proc: experimental annotation fix | port of `lab-scripts/correct_experimental_annotation…R` |
 | `runners/dia.py` | Post-proc: (TBD — probably nothing beyond copying `report.tsv` up) | — |
-| `cli.py` | `ionomos setup / run / check / status / dry-run / retry / testbed / diagnose / update`; no args → app; hidden `fake-fragpipe` for the testbed | — |
+| `cli.py` | `ionomos setup / run / check / status / dry-run / names test / retry / testbed / diagnose / update`; no args → app; hidden `fake-fragpipe` for the testbed | — |
 
 ## Data flow for one job
 
@@ -123,6 +125,8 @@ C:\Fragpipe_General\<user>\<experiment>\    ← where jobs land
   results\                           ← post-processing output
     <experiment>_sites.tsv           (isoDTB)
     experimental_annotation.tsv      (TMT)
+    report.html, analysis.json, …    (the analysis; see "Downstream pipeline")
+    sdrf.tsv                         SDRF-Proteomics sample metadata, one row per raw file (and label)
   DONE.txt | FAILED.txt              ← human-facing one-line status
 ```
 
@@ -278,6 +282,26 @@ notes in the report and warnings on the job, and `ionomos analyze` / Jobs →
 Re-run analysis / the Analysis tab redo it with new settings.
 `results/fragpipe-analyst/` holds an `experiment_annotation.tsv` and a
 `reproduce_in_R.R` that repeat the analysis in FragPipeAnalystR (D24).
+
+`results/sdrf.tsv` (`downstream/sdrf.py`, D38) is the experiment's sample
+sheet in SDRF-Proteomics v1.1.0 (template `ms-proteomics`), the format PRIDE
+and reanalysis pipelines read. It is its own isolated stage, after the
+statistics and before the report:
+
+| Column(s) | Source |
+|---|---|
+| rows | one per raw file in `ionomos.json` `plan.manifest` (experiment.yaml corrections applied); TMT: one per file × channel; isoDTB: a light and a heavy row per file (`ICAT light` / `ICAT heavy`, sharing the assay name). Without a manifest: the quant table's run columns, else the raws in the folder |
+| `source name`, `characteristics[biological replicate]` | the sample (`DMSO_1`; TMT: the channel's sample name) and its replicate; a replicate number is never reused within a condition (a sample moved to another condition gets the next free one) |
+| `comment[fraction identifier]` | read from the file name (`_<rep>_<fraction>`), else 1 |
+| `comment[label]` | `label free sample`, `TMT126`…, `ICAT light/heavy`; TMT channels from `annotation.txt` next to the raws, else experiment.yaml `tmt:`, else names like `DMSO_1_126` |
+| `factor value[condition]` | the condition the analysis used (after `sample_conditions`); samples left out are still listed with theirs |
+| `characteristics[organism]` | `analysis.sdrf.organism`, else the FASTA's UniProt `OS=` (one species ≥ 90 % of targets) |
+| `comment[cleavage agent details]`, `comment[modification parameters]` | `analysis.sdrf.cleavage_agent`, else the MSFragger enzyme in `fragpipe/fragpipe.workflow`; enabled fixed/variable mods mapped to Unimod (unknown masses keep `MM=`) |
+| `comment[instrument]`, organism part, cell type, disease | `analysis.sdrf` only (config.yaml lab-wide, experiment.yaml per experiment) |
+
+Unknown values are `not available`. `analysis.json` → `sdrf` lists the columns
+a repository still needs filled (`fill_in`), and the report's Methods says so.
+A table analysed on its own (D33) gets no SDRF: it names no raw files.
 
 ## Packaging, updates, support (0.5.0)
 

@@ -25,6 +25,9 @@ experiment.yaml `analysis:` block:
       enrichment: true
       enrichment_libraries: [Hallmark, GO Biological Process, Reactome]
       top_labels: 15              # names drawn on each static volcano
+      sdrf:                       # sample metadata for results/sdrf.tsv (sdrf.py): lab-wide in config.yaml,
+        instrument: Orbitrap Eclipse   # per experiment in experiment.yaml (keys merge; the experiment's win)
+        organism: homo sapiens    # default: the FASTA's OS=; also organism_part, cell_type, disease, cleavage_agent
 """
 from __future__ import annotations
 
@@ -69,6 +72,7 @@ class Settings:
     top_labels: int = 15
     pca_features: int = 500
     heatmap_max: int = 300
+    sdrf: dict[str, str] = field(default_factory=dict)  # SDRF metadata: organism, instrument, ... (downstream/sdrf.py)
 
     def describe(self) -> str:
         which = "adjusted p" if self.use_adjusted else "p"
@@ -95,6 +99,21 @@ def _bool(v) -> bool:
 def _list(v) -> list[str]:
     items = v if isinstance(v, (list, tuple)) else str(v).split(",")
     return [str(x).strip() for x in items if str(x).strip()]
+
+
+def _sdrf_meta(v) -> dict[str, str]:
+    from ionomos.downstream.sdrf import SETTINGS
+
+    if not isinstance(v, dict):
+        raise AnalysisError("sdrf must map a field to a value, e.g. {instrument: Orbitrap Eclipse}")
+    out = {}
+    for key, val in v.items():
+        k = str(key).strip().lower().replace(" ", "_")
+        if k not in SETTINGS:
+            raise AnalysisError(f"unknown sdrf field {key!r} (known: {', '.join(SETTINGS)})")
+        if val is not None and str(val).strip():
+            out[k] = str(val).strip()
+    return out
 
 
 def settings_from(*layers: dict | None) -> Settings:
@@ -152,6 +171,8 @@ def settings_from(*layers: dict | None) -> Settings:
                     v = {str(a): str(b) for a, b in v.items()}
                 elif k in ("control", "enrichment_gmt"):
                     v = str(v)
+                elif k == "sdrf":
+                    v = {**s.sdrf, **_sdrf_meta(v)}  # a later layer adds to / overrides the lab's values
             except (TypeError, ValueError) as exc:
                 if isinstance(exc, AnalysisError):
                     raise

@@ -473,6 +473,161 @@ server. The view lives in the address hash, so a link reopens it. Protein
 complexes (CORUM: non-commercial licence), CysDB for isoDTB sites, and
 PSM-level QC from `psm.tsv` were left for later (ROADMAP).
 
+### D36 — Ionomos is for other labs too: engines are adapters, analysis installs from pip
+**2026-09-30.** The goal is now that other labs can use Ionomos (ROADMAP
+Phase 5).
+
+The research found that no open tool automates the path from a lab's Windows
+instrument PC to a finished, trustworthy report without a bioinformatician:
+- quantms, Frag'n'Flow and ProtPipe need Linux, containers and HPC.
+- AlphaPept watches folders only for its own engine.
+- MSAID's `watch` is a commercial cloud product.
+- Downstream tools start from an uploaded table.
+
+So Ionomos stays on-premise and Windows-native for the watcher, and adds:
+
+1. **An analysis-only install from pip that runs anywhere.** The pure-Python
+   analysis has one dependency, and the literature on tool adoption says
+   installation decides whether a tool is tried at all.
+2. **Engines as adapters.** A registry of adapters can each recognise their
+   outputs, load one canonical quantity matrix and report provenance.
+   FragPipe is the first; the any-table loader is the fallback. Import comes
+   before running, because it is useful immediately and carries no licence
+   risk.
+3. **Ionomos never bundles an engine with a restrictive licence.** MSFragger
+   is academic-only, DIA-NN is not redistributable from 1.9 on, and MaxQuant
+   is not redistributable either. Each lab installs and accepts its own.
+   Sage (MIT) is the only candidate for bundling.
+4. **SDRF-Proteomics for sample metadata** (export first). mzTab is not used
+   internally: it has stalled for quantification and adds nothing over the
+   TSVs.
+
+Priorities are in ROADMAP Phase 5. Whether numpy may become an optional
+speed-up is left open until dose-response or a limpa-style model needs it.
+
+### D37 — Another lab's names are config: templates per method, a regex for power users
+**2026-09-30.** ROADMAP Phase 5A. The naming rules were tuned to this lab in
+code: the per-method raw-file tails, the date formats, the DIA condition
+codes. Another lab needs its convention to be a `config.yaml` change it can
+check before the first drop. (D36, the Phase 5 plan, is in a separate PR.)
+
+`naming:` now holds, besides `condition_codes`:
+- **`methods.<name>`**: how that method's `.raw` names are read. It can be:
+  - a readable **template** (`'{sample}_R{rep}_F{fraction}'`, with `[ ]` for
+    optional parts); a plain string is short for `files:`
+  - a **regex** with named groups `sample` / `rep` / `fraction` (`pattern:`)
+  - **`like: isoDTB | TMT | DIA`**, which borrows a built-in rule
+- **`date_formats`**: which of six named formats to try, in order.
+
+Choices:
+- **The built-in rules are templates too.** These three compile to exactly the
+  old regular expressions, character for character (a test pins them):
+  - `{sample}_{rep}[_{fraction}]`
+  - `{sample}[_TMT][_{fraction}]`
+  - `{sample}[_{rep}]`
+
+  With no `naming:` block every name reads as before, and every earlier test
+  passes unchanged.
+- **Templates before regexes.** A template is what a lab would write on a
+  whiteboard. `_` and `-` stay interchangeable, letters match either case, and
+  `{rep}` / `{fraction}` keep the R/F prefixes. The regex is there for names a
+  template can't describe.
+- **D30 holds for every rule:**
+  - Template numbers are 1–3 digits.
+  - Every rule's numbers are checked 1–999 by value when they are read, so a
+    hand-written `\d+` can't mint replicate 1000.
+  - A group that captures letters is an error, not a guess.
+  - The Xcalibur stamp is stripped and the fraction-set check runs as before.
+- **Keywords stay in `methods.<name>.aliases`.** The app's Methods tab edits
+  them there, and a second place would drift. A keyword listed under two
+  methods is now a config error, because every folder containing it would be
+  ambiguous. So is a blank keyword, which would match every folder.
+- **`like:` is about names only.** The analysis after FragPipe still branches
+  on the method's name (isoDTB sites, TMT annotation, DIA `pg_matrix`), so a
+  renamed DIA method gets the generic analysis. The documented way to use
+  another word for DIA is to add it to `methods.DIA.aliases`. Carrying `like`
+  into the pipeline is left open.
+- **Mistakes fail at load and name the setting** (`naming.methods.DIA:
+  '{rep}_{fraction}' needs {sample} once, outside [ ]`). The watcher then
+  keeps its last good config (D34) and the app won't save. Unknown keys under
+  `naming:` are errors, as they are under `analysis:`.
+- **"Test your names" is one read-only function** (`namecheck.py`). It sits
+  behind `ionomos names test <folder> <file.raw> …` and the app's Methods tab
+  → **Test names…**. For each name it prints user, method, rule and date, and
+  each file's sample, replicate and fraction, or why the file is rejected. It
+  uses the same parser and fraction check as intake, so what it says is what a
+  drop will do.
+
+The app's config writer keeps `naming.methods` and `naming.date_formats`,
+but the app has no editor for them. They are rare, one-off settings, and the
+comments in the config file and the check cover them.
+
+### D38 — Every analysed experiment gets an SDRF sample sheet; unknowns stay "not available"
+**2026-09-30.** ROADMAP Phase 5A (D36): the sample metadata other labs and
+repositories need should come out of Ionomos, not be retyped. Each analysis now
+writes `results/sdrf.tsv` in SDRF-Proteomics v1.1.0 (PSI; template
+`ms-proteomics`), as an isolated stage whose failure never touches the report.
+
+What it says, and why:
+- **One row per raw file, and per label in it.** TMT: a row per file × channel
+  (all the files of a plex carry all its channels). isoDTB: a light and a heavy
+  row per file sharing the assay name, the spec's pattern for SILAC. PRIDE has
+  no isoDTB label, so the rows say `ICAT light` / `ICAT heavy`: isoDTB tags are
+  chemical, cysteine-directed, isotope-coded affinity tags like ICAT, and
+  `SILAC …` would claim metabolic labelling. The actual isoDTB masses go in
+  `comment[modification parameters]` (`NT=isoDTB light;…;MM=561.3387`). Which
+  treatment carried which tag isn't recorded anywhere, so both rows carry the
+  experiment's condition.
+- **The analysis' conditions, all the raw files.** `factor value[condition]` is
+  the condition the statistics used (`sample_conditions` applied). Samples left
+  out of the analysis are still listed: their raw files belong to the
+  experiment and would be deposited with it; `analysis.json` names them.
+  A replicate number is never reused within a condition, so a sample moved into
+  another condition gets the next free number.
+- **Derived where it's reliable, otherwise asked for.** Files, samples and
+  replicates come from `ionomos.json`'s manifest; fractions from file names;
+  TMT channels from `annotation.txt` (what FragPipe used), then experiment.yaml
+  `tmt:`, then names like `DMSO_1_126`. Organism comes from the FASTA's UniProt
+  `OS=` when one species holds ≥ 90 % of targets. Enzyme and modifications come
+  from the workflow FragPipe copied into its output (MSFragger's enzyme;
+  enabled mods mapped to Unimod by mass, unknown masses kept with `MM=`).
+  Instrument, organism part, cell type and disease can't be read from anything
+  Ionomos has. They come from a new `analysis.sdrf` setting (lab-wide in
+  config.yaml, per experiment in experiment.yaml, keys merged). Reading the
+  instrument from `.raw` headers was left out: it can't be tested without real
+  files. The official validator rejects `not available` for organism,
+  instrument, cleavage agent, label and data file, so when those are unknown
+  they are listed in `analysis.json` → `sdrf.fill_in` and in the report's
+  Methods instead of being guessed. `comment[file uri]` is left out: a path on
+  the lab PC isn't a URI anyone can fetch, and PRIDE assigns its own.
+- **No SDRF for a table on its own** (`ionomos analyze <table>`, D33). It names
+  no raw files, and linking samples to raw files is what an SDRF is for;
+  `analysis.json` says so.
+
+`tests/test_sdrf.py` checks the spec's structure rules on every run, and runs
+the official validator (`sdrf-pipelines`, `--skip-ontology`) when it is
+installed: CI installs it on Linux; it is never a runtime dependency.
+
+### D39 — The watcher can run DIA-NN itself
+**2026-09-30.** A lab that searches DIA with DIA-NN alone (no FragPipe)
+couldn't use the watcher. A method can now say `engine: diann`.
+- `runner.py` picks FragPipe or DIA-NN per method.
+- `diann.py` builds the job: the lab's `diann_exe`, FASTA or spectral library,
+  and `ionomos_run/diann.cfg`, run as `diann --cfg …`.
+- Both engines share `fragpipe.run`'s start / cancel / stop / timeout loop and
+  `check_raws()`, so holds, failures, Retry, pop-ups and "never delete an old
+  attempt" (`diann_previous_*`) behave the same.
+
+The cfg file, not a long command line, is the job's settings. It is
+readable, kept with the results, and one option per line. The price is that
+paths can't have spaces; Ionomos already requires that for FragPipe. The
+defaults follow DIA-NN's GUI defaults for a tryptic search, and a lab adds
+its own with `diann_args`. DIA-NN is never shipped: from 1.9 it can't be
+redistributed, and each lab installs its own edition (Academia / Enterprise).
+MaxQuant and Sage runners would slot into `runner.py` the same way (ROADMAP
+5B). Tested end to end with a fake DIA-NN (`ionomos fake-diann`) that reads
+the cfg and fails like the real one on missing inputs.
+
 ### D40 — `pip install ionomos` is the analysis; the demo is simulated, offline and writes only new folders
 **2026-09-30.** First step of ROADMAP Phase 5A (the plan in D36): a stranger
 can `pip install ionomos`, run `ionomos demo`, then `ionomos analyze` on their
