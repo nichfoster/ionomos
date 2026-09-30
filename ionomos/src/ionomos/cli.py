@@ -903,6 +903,10 @@ def main(argv: list[str] | None = None) -> int:
         ok, why = gui_available()
         print("ok" if ok else why)
         return 0 if ok else 1
+    if argv[:1] == ["fake-maxquant"]:  # hidden: the testbed's stand-in for MaxQuantCmd (engine: maxquant)
+        from ionomos.testbed import fake_maxquant
+
+        return fake_maxquant(argv[1:])
     if argv[:1] == ["fake-diann"]:  # hidden: the testbed's stand-in for DIA-NN (engine: diann)
         from ionomos.testbed import fake_diann
 

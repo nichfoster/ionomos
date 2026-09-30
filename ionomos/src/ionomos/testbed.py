@@ -381,6 +381,113 @@ def write_fake_diann(folder: Path) -> Path:
     return exe
 
 
+FAKE_MQPAR = """<?xml version="1.0" encoding="utf-8"?>
+<MaxQuantParams xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+   <fastaFiles>
+      <FastaFileInfo>
+         <fastaFilePath></fastaFilePath>
+         <identifierParseRule>&gt;.*\\|(.*)\\|</identifierParseRule>
+         <descriptionParseRule>&gt;(.*)</descriptionParseRule>
+         <taxonomyParseRule></taxonomyParseRule>
+         <variationParseRule></variationParseRule>
+         <modificationParseRule></modificationParseRule>
+         <taxonomyId></taxonomyId>
+      </FastaFileInfo>
+   </fastaFiles>
+   <fixedCombinedFolder></fixedCombinedFolder>
+   <numThreads>1</numThreads>
+   <maxQuantVersion>2.6.7.0</maxQuantVersion>
+   <filePaths />
+   <experiments />
+   <fractions />
+   <ptms />
+   <paramGroupIndices />
+   <referenceChannel />
+   <parameterGroups>
+      <parameterGroup>
+         <lfqMode>0</lfqMode>
+         <enzymes><string>Trypsin/P</string></enzymes>
+      </parameterGroup>
+   </parameterGroups>
+</MaxQuantParams>
+"""
+
+
+def fake_maxquant(argv: list[str]) -> int:
+    """Fake MaxQuantCmd (`ionomos fake-maxquant`): `--create FILE` writes a template like the real one;
+    `MQPAR` checks the FASTA and raw files exist, then writes combined/txt/proteinGroups.txt (LFQ intensity
+    per experiment, planted changes) and parameters.txt into fixedCombinedFolder.
+    IONOMOS_FAKE_FP_MODE=fail exits 1."""
+    import tempfile
+    from xml.etree import ElementTree as ET
+
+    from ionomos.downstream import simulate
+
+    say = lambda *x: print("FAKE MaxQuant:", *x, flush=True)  # noqa: E731
+    if argv[:1] == ["--create"] and len(argv) > 1:
+        Path(argv[1]).write_text(FAKE_MQPAR, encoding="utf-8")
+        say(f"template written to {argv[1]}")
+        return 0
+    if not argv or not Path(argv[-1]).is_file():
+        say("usage: MaxQuantCmd mqpar.xml | --create mqpar.xml")
+        return 2
+    root = ET.parse(argv[-1]).getroot()
+    fasta = root.findtext("fastaFiles/FastaFileInfo/fastaFilePath") or ""
+    files = [e.text or "" for e in root.findall("filePaths/string")]
+    exps = [e.text or "" for e in root.findall("experiments/string")]
+    out = Path(root.findtext("fixedCombinedFolder") or ".")
+    if not Path(fasta).is_file():
+        say(f"ERROR: FASTA file not found: {fasta}")
+        return 1
+    for f in files:
+        if not Path(f).is_file():
+            say(f"ERROR: raw file not found: {f}")
+            return 1
+    if not files or len(exps) != len(files) or len(root.findall("fractions/short")) != len(files):
+        say("ERROR: filePaths / experiments / fractions differ in length")
+        return 1
+    if os.environ.get("IONOMOS_FAKE_FP_MODE") == "fail":
+        say("ERROR: fake failure")
+        return 1
+    for step in ("Configuring", "Feature detection", "MS/MS search", "Protein assembly", "LFQ", "Writing tables"):
+        print(f"{step}...", flush=True)
+    samples = list(dict.fromkeys(exps))
+    with tempfile.TemporaryDirectory() as td:
+        pg = Path(td) / "pg.tsv"
+        simulate.dia_pg_matrix(pg, [(x, x.rsplit("_", 1)[0]) for x in samples], seed=len(samples), n_proteins=300)
+        head, *rows = [ln.split("\t") for ln in pg.read_text(encoding="utf-8").splitlines()]
+    txt = out / "combined" / "txt"
+    txt.mkdir(parents=True, exist_ok=True)
+    cols = ["Protein IDs", "Majority protein IDs", "Gene names", "Protein names", "Peptides",
+            "Razor + unique peptides", "Reverse", "Potential contaminant", "Only identified by site",
+            *[f"Intensity {x}" for x in samples], *[f"LFQ intensity {x}" for x in samples]]
+    body = []
+    for r in rows:
+        vals = [v or "0" for v in r[7:]]
+        body.append([r[0], r[0], r[3], r[4], r[5], r[5], "", "", "", *vals, *vals])
+    (txt / "proteinGroups.txt").write_text("\t".join(cols) + "\n" + "\n".join("\t".join(b) for b in body) + "\n",
+                                           encoding="utf-8")
+    (txt / "parameters.txt").write_text("Parameter\tValue\nVersion\t2.6.7.0\nProtein FDR\t0.01\n", encoding="utf-8")
+    say("done")
+    return 0
+
+
+def write_fake_maxquant(folder: Path) -> Path:
+    """MaxQuantCmd.bat / .sh in `folder` running `ionomos fake-maxquant` (for `engine: maxquant` tests)."""
+    from ionomos.service import ionomos_command
+
+    cmd = ionomos_command(console=True)
+    folder.mkdir(parents=True, exist_ok=True)
+    if os.name == "nt":
+        exe = folder / "MaxQuantCmd.bat"
+        exe.write_text("@echo off\r\n" + " ".join(f'"{c}"' for c in cmd) + " fake-maxquant %*\r\n", encoding="utf-8")
+    else:
+        exe = folder / "MaxQuantCmd.sh"
+        exe.write_text("#!/bin/sh\nexec " + " ".join(f"'{c}'" for c in cmd) + ' fake-maxquant "$@"\n', encoding="utf-8")
+        exe.chmod(exe.stat().st_mode | stat.S_IEXEC)
+    return exe
+
+
 def write_fake_launcher(folder: Path) -> Path:
     """fragpipe.bat / fragpipe.sh in `folder` that runs `ionomos fake-fragpipe` (works frozen or from a venv)."""
     from ionomos.service import ionomos_command

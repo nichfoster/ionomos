@@ -756,3 +756,48 @@ Left open: TMT QC runs, the RT shift from DIA-NN 2.x `report.parquet`,
 telling instruments apart within one config, and tuning the SD floor and
 CUSUM h on real QC data.
 
+
+### D49 — The assistant on the PC is local, grounded, and can only propose
+**2026-09-30.** The owner wants a local AI that helps lab members troubleshoot
+and work with their data in plain language. The plan is ROADMAP Phase 6,
+written but not built. The decisions it fixes up front:
+1. **Ionomos speaks the OpenAI-compatible chat API to a runtime the lab
+   installs** (Ollama by default, llama.cpp `llama-server` for a PC with no
+   internet). It never bundles a runtime or model weights, as with DIA-NN and
+   MaxQuant.
+2. **Tools, never a shell.** A small set of read-only wrappers over existing
+   functions, plus proposals. Any change goes through a native dialog built
+   from the structured arguments, and the user clicks Confirm. Chat text can
+   never trigger an action.
+3. **Every claim cites** an issue code, log line, help anchor or analysis
+   field, and Ionomos checks the citation exists before showing the answer.
+   Without one, the assistant falls back to the doctor text.
+4. **Everything it reads is treated as untrusted:** names, logs,
+   experiment.yaml.
+5. **Local only by default.** A cloud model needs an admin flag, a visible
+   banner, and a preview of exactly what would be sent (never data files).
+
+The model is chosen by a measured scorecard on the PC (Phase 6.0), not by
+leaderboards: CPU-only generation is memory-bound, and the model shares RAM
+with FragPipe.
+
+
+### D50 — The watcher can run MaxQuant; its mqpar is always the installed version's
+**2026-09-30.** MaxQuant is the most widely used free search engine for DDA
+label-free work, so a DDA method can now say `engine: maxquant`
+(`maxquant.py`, through `runner.py` as for DIA-NN, D39). `mqpar.xml` changes
+from version to version, so a shipped template would silently break with the
+next MaxQuant. The job instead starts from the lab's own saved parameters
+(`mqpar:`) or from `MaxQuantCmd --create`, the installed version's own
+defaults, with label-free quantification switched on. Ionomos replaces only
+the job-specific lists and paths. Experiments are named
+`<condition>_<replicate>`, so `proteinGroups.txt` comes back as
+`LFQ intensity DMSO_1` …, which the engines importer and the analysis read
+directly. The manifest has no fraction column, so fractions come from the
+file names by the lab's naming rules, else file order. A single-shot sample
+gets MaxQuant's 32767.
+
+The analysis of a MaxQuant job reads `proteinGroups.txt` whatever the lab
+calls the method (`postprocess.prepare`). Tested end to end with
+`ionomos fake-maxquant`; not yet against a real MaxQuant.
+
