@@ -364,11 +364,28 @@ analysis:                   # results/report.html for this experiment (lab defau
   control: DMSO             # default: recognised by name (DMSO, vehicle, ctrl, WT, ...)
   log2fc: 1                 # also: alpha, use_adjusted, min_valid, normalize, test, top_labels
   enrichment_gmt: sets.gmt  # extra gene sets; a relative path is read from this folder first
+  block: replicate          # the design (limma, D42): a block as a fixed effect — the replicate number
+                            #   (rep 1 of every condition prepared together; pairs, patients), or
+                            #   {DMSO_1: A, Drug_1: A, DMSO_2: B, Drug_2: B} (every sample listed), or
+  # block_from: '_(P\d+)_'  #   a regex on the sample names: group "block" if named, else group 1
+  covariates:               # optional, one value per sample: numbers -> a slope, text -> a factor
+    age: {DMSO_1: 54, DMSO_2: 61, DMSO_3: 47, Drug_1: 49, Drug_2: 66, Drug_3: 58}
+  variance_prior: deqms     # limma (default) | deqms: each protein's prior variance from its peptide count
   sdrf:                     # sample metadata for results/sdrf.tsv (lab-wide values: config.yaml analysis.sdrf)
     cell_type: HEK293T      # also: organism, organism_part, disease, instrument, cleavage_agent
 
 notes: "24 h treatment, 1 µM"   # copied into ionomos.json for provenance
 ```
+
+The sample names in `block:` and `covariates:` are the analysis' samples:
+`condition_replicate` for DIA / LFQ (`DMSO_1`), the TMT sample names
+(`DMSO_1_126`), a table's column names. Names that aren't samples are ignored
+with a note. Keys under `covariates:` are free text (SDRF-style names such as
+`characteristics[age]` are fine); a single `{sample: value}` mapping is one
+covariate. A design that can't be used (a block equal to the condition, a
+sample without a value, more parameters than samples) is explained in a
+pop-up and the comparisons use the plain `~0 + condition` model. With three or
+more conditions every report also has a moderated F-test ("any change").
 
 ## What the watcher derives
 

@@ -1,0 +1,13 @@
+sample	condition	replicate	age	sex
+DMSO_1	DMSO	1	59.5	F
+DMSO_2	DMSO	2	57.1	M
+DMSO_3	DMSO	3	65.7	M
+DMSO_4	DMSO	4	33.5	F
+DrugA_1	DrugA	1	46.9	F
+DrugA_2	DrugA	2	31.2	M
+DrugA_3	DrugA	3	38.7	M
+DrugA_4	DrugA	4	50.2	M
+DrugB_1	DrugB	1	31.1	F
+DrugB_2	DrugB	2	38.0	F
+DrugB_3	DrugB	3	56.0	M
+DrugB_4	DrugB	4	51.8	F

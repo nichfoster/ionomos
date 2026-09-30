@@ -680,6 +680,124 @@ isoDTB requires a replicate, so a name ending in a setting is refused with a
 hint instead of guessed. `CE` is left out on purpose: as a condition it is
 too plausible.
 
+### D42 — Designs are limma's general linear model: blocks as fixed effects, covariates, a moderated F
+**2026-09-30.** ROADMAP 5C #1. FragPipe-Analyst fits `~0 + condition`, so a
+batch stays in the residuals. That batch can be:
+- a prep day (the replicate number, D35's `BATCH_SUSPECT`)
+- a TMT plex
+- a patient or a pair
+
+In a simulated three-condition experiment with a replicate batch, the plain
+model found none of the 48 planted changes per comparison. Blocking on the
+replicate found 14 and 24, with no false ones.
+
+**How a design is given.** It goes under `analysis:` in config.yaml or
+experiment.yaml (spec in NAMING_CONVENTION.md):
+- `block: replicate`: the replicate number is the block.
+- `block: {sample: block}`: a block per sample.
+- `block_from: <regex>`: the block is read from the sample names (group
+  `block`, else group 1).
+- `covariates: {name: {sample: value}}`: numbers become a slope, text a
+  factor; SDRF-style names are fine.
+
+**How it is fitted.** The model is `~0 + condition + block + covariates`
+(treatment coding, levels in order of appearance). It is fitted the way
+limma's lmFit → contrasts.fit → eBayes → topTable does it:
+- row by row, with missing values dropped
+- QR with lm.fit's limited pivoting (tol 1e-7), so a coefficient a row can't
+  estimate is NA
+- residual df = observed values − rank
+- the same squeezeVar across features as before
+
+With missing values in a non-orthogonal design, a contrast's SD uses limma's
+approximation: each row's own coefficient SDs combined with the full design's
+correlation. The exact per-row c'(X'X)⁻¹c would differ from limma, and parity
+with limma was preferred; the two agree whenever a row is complete.
+
+**Choices:**
+- **Fixed effects, not duplicateCorrelation.** This is Smyth's advice for a
+  handful of blocks, and it is exact limma. A random block (for blocks that
+  cross conditions incompletely) is left for later, as are interactions,
+  spline time courses and SDRF as the design source. A numeric time is
+  already possible as a linear covariate.
+- **The default is untouched.** With no design setting, the comparisons run
+  the old code path, so every FragPipe-Analyst golden passes unchanged.
+- **A design that can't be used never stops the analysis.** That covers a
+  block equal to the condition, a sample without a value, a rank-deficient
+  matrix or no residual df. The doctor raises `DESIGN_NOT_USED` (input, a
+  pop-up) naming the term. The comparisons then use `~0 + condition`,
+  byte-identical to a run without the setting. `BATCH_SUSPECT` now suggests
+  `block: replicate`, and says so when it is already used.
+- **The moderated F runs for every experiment with 3+ conditions.** It is
+  limma's classifyTestsF / topTableF on every condition against the control,
+  a basis for all condition differences, with df₂ = d0 + df as limma. It asks
+  whether a feature changes anywhere, so it applies no fold-change cut-off.
+  It is reported as the `F` / `F_p` / `F_p_adj` columns of
+  `<level>_results.tsv`, `analysis.json` → `f_test`, an "Any change (F)" tile
+  and a table column.
+- **FragPipe-Analyst can't repeat a blocked model.** `reproduce_in_R.R` says
+  it repeats the plain model. `reproduce_design_in_R.R` repeats Ionomos's
+  model in plain limma, on the values Ionomos tested. A dev test runs it when
+  R is available: identical to 1e-6, the TSV precision.
+
+**Checked** against limma 3.68.5 (`tests/test_design.py`,
+`tests/golden/design/`): 9,600 values, the worst relative difference
+8.5e-11. The cases:
+- a replicate block, with complete data and with missing values (a condition
+  absent, a block unestimable in a row)
+- block + numeric + factor covariates
+- one-vs-others with a block
+- topTableF for the blocked, covariate and plain models
+
+
+### D43 — DEqMS is an optional variance prior, ported exactly
+**2026-09-30.** ROADMAP 5C #4. limma gives every protein the same prior
+variance, but a protein quantified from one peptide is noisier than one
+quantified from twenty. DEqMS (Zhu et al., Mol. Cell. Proteomics 2020) fits
+log s² against log2 of the peptide count and uses the fitted value as each
+protein's prior. `variance_prior: deqms` turns it on. The counts are the ones
+the loaders already read (D36): DIA-NN `N.Sequences`, FragPipe and MaxQuant
+peptides, TMT-Integrator PSMs.
+
+This is a port of DEqMS 1.30 `spectraCounteBayes(fit.method = "loess")`:
+- the loess of log s² on log2(count)
+- the digamma / trigamma bias correction
+- the prior df from its 0.1-step grid search
+- post df = d0 + df, uncapped, unlike limma
+
+It needs R's `loess` exactly, which is not a plain local regression: dloess
+builds a k-d tree of cells with ≤ floor(n·span·0.2) points (ties go to one
+side), fits a quadratic (value and slope) at each cell vertex, and
+interpolates with cubic Hermite polynomials. `deqms.loess` reproduces it for
+one predictor, to 1e-12 against R on tied and continuous data. DEqMS
+t-statistics and p-values agree with the package to 1e-10 on the blocked
+and plain fits, with and without missing values.
+
+**Deviations, where DEqMS would stop or misbehave:**
+- A feature without a count (or with 0, or with no residual df) keeps limma's
+  prior. DEqMS stops on a missing count.
+- With fewer than 20 usable features or fewer than 3 distinct counts, limma's
+  prior is used for all, with the warning `DEQMS_NOT_USED`. So does a table
+  without counts.
+- The count is whatever the table reports for the protein, usually counted
+  over the whole experiment. DEqMS' vignette suggests the minimum across
+  samples. The trend is fitted on whichever is given.
+
+**When it helps:** many proteins with few peptides and a clear dependence of
+variance on count (DDA label-free, DIA with a wide range of counts, TMT with
+PSM counts). DEqMS ranks those better than one prior.
+
+**Known conservativeness:** one- and two-peptide proteins get a larger prior
+variance, so they are called less often, including real changes. DEqMS'
+moment-matched d0 is often larger than limma's (10.8 against 3.8 on the golden
+data), which shrinks every variance harder towards the trend. Without a trend
+(the same count everywhere), DEqMS is just a different estimate of the
+limma prior. It stays opt-in.
+
+The F-test with DEqMS uses DEqMS' posterior variances and df. DEqMS has no F,
+so that combination has no R reference.
+
+
 ### D45 — The QC standard is trended from the searches Ionomos already runs
 **2026-09-30.** ROADMAP 5C #6. Labs inject a QC standard (a HeLa or K562
 digest) on a schedule to watch the LC and the mass spectrometer. The numbers

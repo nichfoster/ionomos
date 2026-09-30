@@ -37,6 +37,8 @@ analysis:
   normalize: median          # median | none (intensities only)
   top_labels: 15             # hit names written on each volcano
   control_keywords: [DMSO, vehicle, veh, ctrl, control, mock, untreated, NT, WT, EV, scr, scramble, siNT, PBS]
+  # block: replicate         # the replicate number as a block (batch / pair) in the limma model (D42)
+  # variance_prior: deqms    # limma (default) | deqms: prior variance by peptide count (D43)
 
 # Instrument QC (docs/QC_TREND.md): runs of the lab's QC standard (a HeLa / K562 digest) are trended
 # in logs/qc_trend.html, with Levey-Jennings charts and Westgard rules. Does nothing until one is searched.

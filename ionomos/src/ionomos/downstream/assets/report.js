@@ -364,6 +364,12 @@
         fmtInt(n.up + n.down) + '</div><div class="d"><span class="dot up"></span> ' + fmtInt(n.up) + ' up · <span class="dot down"></span> ' +
         fmtInt(n.down) + " down of " + fmtInt(n.tested) + "</div>" + confBadge(c) + "</div>";
     });
+    if (D.F) { // the moderated F (3+ conditions): features that change between any of the conditions
+      let nf = 0, tf = 0;
+      for (let i = 0; i < nF; i++) if (D.F.q[i] != null) { tf++; if (D.F.q[i] <= ST.alpha) nf++; }
+      h += '<div class="tile" title="limma moderated F on every condition against ' + esc(D.F.ref) + ' (adjusted p; no fold-change cut-off)"><div class="k">Any change (F)</div><div class="v">' +
+        fmtInt(nf) + '</div><div class="d">adj. p ≤ ' + esc(String(ST.alpha)) + " across " + D.F.conds.length + " conditions, of " + fmtInt(tf) + "</div></div>";
+    }
     host.innerHTML = h;
     $$(".tile[data-ci]", host).forEach((t) => (t.onclick = () => { ST.ci = +t.dataset.ci; syncControls(); renderDiff(); goTo("differential"); }));
     $$(".tile[data-go]", host).forEach((t) => (t.onclick = () => { qcTab = "card"; renderQC(); goTo(t.dataset.go); }));
@@ -909,7 +915,7 @@
     { k: "p", t: "p", n: 1, f: (c, i) => fmtP(c.p[i]), v: (c, i) => (c.p[i] == null ? 2 : c.p[i]) },
     { k: "q", t: "adj. p", n: 1, f: (c, i) => fmtP(c.q[i]), v: (c, i) => (c.q[i] == null ? 2 : c.q[i]) },
     { k: "n", t: "measured", n: 1, f: (c, i) => (c.nt[i] == null ? "" : c.nt[i] + (c.nc[i] != null && c.t2 ? " / " + c.nc[i] : "")), v: (c, i) => (c.nt[i] || 0) + (c.nc[i] || 0) },
-  ].concat(D.f.pep ? [{ k: "pep", t: D.evidence || "peptides", n: 1, f: (c, i) => (D.f.pep[i] == null ? "" : String(D.f.pep[i])), v: (c, i) => (D.f.pep[i] == null ? -1 : D.f.pep[i]) }] : []).concat([
+  ].concat(D.F ? [{ k: "F", t: "any change (F) adj. p", n: 1, f: (c, i) => fmtP(D.F.q[i]), v: (c, i) => (D.F.q[i] == null ? 2 : D.F.q[i]) }] : []).concat(D.f.pep ? [{ k: "pep", t: D.evidence || "peptides", n: 1, f: (c, i) => (D.f.pep[i] == null ? "" : String(D.f.pep[i])), v: (c, i) => (D.f.pep[i] == null ? -1 : D.f.pep[i]) }] : []).concat([
     { k: "desc", t: "Description", f: (c, i) => esc((D.f.desc[i] || "").slice(0, 120)), v: (c, i) => D.f.desc[i] || "", cls: "desc" },
   ]);
   function tableRows() {
@@ -975,11 +981,11 @@
   }
   function exportCSV() {
     const c = C(), rows = tableRows();
-    const head = ["id", "label", "description", "log2fc", "ci_low", "ci_high", "p", "adj_p", "significant", "imputation_driven"].concat(D.f.pep ? [D.evidence || "peptides"] : [], D.samples);
+    const head = ["id", "label", "description", "log2fc", "ci_low", "ci_high", "p", "adj_p", "significant", "imputation_driven"].concat(D.F ? ["any_change_F_adj_p"] : [], D.f.pep ? [D.evidence || "peptides"] : [], D.samples);
     const q = (s) => '"' + String(s == null ? "" : s).replace(/"/g, '""') + '"';
     const imp = impDriven(c);
     const lines = [head.map(q).join(",")].concat(rows.map((i) => [q(D.f.id[i]), q(D.f.label[i]), q(D.f.desc[i]), c.fc[i], c.ciL[i], c.ciR[i], c.p[i], c.q[i], sigOf(c, i), imp[i] ? "yes" : ""]
-      .concat(D.f.pep ? [D.f.pep[i]] : [], D.v[i]).map((v) => (v == null ? "" : v)).join(",")));
+      .concat(D.F ? [D.F.q[i]] : [], D.f.pep ? [D.f.pep[i]] : [], D.v[i]).map((v) => (v == null ? "" : v)).join(",")));
     download(c.slug + "_filtered.csv", lines.join("\n"), "text/csv");
   }
   function copyGenes(dir) {
