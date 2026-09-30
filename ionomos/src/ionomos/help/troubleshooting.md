@@ -375,8 +375,37 @@ condition in the PCA.
 A main [PCA](#qc.pca) component follows the replicate number more than the
 condition: replicates with the same number were probably prepared or run
 together, and that [batch](#glossary.batch) shows. If every condition has all
-replicate numbers, the comparisons are still valid but less sensitive. Next
-time, randomise the preparation and run order.
+replicate numbers, the comparisons are still valid but less sensitive, and
+you can get the sensitivity back: add `block: replicate` under `analysis:` in
+the experiment's `experiment.yaml` and re-run the analysis. The replicate
+number then becomes a blocking factor in the model, so each comparison is
+made within a batch ([How to re-run](#faq.rerun)). Next time, randomise the
+preparation and run order.
+
+## The experimental design couldn't be used {#issue.DESIGN_NOT_USED}
+
+The experiment asks for blocks or covariates (`block`, `block_from` or
+`covariates` in `experiment.yaml`), but Ionomos couldn't fit that model, so
+the comparisons used the plain one (each condition against the control, no
+blocks). The message says why. Common causes:
+- **The block is the same as the condition:** every block holds a single
+  condition, e.g. a batch processed one condition at a time. Then the batch
+  and the treatment can't be told apart, and no model can fix that.
+- **A sample has no block or covariate value:** a typo in a sample name, or
+  samples renamed or left out since the design was written.
+- **Too many blocks or covariates for the number of samples.**
+
+Fix the `analysis:` settings in `experiment.yaml` and re-run. In a paired
+design, every pair (block) needs samples from at least two conditions.
+
+## DEqMS wasn't used {#issue.DEQMS_NOT_USED}
+
+`variance_prior: deqms` makes the statistics take into account how many
+peptides each protein was measured with: proteins seen with many peptides
+get more trust. That needs a peptide (or PSM) count for each protein, and
+this result table has none, or too few proteins had one. The statistics
+used limma's usual variance prior instead, so the results are still valid.
+DIA-NN, FragPipe, MaxQuant and TMT-Integrator tables carry peptide counts.
 
 ## Missing values look random but were imputed as low {#issue.IMPUTATION_MISMATCH}
 
