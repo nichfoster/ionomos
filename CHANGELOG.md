@@ -110,6 +110,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (pip-installable analysis, engine adapters, SDRF, configurable naming, more
   engines and analyses).
 
+### Fixed
+
+- An instrument setting at the end of a raw file name is part of the sample,
+  never a replicate or fraction (D41, NAMING_CONVENTION.md). FAIMS runs
+  `…_DIA_CV-35/-45/-55.raw` were read as one sample with replicates 35, 45 and
+  55; they are now three samples. The same applies to `X_CV35` (was condition
+  code CV, rep 35) and TMT `…_CV-40` (was fraction 40). isoDTB names ending
+  in a setting are refused with a hint.
+
 ## [0.11.0] - 2026-09-30
 
 ### Added

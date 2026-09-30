@@ -659,3 +659,24 @@ own table, on Windows, macOS or Linux (docs/QUICKSTART.md).
   unconfigured repository never fails a release. On 2026-09-30 the name
   `ionomos` was free on PyPI.
 
+### D41 — An instrument setting at the end of a name is part of the sample
+**2026-09-30.** The PC inventory has `…_DIA_CV-35.raw`, `…_CV-45.raw` and
+`…_CV-55.raw`: one sample acquired at three FAIMS compensation voltages. The
+DIA rule read them as one sample, `…_DIA_CV`, with replicates 35, 45 and 55,
+and would have tested the settings against each other as replicates. TMT
+would have read `_CV-40` as fraction 40, and the short-code rule would read a
+glued `CV35` as condition "CV", replicate 35.
+
+Now a trailing `CV` / `FAIMS` / `HCD` / `NCE` / `CID` followed by 2–3 digits
+is masked before the file rule reads the name, then restored in the sample
+name, for every method (built-in or configured, D37). `HCD33` was already
+safe, because only 1–2 letter codes count. Guards:
+- 2–3 digits only, since settings are ≥ 10, so `X_CV_1` is still condition
+  CV, rep 1.
+- The setting must follow some text; a bare `CV-35.raw` reads as before.
+- A key listed in `naming.condition_codes` keeps the lab's meaning.
+
+isoDTB requires a replicate, so a name ending in a setting is refused with a
+hint instead of guessed. `CE` is left out on purpose: as a condition it is
+too plausible.
+

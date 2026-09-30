@@ -117,6 +117,25 @@ so an instrument setting such as `…_DIA_HCD33.raw` is never read as
 in different labs, every drop is shown in the review window (below) before it
 is filed.
 
+**Instrument settings are part of the sample name.** A FAIMS compensation
+voltage or a collision energy at the end of a name is never a replicate or a
+fraction, for every method. The settings recognised are `CV`, `FAIMS`, `HCD`,
+`NCE` and `CID` followed by 2–3 digits, with or without `-` / `_`. Three runs
+at different CVs are three samples:
+
+```
+CS_isoDTB_ELK_3_1-7_DIA_CV-35.raw  →  CS_isoDTB_ELK_3_1-7_DIA_CV-35, rep 1   (not …_DIA_CV rep 35)
+CS_isoDTB_ELK_3_1-7_DIA_CV-45.raw  →  CS_isoDTB_ELK_3_1-7_DIA_CV-45, rep 1
+X_CV35.raw                         →  X_CV35, rep 1                           (not code CV, rep 35)
+DMSO_CV-45_2.raw                   →  DMSO_CV-45, rep 2                       (a replicate after it still counts)
+KL_TMT_CV-40.raw                   →  KL_TMT_CV-40                            (not fraction 40)
+X_CV_1.raw                         →  X_CV, rep 1                             (one digit: a replicate)
+```
+
+isoDTB names need a replicate, so `X_CV-35.raw` is refused there with a hint
+(`X_CV-35_1.raw`). A lab that uses one of these words as a condition code
+lists it in `naming.condition_codes`, and that meaning wins.
+
 Raw files may sit at the top level or in a `raw\` subfolder. Anything else in
 the folder (`.xlsx`, notes, `.mzML`) is carried along untouched.
 
