@@ -473,7 +473,7 @@ server. The view lives in the address hash, so a link reopens it. Protein
 complexes (CORUM: non-commercial licence), CysDB for isoDTB sites, and
 PSM-level QC from `psm.tsv` were left for later (ROADMAP).
 
-### D37 — `pip install ionomos` is the analysis; the demo is simulated, offline and writes only new folders
+### D40 — `pip install ionomos` is the analysis; the demo is simulated, offline and writes only new folders
 **2026-09-30.** First step of ROADMAP Phase 5A (the plan in D36): a stranger
 can `pip install ionomos`, run `ionomos demo`, then `ionomos analyze` on their
 own table, on Windows, macOS or Linux (docs/QUICKSTART.md).

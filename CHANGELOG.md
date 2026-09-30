@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Analysis-only install from pip** (ROADMAP Phase 5A, D37). `pip install
+- **Analysis-only install from pip** (ROADMAP Phase 5A, D40). `pip install
   ionomos`, then `ionomos analyze <table or folder>`, on Windows, macOS or
   Linux with no Tk; a test runs the analysis in a Python where `import
   tkinter` fails. New [docs/QUICKSTART.md](docs/QUICKSTART.md): a 10-minute
