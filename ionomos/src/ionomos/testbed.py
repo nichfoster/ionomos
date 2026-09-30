@@ -228,6 +228,7 @@ def _fake_results(wd: Path, rows: list[list[str]], workflow_name: str) -> None:
         (wd / "diann-output" / "report.tsv").parent.mkdir(parents=True, exist_ok=True)
         (wd / "diann-output" / "report.tsv").write_text("Run\tProtein.Group\tPrecursor.Quantity\n", encoding="utf-8")
         simulate.dia_pg_matrix(wd / "diann-output" / "report.pg_matrix.tsv", [(r[0], r[1]) for r in rows], seed)
+        fake_diann_stats(wd / "diann-output" / "report.stats.tsv", [r[0] for r in rows])
     elif "tmt" in workflow_name.lower():
         ann = Path(rows[0][0]).parent / "annotation.txt"
         names = []
@@ -243,11 +244,81 @@ def _fake_results(wd: Path, rows: list[list[str]], workflow_name: str) -> None:
                 exps[r[1]].append(int(r[2]))
         simulate.isodtb_label_quant(wd / "combined_modified_peptide_label_quant.tsv",
                                     {e: sorted(v) for e, v in exps.items()}, seed)
+        groups: dict[str, list[str]] = {}
+        for r in rows:  # FragPipe writes one psm.tsv per <experiment>_<bioreplicate> folder
+            groups.setdefault(f"{r[1]}_{r[2]}", []).append(r[0])
+        for name, raws in groups.items():
+            fake_psm(wd / name / "psm.tsv", raws)
+
+
+DIANN_STATS_HEADER = ["File.Name", "Precursors.Identified", "Proteins.Identified", "Total.Quantity", "MS1.Signal",
+                      "MS2.Signal", "FWHM.Scans", "FWHM.RT", "Median.Mass.Acc.MS1", "Median.Mass.Acc.MS1.Corrected",
+                      "Median.Mass.Acc.MS2", "Median.Mass.Acc.MS2.Corrected", "MS2.Mass.Instability",
+                      "Normalisation.Instability", "Median.RT.Prediction.Acc", "Average.Peptide.Length",
+                      "Average.Peptide.Charge", "Average.Missed.Tryptic.Cleavages"]
+PSM_HEADER = ["Spectrum", "Spectrum File", "Peptide", "Modified Peptide", "Peptide Length", "Charge", "Retention",
+              "Observed Mass", "Calibrated Observed Mass", "Observed M/Z", "Calibrated Observed M/Z",
+              "Calculated Peptide Mass", "Calculated M/Z", "Delta Mass", "Expectation", "Hyperscore",
+              "Probability", "Number of Enzymatic Termini", "Number of Missed Cleavages", "Intensity",
+              "Assigned Modifications", "Is Unique", "Protein", "Protein ID", "Entry Name", "Gene"]
+
+
+def _qc_rng(name: str) -> tuple[random.Random, float]:
+    """Per-run noise, and a quality factor: a run whose name contains QCBAD is a bad injection (45 % fewer IDs)."""
+    import zlib
+
+    return random.Random(zlib.crc32(Path(name).name.encode())), (0.55 if "QCBAD" in name.upper() else 1.0)
+
+
+def fake_diann_stats(path: Path, raws: list[str]) -> None:
+    """A DIA-NN report.stats.tsv with DIA-NN's columns and plausible HeLa-like numbers, one row per run."""
+    lines = ["\t".join(DIANN_STATS_HEADER)]
+    for raw in raws:
+        rng, q = _qc_rng(raw)
+        prec = int(42000 * q * rng.gauss(1, 0.015))
+        vals = [raw, prec, int(6200 * q * rng.gauss(1, 0.01)), f"{2.1e10 * q * rng.gauss(1, 0.04):.6g}",
+                f"{8.0e9 * q:.6g}", f"{1.3e10 * q:.6g}", f"{rng.gauss(6.1, 0.1) / q:.3f}",
+                f"{rng.gauss(0.152, 0.003) / q:.5f}", f"{rng.gauss(1.6, 0.15):.4f}", f"{rng.gauss(0.2, 0.05):.4f}",
+                f"{rng.gauss(3.1, 0.2):.4f}", f"{rng.gauss(0.4, 0.05):.4f}", "0.02", "0.01", "0.03", "10.8",
+                f"{rng.gauss(2.45, 0.01):.4f}", f"{rng.gauss(0.11, 0.004):.4f}"]
+        lines.append("\t".join(str(v) for v in vals))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def fake_psm(path: Path, raws: list[str], n_psms: int = 240) -> None:
+    """A FragPipe psm.tsv with its real columns: n_psms PSMs per run from a fixed pool of peptides (stable RTs,
+    ~2 ppm precursor error, ~10 % missed cleavages), so the instrument QC trend has DDA runs to read."""
+    pool = random.Random(7)
+    aa = "ACDEFGHIKLMNPQRSTVWY"
+    peptides = ["".join(pool.choice(aa) for _ in range(pool.randint(7, 18))) + pool.choice("KR") for _ in range(160)]
+    base_rt = {p: pool.uniform(600, 5400) for p in peptides}
+    lines = ["\t".join(PSM_HEADER)]
+    for raw in raws:
+        rng, q = _qc_rng(raw)
+        stem = Path(raw.replace("\\", "/")).stem
+        for k in range(int(n_psms * q)):
+            pep = peptides[k % len(peptides)]
+            z = 2 if rng.random() < 0.62 else 3
+            calc = 110.0 * len(pep) + 18.0106
+            obs = calc * (1 + rng.gauss(2.0, 1.5) * 1e-6)
+            rt = base_rt[pep] + rng.gauss(0, 6)
+            mc = 1 if rng.random() < 0.1 else 0
+            scan = f"{k + 1:05d}"
+            lines.append("\t".join(str(v) for v in (
+                f"{stem}.{scan}.{scan}.{z}", f"interact-{stem}.pep.xml", pep, "", len(pep), z, f"{rt:.3f}",
+                f"{obs:.5f}", f"{obs:.5f}", f"{(obs + z * 1.00728) / z:.5f}", f"{(obs + z * 1.00728) / z:.5f}",
+                f"{calc:.5f}", f"{(calc + z * 1.00728) / z:.5f}", f"{obs - calc:.5f}", "1e-5", "35", "0.999", 2, mc,
+                f"{rng.lognormvariate(16, 1) * q:.1f}", "", "true", f"sp|P{k % 90:05d}|PROT{k % 90}_HUMAN",
+                f"P{k % 90:05d}", f"PROT{k % 90}_HUMAN", f"GENE{k % 90}")))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def fake_diann(argv: list[str]) -> int:
     """Fake DIA-NN (`ionomos fake-diann --cfg ionomos_run/diann.cfg`): reads the cfg the runner writes, fails
-    like the real one on a missing raw / FASTA / library, then writes report.pg_matrix.tsv + report.log.txt.
+    like the real one on a missing raw / FASTA / library, then writes report.pg_matrix.tsv, report.stats.tsv
+    and report.log.txt.
     IONOMOS_FAKE_FP_MODE=fail exits 1; IONOMOS_FAKE_FP_SECONDS sets the run time (default 2)."""
     import re as _re
 
@@ -287,6 +358,7 @@ def fake_diann(argv: list[str]) -> int:
         runs.append((f, m.group(1) if m and m.group(1) else stem))
     stem = out.name.rsplit(".", 1)[0]
     simulate.dia_pg_matrix(out.parent / f"{stem}.pg_matrix.tsv", runs, seed=len(runs))
+    fake_diann_stats(out.parent / f"{stem}.stats.tsv", opts["--f"])
     (out.parent / f"{stem}.log.txt").write_text("DIA-NN 2.2.0 Academia (Data-Independent Acquisition by Neural "
                                                 "Networks)\nfake run by the Ionomos testbed\n", encoding="utf-8")
     say("done")

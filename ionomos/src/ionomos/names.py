@@ -115,3 +115,7 @@ def config_env() -> str | None:
 # Recoverable inbox removals and confirmed naming examples (introduced in 0.5.3).
 REMOVED_DIR = ".removed"
 NAMING_HISTORY_FILE = "naming-history.jsonl"
+
+# Instrument QC trending (D45): the per-run metric store and the trend page, both in log_dir.
+QC_TREND_STORE = "qc_trend.jsonl"
+QC_TREND_PAGE = "qc_trend.html"

@@ -97,6 +97,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - the setup checklist checks the DIA-NN install and FASTA / library
 
   Done notes, failure pop-ups and logs name the engine that ran.
+- **Instrument QC trending** (ROADMAP 5C #6, D45, new
+  [docs/QC_TREND.md](docs/QC_TREND.md)). Runs of the lab's QC standard (a
+  HeLa or K562 digest) are recognised by name: `qc_trend.match`, default
+  `hela, k562, qc_std, qcstd, _qc_`. A dedicated QC method also counts
+  (`qc_trend.methods`). A replicated design is never mistaken for one. After
+  each search of one, Ionomos:
+  - reads its numbers from the search's own tables: IDs, signal, peak width,
+    MS1/MS2 mass error, missed cleavages, charge, and the RT of the most
+    intense peptides (DIA-NN `report.stats.tsv` / `pg_matrix` / `report.tsv`,
+    FragPipe `psm.tsv` / `combined_protein.tsv`)
+  - stores them in `logs/qc_trend.jsonl` (a re-run updates its row)
+  - judges them against a baseline (the first 10 runs, or pinned dates):
+    Levey-Jennings z-scores, the Westgard rules 1-3s / 2-2s / R-4s / 10-x
+    (1-2s warns) and a CUSUM drift flag, with a plain-English verdict
+    ("Precursors 18% below baseline (1-3s) — check the column and the spray…")
+  - rewrites `logs/qc_trend.html`: Levey-Jennings charts, every run,
+    self-contained
+  - when a rule is broken, raises a `qc_trend` attention item (a warning; no
+    pop-up unless `qc_trend.popup: true`), which closes when a run is back
+    within the baseline
+
+  `ionomos qc-trend [--rebuild] [--open]` rebuilds the page; `--rebuild`
+  re-reads past QC runs under users_root, read-only. The app's Jobs tab has an
+  **Instrument QC** button. It is all isolated: a QC table that can't be read
+  never fails the job.
+- The testbed's fake FragPipe and fake DIA-NN write DIA-NN's
+  `report.stats.tsv`; the fake FragPipe also writes a `psm.tsv` per DDA
+  experiment (FragPipe's columns). A raw name containing `QCBAD` makes a bad
+  injection.
 
 - **The watcher can run MaxQuant** for a DDA method (`engine: maxquant`,
   `maxquant_exe`, optional lab `mqpar`; D50, docs/ENGINES.md). Each job's
