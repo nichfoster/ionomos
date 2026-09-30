@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **SDRF-Proteomics sample sheet for every analysed experiment**
+  (`results/sdrf.tsv`, `downstream/sdrf.py`, D38). It follows spec v1.1.0,
+  template `ms-proteomics`, and has one row per raw file: per channel for TMT,
+  and a light and a heavy row for isoDTB. Where the values come from:
+  - samples, replicates and conditions: the manifest and the analysis
+    (renamed conditions applied; left-out samples still listed)
+  - fractions: the file names
+  - TMT channels: `annotation.txt`, experiment.yaml `tmt:` or the sample names
+  - organism: the FASTA's `OS=`
+  - enzyme and Unimod modifications: FragPipe's workflow
+  - instrument, organism part, cell type, disease: a new `analysis.sdrf`
+    setting (config.yaml lab-wide, experiment.yaml per experiment)
+
+  Anything unknown is `not available`. `analysis.json` → `sdrf` and the
+  report's Methods name the columns to fill in before depositing to PRIDE.
+  A table analysed on its own gets none. Checked with the official validator
+  (`sdrf-pipelines`, dev-only, installed in CI on Linux).
+
 - **Configurable naming** (`config.yaml` `naming:`, D37; ROADMAP Phase 5A).
   Another lab's convention is now a config change, not a code change:
   - `naming.methods.<name>`: each method's `.raw` rule as a template

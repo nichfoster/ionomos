@@ -201,6 +201,11 @@ def dump_config(d: dict) -> str:
     for k in ("impute_shift", "impute_scale", "seed", "pca_features", "heatmap_max", "control"):
         if an.get(k) not in (None, ""):
             a(f"  {k}: {_y(an[k])}")
+    meta = an.get("sdrf") if isinstance(an.get("sdrf"), dict) else {}
+    a("  sdrf:   # results/sdrf.tsv sample metadata: instrument, organism (default: from the FASTA), organism_part, "
+      "cell_type, disease, cleavage_agent (default: from the workflow)")
+    for k, v in meta.items():
+        a(f"    {_y(str(k))}: {_y(str(v))}")
     a("")
     a("users:   # users are the subfolders of users_root; aliases map initials -> folder")
     a("  aliases:")

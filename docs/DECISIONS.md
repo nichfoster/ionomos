@@ -562,6 +562,52 @@ The app's config writer keeps `naming.methods` and `naming.date_formats`,
 but the app has no editor for them. They are rare, one-off settings, and the
 comments in the config file and the check cover them.
 
+### D38 — Every analysed experiment gets an SDRF sample sheet; unknowns stay "not available"
+**2026-09-30.** ROADMAP Phase 5A (D36): the sample metadata other labs and
+repositories need should come out of Ionomos, not be retyped. Each analysis now
+writes `results/sdrf.tsv` in SDRF-Proteomics v1.1.0 (PSI; template
+`ms-proteomics`), as an isolated stage whose failure never touches the report.
+
+What it says, and why:
+- **One row per raw file, and per label in it.** TMT: a row per file × channel
+  (all the files of a plex carry all its channels). isoDTB: a light and a heavy
+  row per file sharing the assay name, the spec's pattern for SILAC. PRIDE has
+  no isoDTB label, so the rows say `ICAT light` / `ICAT heavy`: isoDTB tags are
+  chemical, cysteine-directed, isotope-coded affinity tags like ICAT, and
+  `SILAC …` would claim metabolic labelling. The actual isoDTB masses go in
+  `comment[modification parameters]` (`NT=isoDTB light;…;MM=561.3387`). Which
+  treatment carried which tag isn't recorded anywhere, so both rows carry the
+  experiment's condition.
+- **The analysis' conditions, all the raw files.** `factor value[condition]` is
+  the condition the statistics used (`sample_conditions` applied). Samples left
+  out of the analysis are still listed: their raw files belong to the
+  experiment and would be deposited with it; `analysis.json` names them.
+  A replicate number is never reused within a condition, so a sample moved into
+  another condition gets the next free number.
+- **Derived where it's reliable, otherwise asked for.** Files, samples and
+  replicates come from `ionomos.json`'s manifest; fractions from file names;
+  TMT channels from `annotation.txt` (what FragPipe used), then experiment.yaml
+  `tmt:`, then names like `DMSO_1_126`. Organism comes from the FASTA's UniProt
+  `OS=` when one species holds ≥ 90 % of targets. Enzyme and modifications come
+  from the workflow FragPipe copied into its output (MSFragger's enzyme;
+  enabled mods mapped to Unimod by mass, unknown masses kept with `MM=`).
+  Instrument, organism part, cell type and disease can't be read from anything
+  Ionomos has. They come from a new `analysis.sdrf` setting (lab-wide in
+  config.yaml, per experiment in experiment.yaml, keys merged). Reading the
+  instrument from `.raw` headers was left out: it can't be tested without real
+  files. The official validator rejects `not available` for organism,
+  instrument, cleavage agent, label and data file, so when those are unknown
+  they are listed in `analysis.json` → `sdrf.fill_in` and in the report's
+  Methods instead of being guessed. `comment[file uri]` is left out: a path on
+  the lab PC isn't a URI anyone can fetch, and PRIDE assigns its own.
+- **No SDRF for a table on its own** (`ionomos analyze <table>`, D33). It names
+  no raw files, and linking samples to raw files is what an SDRF is for;
+  `analysis.json` says so.
+
+`tests/test_sdrf.py` checks the spec's structure rules on every run, and runs
+the official validator (`sdrf-pipelines`, `--skip-ontology`) when it is
+installed: CI installs it on Linux; it is never a runtime dependency.
+
 ### D39 — The watcher can run DIA-NN itself
 **2026-09-30.** A lab that searches DIA with DIA-NN alone (no FragPipe)
 couldn't use the watcher. A method can now say `engine: diann`.
