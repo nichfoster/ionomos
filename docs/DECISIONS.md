@@ -505,3 +505,23 @@ So Ionomos stays on-premise and Windows-native for the watcher, and adds:
 Priorities are in ROADMAP Phase 5. Whether numpy may become an optional
 speed-up is left open until dose-response or a limpa-style model needs it.
 
+### D39 — The watcher can run DIA-NN itself
+**2026-09-30.** A lab that searches DIA with DIA-NN alone (no FragPipe)
+couldn't use the watcher. A method can now say `engine: diann`.
+- `runner.py` picks FragPipe or DIA-NN per method.
+- `diann.py` builds the job: the lab's `diann_exe`, FASTA or spectral library,
+  and `ionomos_run/diann.cfg`, run as `diann --cfg …`.
+- Both engines share `fragpipe.run`'s start / cancel / stop / timeout loop and
+  `check_raws()`, so holds, failures, Retry, pop-ups and "never delete an old
+  attempt" (`diann_previous_*`) behave the same.
+
+The cfg file, not a long command line, is the job's settings. It is
+readable, kept with the results, and one option per line. The price is that
+paths can't have spaces; Ionomos already requires that for FragPipe. The
+defaults follow DIA-NN's GUI defaults for a tryptic search, and a lab adds
+its own with `diann_args`. DIA-NN is never shipped: from 1.9 it can't be
+redistributed, and each lab installs its own edition (Academia / Enterprise).
+MaxQuant and Sage runners would slot into `runner.py` the same way (ROADMAP
+5B). Tested end to end with a fake DIA-NN (`ionomos fake-diann`) that reads
+the cfg and fails like the real one on missing inputs.
+

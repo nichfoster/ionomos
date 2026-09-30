@@ -166,16 +166,21 @@ def load(path: str | Path, check_paths: bool = True) -> Config:
     for key, m in methods_raw.items():
         if not isinstance(m, dict):
             raise ConfigError(f"'methods.{key}' must be a mapping")
-        for req in ("workflow", "fasta", "data_type"):
+        engine = str(m.get("engine") or "fragpipe").lower()
+        if engine not in ("fragpipe", "diann"):
+            raise ConfigError(f"'methods.{key}.engine' must be fragpipe or diann")
+        for req in (("fasta", "data_type") if engine == "diann" else ("workflow", "fasta", "data_type")):
             if not m.get(req):
                 raise ConfigError(f"'methods.{key}.{req}' is required")
         if m["data_type"] not in ("DDA", "DIA"):
             raise ConfigError(f"'methods.{key}.data_type' must be DDA or DIA")
+        if engine == "diann" and m["data_type"] != "DIA":
+            raise ConfigError(f"'methods.{key}': DIA-NN (engine: diann) needs data_type DIA")
         aliases = m.get("aliases") or DEFAULT_METHOD_ALIASES.get(key) or [key.lower()]
         extra = {k: v for k, v in m.items() if k not in ("workflow", "fasta", "data_type", "postprocess", "aliases")}
         methods[key] = MethodConfig(
             key=key,
-            workflow=str(m["workflow"]),
+            workflow=str(m.get("workflow") or ""),
             fasta=str(m["fasta"]),
             data_type=m["data_type"],
             postprocess=tuple(m.get("postprocess") or ()),

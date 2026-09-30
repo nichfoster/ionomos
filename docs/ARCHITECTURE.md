@@ -29,8 +29,9 @@
 | `configio.py` | config.yaml as a dict; writes a commented file | — |
 | `service.py` | child processes, PID file, Task Scheduler, remembered config path, exe routing; dev install: git update, diagnostics bundle | — |
 | `ledger.py` | SQLite job table + status transitions; source of truth for "what's queued" | `prior-work/store.py` |
-| `worker.py` | Thread inside `ionomos run`: first runnable `queued` job → FragPipe → done/failed; holds jobs whose setup files are missing. Sequential. | `prior-work/queue_worker.py` |
+| `worker.py` | Thread inside `ionomos run`: first runnable `queued` job → FragPipe or DIA-NN (runner.py) → done/failed; holds jobs whose setup files are missing. Sequential. | `prior-work/queue_worker.py` |
 | `fragpipe.py` | Prepare a job (launcher, workflow with `database.db-path` patched to the method's FASTA, manifest, TMT annotation), run headless with timeout/stop, kill the process tree | `prior-work/fragpipe_runner.py` |
+| `diann.py`, `runner.py` | `engine: diann` methods: prepare a DIA-NN job (the lab's `diann_exe`, FASTA or spectral library, `ionomos_run/diann.cfg`), output in `diann/`; `runner` picks FragPipe or DIA-NN per method, and both use `fragpipe.run`'s start / cancel / stop / timeout loop (D39) | — |
 | `postprocess.py` | After a done job: runs `downstream` (or only the R-port prep steps when analysis is off); `ionomos analyze` and the Analysis tab use it too (`prepare`, `inspect_folder`) | — |
 | `analysis_tab.py` | App tab 7: analyse one experiment (samples, conditions, comparisons → experiment.yaml, Run) and the lab defaults | — |
 | `experiment_editor.py` | One experiment's analysis choices as a Tk panel (samples, conditions, comparisons, cut-offs, Run, issues); used by tab 7 and the pop-ups | — |
