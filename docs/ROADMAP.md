@@ -195,12 +195,12 @@ Installation and configuration kill lab tools: in one study, 28% of omics
 tools failed to install within 2 hours, and tools on package managers always
 installed.
 
-- [ ] **Analysis-only install from pip.** `pip install ionomos`, then
+- [x] **Analysis-only install from pip.** (2026-09-30, D40: `ionomos demo`, PyPI workflow; publishing awaits the maintainer's trusted-publisher setup) `pip install ionomos`, then
   `ionomos analyze <table or folder>` and `ionomos demo`, on Windows / macOS /
   Linux, with no Tk needed. The analysis has one dependency (PyYAML), so this
   is the cheapest adoption lever. Publishing to PyPI is the maintainer's step
   (trusted publishing from a tag).
-- [ ] **Engine adapters** (import side first). One registry; each adapter can:
+- [x] **Engine adapters** (import side first). (2026-09-30: `downstream/engines.py`, docs/ENGINES.md; run side: DIA-NN, D39) One registry; each adapter can:
   - recognise its results folder / tables (with a confidence score)
   - load one canonical quantity matrix
   - report provenance: engine, version, settings, FDR filters
@@ -209,17 +209,17 @@ installed.
   the fallback. The run side (build the command, locate outputs; the core
   runner keeps locking, logging, cancellation and the "failures leave data in
   place" rule) follows once import works.
-- [ ] **Provenance in every report** (MS-DAP-style audit trail): engine and
+- [x] **Provenance in every report** (2026-09-30: Methods → Data source, `analysis.json` `engine`) (MS-DAP-style audit trail): engine and
   version, workflow / parameter file, FDR filters, Ionomos settings.
-- [ ] **SDRF-Proteomics export** (`results/sdrf.tsv`), the PSI sample-metadata
+- [x] **SDRF-Proteomics export** (2026-09-30, D38; SDRF *import* as a design still open) (`results/sdrf.tsv`), the PSI sample-metadata
   standard PRIDE promotes. Built from what the file names already say:
   condition, replicate, fraction, label channel. Later: accept SDRF as a
   design import.
-- [ ] **Configurable naming.** Each method's file pattern and the condition
+- [x] **Configurable naming.** (2026-09-30, D37: `naming.methods`, `ionomos names test`, Methods tab → Test names…) Each method's file pattern and the condition
   codes become editable config, with a "test your names" check (CLI + setup
   window), so another lab's convention needs no code change. Keep
   NAMING_CONVENTION.md ↔ naming.py in sync.
-- [ ] **Docs for a stranger:**
+- [ ] **Docs for a stranger:** (2026-09-30: QUICKSTART.md, ENGINES.md and the simulated demo done; still to do: a real-data example, and a "never done to your data" page)
   - a 10-minute quickstart
   - demo data, from the real fixture once it exists (simulated until then)
   - "what Ionomos will never do to your data"
@@ -229,18 +229,27 @@ installed.
 
 | # | Engine | Mode | Notes |
 |---|---|---|---|
-| 1 | DIA-NN standalone (1.9 / 2.x) | import, then run | `pg_matrix` parser exists; 2.x `report.parquet` needs an optional Parquet reader. DIA-NN can't be redistributed from 1.9 on (Academia / Enterprise editions): the lab supplies the binary. |
-| 2 | MaxQuant | import `proteinGroups.txt`; later run | Free incl. commercial use; not redistributable. Run mode patches an `mqpar.xml` made by the installed version (`--create`), never a shipped template. |
-| 3 | MSstats long format + SDRF design | import | One importer covers quantms, Skyline and anything with an MSstats converter; protein summary by Tukey median polish (MSstats' default). |
-| 4 | Spectronaut | import | Common in cores; ship an Ionomos report schema (`.rs`), read `PG.Quantity` pivots or the long BGS report. |
+| 1 ✅ | DIA-NN standalone (1.9 / 2.x) | import ✅, run ✅ (`engine: diann`, D39) | `pg_matrix` parser exists; 2.x `report.parquet` needs an optional Parquet reader. DIA-NN can't be redistributed from 1.9 on (Academia / Enterprise editions): the lab supplies the binary. |
+| 2 | MaxQuant | import ✅ `proteinGroups.txt`; run still to do | Free incl. commercial use; not redistributable. Run mode patches an `mqpar.xml` made by the installed version (`--create`), never a shipped template. |
+| 3 | MSstats long format + SDRF design | import ✅ label-free MSstats (MSstatsTMT, SDRF design still to do) | One importer covers quantms, Skyline and anything with an MSstats converter; protein summary by Tukey median polish (MSstats' default). |
+| 4 ✅ | Spectronaut | import ✅ pivot + long reports (the `.rs` schema still to ship) | Common in cores; ship an Ionomos report schema (`.rs`), read `PG.Quantity` pivots or the long BGS report. |
 | 5 | Sage | run + import | MIT and cross-platform: the only engine Ionomos could bundle. Needs ThermoRawFileParser (.raw → mzML) and a protein roll-up of `lfq.tsv`. |
-| 6 | AlphaDIA | import | Apache-2.0, pip-installable; column names changed between 1.x and 2.x. |
-| 7 | Proteome Discoverer | import | Protein-table text export only; no supported headless mode. |
+| 6 ✅ | AlphaDIA | import ✅ `pg.matrix.tsv` | Apache-2.0, pip-installable; column names changed between 1.x and 2.x. |
+| 7 ✅ | Proteome Discoverer | import ✅ (column format from the docs, not yet a real export) | Protein-table text export only; no supported headless mode. |
 
 Skipped unless asked: MSFragger / Philosopher outside FragPipe, PEAKS,
 CHIMERYS, our own search engine. MSFragger and DIA-NN licences make
 bundling impossible, and each lab accepts its own; that is a selling point,
 not a gap.
+
+Found while building 5A/5B (2026-09-30), to fix:
+- `…_DIA_CV-35.raw` is read as replicate 35, but CV-35 is a FAIMS
+  compensation voltage.
+- `naming.methods.<X>: {like: DIA}` borrows DIA's name rules only. The
+  downstream analysis, TMT annotation and control detection still branch on
+  the method's key. Decide whether `like:` should carry through to them.
+- The demo's clean simulated data sometimes flags one sample as "warn". That
+  is borderline: check the scorecard floors on real data.
 
 ### 5C — More analysis (value × feasibility; all possible in pure Python)
 
