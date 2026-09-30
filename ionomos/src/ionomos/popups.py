@@ -19,7 +19,7 @@ Each window says what happened, the most likely causes, what to do, the details
     search_failed                      Retry search, FragPipe log, folder, Report a problem
     search_waiting                     Open Ionomos (setup checklist), folder
     intake_rejected                    Open the inbox, the note
-    every item                         Remind me in an hour, Dismiss
+    every item                         More help (the help page at this problem), Remind me in an hour, Dismiss
 """
 from __future__ import annotations
 
@@ -261,6 +261,7 @@ class ItemWindow:
         self._buttons(b)
         ttk.Button(b, text="Dismiss", command=self.dismiss).pack(side="right", padx=3)
         ttk.Button(b, text="Remind me in an hour", command=self.snooze).pack(side="right", padx=3)
+        ttk.Button(b, text="More help", command=self.more_help).pack(side="right", padx=3)
         win.protocol("WM_DELETE_WINDOW", self.close)
         win.bind("<Escape>", lambda e: self.close())
         win.update_idletasks()
@@ -361,6 +362,15 @@ class ItemWindow:
             self.msg.configure(text=f"Saved {z.name} on the Desktop — send it to whoever looks after Ionomos.")
         except Exception as exc:  # noqa: BLE001
             messagebox.showerror("Report a problem", str(exc), parent=self.win)
+
+    def more_help(self) -> None:
+        """The help page, opened at the entry that explains this item (help.topic_for_item)."""
+        from ionomos import help as helpdoc
+
+        try:
+            helpdoc.open_help(helpdoc.topic_for_item(self.item), log_dir=self.host.log_dir(), opener=self.host.open_path)
+        except OSError as exc:
+            self.msg.configure(text=f"Could not open the help: {exc}", foreground="#c62828")
 
     def snooze(self) -> None:
         attention.snooze(self.host.log_dir(), self.item.id, 60)

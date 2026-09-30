@@ -15,6 +15,8 @@ Command line.
                      [--exclude SAMPLE] [--log2fc F] [--open]
                                                    statistics + volcano plots + results/report.html
     ionomos demo     [FOLDER] [--open]            a simulated experiment + its report (offline, no lab setup)
+    ionomos help     [TOPIC] [--open]             plain-language help: prints TOPIC (NO_TABLE, pca, ...) and
+                                                   writes help.html (--open: in the browser, at TOPIC)
     ionomos init     [--root DIR] [--users DIR]   create folders + a config without the app (headless setup)
     ionomos qc-trend [--rebuild] [--open]         instrument QC: the QC-standard runs trended (logs/qc_trend.html)
     ionomos cancel   JOB_ID                       stop a running search / drop a queued job
@@ -662,6 +664,35 @@ def cmd_demo(args) -> int:
     return 0
 
 
+def cmd_help(args) -> int:
+    """Print one help topic and write the full help page (help.html) where the lab's logs are, or in the
+    app-data folder; --open shows it in the browser at that topic. Needs no config and no Tk."""
+    from ionomos import help as helpdoc
+
+    hid = helpdoc.topic(args.topic) if args.topic else None
+    if args.topic and hid is None:
+        print(f"no help topic {args.topic!r}. Try an issue code (NO_TABLE), a word (volcano, imputation) or a "
+              f"section: {', '.join(s.id for s in helpdoc.sections())}", file=sys.stderr)
+        return 1
+    print(helpdoc.text(hid) if hid else "\n".join(f"{s.title}   (ionomos help {s.id})" for s in helpdoc.sections()))
+    log_dir = None
+    if not args.out:
+        try:
+            log_dir = load(args.config, check_paths=False).log_dir
+        except Exception:  # noqa: BLE001 - no lab config (a pip install): the app-data folder instead
+            log_dir = None
+    try:
+        out = Path(args.out) if args.out else helpdoc.default_dir(log_dir)
+        page = helpdoc.write_page(out, hid)
+    except OSError as exc:
+        print(f"could not write the help page: {exc}", file=sys.stderr)
+        return 2
+    print(f"\nfull help: {page}" + ("" if args.open else "  (--open shows it in the browser)"))
+    if args.open:
+        _open_report(page)
+    return 0
+
+
 def cmd_attention(args) -> int:
     """What needs a person: list, show one, dismiss."""
     from ionomos import attention
@@ -868,6 +899,12 @@ def main(argv: list[str] | None = None) -> int:
     dm.add_argument("--quiet", action="store_true", help="no progress lines")
     dm.add_argument("--open", action="store_true", help="open the report when done")
     dm.set_defaults(fn=cmd_demo)
+    hp = sub.add_parser("help", help="plain-language help: a topic here, the full help page in the browser")
+    hp.add_argument("topic", nargs="?", help="an issue code (NO_TABLE), a word (volcano, imputation), a section "
+                                             "(start, report, glossary, trouble, safety, faq) or a topic id")
+    hp.add_argument("--open", action="store_true", help="open help.html in the browser, at the topic")
+    hp.add_argument("--out", metavar="DIR", help="folder for help.html (default: the log folder, else app data)")
+    hp.set_defaults(fn=cmd_help)
     at = sub.add_parser("attention", help="what needs a person (analysis decisions, failed searches, ...)")
     at.add_argument("action", nargs="?", choices=["list", "show", "dismiss"], default="list")
     at.add_argument("item", nargs="?", help="item id (from the list)")

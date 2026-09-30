@@ -4,7 +4,7 @@ Ionomos app — setup wizard on first run, control panel afterwards.
     ionomos setup [--config PATH]        (or just double-click Ionomos.exe)
 
 Tabs:  1 Folders · 2 Users · 3 Methods · 4 Advanced · 5 Run & Test · Help
-Bottom bar: config path, Reload, Save, Save & Check.
+Bottom bar: config path, Reload, Save, Save & Check, Report a problem, Help (the full help page in the browser).
 
 Pure tkinter/ttk. Edits a plain dict (ionomos.configio) and writes a
 commented config.yaml; validation is done by ionomos.config.load so the app
@@ -39,6 +39,13 @@ IONOMOS — what it does
   METHOD (isoDTB / TMT / DIA) from the names, moves it to
   <users_root>/<user>/<experiment>/ and queues it for FragPipe.
   If it can't tell, a small window asks you.
+
+HELP FOR THE LAB
+  The Help button (bottom right, or the button above) opens the full help in
+  the browser: naming folders, the review window, reading the report chart by
+  chart, a glossary, what every message and pop-up means, and what Ionomos
+  never does to your data. Same page: ionomos help --open. Every report also
+  has a Help section and a "?" beside each part. This tab is about setting up.
 
 START HERE: the ✓ Setup tab
   A live checklist of everything Ionomos needs (folders, people, FragPipe,
@@ -195,6 +202,7 @@ WHERE THINGS ARE
 
 COMMAND LINE (same program; ionomos-cli.exe on Windows)
   ionomos check | status | dry-run <folder> | run | retry <id> | cancel <id>
+  ionomos help [topic] [--open]   e.g. ionomos help NO_TABLE, ionomos help pca
   ionomos pause | resume | diagnose [--zip] | repair-ledger | testbed ...
   ionomos testbed stress   many messy drops + chaos, then checks nothing was lost
 """
@@ -2109,10 +2117,25 @@ class App:
     def _tab_help(self):
         f = ttk.Frame(self.nb, padding=10)
         self.nb.add(f, text="  Help  ")
+        top = ttk.Frame(f)
+        top.pack(fill="x", pady=(0, 8))
+        ttk.Button(top, text="Open the full help in the browser", command=self.open_help).pack(side="left")
+        ttk.Label(top, text="  For everyone in the lab: naming folders, reading the report, a glossary, what every "
+                            "message means. Below: setting Ionomos up.", foreground="#555").pack(side="left")
         t = scrolledtext.ScrolledText(f, wrap="word", font=("Menlo" if sys.platform == "darwin" else "Consolas", 10))
         t.pack(fill="both", expand=True)
         t.insert("1.0", HELP_TEXT)
         t.configure(state="disabled")
+
+    def open_help(self, topic: str | None = None):
+        """The full help page (ionomos/help) in the browser; the same page `ionomos help --open` writes."""
+        from ionomos import help as helpdoc
+
+        try:
+            helpdoc.open_help(topic, log_dir=self.v("paths.log_dir").get().strip() or None,
+                              opener=lambda p: self._open(p))
+        except OSError as exc:
+            messagebox.showerror("Help", f"Could not write the help page:\n{exc}")
 
     # -------------------------------------------------------- bottom bar ----
 
@@ -2129,6 +2152,7 @@ class App:
         ttk.Button(b, text="Reload", command=self.reload).pack(side="right", padx=4)
         self.report_btn = ttk.Button(b, text="Report a problem…", command=self.report_problem)
         self.report_btn.pack(side="right", padx=(4, 16))
+        ttk.Button(b, text="Help", command=self.open_help).pack(side="right", padx=4)
         self.attn_btn = tk.Button(b, text="", command=self.show_attention, foreground="#b26a00", relief="groove")
         self.update_btn = ttk.Button(b, text="", command=self.install_update)  # shown when an update is downloaded
         b2 = ttk.Frame(self.root, padding=(8, 0, 8, 6))

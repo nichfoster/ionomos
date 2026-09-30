@@ -146,6 +146,9 @@ labelled as low confidence, never refused, and p-values are never invented
 
 ## Next
 
+- What a chart, a word or a warning means: the **?** beside each part of the
+  report and its Help section, or `ionomos help --open` for the whole help
+  ([HELP.md](HELP.md)).
 - A problem, or a table it doesn't read:
   <https://github.com/nichfoster/ionomos/issues> (attach the header row, not
   your data).

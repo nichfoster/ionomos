@@ -757,6 +757,59 @@ telling instruments apart within one config, and tuning the SD floor and
 CUSUM h on real QC data.
 
 
+### D46 — Help for users comes from one Markdown source, shown in every report, a help page and the terminal
+**2026-09-30.** The people who read the reports and drop the folders are lab
+members, not bioinformaticians. What each chart shows, what "adjusted p" or
+"imputed" means, and what to do about `BATCH_SUSPECT` or a `.REJECTED.txt`
+lived in the docs folder, the doctor's one-line causes and the app's setup
+text. Nobody at the PC reads those.
+
+The help is now one set of plain Markdown files in `ionomos/help/`: getting
+started, reading the report, a glossary, troubleshooting, what Ionomos never
+does to your data, and questions (docs/HELP.md). Each topic is a
+`## Title {#id}` entry. The id's namespace says where it is used (`report.`,
+`qc.`, `glossary.`, `issue.<CODE>`, `attention.<kind>`, `intake.<kind>`, …).
+It is shown in three places:
+- **Every report** embeds the report and QC entries, the glossary, the entries
+  for the issues it found, and every entry those link to (about 40 KB). A
+  **?** beside each section title, QC tab, the cut-offs and each issue box
+  opens the text in place, and a Help section at the end lists it all. It
+  works offline, like the rest of the page.
+- **`help.html`**: everything, self-contained, with a search box. The app's
+  Help button, each pop-up's **More help** (opened at the topic that explains
+  that item) and `ionomos help --open` all write it to `<log_dir>/help/` and
+  open it in the browser.
+- **`ionomos help TOPIC`** prints one topic (an issue code, a word, a
+  section) as plain text.
+
+Why these choices:
+- **Markdown, not a Python or YAML structure.** The content is prose that
+  the maintainer and lab members edit. It reads as-is on GitHub and diffs
+  cleanly. A small renderer in the standard library handles the subset the
+  help needs (paragraphs, lists, bold, italic, code, links). It escapes all
+  text before applying the markup and turns only `#id` and `https://` targets
+  into links, so no content can inject a tag or a `javascript:` URL. The price
+  is two packaging entries (`pyproject.toml` package-data, the PyInstaller
+  spec), which a test checks.
+- **Rendered in Python, drawn in JS.** The report gets ready, escaped HTML
+  per entry, so report.js only places it. The only data-derived text in the
+  help (issue titles and codes) goes through `esc()` there. A failure while
+  building the help leaves it out of the report; the report is still made.
+- **Coverage is tested, not remembered.** Tests read the code: every
+  `Issue("CODE")`, every attention kind, every intake rejection kind and every
+  `raise Hold(…)` reason must have an entry, so a new code can't ship
+  unexplained. The FragPipe failure causes on the help page come from
+  `fragpipe.EXPLANATIONS` itself.
+- **The "never do" page states only what the code does**, checked against
+  intake, the runners and D17 / D29 / D33 / D40. One thing it says plainly
+  because it could surprise someone: `results/` belongs to Ionomos, so a
+  re-analysis replaces the report in it.
+
+The app's Help tab keeps its setup text for whoever runs the PC, with a
+button to the full help above it. The help is English only; translations would
+be one file set per language, and nobody has asked yet.
+
+
 ### D49 — The assistant on the PC is local, grounded, and can only propose
 **2026-09-30.** The owner wants a local AI that helps lab members troubleshoot
 and work with their data in plain language. The plan is ROADMAP Phase 6,

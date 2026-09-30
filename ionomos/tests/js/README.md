@@ -39,6 +39,10 @@ VirtualConsole; tests assert the list stays empty.
   (localStorage, .gmt export), hit filters, key findings, compare
   (quadrants + UpSet), only-in-one-condition, rank-based enrichment and its
   barcode, every QC tab, and a broken section staying contained.
+- `test/help.test.mjs` — the help (D46): the Help nav entry and section, the
+  **?** beside section titles, QC tabs and issue boxes and their panels,
+  every help link resolving in the page, escaped issue titles and codes, and
+  a report without a help payload.
 
 ## Running
 
