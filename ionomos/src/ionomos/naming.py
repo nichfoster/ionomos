@@ -80,6 +80,25 @@ def strip_acq_stamp(stem: str) -> str:
     return ACQ_STAMP.sub("", stem)
 
 
+# An instrument setting at the end of a name: FAIMS compensation voltage (CV-35, cv-55), collision energy
+# (HCD33, NCE30), CID. Its number is part of the sample name, never a replicate or fraction: three runs
+# at CV-35 / -45 / -55 are three settings of one sample, not replicates 35, 45, 55. Only 2-3 digits
+# (settings are >= 10), after a separator and some text, so condition "CV" rep 1 (X_CV_1) still reads as that.
+ACQ_SETTING = re.compile(r"(?<=.)(?<=[_-])(?P<key>CV|FAIMS|HCD|NCE|CID)(?P<sep>[_-]?)(?P<num>\d{2,3})$", re.I)
+_DIGIT_MASK = str.maketrans("0123456789", "abcdefghij")
+
+
+def mask_setting(stem: str, codes: dict[str, str] | None = None) -> tuple[str, tuple[str, str] | None]:
+    """(stem with a trailing instrument setting hidden from the file rule, (mask, original) to restore it).
+    A key configured as a condition code (naming.condition_codes) is left alone: the lab said what it means."""
+    m = ACQ_SETTING.search(stem)
+    if not m or any(k.lower() == m["key"].lower() for k in (codes or {})):
+        return stem, None
+    original = stem[m.start("key"):]
+    mask = m["key"] + "~" + m["num"].translate(_DIGIT_MASK)  # no separator, no digits: nothing to read
+    return stem[:m.start("key")] + mask, (mask, original)
+
+
 DEFAULT_METHOD_ALIASES: dict[str, list[str]] = {
     "isoDTB": ["isodtb", "iso-dtb", "iso_dtb"],
     "TMT": ["tmt"],
@@ -551,16 +570,23 @@ def parse_raw_name(filename: str, method: str, codes: dict[str, str] | None = No
                           "to config.yaml (e.g. files: '{sample}_{rep}', or like: DIA)")
     stem = filename[: -len(RAW_SUFFIX)]
     safe_stem = sanitize(stem)
-    m = rule.regex.match(strip_acq_stamp(safe_stem))
+    read_stem, setting = mask_setting(strip_acq_stamp(safe_stem), codes)
+    m = rule.regex.match(read_stem)
     if not m:  # built-in rules: only reachable for isoDTB (the others accept a bare stem)
+        if setting:
+            raise NamingError(f"{filename!r}: {setting[1]} looks like an instrument setting (FAIMS CV / collision "
+                              f"energy), not a replicate; {method} files {rule.must}, e.g. "
+                              f"{stem}_1.raw")
         raise NamingError(f"{filename!r}: {method} files {rule.must}")
     sample, rep, frac = rule.read(m)
+    if setting and sample:
+        sample = sample.replace(setting[0], setting[1])
     if not sample:
         raise NamingError(f"{filename!r}: no sample name left once the {method} rule is applied")
     for what, v in (("replicate", rep), ("fraction", frac)):
         if v is not None and not v.isdigit():  # only a hand-written pattern can capture non-digits
             raise NamingError(f"{filename!r}: {what} {v!r} is not a number")
-    if rule.codes and rep is None:
+    if rule.codes and rep is None and not setting:  # "CV35" is a setting, not condition CV rep 35
         c = _CODED.match(strip_acq_stamp(safe_stem))
         full = expand_code(c["code"], codes) if c else None
         if full:

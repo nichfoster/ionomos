@@ -280,3 +280,50 @@ def test_group_duplicate_after_normalisation():
 def test_group_empty():
     with pytest.raises(NamingError, match="no .raw"):
         group_raws([], "DIA")
+
+
+# Instrument settings at the end of a name (FAIMS CV, collision energy) are part of the sample, never a
+# replicate or fraction. Real names from reference/pc-inventory (D:\Chris\22rv1_ELK_F1-7-mixed_optimization):
+# one sample acquired at three compensation voltages.
+@pytest.mark.parametrize(
+    "fname, method, sample, rep, frac",
+    [
+        ("CS_isoDTB_ELK_3_1-7_DIA_CV-35.raw", "DIA", "CS_isoDTB_ELK_3_1-7_DIA_CV-35", 1, None),
+        ("CS_isoDTB_ELK_3_1-7_DIA_CV-45.raw", "DIA", "CS_isoDTB_ELK_3_1-7_DIA_CV-45", 1, None),
+        ("CS_isoDTB_ELK_3_1-7_DIA_CV-55.raw", "DIA", "CS_isoDTB_ELK_3_1-7_DIA_CV-55", 1, None),
+        ("CS_isoDTB_ELK_3_1-7_DIA_HCD333_cv-55.raw", "DIA", "CS_isoDTB_ELK_3_1-7_DIA_HCD333_cv-55", 1, None),
+        ("CS_isoDTB_ELK_3_1-7_DIA_HCD33.raw", "DIA", "CS_isoDTB_ELK_3_1-7_DIA_HCD33", 1, None),  # unchanged
+        ("X_CV35.raw", "DIA", "X_CV35", 1, None),              # glued: not condition code CV, rep 35
+        ("X_NCE-30.raw", "DIA", "X_NCE-30", 1, None),
+        ("X_FAIMS_45.raw", "DIA", "X_FAIMS_45", 1, None),
+        ("DMSO_CV-45_2.raw", "DIA", "DMSO_CV-45", 2, None),    # a real replicate after the setting still counts
+        ("X_CV-35_20260508204737.raw", "DIA", "X_CV-35", 1, None),  # with an Xcalibur stamp
+        ("KL_TMT_CV-40.raw", "TMT", "KL_TMT_CV-40", 1, None),   # not fraction 40
+        ("X_CV-35_1_3.raw", "isoDTB", "X_CV-35", 1, 3),
+        # not settings: one digit, a condition that is just the word, a short DIA code
+        ("X_CV_1.raw", "DIA", "X_CV", 1, None),
+        ("CV-35.raw", "DIA", "CV", 35, None),                   # nothing before it: read as before
+        ("X_D1.raw", "DIA", "X_DMSO", 1, None),
+        ("X_C12.raw", "DIA", "X_Compound", 12, None),
+    ],
+)
+def test_instrument_setting_is_part_of_the_sample(fname, method, sample, rep, frac):
+    r = parse_raw_name(fname, method)
+    assert (r.sample, r.rep, r.fraction) == (sample, rep, frac)
+
+
+def test_cv_optimisation_folder_is_three_samples_not_three_replicates():
+    names = [f"CS_isoDTB_ELK_3_1-7_DIA_CV-{v}.raw" for v in (35, 45, 55)]
+    rs = group_raws(names, "DIA")
+    assert rs.layout == {f"CS_isoDTB_ELK_3_1-7_DIA_CV-{v}": {1: []} for v in (35, 45, 55)}
+
+
+def test_setting_without_a_replicate_is_refused_for_isodtb_with_a_hint():
+    with pytest.raises(NamingError, match=r"CV-35 looks like an instrument setting.*e\.g\. X_CV-35_1\.raw"):
+        parse_raw_name("X_CV-35.raw", "isoDTB")
+
+
+def test_a_configured_condition_code_keeps_its_meaning():
+    # a lab that says CV is a condition (naming.condition_codes) gets condition CV, replicate 35
+    r = parse_raw_name("X_CV35.raw", "DIA", codes={"CV": "Cardio", "D": "DMSO"})
+    assert (r.sample, r.rep) == ("X_Cardio", 35)
