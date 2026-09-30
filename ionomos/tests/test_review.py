@@ -297,14 +297,18 @@ def test_open_window_picks_up_a_user_added_meanwhile(lab):
                 return
             if user_cb.get() == "Kosuke":
                 filled.append("Kosuke" in user_cb.cget("values"))
-                win.event_generate("<Return>")
+                # Press Accept directly: a synthetic <Return> only reaches the window while it holds keyboard
+                # focus, and on a desktop in use it often doesn't, so the key was dropped and the test flaked.
+                next(w for w in _widgets(win) if w.winfo_class() == "TButton"
+                     and str(w.cget("text")).startswith("Accept")).invoke()
             else:
                 win.after(100, wait_for_user)
 
         wait_for_user()
 
-    assert not _drive_dialog(root, act)
+    hung = _drive_dialog(root, act)
     ov = TkResolver(root, refresh=lambda dd: draft(folder, live.get(), review=dd.review)).resolve(d)
     root.destroy()
+    assert not hung  # checked after the window closed; before it opens the list is always empty
     assert filled == [True]
     assert ov is not None and ov.user == "Kosuke"
