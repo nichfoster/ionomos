@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Flaky GUI test `test_open_window_picks_up_a_user_added_meanwhile` on macOS.
+  Config reloading was fine. The test accepted the window with a synthetic
+  Return key, which Tk drops whenever the window has lost keyboard focus (for
+  example while someone uses the desktop). It now presses Accept directly, and
+  its watchdog check runs after the window closes instead of before it opens.
+
 ## [0.10.1] - 2026-09-28
 
 Same features as 0.10.0, which was tagged but never released: its installer
