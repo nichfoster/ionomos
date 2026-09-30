@@ -60,7 +60,7 @@ to put it on the PC.
 | [`docs/`](docs/) | Design docs — read these first |
 | [`ionomos/`](ionomos/) | The watcher package (Python 3.11+, installed on the proteomics PC) |
 | [`deploy/`](deploy/) | `dev_install.ps1` (PC runs from a git clone; updates = one button), `build_exe.ps1` (PyInstaller → `Ionomos.exe`, also run by GitHub Actions), `install.ps1` fallback |
-| [`.github/workflows/`](.github/workflows/) | CI: tests on Linux + Windows every push; exe build + Release on `v*` tags |
+| [`.github/workflows/`](.github/workflows/) | CI: tests on Linux + Windows every push; exe build + Release on `v*` tags; the pip package built and tried on Windows / macOS / Linux on `v*` tags (uploads to PyPI once trusted publishing is set up) |
 | [`scripts/`](scripts/) | One-shot dev/test setup for macOS and Windows |
 | [`tools/inventory/`](tools/inventory/) | PowerShell inventory collector to run on the lab PC (fixed version) |
 | [`reference/pc-inventory/`](reference/pc-inventory/) | Raw output of the inventory runs (2026-09-15) |
@@ -72,6 +72,7 @@ to put it on the PC.
 
 | Doc | Purpose |
 |---|---|
+| [QUICKSTART.md](docs/QUICKSTART.md) | **New here?** `pip install ionomos`, `ionomos demo`, then `ionomos analyze` on your own table: what it reads and what the report shows |
 | [SCOPE.md](docs/SCOPE.md) | Problem statement, in/out of scope, users, constraints |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, data flow, job state machine, on-disk layout |
 | [NAMING_CONVENTION.md](docs/NAMING_CONVENTION.md) | The folder/file naming spec users must follow + the optional `experiment.yaml` |
@@ -84,6 +85,16 @@ to put it on the PC.
 | [TESTING.md](docs/TESTING.md) | Test suite + testbed on macOS and Windows |
 | [FIRST_REAL_RUN.md](docs/FIRST_REAL_RUN.md) | Runbook for the first real FragPipe run on the PC (isoDTB, then DIA) |
 | [ENGINES.md](docs/ENGINES.md) | Results from other engines Ionomos can analyse (DIA-NN, MaxQuant, Spectronaut, AlphaDIA, MSstats format, Proteome Discoverer) and what it reads from each |
+
+## Try the analysis on any computer
+
+```bash
+pip install ionomos        # until it is on PyPI: pip install "git+https://github.com/nichfoster/ionomos#subdirectory=ionomos"
+ionomos demo --open        # a simulated experiment and its report, offline
+ionomos analyze path/to/your/table.tsv --open
+```
+
+Windows, macOS or Linux; no lab setup, no Tk. See [docs/QUICKSTART.md](docs/QUICKSTART.md).
 
 ## Quick start (dev, on this Mac)
 

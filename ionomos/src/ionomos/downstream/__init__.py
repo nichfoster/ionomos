@@ -185,12 +185,17 @@ def _few_text(groups) -> str:
     return ", ".join(f"{g} has {n} sample{'s' if n != 1 else ''}" for g, n in groups)
 
 
-def _libraries(settings, notes) -> dict:
+def _libraries(settings, notes, base: Path | None = None) -> dict:
+    """base: the experiment folder; a relative enrichment_gmt found there is read from there (so a folder
+    carrying its own .gmt can be moved or analysed from anywhere)."""
     from ionomos.downstream import enrich
 
     if not settings.enrichment:
         return {}
-    libs, lnotes = enrich.load_libraries(settings.enrichment_libraries, settings.enrichment_gmt or None)
+    gmt = settings.enrichment_gmt or None
+    if gmt and base is not None and not Path(gmt).is_absolute() and (Path(base) / gmt).is_file():
+        gmt = str(Path(base) / gmt)
+    libs, lnotes = enrich.load_libraries(settings.enrichment_libraries, gmt)
     notes += lnotes
     return libs
 
@@ -395,7 +400,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
                                                           for d in diffs}}) or {}
         if diffs and settings.enrichment:
             say("enrichment")
-            libs = stage("enrichment", _libraries, settings, enr_notes) or {}
+            libs = stage("enrichment", _libraries, settings, enr_notes, dest) or {}
             enrichment = stage("enrichment", _enrichment, diffs, libs) or []
             ranked = stage("enrichment", _rank_enrichment, diffs, None, libs) or []
             _write_enrichment(results, enrichment, ranked, stage, out)
@@ -497,7 +502,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
                         out.files.append(t)
         if diffs and settings.enrichment:
             say("enrichment (hits, and every protein ranked)")
-            libs = stage("enrichment", _libraries, settings, enr_notes) or {}
+            libs = stage("enrichment", _libraries, settings, enr_notes, dest) or {}
             enrichment = stage("enrichment", _enrichment, diffs, libs) or []
             ranked = stage("enrichment", _rank_enrichment, diffs, processed, libs) or []
             _write_enrichment(results, enrichment, ranked, stage, out)

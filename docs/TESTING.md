@@ -14,6 +14,7 @@ Three layers, all runnable on macOS and Windows:
 | Stress | `ionomos testbed stress --n 150`: messy drops (unicode/emoji/huge names, no raws, empty raws, bad tails, duplicates, slow copies, failing searches) + chaos (worker killed mid-run, ledger locked, corrupt status file, pause/resume, cancel), then invariant checks; plus a 5000-name parser fuzz | any machine; a smaller run is in pytest |
 | GitHub Actions | the pytest suite and the JS report-harness on Linux **and Windows** on every push; on a version tag also the frozen exe (pipeline + stress) and the **installer**: install, retire a fake LabWatch, upgrade, uninstall, data kept | Actions tab |
 | Migration | an install from the LabWatch era (old status files, run folders, logs, lock, config pointer, env var) keeps working | `tests/test_migration.py` |
+| pip install / demo | `ionomos demo` finds what it planted (hits, on/off proteins, gene sets by both tests), never writes into an existing folder, is reproducible, works offline with no lab config; `demo` and `analyze <table\|folder>` run in a Python where `import tkinter` fails (a subprocess, so nothing Tk can creep into the analysis path); the demo gene sets and the LICENSE copy ship in the package | `tests/test_demo.py`, `tests/test_packaging.py`; the wheel itself: `publish-pypi` workflow (below) |
 
 ## One-shot setup
 
@@ -130,6 +131,23 @@ dist/exe/ionomos setup          # the app, frozen
 
 The Windows build (`deploy\build_exe.ps1`) produces `Ionomos.exe` (windowed)
 and `ionomos-cli.exe` (console) from the same spec.
+
+## The pip package
+
+What `pip install ionomos` gets (docs/QUICKSTART.md). To check a build by hand:
+
+```bash
+cd ionomos && .venv/bin/python -m build --outdir /tmp/ionomos-dist .   # wheel + sdist (`build` is in [dev])
+python3 -m venv /tmp/fresh && /tmp/fresh/bin/pip install /tmp/ionomos-dist/*.whl
+cd /tmp && /tmp/fresh/bin/ionomos demo --open      # from a folder that is not the checkout
+```
+
+`.github/workflows/publish-pypi.yml` does the same on every `v*` tag (or by
+hand): builds, `twine check`, installs the wheel into a fresh venv on Windows,
+macOS and Linux (Python 3.11 and 3.14) and the sdist on Linux, and runs
+`ionomos demo` and `ionomos analyze` from them. It uploads to PyPI only once
+the maintainer has set up trusted publishing (the steps are at the top of the
+workflow file).
 
 ## Stress testing
 

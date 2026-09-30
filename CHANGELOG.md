@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Analysis-only install from pip** (ROADMAP Phase 5A, D40). `pip install
+  ionomos`, then `ionomos analyze <table or folder>`, on Windows, macOS or
+  Linux with no Tk; a test runs the analysis in a Python where `import
+  tkinter` fails. New [docs/QUICKSTART.md](docs/QUICKSTART.md): a 10-minute
+  guide for someone new, covering what `analyze` reads and what the report
+  shows.
+- **`ionomos demo [FOLDER] [--open]`**: writes a simulated DIA experiment and
+  analyses it, offline. It has DMSO / DrugA / DrugB × 4 replicates, planted
+  hits, on/off proteins and gene-set shifts, with a bundled demo `.gmt`. The
+  default folder is `./ionomos_demo`, then `_2`, `_3`, ... if taken; the demo
+  never writes into a folder that holds anything.
+- PyPI metadata in `ionomos/pyproject.toml`: SPDX licence, classifiers,
+  keywords, project URLs, and a short PyPI-facing `ionomos/README.md`.
+- `.github/workflows/publish-pypi.yml`. On `v*` tags or by hand, it builds the
+  wheel and sdist, runs `twine check`, installs them into fresh venvs on
+  Windows / macOS / Linux and runs `demo` and `analyze` from them. It uploads
+  with PyPI trusted publishing only once the maintainer has configured it
+  (steps at the top of the file).
 - **SDRF-Proteomics sample sheet for every analysed experiment**
   (`results/sdrf.tsv`, `downstream/sdrf.py`, D38). It follows spec v1.1.0,
   template `ms-proteomics`, and has one row per raw file: per channel for TMT,
@@ -26,7 +44,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   report's Methods name the columns to fill in before depositing to PRIDE.
   A table analysed on its own gets none. Checked with the official validator
   (`sdrf-pipelines`, dev-only, installed in CI on Linux).
-
 - **Configurable naming** (`config.yaml` `naming:`, D37; ROADMAP Phase 5A).
   Another lab's convention is now a config change, not a code change:
   - `naming.methods.<name>`: each method's `.raw` rule as a template
@@ -51,7 +68,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unsaved settings.
 - A `.raw` name for a method with no file rule now says how to add one
   (`naming.methods.<name>`).
-
 - **Results from other engines** (`downstream/engines.py`, docs/ENGINES.md,
   D36). `ionomos analyze` (and the Analysis tab's Table…) recognises and
   loads:
@@ -84,6 +100,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A relative `enrichment_gmt` (in `experiment.yaml` or the lab config) is read
+  from the experiment folder when the file is there.
+- `simulate.dia_pg_matrix` can name the proteins, plant chosen effects and
+  leave proteins out of whole conditions. Output for existing seeds is
+  unchanged.
 - ROADMAP Phase 5 and D36: the plan for making Ionomos useful to other labs
   (pip-installable analysis, engine adapters, SDRF, configurable naming, more
   engines and analyses).

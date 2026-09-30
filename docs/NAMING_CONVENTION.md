@@ -314,6 +314,7 @@ analysis:                   # results/report.html for this experiment (lab defau
   comparisons: ["Drug vs DMSO", "Drug2 vs DMSO"]   # treatment vs control; default: all vs the control
   control: DMSO             # default: recognised by name (DMSO, vehicle, ctrl, WT, ...)
   log2fc: 1                 # also: alpha, use_adjusted, min_valid, normalize, test, top_labels
+  enrichment_gmt: sets.gmt  # extra gene sets; a relative path is read from this folder first
   sdrf:                     # sample metadata for results/sdrf.tsv (lab-wide values: config.yaml analysis.sdrf)
     cell_type: HEK293T      # also: organism, organism_part, disease, instrument, cleavage_agent
 

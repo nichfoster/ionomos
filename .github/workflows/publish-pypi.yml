@@ -1,0 +1,104 @@
+# Builds the `ionomos` wheel + sdist, installs each into a fresh venv on Windows / macOS / Linux and runs
+# `ionomos demo` and `ionomos analyze` from it (no checkout: only what pip installs), then, ONLY WHEN
+# SWITCHED ON, uploads to PyPI with trusted publishing (docs/QUICKSTART.md is what a PyPI user reads).
+#
+# NOTHING IS UPLOADED UNTIL THE MAINTAINER HAS SET THIS UP (one time; no API token is ever stored in GitHub):
+#   1. pypi.org -> Account -> Publishing -> "Add a new pending publisher" (the project doesn't exist yet):
+#        PyPI project name: ionomos   Owner: nichfoster   Repository name: ionomos
+#        Workflow name: publish-pypi.yml   Environment name: pypi
+#   2. GitHub -> Settings -> Environments -> New environment "pypi" (tip: add yourself as required
+#      reviewer, so every upload waits for a click).
+#   3. GitHub -> Settings -> Secrets and variables -> Actions -> Variables -> New: PYPI_PUBLISH = true
+# Until step 3, a v* tag only builds and checks the packages. After it, the release routine in CLAUDE.md
+# (bump the version, push, wait for CI, `git tag vX.Y.Z && git push --tags`) also publishes that version.
+# A manual run (Actions -> publish-pypi -> Run workflow) checks the packages, and uploads only with
+# "publish" ticked. PyPI never accepts the same version twice, so a re-run of a published tag fails there.
+name: publish-pypi
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Upload to PyPI after the checks (needs the trusted publisher: see the top of the file)"
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install build twine
+      - run: python -m build ionomos --outdir dist
+      - name: The tag is the package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          v=$(python -c "import tomllib; print(tomllib.load(open('ionomos/pyproject.toml', 'rb'))['project']['version'])")
+          test "v$v" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME is not the pyproject version v$v"; exit 1; }
+      - run: python -m twine check --strict dist/*
+      - name: The sdist builds and installs too
+        env:
+          IONOMOS_OFFLINE: "1"
+        run: |
+          python -m venv "$RUNNER_TEMP/sdist"
+          "$RUNNER_TEMP/sdist/bin/python" -m pip install dist/*.tar.gz
+          cd "$RUNNER_TEMP" && "$RUNNER_TEMP/sdist/bin/ionomos" demo --quiet
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+  smoke:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+        python: ["3.11", "3.14"]
+    name: smoke (${{ matrix.os }}, py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Wheel into a fresh venv, then demo + analyze from a folder of its own
+        shell: bash
+        env:
+          IONOMOS_OFFLINE: "1"
+        run: |
+          python -m venv "$RUNNER_TEMP/fresh"
+          bin="$RUNNER_TEMP/fresh/bin"; [ -d "$bin" ] || bin="$RUNNER_TEMP/fresh/Scripts"
+          "$bin/python" -m pip install dist/*.whl
+          mkdir "$RUNNER_TEMP/try" && cd "$RUNNER_TEMP/try"
+          "$bin/ionomos" --version
+          "$bin/ionomos" demo
+          test -f ionomos_demo/results/report.html
+          "$bin/ionomos" demo --quiet
+          test -f ionomos_demo_2/results/report.html
+          "$bin/ionomos" analyze ionomos_demo/fragpipe/diann-output/report.pg_matrix.tsv --quiet
+          test -f ionomos_demo/fragpipe/diann-output/report.pg_matrix_ionomos/results/report.html
+  publish:
+    needs: [build, smoke]
+    if: >-
+      (github.event_name == 'push' && vars.PYPI_PUBLISH == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish)
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/ionomos
+    permissions:
+      id-token: write  # trusted publishing: PyPI checks this workflow's identity, no password
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1

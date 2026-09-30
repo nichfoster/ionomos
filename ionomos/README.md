@@ -1,49 +1,57 @@
-# ionomos
+# Ionomos
 
-The watcher package. Design is in [`../docs/`](../docs/); this file is the
-developer/operator view.
+Proteomics results to an interactive, self-contained report: filtering,
+normalisation, imputation, limma statistics, volcano plots, sample QC,
+"only in one condition" proteins and gene-set enrichment, in one
+`report.html` that opens in any browser, offline. The statistics are a
+Python port of FragPipe-Analyst, checked against the R package.
 
-## Status
-
-Phase 1 complete and hardened (watcher + intake + resolver window + testbed;
-no FragPipe yet). See `../docs/ROADMAP.md`. Testing: `../docs/TESTING.md`.
-Deploying: `../docs/DEPLOY_WINDOWS.md`.
-
-## Develop (Mac/Linux)
+Pure Python, one dependency (PyYAML), Windows / macOS / Linux, no Tk needed
+for the analysis.
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-pytest
-ruff check src tests
+pip install ionomos
+ionomos demo --open                              # a simulated experiment and its report
+ionomos analyze path/to/report.pg_matrix.tsv --open
 ```
 
-## Deploy (proteomics PC, Windows)
+`ionomos analyze` reads:
+- a FragPipe results folder (LFQ `combined_protein.tsv`, DIA `report.pg_matrix.tsv`,
+  TMT `abundance_*_MD.tsv`, isoDTB `combined_modified_peptide_label_quant.tsv`)
+- DIA-NN (`pg_matrix.tsv`, `report.tsv`, or `report.parquet` with
+  `pip install "ionomos[parquet]"`), MaxQuant `proteinGroups.txt`, Spectronaut
+  reports, AlphaDIA `pg.matrix.tsv`, MSstats-format tables, Proteome Discoverer
+  protein exports ([what is read from each](https://github.com/nichfoster/ionomos/blob/master/docs/ENGINES.md))
+- any protein table (`.csv`, `.tsv`, `.txt`, `.xlsx`: Perseus exports, your own sheet)
+- a results table that already holds fold changes and p-values (plotted as given)
 
-Preferred: build `Ionomos.exe` on a Windows machine with
-`deploy\build_exe.ps1`, unzip on the PC, double-click. Fallback: wheel +
-`install.ps1` via `deploy/make_release.sh`. Full walkthrough in
-[`../docs/DEPLOY_WINDOWS.md`](../docs/DEPLOY_WINDOWS.md).
+Results go to `results/` in a folder, or `<table name>_ionomos/` next to a
+table; nothing beside your data is changed.
 
-## Modules
+Ionomos is also a Windows app that watches a drop folder on the instrument PC,
+files each experiment and runs FragPipe headlessly before the analysis; that
+part is set up from the installer on the
+[releases page](https://github.com/nichfoster/ionomos/releases).
 
-| Module | State |
-|---|---|
-| `naming.py` | ✅ keyword/user/date matching, per-method raw tails (configurable: `naming:` in config.yaml) |
-| `namecheck.py` | ✅ `ionomos names test`: how the config reads a list of names |
-| `config.py` | ✅ YAML load + validation (FragPipe paths are warnings until Phase 2) |
-| `watcher.py` | ✅ inbox polling with tree-fingerprint stability |
-| `ledger.py` | ✅ SQLite jobs table, startup recovery |
-| `intake.py` | ✅ plan → move → ionomos.json → ledger; `.REJECTED.txt` on failure |
-| `resolve.py` | ✅ tkinter resolver window; pure validation logic separately testable |
-| `testbed.py` | ✅ `ionomos testbed init/list/drop/reset/gui-demo` |
-| `app.py` | ✅ setup wizard / control panel (`ionomos setup`, or the exe with no args) |
-| `configio.py` | ✅ commented config.yaml writer used by the app |
-| `service.py` | ✅ child watcher process, PID file, Task Scheduler, exe routing |
-| `cli.py` | ✅ `setup`, `run [--no-gui]`, `check`, `status`, `dry-run`, `names test`, `retry`, `testbed` |
-| `manifest.py` | stub |
-| `worker.py` | stub |
-| `runners/fragpipe.py` | stub (port from `reference/prior-work`) |
-| `runners/isodtb.py` | stub (port from `reference/lab-scripts`) |
-| `runners/tmt.py` | stub (port from `reference/lab-scripts`) |
-| `runners/dia.py` | stub |
+- 10-minute quickstart: <https://github.com/nichfoster/ionomos/blob/master/docs/QUICKSTART.md>
+- Source, docs and issues: <https://github.com/nichfoster/ionomos>
+- Changes: <https://github.com/nichfoster/ionomos/blob/master/CHANGELOG.md>
+
+## Develop
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
+.venv/bin/pytest && .venv/bin/ruff check src tests
+```
+
+Design docs, testing and deployment:
+[docs/](https://github.com/nichfoster/ionomos/tree/master/docs).
+
+## License and citation
+
+GPL-3.0-or-later. The analysis is a translation of
+[FragPipeAnalystR](https://github.com/Nesvilab/FragPipeAnalystR) and
+[FragPipe-Analyst](https://github.com/MonashProteomics/FragPipe-Analyst)
+(GPL-3); please cite Hsiao et al., *J. Proteome Res.* 2024,
+doi:10.1021/acs.jproteome.4c00294, and limma (Ritchie et al.,
+*Nucleic Acids Res.* 2015).
