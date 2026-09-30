@@ -77,6 +77,12 @@ How much signal the instrument saw for a feature in a sample. More protein
 gives more intensity, but intensities are only comparable for the same feature
 across samples.
 
+## pEC50 and EC50 {#glossary.pec50}
+
+EC50 is the concentration that gives half of a compound's maximal effect.
+pEC50 is −log10 of it in molar: an EC50 of 1 µM is a pEC50 of 6, and 10 nM is
+8. Higher pEC50 means more potent. Each step of 1 is ten times more potent.
+
 ## log2 fold change {#glossary.log2fc}
 
 How much a feature changed between two conditions, on a log2 scale: 1 means

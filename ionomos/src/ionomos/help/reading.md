@@ -230,6 +230,31 @@ Gene sets are downloaded once from the Enrichr libraries and then used offline;
 your gene lists never leave the computer. See
 [Enrichment](#glossary.enrichment).
 
+## Dose-response {#report.dose}
+
+Shown when the experiment is a titration: a control (DMSO) plus at least four
+doses of a compound. Doses come from `analysis.doses` in `experiment.yaml`,
+or from the condition names (`Cmpd_10nM`, `Cmpd_0p1uM`, `10 µM`). Each
+feature's values, as ratios to the control, get a sigmoid curve fitted
+([pEC50](#glossary.pec50), slope, top and bottom), the way CurveCurator does
+it.
+
+- **Class**: *up* / *down* are real curves (significant and a big enough
+  effect), *not* is flat, *unclear* is somewhere in between. Filter the
+  table by class, or type a name to find a curve.
+- **Potency vs effect**: each point is a curve. Right means more potent
+  (higher pEC50), up and down means a bigger effect (curve fold change).
+  Click a point or a table row to draw its curve over the measured points,
+  with the control at the left.
+- **Relevance** combines significance and effect size; sorting by it puts
+  the best curves first.
+- Several compounds in one experiment each get their own curves: pick one
+  under **Compound**.
+
+A curve fitted on few points or with a wide pEC50 interval is a lead to
+confirm, not a measured potency. The numbers are also in
+`results/dose_response.tsv`.
+
 ## Quality control {#report.quality}
 
 Tabs of checks on the samples and the data. Start with the **Sample

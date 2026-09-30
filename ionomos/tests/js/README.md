@@ -39,6 +39,11 @@ VirtualConsole; tests assert the list stays empty.
   (localStorage, .gmt export), hit filters, key findings, compare
   (quadrants + UpSet), only-in-one-condition, rank-based enrichment and its
   barcode, every QC tab, and a broken section staying contained.
+- `test/dose.test.mjs` — the Dose-response section: the fixture's empty state
+  (no titration), the "too few doses" reason, and a synthetic `dose` payload
+  (table, class and text filters, sorting, two compounds, a clicked row or
+  point drawing its curve, the report search ringing curves, CSV export).
+
 - `test/help.test.mjs` — the help (D46): the Help nav entry and section, the
   **?** beside section titles, QC tabs and issue boxes and their panels,
   every help link resolving in the page, escaped issue titles and codes, and

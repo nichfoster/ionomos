@@ -373,6 +373,13 @@ analysis:                   # results/report.html for this experiment (lab defau
   variance_prior: deqms     # limma (default) | deqms: each protein's prior variance from its peptide count
   sdrf:                     # sample metadata for results/sdrf.tsv (lab-wide values: config.yaml analysis.sdrf)
     cell_type: HEK293T      # also: organism, organism_part, disease, instrument, cleavage_agent
+  doses:                    # a titration's doses (dose-response curves, D44); default: read from the
+    DMSO: 0                 #   condition names (Cmpd_10nM, Cmpd_0p1uM); the control is dose 0
+    Cmpd_low: 10 nM         #   units pM, nM, uM / µM, mM, M; a bare number needs dose_unit
+    Cmpd_mid: 100 nM
+    Cmpd_high: 1 uM
+    Cmpd_top: 10 uM
+  dose_min_doses: 4         # doses above 0 a compound needs before curves are fitted (default 4)
 
 notes: "24 h treatment, 1 µM"   # copied into ionomos.json for provenance
 ```
@@ -398,6 +405,15 @@ more conditions every report also has a moderated F-test ("any change").
    DIA `DMSO_1.raw` → condition `DMSO`; TMT sample `Drug_1_128N` → `Drug`;
    isoDTB: each sample prefix is tested on its own (ratios vs 0). Edit
    `analysis:` in `experiment.yaml` and press *Re-run analysis* to change them.
+7. titrations: a condition whose name holds one concentration is a dose of
+   the compound named by the rest (`Cmpd_10nM`, `10nM_Cmpd`, `Cmpd10nM` →
+   compound `Cmpd`, 10 nM). Units `pM`, `nM`, `uM` / `µM`, `mM`, `M`; write a
+   decimal point as `p` (`Cmpd_0p1uM`), since a `.` in a raw file name is
+   awkward. The control (DMSO, vehicle, …, or `analysis.control`) is dose 0
+   and shared by every compound. With 4 or more doses above 0 (`dose_min_doses`)
+   the report gets dose-response curves (`results/dose_response.tsv`). A name
+   with two doses (`A_1uM_B_10nM`, a combination) is left out with a warning;
+   list the doses in `analysis.doses` instead.
 
 ## Still to confirm with the lab
 

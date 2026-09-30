@@ -25,7 +25,6 @@ from ionomos.downstream import stats
 
 POPUP = ("input", "error")
 
-
 @dataclass
 class Issue:
     code: str
@@ -38,7 +37,6 @@ class Issue:
 
     def as_dict(self) -> dict:
         return asdict(self)
-
 
 @dataclass
 class Findings:
@@ -59,8 +57,8 @@ class Findings:
     read_problem: str | None = None      # the result table exists but holds nothing usable (e.g. isoDTB SiteError)
     enrichment_notes: list = field(default_factory=list)
     insights: dict = field(default_factory=dict)          # insights.py: scorecard, pcs, missingness, phist, ...
+    dose_problems: list = field(default_factory=list)     # [(severity, message)] from doseresponse.plan_series
     model: object = None                # analysis.Model: the design used, or why an asked-for one wasn't
-
 
 # the tables each method needs, and why they might be missing
 EXPECTED = {
@@ -95,7 +93,6 @@ EXPECTED = {
            ["The Proteins table was exported without abundance columns"]),
 }
 
-
 def _tables_present(workdir: Path | None, limit: int = 12) -> list[str]:
     if workdir is None or not Path(workdir).is_dir():
         return []
@@ -104,7 +101,6 @@ def _tables_present(workdir: Path | None, limit: int = 12) -> list[str]:
     except OSError:
         return []
     return found[:limit]
-
 
 def suggest_conditions(samples: list[str]) -> dict[str, str]:
     """Best guess at each sample's condition from its name: drop the part every name shares,
@@ -121,7 +117,6 @@ def suggest_conditions(samples: list[str]) -> dict[str, str]:
             n += 1
         toks = {s: t[n:] for s, t in toks.items()}
     return {s: ("_".join(t) or cleaned[s] or s) for s, t in toks.items()}
-
 
 def check(f: Findings) -> list[Issue]:
     out: list[Issue] = []
@@ -335,13 +330,19 @@ def check(f: Findings) -> list[Issue]:
     _insight_checks(f, p, add)
     _design_checks(f, s, add)
 
+    # ---- dose-response (doseresponse.py): doses that can't be read, a titration without a control
+    for sev, msg in f.dose_problems:
+        add(Issue("DOSES", sev, "Dose-response: the doses need a look", msg,
+                  ["analysis.doses names a condition that isn't in this experiment, or a dose without a unit",
+                   "A condition name holds two doses (a combination), or the vehicle isn't named DMSO / vehicle"],
+                  ["List every condition's dose in experiment.yaml analysis.doses (DMSO: 0, Cmpd_A: 10 nM, ...) "
+                   "and Run analysis"], {"message": msg}))
+
     # ---- statistics and plots
     _result_checks(f, s, add)
     return out
 
-
 LEFT_CENSORED = ("perseus", "mindet", "minprob", "min", "zero")
-
 
 def _insight_checks(f: Findings, p, add) -> None:
     """The deeper QC (insights.py): outlier samples, a batch-like structure, imputation that doesn't fit the
@@ -412,7 +413,6 @@ def _insight_checks(f: Findings, p, add) -> None:
                       ["In the report, tick 'hide imputation-driven' to see the hits that stand on measured values"],
                       {"comparison": name, "count": len(idx)}))
 
-
 def _design_checks(f: Findings, s, add) -> None:
     """An experimental design (analysis.block / block_from / covariates) or DEqMS that was asked for and
     couldn't be used. The comparisons still ran, on the plain model; the person should know which."""
@@ -440,7 +440,6 @@ def _design_checks(f: Findings, s, add) -> None:
                   ["Nothing to do: the statistics are limma's usual ones. To use DEqMS, analyse a table with "
                    "peptide counts (DIA-NN, FragPipe, MaxQuant, TMT-Integrator give them)"],
                   {"reason": prior.get("reason", "")}))
-
 
 def _result_checks(f: Findings, s, add) -> None:
     """Per-comparison checks: confidence labels, nothing tested, no hits, missing plots, enrichment."""
@@ -486,7 +485,6 @@ def _result_checks(f: Findings, s, add) -> None:
         add(Issue("ENRICHMENT", "warning", "Enrichment was incomplete", "; ".join(f.enrichment_notes),
                   ["No internet the first time a gene-set library is needed"],
                   ["Re-run analysis when the PC is online; after that it works offline"], {}))
-
 
 def popups(issues: list[Issue]) -> list[Issue]:
     return [i for i in issues if i.severity in POPUP]

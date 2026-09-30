@@ -54,4 +54,7 @@ GPL-3.0-or-later. The analysis is a translation of
 [FragPipe-Analyst](https://github.com/MonashProteomics/FragPipe-Analyst)
 (GPL-3); please cite Hsiao et al., *J. Proteome Res.* 2024,
 doi:10.1021/acs.jproteome.4c00294, and limma (Ritchie et al.,
-*Nucleic Acids Res.* 2015).
+*Nucleic Acids Res.* 2015). Dose-response curves are a translation of
+[CurveCurator](https://github.com/kusterlab/curve_curator) (Apache-2.0,
+© 2023 Florian P. Bayer); please cite Bayer et al., *Nat. Commun.* 2023,
+doi:10.1038/s41467-023-43696-z.

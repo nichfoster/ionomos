@@ -11,6 +11,8 @@ Three layers, all runnable on macOS and Windows:
 | JS harness (report front end) | dev-only jsdom tests of `report.js`: every section against the payload shapes that have bitten before (zero comparisons, one sample, ratio/isoDTB, 10k features × 50 samples, all p-values missing, dark/light) and hostile `<`/`&`/quote names through every dynamic-HTML sink incl. tooltips and the CSV export; the search grammar (lists, wildcards, regex, `desc:`, `term:`), suggestions, box selection, highlight groups, the address state, hit filters and every discovery / QC section (`discovery.test.mjs`); the help: the nav entry, a **?** on each section, QC tab and issue box, panels that open and close, every help link resolving in the page, escaped issue titles, a report without help (`help.test.mjs`); a pytest check fails when `tests/js/fixture.html` drifts from the shipped assets | `cd ionomos/tests/js && npm ci && npm test`; sync check runs with pytest |
 | Help (D46) | the help content parses and every link resolves; every doctor issue code, attention kind, intake rejection kind and held-search reason found in the code has an entry; the Markdown renderer escapes everything and links only `#id` / `https://`; `help.html` is self-contained and every anchor on it resolves; `ionomos help` prints a topic and writes the page (log folder, else app data); the report embeds every entry its help links to, under 60 KB; the files ship in the wheel and the exe spec | `tests/test_help.py`; the report side in `tests/js/test/help.test.mjs` |
 | SDRF export | `results/sdrf.tsv` for DIA (manifest, exclusions, renamed conditions, no manifest), isoDTB (light/heavy rows), TMT (annotation.txt, `tmt:` plexes, channels from sample names), a table alone (none written), a failing stage; checked against the spec's structure rules every run, and with the official validator `sdrf-pipelines` when it is installed (dev-only; CI installs it on Linux) | `tests/test_sdrf.py`; `pip install sdrf-pipelines` to add the validator |
+| Dose-response (D44) | the CurveCurator port against CurveCurator 0.6.0's own output on two simulated designs (classes, pEC50, F, p; CurveCurator is not needed to run the test); the F tail and quantile vs scipy; planted pEC50s recovered, flat features not called; dose parsing (units, µ/u, `0p1`, two doses in a name); fewer than 4 doses skipped with a note; isoDTB-style ratios; bad `analysis.doses` → an issue; a crash in the stage still gives the report; the report section in jsdom (`tests/js/test/dose.test.mjs`) | `tests/test_dose_response.py`, `tests/golden/dose_response/` |
+
 | Instrument QC trending (D45) | per-run metrics from small tables with the real column names (DIA-NN `report.stats.tsv` / `pg_matrix` / `report.tsv`, FragPipe `psm.tsv` / `combined_protein.tsv`, Windows paths, stamped / calibrated run names, isotope-error ppm, oversized and broken tables); which runs are QC standards (words, separators, experiments left out, `exclude`, dedicated method, series by standard and amount); acquisition time from the stamp or the file; the store (a re-run updates its row, damaged lines skipped, compaction); every Westgard rule, the CUSUM drift flag, direction (better ≠ bad), log-scale signal, pinned baselines, RT shift; the page (self-contained, escaped, no network); config validation and the app's config writer; the CLI (`qc-trend`, `--rebuild` read-only, `--open`); the app button's helper; the attention item raised and closed, `popup`; a broken QC read never fails the job; end to end through the worker with the testbed's fake FragPipe (which now writes DIA-NN's `report.stats.tsv` and a `psm.tsv` per experiment) | `tests/test_qctrend.py` |
 | FragPipe-Analyst port | R's RNG and Perseus imputation exact; `test_limma` all/control/others/missing vs limma; whole pipeline vs the real FragPipeAnalystR 1.1.1; PCA/hclust vs R; hypergeometric vs `phyper` | `tests/test_fpa.py`, `tests/golden/fpa/` |
 | Designs, F-test, DEqMS (D42, D43) | against limma 3.68.5 / DEqMS 1.30.0 to 1e-8 on 200 proteins × 12 samples: a replicate block with complete data and with missing values per row (incl. a condition absent and an unestimable block), block + numeric + factor covariates, one-vs-others with a block, `topTableF` for the blocked, covariate and plain models; R's `loess` (k-d tree + vertex interpolation) and `spectraCounteBayes` on the blocked and plain fits; confounded / incomplete / no-df designs explained, never crashed; settings errors; end to end: blocking on a replicate batch finds more hits, a confounded block falls back byte-identically to the plain model, DEqMS without counts warns. The exported `reproduce_design_in_R.R` is run in R when `IONOMOS_R_LIBS` names a library with limma (dev-only; skipped otherwise). Regenerate: `cd tests/golden/design && python make_design_inputs.py && Rscript run_design_reference.R <R library>` | `tests/test_design.py`, `tests/golden/design/`, `tests/js/test/design.test.mjs` |
@@ -195,6 +197,22 @@ a simulated DIA-NN matrix with the `reproduce_in_R.R` Ionomos writes (how:
 `e2e/README.md`). Installing FragPipeAnalystR into a scratch library:
 `BiocManager::install(c("limma", "SummarizedExperiment", "MSnbase", ...))` then
 `remotes::install_github("Nesvilab/FragPipeAnalystR@v1.1.1")` — see its README.
+
+### Dose-response port (`tests/test_dose_response.py`, `tests/golden/dose_response/`)
+
+```bash
+cd ionomos
+.venv/bin/python tests/golden/dose_response/make_dose_inputs.py     # simulated titrations A and B
+uv venv --python 3.12 /tmp/ccvenv && uv pip install --python /tmp/ccvenv/bin/python curve-curator==0.6.0
+/tmp/ccvenv/bin/python tests/golden/dose_response/run_curvecurator.py   # -> <design>_curvecurator.tsv
+```
+
+CurveCurator needs Python 3.11–3.13 and numpy / scipy / pandas, so it lives in
+its own throwaway venv, never in Ionomos' dependencies. `run_curvecurator.py`
+calls its pipeline functions with the defaults its TOML parser fills in (OLS,
+"standard" speed) plus alpha 0.05 and fc_lim 0.45. Design A is decryptM-like
+(8 doses, one replicate), B replicated (5 doses × 3); both keep ≤ 16 dosed
+samples, so numpy's argsort keeps replicates in order as the port does.
 
 **Windows during tests.** Tests that drive real Tk windows (the app, the naming
 / review window) skip on a dev machine so they don't cover the screen while you

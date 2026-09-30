@@ -1,0 +1,11 @@
+sample	condition	dose_nM
+DMSO_1	DMSO	0
+DMSO_2	DMSO	0
+Cmpd_1nM_1	Cmpd_1nM	1
+Cmpd_3nM_1	Cmpd_3nM	3
+Cmpd_10nM_1	Cmpd_10nM	10
+Cmpd_30nM_1	Cmpd_30nM	30
+Cmpd_100nM_1	Cmpd_100nM	100
+Cmpd_300nM_1	Cmpd_300nM	300
+Cmpd_1uM_1	Cmpd_1uM	1000
+Cmpd_3uM_1	Cmpd_3uM	3000

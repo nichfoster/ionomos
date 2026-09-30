@@ -17,6 +17,7 @@ Layout it reads and writes (inside the experiment folder):
       sample_qc.tsv                 the per-sample scorecard (insights.py)
       presence_absence.tsv          features measured in one group and never in the other
       gene_set_ranks.tsv            rank-based gene-set test on every protein (enrichment on)
+      dose_response.tsv             a titration (4+ doses): a fitted curve per feature, pEC50, F, p, class
       sdrf.tsv                      SDRF-Proteomics sample metadata: a row per raw file (and label), for PRIDE
       analysis.json                what was done, with which settings (reproducibility), + "quality"
 
@@ -28,6 +29,7 @@ Pipeline stages, each a module:
     statistics    analysis.py + stats.py       (comparisons, Welch / one-sample t, BH)
                   design.py + deqms.py         (blocks / covariates, the moderated F, DEqMS; D42, D43)
     QC, insights  qc.py + insights.py + enrich.py  (PCA, scorecard, batch, missingness, on/off, gene sets)
+    dose-response doseresponse.py              (CurveCurator's curves, when the conditions are doses)
     metadata      sdrf.py                      (SDRF-Proteomics, from the manifest, workflow and FASTA)
     presentation  charts.py + report.py        (SVG + HTML)
 
@@ -51,7 +53,6 @@ log = logging.getLogger("ionomos.downstream")
 
 RESULTS = "results"
 
-
 @dataclass
 class Outcome:
     method: str | None
@@ -62,7 +63,6 @@ class Outcome:
     summary: dict = field(default_factory=dict)
     issues: list = field(default_factory=list)  # doctor.Issue: what needs a person (see doctor.py)
 
-
 def _find(root: Path, *patterns: str) -> Path | None:
     """First match, shallowest path first, for each pattern in order."""
     for pat in patterns:
@@ -71,7 +71,6 @@ def _find(root: Path, *patterns: str) -> Path | None:
         if hits:
             return hits[0]
     return None
-
 
 def detect_method(workdir: Path) -> str | None:
     if _find(workdir, isodtb.LABEL_FILE):
@@ -89,14 +88,12 @@ def detect_method(workdir: Path) -> str | None:
         return "table"
     return None
 
-
 def _sample_map(record: dict | None) -> dict[str, tuple[str, int]]:
     out = {}
     for line in ((record or {}).get("plan") or {}).get("manifest") or []:
         stem = quant.run_stem(line["file"])
         out[stem] = (str(line["experiment"]), int(line["bioreplicate"]))
     return out
-
 
 def _merge_ratio(mats: list[quant.QuantMatrix]) -> quant.QuantMatrix:
     """Several isoDTB samples in one folder -> one site matrix (union of sites)."""
@@ -118,7 +115,6 @@ def _merge_ratio(mats: list[quant.QuantMatrix]) -> quant.QuantMatrix:
         off += len(m.samples)
     cond = {s: c for m in mats for s, c in m.condition.items()}
     return quant.QuantMatrix("ratio", "site", feats, samples, values, cond, mats[0].source)
-
 
 def load_quantities(method: str | None, workdir: Path, results: Path, record: dict | None,
                     mod_mass: str = "561.3387", table: Path | None = None
@@ -164,7 +160,6 @@ def load_quantities(method: str | None, workdir: Path, results: Path, record: di
         return None, files, [f"don't know how to analyse method {method!r} (no known result table found)"]
     return quant.from_combined_protein(cp), files, notes
 
-
 def _guard(p, comps, settings) -> tuple[list[tuple[int, str]], list[str], list]:
     """Comparisons whose groups are too small to test: [(index, reason)], notes, [(t, c, [(group, n)])]."""
     bad, notes, small = [], [], []
@@ -181,10 +176,8 @@ def _guard(p, comps, settings) -> tuple[list[tuple[int, str]], list[str], list]:
             small.append((t, c, few))
     return bad, notes, small
 
-
 def _few_text(groups) -> str:
     return ", ".join(f"{g} has {n} sample{'s' if n != 1 else ''}" for g, n in groups)
-
 
 def _libraries(settings, notes, base: Path | None = None) -> dict:
     """base: the experiment folder; a relative enrichment_gmt found there is read from there (so a folder
@@ -199,7 +192,6 @@ def _libraries(settings, notes, base: Path | None = None) -> dict:
     libs, lnotes = enrich.load_libraries(settings.enrichment_libraries, gmt)
     notes += lnotes
     return libs
-
 
 def _enrichment(diffs, libs) -> list[dict]:
     from ionomos.downstream import enrich
@@ -216,7 +208,6 @@ def _enrichment(diffs, libs) -> list[dict]:
                 out.append({"comparison": d.name, "direction": direction, "library": name, "hits": len(set(hits)),
                             "background": len(set(bg)), "terms": enrich.ora(hits, bg, lib) if hits else []})
     return out
-
 
 def _gene_scores(d) -> dict[str, tuple[float, int]]:
     """gene -> (signed statistic, feature index): the moderated t, else sign(log2FC) * -log10 p; a gene measured
@@ -238,7 +229,6 @@ def _gene_scores(d) -> dict[str, tuple[float, int]]:
         if g not in out or abs(t) > abs(out[g][0]):
             out[g] = (t, r["index"])
     return out
-
 
 def _rank_enrichment(diffs, p, libs, limit: int = 40) -> list[dict]:
     """Rank-based gene-set test per comparison and library, on every tested gene (no cut-off)."""
@@ -274,7 +264,6 @@ def _rank_enrichment(diffs, p, libs, limit: int = 40) -> list[dict]:
                         "adjusted": resid is not None, "terms": terms})
     return out
 
-
 def _insights(p, diffs, qcd) -> dict:
     """Deeper QC and discovery (insights.py) for the report, the doctor and analysis.json."""
     from ionomos.downstream import insights
@@ -295,7 +284,6 @@ def _insights(p, diffs, qcd) -> dict:
         out["imputation_driven"][d.name] = insights.imputation_driven(p.imputed, m.samples, m.condition, d) \
             if p.n_imputed else []
     return out
-
 
 def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = None, overrides: dict | None = None,
             record: dict | None = None, context: dict | None = None, mod_mass: str = "561.3387",
@@ -366,6 +354,8 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     insight: dict = {}
     enr_notes: list[str] = []
     comps: list = []
+    dose_info: dict = {"ran": False, "reason": "no processed quantities to fit"}
+    dose_view: dict | None = None
     model = analysis.Model()
     ftest = None
 
@@ -514,6 +504,12 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
                     t = stage("tables", fn, results / name, arg)
                     if t:
                         out.files.append(t)
+            dose = stage("dose_response", _dose_response, processed, settings, results, out, say)
+            if dose is None:
+                dose_info = {"ran": False, "reason": "the dose-response step failed (see analysis_error.txt)"}
+            else:
+                dose_info, dose_view, f.dose_problems, dnotes = dose
+                notes += dnotes
         if diffs and settings.enrichment:
             say("enrichment (hits, and every protein ranked)")
             libs = stage("enrichment", _libraries, settings, enr_notes, dest) or {}
@@ -546,7 +542,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
            for p in out.files]
     out.report = results / "report.html"
     html = stage("report", report.render, ctx, m, processed, diffs, out.warnings, rel, settings, qcd, enrichment,
-                 ranked, insight)
+                 ranked, insight, dose=dose_view)
     if html is None:  # the fallback page: issues, notes and the volcano plots themselves
         out.issues = doctor.check(f)
         ctx["issues"] = [i.as_dict() for i in out.issues]
@@ -583,6 +579,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
                             "top": [f"{t['term']} ({t['direction']})" for t in b["terms"][:5] if t["q"] <= 0.05]}
                            for b in ranked],
         "quality": _quality_summary(insight),
+        "dose_response": dose_info,
         "sdrf": sdrf_info,
         "source": m.source if m else None,
         "engine": ctx.get("engine") or {},
@@ -598,6 +595,25 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
         out.warnings.append(f"could not write analysis.json: {exc}")
     return out
 
+def _dose_response(p, settings, results: Path, out: Outcome, say) -> tuple[dict, dict, list, list[str]]:
+    """results/dose_response.tsv when the conditions are a titration (doseresponse.py). Returns (analysis.json
+    summary, the report's payload, problems for the doctor, notes)."""
+    from ionomos.downstream import doseresponse as dr
+
+    if not settings.dose_response:
+        off = "dose-response is switched off (analysis.dose_response)"
+        return {"ran": False, "reason": off}, {"ran": False, "found": False, "reason": off}, [], []
+    try:
+        control = analysis.find_control(p.m.conditions, settings)
+    except analysis.AnalysisError:
+        control = None
+    res, plan = dr.run(p, settings, control, progress=lambda i: say(f"dose-response curves ({i:,} features)"))
+    table = None
+    if res is not None:
+        out.files.append(write_tsv(results / "dose_response.tsv", dr.COLUMNS, dr.table_rows(res)))
+        table = f"{RESULTS}/dose_response.tsv"
+    return (dr.summary(res, plan, table), dr.report_payload(res, plan), plan.problems,
+            res.notes if res is not None else plan.notes)
 
 def _sdrf(method, dest: Path, workdir: Path, record, m, processed, settings, version: str, results: Path,
           out: Outcome) -> dict:
@@ -610,7 +626,6 @@ def _sdrf(method, dest: Path, workdir: Path, record, m, processed, settings, ver
     out.files.append(sdrf.write(results / "sdrf.tsv", sd))
     return sdrf.summary(sd, "", f"{RESULTS}/sdrf.tsv")
 
-
 def _write_enrichment(results: Path, enrichment, ranked, stage, out) -> None:
     from ionomos.downstream import export
 
@@ -622,7 +637,6 @@ def _write_enrichment(results: Path, enrichment, ranked, stage, out) -> None:
         rt = stage("enrichment", export.rank_enrichment_table, results / "gene_set_ranks.tsv", ranked)
         if rt:
             out.files.append(rt)
-
 
 def _quality_summary(insight: dict) -> dict:
     """The deeper checks in a few fields for analysis.json (the app and the CLI read it)."""
@@ -640,7 +654,6 @@ def _quality_summary(insight: dict) -> dict:
         "imputation_driven_hits": {k: len(v) for k, v in (insight.get("imputation_driven") or {}).items()},
     }
 
-
 def _f_summary(ftest, settings) -> dict | None:
     """analysis.json "f_test": the moderated F across the conditions (3+ conditions with limma)."""
     if ftest is None:
@@ -650,11 +663,9 @@ def _f_summary(ftest, settings) -> dict | None:
             "any_change": sum(1 for q in qs if q <= settings.alpha), "alpha_adjusted": settings.alpha,
             "table": "the F, F_p and F_p_adj columns of <level>_results.tsv"}
 
-
 def _state(issues) -> str:
     sev = {i.severity for i in issues}
     return "failed" if "error" in sev else "needs_input" if "input" in sev else "ok"
-
 
 def _write_volcano(results: Path, d, stage) -> Path | None:
     """Every comparison gets a volcano file, checked after writing; an empty comparison gets an empty plot."""
@@ -676,10 +687,8 @@ def _write_volcano(results: Path, d, stage) -> Path | None:
     stage("volcano", _raise, f"could not write {svg.name}: {problem}")
     return None
 
-
 def _raise(msg: str):
     raise OSError(msg)
-
 
 def _qc(p, diffs, settings) -> dict:
     from ionomos.downstream import qc
