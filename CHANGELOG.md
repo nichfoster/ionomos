@@ -71,6 +71,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A `<!--` inside a protein or sample name could stop the report from
   drawing (finding F-01). The data script now escapes it.
 - One chart that fails to draw no longer blanks the rest of the page.
+- Running the tests on a dev machine no longer covers the screen with Tk
+  windows. Tests that open real windows run in CI; locally they run only
+  with `IONOMOS_GUI_TESTS=1`.
 
 ## [0.10.1] - 2026-09-28
 

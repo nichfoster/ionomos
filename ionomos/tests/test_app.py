@@ -5,10 +5,9 @@ import time
 import pytest
 
 from ionomos.config import load
-from ionomos.resolve import gui_available
-from tests.conftest import make_tk_root
+from tests.conftest import gui_tests, make_tk_root
 
-_ok, _why = gui_available()
+_ok, _why = gui_tests()
 pytestmark = pytest.mark.skipif(not _ok, reason=f"no GUI: {_why}")
 
 

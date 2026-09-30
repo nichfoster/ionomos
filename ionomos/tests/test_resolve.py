@@ -9,7 +9,6 @@ from ionomos.manifest import FileOverride, Overrides
 from ionomos.resolve import (
     Answer,
     guess_alias_token,
-    gui_available,
     reparse,
     to_overrides,
     validate,
@@ -264,7 +263,9 @@ def test_src_never_instantiates_plain_tk_variables():
 
 # ------------------------------------------------------------- real tkinter --
 
-_ok, _why = gui_available()
+from tests.conftest import gui_tests  # noqa: E402
+
+_ok, _why = gui_tests()
 
 
 def _drive_dialog(root, act, watchdog_ms=20000):

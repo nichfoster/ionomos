@@ -62,6 +62,17 @@ def iso_raws(reps=(1, 2, 3), fracs=range(1, 8), prefix="EJQ_PK_EJQ-2-027_isoDTB_
     return [f"{prefix}_{r}_{f}.raw" for r in reps for f in fracs]
 
 
+def gui_tests() -> tuple[bool, str]:
+    """(ok, reason) for tests that open real Tk windows. They run in CI (the Windows runner has a
+    display). On a dev machine they would cover the screen with windows while you work, so there
+    they only run with IONOMOS_GUI_TESTS=1."""
+    if not (os.environ.get("CI") or os.environ.get("IONOMOS_GUI_TESTS")):
+        return False, "opens real windows; set IONOMOS_GUI_TESTS=1 to run it here (CI always does)"
+    from ionomos.resolve import gui_available
+
+    return gui_available()
+
+
 def make_tk_root(attempts: int = 4, first_delay: float = 0.25):
     """Create a Tk root, retrying transient Tcl-init failures with escalating backoff.
 

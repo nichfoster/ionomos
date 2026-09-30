@@ -173,3 +173,13 @@ a simulated DIA-NN matrix with the `reproduce_in_R.R` Ionomos writes (how:
 `e2e/README.md`). Installing FragPipeAnalystR into a scratch library:
 `BiocManager::install(c("limma", "SummarizedExperiment", "MSnbase", ...))` then
 `remotes::install_github("Nesvilab/FragPipeAnalystR@v1.1.1")` — see its README.
+
+**Windows during tests.** Tests that drive real Tk windows (the app, the naming
+/ review window) skip on a dev machine so they don't cover the screen while you
+work. They run in CI (GitHub Actions sets `CI`; the Windows runner has a
+display). To run them locally:
+
+```bash
+cd ionomos && IONOMOS_GUI_TESTS=1 .venv/bin/pytest tests/test_app.py tests/test_review.py tests/test_resolve.py
+```
+
