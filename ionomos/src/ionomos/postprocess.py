@@ -7,6 +7,8 @@ Method prep steps (the R-script ports) always run; statistics, volcano plots
 and results/report.html run when config analysis.enabled is on (default).
 A failure here never fails the job — FragPipe's output is still good — it
 becomes a warning on the done job, and `ionomos analyze <folder>` re-runs it.
+Then, for a job with QC-standard runs, instrument QC trending (qctrend.after_job, D45),
+isolated the same way.
 """
 from __future__ import annotations
 
@@ -59,8 +61,12 @@ def prepare(dest: Path, cfg, method: str | None = None, extra: dict | None = Non
     mod_mass = "561.3387"
     if cfg is not None and method in getattr(cfg, "methods", {}):
         mod_mass = str(cfg.methods[method].extra.get("isodtb_mod_mass", mod_mass))
-    return {"dest": dest, "method": method, "lab": lab, "overrides": {**overrides, **(extra or {})}, "record": record,
-            "context": context_for(dest, record, method or "?"), "mod_mass": mod_mass}
+    analysis_method = method
+    if cfg is not None and method in getattr(cfg, "methods", {}) and \
+            str(cfg.methods[method].extra.get("engine", "")).lower() == "maxquant":
+        analysis_method = "MaxQuant"  # read proteinGroups.txt whatever the lab calls the method (engines.py)
+    return {"dest": dest, "method": analysis_method, "lab": lab, "overrides": {**overrides, **(extra or {})},
+            "record": record, "context": context_for(dest, record, method or "?"), "mod_mass": mod_mass}
 
 
 def table_workspace(table: Path) -> Path:
@@ -152,6 +158,25 @@ def record_issues(log_dir, dest: Path, out, job_id: int | None = None) -> None:
 
 
 def run_all(job, spec, cfg) -> tuple[list[str], dict]:
+    """The analysis, then instrument QC trending when the job holds QC-standard runs (qctrend.py, D45).
+    Trending runs even when the analysis fails, and never raises: its verdicts go in the job's results."""
+    warnings, summary = [], {}
+    try:
+        warnings, summary = _analyse(job, spec, cfg)
+    finally:
+        try:
+            from ionomos import qctrend
+
+            lines = qctrend.after_job(job, cfg)
+        except Exception:  # noqa: BLE001 - after_job already catches; belt and braces for an import error
+            log.exception("job %s: instrument QC trending failed", getattr(job, "id", "?"))
+            lines = []
+        if lines:
+            summary = {**(summary or {}), "qc_trend": lines}
+    return warnings, summary
+
+
+def _analyse(job, spec, cfg) -> tuple[list[str], dict]:
     if not (getattr(cfg, "analysis", {}) or {}).get("enabled", True):
         # statistics off: still write the lab's R-script outputs (site table / TMT annotation)
         from ionomos import downstream

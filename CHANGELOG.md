@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Help for users** (D46, [docs/HELP.md](docs/HELP.md)). One set of plain
+  Markdown texts in `ionomos/help/` covers getting started, reading the
+  report chart by chart, a glossary, troubleshooting (every analysis issue
+  code, pop-up kind, rejected folder and held or failed search), what Ionomos
+  never does to your data, and common questions. It is shown in three places:
+  - **every report**: **Help** in the top bar, a **?** beside each section
+    title, QC tab and issue box that opens its text in place, and a Help
+    section at the end with the glossary and what to do about the issues in
+    that report (offline, inside the file);
+  - **`help.html`**, the whole help with a search box: the app's new **Help**
+    button, **More help** in each pop-up (opened at the topic that explains
+    it) and `ionomos help --open`;
+  - **`ionomos help [TOPIC]`** prints one topic (`NO_TABLE`, `pca`,
+    `glossary`, …).
+
+  Tests fail when an issue code, attention kind, intake rejection or held-search
+  reason has no help entry.
+
 - **Analysis-only install from pip** (ROADMAP Phase 5A, D40). `pip install
   ionomos`, then `ionomos analyze <table or folder>`, on Windows, macOS or
   Linux with no Tk; a test runs the analysis in a Python where `import
@@ -120,8 +138,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `model` describe the model used (formula, blocks, covariates, variance
   prior, F-test).
 
+- **Instrument QC trending** (ROADMAP 5C #6, D45, new
+  [docs/QC_TREND.md](docs/QC_TREND.md)). Runs of the lab's QC standard (a
+  HeLa or K562 digest) are recognised by name: `qc_trend.match`, default
+  `hela, k562, qc_std, qcstd, _qc_`. A dedicated QC method also counts
+  (`qc_trend.methods`). A replicated design is never mistaken for one. After
+  each search of one, Ionomos:
+  - reads its numbers from the search's own tables: IDs, signal, peak width,
+    MS1/MS2 mass error, missed cleavages, charge, and the RT of the most
+    intense peptides (DIA-NN `report.stats.tsv` / `pg_matrix` / `report.tsv`,
+    FragPipe `psm.tsv` / `combined_protein.tsv`)
+  - stores them in `logs/qc_trend.jsonl` (a re-run updates its row)
+  - judges them against a baseline (the first 10 runs, or pinned dates):
+    Levey-Jennings z-scores, the Westgard rules 1-3s / 2-2s / R-4s / 10-x
+    (1-2s warns) and a CUSUM drift flag, with a plain-English verdict
+    ("Precursors 18% below baseline (1-3s) — check the column and the spray…")
+  - rewrites `logs/qc_trend.html`: Levey-Jennings charts, every run,
+    self-contained
+  - when a rule is broken, raises a `qc_trend` attention item (a warning; no
+    pop-up unless `qc_trend.popup: true`), which closes when a run is back
+    within the baseline
+
+  `ionomos qc-trend [--rebuild] [--open]` rebuilds the page; `--rebuild`
+  re-reads past QC runs under users_root, read-only. The app's Jobs tab has an
+  **Instrument QC** button. It is all isolated: a QC table that can't be read
+  never fails the job.
+- The testbed's fake FragPipe and fake DIA-NN write DIA-NN's
+  `report.stats.tsv`; the fake FragPipe also writes a `psm.tsv` per DDA
+  experiment (FragPipe's columns). A raw name containing `QCBAD` makes a bad
+  injection.
+
+- **The watcher can run MaxQuant** for a DDA method (`engine: maxquant`,
+  `maxquant_exe`, optional lab `mqpar`; D50, docs/ENGINES.md). Each job's
+  `ionomos_run/mqpar.xml` starts from the lab's saved parameters or MaxQuant's
+  own `--create` template. The job's raws, `<condition>_<replicate>`
+  experiments, fractions from the names, FASTA, threads and output folder are
+  filled in. Results go to `maxquant/`, and the analysis reads
+  `proteinGroups.txt`.
+
 ### Changed
 
+- ROADMAP Phase 6 (D49): a local AI assistant on the proteomics PC. It runs local-first, grounded in citations,
+  can only propose changes the user confirms, and is evaluated by a scenario scorecard. A Help section is added
+  to Phase 5A.
 - A relative `enrichment_gmt` (in `experiment.yaml` or the lab config) is read
   from the experiment folder when the file is there.
 - `simulate.dia_pg_matrix` can name the proteins, plant chosen effects and

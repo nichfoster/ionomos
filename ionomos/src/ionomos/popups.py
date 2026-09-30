@@ -19,7 +19,7 @@ Each window says what happened, the most likely causes, what to do, the details
     search_failed                      Retry search, FragPipe log, folder, Report a problem
     search_waiting                     Open Ionomos (setup checklist), folder
     intake_rejected                    Open the inbox, the note
-    every item                         Remind me in an hour, Dismiss
+    every item                         More help (the help page at this problem), Remind me in an hour, Dismiss
 """
 from __future__ import annotations
 
@@ -101,8 +101,8 @@ class Popups:
     def due(self) -> list[attention.Item]:
         log_dir = self.host.log_dir()
         its = attention.items(log_dir)
-        return [i for i in its if i.due() and i.shown == 0 and i.kind in attention.POPUP_KINDS
-                and i.severity in ("input", "error")]
+        return [i for i in its if i.due() and i.shown == 0 and (
+            (i.kind in attention.POPUP_KINDS and i.severity in ("input", "error")) or i.data.get("popup") is True)]
 
     def check(self) -> None:
         """One pass: refresh the badge, open the next window if one is due and nothing is open."""
@@ -261,6 +261,7 @@ class ItemWindow:
         self._buttons(b)
         ttk.Button(b, text="Dismiss", command=self.dismiss).pack(side="right", padx=3)
         ttk.Button(b, text="Remind me in an hour", command=self.snooze).pack(side="right", padx=3)
+        ttk.Button(b, text="More help", command=self.more_help).pack(side="right", padx=3)
         win.protocol("WM_DELETE_WINDOW", self.close)
         win.bind("<Escape>", lambda e: self.close())
         win.update_idletasks()
@@ -293,6 +294,9 @@ class ItemWindow:
             ttk.Button(b, text="Re-run analysis", command=lambda: self.editor.run(confirm=False)).pack(side="left", padx=3)
         if it.kind == "search_waiting":
             ttk.Button(b, text="Open the setup checklist", command=self.open_setup).pack(side="left", padx=3)
+        if it.kind == "qc_trend" and it.data.get("page"):
+            ttk.Button(b, text="Open QC trend", command=lambda: self.host.open_path(it.data["page"])).pack(
+                side="left", padx=3)
         if it.kind == "intake_rejected":
             ttk.Button(b, text="Open the inbox", command=lambda: self.host.open_path(str(Path(it.dest).parent))).pack(
                 side="left", padx=3)
@@ -358,6 +362,15 @@ class ItemWindow:
             self.msg.configure(text=f"Saved {z.name} on the Desktop — send it to whoever looks after Ionomos.")
         except Exception as exc:  # noqa: BLE001
             messagebox.showerror("Report a problem", str(exc), parent=self.win)
+
+    def more_help(self) -> None:
+        """The help page, opened at the entry that explains this item (help.topic_for_item)."""
+        from ionomos import help as helpdoc
+
+        try:
+            helpdoc.open_help(helpdoc.topic_for_item(self.item), log_dir=self.host.log_dir(), opener=self.host.open_path)
+        except OSError as exc:
+            self.msg.configure(text=f"Could not open the help: {exc}", foreground="#c62828")
 
     def snooze(self) -> None:
         attention.snooze(self.host.log_dir(), self.item.id, 60)

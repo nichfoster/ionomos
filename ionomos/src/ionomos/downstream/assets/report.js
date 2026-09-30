@@ -427,6 +427,7 @@
     $$("a.gl", host).forEach((a) => (a.onclick = (e) => { e.preventDefault(); setFocus(+a.dataset.i); goTo("differential"); }));
     $$("a.oo", host).forEach((a) => (a.onclick = () => { onoffCi = +a.dataset.ci; renderOnOff(); }));
     $$("a.gs", host).forEach((a) => (a.onclick = (e) => { e.preventDefault(); setSearch("term:" + a.dataset.term); goTo("differential"); }));
+    addHelp($("h3", host), "report.findings");
   }
 
   // -------------------------------------------------------------- volcano
@@ -1398,6 +1399,7 @@
     $$(".tabs button", host).forEach((b) => (b.onclick = () => { qcTab = b.dataset.k; renderQC(); }));
     const body = $("#qcbody");
     safe(() => ({ card: qcCard, pca: qcPCA, corr: qcCorr, missing: qcMissing, mnar: qcMNAR, dist: qcDist, cv: qcCV, mv: qcMV, rank: qcRank, ids: qcIds, imp: qcImp, power: qcPower })[qcTab](body), body);
+    addHelp($(":scope > .sub", body), "qc." + qcTab);
   }
   function legend() { return "<div class='legend'>" + D.conditions.map((c) => "<span><span class='sw' style='background:" + condColor(c) + "'></span>" + esc(c) + "</span>").join("") + "</div>"; }
   function qcCard(host) {
@@ -1738,6 +1740,82 @@
     svgTools(ch, root, "power");
   }
 
+  // ----------------------------------------------------------------- help
+  // Plain-language help from ionomos/help/*.md, rendered to safe HTML in Python (report.py _help_payload):
+  // a "?" beside each section title, QC tab and issue opens its entry inline, and the Help section at the
+  // end lists every entry, the glossary and the issues of this report. Entry HTML is ours; anything that
+  // comes from the data (issue titles) goes through esc().
+  const H = Object.assign({ entries: {}, report: [], glossary: [], more: [], issues: [] }, D.help || {});
+  const HELP_AT = [["#differential > h2", "report.differential"], ["#differential > p.sub", "report.search"],
+    ["#differential-body > .bar", "report.cutoffs"], ["#differential-body > h3", "report.phist"],
+    ["#differential-body > .tablebar", "report.table"], ["#compare > h2", "report.compare"], ["#onoff > h2", "report.onoff"],
+    ["#heat > h2", "report.heatmap"], ["#enrichment > h2", "report.enrichment"], ["#quality > h2", "report.quality"],
+    ["#methods > h2", "report.methods"], ["#files > h2", "report.files"]];
+  const HELP_H = { "Data source": "report.source", "Settings used": "report.methods", "Sample metadata": "report.sdrf",
+    "Cross-check": "report.fpa", "Highlight groups": "report.groups", "Hits": "report.hitfilters" };
+  /** A "?" button in `host` that opens entry `id` in a panel placed after `after` (default: host). */
+  function addHelp(host, id, after) {
+    const e = H.entries[id];
+    if (!host || !e || $(":scope > .qhelp", host)) return;
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "qhelp"; b.textContent = "?";
+    b.title = "What is this?"; b.setAttribute("aria-label", "Help: " + e.t); b.setAttribute("aria-expanded", "false");
+    b.dataset.help = id;
+    b.onclick = (ev) => { ev.stopPropagation(); toggleHelp(b, id, after || host); };
+    host.appendChild(b);
+  }
+  function toggleHelp(b, id, after) {
+    const old = b._panel;
+    if (old && old.isConnected) { old.remove(); b._panel = null; b.setAttribute("aria-expanded", "false"); return; }
+    const e = H.entries[id], p = document.createElement("div");
+    p.className = "helppanel"; p.setAttribute("role", "note");
+    p.innerHTML = "<div class='hh'><b>" + esc(e.t) + "</b> <button type='button' class='hclose' aria-label='Close help'>×</button></div>" +
+      e.h + "<p class='muted'><a href='#help-" + esc(id) + "' data-help='" + esc(id) + "'>More in the Help section</a></p>";
+    $(".hclose", p).onclick = () => toggleHelp(b, id, after);
+    after.insertAdjacentElement("afterend", p);
+    b._panel = p; b.setAttribute("aria-expanded", "true");
+    wireHelpLinks(p);
+  }
+  function openHelp(id) {
+    const el = document.getElementById("help-" + id);
+    if (!el) return;
+    el.open = true;
+    goTo(el.id);
+  }
+  function wireHelpLinks(root) {
+    $$("a[data-help]", root).forEach((a) => (a.onclick = (ev) => { ev.preventDefault(); openHelp(a.dataset.help); }));
+  }
+  function helpItem(id, extra) {
+    const e = H.entries[id];
+    return e ? "<details class='helpitem' id='help-" + esc(id) + "'><summary>" + esc(e.t) + "</summary><div class='hbody'>" + (extra || "") + e.h + "</div></details>" : "";
+  }
+  function renderHelp() {
+    const host = $("#helpbody");
+    if (!host) return;
+    HELP_AT.forEach(([sel, id]) => addHelp($(sel), id));
+    $$("#methods > h3, .optpanel h4").forEach((h) => { const k = Object.keys(HELP_H).find((t) => h.textContent.indexOf(t) === 0); if (k) addHelp(h, HELP_H[k]); });
+    $$(".issues > .issue").forEach((box) => {
+      const t = ($(":scope > b", box) || {}).textContent, x = H.issues.find((i) => i.title === t && i.id);
+      if (x) addHelp($(".sev", box), x.id, box.lastElementChild);
+    });
+    if (!Object.keys(H.entries).length) { host.innerHTML = "<div class='empty'>The help could not be included in this report.</div>"; return; }
+    let h = "";
+    const byId = new Map();
+    H.issues.forEach((x) => { const k = x.id || ""; if (!byId.has(k)) byId.set(k, []); byId.get(k).push(x); });
+    if (byId.size) {
+      h += "<h3>The issues in this report</h3>";
+      byId.forEach((xs, id) => {
+        const list = "<ul class='hin'>" + xs.map((x) => "<li>" + esc(x.title) + " <span class='muted'>" + esc(x.code) + "</span></li>").join("") + "</ul>";
+        h += id ? helpItem(id, "<p class='muted'>In this report:</p>" + list) : "<div class='helpitem'>" + list + "<p class='muted'>No help for this one yet.</p></div>";
+      });
+    }
+    const group = (ttl, ids) => (ids.length ? "<h3>" + ttl + "</h3>" + ids.map((i) => helpItem(i)).join("") : "");
+    h += group("Reading this report", H.report) + group("Glossary", H.glossary) + group("More answers", H.more.filter((i) => !byId.has(i)));
+    h += "<p class='muted'>Everything else (naming folders, the inbox, failed searches, what Ionomos never does to your data) is in the full help: the Help button in the Ionomos app, or <code>ionomos help --open</code>.</p>";
+    host.innerHTML = h;
+    wireHelpLinks(host);
+  }
+
   // ------------------------------------------------------------- controls
   function syncControls() {
     const sel = $("#comp");
@@ -1873,6 +1951,7 @@
     safe(renderHeatmap, "#heatmap");
     safe(renderEnrichment, "#enrich");
     safe(renderQC, "#qc");
+    safe(renderHelp, "#helpbody");
     const theme = $("#theme");
     if (theme) theme.onclick = () => {
       const r = document.documentElement, cur = r.getAttribute("data-theme");

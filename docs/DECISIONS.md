@@ -749,6 +749,7 @@ with limma was preferred; the two agree whenever a row is complete.
 - one-vs-others with a block
 - topTableF for the blocked, covariate and plain models
 
+
 ### D43 — DEqMS is an optional variance prior, ported exactly
 **2026-09-30.** ROADMAP 5C #4. limma gives every protein the same prior
 variance, but a protein quantified from one peptide is noisier than one
@@ -795,4 +796,179 @@ limma prior. It stays opt-in.
 
 The F-test with DEqMS uses DEqMS' posterior variances and df. DEqMS has no F,
 so that combination has no R reference.
+
+
+### D45 — The QC standard is trended from the searches Ionomos already runs
+**2026-09-30.** ROADMAP 5C #6. Labs inject a QC standard (a HeLa or K562
+digest) on a schedule to watch the LC and the mass spectrometer. The numbers
+usually end up in a spreadsheet, if anywhere. Ionomos files and searches every
+one of those runs, so it now trends them (`qctrend.py`, docs/QC_TREND.md).
+
+- **Recognised by name, not by a new folder.** A run counts when its folder
+  or `.raw` name contains a `qc_trend.match` word, or when its method is in
+  `qc_trend.methods`. The default words are `hela`, `k562`, `qc_std`, `qcstd`
+  and `_qc_`. `_ - .` and spaces are one separator, so `_qc_` means QC as a
+  word. HeLa is also a cell line people experiment on, so a folder with two
+  or more samples of two or more replicates each is an experiment, not a
+  standard. `exclude` covers the rest. Trending is on by default because it
+  is inert until a matching run is searched, and it never changes what
+  happens to the job.
+- **Numbers from the engines' own tables.** Every number is read from what
+  the search wrote:
+  - DIA-NN's per-run `stats.tsv`: IDs, total quantity, FWHM, and median
+    MS1/MS2 mass accuracy before its recalibration, so instrument drift shows
+  - the `pg_matrix`
+  - FragPipe's `psm.tsv` and `combined_protein.tsv`
+
+  Nothing is recomputed from spectra, and no raw-file reader is needed. The
+  DDA mass error is Observed vs Calculated Peptide Mass, isotope-error
+  corrected; more than 50 ppm counts as a mass offset and is ignored.
+  Tables are streamed and size-capped, and a broken one leaves a note on the
+  run. RT drift uses the standard's own 200 most intense peptides against
+  their baseline RTs (median over ≥ 5 shared peptides), so no iRT spike-in is
+  needed. Acquisition time comes from the Xcalibur stamp in the name, else
+  the raw file's modification time (intake keeps it), and the row records
+  which.
+- **One store per lab, next to the ledger.** `<log_dir>/qc_trend.jsonl`
+  (names.py) holds one JSON object per line and is appended. The last line
+  for a run (experiment folder + run name) wins when read, so a re-run
+  updates its row, and the file is compacted when mostly superseded. JSON
+  lines beat a second SQLite file here: they are readable, need no schema,
+  and survive a half-written last line. Experiment folders are only read.
+  `--rebuild` merges what it finds and keeps rows for runs no longer on
+  disk, for example experiments archived elsewhere.
+- **Classic laboratory QC, not a model.** Each series (instrument · method ·
+  standard · amount) has a baseline: the first `baseline_runs` (10), or the
+  runs between two pinned dates, for example after a column change. It gives
+  each metric's mean and SD, with the SD floored at 2 % of the mean for
+  counts so near-identical baseline runs can't turn noise into alarms.
+  Later runs get:
+  - Levey-Jennings z-scores
+  - the Westgard rules 1-3s, 2-2s, R-4s and 10-x, with 1-2s as a warning
+  - a tabular CUSUM (k = 0.5, h = 5 SD) for the slow drift single-run rules
+    miss
+
+  The CUSUM starts after the baseline, clips each z at ±3 and restarts after
+  a run another rule rejected. Without that, one failed injection read as
+  "drift" for weeks, which a test pins. These are the rules every clinical
+  and proteomics core already knows, so a verdict can be checked by hand.
+- **Direction matters.** Fewer IDs, less signal, broader peaks and more
+  missed cleavages are problems; any shift in mass error, RT or charge is a
+  problem either way; R-4s (imprecision) is always one. More IDs after a new
+  column is "watch", with a hint to pin a new baseline, not a warning.
+- **A warning, not a pop-up.** A broken rule on a series' newest run raises
+  an attention item (kind `qc_trend`, severity warning) with the likely
+  causes. The next run back within the baseline closes it. The instrument
+  still works, and nobody's experiment is blocked, so no window interrupts
+  whoever is at the PC. `qc_trend.popup: true` makes it one, like a failed
+  search.
+- **The page is static.** `<log_dir>/qc_trend.html` is SVG drawn in Python
+  with `<title>` tooltips and the report's stylesheet inlined. It has no
+  script, so it needs no JS harness and opens anywhere. It is rewritten after
+  each QC run and by `ionomos qc-trend`; the app's Jobs tab opens it.
+- **Isolated.** `postprocess.run_all` calls `qctrend.after_job` after the
+  analysis, even when the analysis crashed. `after_job` never raises, and its
+  verdicts go in the job's `ionomos.json` (`results.qc_trend`).
+
+Left open: TMT QC runs, the RT shift from DIA-NN 2.x `report.parquet`,
+telling instruments apart within one config, and tuning the SD floor and
+CUSUM h on real QC data.
+
+
+### D46 — Help for users comes from one Markdown source, shown in every report, a help page and the terminal
+**2026-09-30.** The people who read the reports and drop the folders are lab
+members, not bioinformaticians. What each chart shows, what "adjusted p" or
+"imputed" means, and what to do about `BATCH_SUSPECT` or a `.REJECTED.txt`
+lived in the docs folder, the doctor's one-line causes and the app's setup
+text. Nobody at the PC reads those.
+
+The help is now one set of plain Markdown files in `ionomos/help/`: getting
+started, reading the report, a glossary, troubleshooting, what Ionomos never
+does to your data, and questions (docs/HELP.md). Each topic is a
+`## Title {#id}` entry. The id's namespace says where it is used (`report.`,
+`qc.`, `glossary.`, `issue.<CODE>`, `attention.<kind>`, `intake.<kind>`, …).
+It is shown in three places:
+- **Every report** embeds the report and QC entries, the glossary, the entries
+  for the issues it found, and every entry those link to (about 40 KB). A
+  **?** beside each section title, QC tab, the cut-offs and each issue box
+  opens the text in place, and a Help section at the end lists it all. It
+  works offline, like the rest of the page.
+- **`help.html`**: everything, self-contained, with a search box. The app's
+  Help button, each pop-up's **More help** (opened at the topic that explains
+  that item) and `ionomos help --open` all write it to `<log_dir>/help/` and
+  open it in the browser.
+- **`ionomos help TOPIC`** prints one topic (an issue code, a word, a
+  section) as plain text.
+
+Why these choices:
+- **Markdown, not a Python or YAML structure.** The content is prose that
+  the maintainer and lab members edit. It reads as-is on GitHub and diffs
+  cleanly. A small renderer in the standard library handles the subset the
+  help needs (paragraphs, lists, bold, italic, code, links). It escapes all
+  text before applying the markup and turns only `#id` and `https://` targets
+  into links, so no content can inject a tag or a `javascript:` URL. The price
+  is two packaging entries (`pyproject.toml` package-data, the PyInstaller
+  spec), which a test checks.
+- **Rendered in Python, drawn in JS.** The report gets ready, escaped HTML
+  per entry, so report.js only places it. The only data-derived text in the
+  help (issue titles and codes) goes through `esc()` there. A failure while
+  building the help leaves it out of the report; the report is still made.
+- **Coverage is tested, not remembered.** Tests read the code: every
+  `Issue("CODE")`, every attention kind, every intake rejection kind and every
+  `raise Hold(…)` reason must have an entry, so a new code can't ship
+  unexplained. The FragPipe failure causes on the help page come from
+  `fragpipe.EXPLANATIONS` itself.
+- **The "never do" page states only what the code does**, checked against
+  intake, the runners and D17 / D29 / D33 / D40. One thing it says plainly
+  because it could surprise someone: `results/` belongs to Ionomos, so a
+  re-analysis replaces the report in it.
+
+The app's Help tab keeps its setup text for whoever runs the PC, with a
+button to the full help above it. The help is English only; translations would
+be one file set per language, and nobody has asked yet.
+
+
+### D49 — The assistant on the PC is local, grounded, and can only propose
+**2026-09-30.** The owner wants a local AI that helps lab members troubleshoot
+and work with their data in plain language. The plan is ROADMAP Phase 6,
+written but not built. The decisions it fixes up front:
+1. **Ionomos speaks the OpenAI-compatible chat API to a runtime the lab
+   installs** (Ollama by default, llama.cpp `llama-server` for a PC with no
+   internet). It never bundles a runtime or model weights, as with DIA-NN and
+   MaxQuant.
+2. **Tools, never a shell.** A small set of read-only wrappers over existing
+   functions, plus proposals. Any change goes through a native dialog built
+   from the structured arguments, and the user clicks Confirm. Chat text can
+   never trigger an action.
+3. **Every claim cites** an issue code, log line, help anchor or analysis
+   field, and Ionomos checks the citation exists before showing the answer.
+   Without one, the assistant falls back to the doctor text.
+4. **Everything it reads is treated as untrusted:** names, logs,
+   experiment.yaml.
+5. **Local only by default.** A cloud model needs an admin flag, a visible
+   banner, and a preview of exactly what would be sent (never data files).
+
+The model is chosen by a measured scorecard on the PC (Phase 6.0), not by
+leaderboards: CPU-only generation is memory-bound, and the model shares RAM
+with FragPipe.
+
+
+### D50 — The watcher can run MaxQuant; its mqpar is always the installed version's
+**2026-09-30.** MaxQuant is the most widely used free search engine for DDA
+label-free work, so a DDA method can now say `engine: maxquant`
+(`maxquant.py`, through `runner.py` as for DIA-NN, D39). `mqpar.xml` changes
+from version to version, so a shipped template would silently break with the
+next MaxQuant. The job instead starts from the lab's own saved parameters
+(`mqpar:`) or from `MaxQuantCmd --create`, the installed version's own
+defaults, with label-free quantification switched on. Ionomos replaces only
+the job-specific lists and paths. Experiments are named
+`<condition>_<replicate>`, so `proteinGroups.txt` comes back as
+`LFQ intensity DMSO_1` …, which the engines importer and the analysis read
+directly. The manifest has no fraction column, so fractions come from the
+file names by the lab's naming rules, else file order. A single-shot sample
+gets MaxQuant's 32767.
+
+The analysis of a MaxQuant job reads `proteinGroups.txt` whatever the lab
+calls the method (`postprocess.prepare`). Tested end to end with
+`ionomos fake-maxquant`; not yet against a real MaxQuant.
 

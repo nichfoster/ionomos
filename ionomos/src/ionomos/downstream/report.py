@@ -19,6 +19,8 @@ The page carries its data as JSON and draws everything in the browser
                    against intensity, distributions, CV, mean-variance, abundance rank, identifications,
                    imputation, power (minimum detectable fold change against replicates)
     Methods        a paragraph ready for a notebook, the exact settings, and FragPipe-Analyst export files
+    Help           what each section shows (also behind a "?" beside each title and QC tab), a glossary, and
+                   what to do about the issues found in this report (content: ionomos/help/*.md)
 
 The page state (comparison, cut-offs, search) is kept in the address (#...), so a link or a bookmark
 reopens the same view. The static volcano_*.svg files next to it are for slides and for viewing without scripts.
@@ -79,6 +81,7 @@ def payload(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: li
                      "normalize": s.normalize, "test": s.test},
         "imputationLabel": fpa.IMPUTATION_LABELS.get(p.imputation, "") if p else "",
         "qc": {}, "enr": [], "enrNote": "", "gsea": [], "evidence": "", "rep": [],
+        "help": _help_payload(ctx.get("issues")),
     }
     if pm is None:
         return d
@@ -162,6 +165,17 @@ def payload(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: li
     elif ctx.get("enrichment_notes"):
         d["enrNote"] = "; ".join(ctx["enrichment_notes"])
     return d
+
+
+def _help_payload(issues) -> dict:
+    """The plain-language help the page shows (ionomos/help: its sections, QC tabs, the glossary and this
+    report's issues). Help must never cost a report, so any problem leaves it out."""
+    try:
+        from ionomos import help as helpdoc
+
+        return helpdoc.report_payload(issues or [])
+    except Exception:  # noqa: BLE001
+        return {}
 
 
 def _insight_payload(ins: dict) -> dict:
@@ -390,7 +404,7 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
          + "<a href='#compare' id='navcompare'" + ("" if len(diffs) >= 2 else " hidden") + ">Compare</a>"
          + ("" if ratio else "<a href='#onoff'>Only in one</a>")
          + "<a href='#heat'>Heatmap</a><a href='#enrichment'>Enrichment</a><a href='#quality'>Quality control</a>"
-         "<a href='#methods'>Methods</a><a href='#files'>Files</a></nav>",
+         "<a href='#methods'>Methods</a><a href='#files'>Files</a><a href='#help'>Help</a></nav>",
          "<noscript><div class='notes'>This report draws its charts with JavaScript. The volcano_*.svg and *.tsv "
          "files in this folder hold the same results.</div></noscript>",
          "<section id='overview'><div class='tiles' id='tiles'></div><div id='findings'></div>"]
@@ -480,6 +494,9 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
     if files:
         b.append("<section id='files'><h2>Files</h2><ul class='files'>" + "".join(
             f"<li><a href='{escape(f)}'>{escape(f)}</a></li>" for f in files) + "</ul></section>")
+    b.append("<section id='help'><h2>Help</h2><p class='sub'>What each part of this report shows, what the words "
+             "mean, and what to do about the issues found here. A <b>?</b> beside a title opens its part.</p>"
+             "<div id='helpbody'></div></section>")
     b.append("</main><div id='tip'></div>")
     return (f"<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' "
             f"content='width=device-width,initial-scale=1'><meta name='generator' content='{MARKER}'>"
