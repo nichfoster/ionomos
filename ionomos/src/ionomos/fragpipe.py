@@ -130,6 +130,11 @@ class RunSpec:
             cmd += ["--config-diann", self.config_diann]
         return cmd
 
+    engine_name = "FragPipe"  # the program run, for messages
+
+    def expected_outputs(self) -> tuple[str, ...]:
+        return EXPECTED_OUTPUTS.get(self.method, ())
+
     @property
     def method_is_dia(self) -> bool:
         return any(line[3] == "DIA" for line in self.manifest_lines)
@@ -208,44 +213,9 @@ def patch_workflow(text: str, fasta: Path) -> str:
 # ---------------------------------------------------------------- prepare --
 
 
-def prepare(job: Job, cfg: Config) -> RunSpec:
-    """Everything needed to run `job`, checked. Raises Hold or JobError."""
-    rec = job.parsed or {}
-    plan = rec.get("plan") or {}
-    overrides = plan.get("overrides") or {}
-    method_cfg = cfg.methods.get(job.method)
-    if method_cfg is None:
-        raise Hold(f"method {job.method!r} is not in config.yaml any more")
-
-    exe = resolve_launcher(cfg)
-
-    dest = Path(job.dest_dir)
-    if not dest.is_dir():
-        raise JobError(f"experiment folder is gone: {dest}")
-
-    # workflow: experiment.yaml override is the job's own choice -> JobError if missing;
-    # the method default is setup -> Hold until someone puts the file there.
-    wf_name = overrides.get("workflow") or method_cfg.workflow  # current config, not the one at intake
-    wf = _find_file(wf_name, cfg.workflow_dir, ".workflow")
-    if wf is None:
-        where = cfg.workflow_dir / wf_name
-        if overrides.get("workflow"):
-            raise JobError(f"experiment.yaml asks for workflow {wf_name!r}, which is not in {cfg.workflow_dir}")
-        raise Hold(f"workflow file for {job.method} missing: {where} (export it from FragPipe, see DEPLOY_WINDOWS.md A4)")
-
-    warnings: list[str] = []
-    fasta_name = overrides.get("fasta") or method_cfg.fasta
-    fasta = _find_file(fasta_name, cfg.fasta_dir) if fasta_name else None
-    if fasta is None:
-        in_wf = workflow_db_path(wf.read_text(encoding="utf-8", errors="replace"))
-        if in_wf and Path(in_wf).is_file():
-            warnings.append(f"FASTA {fasta_name!r} not in {cfg.fasta_dir}; using the workflow's own database {in_wf}")
-        elif overrides.get("fasta"):
-            raise JobError(f"experiment.yaml asks for FASTA {fasta_name!r}, which is not in {cfg.fasta_dir}")
-        else:
-            raise Hold(f"FASTA for {job.method} missing: {cfg.fasta_dir / fasta_name} "
-                       f"(and the workflow has no usable database.db-path)")
-
+def check_raws(dest: Path, plan: dict, cfg: Config) -> list[tuple[str, str, int, str]]:
+    """The job's raw files as (path, experiment, bioreplicate, data type), checked: all there, none empty,
+    enough disk space. Raises JobError / Hold. Shared by every engine's runner."""
     lines = []
     missing = []
     empty = []
@@ -284,6 +254,49 @@ def prepare(job: Job, cfg: Config) -> RunSpec:
         if free is not None and free < need:
             raise Hold(f"low disk space: {free:.0f} GB free on {dest.anchor or dest}, this search needs "
                        f"~{need:.0f} GB (fragpipe.min_free_gb {need_free_gb} + raws {raw_gb:.1f})")
+
+    return lines
+
+
+def prepare(job: Job, cfg: Config) -> RunSpec:
+    """Everything needed to run `job`, checked. Raises Hold or JobError."""
+    rec = job.parsed or {}
+    plan = rec.get("plan") or {}
+    overrides = plan.get("overrides") or {}
+    method_cfg = cfg.methods.get(job.method)
+    if method_cfg is None:
+        raise Hold(f"method {job.method!r} is not in config.yaml any more")
+
+    exe = resolve_launcher(cfg)
+
+    dest = Path(job.dest_dir)
+    if not dest.is_dir():
+        raise JobError(f"experiment folder is gone: {dest}")
+
+    # workflow: experiment.yaml override is the job's own choice -> JobError if missing;
+    # the method default is setup -> Hold until someone puts the file there.
+    wf_name = overrides.get("workflow") or method_cfg.workflow  # current config, not the one at intake
+    wf = _find_file(wf_name, cfg.workflow_dir, ".workflow")
+    if wf is None:
+        where = cfg.workflow_dir / wf_name
+        if overrides.get("workflow"):
+            raise JobError(f"experiment.yaml asks for workflow {wf_name!r}, which is not in {cfg.workflow_dir}")
+        raise Hold(f"workflow file for {job.method} missing: {where} (export it from FragPipe, see DEPLOY_WINDOWS.md A4)")
+
+    warnings: list[str] = []
+    fasta_name = overrides.get("fasta") or method_cfg.fasta
+    fasta = _find_file(fasta_name, cfg.fasta_dir) if fasta_name else None
+    if fasta is None:
+        in_wf = workflow_db_path(wf.read_text(encoding="utf-8", errors="replace"))
+        if in_wf and Path(in_wf).is_file():
+            warnings.append(f"FASTA {fasta_name!r} not in {cfg.fasta_dir}; using the workflow's own database {in_wf}")
+        elif overrides.get("fasta"):
+            raise JobError(f"experiment.yaml asks for FASTA {fasta_name!r}, which is not in {cfg.fasta_dir}")
+        else:
+            raise Hold(f"FASTA for {job.method} missing: {cfg.fasta_dir / fasta_name} "
+                       f"(and the workflow has no usable database.db-path)")
+
+    lines = check_raws(dest, plan, cfg)
 
     raw_dir = dest / plan["raw_dir"] if plan.get("raw_dir") else dest
     annotations: dict[str, str] = {}
@@ -382,7 +395,8 @@ def kill_tree(proc: subprocess.Popen) -> None:
 
 def run(spec: RunSpec, stop: threading.Event | None = None, on_start=None, poll: float = 1.0,
         on_poll=None) -> RunResult:
-    """Run FragPipe for `spec`; blocks until it exits, times out, is cancelled, or `stop` is set."""
+    """Run the engine for `spec` (FragPipe, or DIA-NN via diann.py); blocks until it exits, times out, is
+    cancelled, or `stop` is set."""
     stop = stop or threading.Event()
     cmd = spec.command()
     started = time.monotonic()
@@ -395,7 +409,7 @@ def run(spec: RunSpec, stop: threading.Event | None = None, on_start=None, poll:
             proc = subprocess.Popen(cmd, stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                                     cwd=str(spec.run_dir), **_popen_kwargs())
         except OSError as exc:
-            return RunResult(None, f"could not start FragPipe ({spec.exe}): {exc}")
+            return RunResult(None, f"could not start {spec.engine_name} ({spec.exe}): {exc}")
         if on_start:
             on_start(proc.pid, cmd)
         while True:
@@ -427,7 +441,7 @@ def run(spec: RunSpec, stop: threading.Event | None = None, on_start=None, poll:
     hints = explain(text)
     if code != 0:
         lead = f"{hints[0]} — " if hints else ""
-        return RunResult(code, f"{lead}FragPipe exited with code {code}; last lines: {tail(spec.console_log, 4)}",
+        return RunResult(code, f"{lead}{spec.engine_name} exited with code {code}; last lines: {tail(spec.console_log, 4)}",
                          hints=hints)
     bad_step = _FAILED_STEP.findall(text)
     if bad_step:
@@ -436,16 +450,16 @@ def run(spec: RunSpec, stop: threading.Event | None = None, on_start=None, poll:
                             f"last lines: {tail(spec.console_log, 4)}", hints=hints)
     produced = [p for p in spec.workdir.iterdir()] if spec.workdir.is_dir() else []
     if not produced:
-        return RunResult(1, "FragPipe exited 0 but wrote nothing to the output folder; see "
+        return RunResult(1, f"{spec.engine_name} exited 0 but wrote nothing to the output folder; see "
                             f"{spec.console_log}", hints=hints)
     return RunResult(0)
 
 
 def missing_outputs(spec: RunSpec) -> list[str]:
-    want = EXPECTED_OUTPUTS.get(spec.method)
+    want = spec.expected_outputs()
     if not want or any((spec.workdir / w).exists() for w in want):
         return []
-    return [f"none of the expected {spec.method} outputs found in {WORKDIR}/: {', '.join(want)}"]
+    return [f"none of the expected {spec.method} outputs found in {spec.workdir.name}/: {', '.join(want)}"]
 
 
 def tail(path: Path, n: int = 20) -> str:
@@ -628,6 +642,10 @@ def inspect_workflow(path: Path) -> dict:
 
 def describe_method(cfg: Config, key: str) -> list[tuple[bool | None, str]]:
     """Human-readable readiness lines for one method: [(ok?, text)]. ok None = warning."""
+    from ionomos import diann
+
+    if diann.uses_diann(cfg, key):
+        return diann.describe(cfg, key)
     m = cfg.methods[key]
     return describe_files(cfg.workflow_dir, cfg.fasta_dir, m.workflow, m.fasta)
 

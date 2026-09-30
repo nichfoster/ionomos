@@ -41,13 +41,52 @@ names). Otherwise they come from the sample names (`DMSO_1`, `Drug_2`, …), as
 for FragPipe. They can always be corrected on the Analysis tab or in
 `experiment.yaml` (`sample_conditions`).
 
+## Running DIA-NN directly (instead of FragPipe)
+
+A DIA method can be searched by the lab's own DIA-NN (1.9 or 2.x) rather than
+FragPipe (D39):
+
+```yaml
+methods:
+  DIA:
+    engine: diann
+    diann_exe: C:/DIA-NN/2.2.0/diann.exe   # your install; Ionomos never ships DIA-NN
+    fasta: human_reviewed.fasta           # in fasta_dir
+    data_type: DIA
+    library: human_lib.parquet            # optional; otherwise predicted from the FASTA
+    diann_args: "--var-mods 1 --var-mod UniMod:35,15.994915,M"   # optional, added to the defaults
+```
+
+Each job then writes `ionomos_run/diann.cfg` and runs
+`diann.exe --cfg ionomos_run/diann.cfg`. The cfg is the job's full,
+reproducible settings: every raw file, FASTA / library, output, threads and
+options. Results go to `<experiment>/diann/`. Watching, holding, cancel,
+Retry, pop-ups and the analysis work exactly as for FragPipe. A second run
+keeps the first as `diann_previous_<time>/`. An experiment can pick another
+`fasta` in its `experiment.yaml`, as for FragPipe.
+
+Ionomos' defaults are close to DIA-NN's GUI defaults for a tryptic search:
+- 1% q-value
+- `--matrices`
+- N-terminal Met excision
+- `K*,R*` with 1 missed cleavage
+- peptides of 7–30 residues, charge 1–4, m/z 300–1800
+- carbamidomethyl C (`--unimod4`)
+- MBR (`--reanalyse`) and `--rt-profiling`
+- without a library: `--fasta-search --predictor --gen-spec-lib`
+
+Check them against your lab's usual DIA-NN settings: DIA-NN prints the full
+command line at the top of its log. Paths must not contain spaces, since
+`diann.cfg` is split on them, and the experiment folders already can't have
+any.
+
 **Not supported yet:**
 - MSstatsTMT format.
 - Spectronaut's peptide-only reports.
 - AlphaDIA's Parquet matrices: read `pg.matrix.tsv`, which holds the same
   numbers.
-- Running any engine other than FragPipe. Running DIA-NN, MaxQuant or Sage
-  from the watcher is ROADMAP Phase 5B.
+- Running MaxQuant or Sage from the watcher (ROADMAP Phase 5B). DIA-NN can be
+  run: see above.
 
 The formats were built from each vendor's documentation and tested with files
 using the real column names (`tests/test_engines.py`). The Proteome Discoverer

@@ -245,6 +245,70 @@ def _fake_results(wd: Path, rows: list[list[str]], workflow_name: str) -> None:
                                     {e: sorted(v) for e, v in exps.items()}, seed)
 
 
+def fake_diann(argv: list[str]) -> int:
+    """Fake DIA-NN (`ionomos fake-diann --cfg ionomos_run/diann.cfg`): reads the cfg the runner writes, fails
+    like the real one on a missing raw / FASTA / library, then writes report.pg_matrix.tsv + report.log.txt.
+    IONOMOS_FAKE_FP_MODE=fail exits 1; IONOMOS_FAKE_FP_SECONDS sets the run time (default 2)."""
+    import re as _re
+
+    from ionomos.downstream import simulate
+
+    say = lambda *x: print("FAKE DIA-NN:", *x, flush=True)  # noqa: E731
+    if "--cfg" not in argv or argv.index("--cfg") + 1 >= len(argv):
+        say("usage: --cfg FILE")
+        return 2
+    opts: dict[str, list[str]] = {}
+    for line in Path(argv[argv.index("--cfg") + 1]).read_text(encoding="utf-8").splitlines():
+        parts = line.split(" ", 1)
+        if parts[0].startswith("--"):
+            opts.setdefault(parts[0], []).append(parts[1] if len(parts) > 1 else "")
+    for flag in ("--f", "--fasta", "--lib"):
+        for f in opts.get(flag, []):
+            if not Path(f).is_file():
+                say(f"ERROR: cannot open {f}")
+                return 1
+    if not opts.get("--f") or not opts.get("--out"):
+        say("ERROR: no input files or no --out")
+        return 1
+    if os.environ.get("IONOMOS_FAKE_FP_MODE") == "fail":
+        say("ERROR: fake failure")
+        return 1
+    total = float(os.environ.get("IONOMOS_FAKE_FP_SECONDS", "2"))
+    print("DIA-NN 2.2.0 Academia (Data-Independent Acquisition by Neural Networks)", flush=True)
+    for step in ("Loading spectral library", "Processing runs", "Protein inference", "Writing report"):
+        print(f"[0:0{int(total)}] {step}", flush=True)
+        time.sleep(total / 4)
+    out = Path(opts["--out"][0])
+    out.parent.mkdir(parents=True, exist_ok=True)
+    runs = []
+    for f in opts["--f"]:
+        stem = Path(f).stem
+        m = _re.match(r"^(.*?)[_-]?[A-Za-z]?\d+$", stem)
+        runs.append((f, m.group(1) if m and m.group(1) else stem))
+    stem = out.name.rsplit(".", 1)[0]
+    simulate.dia_pg_matrix(out.parent / f"{stem}.pg_matrix.tsv", runs, seed=len(runs))
+    (out.parent / f"{stem}.log.txt").write_text("DIA-NN 2.2.0 Academia (Data-Independent Acquisition by Neural "
+                                                "Networks)\nfake run by the Ionomos testbed\n", encoding="utf-8")
+    say("done")
+    return 0
+
+
+def write_fake_diann(folder: Path) -> Path:
+    """diann.bat / diann.sh in `folder` that runs `ionomos fake-diann` (for `engine: diann` methods in tests)."""
+    from ionomos.service import ionomos_command
+
+    cmd = ionomos_command(console=True)
+    folder.mkdir(parents=True, exist_ok=True)
+    if os.name == "nt":
+        exe = folder / "diann.bat"
+        exe.write_text("@echo off\r\n" + " ".join(f'"{c}"' for c in cmd) + " fake-diann %*\r\n", encoding="utf-8")
+    else:
+        exe = folder / "diann.sh"
+        exe.write_text("#!/bin/sh\nexec " + " ".join(f"'{c}'" for c in cmd) + ' fake-diann "$@"\n', encoding="utf-8")
+        exe.chmod(exe.stat().st_mode | stat.S_IEXEC)
+    return exe
+
+
 def write_fake_launcher(folder: Path) -> Path:
     """fragpipe.bat / fragpipe.sh in `folder` that runs `ionomos fake-fragpipe` (works frozen or from a venv)."""
     from ionomos.service import ionomos_command

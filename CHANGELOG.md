@@ -29,6 +29,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   records them. The Methods paragraph names the engine that produced the
   numbers.
 - MaxQuant `CON__` contaminants are removed like FragPipe's `contam_`.
+- **The watcher can run DIA-NN** instead of FragPipe for a DIA method
+  (`engine: diann`, `diann_exe`, optional `library` / `diann_args`; D39,
+  docs/ENGINES.md):
+  - each job's settings are written to `ionomos_run/diann.cfg`
+  - results go to `diann/`
+  - cancel / Retry / pop-ups / previous-attempt folders work as for FragPipe
+  - the setup checklist checks the DIA-NN install and FASTA / library
+
+  Done notes, failure pop-ups and logs name the engine that ran.
 
 ## [0.11.0] - 2026-09-30
 
