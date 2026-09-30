@@ -141,6 +141,26 @@ run on the PC.
 - **Data presentation**: volcano plot + summary at the end of each run —
   either an HTML report (plotly, no server) or a small Shiny/Streamlit app.
   FragPipe Analyst ships R code that can be reused for the stats.
+  → 2026-09-30: the report now also has deeper QC and discovery views (D35):
+  - a sample scorecard and batch check
+  - missingness vs intensity, and π0
+  - on/off features and imputation-driven hits
+  - rank-based gene sets
+  - compare comparisons
+  - power
+  - list / wildcard / term search, highlight groups, and the view in the link
+
+  Still open:
+  - Tune the D35 warning thresholds on real lab experiments.
+  - PSM-level technical QC from `psm.tsv`: mass error, missed cleavages,
+    charge states.
+  - Run-order drift, once acquisition times are recorded.
+  - Protein complexes (CORUM, whose licence needs checking).
+  - For isoDTB:
+    - competition-ratio classes, once the lab confirms the ratio direction
+      and thresholds
+    - a CysDB overlay (liganded / hyperreactive / novel)
+    - site selectivity across compounds
 - `ionomos status` as a tiny local web page if people ask.
 - Auto-archive finished experiments to `D:\<user>\` after N days.
 - Optional: auto-pull from `C:\Proteomics_File_Sharing` (reversing D3) once
@@ -172,6 +192,9 @@ Collected from the other docs; resolve before/during Phase 1.
 - [ ] Does bundled DIA-NN suffice or is `--config-diann` needed for 2.3.2?
 - [ ] Confirm the DIA condition codes with the lab: is `C` always "Compound" (not "Control")? Other codes
       in use (`V` vehicle, `T` treated …)? Set `naming.condition_codes` accordingly (D34).
+- [ ] D35 warnings: are the sample-outlier / batch / imputation-mismatch thresholds right on real experiments?
+      Should an outlier sample pop up (input) rather than stay a warning?
+- [ ] isoDTB: which ratio direction and threshold call a cysteine "liganded" (e.g. R ≥ 4)? Then add ratio classes.
 - [ ] Is a review window on every drop right long-term, or only for new users / methods / code patterns?
       Watch how it feels on the PC for a few weeks (`gui.review_drops`).
 - [x] Agent auto-merge: removed 2026-09-27; a person merges (D31).

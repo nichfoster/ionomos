@@ -29,9 +29,16 @@ VirtualConsole; tests assert the list stays empty.
   missing, and the dark/light theme toggle.
 - `test/escaping.test.mjs` — gene/sample/condition/description names containing
   `<`, `&`, quotes and `<script>` through every dynamic-HTML sink (table,
-  tiles, detail panel, the `showTip` tooltip, CSV export), plus the skipped
-  F-01 regression (a `<!--` in the data breaks the shipped script-tag
-  escaping; the test switches on when that is fixed).
+  tiles, detail panel, the `showTip` tooltip, CSV export), plus the F-01
+  guard: a `<!--` in the data can't break the script tags (report.py escapes
+  it as `<\u0021--`; `embedData()` here does the same).
+- `test/confidence.test.mjs` — low-confidence and fold-change-only comparisons.
+- `test/discovery.test.mjs` — the search grammar (lists with found / not found,
+  `KRT*`, `/regex/`, `desc:`, `term:`), suggestions and keys, the view in the
+  address (`loadReport({ url })`), box selection, highlight groups
+  (localStorage, .gmt export), hit filters, key findings, compare
+  (quadrants + UpSet), only-in-one-condition, rank-based enrichment and its
+  barcode, every QC tab, and a broken section staying contained.
 
 ## Running
 

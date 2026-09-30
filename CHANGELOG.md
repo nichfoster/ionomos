@@ -7,6 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Deeper QC in every report** (`downstream/insights.py`, D35). Each sample
+  gets a scorecard, with robust z-scores and plain-word flags, in the report
+  and in `sample_qc.tsv`. The scorecard covers:
+  - identifications and missingness
+  - loading before normalisation
+  - correlation with its own replicates
+  - spread around its group mean
+  - the group's CV with the sample left out
+
+  Also new:
+  - Each principal component is related to condition and to replicate number,
+    so a batch shows up as "PC1 follows the replicate number".
+  - Missing values are checked against intensity (low-abundance dropouts or
+    random gaps), which says whether low-value imputation fits.
+  - The p-value histogram gets its shape and Storey's π0.
+  - New doctor warnings (report and attention list, never a pop-up):
+    `SAMPLE_OUTLIER`, `BATCH_SUSPECT`, `IMPUTATION_MISMATCH`,
+    `P_VALUE_SHAPE`, `IMPUTATION_DRIVEN`.
+- **Discovery views**:
+  - **Key findings** at the top of the report: top hits, on/off features,
+    pathways and the sample verdict per comparison.
+  - **Only in one condition**: features measured in most replicates of one
+    group and never in the other, the hits a t-test can't see. They are listed
+    in the report, in `presence_absence.tsv`, and marked ▲ on the volcano.
+  - **Compare comparisons**: log2FC against log2FC in four quadrants, plus an
+    UpSet chart of the hit lists; a bar marks its features.
+  - **Rank-based gene-set test** on every protein, with no cut-off. It is a
+    Wilcoxon rank-sum test with the variance inflated by the set's
+    inter-gene correlation, as in limma's camera, and comes with a barcode
+    plot. Results are in `gene_set_ranks.tsv`.
+  - A protein's **"Behaves like"** list: the proteins most correlated with it
+    across samples.
+  - For site-level (isoDTB) data: a **Proteins** view of how many of each
+    protein's sites move.
+  - New QC tabs: missingness vs intensity, mean–variance, abundance rank, and
+    **power**. The power tab shows the smallest detectable fold change against
+    replicates per group, from the experiment's own noise.
+- **Volcano search**:
+  - Accepts a single word, a pasted list (with "found 38 of 42, not found:
+    …"), `KRT*`, `/^RPL\d/`, `desc:kinase` or `term:apoptosis`.
+  - Suggestions as you type; <kbd>/</kbd> jumps to the box.
+  - Matches are labelled and shown in the table, heatmap, compare plot and
+    abundance rank.
+- Other volcano and page features:
+  - **Box select** mode on the volcano.
+  - **Highlight groups**: named, coloured gene lists kept in the browser,
+    shown in every report, with .gmt import and export.
+  - **Hit filters**: ignore imputation-driven hits, or require at least N
+    peptides / PSMs. Peptide / PSM counts are read from DIA-NN, FragPipe and
+    TMT-Integrator tables.
+  - Plot options for point size, label size and cut-off lines.
+  - PNG export next to SVG.
+  - "Copy up / down genes" for STRING or Enrichr.
+  - The page state (comparison, cut-offs, search, open protein) is kept in the
+    address, and a **Link** button copies it.
+  - `ionomos analyze` prints the on/off count and π0 per comparison.
+
+### Fixed
+
+- A `<!--` inside a protein or sample name could stop the report from
+  drawing (finding F-01). The data script now escapes it.
+- One chart that fails to draw no longer blanks the rest of the page.
+
 ## [0.10.1] - 2026-09-28
 
 Same features as 0.10.0, which was tagged but never released: its installer

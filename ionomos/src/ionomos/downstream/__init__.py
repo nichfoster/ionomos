@@ -14,12 +14,16 @@ Layout it reads and writes (inside the experiment folder):
       <level>_matrix_log2.tsv       the quantities that went into the statistics
       <comparison>_differential.tsv every feature: log2FC, p, q, significance
       volcano_<comparison>.svg      standalone plot (opens in any browser, pastes into slides)
-      analysis.json                 what was done, with which settings (reproducibility)
+      sample_qc.tsv                 the per-sample scorecard (insights.py)
+      presence_absence.tsv          features measured in one group and never in the other
+      gene_set_ranks.tsv            rank-based gene-set test on every protein (enrichment on)
+      analysis.json                 what was done, with which settings (reproducibility), + "quality"
 
 Pipeline stages, each a module:
     method prep   isodtb.py / tmt.py           (ports of the lab R scripts)
     quantities    quant.py   -> QuantMatrix    (one shape for every method)
     statistics    analysis.py + stats.py       (comparisons, Welch / one-sample t, BH)
+    QC, insights  qc.py + insights.py + enrich.py  (PCA, scorecard, batch, missingness, on/off, gene sets)
     presentation  charts.py + report.py        (SVG + HTML)
 
 Adding a method or an output means adding one loader or one renderer; the
@@ -171,14 +175,20 @@ def _few_text(groups) -> str:
     return ", ".join(f"{g} has {n} sample{'s' if n != 1 else ''}" for g, n in groups)
 
 
-def _enrichment(diffs, p, settings, notes) -> list[dict]:
+def _libraries(settings, notes) -> dict:
     from ionomos.downstream import enrich
 
-    if not settings.enrichment or not diffs:
-        return []
+    if not settings.enrichment:
+        return {}
     libs, lnotes = enrich.load_libraries(settings.enrichment_libraries, settings.enrichment_gmt or None)
     notes += lnotes
-    if not libs:
+    return libs
+
+
+def _enrichment(diffs, libs) -> list[dict]:
+    from ionomos.downstream import enrich
+
+    if not libs or not diffs:
         return []
     out = []
     for d in diffs:
@@ -189,6 +199,85 @@ def _enrichment(diffs, p, settings, notes) -> list[dict]:
             for name, lib in libs.items():
                 out.append({"comparison": d.name, "direction": direction, "library": name, "hits": len(set(hits)),
                             "background": len(set(bg)), "terms": enrich.ora(hits, bg, lib) if hits else []})
+    return out
+
+
+def _gene_scores(d) -> dict[str, tuple[float, int]]:
+    """gene -> (signed statistic, feature index): the moderated t, else sign(log2FC) * -log10 p; a gene measured
+    as several proteins / sites keeps its strongest."""
+    import math
+
+    from ionomos.downstream import enrich
+
+    out: dict[str, tuple[float, int]] = {}
+    for r in d.rows:
+        g = enrich.gene_symbol(r["label"]) if r["label"] else ""
+        if not g:
+            continue
+        t = r.get("t")
+        if t is None or not math.isfinite(t):
+            if r["pvalue"] is None or r["log2fc"] is None:
+                continue
+            t = math.copysign(-math.log10(max(r["pvalue"], 1e-300)), r["log2fc"])
+        if g not in out or abs(t) > abs(out[g][0]):
+            out[g] = (t, r["index"])
+    return out
+
+
+def _rank_enrichment(diffs, p, libs, limit: int = 40) -> list[dict]:
+    """Rank-based gene-set test per comparison and library, on every tested gene (no cut-off)."""
+    from ionomos.downstream import enrich
+
+    if not libs or not diffs:
+        return []
+    resid_rows = None
+    if p is not None:
+        m = p.m
+        groups: dict[str, list[int]] = {}
+        for j, x in enumerate(m.samples):
+            groups.setdefault(m.condition[x], []).append(j)
+        resid_rows = []
+        for row in m.values:
+            res = [0.0] * len(row)
+            for idx in groups.values():
+                obs = [row[j] for j in idx if row[j] is not None]
+                mu = sum(obs) / len(obs) if obs else 0.0
+                for j in idx:
+                    res[j] = row[j] - mu if row[j] is not None else 0.0
+            resid_rows.append(res)
+    out = []
+    for d in diffs:
+        sc = _gene_scores(d)
+        if len(sc) < 20:
+            continue
+        scores = {g: v for g, (v, _i) in sc.items()}
+        resid = {g: resid_rows[i] for g, (_v, i) in sc.items()} if resid_rows else None
+        for name, lib in libs.items():
+            terms = enrich.rank_test(scores, lib, resid, limit=limit)
+            out.append({"comparison": d.name, "library": name, "tested": len(scores),
+                        "adjusted": resid is not None, "terms": terms})
+    return out
+
+
+def _insights(p, diffs, qcd) -> dict:
+    """Deeper QC and discovery (insights.py) for the report, the doctor and analysis.json."""
+    from ionomos.downstream import insights
+
+    m = p.m
+    out: dict = {}
+    out["scorecard"] = insights.sample_scorecard(p.measured, m.samples, m.condition, p.normalized_from,
+                                                 qcd.get("correlation"), m.kind)
+    out["pcs"] = insights.pc_association(qcd.get("pca") or {}, m.samples, m.condition, m.replicate)
+    out["missingness"] = insights.missingness(p.measured)
+    prior = next((d.prior for d in diffs if d.prior and all(x == x for x in d.prior)), None)
+    out["power"] = insights.power(p.measured, m.samples, m.condition, prior, m.kind)
+    out["phist"], out["onoff"], out["imputation_driven"] = {}, {}, {}
+    for d in diffs:
+        out["phist"][d.name] = insights.p_histogram([r["pvalue"] for r in d.rows])
+        if d.confidence != "none":
+            out["onoff"][d.name] = insights.presence_absence(p.measured, m.samples, m.condition, d.treatment, d.control)
+        out["imputation_driven"][d.name] = insights.imputation_driven(p.imputed, m.samples, m.condition, d) \
+            if p.n_imputed else []
     return out
 
 
@@ -203,7 +292,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     out.issues (doctor.py), which the worker and the app turn into pop-up windows.
     progress(text) is called between stages (the app shows it)."""
     from ionomos import __version__
-    from ionomos.downstream import doctor, export, fpa
+    from ionomos.downstream import doctor, export, fpa, insights
 
     dest = Path(dest)
     workdir = dest / "fragpipe" if (dest / "fragpipe").is_dir() else dest
@@ -256,6 +345,8 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     processed = None
     qcd: dict = {}
     enrichment: list[dict] = []
+    ranked: list[dict] = []
+    insight: dict = {}
     enr_notes: list[str] = []
     comps: list = []
 
@@ -288,13 +379,15 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
             f.volcanos[d.name] = _write_volcano(results, d, stage)
             if f.volcanos[d.name]:
                 out.files.append(f.volcanos[d.name])
+        if diffs:
+            insight = stage("insights", lambda: {"phist": {d.name: insights.p_histogram([r["pvalue"] for r in d.rows])
+                                                          for d in diffs}}) or {}
         if diffs and settings.enrichment:
             say("enrichment")
-            enrichment = stage("enrichment", _enrichment, diffs, None, settings, enr_notes) or []
-            if enrichment:
-                et = stage("enrichment", export.enrichment_table, results / "enrichment.tsv", enrichment)
-                if et:
-                    out.files.append(et)
+            libs = stage("enrichment", _libraries, settings, enr_notes) or {}
+            enrichment = stage("enrichment", _enrichment, diffs, libs) or []
+            ranked = stage("enrichment", _rank_enrichment, diffs, None, libs) or []
+            _write_enrichment(results, enrichment, ranked, stage, out)
     elif m is not None and m.features:
         files_mx = results / f"{m.level}_matrix_log2.tsv"
         if stage("tables", write_tsv, files_mx, ["id", "label", "description", *m.samples],
@@ -382,18 +475,27 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
                     out.files.append(rt)
             say("quality control (PCA, correlation, missing values)")
             qcd = stage("qc", _qc, processed, diffs, settings) or {}
+            say("sample scorecard, batch and missingness checks, on/off features, power")
+            insight = stage("insights", _insights, processed, diffs, qcd) or {}
+            for name, fn, arg in (("sample_qc.tsv", export.sample_qc_table, insight.get("scorecard")),
+                                  ("presence_absence.tsv", export.presence_absence_table,
+                                   (processed, insight["onoff"]) if any((insight.get("onoff") or {}).values()) else None)):
+                if arg:
+                    t = stage("tables", fn, results / name, arg)
+                    if t:
+                        out.files.append(t)
         if diffs and settings.enrichment:
-            say("enrichment")
-            enrichment = stage("enrichment", _enrichment, diffs, processed, settings, enr_notes) or []
-            if enrichment:
-                et = stage("enrichment", export.enrichment_table, results / "enrichment.tsv", enrichment)
-                if et:
-                    out.files.append(et)
+            say("enrichment (hits, and every protein ranked)")
+            libs = stage("enrichment", _libraries, settings, enr_notes) or {}
+            enrichment = stage("enrichment", _enrichment, diffs, libs) or []
+            ranked = stage("enrichment", _rank_enrichment, diffs, processed, libs) or []
+            _write_enrichment(results, enrichment, ranked, stage, out)
         exported = stage("export", export.fragpipe_analyst, results / "fragpipe-analyst", m, processed, diffs,
                          settings, comps)
         out.files += exported or []
     f.diffs = diffs
     f.enrichment_notes = enr_notes
+    f.insights = insight
     out.issues = doctor.check(f)
     out.warnings += notes
     ctx = {"version": __version__, **(context or {})}
@@ -406,7 +508,8 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     rel = [str(p.relative_to(results)).replace("\\", "/") if p.is_relative_to(results) else p.name
            for p in out.files]
     out.report = results / "report.html"
-    html = stage("report", report.render, ctx, m, processed, diffs, out.warnings, rel, settings, qcd, enrichment)
+    html = stage("report", report.render, ctx, m, processed, diffs, out.warnings, rel, settings, qcd, enrichment,
+                 ranked, insight)
     if html is None:  # the fallback page: issues, notes and the volcano plots themselves
         out.issues = doctor.check(f)
         ctx["issues"] = [i.as_dict() for i in out.issues]
@@ -437,6 +540,10 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
         "enrichment": [{k: v for k, v in b.items() if k != "terms"} | {"top": [t["term"] for t in b["terms"][:5]
                         if t["q"] <= 0.05]} for b in enrichment],
         "enrichment_notes": enr_notes,
+        "gene_set_ranks": [{"comparison": b["comparison"], "library": b["library"],
+                            "top": [f"{t['term']} ({t['direction']})" for t in b["terms"][:5] if t["q"] <= 0.05]}
+                           for b in ranked],
+        "quality": _quality_summary(insight),
         "source": m.source if m else None,
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "ionomos_version": __version__,
@@ -449,6 +556,36 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     except OSError as exc:
         out.warnings.append(f"could not write analysis.json: {exc}")
     return out
+
+
+def _write_enrichment(results: Path, enrichment, ranked, stage, out) -> None:
+    from ionomos.downstream import export
+
+    if enrichment:
+        et = stage("enrichment", export.enrichment_table, results / "enrichment.tsv", enrichment)
+        if et:
+            out.files.append(et)
+    if any(b["terms"] for b in ranked):
+        rt = stage("enrichment", export.rank_enrichment_table, results / "gene_set_ranks.tsv", ranked)
+        if rt:
+            out.files.append(rt)
+
+
+def _quality_summary(insight: dict) -> dict:
+    """The deeper checks in a few fields for analysis.json (the app and the CLI read it)."""
+    if not insight:
+        return {}
+    card = insight.get("scorecard") or []
+    miss = insight.get("missingness") or {}
+    return {
+        "samples_flagged": {r["sample"]: r["flags"] for r in card if r["status"] != "ok"},
+        "batch": (insight.get("pcs") or {}).get("batch"),
+        "missingness": miss.get("verdict", ""),
+        "pi0": {k: v.get("pi0") for k, v in (insight.get("phist") or {}).items()},
+        "p_value_shape": {k: v.get("shape") for k, v in (insight.get("phist") or {}).items()},
+        "only_in_one_condition": {k: len(v) for k, v in (insight.get("onoff") or {}).items()},
+        "imputation_driven_hits": {k: len(v) for k, v in (insight.get("imputation_driven") or {}).items()},
+    }
 
 
 def _state(issues) -> str:

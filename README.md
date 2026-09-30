@@ -41,7 +41,14 @@ testbed with a fake FragPipe. After each search: the lab's R-script outputs
 (byte-identical Python ports) and FragPipe-Analyst's analysis — filtering,
 normalisation, imputation, limma, PCA/QC, enrichment — ported from
 FragPipeAnalystR and checked against it, in an interactive, self-contained
-`results/report.html`. The app's Analysis tab re-runs any experiment with
+`results/report.html`. The report also checks each sample (scorecard, batch,
+missingness, p-value shape) and adds views beyond the volcano:
+- key findings
+- features only in one condition
+- comparison against comparison
+- rank-based pathways
+- a power curve
+- search by gene lists, wildcards or pathway terms The app's Analysis tab re-runs any experiment with
 other conditions, samples or comparisons. See
 [docs/ROADMAP.md](docs/ROADMAP.md), and [docs/DEPLOY_WINDOWS.md](docs/DEPLOY_WINDOWS.md)
 to put it on the PC.

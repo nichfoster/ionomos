@@ -100,9 +100,9 @@ function stubBrowser(win, errors) {
   }
 }
 
-/** Escape `</` the way report.py does before putting JSON inside a script tag. */
-function embedData(data) {
-  return JSON.stringify(data).replaceAll("</", "<\\/");
+/** Escape `</` and `<!--` the way report.py does before putting JSON inside a script tag. */
+export function embedData(data) {
+  return JSON.stringify(data).replaceAll("</", "<\\/").replaceAll("<!--", "<\\u0021--");
 }
 
 function waitReady(win) {
@@ -116,7 +116,7 @@ function waitReady(win) {
  * Load the report with `data` (defaults to the fixture's own payload).
  * Returns { window, document, errors } after setup() has run.
  */
-export async function loadReport({ data } = {}) {
+export async function loadReport({ data, url } = {}) {
   const html = readFixture();
   const js = reportJs();
   const shell =
@@ -134,7 +134,7 @@ export async function loadReport({ data } = {}) {
   vc.on("error", (...a) => errors.push(a.map(String).join(" ")));
   const dom = new JSDOM(shell, {
     runScripts: "outside-only",
-    url: "file:///report.html",
+    url: url || "file:///report.html",
     virtualConsole: vc,
     beforeParse: (win) => stubBrowser(win, errors),
   });
