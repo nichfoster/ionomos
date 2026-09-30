@@ -1860,6 +1860,7 @@ class App:
         self.jobs_state = ttk.Label(top, text="", font=("", 10, "bold"))
         self.jobs_state.pack(side="left", padx=4)
         ttk.Button(top, text="Check FragPipe install", command=self.check_fragpipe).pack(side="right", padx=4)
+        ttk.Button(top, text="Instrument QC", command=self.open_qc_trend).pack(side="right", padx=4)
         self.pause_btn = ttk.Button(top, text="Pause searches", command=self.toggle_pause)
         self.pause_btn.pack(side="right", padx=4)
         ttk.Button(top, text="Refresh", command=self.refresh_jobs).pack(side="right", padx=4)
@@ -2079,6 +2080,17 @@ class App:
             pause(log_dir, "from the app")
             self.set_status("searches paused — queued jobs wait; a running search finishes")
         self.refresh_jobs()
+
+    def open_qc_trend(self):
+        """The instrument QC trend page (qctrend.page_for: rebuilt from the store when stale) in the browser."""
+        from ionomos import qctrend
+
+        try:
+            page = qctrend.page_for(self.config_path)
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("Instrument QC", f"Could not build the QC trend page: {exc} (save the config first?)")
+            return
+        self._open(str(page))
 
     def check_fragpipe(self):
         cfg_path = self.config_path

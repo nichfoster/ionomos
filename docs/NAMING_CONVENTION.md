@@ -231,6 +231,36 @@ touches nothing. Exit code 0 means every name was read. The app's **Methods**
 tab has the same check (**Test names…**), using the settings in the window
 whether or not they are saved.
 
+## QC standard runs
+
+Runs of the lab's recurring QC standard (a HeLa or K562 digest) are filed and
+searched like any drop, then also trended on the instrument QC page
+([QC_TREND.md](QC_TREND.md), D45). Nothing about the name has to change. A
+run counts when its `.raw` name or folder name contains one of
+`qc_trend.match`, or when its method is listed in `qc_trend.methods`:
+
+- The default words are `hela`, `k562`, `qc_std`, `qcstd` and `_qc_`.
+- Case is ignored, and `_ - .` and spaces all count as one separator. So
+  `_qc_` matches QC as a word: `…_QC_…`, `QC-HeLa`, `…_qc.raw`, but not
+  `QCtest`.
+- A folder that is an experiment (two or more samples with two or more
+  replicates each) is not a QC standard, even when a name matches. HeLa is
+  also a cell line people experiment on.
+- `qc_trend.exclude` words win over everything.
+
+| Folder / file | QC run? | Series |
+|---|---|---|
+| `20260930_EJQ_DIA_HeLa-200ng-QC` / `HeLa_200ng_1.raw` | yes (`hela`) | DIA · HeLa · 200ng |
+| `20260930_EJQ_DIA_instrument-check` / `K562-50ng_1.raw` | yes (the file name) | DIA · K562 · 50ng |
+| `20260930_EJQ_DIA_QC` / `run_1.raw` | yes (`_qc_`) | DIA · QC |
+| `20260930_EJQ_DIA_QCtest` / `run_1.raw` | no (`QC` is not a word here) | – |
+| `20260930_EJQ_DIA_HeLa_KO-vs-WT` / `KO_1`, `KO_2`, `WT_1`, `WT_2` | no (an experiment) | – |
+
+The amount (`200ng`, `50ng`, `1ug`) is read from the name, so standards at
+different loads are trended separately. An Xcalibur stamp at the end of the
+name (`…_20260930143015.raw`) gives the acquisition time; without one, the raw
+file's own time is used.
+
 ## Raw files dropped without a folder
 
 Dragging just the `.raw` files into the inbox works too. Once they have stopped

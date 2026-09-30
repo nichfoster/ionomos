@@ -59,6 +59,7 @@ the same gap. The messages are explained below:
 [launcher](#search.hold-launcher), [workflow](#search.hold-workflow),
 [FASTA](#search.hold-fasta), [disk space](#search.hold-disk),
 [DIA-NN](#search.hold-diann), [spectral library](#search.hold-library),
+[MaxQuant](#search.hold-maxquant), [MaxQuant parameters](#search.hold-mqpar),
 [method](#search.hold-method).
 
 ## A folder was not taken in {#attention.intake_rejected}
@@ -68,6 +69,26 @@ a `<folder>.REJECTED.txt` note that says why. Rename the folder or the files,
 or add an `experiment.yaml`; Ionomos tries again by itself. Deleting the note
 also makes it try again. The reasons are explained under
 [Why a folder is not taken in](#trouble.intake).
+
+## The instrument QC standard looks off {#attention.qc_trend}
+
+Your lab's recurring QC standard (a HeLa or K562 run, for example) came
+out outside its usual range. Ionomos compares every QC-standard run with the
+first runs of the same series (same method, standard and amount), using
+control-chart rules. The item names the metric and how far it moved, e.g.
+"IDs 18% below baseline" or "MS1 mass error drifting".
+
+This is about the instrument, not your experiment. Nothing was changed or
+stopped. What to do:
+- Open the trend page: app → **Jobs** → **Instrument QC**, or
+  `ionomos qc-trend --open`. One bad point can be a failed injection; a run
+  of points drifting the same way points to the column, the spray or the
+  calibration.
+- Tell whoever looks after the instrument, and check the run's raw file
+  (TIC, spray) before trusting experiments acquired since.
+- The item closes by itself when a later QC run is back in range.
+
+More about what is measured: docs/QC_TREND.md.
 
 ## Why a folder is not taken in {#trouble.intake}
 
@@ -160,6 +181,21 @@ own licence) and set `methods.<method>.diann_exe` in `config.yaml`.
 
 The method asks for a spectral library that isn't in the workflows or FASTA
 folder. Put the library there, or remove it from the method.
+
+## MaxQuant not found {#search.hold-maxquant}
+
+The method is set to run MaxQuant (`engine: maxquant`) but its
+`MaxQuantCmd.exe` isn't where the settings say. Install your lab's MaxQuant
+and set the method's `maxquant_exe` to its `bin\MaxQuantCmd.exe`. The search
+starts by itself once it is found.
+
+## MaxQuant parameter file missing {#search.hold-mqpar}
+
+The method names a lab MaxQuant parameter file (`mqpar:`) that isn't in the
+workflow folder. In the MaxQuant GUI, set up the search you normally use,
+then **File → Save parameters**, and put the file in the workflow folder
+under that name. Or remove `mqpar:` to use MaxQuant's defaults with
+label-free quantification.
 
 ## The method is no longer set up {#search.hold-method}
 

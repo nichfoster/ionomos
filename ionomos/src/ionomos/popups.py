@@ -101,8 +101,8 @@ class Popups:
     def due(self) -> list[attention.Item]:
         log_dir = self.host.log_dir()
         its = attention.items(log_dir)
-        return [i for i in its if i.due() and i.shown == 0 and i.kind in attention.POPUP_KINDS
-                and i.severity in ("input", "error")]
+        return [i for i in its if i.due() and i.shown == 0 and (
+            (i.kind in attention.POPUP_KINDS and i.severity in ("input", "error")) or i.data.get("popup") is True)]
 
     def check(self) -> None:
         """One pass: refresh the badge, open the next window if one is due and nothing is open."""
@@ -294,6 +294,9 @@ class ItemWindow:
             ttk.Button(b, text="Re-run analysis", command=lambda: self.editor.run(confirm=False)).pack(side="left", padx=3)
         if it.kind == "search_waiting":
             ttk.Button(b, text="Open the setup checklist", command=self.open_setup).pack(side="left", padx=3)
+        if it.kind == "qc_trend" and it.data.get("page"):
+            ttk.Button(b, text="Open QC trend", command=lambda: self.host.open_path(it.data["page"])).pack(
+                side="left", padx=3)
         if it.kind == "intake_rejected":
             ttk.Button(b, text="Open the inbox", command=lambda: self.host.open_path(str(Path(it.dest).parent))).pack(
                 side="left", padx=3)

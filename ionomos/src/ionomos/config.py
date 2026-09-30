@@ -89,6 +89,7 @@ class Config:
     condition_codes: dict = field(default_factory=lambda: dict(DEFAULT_CONDITION_CODES))  # DIA X_D1 -> DMSO rep 1
     file_rules: dict[str, FileRule] = field(default_factory=lambda: dict(DEFAULT_FILE_RULES))  # naming.methods
     date_formats: tuple[str, ...] = DEFAULT_DATE_FORMATS  # naming.date_formats
+    qc_trend: dict = field(default_factory=dict)  # instrument QC trending (qctrend.py, D45); {} = defaults
 
     @property
     def method_aliases(self) -> dict[str, list[str]]:
@@ -180,15 +181,17 @@ def load(path: str | Path, check_paths: bool = True) -> Config:
         if not isinstance(m, dict):
             raise ConfigError(f"'methods.{key}' must be a mapping")
         engine = str(m.get("engine") or "fragpipe").lower()
-        if engine not in ("fragpipe", "diann"):
-            raise ConfigError(f"'methods.{key}.engine' must be fragpipe or diann")
-        for req in (("fasta", "data_type") if engine == "diann" else ("workflow", "fasta", "data_type")):
+        if engine not in ("fragpipe", "diann", "maxquant"):
+            raise ConfigError(f"'methods.{key}.engine' must be fragpipe, diann or maxquant")
+        for req in (("workflow", "fasta", "data_type") if engine == "fragpipe" else ("fasta", "data_type")):
             if not m.get(req):
                 raise ConfigError(f"'methods.{key}.{req}' is required")
         if m["data_type"] not in ("DDA", "DIA"):
             raise ConfigError(f"'methods.{key}.data_type' must be DDA or DIA")
         if engine == "diann" and m["data_type"] != "DIA":
             raise ConfigError(f"'methods.{key}': DIA-NN (engine: diann) needs data_type DIA")
+        if engine == "maxquant" and m["data_type"] != "DDA":
+            raise ConfigError(f"'methods.{key}': MaxQuant (engine: maxquant) needs data_type DDA")
         aliases = m.get("aliases") or DEFAULT_METHOD_ALIASES.get(key) or [key.lower()]
         extra = {k: v for k, v in m.items() if k not in ("workflow", "fasta", "data_type", "postprocess", "aliases")}
         methods[key] = MethodConfig(
@@ -259,6 +262,7 @@ def load(path: str | Path, check_paths: bool = True) -> Config:
         date_formats=date_formats,
         config_path=p,
         analysis=_analysis(raw.get("analysis")),
+        qc_trend=_qc_trend(raw.get("qc_trend")),
         user_ignore=tuple(str(x) for x in (users.get("ignore") if users.get("ignore") is not None else DEFAULT_USER_IGNORE)),
     )
 
@@ -329,6 +333,16 @@ def _analysis(raw) -> dict:
     except AnalysisError as exc:
         raise ConfigError(f"analysis: {exc}") from exc
     return {"enabled": True, **raw}
+
+
+def _qc_trend(raw) -> dict:
+    """qc_trend: section (instrument QC trending, D45), validated by the module that uses it."""
+    from ionomos.qctrend import QCTrendError, settings_from
+
+    try:
+        return settings_from(raw)
+    except QCTrendError as exc:
+        raise ConfigError(f"qc_trend.{exc}" if not str(exc).startswith("must") else f"qc_trend: {exc}") from None
 
 
 def _read_learned(path: Path) -> dict[str, list[str]]:
