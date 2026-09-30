@@ -642,10 +642,12 @@ def inspect_workflow(path: Path) -> dict:
 
 def describe_method(cfg: Config, key: str) -> list[tuple[bool | None, str]]:
     """Human-readable readiness lines for one method: [(ok?, text)]. ok None = warning."""
-    from ionomos import diann
+    from ionomos import diann, maxquant
 
     if diann.uses_diann(cfg, key):
         return diann.describe(cfg, key)
+    if maxquant.uses_maxquant(cfg, key):
+        return maxquant.describe(cfg, key)
     m = cfg.methods[key]
     return describe_files(cfg.workflow_dir, cfg.fasta_dir, m.workflow, m.fasta)
 

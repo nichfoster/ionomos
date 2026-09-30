@@ -680,6 +680,124 @@ isoDTB requires a replicate, so a name ending in a setting is refused with a
 hint instead of guessed. `CE` is left out on purpose: as a condition it is
 too plausible.
 
+### D42 — Designs are limma's general linear model: blocks as fixed effects, covariates, a moderated F
+**2026-09-30.** ROADMAP 5C #1. FragPipe-Analyst fits `~0 + condition`, so a
+batch stays in the residuals. That batch can be:
+- a prep day (the replicate number, D35's `BATCH_SUSPECT`)
+- a TMT plex
+- a patient or a pair
+
+In a simulated three-condition experiment with a replicate batch, the plain
+model found none of the 48 planted changes per comparison. Blocking on the
+replicate found 14 and 24, with no false ones.
+
+**How a design is given.** It goes under `analysis:` in config.yaml or
+experiment.yaml (spec in NAMING_CONVENTION.md):
+- `block: replicate`: the replicate number is the block.
+- `block: {sample: block}`: a block per sample.
+- `block_from: <regex>`: the block is read from the sample names (group
+  `block`, else group 1).
+- `covariates: {name: {sample: value}}`: numbers become a slope, text a
+  factor; SDRF-style names are fine.
+
+**How it is fitted.** The model is `~0 + condition + block + covariates`
+(treatment coding, levels in order of appearance). It is fitted the way
+limma's lmFit → contrasts.fit → eBayes → topTable does it:
+- row by row, with missing values dropped
+- QR with lm.fit's limited pivoting (tol 1e-7), so a coefficient a row can't
+  estimate is NA
+- residual df = observed values − rank
+- the same squeezeVar across features as before
+
+With missing values in a non-orthogonal design, a contrast's SD uses limma's
+approximation: each row's own coefficient SDs combined with the full design's
+correlation. The exact per-row c'(X'X)⁻¹c would differ from limma, and parity
+with limma was preferred; the two agree whenever a row is complete.
+
+**Choices:**
+- **Fixed effects, not duplicateCorrelation.** This is Smyth's advice for a
+  handful of blocks, and it is exact limma. A random block (for blocks that
+  cross conditions incompletely) is left for later, as are interactions,
+  spline time courses and SDRF as the design source. A numeric time is
+  already possible as a linear covariate.
+- **The default is untouched.** With no design setting, the comparisons run
+  the old code path, so every FragPipe-Analyst golden passes unchanged.
+- **A design that can't be used never stops the analysis.** That covers a
+  block equal to the condition, a sample without a value, a rank-deficient
+  matrix or no residual df. The doctor raises `DESIGN_NOT_USED` (input, a
+  pop-up) naming the term. The comparisons then use `~0 + condition`,
+  byte-identical to a run without the setting. `BATCH_SUSPECT` now suggests
+  `block: replicate`, and says so when it is already used.
+- **The moderated F runs for every experiment with 3+ conditions.** It is
+  limma's classifyTestsF / topTableF on every condition against the control,
+  a basis for all condition differences, with df₂ = d0 + df as limma. It asks
+  whether a feature changes anywhere, so it applies no fold-change cut-off.
+  It is reported as the `F` / `F_p` / `F_p_adj` columns of
+  `<level>_results.tsv`, `analysis.json` → `f_test`, an "Any change (F)" tile
+  and a table column.
+- **FragPipe-Analyst can't repeat a blocked model.** `reproduce_in_R.R` says
+  it repeats the plain model. `reproduce_design_in_R.R` repeats Ionomos's
+  model in plain limma, on the values Ionomos tested. A dev test runs it when
+  R is available: identical to 1e-6, the TSV precision.
+
+**Checked** against limma 3.68.5 (`tests/test_design.py`,
+`tests/golden/design/`): 9,600 values, the worst relative difference
+8.5e-11. The cases:
+- a replicate block, with complete data and with missing values (a condition
+  absent, a block unestimable in a row)
+- block + numeric + factor covariates
+- one-vs-others with a block
+- topTableF for the blocked, covariate and plain models
+
+
+### D43 — DEqMS is an optional variance prior, ported exactly
+**2026-09-30.** ROADMAP 5C #4. limma gives every protein the same prior
+variance, but a protein quantified from one peptide is noisier than one
+quantified from twenty. DEqMS (Zhu et al., Mol. Cell. Proteomics 2020) fits
+log s² against log2 of the peptide count and uses the fitted value as each
+protein's prior. `variance_prior: deqms` turns it on. The counts are the ones
+the loaders already read (D36): DIA-NN `N.Sequences`, FragPipe and MaxQuant
+peptides, TMT-Integrator PSMs.
+
+This is a port of DEqMS 1.30 `spectraCounteBayes(fit.method = "loess")`:
+- the loess of log s² on log2(count)
+- the digamma / trigamma bias correction
+- the prior df from its 0.1-step grid search
+- post df = d0 + df, uncapped, unlike limma
+
+It needs R's `loess` exactly, which is not a plain local regression: dloess
+builds a k-d tree of cells with ≤ floor(n·span·0.2) points (ties go to one
+side), fits a quadratic (value and slope) at each cell vertex, and
+interpolates with cubic Hermite polynomials. `deqms.loess` reproduces it for
+one predictor, to 1e-12 against R on tied and continuous data. DEqMS
+t-statistics and p-values agree with the package to 1e-10 on the blocked
+and plain fits, with and without missing values.
+
+**Deviations, where DEqMS would stop or misbehave:**
+- A feature without a count (or with 0, or with no residual df) keeps limma's
+  prior. DEqMS stops on a missing count.
+- With fewer than 20 usable features or fewer than 3 distinct counts, limma's
+  prior is used for all, with the warning `DEQMS_NOT_USED`. So does a table
+  without counts.
+- The count is whatever the table reports for the protein, usually counted
+  over the whole experiment. DEqMS' vignette suggests the minimum across
+  samples. The trend is fitted on whichever is given.
+
+**When it helps:** many proteins with few peptides and a clear dependence of
+variance on count (DDA label-free, DIA with a wide range of counts, TMT with
+PSM counts). DEqMS ranks those better than one prior.
+
+**Known conservativeness:** one- and two-peptide proteins get a larger prior
+variance, so they are called less often, including real changes. DEqMS'
+moment-matched d0 is often larger than limma's (10.8 against 3.8 on the golden
+data), which shrinks every variance harder towards the trend. Without a trend
+(the same count everywhere), DEqMS is just a different estimate of the
+limma prior. It stays opt-in.
+
+The F-test with DEqMS uses DEqMS' posterior variances and df. DEqMS has no F,
+so that combination has no R reference.
+
+
 ### D44 — Titrations get CurveCurator's dose-response curves, ported and checked against CurveCurator
 **2026-09-30.** ROADMAP 5C #2. Chemoproteomics and drug labs titrate a
 compound (DMSO + several concentrations); a volcano per dose answers the
@@ -738,4 +856,179 @@ later behind settings if a lab needs them. Open: median normalisation assumes
 most proteins don't move; a compound that changes a large share of the
 proteome at high doses would bias the flat curves (seen in simulation with
 40% responders), and CurveCurator's own normalisation is off by default.
+
+
+### D45 — The QC standard is trended from the searches Ionomos already runs
+**2026-09-30.** ROADMAP 5C #6. Labs inject a QC standard (a HeLa or K562
+digest) on a schedule to watch the LC and the mass spectrometer. The numbers
+usually end up in a spreadsheet, if anywhere. Ionomos files and searches every
+one of those runs, so it now trends them (`qctrend.py`, docs/QC_TREND.md).
+
+- **Recognised by name, not by a new folder.** A run counts when its folder
+  or `.raw` name contains a `qc_trend.match` word, or when its method is in
+  `qc_trend.methods`. The default words are `hela`, `k562`, `qc_std`, `qcstd`
+  and `_qc_`. `_ - .` and spaces are one separator, so `_qc_` means QC as a
+  word. HeLa is also a cell line people experiment on, so a folder with two
+  or more samples of two or more replicates each is an experiment, not a
+  standard. `exclude` covers the rest. Trending is on by default because it
+  is inert until a matching run is searched, and it never changes what
+  happens to the job.
+- **Numbers from the engines' own tables.** Every number is read from what
+  the search wrote:
+  - DIA-NN's per-run `stats.tsv`: IDs, total quantity, FWHM, and median
+    MS1/MS2 mass accuracy before its recalibration, so instrument drift shows
+  - the `pg_matrix`
+  - FragPipe's `psm.tsv` and `combined_protein.tsv`
+
+  Nothing is recomputed from spectra, and no raw-file reader is needed. The
+  DDA mass error is Observed vs Calculated Peptide Mass, isotope-error
+  corrected; more than 50 ppm counts as a mass offset and is ignored.
+  Tables are streamed and size-capped, and a broken one leaves a note on the
+  run. RT drift uses the standard's own 200 most intense peptides against
+  their baseline RTs (median over ≥ 5 shared peptides), so no iRT spike-in is
+  needed. Acquisition time comes from the Xcalibur stamp in the name, else
+  the raw file's modification time (intake keeps it), and the row records
+  which.
+- **One store per lab, next to the ledger.** `<log_dir>/qc_trend.jsonl`
+  (names.py) holds one JSON object per line and is appended. The last line
+  for a run (experiment folder + run name) wins when read, so a re-run
+  updates its row, and the file is compacted when mostly superseded. JSON
+  lines beat a second SQLite file here: they are readable, need no schema,
+  and survive a half-written last line. Experiment folders are only read.
+  `--rebuild` merges what it finds and keeps rows for runs no longer on
+  disk, for example experiments archived elsewhere.
+- **Classic laboratory QC, not a model.** Each series (instrument · method ·
+  standard · amount) has a baseline: the first `baseline_runs` (10), or the
+  runs between two pinned dates, for example after a column change. It gives
+  each metric's mean and SD, with the SD floored at 2 % of the mean for
+  counts so near-identical baseline runs can't turn noise into alarms.
+  Later runs get:
+  - Levey-Jennings z-scores
+  - the Westgard rules 1-3s, 2-2s, R-4s and 10-x, with 1-2s as a warning
+  - a tabular CUSUM (k = 0.5, h = 5 SD) for the slow drift single-run rules
+    miss
+
+  The CUSUM starts after the baseline, clips each z at ±3 and restarts after
+  a run another rule rejected. Without that, one failed injection read as
+  "drift" for weeks, which a test pins. These are the rules every clinical
+  and proteomics core already knows, so a verdict can be checked by hand.
+- **Direction matters.** Fewer IDs, less signal, broader peaks and more
+  missed cleavages are problems; any shift in mass error, RT or charge is a
+  problem either way; R-4s (imprecision) is always one. More IDs after a new
+  column is "watch", with a hint to pin a new baseline, not a warning.
+- **A warning, not a pop-up.** A broken rule on a series' newest run raises
+  an attention item (kind `qc_trend`, severity warning) with the likely
+  causes. The next run back within the baseline closes it. The instrument
+  still works, and nobody's experiment is blocked, so no window interrupts
+  whoever is at the PC. `qc_trend.popup: true` makes it one, like a failed
+  search.
+- **The page is static.** `<log_dir>/qc_trend.html` is SVG drawn in Python
+  with `<title>` tooltips and the report's stylesheet inlined. It has no
+  script, so it needs no JS harness and opens anywhere. It is rewritten after
+  each QC run and by `ionomos qc-trend`; the app's Jobs tab opens it.
+- **Isolated.** `postprocess.run_all` calls `qctrend.after_job` after the
+  analysis, even when the analysis crashed. `after_job` never raises, and its
+  verdicts go in the job's `ionomos.json` (`results.qc_trend`).
+
+Left open: TMT QC runs, the RT shift from DIA-NN 2.x `report.parquet`,
+telling instruments apart within one config, and tuning the SD floor and
+CUSUM h on real QC data.
+
+
+### D46 — Help for users comes from one Markdown source, shown in every report, a help page and the terminal
+**2026-09-30.** The people who read the reports and drop the folders are lab
+members, not bioinformaticians. What each chart shows, what "adjusted p" or
+"imputed" means, and what to do about `BATCH_SUSPECT` or a `.REJECTED.txt`
+lived in the docs folder, the doctor's one-line causes and the app's setup
+text. Nobody at the PC reads those.
+
+The help is now one set of plain Markdown files in `ionomos/help/`: getting
+started, reading the report, a glossary, troubleshooting, what Ionomos never
+does to your data, and questions (docs/HELP.md). Each topic is a
+`## Title {#id}` entry. The id's namespace says where it is used (`report.`,
+`qc.`, `glossary.`, `issue.<CODE>`, `attention.<kind>`, `intake.<kind>`, …).
+It is shown in three places:
+- **Every report** embeds the report and QC entries, the glossary, the entries
+  for the issues it found, and every entry those link to (about 40 KB). A
+  **?** beside each section title, QC tab, the cut-offs and each issue box
+  opens the text in place, and a Help section at the end lists it all. It
+  works offline, like the rest of the page.
+- **`help.html`**: everything, self-contained, with a search box. The app's
+  Help button, each pop-up's **More help** (opened at the topic that explains
+  that item) and `ionomos help --open` all write it to `<log_dir>/help/` and
+  open it in the browser.
+- **`ionomos help TOPIC`** prints one topic (an issue code, a word, a
+  section) as plain text.
+
+Why these choices:
+- **Markdown, not a Python or YAML structure.** The content is prose that
+  the maintainer and lab members edit. It reads as-is on GitHub and diffs
+  cleanly. A small renderer in the standard library handles the subset the
+  help needs (paragraphs, lists, bold, italic, code, links). It escapes all
+  text before applying the markup and turns only `#id` and `https://` targets
+  into links, so no content can inject a tag or a `javascript:` URL. The price
+  is two packaging entries (`pyproject.toml` package-data, the PyInstaller
+  spec), which a test checks.
+- **Rendered in Python, drawn in JS.** The report gets ready, escaped HTML
+  per entry, so report.js only places it. The only data-derived text in the
+  help (issue titles and codes) goes through `esc()` there. A failure while
+  building the help leaves it out of the report; the report is still made.
+- **Coverage is tested, not remembered.** Tests read the code: every
+  `Issue("CODE")`, every attention kind, every intake rejection kind and every
+  `raise Hold(…)` reason must have an entry, so a new code can't ship
+  unexplained. The FragPipe failure causes on the help page come from
+  `fragpipe.EXPLANATIONS` itself.
+- **The "never do" page states only what the code does**, checked against
+  intake, the runners and D17 / D29 / D33 / D40. One thing it says plainly
+  because it could surprise someone: `results/` belongs to Ionomos, so a
+  re-analysis replaces the report in it.
+
+The app's Help tab keeps its setup text for whoever runs the PC, with a
+button to the full help above it. The help is English only; translations would
+be one file set per language, and nobody has asked yet.
+
+
+### D49 — The assistant on the PC is local, grounded, and can only propose
+**2026-09-30.** The owner wants a local AI that helps lab members troubleshoot
+and work with their data in plain language. The plan is ROADMAP Phase 6,
+written but not built. The decisions it fixes up front:
+1. **Ionomos speaks the OpenAI-compatible chat API to a runtime the lab
+   installs** (Ollama by default, llama.cpp `llama-server` for a PC with no
+   internet). It never bundles a runtime or model weights, as with DIA-NN and
+   MaxQuant.
+2. **Tools, never a shell.** A small set of read-only wrappers over existing
+   functions, plus proposals. Any change goes through a native dialog built
+   from the structured arguments, and the user clicks Confirm. Chat text can
+   never trigger an action.
+3. **Every claim cites** an issue code, log line, help anchor or analysis
+   field, and Ionomos checks the citation exists before showing the answer.
+   Without one, the assistant falls back to the doctor text.
+4. **Everything it reads is treated as untrusted:** names, logs,
+   experiment.yaml.
+5. **Local only by default.** A cloud model needs an admin flag, a visible
+   banner, and a preview of exactly what would be sent (never data files).
+
+The model is chosen by a measured scorecard on the PC (Phase 6.0), not by
+leaderboards: CPU-only generation is memory-bound, and the model shares RAM
+with FragPipe.
+
+
+### D50 — The watcher can run MaxQuant; its mqpar is always the installed version's
+**2026-09-30.** MaxQuant is the most widely used free search engine for DDA
+label-free work, so a DDA method can now say `engine: maxquant`
+(`maxquant.py`, through `runner.py` as for DIA-NN, D39). `mqpar.xml` changes
+from version to version, so a shipped template would silently break with the
+next MaxQuant. The job instead starts from the lab's own saved parameters
+(`mqpar:`) or from `MaxQuantCmd --create`, the installed version's own
+defaults, with label-free quantification switched on. Ionomos replaces only
+the job-specific lists and paths. Experiments are named
+`<condition>_<replicate>`, so `proteinGroups.txt` comes back as
+`LFQ intensity DMSO_1` …, which the engines importer and the analysis read
+directly. The manifest has no fraction column, so fractions come from the
+file names by the lab's naming rules, else file order. A single-shot sample
+gets MaxQuant's 32767.
+
+The analysis of a MaxQuant job reads `proteinGroups.txt` whatever the lab
+calls the method (`postprocess.prepare`). Tested end to end with
+`ionomos fake-maxquant`; not yet against a real MaxQuant.
 

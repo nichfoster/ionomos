@@ -25,7 +25,6 @@ from ionomos.downstream import stats
 
 POPUP = ("input", "error")
 
-
 @dataclass
 class Issue:
     code: str
@@ -38,7 +37,6 @@ class Issue:
 
     def as_dict(self) -> dict:
         return asdict(self)
-
 
 @dataclass
 class Findings:
@@ -60,7 +58,7 @@ class Findings:
     enrichment_notes: list = field(default_factory=list)
     insights: dict = field(default_factory=dict)          # insights.py: scorecard, pcs, missingness, phist, ...
     dose_problems: list = field(default_factory=list)     # [(severity, message)] from doseresponse.plan_series
-
+    model: object = None                # analysis.Model: the design used, or why an asked-for one wasn't
 
 # the tables each method needs, and why they might be missing
 EXPECTED = {
@@ -95,7 +93,6 @@ EXPECTED = {
            ["The Proteins table was exported without abundance columns"]),
 }
 
-
 def _tables_present(workdir: Path | None, limit: int = 12) -> list[str]:
     if workdir is None or not Path(workdir).is_dir():
         return []
@@ -104,7 +101,6 @@ def _tables_present(workdir: Path | None, limit: int = 12) -> list[str]:
     except OSError:
         return []
     return found[:limit]
-
 
 def suggest_conditions(samples: list[str]) -> dict[str, str]:
     """Best guess at each sample's condition from its name: drop the part every name shares,
@@ -121,7 +117,6 @@ def suggest_conditions(samples: list[str]) -> dict[str, str]:
             n += 1
         toks = {s: t[n:] for s, t in toks.items()}
     return {s: ("_".join(t) or cleaned[s] or s) for s, t in toks.items()}
-
 
 def check(f: Findings) -> list[Issue]:
     out: list[Issue] = []
@@ -333,6 +328,7 @@ def check(f: Findings) -> list[Issue]:
                   ["Check the identifications per sample in the report's QC section"], {"n": len(pm.features)}))
 
     _insight_checks(f, p, add)
+    _design_checks(f, s, add)
 
     # ---- dose-response (doseresponse.py): doses that can't be read, a titration without a control
     for sev, msg in f.dose_problems:
@@ -346,9 +342,7 @@ def check(f: Findings) -> list[Issue]:
     _result_checks(f, s, add)
     return out
 
-
 LEFT_CENSORED = ("perseus", "mindet", "minprob", "min", "zero")
-
 
 def _insight_checks(f: Findings, p, add) -> None:
     """The deeper QC (insights.py): outlier samples, a batch-like structure, imputation that doesn't fit the
@@ -369,15 +363,24 @@ def _insight_checks(f: Findings, p, add) -> None:
     batch = (ins.get("pcs") or {}).get("batch")
     if batch:
         rc = batch.get("r2_condition")
+        model = f.model
+        blocked = model is not None and model.design is not None and any(
+            t["name"] == "replicate" for t in model.design.terms)
+        fixes = (["The comparisons already block on the replicate number (analysis.block: replicate), which takes "
+                  "this batch out of the tests; the PCA still shows it",
+                  "Randomise the run order next time"] if blocked else
+                 ["Block on it: add `block: replicate` under `analysis:` in experiment.yaml (or the lab's settings) and "
+                  "Re-run analysis. The replicate number becomes a fixed effect (a paired / batch design), so the "
+                  "batch no longer hides changes",
+                  "Check the PCA coloured by replicate in the report; randomise the run order next time",
+                  "Without blocking, a balanced design still gives valid comparisons, only less sensitive ones"])
         add(Issue("BATCH_SUSPECT", "warning", "Samples group by replicate number, not only by condition",
                   f"PC{batch['pc']} ({batch['percent']:.0f}% of the variance) is {100 * batch['r2_replicate']:.0f}% "
                   f"explained by the replicate number and {100 * (rc or 0):.0f}% by condition. Replicates with the "
                   "same number were probably prepared or run together, and that batch shows in the data.",
                   ["Replicates prepared, digested or acquired on different days / columns",
                    "Instrument drift over a long queue"],
-                  ["Check the PCA coloured by replicate in the report; randomise the run order next time",
-                   "If the design is balanced, the comparisons are still valid but less sensitive"],
-                  dict(batch)))
+                  fixes, {**batch, "blocked": blocked}))
     miss = ins.get("missingness") or {}
     if (p is not None and p.imputation in LEFT_CENSORED and miss.get("verdict") == "random"
             and p.n_imputed > 0.05 * max(1, len(p.m.values) * len(p.m.samples))):
@@ -410,6 +413,33 @@ def _insight_checks(f: Findings, p, add) -> None:
                       ["In the report, tick 'hide imputation-driven' to see the hits that stand on measured values"],
                       {"comparison": name, "count": len(idx)}))
 
+def _design_checks(f: Findings, s, add) -> None:
+    """An experimental design (analysis.block / block_from / covariates) or DEqMS that was asked for and
+    couldn't be used. The comparisons still ran, on the plain model; the person should know which."""
+    model = f.model
+    if model is None or s is None:
+        return
+    if model.problem:
+        add(Issue("DESIGN_NOT_USED", "input", "The experimental design couldn't be used",
+                  f"{model.problem[:1].upper()}{model.problem[1:]}. The comparisons were made with the plain model "
+                  "(~0 + condition) instead, without the blocks or covariates.",
+                  ["The block is the same as the condition (every block holds one condition): a batch processed "
+                   "one condition at a time can't be separated from the treatment",
+                   "A sample has no block or covariate value (a typo, or samples renamed or left out)",
+                   "Too many blocks or covariates for the number of samples"],
+                  ["Fix analysis.block / block_from / covariates in experiment.yaml, then Re-run analysis",
+                   "In a paired design every pair (block) needs samples from at least two conditions"],
+                  {"problem": model.problem, "block": s.block if isinstance(s.block, str) else "mapping",
+                   "block_from": s.block_from, "covariates": list(s.covariates)}))
+    prior = model.prior or {}
+    if s.test == "limma" and s.variance_prior == "deqms" and prior and not prior.get("deqms_used", True):
+        add(Issue("DEQMS_NOT_USED", "warning", "DEqMS wasn't used: limma's single variance prior was",
+                  f"variance_prior: deqms needs a peptide (or PSM) count per feature, and {prior.get('reason', '')}.",
+                  ["The result table has no peptide-count column (e.g. a bare matrix, or an engine export "
+                   "without it)", "Very few features were quantified"],
+                  ["Nothing to do: the statistics are limma's usual ones. To use DEqMS, analyse a table with "
+                   "peptide counts (DIA-NN, FragPipe, MaxQuant, TMT-Integrator give them)"],
+                  {"reason": prior.get("reason", "")}))
 
 def _result_checks(f: Findings, s, add) -> None:
     """Per-comparison checks: confidence labels, nothing tested, no hits, missing plots, enrichment."""
@@ -455,7 +485,6 @@ def _result_checks(f: Findings, s, add) -> None:
         add(Issue("ENRICHMENT", "warning", "Enrichment was incomplete", "; ".join(f.enrichment_notes),
                   ["No internet the first time a gene-set library is needed"],
                   ["Re-run analysis when the PC is online; after that it works offline"], {}))
-
 
 def popups(issues: list[Issue]) -> list[Issue]:
     return [i for i in issues if i.severity in POPUP]

@@ -15,6 +15,7 @@ Result tables, and the files to open the same data in FragPipe-Analyst / FragPip
 from __future__ import annotations
 
 import math
+import re
 from pathlib import Path
 
 from ionomos.downstream import fpa
@@ -28,7 +29,8 @@ def _slug(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("_")
 
 
-def results_table(path: Path, p: fpa.Processed, diffs: list[DiffResult]) -> Path:
+def results_table(path: Path, p: fpa.Processed, diffs: list[DiffResult], ftest=None) -> Path:
+    """ftest (design.FTest, 3+ conditions): the moderated F columns, "any change between the conditions"."""
     m = p.m
     by_index = []
     for d in diffs:
@@ -38,6 +40,8 @@ def results_table(path: Path, p: fpa.Processed, diffs: list[DiffResult]) -> Path
     for d in diffs:
         k = _slug(d.name)
         header += [f"{k}_log2fc", f"{k}_ci_low", f"{k}_ci_high", f"{k}_p", f"{k}_p_adj", f"{k}_significant"]
+    if ftest is not None:
+        header += ["F", "F_p", "F_p_adj"]
     header += ["significant_any", "imputed", "num_missing"] + list(m.samples)
     rows = []
     for i, f in enumerate(m.features):
@@ -48,6 +52,8 @@ def results_table(path: Path, p: fpa.Processed, diffs: list[DiffResult]) -> Path
             row += [r.get("log2fc"), r.get("ci_low"), r.get("ci_high"), r.get("pvalue"), r.get("qvalue"),
                     r.get("significant", "")]
             any_sig = any_sig or bool(r.get("significant"))
+        if ftest is not None:
+            row += [None if x != x else x for x in (ftest.f[i], ftest.p[i], ftest.q[i])]
         n_missing = sum(1 for v in p.measured[i] if v is None)
         row += ["TRUE" if any_sig else "FALSE", "TRUE" if n_missing else "FALSE", n_missing]
         row += m.values[i]
@@ -113,12 +119,75 @@ def _r_str(s: str) -> str:
     return '"' + str(s).replace("\\", "/").replace('"', '\\"') + '"'
 
 
+def _design_script(folder: Path, p: fpa.Processed, d, comps, s: Settings) -> Path:
+    """reproduce_design_in_R.R: Ionomos's blocked / covariate model in plain limma, on the values it tested
+    (<level>_matrix_processed.tsv), since FragPipeAnalystR's test_limma fits only ~0 + condition."""
+    m = p.m
+    samples = list(d.samples)
+    vec = lambda xs: "c(" + ", ".join(_r_str(x) for x in xs) + ")"  # noqa: E731
+    lines = [
+        "# Repeat Ionomos's linear model with limma (lmFit -> contrasts.fit -> eBayes -> topTable).",
+        f"# Model: {d.formula}" + (f"  ({d.describe()})" if d.describe() else ""),
+        "# Needs R with limma (Bioconductor). Run from this folder: Rscript reproduce_design_in_R.R",
+        "suppressPackageStartupMessages(library(limma))",
+        f"x <- read.delim({_r_str('../' + m.level + '_matrix_processed.tsv')}, check.names = FALSE)",
+        f"samples <- {vec(samples)}",
+        "y <- as.matrix(x[, samples]); rownames(y) <- x$id",
+        f"condition <- factor({vec([m.condition[x] for x in samples])}, levels = {vec(d.conditions)})",
+    ]
+    k = len(d.conditions)
+    parts = ["condition"]
+    for t in d.terms:
+        var = re.sub(r"[^A-Za-z0-9_]", "_", t["name"]) or "term"
+        if t["kind"] == "numeric":
+            col = d.columns.index(t["name"])
+            lines.append(f"{var} <- c({', '.join(repr(float(row[col])) for row in d.x)})")
+        else:
+            start = next(j for j, c in enumerate(d.columns) if j >= k and c.startswith(t["name"]))
+            width = len(t["levels"]) - 1
+            lv = []
+            for row in d.x:
+                hit = next((i for i in range(width) if row[start + i] == 1.0), None)
+                lv.append(t["levels"][0] if hit is None else t["levels"][hit + 1])
+            lines.append(f"{var} <- factor({vec(lv)}, levels = {vec(t['levels'])})")
+        parts.append(var)
+    pairs = [(a, b) for a, b in comps if b not in (None, "others")]
+    cont = ", ".join(f"{_r_str(f'{a}_vs_{b}')} = ifelse(conds == {_r_str(a)}, 1, ifelse(conds == {_r_str(b)}, -1, 0))"
+                     for a, b in pairs)
+    lines += [
+        f"design <- model.matrix(~0 + {' + '.join(parts)})",
+        "conds <- c(levels(condition), rep(\"\", ncol(design) - nlevels(condition)))",
+        f"C <- cbind({cont})",
+        "fit <- eBayes(contrasts.fit(lmFit(y, design), C))",
+        "out <- do.call(rbind, lapply(colnames(C), function(k) {",
+        "  tt <- topTable(fit, coef = k, number = Inf, sort.by = \"none\", confint = TRUE)",
+        "  data.frame(comparison = k, id = rownames(tt), tt, check.names = FALSE)",
+        "}))",
+        "write.table(out, \"limma_design_results.tsv\", sep = \"\\t\", quote = FALSE, row.names = FALSE)",
+    ]
+    if any(b == "others" for _, b in comps):
+        lines.append("# 'vs others' comparisons are not repeated here (one model per condition, as test_limma).")
+    if p.imputation == "none" and s.min_valid:
+        lines.append(f"# Ionomos leaves a feature untested where a group has fewer than {s.min_valid} measured values;"
+                     " limma tests every estimable one.")
+    if s.variance_prior == "deqms":
+        lines += ["# Ionomos used DEqMS: with the peptide counts per row of y in `count`,",
+                  "#   library(DEqMS); fit$count <- count; fit <- spectraCounteBayes(fit)   # then fit$sca.t, fit$sca.p"]
+    path = folder / "reproduce_design_in_R.R"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
 def fragpipe_analyst(folder: Path, m_loaded, p: fpa.Processed, diffs: list[DiffResult], s: Settings,
-                     comps: list[tuple[str, str | None]]) -> list[Path]:
+                     comps: list[tuple[str, str | None]], model=None) -> list[Path]:
     """experiment_annotation.tsv in FragPipe-Analyst's format + an R script that repeats this analysis
-    with FragPipeAnalystR. Not for ratio data (isoDTB), which FragPipe-Analyst doesn't take."""
+    with FragPipeAnalystR. Not for ratio data (isoDTB), which FragPipe-Analyst doesn't take.
+    model (analysis.Model): with blocks or covariates, test_limma can't repeat the model, so the script
+    says so and reproduce_design_in_R.R repeats it in limma."""
     if p.m.kind != "intensity" or m_loaded.exp not in ("DIA", "LFQ", "TMT") or not m_loaded.columns:
         return []
+    design = getattr(model, "design", None)
+    deqms = s.test == "limma" and s.variance_prior == "deqms" and (getattr(model, "prior", {}) or {}).get("deqms_used")
     folder.mkdir(parents=True, exist_ok=True)
     samples = [x for x in m_loaded.samples if x in p.m.samples]
     cond = p.m.condition
@@ -146,6 +215,16 @@ def fragpipe_analyst(folder: Path, m_loaded, p: fpa.Processed, diffs: list[DiffR
         "# Needs R >= 4.5 with FragPipeAnalystR installed (see its README). Run from this folder:",
         "#   Rscript reproduce_in_R.R",
         "# Or upload the quant table and experiment_annotation.tsv to FragPipe-Analyst (https://fragpipe-analyst.org).",
+    ]
+    if design is not None or deqms:
+        what = " and ".join(x for x in ((f"the model {design.formula}" if design is not None else ""),
+                                        ("DEqMS's peptide-count variance prior" if deqms else "")) if x)
+        lines += [
+            f"# NOTE: Ionomos used {what}. FragPipeAnalystR's test_limma fits only ~0 + condition with",
+            "# limma's single prior, so this script repeats the PLAIN model: its p-values will differ from the report's."
+            + (" reproduce_design_in_R.R repeats the model Ionomos used, in limma." if design is not None else ""),
+        ]
+    lines += [
         "suppressPackageStartupMessages(library(FragPipeAnalystR))",
         f"quant <- {_r_str(m_loaded.source)}",
         f"se <- make_se_from_files(quant, \"experiment_annotation.tsv\", type = \"{typ}\", level = \"{level}\""
@@ -196,4 +275,6 @@ def fragpipe_analyst(folder: Path, m_loaded, p: fpa.Processed, diffs: list[DiffR
     ]
     script = folder / "reproduce_in_R.R"
     script.write_text("\n".join(lines), encoding="utf-8")
+    if design is not None:
+        return [ann, script, _design_script(folder, p, design, comps, s)]
     return [ann, script]

@@ -44,6 +44,11 @@ VirtualConsole; tests assert the list stays empty.
   (table, class and text filters, sorting, two compounds, a clicked row or
   point drawing its curve, the report search ringing curves, CSV export).
 
+- `test/help.test.mjs` — the help (D46): the Help nav entry and section, the
+  **?** beside section titles, QC tabs and issue boxes and their panels,
+  every help link resolving in the page, escaped issue titles and codes, and
+  a report without a help payload.
+
 ## Running
 
 ```bash

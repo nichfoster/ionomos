@@ -75,6 +75,39 @@ def betainc(a: float, b: float, x: float) -> float:
     return 1 - bt * _betacf(b, a, 1 - x) / b
 
 
+def gamma_upper(a: float, x: float) -> float:
+    """Regularised upper incomplete gamma Q(a, x) = pchisq(2x, 2a, lower.tail = FALSE) (Numerical Recipes 6.2:
+    series below a + 1, continued fraction above)."""
+    if x <= 0:
+        return 1.0
+    lead = -x + a * math.log(x) - math.lgamma(a)
+    if x < a + 1:
+        term = total = 1 / a
+        ap = a
+        for _ in range(1000):
+            ap += 1
+            term *= x / ap
+            total += term
+            if abs(term) < abs(total) * 1e-16:
+                break
+        return max(0.0, 1 - total * math.exp(lead))
+    fpmin = 1e-300
+    b, c, d = x + 1 - a, 1 / fpmin, 1 / (x + 1 - a)
+    h = d
+    for i in range(1, 1000):
+        an = -i * (i - a)
+        b += 2
+        d = an * d + b
+        d = 1 / (d if abs(d) > fpmin else fpmin)
+        c = b + an / c
+        c = c if abs(c) > fpmin else fpmin
+        de = d * c
+        h *= de
+        if abs(de - 1) < 1e-16:
+            break
+    return math.exp(lead) * h
+
+
 def t_two_sided_p(t: float, df: float) -> float:
     if math.isnan(t) or math.isnan(df) or df <= 0:
         return float("nan")

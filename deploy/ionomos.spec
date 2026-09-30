@@ -14,7 +14,8 @@ a = Analysis(
     [ENTRY],
     pathex=[str(SRC)],
     binaries=[],
-    datas=[(str(SRC / "ionomos" / "downstream" / "assets"), "ionomos/downstream/assets")],  # report.js / report.css
+    datas=[(str(SRC / "ionomos" / "downstream" / "assets"), "ionomos/downstream/assets"),  # report.js / report.css
+           (str(SRC / "ionomos" / "help" / "*.md"), "ionomos/help")],  # the help content (ionomos help, reports)
     hiddenimports=["tkinter", "tkinter.ttk", "tkinter.filedialog", "tkinter.messagebox", "tkinter.scrolledtext",
                    "yaml", "ionomos.app", "ionomos.resolve", "ionomos.testbed", "ionomos.worker",
                    "ionomos.fragpipe", "ionomos.postprocess", "ionomos.health", "ionomos.stress",
@@ -26,7 +27,7 @@ a = Analysis(
                    "ionomos.downstream.qc", "ionomos.downstream.enrich", "ionomos.downstream.export",
                    "ionomos.downstream.rrandom", "ionomos.analysis_tab", "ionomos.manifest",
                    "ionomos.naming_history", "ionomos.inbox", "ionomos.attention", "ionomos.popups",
-                   "ionomos.experiment_editor", "ionomos.downstream.doctor"],
+                   "ionomos.experiment_editor", "ionomos.downstream.doctor", "ionomos.help"],
     hookspath=[],
     runtime_hooks=[],
     excludes=["pandas", "numpy", "matplotlib", "scipy", "PIL", "pytest", "ruff", "pyarrow"],  # pyarrow: optional (engines.py)
