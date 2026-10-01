@@ -59,6 +59,21 @@ VirtualConsole; tests assert the list stays empty.
   and dashes, the four charts, many runs, DIA-NN's summary alone or below,
   notes, the **?**, a report with no quantities, hostile names).
 
+- `test/export.test.mjs` — figure export (D62): the SVG / PNG / Export…
+  buttons of each chart, the Export dialog (every control changes the
+  downloaded SVG: size presets in px and mm, custom sizes, font, palettes,
+  background, title and subtitle, legend, the cut-offs line, names, line and
+  point size), text as text and no CSS in the file, `<desc>` with the
+  cut-offs as set, the style kept in localStorage, lab defaults and reset,
+  save / load of the style file (a hostile file is refused key by key), PNG
+  (pixel size, `pHYs`, `iTXt`, chunk CRCs), copy as an image, "Export for
+  slides" (the store-only .zip is read back with the harness' own reader and
+  CRC-32; its README, tables and style), a low-confidence comparison, a
+  chart with its own redraw, the friendlier options (tooltips, the cut-offs
+  in words, reset to lab defaults), no comparisons, 10,000 features.
+  `test/escaping.test.mjs` has the hostile-name half: file names, the SVG's
+  title and `<desc>`, the zip's README and CSV, a loaded style file.
+
 - `test/help.test.mjs` — the help (D46): the Help nav entry and section, the
   **?** beside section titles, QC tabs and issue boxes and their panels,
   every help link resolving in the page, escaped issue titles and codes, and
@@ -95,4 +110,15 @@ jsdom has no layout engine and no canvas. `lib/harness.mjs` stubs, via
 - `Element.prototype.getBoundingClientRect` — returns the element's own
   `width`/`height` attributes (the SVG roots carry them); without this the
   volcano's hover maths divides by zero and no tooltip ever fires;
-- `scrollIntoView`, `URL.createObjectURL` (blobs are captured for inspection).
+- `scrollIntoView`, `URL.createObjectURL` (blobs are captured for inspection);
+- a click on an `<a download>` — recorded in `window.__downloads` as
+  `{ name, blob }`, so a test can check what a file is called.
+
+For the export tests the harness also has: `loadReport({ storage })` (what an
+earlier report left in localStorage, set before the report script runs; such a
+page gets an `http://localhost` address, since jsdom gives a `file://` page no
+storage), `blobBytes`, `unzip` and `crc32` (a zip reader that checks headers
+and CRCs, written apart from the report's writer), `pngChunks`, `until`, and
+`fakePng(window)`: an `Image` that loads at once and a canvas `toBlob` that
+returns a small real PNG, so the PNG path runs. What jsdom cannot show is
+whether a browser draws the SVG right; that was looked at by hand (D62).

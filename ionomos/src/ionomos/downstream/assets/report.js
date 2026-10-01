@@ -19,7 +19,8 @@
   };
 
   // ---------------------------------------------------------------- helpers
-  const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  let EX = null;  // set while a figure is drawn for export ("figure export" below): the style then answers css(), widthOf(), heightOf()
+  const css = (v) => (EX && EX.tokens[v] != null ? EX.tokens[v] : getComputedStyle(document.documentElement).getPropertyValue(v).trim());
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   function svg(tag, attrs, parent) {
     const e = document.createElementNS(SVGNS, tag);
@@ -66,7 +67,7 @@
   function download(name, content, type) {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(content instanceof Blob ? content : new Blob([content], { type: type }));
-    a.download = name.replace(/[^\w.+-]+/g, "_");
+    a.download = safeName(name);
     document.body.appendChild(a);
     a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
@@ -86,46 +87,34 @@
     } catch (e) { fallback(); }
   }
   function flash(el, msg) { if (!el) return; el.textContent = msg; clearTimeout(el._t); el._t = setTimeout(() => (el.textContent = ""), 2500); }
-  function svgString(root) {
-    const c = root.cloneNode(true);
-    c.setAttribute("xmlns", SVGNS);
-    c.removeAttribute("style");
-    const bg = document.createElementNS(SVGNS, "rect");
-    bg.setAttribute("width", "100%"); bg.setAttribute("height", "100%"); bg.setAttribute("fill", css("--surface"));
-    c.insertBefore(bg, c.firstChild);
-    // inline the font so the file looks the same outside the page
-    c.setAttribute("font-family", "system-ui, -apple-system, 'Segoe UI', sans-serif");
-    return new XMLSerializer().serializeToString(c);
+  /** A file name that is safe on Windows, macOS and inside a zip: ASCII letters, digits and . _ + - only, no
+   * dot or underscore at either end, no "..", not a device name (CON, NUL, COM1 ...), at most 120 characters. */
+  function safeName(name) {
+    const s = String(name == null ? "" : name).replace(/[^\w.+-]+/g, "_");
+    const m = /\.([A-Za-z0-9]{1,5})$/.exec(s), ext = m && m.index > 0 ? "." + m[1] : "";
+    let stem = (ext ? s.slice(0, m.index) : s).replace(/[._]{2,}/g, "_").replace(/^[._-]+|[._]+$/g, "").slice(0, 110).replace(/[._]+$/, "");
+    if (!stem) stem = "figure";
+    if (/^(con|prn|aux|nul|com[0-9]|lpt[0-9])$/i.test(stem.split(".")[0])) stem = "_" + stem;
+    return stem + ext;
   }
-  function svgToPng(root, name) {
-    try {
-      const w = +root.getAttribute("width"), h = +root.getAttribute("height"), scale = 3;
-      const img = new Image();
-      img.onload = () => {
-        const cv = document.createElement("canvas");
-        cv.width = w * scale; cv.height = h * scale;
-        const ctx = cv.getContext("2d");
-        ctx.scale(scale, scale);
-        ctx.drawImage(img, 0, 0, w, h);
-        if (cv.toBlob) cv.toBlob((b) => b && download(name + ".png", b));
-      };
-      img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svgString(root));
-    } catch (e) { /* PNG export is a convenience; SVG always works */ }
-  }
-  function svgTools(host, root, name) {
+  /** The export buttons of one chart (the work is in "figure export" below). `again` draws just this chart
+   * again (default: its section is drawn again); root is null for a chart that is a canvas on screen and has
+   * an SVG twin for export (the heatmap). While a figure is drawn for export, the chart is handed over here. */
+  function svgTools(host, root, name, again) {
+    if (EX && root) EX.cap.push({ host: host, root: root, name: name });
     let t = $(".tools", host);
     if (!t) { t = document.createElement("div"); t.className = "tools"; host.appendChild(t); }
     t.innerHTML = "";
-    const b = document.createElement("button");
-    b.textContent = "SVG";
-    b.title = "Download this chart as SVG (for slides, editable in Illustrator / Inkscape)";
-    b.onclick = () => download(name + ".svg", svgString(root), "image/svg+xml");
-    t.appendChild(b);
-    const png = document.createElement("button");
-    png.textContent = "PNG";
-    png.title = "Download this chart as a high-resolution PNG";
-    png.onclick = () => svgToPng(root, name);
-    t.appendChild(png);
+    const chart = { host: host, root: root, name: name, again: again };
+    [["SVG", "Download this chart as SVG at the export settings: stays sharp, and can be edited in PowerPoint, Illustrator or Inkscape", () => exportOne(chart, "svg")],
+      ["PNG", "Download this chart as a PNG picture at the export settings", () => exportOne(chart, "png")],
+      ["Export…", "Size, text, colours, title and legend of exported figures; copy as an image; every figure in one .zip", () => openExport(chart)]].forEach(([label, what, fn]) => {
+      const b = document.createElement("button");
+      b.textContent = label;
+      b.title = what;
+      b.onclick = fn;
+      t.appendChild(b);
+    });
     return t;
   }
   function frame(host, w, h) {
@@ -151,7 +140,8 @@
   }
   function goTo(id) { const e = document.getElementById(id); if (e) e.scrollIntoView({ behavior: "smooth", block: "start" }); }
   function fmtTick(v) { return Math.abs(v) >= 1000 ? v.toLocaleString() : String(+v.toFixed(3)); }
-  function widthOf(host, fallback) { return Math.max(320, Math.floor(host.clientWidth || fallback || 760)); }
+  function widthOf(host, fallback) { return EX ? EX.w : Math.max(320, Math.floor(host.clientWidth || fallback || 760)); }
+  function heightOf(h) { return EX ? EX.h : h; }  // a chart that can take any height asks here, so an exported figure fills its size
   function median(xs) { if (!xs.length) return null; const s = xs.slice().sort((a, b) => a - b), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
   function pearson(a, b) {
     let n = 0, sa = 0, sb = 0;
@@ -435,7 +425,7 @@
     const host = $("#volcano");
     if (!host) return;
     const c = C();
-    const W = widthOf(host), H = Math.round(Math.min(560, Math.max(360, W * 0.62)));
+    const W = widthOf(host), H = heightOf(Math.round(Math.min(560, Math.max(360, W * 0.62))));
     const L = 56, R = 18, T = 26, B = 44;
     const root = frame(host, W, H);
     const fco = c.conf === "none";  // no replicates: fold change against abundance (or rank), no p-values
@@ -861,7 +851,7 @@
     renderStrip($("#strip"), [i]);
   }
   function renderStrip(host, feats) {
-    const W = widthOf(host, 300), H = 230, L = 44, R = 10, T = 26, B = 50;
+    const W = widthOf(host, 300), H = heightOf(230), L = 44, R = 10, T = 26, B = 50;
     const root = frame(host, W, H);
     let lo = Infinity, hi = -Infinity;
     feats.forEach((i) => D.v[i].forEach((v) => { if (v != null) { lo = Math.min(lo, v); hi = Math.max(hi, v); } }));
@@ -896,7 +886,7 @@
     });
     const hasImp = feats.some((i) => D.samples.some((_, j) => isImputed(i, j)));
     if (hasImp) text(g, L + 4, H - 4, "○ imputed   ● measured", { "font-size": 11 });
-    svgTools(host, root, "values_" + feats.map(nameOf).join("_").slice(0, 60));
+    svgTools(host, root, "values_" + feats.map(nameOf).join("_").slice(0, 60), () => renderStrip(host, feats));
   }
   function renderProfile() {
     const host = $("#detail");
@@ -981,13 +971,8 @@
     $$("tbody tr[data-k]", host).forEach((tr) => (tr.onclick = () => { const e = rows[+tr.dataset.k]; setHighlight(new Set(e.idx), e.gene + " sites"); }));
   }
   function exportCSV() {
-    const c = C(), rows = tableRows();
-    const head = ["id", "label", "description", "log2fc", "ci_low", "ci_high", "p", "adj_p", "significant", "imputation_driven"].concat(D.F ? ["any_change_F_adj_p"] : [], D.f.pep ? [D.evidence || "peptides"] : [], D.samples);
-    const q = (s) => '"' + String(s == null ? "" : s).replace(/"/g, '""') + '"';
-    const imp = impDriven(c);
-    const lines = [head.map(q).join(",")].concat(rows.map((i) => [q(D.f.id[i]), q(D.f.label[i]), q(D.f.desc[i]), c.fc[i], c.ciL[i], c.ciR[i], c.p[i], c.q[i], sigOf(c, i), imp[i] ? "yes" : ""]
-      .concat(D.F ? [D.F.q[i]] : [], D.f.pep ? [D.f.pep[i]] : [], D.v[i]).map((v) => (v == null ? "" : v)).join(",")));
-    download(c.slug + "_filtered.csv", lines.join("\n"), "text/csv");
+    const c = C();
+    download(c.slug + "_filtered.csv", resultsCsv(c, tableRows()), "text/csv");
   }
   function copyGenes(dir) {
     const c = C(), out = [];
@@ -1003,7 +988,7 @@
     const c = C(), bins = new Array(20).fill(0);
     let n = 0;
     for (let i = 0; i < nF; i++) if (c.p[i] != null) { bins[Math.min(19, Math.floor(c.p[i] * 20))]++; n++; }
-    const W = widthOf(host, 300), H = 180, L = 44, R = 8, T = 10, B = 34;
+    const W = widthOf(host, 300), H = heightOf(180), L = 44, R = 8, T = 10, B = 34;
     const root = frame(host, W, H), g = svg("g", {}, root);
     const ymax = Math.max(1, ...bins);
     const X = (v) => L + v * (W - L - R), Y = (v) => H - B - (v / ymax) * (H - T - B);
@@ -1046,7 +1031,7 @@
   }
   function renderQuadrant() {
     const host = $("#quad"), A = D.comps[cmpA], Bc = D.comps[cmpB];
-    const W = widthOf(host, 480), H = Math.min(480, Math.max(340, W * 0.85)), L = 52, R = 14, T = 34, B = 44;
+    const W = widthOf(host, 480), H = heightOf(Math.min(480, Math.max(340, W * 0.85))), L = 52, R = 14, T = 34, B = 44;
     const pts = [];
     let lim = 1;
     for (let i = 0; i < nF; i++) if (A.fc[i] != null && Bc.fc[i] != null) { pts.push(i); lim = Math.max(lim, Math.abs(A.fc[i]), Math.abs(Bc.fc[i])); }
@@ -1233,6 +1218,7 @@
     $("#heatlegend").innerHTML = "<span><span class='sw' style='background:" + css("--down") + "'></span>below the protein's mean</span><span><span class='sw' style='background:" +
       css("--up") + "'></span>above</span><span class='muted'>colour saturates at ±" + fmt(lim, 1) + " log2 · " + rows.length + " of " + fmtInt(hm.total_significant) +
       " significant features, clustered (euclidean, complete linkage) · click a row to open it · search matches are marked at the left</span>";
+    svgTools(host, null, "heatmap", heatmapSvg);
   }
 
   // ----------------------------------------------------------- enrichment
@@ -1347,7 +1333,7 @@
     const sc = (i) => Math.sign(c.fc[i]) * -Math.log10(Math.max(c.p[i], 1e-300));
     order.sort((a, b) => sc(b) - sc(a));
     const members = indicesOfGenes(t.genes);
-    const W = widthOf(host), H = 176, L = 20, R = 20, T = 70, B = 30;
+    const W = widthOf(host), H = heightOf(176), L = 20, R = 20, T = 70, B = 30;
     const root = frame(host, W, H), g = svg("g", {}, root);
     const X = (k) => L + (k / Math.max(1, order.length - 1)) * (W - L - R);
     const grad = svg("linearGradient", { id: "bcg", x1: 0, x2: 1, y1: 0, y2: 0 }, svg("defs", {}, root));
@@ -1390,13 +1376,17 @@
   // ------------------------------------------------------------------- QC
   const QC_TABS = [["card", "Sample scorecard"], ["pca", "PCA"], ["corr", "Correlation"], ["missing", "Missing values"], ["mnar", "Missing vs intensity"], ["dist", "Distributions"], ["cv", "CV"],
     ["mv", "Mean–variance"], ["rank", "Abundance rank"], ["ids", "Identifications"], ["imp", "Imputation"], ["power", "Power"], ["psm", "Search quality"]];
+  const QC_TIPS = { card: "Each sample against the others: which ones stand out", pca: "Do the replicates of a condition sit together?", corr: "How alike the samples are, pair by pair",
+    missing: "How many values are missing, and where", mnar: "Are values missing because they are low?", dist: "The spread of values in each sample, before and after normalisation",
+    cv: "How reproducible each condition's replicates are", mv: "Does the spread depend on the abundance?", rank: "The abundance of every feature, from most to least",
+    ids: "How many features each sample has", imp: "The imputed values against the measured ones", power: "The smallest fold change this design can detect", psm: "What the search made of each raw file" };
   let qcTab = null;
   function renderQC() {
     const host = $("#qc");
     if (!host) return;
     const tabs = QC_TABS.filter(([k]) => (k !== "imp" || D.imp) && (k !== "card" || (D.qc.scorecard && D.qc.scorecard.length)) && (k !== "mnar" || D.qc.mnar) && (k !== "power" || D.qc.power) && (k !== "mv" || D.kind !== "ratio" || nS > 2) && (k !== "psm" || D.qc.psm));
     if (!qcTab || !tabs.some(([k]) => k === qcTab)) qcTab = tabs.some(([k]) => k === "card") ? "card" : "pca";
-    host.innerHTML = "<div class='tabs'>" + tabs.map(([k, t]) => "<button data-k='" + k + "'" + (k === qcTab ? " class='on'" : "") + ">" + t + "</button>").join("") + "</div><div id='qcbody'></div>";
+    host.innerHTML = "<div class='tabs'>" + tabs.map(([k, t]) => "<button data-k='" + k + "' title='" + esc(QC_TIPS[k] || "") + "'" + (k === qcTab ? " class='on'" : "") + ">" + t + "</button>").join("") + "</div><div id='qcbody'></div>";
     $$(".tabs button", host).forEach((b) => (b.onclick = () => { qcTab = b.dataset.k; renderQC(); }));
     const body = $("#qcbody");
     safe(() => ({ card: qcCard, pca: qcPCA, corr: qcCorr, missing: qcMissing, mnar: qcMNAR, dist: qcDist, cv: qcCV, mv: qcMV, rank: qcRank, ids: qcIds, imp: qcImp, power: qcPower, psm: qcPsm })[qcTab](body), body);
@@ -1453,7 +1443,7 @@
     if (by) by.onchange = (e) => { st.by = e.target.value; qcPCA(host); };
     const when = $("#pcw");
     if (when) when.onchange = (e) => { st.when = e.target.value; qcPCA(host); };
-    const ch = $("#pcachart"), W = widthOf(ch), H = Math.min(520, Math.round(W * 0.6)), L = 56, R = 20, T = 16, B = 44;
+    const ch = $("#pcachart"), W = widthOf(ch), H = heightOf(Math.min(520, Math.round(W * 0.6))), L = 56, R = 20, T = 16, B = 44;
     const xs = P.scores.map((s) => s[st.x]), ys = P.scores.map((s) => s[st.y]);
     const pad = (a) => { const lo = Math.min(...a), hi = Math.max(...a), p = (hi - lo) * 0.12 || 1; return [lo - p, hi + p]; };
     const [x0, x1] = pad(xs), [y0, y1] = pad(ys);
@@ -1479,7 +1469,7 @@
     if (!Cc || !Cc.matrix.length) { host.innerHTML = "<div class='empty'>No correlation.</div>"; return; }
     host.innerHTML = "<p class='sub'>Pearson correlation between samples over " + fmtInt(Cc.complete_rows) + " complete features, clustered. Replicates of a condition should form blocks.</p>" + legend() + "<div class='chart card' id='corrchart'></div>";
     const ch = $("#corrchart"), o = Cc.order, n = o.length;
-    const W = widthOf(ch), lab = 130, cell = Math.max(10, Math.min(36, Math.floor((W - lab - 20) / n))), H = lab + n * cell + 10;
+    const W = widthOf(ch), lab = 130, cell = Math.max(10, Math.min(36, Math.floor((Math.min(W, heightOf(W)) - lab - 20) / n))), H = lab + n * cell + 10;
     const root = frame(ch, lab + n * cell + 12, H), g = svg("g", {}, root);
     let lo = 1, hi = -1;  // off-diagonal range, so r = 1 on the diagonal doesn't flatten the scale
     Cc.matrix.forEach((r, a) => r.forEach((v, b) => { if (v != null && a !== b) { lo = Math.min(lo, v); hi = Math.max(hi, v); } }));
@@ -1529,7 +1519,7 @@
       cv.onmouseleave = hideTip;
       if (M.total > rows.length) ch.insertAdjacentHTML("beforeend", "<div class='muted'>every " + Math.ceil(M.total / rows.length) + "th of " + fmtInt(M.total) + " rows shown</div>");
     }
-    const cc = $("#cumchart"), W = widthOf(cc, 360), H = 300, L = 56, R = 14, T = 14, B = 44;
+    const cc = $("#cumchart"), W = widthOf(cc, 360), H = heightOf(300), L = 56, R = 14, T = 14, B = 44;
     const root = frame(cc, W, H), g = svg("g", {}, root), curve = M.curve;
     const X = (v) => L + v * (W - L - R), Y = (v) => H - B - (v / Math.max(1, M.all)) * (H - T - B);
     axes(g, X, Y, [0, 0.25, 0.5, 0.75, 1], niceTicks(0, M.all, 5), L, R, T, B, W, H, "missing fraction (at most)", "features");
@@ -1545,7 +1535,7 @@
     host.innerHTML = "<p class='sub'>Share of samples in which a " + esc(D.levelWord) + " is measured, against its mean measured log2 value (equal-sized bins). " +
       (M.rho != null ? "Spearman ρ = " + fmt(M.rho) + "; complete " + esc(D.levelWord) + "s are " + fmt(M.gap) + " log2 more abundant than incomplete ones. " : "") + "</p>" +
       (verdict ? "<div class='card verdict'>" + esc(verdict) + "</div>" : "") + "<div class='chart card' id='mnarchart' style='max-width:640px'></div>";
-    const ch = $("#mnarchart"), W = widthOf(ch, 600), H = 280, L = 56, R = 14, T = 14, B = 44;
+    const ch = $("#mnarchart"), W = widthOf(ch, 600), H = heightOf(280), L = 56, R = 14, T = 14, B = 44;
     const bins = M.bins, lo = Math.min(...bins.map((b) => b.mean)), hi = Math.max(...bins.map((b) => b.mean));
     const X = (v) => L + ((v - lo) / (hi - lo || 1)) * (W - L - R), Y = (v) => H - B - v * (H - T - B);
     const root = frame(ch, W, H), g = svg("g", {}, root);
@@ -1555,7 +1545,7 @@
     svgTools(ch, root, "missingness_vs_intensity");
   }
   function boxes(host, stats, ttl) {
-    const W = widthOf(host), H = 300, L = 50, R = 10, T = 14, B = 90;
+    const W = widthOf(host), H = heightOf(300), L = 50, R = 10, T = 14, B = 90;
     const root = frame(host, W, H), g = svg("g", {}, root);
     let lo = Infinity, hi = -Infinity;
     stats.forEach((s) => { if (s) { lo = Math.min(lo, s.lo); hi = Math.max(hi, s.hi); } });
@@ -1594,13 +1584,14 @@
       const d = document.createElement("div");
       d.className = "chart card";
       grid.appendChild(d);
-      const bins = cv[c].hist, W = widthOf(d, 300), H = 200, L = 44, R = 8, T = 30, B = 34, ymax = Math.max(1, ...bins);
+      const bins = cv[c].hist, W = widthOf(d, 300), H = heightOf(200), L = 44, R = 8, T = 30, B = 34, ymax = Math.max(1, ...bins);
       const root = frame(d, W, H), g = svg("g", {}, root);
       const X = (v) => L + v * (W - L - R), Y = (v) => H - B - (v / ymax) * (H - T - B);
       axes(g, X, Y, [0, 0.25, 0.5, 0.75, 1], niceTicks(0, ymax, 3), L, R, T, B, W, H, "CV", "");
       bins.forEach((b, k) => svg("rect", { x: X(k / bins.length) + 0.5, y: Y(b), width: (W - L - R) / bins.length - 1, height: H - B - Y(b), fill: condColor(c), "fill-opacity": 0.75 }, g));
       if (cv[c].median != null) svg("line", { x1: X(Math.min(1, cv[c].median)), x2: X(Math.min(1, cv[c].median)), y1: T, y2: H - B, stroke: css("--text"), "stroke-dasharray": "4 3" }, g);
       text(g, 4, 16, c + " · median " + (cv[c].median == null ? "–" : (cv[c].median * 100).toFixed(1) + "%"), { fill: css("--text"), "font-size": 12.5, "font-weight": 600 });
+      svgTools(d, root, "cv_" + c);
     });
   }
   /** Per-feature mean and pooled within-condition SD: shows the noise floor and whether variance depends on abundance. */
@@ -1620,7 +1611,7 @@
     if (pts.length < 10) { host.innerHTML = "<div class='empty'>Needs replicates with measured values.</div>"; return; }
     pts.sort((a, b) => a[0] - b[0]);
     host.innerHTML = "<p class='sub'>Pooled within-condition SD of measured values against the mean, for every " + esc(D.levelWord) + ", with a running median. Noise usually rises at low abundance; hits there need bigger fold changes to be real. Median SD " + fmt(median(pts.map((p) => p[1])), 3) + " log2.</p><div class='chart card' id='mvchart'></div>";
-    const ch = $("#mvchart"), W = widthOf(ch), H = 320, L = 56, R = 14, T = 14, B = 44;
+    const ch = $("#mvchart"), W = widthOf(ch), H = heightOf(320), L = 56, R = 14, T = 14, B = 44;
     const x0 = pts[0][0], x1 = pts[pts.length - 1][0], sds = pts.map((p) => p[1]).sort((a, b) => a - b), y1 = sds[Math.floor(sds.length * 0.995)] * 1.1 || 1;
     const X = (v) => L + ((v - x0) / (x1 - x0 || 1)) * (W - L - R), Y = (v) => H - B - (Math.min(v, y1) / y1) * (H - T - B);
     const root = frame(ch, W, H), g = svg("g", {}, root);
@@ -1650,7 +1641,7 @@
     const hits = c ? pts.filter((p) => sigOf(c, p[1])).map((p, k) => k) : [];
     host.innerHTML = "<p class='sub'>Every " + esc(D.levelWord) + " ranked by its mean measured log2 value: the dynamic range of the experiment (" + fmt(pts[0][0] - pts[pts.length - 1][0], 1) + " log2 ≈ " + fmt((pts[0][0] - pts[pts.length - 1][0]) * Math.log10(2), 1) + " orders of magnitude). " +
       (c ? "Hits of " + esc(c.name) + " are coloured; search matches ringed. Hits piled at the low end are the ones to double-check." : "") + "</p><div class='chart card' id='rankchart'></div>";
-    const ch = $("#rankchart"), W = widthOf(ch), H = 320, L = 56, R = 14, T = 14, B = 44;
+    const ch = $("#rankchart"), W = widthOf(ch), H = heightOf(320), L = 56, R = 14, T = 14, B = 44;
     const y0 = pts[pts.length - 1][0] - 0.5, y1 = pts[0][0] + 0.5;
     const X = (k) => L + (k / Math.max(1, pts.length - 1)) * (W - L - R), Y = (v) => H - B - ((v - y0) / (y1 - y0)) * (H - T - B);
     const root = frame(ch, W, H), g = svg("g", {}, root);
@@ -1688,7 +1679,7 @@
   function qcIds(host) {
     const a = D.qc.features_per_sample || [], b = D.qc.features_per_sample_after || [];
     host.innerHTML = "<p class='sub'>" + esc(D.levelTitle) + " measured per sample (FragPipe-Analyst plot_feature_numbers): before filtering (light) and in the analysis (solid).</p>" + legend() + "<div class='chart card' id='idchart'></div>";
-    const ch = $("#idchart"), W = widthOf(ch), H = 300, L = 60, R = 10, T = 14, B = 90;
+    const ch = $("#idchart"), W = widthOf(ch), H = heightOf(300), L = 60, R = 10, T = 14, B = 90;
     const root = frame(ch, W, H), g = svg("g", {}, root), ymax = Math.max(1, ...a);
     const bw = (W - L - R) / nS, Y = (v) => H - B - (v / ymax) * (H - T - B);
     axes(g, () => 0, Y, [], niceTicks(0, ymax, 5), L, R, T, B, W, H, "", "features");
@@ -1712,7 +1703,7 @@
     const nb = 40;
     const hist = (xs) => { const b = new Array(nb).fill(0); xs.forEach((v) => b[Math.min(nb - 1, Math.floor(((v - lo) / (hi - lo || 1)) * nb))]++); return b; };
     const hm = hist(meas), hi_ = hist(imp), ymax = Math.max(1, ...hm, ...hi_);
-    const ch = $("#impchart"), W = widthOf(ch), H = 280, L = 56, R = 10, T = 14, B = 44;
+    const ch = $("#impchart"), W = widthOf(ch), H = heightOf(280), L = 56, R = 10, T = 14, B = 44;
     const root = frame(ch, W, H), g = svg("g", {}, root);
     const X = (v) => L + ((v - lo) / (hi - lo || 1)) * (W - L - R), Y = (v) => H - B - (v / ymax) * (H - T - B);
     axes(g, X, Y, niceTicks(lo, hi, 7), niceTicks(0, ymax, 4), L, R, T, B, W, H, "log2 value", "values");
@@ -1740,7 +1731,7 @@
       "<div class='card verdict'>" + (P.unbalanced ? "The groups are not the same size (the table below gives each comparison as it is). " : "") + "With " + P.current + " per group" + (P.unbalanced ? " (the usual group here)" : " now") + ", a typical " + esc(D.levelWord) + " needs |log2FC| ≥ " + fmt(((a05[P.n.indexOf(P.current)] || {}).q50), 2) + " (p 0.05) or ≥ " + fmt(((a001[P.n.indexOf(P.current)] || {}).q50), 2) + " (p 0.001, closer to what survives the FDR). " +
       "For the current cut-off (|log2FC| ≥ " + fmt(ST.lfc, 2) + "): " + (n05 ? n05 + " replicates at p 0.05" : "more than " + P.n[P.n.length - 1] + " replicates at p 0.05") + ", " + (n001 ? n001 + " at p 0.001." : "more than " + P.n[P.n.length - 1] + " at p 0.001.") + "</div>" +
       "<div class='chart card' id='powchart' style='max-width:700px'></div>" + powerTable(P);
-    const ch = $("#powchart"), W = widthOf(ch, 640), H = 300, L = 56, R = 16, T = 16, B = 44;
+    const ch = $("#powchart"), W = widthOf(ch, 640), H = heightOf(300), L = 56, R = 16, T = 16, B = 44;
     let ymax = ST.lfc * 1.2;
     [a05, a001].forEach((cv) => cv.forEach((r) => { if (r) ymax = Math.max(ymax, Math.min(r.q75, 6)); }));
     const X = (n) => L + ((n - P.n[0]) / (P.n[P.n.length - 1] - P.n[0] || 1)) * (W - L - R), Y = (v) => H - B - (Math.min(v, ymax) / ymax) * (H - T - B);
@@ -1787,7 +1778,7 @@
     host.innerHTML = h;
     if (!runs.length) return;
     $("#psmsel").onchange = (e) => { st.chart = e.target.value; qcPsm(host); };
-    const ch = $("#psmchart"), n = runs.length, W = widthOf(ch), H = 300, L = 56, R = 10, T = 14, B = st.chart === "len" ? 44 : n <= 60 ? 90 : 24;
+    const ch = $("#psmchart"), n = runs.length, W = widthOf(ch), H = heightOf(300), L = 56, R = 10, T = 14, B = st.chart === "len" ? 44 : n <= 60 ? 90 : 24;
     const root = frame(ch, W, H), g = svg("g", {}, root), bw = (W - L - R) / n;
     const name = (j) => {  // the run under its bar; too many runs to read: the bar's tooltip names it
       if (n > 60) return;
@@ -1925,7 +1916,7 @@
     const S = doseSeries(), host = $("#dosescatter");
     if (!S || !host) return;
     const ks = doseRows(S, false).filter((k) => S.pec50[k] != null && S.fc[k] != null);
-    const W = widthOf(host, 700), H = 380, L = 56, R = 16, T = 16, B = 44;
+    const W = widthOf(host, 700), H = heightOf(380), L = 56, R = 16, T = 16, B = 44;
     const root = frame(host, W, H);
     if (!ks.length) { text(root, W / 2, H / 2, "No curves in this class", { "text-anchor": "middle" }); return; }
     const xs = ks.map((k) => S.pec50[k]), ys = ks.map((k) => S.fc[k]).concat([D.dose.fcLim, -D.dose.fcLim]);
@@ -1970,7 +1961,7 @@
       const v = S.y[k][jj];
       if (v != null) pts.push([S.sdose[jj] > 0 ? Math.log10(S.sdose[jj]) : xc, Math.pow(2, v), S.sdose[jj] === 0]);
     });
-    const W = widthOf(host, 320), H = 260, L = 44, R = 10, T = 12, B = 40;
+    const W = widthOf(host, 320), H = heightOf(260), L = 44, R = 10, T = 12, B = 40;
     const ymax = Math.max(1.4, S.front[k], S.back[k], ...pts.map((p) => p[1])) * 1.08;
     const X = (v) => L + ((v - (xc - gap * 0.4)) / (xb - (xc - gap * 0.4))) * (W - L - R), Y = (v) => T + (1 - v / ymax) * (H - T - B);
     const root = frame(host, W, H), g = svg("g", {}, root);
@@ -2147,7 +2138,7 @@
     // the control series on this series' time axis (the shared time points)
     const opts = other ? pointsOf(other).map((p) => [S.times.indexOf(other.times[p[0]]), p[1], p[2]]).filter((p) => p[0] >= 0) : [];
     const omeans = other ? S.times.map((_t, a) => { const v = opts.filter((p) => p[0] === a).map((p) => p[1]); return v.length ? v.reduce((x, y) => x + y, 0) / v.length : null; }) : [];
-    const W = widthOf(host, 420), H = 300, L = 52, R = 14, T = 14, B = 44;
+    const W = widthOf(host, 420), H = heightOf(300), L = 52, R = 14, T = 14, B = 44;
     const root = frame(host, W, H);
     const ys = pts.concat(opts).map((p) => p[1]);
     if (!ys.length) { text(root, W / 2, H / 2, "No measured values", { "text-anchor": "middle" }); return; }
@@ -2382,7 +2373,7 @@
     const ks = [];
     for (let k = 0; k < X.i.length; k++) if (S.r[k] != null) ks.push(k);
     ks.sort((a, b) => S.r[b] - S.r[a]);
-    const W = widthOf(host, 900), H = 300, L = 56, R = 16, T = 16, B = 44;
+    const W = widthOf(host, 900), H = heightOf(300), L = 56, R = 16, T = 16, B = 44;
     const root = frame(host, W, H);
     if (!ks.length) { text(root, W / 2, H / 2, "No site of " + S.name + " has a ratio", { "text-anchor": "middle" }); return; }
     const thr = Math.log2(X.ratio);
@@ -2473,7 +2464,7 @@
     ["#heat > h2", "report.heatmap"], ["#enrichment > h2", "report.enrichment"], ["#dose > h2", "report.dose"], ["#time > h2", "report.time"], ["#cys > h2", "report.cys"], ["#quality > h2", "report.quality"],
     ["#methods > h2", "report.methods"], ["#files > h2", "report.files"]];
   const HELP_H = { "Data source": "report.source", "Settings used": "report.methods", "Sample metadata": "report.sdrf",
-    "Cross-check": "report.fpa", "Highlight groups": "report.groups", "Hits": "report.hitfilters" };
+    "Cross-check": "report.fpa", "Highlight groups": "report.groups", "Hits": "report.hitfilters", "Plot": "report.plotoptions", "Figures for slides": "report.export" };
   /** A "?" button in `host` that opens entry `id` in a panel placed after `after` (default: host). */
   function addHelp(host, id, after) {
     const e = H.entries[id];
@@ -2537,6 +2528,697 @@
     wireHelpLinks(host);
   }
 
+  // -------------------------------------------------------- figure export
+  // One style (XS) for every exported figure: size, text, marks, colours, what is drawn. It starts from the
+  // lab's defaults (config.yaml analysis.export, sent as D.exportDefaults), is kept in this browser, and can be
+  // saved and loaded as a small JSON file (a house style). `ionomos export` reads the same keys
+  // (downstream/charts.py STYLE_DEFAULTS): keep the two in step.
+  // A figure is exported by drawing its part of the report again with EX set (css(), widthOf() and heightOf()
+  // then answer from the style), copying the chart svgTools() is handed, and putting a title, a legend and the
+  // cut-offs around it. Text stays text, colours are written out, nothing in the file refers to the page.
+  const STYLE_KEY = "ionomos.export.v1";
+  // name, width, height, unit, text size (pt) that suits it. A 16:9 PowerPoint slide is 1280 x 720 px at 96 px / inch.
+  const SIZES = { slide169: ["16:9 slide", 1280, 720, "px", 14], slide43: ["4:3 slide", 960, 720, "px", 14], half: ["Half a slide", 640, 600, "px", 12],
+    col1: ["Journal figure, one column (85 mm)", 85, 70, "mm", 7], col2: ["Journal figure, two columns (180 mm)", 180, 110, "mm", 7], custom: ["Custom size", 0, 0, "", 0] };
+  const STATIC_FIGS = ["volcano", "pca", "heatmap", "correlation"];  // what `figures:` may list (the watcher's static files)
+  const STYLE_DEFAULTS = { size: "slide169", width: 1280, height: 720, unit: "px", font_pt: 14, font_family: "Arial", line_scale: 1, point_scale: 1,
+    palette: "default", up: "#e34948", down: "#2a78d6", neutral: "#c3c2b7", background: "light", title: true, subtitle: true, legend: true, note: true,
+    labels: "screen", label_count: null, png_scale: 2, png_dpi: 0, zip_format: "both", figures: [] };
+  const STYLE_ENUMS = { size: Object.keys(SIZES), unit: ["px", "mm"], palette: ["default", "colorblind", "grey", "custom"], background: ["light", "dark", "transparent"],
+    labels: ["screen", "top", "marked", "none"], zip_format: ["svg", "png", "both"] };
+  const STYLE_RANGES = { width: [20, 8000], height: [20, 8000], font_pt: [4, 48], line_scale: [0.25, 4], point_scale: [0.25, 4], png_scale: [1, 4] };
+  const FONTS = ["Arial", "Helvetica", "Calibri", "Segoe UI", "Verdana", "Times New Roman", "Georgia", "Courier New"];
+  // [light, dark] marks per palette: up, down, not significant, and the eight categories (conditions, groups).
+  // colorblind is Okabe and Ito's set; grey is for print without colour.
+  const PALETTES = {
+    default: [{ up: "#e34948", down: "#2a78d6", ns: "#c3c2b7", c: ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"] },
+      { up: "#e66767", down: "#3987e5", ns: "#52514e", c: ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"] }],
+    colorblind: [{ up: "#d55e00", down: "#0072b2", ns: "#b3b3b3", c: ["#0072b2", "#e69f00", "#009e73", "#cc79a7", "#56b4e9", "#d55e00", "#f0e442", "#000000"] },
+      { up: "#e69f00", down: "#56b4e9", ns: "#5a5a5a", c: ["#56b4e9", "#e69f00", "#009e73", "#cc79a7", "#0072b2", "#d55e00", "#f0e442", "#ffffff"] }],
+    grey: [{ up: "#111111", down: "#6b6b6b", ns: "#cfcfcf", c: ["#111111", "#5c5c5c", "#8c8c8c", "#b0b0b0", "#333333", "#747474", "#9e9e9e", "#c4c4c4"] },
+      { up: "#f2f2f2", down: "#9a9a9a", ns: "#4d4d4d", c: ["#f2f2f2", "#b0b0b0", "#8c8c8c", "#6b6b6b", "#d9d9d9", "#9e9e9e", "#7a7a7a", "#5c5c5c"] }],
+  };
+  const INKS = {
+    light: { "--page": "#ffffff", "--surface": "#ffffff", "--sunk": "#f1f0ec", "--text": "#0b0b0b", "--text2": "#3f3e3c", "--muted": "#6f6d68", "--line": "#d5d4cc", "--grid": "#e1e0d9", "--axis": "#a8a79c", "--sel": "#0b0b0b", "--accent": "#2a78d6", "--warnink": "#8a5300" },
+    dark: { "--page": "#0d0d0d", "--surface": "#1a1a19", "--sunk": "#141413", "--text": "#ffffff", "--text2": "#c3c2b7", "--muted": "#9a9891", "--line": "#383835", "--grid": "#2c2c2a", "--axis": "#4a4a46", "--sel": "#ffffff", "--accent": "#3987e5", "--warnink": "#f2b64a" },
+  };
+  /** A complete, valid style out of anything: the lab's defaults, this browser's storage, a loaded file (all
+   * untrusted). An unknown key is dropped and a bad value keeps the base value; `bad` collects their names. */
+  function normStyle(raw, base, bad) {
+    const out = Object.assign({}, base || STYLE_DEFAULTS);
+    out.figures = (out.figures || []).slice();
+    bad = bad || [];
+    if (raw == null) return out;
+    if (typeof raw !== "object" || Array.isArray(raw)) { bad.push("(not a style)"); return out; }
+    const has = (k) => Object.prototype.hasOwnProperty.call(raw, k);
+    Object.keys(raw).forEach((k) => { if (!Object.prototype.hasOwnProperty.call(STYLE_DEFAULTS, k) && k !== "ionomos_export_style") bad.push(k); });
+    Object.keys(STYLE_DEFAULTS).forEach((k) => {
+      if (!has(k)) return;
+      const v = raw[k], num = typeof v === "number" && isFinite(v);
+      let ok = false;
+      if (STYLE_ENUMS[k]) ok = typeof v === "string" && STYLE_ENUMS[k].includes(v);
+      else if (STYLE_RANGES[k]) ok = num && v >= STYLE_RANGES[k][0] && v <= STYLE_RANGES[k][1];
+      else if (typeof STYLE_DEFAULTS[k] === "boolean") ok = typeof v === "boolean";
+      else if (k === "up" || k === "down" || k === "neutral") ok = typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v);
+      else if (k === "font_family") ok = typeof v === "string" && /^[A-Za-z0-9][A-Za-z0-9 _-]{0,39}$/.test(v);
+      else if (k === "label_count") ok = v === null || (num && v === Math.floor(v) && v >= 0 && v <= 200);
+      else if (k === "png_dpi") ok = v === 0 || (num && v >= 72 && v <= 1200);
+      else if (k === "figures") ok = Array.isArray(v) && v.length <= STATIC_FIGS.length && v.every((x) => STATIC_FIGS.includes(x));
+      if (ok) out[k] = k === "figures" ? v.slice() : typeof v === "string" && v[0] === "#" ? v.toLowerCase() : v;
+      else bad.push(k);
+    });
+    // a size named without a text size takes the size that suits it (7 pt for a journal column, 14 pt for a slide)
+    if (has("size") && !has("font_pt") && out.size === raw.size && out.size !== "custom") out.font_pt = SIZES[out.size][4];
+    return out;
+  }
+  const LAB = normStyle(D.exportDefaults);  // the lab's house style, or the built-in defaults
+  let XS = normStyle(store.get(STYLE_KEY, null), LAB);
+  const FIG_TEXT = {};  // figure name -> { title, subtitle } typed in the dialog (this session only)
+  function saveStyle() { store.set(STYLE_KEY, XS); }
+  /** [width, height] of the whole figure in px (96 per inch), and whether the size is given in mm. */
+  function sizePx(st) {
+    const z = SIZES[st.size], own = st.size === "custom", mm = (own ? st.unit : z[3]) === "mm", k = mm ? 96 / 25.4 : 1;
+    const cl = (v) => Math.max(120, Math.min(8000, v * k));
+    return [cl(own ? st.width : z[1]), cl(own ? st.height : z[2]), mm];
+  }
+  /** The family with fallbacks every program knows, e.g. "'Segoe UI', Arial, Helvetica, sans-serif". */
+  function fontStack(name) {
+    const tail = /times|georgia|garamond|cambria|palatino|serif|book/i.test(name) && !/sans/i.test(name) ? ["'Times New Roman'", "Times", "serif"]
+      : /courier|mono|consolas|menlo/i.test(name) ? ["'Courier New'", "Courier", "monospace"] : ["Arial", "Helvetica", "sans-serif"];
+    return [/[ _-]/.test(name) ? "'" + name + "'" : name].concat(tail.filter((x) => x.replace(/'/g, "").toLowerCase() !== name.toLowerCase())).join(", ");
+  }
+  function tokensOf(st) {
+    const dark = st.background === "dark", t = Object.assign({}, INKS[dark ? "dark" : "light"]), m = (PALETTES[st.palette] || PALETTES.default)[dark ? 1 : 0];
+    t["--up"] = st.palette === "custom" ? st.up : m.up;
+    t["--down"] = st.palette === "custom" ? st.down : m.down;
+    t["--ns"] = st.palette === "custom" ? st.neutral : m.ns;
+    m.c.forEach((c, k) => (t["--c" + k] = c));
+    if (st.palette === "grey") Object.keys(t).forEach((k) => (t[k] = toGrey(t[k])));  // the inks too: no tint left
+    return t;
+  }
+  const clean = (s) => String(s == null ? "" : s).replace(/[\u0000-\u001f\u007f￾￿]+/g, " ").trim();  // no control characters: they break XML and text files
+  function toGrey(c) {
+    let m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(c || ""), rgb = null;
+    if (m) rgb = hex(c);
+    else if ((m = /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/i.exec(c || ""))) rgb = [+m[1], +m[2], +m[3]];
+    if (!rgb) return c;
+    const y = Math.max(0, Math.min(255, Math.round(0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]))).toString(16).padStart(2, "0");
+    return "#" + y + y + y;
+  }
+
+  // what each chart is, by the start of its svgTools() name, and which cut-offs it rests on: "view" = the ones
+  // set here, "saved" = the report's own (analysis settings), "" = none
+  const FIG_KINDS = [["volcano_", "Volcano plot", "view"], ["pvalues_", "p-value distribution", ""], ["compare_", "Fold change against fold change", "view"], ["upset_", "Overlap of the hit lists", "view"],
+    ["heatmap", "Heatmap of significant features", "saved"], ["enrichment_", "Gene sets over-represented among the hits", "saved"], ["gene_set_ranks_", "Gene sets by rank", ""], ["barcode_", "Barcode plot of a gene set", ""],
+    ["values_", "Values per condition", ""], ["PCA", "PCA of the samples", ""], ["correlation", "Sample correlation", ""], ["cumulative_missing", "Missing values", ""], ["missingness_vs_intensity", "Missing values against intensity", ""],
+    ["distributions", "Value distribution per sample", ""], ["cv_", "Coefficient of variation", ""], ["mean_variance", "Mean against variance", ""], ["abundance_rank", "Abundance rank", ""],
+    ["identifications", "Identifications per sample", ""], ["imputation", "Measured and imputed values", ""], ["power", "Power", ""], ["search_quality_", "Search quality per run", ""],
+    ["dose_potency_", "Dose-response: potency against effect", ""], ["dose_curve_", "Dose-response curve", ""], ["time_course_", "Time course", ""], ["liganded_rank_", "Liganded sites", ""]];
+  const TEST_NAMES = { limma: "limma moderated t-test", welch: "Welch t-test", student: "Student t-test" };
+  /** The cut-offs in plain words: shown beside the plot and written into every exported figure. */
+  function cutText(c) {
+    if (c && c.conf === "none") return "|log2FC| ≥ " + (ST.lfc || 1) + " (fold change only: no replicates, no p-values)";
+    return "|log2FC| ≥ " + ST.lfc + " and " + (ST.adj ? "adjusted p" : "p") + " ≤ " + ST.alpha;
+  }
+  const savedCutText = () => "|log2FC| ≥ " + D.settings.log2fc + " and " + (D.settings.use_adjusted ? "adjusted p" : "p") + " ≤ " + D.settings.alpha;
+  const filterText = () => [ST.opt.hideImp ? "imputation-driven hits ignored" : "", ST.opt.minPep ? "hits need ≥ " + ST.opt.minPep + " " + (D.evidence || "peptides") : ""].filter(Boolean).join(", ");
+  function analysisText() {
+    return [TEST_NAMES[D.settings.test] || D.settings.test, D.kind === "ratio" ? "" : "normalisation: " + D.settings.normalize, D.imputationLabel ? "imputation: " + D.imputationLabel : ""].filter(Boolean).join("; ");
+  }
+  /** What a chart is and which comparison and cut-offs it shows, read from the report's state as it was drawn. */
+  function figInfo(name) {
+    const k = FIG_KINDS.find((x) => name.indexOf(x[0]) === 0), what = k ? k[1] : name.replace(/_/g, " "), cut = k ? k[2] : "view";
+    const c = /^(volcano_|pvalues_)/.test(name) ? C() : null;
+    let detail = "";
+    if (/^compare_/.test(name) && D.comps[cmpA] && D.comps[cmpB]) detail = D.comps[cmpA].name + " (x) against " + D.comps[cmpB].name + " (y)";
+    else if (/^enrichment_/.test(name) && renderORA._st) detail = renderORA._st.comp + ", " + renderORA._st.dir + " hits, " + renderORA._st.lib;
+    else if (/^(gene_set_ranks_|barcode_)/.test(name) && renderRank._st) detail = renderRank._st.comp + ", " + renderRank._st.lib + (/^barcode_/.test(name) && renderRank._st.sel ? ", " + renderRank._st.sel : "");
+    else if (/^(values_|dose_curve_|time_course_|cv_|liganded_rank_|dose_potency_)/.test(name)) detail = name.replace(/^(values|dose_curve|time_course|cv|liganded_rank|dose_potency)_/, "");
+    const cuts = cut === "view" ? cutText(c) + (filterText() ? "; " + filterText() : "") : cut === "saved" ? savedCutText() + " (the report's saved cut-offs)" : "";
+    return { what: what, cut: cut, cuts: cuts, c: c, detail: clean(detail), title: clean(c ? c.name : what), subtitle: clean((c ? what + " · " : detail ? detail + " · " : "") + D.title) };
+  }
+  /** The legend of a chart, read from the page beside it: [colour or null, text]. */
+  function legendItems(cap, tk) {
+    const out = [], host = cap.host, els = [];
+    if (host.id === "volcano" && C()) {
+      const c = C(), n = counts(c);
+      out.push([tk["--up"], "Up " + fmtInt(n.up)], [tk["--down"], "Down " + fmtInt(n.down)], [tk["--ns"], c.conf === "none" ? "Below the cut-off" : "Not significant"]);
+      if ($("#glegend")) els.push($("#glegend"));
+    }
+    const isLegend = (e) => e && e.classList && e.classList.contains("legend");
+    Array.from(host.children).concat([host.previousElementSibling]).forEach((e) => { if (isLegend(e)) els.push(e); });
+    const next = host.nextElementSibling;
+    if (isLegend(next)) els.push(next);
+    else if (next && next.classList && next.classList.contains("meta")) $$(".legend", next).forEach((e) => els.push(e));
+    els.forEach((el) => Array.from(el.children).forEach((sp) => {
+      const sw = $(".sw", sp), t = clean(sp.textContent).slice(0, 70);
+      if (t) out.push([sw ? sw.style.backgroundColor || sw.style.background || null : null, t]);
+    }));
+    return out;
+  }
+  /** Ready the copied chart for a file: nothing that only served the page, the style's line and point sizes. */
+  function tidyChart(root, st) {
+    const grey = st.palette === "grey";
+    Array.from(root.querySelectorAll("*")).forEach((e) => {
+      if (e.getAttribute("fill") === "transparent" || e.getAttribute("visibility") === "hidden" || e.tagName.toLowerCase() === "foreignobject") { e.remove(); return; }
+      e.removeAttribute("style");
+      const sk = e.getAttribute("stroke");
+      if (st.line_scale !== 1 && sk && sk !== "none") e.setAttribute("stroke-width", +((parseFloat(e.getAttribute("stroke-width")) || 1) * st.line_scale).toFixed(2));
+      if (st.point_scale !== 1 && e.tagName === "circle") e.setAttribute("r", +((parseFloat(e.getAttribute("r")) || 0) * st.point_scale).toFixed(2));
+      if (grey) ["fill", "stroke", "stop-color"].forEach((a) => { if (e.hasAttribute(a)) e.setAttribute(a, toGrey(e.getAttribute(a))); });
+      if (!e.children.length && e.textContent && clean(e.textContent) !== e.textContent.trim()) e.textContent = clean(e.textContent);
+    });
+  }
+  /** The finished figure around one captured chart: { name, svg, w, h (px), fit, info, desc }. */
+  function composeFigure(cap, st, box, tk) {
+    const info = figInfo(cap.name), [PW, PH, mm] = sizePx(st), s = st.font_pt / 9, LW = PW / s, LH = PH / s, pad = 12;
+    const body = cap.root.cloneNode(true);
+    tidyChart(body, st);
+    const w = +cap.root.getAttribute("width") || box.w, h = +cap.root.getAttribute("height") || box.h;
+    const own = FIG_TEXT[cap.name] || {}, grey = st.palette === "grey";
+    const tw = (t, fs) => t.length * fs * 0.56;  // no layout to ask off the page: an estimate of a text's width
+    const cut = (t, fs) => { const n = Math.floor((LW - 2 * pad) / (fs * 0.56)); return t.length > n ? t.slice(0, Math.max(1, n - 1)) + "…" : t; };
+    const ttl = st.title ? cut(clean(own.title || info.title), 16) : "", sub = st.subtitle ? cut(clean(own.subtitle || info.subtitle), 12) : "";
+    // a low-confidence or fold-change-only comparison says so in the figure, whatever is switched off
+    const warn = info.c && info.c.conf ? (info.c.conf === "none" ? "FOLD CHANGE ONLY: no replicates, no p-values" : "LOW CONFIDENCE: a group has one sample; p-values borrowed") : "";
+    const note = st.note ? cut(clean(D.title + (info.cuts ? " · hits: " + info.cuts : "") + " · " + analysisText()), 10) : "";
+    // legend rows, flowed into the full width
+    const rows = [[]];
+    let lx = 0;
+    (st.legend ? legendItems(cap, tk) : []).forEach((it) => {
+      const iw = (it[0] ? 15 : 0) + tw(it[1], 12) + 16;
+      if (lx && lx + iw > LW - 2 * pad) { rows.push([]); lx = 0; }
+      rows[rows.length - 1].push([lx, it]);
+      lx += iw;
+    });
+    const nrows = rows[0].length ? rows.length : 0;
+    const top = pad + (ttl ? 24 : 0) + (sub ? 18 : 0) + (warn ? 18 : 0) + nrows * 18 + (nrows ? 4 : 0), bottom = (note ? 20 : 0) + pad * 0.6;
+    let fit = Math.min(1, box.w / w, (LH - top - bottom) / h);
+    fit = Math.max(0.05, fit);
+    const widest = Math.max(ttl ? tw(ttl, 16) : 0, sub ? tw(sub, 12) : 0, warn ? tw(warn, 11.5) : 0, note ? tw(note, 10) : 0, ...rows.map((r) => (r.length ? r[r.length - 1][0] + (r[r.length - 1][1][0] ? 15 : 0) + tw(r[r.length - 1][1][1], 12) : 0)));
+    let OW = Math.min(LW, Math.max(w * fit, widest) + 2 * pad), OH = top + h * fit + bottom;
+    if (LW - OW < 3) OW = LW;  // a chart that fills the size gives exactly the size
+    if (Math.abs(LH - OH) < 3) OH = LH;
+    const out = document.createElementNS(SVGNS, "svg"), r2 = (v) => +v.toFixed(2), unit = mm ? "mm" : "", per = mm ? (25.4 / 96) * s : s;
+    out.setAttribute("width", r2(OW * per) + unit);
+    out.setAttribute("height", r2(OH * per) + unit);
+    out.setAttribute("viewBox", "0 0 " + r2(OW) + " " + r2(OH));
+    out.setAttribute("font-family", fontStack(st.font_family));
+    const desc = ["Figure: " + info.what + (info.detail ? " (" + info.detail + ")" : ""), "Experiment: " + clean(D.title), info.c ? "Comparison: " + clean(info.c.name) : "",
+      info.cuts ? "Cut-offs: " + info.cuts : "", warn, "Analysis: " + analysisText(), D.sourceName ? "Source table: " + clean(D.sourceName) : "",
+      "Export style: " + styleText(st), "Made by the Ionomos report, " + stamp()].filter(Boolean).join("\n");
+    svg("title", {}, out).textContent = info.what + (info.c ? ": " + clean(info.c.name) : "");
+    svg("desc", {}, out).textContent = desc;
+    if (st.background !== "transparent") svg("rect", { x: 0, y: 0, width: r2(OW), height: r2(OH), fill: tk["--surface"] }, out);
+    const put = (x, y, t, attrs) => { const e = svg("text", Object.assign({ x: r2(x), y: r2(y) }, attrs), out); e.textContent = t; return e; };
+    let y = pad;
+    if (ttl) { put(pad, y + 16, ttl, { "font-size": 16, "font-weight": 600, fill: tk["--text"] }); y += 24; }
+    if (sub) { put(pad, y + 12, sub, { "font-size": 12, fill: tk["--text2"] }); y += 18; }
+    if (warn) { put(pad, y + 12, warn, { "font-size": 11.5, "font-weight": 600, fill: tk["--warnink"] }); y += 18; }
+    if (nrows) rows.forEach((row) => {
+      row.forEach(([x, it]) => {
+        if (it[0]) svg("circle", { cx: r2(pad + x + 5), cy: r2(y + 8), r: 5, fill: grey ? toGrey(it[0]) : it[0] }, out);
+        put(pad + x + (it[0] ? 15 : 0), y + 12, it[1], { "font-size": 12, fill: tk["--text2"] });
+      });
+      y += 18;
+    });
+    const g = svg("g", { transform: "translate(" + r2((OW - w * fit) / 2) + " " + r2(top) + ")" + (fit < 0.999 ? " scale(" + +fit.toFixed(4) + ")" : "") }, out);
+    while (body.firstChild) g.appendChild(body.firstChild);
+    if (note) put(pad, top + h * fit + 14, note, { "font-size": 10, fill: tk["--muted"] });
+    return { name: cap.name, svg: '<?xml version="1.0" encoding="UTF-8"?>\n' + new XMLSerializer().serializeToString(out), w: OW * s, h: OH * s, mm: mm, fit: fit, info: info, desc: desc,
+      room: h === box.h ? Math.floor(LH - top - bottom) : 0 };  // a chart that took the height it was given: the height it can have
+  }
+  function stamp() { const d = new Date(), p = (n) => String(n).padStart(2, "0"); return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes()); }
+  function styleText(st) {
+    const [w, h, mm] = sizePx(st), k = mm ? 25.4 / 96 : 1;
+    return SIZES[st.size][0] + " (" + +(w * k).toFixed(1) + " × " + +(h * k).toFixed(1) + (mm ? " mm" : " px") + "), text " + st.font_pt + " pt " + st.font_family + ", palette " + st.palette + ", " + st.background + " background";
+  }
+  // the report's parts as redraw() draws them: a chart's own part is drawn again for its export
+  const STEPS = [["#volcano", renderVolcano], ["#phist", renderPHist], ["#detail", renderDetail], ["#comparebody", renderCompare], ["#enrich", renderEnrichment],
+    ["#dosebody", renderDose], ["#cysbody", renderCys], ["#timebody", renderTime], ["#qc", renderQC]];
+  function holdState() {
+    return { ci: ST.ci, zoom: ST.zoom, mode: ST.mode, labels: ST.labels, lm: ST.opt.labelMatches, pinned: ST.pinned, focus: ST.focus, qc: qcTab, enr: enrMode, ds: DS.s, df: DS.focus,
+      ora: renderORA._st && Object.assign({}, renderORA._st), rank: renderRank._st && Object.assign({}, renderRank._st), psm: qcPsm._st && Object.assign({}, qcPsm._st), pcn: qcPCA._st && qcPCA._st.names };
+  }
+  function restoreState(h) {
+    ST.ci = h.ci; ST.zoom = h.zoom; ST.mode = h.mode; ST.labels = h.labels; ST.opt.labelMatches = h.lm; ST.pinned = h.pinned; ST.focus = h.focus; qcTab = h.qc; enrMode = h.enr; DS.s = h.ds; DS.focus = h.df;
+    [[renderORA, h.ora], [renderRank, h.rank], [qcPsm, h.psm]].forEach(([fn, was]) => { if (was && fn._st) Object.assign(fn._st, was); else if (!was) delete fn._st; });
+    if (qcPCA._st && h.pcn != null) qcPCA._st.names = h.pcn;
+  }
+  /** Draw `fig` with the style and return its finished figures ([] when it draws nothing here). */
+  function figuresOf(fig, st, keep) {
+    const [PW, PH] = sizePx(st), s = st.font_pt / 9, pad = 12, tk = tokensOf(st), held = holdState(), out = [];
+    const box = { w: Math.max(200, Math.floor(PW / s - 2 * pad)), h: Math.max(120, Math.floor(PH / s - 1.6 * pad - (st.title ? 24 : 0) - (st.subtitle ? 18 : 0) - (st.legend ? 22 : 0) - (st.note ? 20 : 0))) };
+    // which names are written on the plot
+    if (st.labels !== "screen") { ST.labels = st.labels === "top" ? (st.label_count == null ? ST.labels : st.label_count) : 0; }
+    if (st.labels === "top" || st.labels === "none") { ST.opt.labelMatches = false; ST.pinned = []; ST.focus = null; }
+    if (st.labels === "none" && qcPCA._st) qcPCA._st.names = false;
+    const pass = (bx) => {
+      EX = { w: bx.w, h: bx.h, tokens: tk, grey: st.palette === "grey", cap: [] };
+      fig.draw();
+      let caps = EX.cap;
+      if (fig.name) caps = caps.filter((c) => c.name === fig.name);
+      else if (fig.pick) caps = caps.filter((c) => c.name.indexOf(fig.pick) === 0);
+      return caps.map((c) => composeFigure(c, st, bx, tk));
+    };
+    try {
+      pass(box).forEach((f) => out.push(f));
+      // the space kept for a legend or a title was a guess: a chart that can take any height is drawn once more at the height that is left
+      const loose = out.find((f) => f.room && Math.abs(f.room - box.h) > 2);
+      if (loose) pass({ w: box.w, h: Math.max(120, loose.room) }).forEach((f) => { const k = out.findIndex((o) => o.name === f.name); if (k >= 0 && out[k].room) out[k] = f; });
+      if (!out.length && fig.root) out.push(composeFigure({ host: fig.host, root: fig.root, name: fig.name }, st, box, tk));  // not drawn again: the chart as it was
+    } catch (e) {
+      if (window.console && console.warn) console.warn("Ionomos export:", e);
+    } finally {
+      EX = null;
+      restoreState(held);
+    }
+    if (!keep) (fig.restore || redrawAll)();
+    return out;
+  }
+  function redrawAll() { syncControls(); redraw(); }
+  /** The figure behind a chart's own buttons: its part of the report (or the whole report) is drawn again. */
+  function figOfChart(t) {
+    const step = t.again ? null : STEPS.find(([sel]) => { const e = $(sel); return e && e.contains(t.host); });
+    const fn = t.again || (step ? step[1] : redraw);
+    return { name: t.name, host: t.host, root: t.root, label: figInfo(t.name).what, draw: fn, restore: t.root ? fn : () => {} };
+  }
+  /** Every figure the report can draw: each comparison, each QC tab, each enrichment with a result. */
+  function allFigs() {
+    const out = [], add = (label, draw, pick) => out.push({ label: label, draw: draw, pick: pick });
+    D.comps.forEach((c, k) => {
+      add("Volcano: " + c.name, () => { ST.ci = k; ST.zoom = null; ST.mode = "volcano"; renderVolcano(); });
+      if (c.conf !== "none") add("p-values: " + c.name, () => { ST.ci = k; renderPHist(); });
+    });
+    if (D.comps.length >= 2) add("Compare comparisons", renderCompare);
+    if (D.qc.heatmap && D.qc.heatmap.rows.length) add("Heatmap of significant features", heatmapSvg);
+    D.enr.filter((b) => b.terms.some((t) => t.q <= 0.05)).forEach((b) => add("Enrichment: " + b.comparison + ", " + b.direction + " hits, " + b.library,
+      () => { enrMode = "ora"; renderORA._st = Object.assign(renderORA._st || {}, { comp: b.comparison, dir: b.direction, lib: b.library }); renderEnrichment(); }, "enrichment_"));
+    D.gsea.filter((b) => b.terms.some((t) => t.q <= 0.05)).forEach((b) => add("Gene sets by rank: " + b.comparison + ", " + b.library,
+      () => { enrMode = "rank"; renderRank._st = Object.assign(renderRank._st || { dir: "both" }, { comp: b.comparison, lib: b.library, sel: null }); renderEnrichment(); }, "gene_set_ranks_"));
+    $$("#qc > .tabs button").forEach((b) => {
+      const k = b.dataset.k;
+      if (k === "psm") [["ppm", "mass error"], ["mc", "missed cleavages"], ["z", "charge states"], ["len", "peptide length"]].forEach(([ch, t]) => add("QC: Search quality, " + t, () => { qcTab = "psm"; qcPsm._st = Object.assign(qcPsm._st || {}, { chart: ch }); renderQC(); }));
+      else if (k !== "card") add("QC: " + b.textContent, () => { qcTab = k; renderQC(); });
+    });
+    ((D.dose && D.dose.ran && D.dose.series) || []).forEach((S, k) => add("Dose-response: " + (S.name || "curves"), () => { DS.s = k; DS.focus = null; renderDose(); }, "dose_potency_"));
+    return out;
+  }
+  /** Every figure, finished: the list above, then whatever else the report shows now (an open protein, a
+   * time course, liganded sites, a section added later). One of each name. */
+  function collectAll(st) {
+    const out = [], seen = new Set();
+    allFigs().concat([{ draw: redraw }]).forEach((f) => figuresOf(f, st, true).forEach((x) => { if (!seen.has(x.name)) { seen.add(x.name); out.push(x); } }));
+    redrawAll();
+    return out;
+  }
+  /** The heatmap as SVG (on screen it is a canvas), drawn off the page and handed to the export. */
+  function heatmapSvg() {
+    const hm = D.qc.heatmap;
+    if (!hm || !hm.rows.length) return;
+    const host = document.createElement("div"), cols = hm.cols, rows = hm.rows, vals = hm.values, topH = 90, W = widthOf(host);
+    const cellH = Math.max(2, Math.min(16, (heightOf(topH + 8 + rows.length * 10) - topH - 8) / rows.length)), names = rows.length <= 80 && cellH >= 9, labW = names ? 110 : 8;
+    const cellW = Math.max(6, Math.min(64, (W - labW - 14) / cols.length));
+    const root = frame(host, Math.round(labW + cols.length * cellW + 10), Math.round(topH + rows.length * cellH + 8)), g = svg("g", {}, root);
+    const all = [];
+    vals.forEach((r) => r.forEach((v) => v != null && all.push(Math.abs(v))));
+    all.sort((a, b) => a - b);
+    const lim = Math.max(0.5, all[Math.floor(all.length * 0.95)] || 1), grey = EX && EX.grey, t2 = css("--text2"), sunk = css("--sunk");
+    // without colour, one ramp from light (low) to dark (high); otherwise the report's blue-to-red
+    const shade = (v) => { const k = Math.round(245 - ((Math.max(-1, Math.min(1, v / lim)) + 1) / 2) * 225).toString(16).padStart(2, "0"); return "#" + k + k + k; };
+    cols.forEach((j, k) => {
+      const t = text(g, 0, 0, D.samples[j].slice(0, 16), { "font-size": 11, fill: t2, transform: "translate(" + +(labW + k * cellW + cellW / 2 + 3).toFixed(1) + "," + (topH - 14) + ") rotate(-60)" });
+      t.setAttribute("x", 0);
+      svg("rect", { x: +(labW + k * cellW).toFixed(1), y: topH - 10, width: +(cellW - 1).toFixed(1), height: 7, fill: condColor(D.cond[j]) }, g);
+    });
+    rows.forEach((i, r) => {
+      const y = +(topH + r * cellH).toFixed(2);
+      vals[r].forEach((v, k) => svg("rect", { x: +(labW + k * cellW).toFixed(1), y: y, width: +(cellW - (cellW > 10 ? 1 : 0)).toFixed(1), height: +(cellH - (cellH > 6 ? 1 : 0)).toFixed(2), fill: v == null ? sunk : grey ? shade(v) : divColor(v, lim) }, g));
+      if (anyMark() && matches(i)) svg("rect", { x: labW - 4, y: y, width: 3, height: +(cellH - 1).toFixed(2), fill: css("--sel") }, g);
+      if (names) text(g, labW - 6, y + cellH - 2, nameOf(i).slice(0, 16), { "text-anchor": "end", "font-size": 11, fill: t2 });
+    });
+    host.insertAdjacentHTML("beforeend", "<div class='legend'><span><span class='sw' style='background:" + (grey ? shade(-lim) : css("--down")) + "'></span>below the " + esc(D.levelWord) + "'s mean</span><span><span class='sw' style='background:" +
+      (grey ? shade(lim) : css("--up")) + "'></span>above</span><span>full colour at ±" + fmt(lim, 1) + " log2 · " + rows.length + " of " + fmtInt(hm.total_significant) + " significant, clustered</span></div>");
+    D.conditions.forEach((c) => $(".legend", host).insertAdjacentHTML("beforeend", "<span><span class='sw' style='background:" + condColor(c) + "'></span>" + esc(c) + "</span>"));
+    svgTools(host, root, "heatmap");
+  }
+
+  // ---- files: PNG, zip, tables
+  function utf8(s) {
+    let b;
+    try { b = unescape(encodeURIComponent(s)); } catch (e) { b = unescape(encodeURIComponent(String(s).replace(/[\ud800-\udfff]/g, "?"))); }  // a lone surrogate
+    const u = new Uint8Array(b.length);
+    for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i);
+    return u;
+  }
+  let CRCT = null;
+  function crc32(u8) {
+    if (!CRCT) { CRCT = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; CRCT[n] = c >>> 0; } }
+    let c = 0xffffffff;
+    for (let i = 0; i < u8.length; i++) c = CRCT[(c ^ u8[i]) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  }
+  /** A .zip of [{ name, data: Uint8Array }], stored without compression (so it needs no library): a local header
+   * and the bytes per file, then the central directory. Names are UTF-8 (here always ASCII: safeName). */
+  function zipStore(files, when) {
+    const d = when || new Date(), time = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1), date = ((Math.max(1980, d.getFullYear()) - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+    const parts = [], central = [];
+    let off = 0;
+    files.forEach((f) => {
+      const name = utf8(f.name), crc = crc32(f.data), n = f.data.length;
+      const lh = new Uint8Array(30 + name.length), lv = new DataView(lh.buffer);
+      lv.setUint32(0, 0x04034b50, true); lv.setUint16(4, 20, true); lv.setUint16(6, 0x0800, true); lv.setUint16(10, time, true); lv.setUint16(12, date, true);
+      lv.setUint32(14, crc, true); lv.setUint32(18, n, true); lv.setUint32(22, n, true); lv.setUint16(26, name.length, true);
+      lh.set(name, 30);
+      const ch = new Uint8Array(46 + name.length), cv = new DataView(ch.buffer);
+      cv.setUint32(0, 0x02014b50, true); cv.setUint16(4, 20, true); cv.setUint16(6, 20, true); cv.setUint16(8, 0x0800, true); cv.setUint16(12, time, true); cv.setUint16(14, date, true);
+      cv.setUint32(16, crc, true); cv.setUint32(20, n, true); cv.setUint32(24, n, true); cv.setUint16(28, name.length, true); cv.setUint32(42, off, true);
+      ch.set(name, 46);
+      parts.push(lh, f.data);
+      central.push(ch);
+      off += lh.length + n;
+    });
+    const end = new Uint8Array(22), ev = new DataView(end.buffer);
+    ev.setUint32(0, 0x06054b50, true); ev.setUint16(8, files.length, true); ev.setUint16(10, files.length, true);
+    ev.setUint32(12, central.reduce((a, b) => a + b.length, 0), true); ev.setUint32(16, off, true);
+    return new Blob(parts.concat(central, [end]), { type: "application/zip" });
+  }
+  function bytesOf(blob, cb) {
+    try {
+      const fr = new FileReader();
+      fr.onload = () => cb(new Uint8Array(fr.result));
+      fr.onerror = () => cb(null);
+      fr.readAsArrayBuffer(blob);
+    } catch (e) { cb(null); }
+  }
+  /** The PNG with its print size (pHYs, so 300 dpi means 300 dpi in Word or InDesign) and the figure's
+   * description (iTXt "Description": experiment, comparison, cut-offs), put in after the header chunk. */
+  function pngMeta(u8, dpi, desc) {
+    if (u8.length < 45 || u8[0] !== 0x89 || u8[1] !== 0x50 || u8[2] !== 0x4e || u8[3] !== 0x47) return u8;  // not a PNG: as it is
+    const chunk = (type, data) => {
+      const o = new Uint8Array(12 + data.length), v = new DataView(o.buffer);
+      v.setUint32(0, data.length);
+      for (let i = 0; i < 4; i++) o[4 + i] = type.charCodeAt(i);
+      o.set(data, 8);
+      v.setUint32(8 + data.length, crc32(o.subarray(4, 8 + data.length)));
+      return o;
+    };
+    const phys = new Uint8Array(9), pv = new DataView(phys.buffer), ppm = Math.round(dpi / 0.0254);
+    pv.setUint32(0, ppm); pv.setUint32(4, ppm); phys[8] = 1;
+    const key = "Description", body = utf8(desc), itxt = new Uint8Array(key.length + 5 + body.length);
+    for (let i = 0; i < key.length; i++) itxt[i] = key.charCodeAt(i);
+    itxt.set(body, key.length + 5);  // keyword, 0, not compressed (0, 0), no language (0), no translated keyword (0), the text
+    const parts = [u8.subarray(0, 33), chunk("pHYs", phys), chunk("iTXt", itxt)], dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    for (let p = 33; p + 12 <= u8.length;) {  // the rest, without a pHYs the browser may have written
+      const n = dv.getUint32(p), type = String.fromCharCode(u8[p + 4], u8[p + 5], u8[p + 6], u8[p + 7]);
+      if (type !== "pHYs") parts.push(u8.subarray(p, p + 12 + n));
+      p += 12 + n;
+    }
+    const out = new Uint8Array(parts.reduce((a, b) => a + b.length, 0));
+    let at = 0;
+    parts.forEach((x) => { out.set(x, at); at += x.length; });
+    return out;
+  }
+  /** [scale, dots per inch] of the PNG for a figure of w x h px. */
+  function pngScale(st, w, h) {
+    const k = Math.min(st.png_dpi ? st.png_dpi / 96 : st.png_scale, 16000 / Math.max(w, h));  // a canvas is at most ~16,000 px a side
+    return [k, 96 * k];
+  }
+  /** cb(Blob or null): the figure as a PNG, drawn by the browser from its SVG. */
+  function pngOf(f, st, done) {
+    let over = false;
+    const timer = setTimeout(() => cb(null), 20000);  // a browser that neither draws the picture nor says why
+    const cb = (b) => { if (!over) { over = true; clearTimeout(timer); done(b); } };
+    try {
+      const [k, dpi] = pngScale(st, f.w, f.h), img = new Image();
+      img.onload = () => {
+        try {
+          const cv = document.createElement("canvas");
+          cv.width = Math.round(f.w * k); cv.height = Math.round(f.h * k);
+          cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+          if (!cv.toBlob) { cb(null); return; }
+          cv.toBlob((b) => { if (!b) cb(null); else bytesOf(b, (u8) => cb(u8 ? new Blob([pngMeta(u8, dpi, f.desc)], { type: "image/png" }) : b)); }, "image/png");
+        } catch (e) { cb(null); }
+      };
+      img.onerror = () => cb(null);
+      img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(f.svg);
+    } catch (e) { cb(null); }  // PNG is a convenience; SVG always works
+  }
+  // a text cell: quoted, and one that a spreadsheet would run as a formula (= + - @) starts with an apostrophe
+  const csvCell = (v) => { const s = String(v == null ? "" : v).replace(/"/g, '""'); return '"' + (/^[=+\-@\t\r]/.test(s) ? "'" : "") + s + '"'; };
+  function resultsCsv(c, rows) {
+    const head = ["id", "label", "description", "log2fc", "ci_low", "ci_high", "p", "adj_p", "significant", "imputation_driven"].concat(D.F ? ["any_change_F_adj_p"] : [], D.f.pep ? [D.evidence || "peptides"] : [], D.samples);
+    const imp = impDriven(c);
+    return [head.map(csvCell).join(",")].concat(rows.map((i) => [csvCell(D.f.id[i]), csvCell(D.f.label[i]), csvCell(D.f.desc[i]), c.fc[i], c.ciL[i], c.ciR[i], c.p[i], c.q[i], sigOf(c, i), imp[i] ? "yes" : ""]
+      .concat(D.F ? [D.F.q[i]] : [], D.f.pep ? [D.f.pep[i]] : [], D.v[i]).map((v) => (v == null ? "" : v)).join(","))).join("\n");
+  }
+  /** The tables that go with the figures: [file name, what it is, text]. */
+  function tablesOf() {
+    const out = [];
+    D.comps.forEach((c) => {
+      const rows = [];
+      for (let i = 0; i < nF; i++) if (c.p[i] != null || c.fc[i] != null) rows.push(i);
+      rows.sort((a, b) => (c.p[a] == null ? 2 : c.p[a]) - (c.p[b] == null ? 2 : c.p[b]));
+      out.push(["results_" + c.slug + ".csv", "Every tested " + D.levelWord + " of " + clean(c.name) + ": fold change, p, adjusted p, hit or not at " + cutText(c) + ", and its values per sample", resultsCsv(c, rows)]);
+    });
+    const card = new Map((D.qc.scorecard || []).map((r) => [r.sample, r]));
+    out.push(["samples.csv", "The samples: condition, replicate" + (card.size ? ", and the quality scorecard" : ""),
+      [["sample", "condition", "replicate"].concat(card.size ? ["status", "identifications", "missing_pct", "r_with_replicates", "flags"] : []).map(csvCell).join(",")].concat(D.samples.map((s, j) => {
+        const r = card.get(s);
+        return [csvCell(s), csvCell(D.cond[j]), D.rep && D.rep[j] != null ? D.rep[j] : ""].concat(card.size ? (r ? [csvCell(r.status), r.ids, r.missing_pct, r.corr_group, csvCell((r.flags || []).join("; "))] : ["", "", "", "", ""]) : []).map((v) => (v == null ? "" : v)).join(",");
+      })).join("\n")]);
+    if (D.enr.some((b) => b.terms.length)) out.push(["enrichment.csv", "Gene sets over-represented among the hits (the report's saved cut-offs)",
+      [["comparison", "direction", "library", "term", "overlap", "set_size", "p", "adj_p", "genes"].map(csvCell).join(",")].concat(D.enr.flatMap((b) => b.terms.map((t) =>
+        [csvCell(b.comparison), csvCell(b.direction), csvCell(b.library), csvCell(t.term), t.k, t.K, t.p, t.q, csvCell(t.genes.join(" "))].join(",")))).join("\n")]);
+    if (D.gsea.some((b) => b.terms.length)) out.push(["gene_set_ranks.csv", "Gene sets tested on every ranked " + D.levelWord + " (no cut-off)",
+      [["comparison", "library", "term", "genes_measured", "z", "p", "adj_p", "direction", "leading_genes"].map(csvCell).join(",")].concat(D.gsea.flatMap((b) => b.terms.map((t) =>
+        [csvCell(b.comparison), csvCell(b.library), csvCell(t.term), t.n, t.z, t.p, t.q, csvCell(t.dir), csvCell(t.leading.join(" "))].join(",")))).join("\n")]);
+    return out;
+  }
+  /** cb(Blob, number of figures): every figure at the style, the tables, the style and a README, in one .zip. */
+  function exportAll(st, cb) {
+    const figs = collectAll(st), base = safeName(D.title || "experiment").slice(0, 60) + "_figures/", used = new Set(), files = [], listed = [];
+    const uniq = (n) => { let x = n, k = 2; while (used.has(x.toLowerCase())) x = n.replace(/(\.[A-Za-z0-9]+)?$/, "_" + k++ + "$1"); used.add(x.toLowerCase()); return x; };
+    const wantSvg = st.zip_format !== "png", wantPng = st.zip_format !== "svg";
+    const finish = () => {
+      tablesOf().forEach(([n, what, txt]) => { const name = uniq("tables/" + safeName(n)); files.push({ name: base + name, data: utf8("﻿" + txt + "\n") }); listed.push([name, what]); });
+      files.push({ name: base + "export_style.json", data: utf8(styleJson(st)) });
+      listed.push(["export_style.json", "The export style these figures were made with; load it in another report (Export, Load style) or pass it to: ionomos export --style"]);
+      files.push({ name: base + "README.txt", data: utf8("﻿" + readmeText(st, listed)) });
+      cb(zipStore(files), figs.length);
+    };
+    const step = (k) => {
+      if (k >= figs.length) { finish(); return; }
+      const f = figs[k], stem = "figures/" + String(k + 1).padStart(2, "0") + "_" + safeName(f.name).slice(0, 80);
+      const what = f.info.what + (f.info.c ? ", " + clean(f.info.c.name) : f.info.detail ? ", " + f.info.detail : "") + (f.info.cuts ? ". Cut-offs: " + f.info.cuts : "") + (f.fit < 0.97 ? ". Scaled to " + Math.round(f.fit * 100) + "% to fit the size" : "");
+      if (wantSvg) { const n = uniq(stem + ".svg"); files.push({ name: base + n, data: utf8(f.svg) }); listed.push([n, what]); }
+      if (!wantPng) { step(k + 1); return; }
+      pngOf(f, st, (blob) => {
+        if (!blob) { if (!wantSvg) { const n = uniq(stem + ".svg"); files.push({ name: base + n, data: utf8(f.svg) }); listed.push([n, what + " (SVG: this browser could not make the PNG)"]); } step(k + 1); return; }
+        bytesOf(blob, (u8) => { if (u8) { const n = uniq(stem + ".png"); files.push({ name: base + n, data: u8 }); listed.push([n, what]); } step(k + 1); });
+      });
+    };
+    step(0);
+  }
+  const styleJson = (st) => JSON.stringify(Object.assign({ ionomos_export_style: 1 }, st), null, 2) + "\n";
+  function readmeText(st, listed) {
+    const L = ["Figures and tables from the Ionomos report", "", "Experiment:  " + clean(D.title), "Exported:    " + stamp(), D.sourceName ? "Source:      " + clean(D.sourceName) : "",
+      "", "Cut-offs", "  In the report as it was open (volcano, compare, overlap, results tables):  " + cutText(null) + (filterText() ? "; " + filterText() : ""),
+      "  Saved with the report (heatmap, over-representation, the TSV files):       " + savedCutText(), "  " + analysisText(),
+      "", "Style", "  " + styleText(st), "", "Files"];
+    const wide = Math.min(60, Math.max(...listed.map((x) => x[0].length)));
+    listed.forEach(([n, what]) => L.push("  " + n.padEnd(wide) + "  " + clean(what)));
+    L.push("", "SVG files keep their text as text and can be ungrouped and edited in PowerPoint, Illustrator or Inkscape.",
+      "Every figure carries these cut-offs in its file (SVG: <desc>, PNG: the Description field), so a figure on a slide can be traced back.",
+      "Enrichment figures are made for gene-set libraries with a term at adjusted p <= 0.05; open the report for the others.");
+    return L.filter((x) => x != null).join("\r\n") + "\r\n";
+  }
+  function exportOne(chart, kind) {
+    const f = figuresOf(figOfChart(chart), XS)[0];
+    if (!f) return;
+    if (kind === "svg") download(f.name + ".svg", f.svg, "image/svg+xml");
+    else pngOf(f, XS, (b) => b && download(f.name + ".png", b));
+  }
+  /** "Export for slides": the zip, with a word in `status` while it is made. */
+  function exportZip(status) {
+    if (exportZip.busy) return;
+    exportZip.busy = true;
+    if (status) status.textContent = "Drawing every figure…";
+    setTimeout(() => {  // let the page show the message first
+      const done = (msg) => { exportZip.busy = false; if (status) flash(status, msg); };
+      try {
+        exportAll(XS, (blob, n) => { download((D.title || "experiment") + "_figures.zip", blob); done(n + " figures and the tables are in the .zip"); });
+      } catch (e) {
+        if (window.console && console.warn) console.warn("Ionomos export:", e);
+        done("The .zip could not be made (" + (e && e.message) + "); the SVG button on each chart still works.");
+      }
+    }, 20);
+  }
+
+  // ---- the dialog
+  let XD = null;  // while the dialog is open: { figs, fig, last }
+  function exportDialog() {
+    let dlg = $("#xdlg");
+    if (dlg) return dlg;
+    dlg = document.createElement("div");
+    dlg.id = "xdlg"; dlg.className = "modal"; dlg.hidden = true;
+    const opts = (pairs) => pairs.map(([v, t]) => "<option value='" + esc(v) + "'>" + esc(t) + "</option>").join("");
+    dlg.innerHTML = "<div class='modalbox' role='dialog' aria-modal='true' aria-labelledby='xdlgh'>" +
+      "<div class='hh'><h3 id='xdlgh'>Export figures</h3><button type='button' id='xclose' aria-label='Close'>×</button></div>" +
+      "<div class='xgrid'><div class='xform'>" +
+      "<fieldset><legend>Figure</legend>" +
+      "<label class='ctl' title='Which figure is shown on the right and downloaded by the buttons under it'>Figure <select id='xfig'></select></label>" +
+      "<label class='ctl' title='A title above the figure. Leave the box empty for the automatic one'><input type='checkbox' id='xtitle'> Title <input type='text' id='xtitletext'></label>" +
+      "<label class='ctl' title='A second, smaller line under the title'><input type='checkbox' id='xsub'> Subtitle <input type='text' id='xsubtext'></label>" +
+      "<label class='ctl' title='What the colours mean, above the plot'><input type='checkbox' id='xlegend'> Legend</label>" +
+      "<label class='ctl' title='A small line under the figure with the experiment, the cut-offs and the test. The same facts are always written into the file itself'><input type='checkbox' id='xnote'> Cut-offs under the figure</label>" +
+      "<label class='ctl' title='Which names are written on the plot'>Names on the plot <select id='xlabels'>" + opts([["screen", "as in the report"], ["top", "the top hits only"], ["marked", "pinned and searched only"], ["none", "none"]]) + "</select></label>" +
+      "<label class='ctl' title='How many of the most significant hits are named (empty: as in the report)'>Top hits named <input type='number' id='xnlab' min='0' max='200' step='1'></label>" +
+      "</fieldset><fieldset><legend>Size</legend>" +
+      "<label class='ctl' title='The size of the whole figure. A figure that cannot fill it (a square heatmap on a wide slide) is made smaller, never stretched'>Size <select id='xsize'>" + opts(Object.keys(SIZES).map((k) => [k, SIZES[k][0] + (SIZES[k][1] ? " · " + SIZES[k][1] + " × " + SIZES[k][2] + " " + SIZES[k][3] : "")])) + "</select></label>" +
+      "<label class='ctl' title='Width and height of a custom size'>Width <input type='number' id='xw' min='20' max='8000'> Height <input type='number' id='xh' min='20' max='8000'> <select id='xunit' aria-label='Unit'>" + opts([["px", "px"], ["mm", "mm"]]) + "</select></label>" +
+      "</fieldset><fieldset><legend>Text and marks</legend>" +
+      "<label class='ctl' title='The size of the axis numbers in the finished figure, in points (titles are larger in proportion). On a slide 14 pt reads well; journals ask for 6 to 8 pt'>Text size <input type='number' id='xfont' min='4' max='48' step='0.5'> pt</label>" +
+      "<label class='ctl' title='The font written into the file, with common fallbacks. It must be installed where the figure is opened'>Font <select id='xfam'>" + opts(FONTS.map((f) => [f, f]).concat([["other", "another font…"]])) + "</select> <input type='text' id='xfamtext' aria-label='Font name' placeholder='font name' maxlength='40'></label>" +
+      "<label class='ctl' title='Thickness of every line, as a multiple of the normal one'>Line width × <input type='number' id='xline' min='0.25' max='4' step='0.25'></label>" +
+      "<label class='ctl' title='Size of every point, as a multiple of the normal one'>Point size × <input type='number' id='xpoint' min='0.25' max='4' step='0.25'></label>" +
+      "</fieldset><fieldset><legend>Colours</legend>" +
+      "<label class='ctl' title='Colour-blind safe uses the Okabe and Ito colours; greyscale is for print without colour'>Palette <select id='xpal'>" + opts([["default", "Ionomos (red up, blue down)"], ["colorblind", "colour-blind safe"], ["grey", "greyscale"], ["custom", "my own colours"]]) + "</select></label>" +
+      "<label class='ctl' id='xcustom' title='Your own colours for up, down and not significant'>Up <input type='color' id='xup'> Down <input type='color' id='xdown'> Not significant <input type='color' id='xns'></label>" +
+      "<label class='ctl' title='Transparent leaves the slide background showing through (dark text)'>Background <select id='xbg'>" + opts([["light", "white"], ["dark", "dark"], ["transparent", "transparent"]]) + "</select></label>" +
+      "</fieldset><fieldset><legend>PNG</legend>" +
+      "<label class='ctl' title='How many pixels a PNG gets. 2× is sharp on a slide; printers ask for 300 dpi or more'>Resolution <select id='xres'>" + opts([["x1", "1×"], ["x2", "2× (slides)"], ["x3", "3×"], ["x4", "4×"], ["d150", "150 dpi"], ["d300", "300 dpi (print)"], ["d600", "600 dpi"]]) + "</select></label> <span id='xpx' class='muted'></span>" +
+      "</fieldset><fieldset><legend>House style</legend>" +
+      "<div class='chips'><button type='button' id='xreset' title='Every setting here back to the lab defaults (config.yaml analysis.export), and forget the style kept in this browser'>Reset to lab defaults</button>" +
+      "<button type='button' id='xsave' title='Save these settings as a small file to share with the lab'>Save style</button>" +
+      "<label class='filebtn' title='Load a style file saved here or by a colleague'>Load style<input type='file' id='xload' accept='.json,application/json'></label></div>" +
+      "<p class='muted'>These settings are kept in this browser and used by every Ionomos report you open in it.</p>" +
+      "</fieldset></div><div class='xside'><div id='xprev' class='xprev'></div><div id='xinfo' class='muted'></div>" +
+      "<div class='chips'><button type='button' id='xsvg' title='This figure as SVG: text stays text, so it can be edited in PowerPoint, Illustrator or Inkscape'>Download SVG</button>" +
+      "<button type='button' id='xpng' title='This figure as a PNG picture at the resolution chosen'>Download PNG</button>" +
+      "<button type='button' id='xcopy' title='Put this figure on the clipboard as a picture, to paste into a slide'>Copy image</button></div>" +
+      "<div class='chips'><label class='ctl' title='What the .zip holds for each figure'>In the .zip <select id='xzipfmt'>" + opts([["both", "SVG and PNG"], ["svg", "SVG"], ["png", "PNG"]]) + "</select></label>" +
+      "<button type='button' id='xzip' title='Every figure of this report with these settings, the tables as CSV and a README, in one .zip'>Export for slides (.zip)</button></div>" +
+      "<div id='xmsg' class='muted' role='status'></div></div></div></div>";
+    document.body.appendChild(dlg);
+    addHelp($(".hh h3", dlg), "report.export", $(".hh", dlg));
+    $("#xclose").onclick = closeExport;
+    dlg.addEventListener("mousedown", (e) => { if (e.target === dlg) closeExport(); });
+    let timer = null;
+    const changed = (e) => {
+      if (e.target.id === "xload") return;
+      if (e.target.id === "xfam" && e.target.value === "other") { $("#xfamtext").hidden = false; $("#xfamtext").focus(); return; }  // then the name is typed
+      if (e.target.id === "xsize" && e.target.value !== "custom") $("#xfont").value = SIZES[e.target.value][4];
+      if (e.target.id === "xfig") XD.fig = XD.figs[+e.target.value] || XD.fig;
+      else if (e.target.id === "xtitletext" || e.target.id === "xsubtext") { if (XD.last) FIG_TEXT[XD.last.name] = { title: $("#xtitletext").value.trim(), subtitle: $("#xsubtext").value.trim() }; }
+      else {
+        XS = readStyle(); saveStyle();
+        if (e.type === "change" && e.target.id === "xfamtext" && XS.font_family !== e.target.value.trim()) $("#xmsg").textContent = "A font name may hold letters, digits, spaces, - and _ only; the font was not changed.";
+      }
+      clearTimeout(timer);
+      if (e.type === "change") { writeStyle(); renderPreview(); } else timer = setTimeout(renderPreview, 200);
+    };
+    $(".xform", dlg).addEventListener("change", changed);
+    $(".xform", dlg).addEventListener("input", changed);
+    $("#xzipfmt").onchange = () => { XS = readStyle(); saveStyle(); };
+    $("#xreset").onclick = () => { XS = normStyle(null, LAB); store.set(STYLE_KEY, null); writeStyle(); renderPreview(); flash($("#xmsg"), "Back to the lab defaults."); };
+    $("#xsave").onclick = () => download("ionomos_export_style.json", styleJson(XS), "application/json");
+    $("#xload").onchange = (e) => {
+      const f = e.target.files && e.target.files[0];
+      e.target.value = "";
+      if (!f) return;
+      if (f.size > 20000) { $("#xmsg").textContent = "That file is too large to be an export style; nothing was changed."; return; }
+      const fr = new FileReader();
+      fr.onload = () => { $("#xmsg").textContent = loadStyle(String(fr.result || "")); writeStyle(); renderPreview(); };
+      fr.readAsText(f);
+    };
+    $("#xsvg").onclick = () => { const f = renderPreview(); if (f) download(f.name + ".svg", f.svg, "image/svg+xml"); };
+    $("#xpng").onclick = () => { const f = renderPreview(); if (f) pngOf(f, XS, (b) => (b ? download(f.name + ".png", b) : ($("#xmsg").textContent = "This browser could not make the PNG; the SVG works everywhere."))); };
+    $("#xcopy").onclick = () => { const f = renderPreview(); if (f) copyFigure(f, (ok) => ($("#xmsg").textContent = ok ? "Copied: paste it into a slide." : "This browser does not let a page copy pictures; use Download PNG.")); };
+    $("#xzip").onclick = () => exportZip($("#xmsg"));
+    return dlg;
+  }
+  /** Take a style file's text (untrusted): returns what to tell the user. Only a valid style changes anything. */
+  function loadStyle(txt) {
+    let raw;
+    try { raw = JSON.parse(txt); } catch (e) { return "That file is not JSON; nothing was changed."; }
+    if (!raw || typeof raw !== "object" || Array.isArray(raw) || raw.ionomos_export_style !== 1) return "That file is not an Ionomos export style; nothing was changed.";
+    const bad = [];
+    XS = normStyle(raw, LAB, bad);
+    saveStyle();
+    return "Style loaded." + (bad.length ? " Not understood and left out: " + bad.slice(0, 12).map((k) => String(k).slice(0, 30)).join(", ") + (bad.length > 12 ? " …" : "") + "." : "");
+  }
+  function readStyle() {
+    const val = (id) => $("#" + id).value, num = (id) => parseFloat(val(id)), on = (id) => $("#" + id).checked, res = val("xres");
+    const nl = val("xnlab").trim();
+    return normStyle({ size: val("xsize"), width: num("xw"), height: num("xh"), unit: val("xunit"), font_pt: num("xfont"), font_family: val("xfam") === "other" ? val("xfamtext").trim() : val("xfam"),
+      line_scale: num("xline"), point_scale: num("xpoint"), palette: val("xpal"), up: val("xup"), down: val("xdown"), neutral: val("xns"), background: val("xbg"),
+      title: on("xtitle"), subtitle: on("xsub"), legend: on("xlegend"), note: on("xnote"), labels: val("xlabels"), label_count: nl === "" ? null : parseInt(nl, 10),
+      png_scale: res[0] === "x" ? +res.slice(1) : XS.png_scale, png_dpi: res[0] === "d" ? +res.slice(1) : 0, zip_format: val("xzipfmt") }, XS);
+  }
+  function writeStyle() {
+    const set = (id, v) => { const e = $("#" + id); if (e) e.value = v; }, own = XS.size === "custom", z = SIZES[XS.size];
+    set("xsize", XS.size); set("xw", own ? XS.width : z[1]); set("xh", own ? XS.height : z[2]); set("xunit", own ? XS.unit : z[3]);
+    ["xw", "xh", "xunit"].forEach((id) => ($("#" + id).disabled = !own));
+    set("xfont", XS.font_pt); set("xline", XS.line_scale); set("xpoint", XS.point_scale); set("xpal", XS.palette); set("xbg", XS.background);
+    const listed = FONTS.includes(XS.font_family);
+    set("xfam", listed ? XS.font_family : "other"); set("xfamtext", listed ? "" : XS.font_family);
+    $("#xfamtext").hidden = listed;
+    set("xup", XS.up); set("xdown", XS.down); set("xns", XS.neutral);
+    $("#xcustom").hidden = XS.palette !== "custom";
+    $("#xtitle").checked = XS.title; $("#xsub").checked = XS.subtitle; $("#xlegend").checked = XS.legend; $("#xnote").checked = XS.note;
+    set("xlabels", XS.labels); set("xnlab", XS.label_count == null ? "" : XS.label_count);
+    $("#xnlab").disabled = XS.labels !== "top";
+    set("xres", XS.png_dpi ? "d" + XS.png_dpi : "x" + XS.png_scale); set("xzipfmt", XS.zip_format);
+  }
+  /** Draw the chosen figure with the style into the dialog; returns it (or null). */
+  function renderPreview() {
+    if (!XD) return null;
+    const f = figuresOf(XD.fig, XS)[0] || null, host = $("#xprev"), tt = $("#xtitletext"), su = $("#xsubtext");
+    XD.last = f;
+    host.className = "xprev" + (XS.background === "transparent" ? " clear" : "");
+    host.innerHTML = "";
+    if (!f) { host.innerHTML = "<div class='empty'>This figure has nothing to draw here.</div>"; $("#xinfo").textContent = ""; return null; }
+    const img = document.createElement("img");
+    img.alt = "Preview of the exported figure";
+    img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(f.svg);
+    host.appendChild(img);
+    const own = FIG_TEXT[f.name] || {}, k = f.mm ? 25.4 / 96 : 1, [ps] = pngScale(XS, f.w, f.h);
+    tt.placeholder = f.info.title; su.placeholder = f.info.subtitle;
+    if (document.activeElement !== tt) tt.value = own.title || "";
+    if (document.activeElement !== su) su.value = own.subtitle || "";
+    $("#xpx").textContent = "PNG: " + Math.round(f.w * ps) + " × " + Math.round(f.h * ps) + " px";
+    $("#xinfo").textContent = +(f.w * k).toFixed(1) + " × " + +(f.h * k).toFixed(1) + (f.mm ? " mm" : " px") + " · text " + XS.font_pt + " pt" +
+      (f.fit < 0.97 ? " · the chart was made " + Math.round(f.fit * 100) + "% of its size to fit, so its text is smaller than " + XS.font_pt + " pt" : "") + (f.info.cuts ? " · " + f.info.cuts : "");
+    return f;
+  }
+  function copyFigure(f, done) {
+    try {
+      if (!navigator.clipboard || !navigator.clipboard.write || typeof ClipboardItem === "undefined") { done(false); return; }
+      // the picture is promised inside the click, as Safari asks
+      const item = new ClipboardItem({ "image/png": new Promise((res, rej) => pngOf(f, XS, (b) => (b ? res(b) : rej(new Error("no PNG"))))) });
+      navigator.clipboard.write([item]).then(() => done(true), () => done(false));
+    } catch (e) { done(false); }
+  }
+  /** Open the dialog on a chart (its own buttons) or on the report's first figure (Options, the top bar). */
+  function openExport(chart) {
+    const dlg = exportDialog(), figs = allFigs();
+    let at = 0;
+    if (chart) { const f = figOfChart(chart); f.label = "This chart: " + f.label; figs.unshift(f); }
+    else if (C()) at = Math.max(0, figs.findIndex((f) => f.label === "Volcano: " + C().name));
+    if (!figs.length) figs.push({ label: "The charts on this page", draw: redraw });
+    XD = { figs: figs, fig: figs[at], last: null };
+    $("#xfig").innerHTML = figs.map((f, k) => "<option value='" + k + "'>" + esc(f.label) + "</option>").join("");
+    $("#xfig").value = String(figs.indexOf(XD.fig));
+    $("#xmsg").textContent = "";
+    writeStyle();
+    dlg.hidden = false;
+    renderPreview();
+    $("#xclose").focus();
+  }
+  function closeExport() { const d = $("#xdlg"); if (d) d.hidden = true; XD = null; }
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && XD) closeExport(); });
+
   // ------------------------------------------------------------- controls
   function syncControls() {
     const sel = $("#comp");
@@ -2568,6 +3250,10 @@
       note.innerHTML = (changed ? "Cut-offs changed here only — the TSV files, heatmap and enrichment use the saved settings (|log2FC| ≥ " + D.settings.log2fc +
         ", " + (D.settings.use_adjusted ? "adj. p" : "p") + " ≤ " + D.settings.alpha + "). " : "") + (filters.length ? "Hit filters on: " + filters.join(", ") + "." : "");
     }
+    const view = $("#viewnote");
+    if (view) view.textContent = "Hits here: " + cutText(c) + (c.conf === "none" || !ST.lfc ? "" : " (" + +Math.pow(2, ST.lfc).toFixed(2) + "-fold or more)") + (filterText() ? "; " + filterText() : "") + " · " + analysisText() + ". Every exported figure says the same.";
+    const fold = $("#foldhint");
+    if (fold) fold.textContent = ST.lfc > 0 ? "= " + +Math.pow(2, ST.lfc).toFixed(2) + "-fold" : "any change";
     $("#ma").disabled = D.kind === "ratio" || !c.t2 || c.conf === "none";
     $("#volc").disabled = c.conf === "none";
     writeHash();
@@ -2652,8 +3338,19 @@
       $("#reset").onclick = () => { ST.lfc = D.settings.log2fc; ST.alpha = D.settings.alpha; ST.adj = D.settings.use_adjusted; syncControls(); renderDiff(); };
       $("#opts").onclick = () => openOptions();
       const opt = (id, key, parse, what) => { const el = $("#" + id); if (!el) return; el.oninput = el.onchange = () => { ST.opt[key] = parse(el); (what || renderDiff)(); }; };
-      opt("ptsize", "pt", (el) => parseFloat(el.value) || 1, renderVolcano);
-      opt("labsize", "lab", (el) => parseFloat(el.value) || 11.5, renderVolcano);
+      const shown = () => { if ($("#ptsizev")) $("#ptsizev").textContent = "×" + ST.opt.pt.toFixed(1); if ($("#labsizev")) $("#labsizev").textContent = ST.opt.lab + " px"; };
+      opt("ptsize", "pt", (el) => parseFloat(el.value) || 1, () => { shown(); renderVolcano(); });
+      opt("labsize", "lab", (el) => parseFloat(el.value) || 11.5, () => { shown(); renderVolcano(); });
+      shown();
+      const all = $("#optreset");
+      if (all) all.onclick = () => {  // the cut-offs, the plot and the hit filters as the report was made (groups and the export style stay)
+        Object.assign(ST, { lfc: D.settings.log2fc, alpha: D.settings.alpha, adj: D.settings.use_adjusted, labels: D.settings.top_labels, zoom: null });
+        Object.assign(ST.opt, { pt: 1, lab: 11.5, labelMatches: true, lines: true, onoff: true, hideImp: false, minPep: 0 });
+        [["labels", ST.labels], ["ptsize", 1], ["labsize", 11.5], ["minpep", 0]].forEach(([id, v]) => { if ($("#" + id)) $("#" + id).value = v; });
+        [["labmatch", true], ["lines", true], ["markonoff", true], ["hideimp", false]].forEach(([id, v]) => { if ($("#" + id)) $("#" + id).checked = v; });
+        shown(); syncControls(); renderDiff();
+        flash($("#optmsg"), "Back to the lab defaults.");
+      };
       opt("labmatch", "labelMatches", (el) => el.checked, renderVolcano);
       opt("lines", "lines", (el) => el.checked, renderVolcano);
       opt("markonoff", "onoff", (el) => el.checked, renderVolcano);
@@ -2676,6 +3373,10 @@
     safe(renderCys, "#cysbody"); safe(renderTime, "#timebody");
     safe(renderQC, "#qc");
     safe(renderHelp, "#helpbody");
+    const xo = $("#xopen"), xz = $("#xzipnow"), sl = $("#slides");
+    if (xo) xo.onclick = () => openExport(null);
+    if (xz) xz.onclick = () => exportZip($("#optmsg"));
+    if (sl) sl.onclick = () => exportZip($("#slidesmsg"));
     const theme = $("#theme");
     if (theme) theme.onclick = () => {
       const r = document.documentElement, cur = r.getAttribute("data-theme");

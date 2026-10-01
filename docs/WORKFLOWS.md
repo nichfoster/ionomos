@@ -191,7 +191,32 @@ features × samples matrix of log2 values and runs the same statistics:
   `<level>_matrix_processed.tsv` (filtered/normalised/imputed + which values
   were imputed), `enrichment.tsv`, `volcano_<comparison>.svg`,
   `fragpipe-analyst/` (annotation + `reproduce_in_R.R`), `analysis.json`
-  (settings and every processing step).
+  (settings and every processing step), and `figures/` when asked for (below).
+
+- **Figures for slides** (D62). In the report, every chart has **SVG**,
+  **PNG** and **Export…** (size, text, colours, title, legend; copy as an
+  image), and **Export for slides** saves every figure, the tables and a
+  README in one .zip. Without the report:
+
+  ```
+  ionomos export <experiment or results folder>            # results/figures/*.svg + README.txt
+  ionomos export 12 --preset col1 --palette colorblind     # job 12, one journal column, colour-blind safe
+  ionomos export <folder> --style export_style.json --figures volcano,pca --out D:/talk
+  ```
+
+  It draws the volcano of each comparison, the PCA, the heatmap of the hits
+  and the sample correlation from the finished report's data, at the saved
+  cut-offs. SVG only (PNG: the report's Export). The lab's style is
+  `analysis.export` in `config.yaml` (an experiment can change it in
+  `experiment.yaml`): `size` (`slide169` | `slide43` | `half` | `col1` |
+  `col2` | `custom` with `width`, `height`, `unit`), `font_pt`,
+  `font_family`, `palette` (`default` | `colorblind` | `grey` | `custom` with
+  `up`, `down`, `neutral`), `background`, `line_scale`, `point_scale`,
+  `title`, `subtitle`, `legend`, `note`, `label_count`, and `figures`: the
+  static figures written to `results/figures/` after every analysis (any of
+  `volcano`, `pca`, `heatmap`, `correlation`; default none). Style order for
+  `ionomos export`: the report's own, the lab's now, `--style`, the flags.
+  A figure file of the same name is replaced only if Ionomos wrote it.
 
 - **Small groups** (D32). A comparison is never refused for having too few
   replicates. When a group has one sample, limma still fits the model over

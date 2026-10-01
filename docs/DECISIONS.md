@@ -1665,3 +1665,119 @@ with it. `downstream/roles.py` adds the design.
 
 **Not verified**: any real lab experiment; the report section in a browser
 other than the one check made while building; R's limma on unequal groups.
+
+### D62 — One export style; a figure is exported by drawing it again; every file says where it came from
+**2026-10-01.** The maintainer asked for figures that are easy to export for
+slides, customisable, and friendlier options. Before this, each chart had an
+SVG and a PNG button that copied the chart as it stood on screen (page
+colours, page size, no legend, no cut-offs), and the static `volcano_*.svg`
+used CSS variables, which PowerPoint does not read.
+
+1. **One style, the same keys everywhere.** `size`, `width`, `height`,
+   `unit`, `font_pt`, `font_family`, `line_scale`, `point_scale`, `palette`,
+   `up`, `down`, `neutral`, `background`, `title`, `subtitle`, `legend`,
+   `note`, `labels`, `label_count`, `png_scale`, `png_dpi`, `zip_format`,
+   `figures`. The report (`report.js` STYLE_DEFAULTS), the saved style file
+   (`export_style.json`), `config.yaml` → `analysis.export`, and
+   `ionomos export` (`charts.py` STYLE_DEFAULTS) all read them. A test
+   compares the two copies of the defaults, sizes, palettes, ranges.
+2. **A figure is drawn again, not restyled.** While a figure is exported, a
+   module variable (`EX`) makes `css()` answer from the style's colours and
+   `widthOf()` / `heightOf()` from its size; the chart's own renderer runs
+   and hands its SVG to `svgTools()`, which is where the export copies it.
+   The renderers changed by one call each (`H = heightOf(300)`), so a section
+   another change adds is exported too: its chart calls `svgTools`, and the
+   export draws the report (`redraw()`) again to capture it. The page is then
+   drawn back as it was. The heatmap is a canvas on screen and has an SVG
+   twin for export.
+3. **Sizes.** Slides are 1280 × 720 px (16:9) and 960 × 720 px (4:3), which
+   is a PowerPoint slide at 96 px per inch; half a slide is 640 × 600; journal
+   columns are 85 mm and 180 mm. Text size is in points in the finished
+   figure: the chart is drawn in units where the axis text is 12, and the
+   SVG's `viewBox` scales it (14 pt → × 14 / 9). A size named without a text
+   size takes 14 pt (slides), 12 pt (half) or 7 pt (journal). A chart that
+   can take any height (volcano, PCA, the bar and line charts) fills the size
+   exactly. A chart with a shape of its own (heatmap, correlation, UpSet,
+   enrichment bars) is never stretched: the figure is made smaller, and when
+   it had to be scaled down to fit, the dialog and the README say by how much.
+4. **SVG for editing.** Text is `<text>`, colours are attribute values, the
+   font is a family name with fallbacks (`'Segoe UI', Arial, Helvetica,
+   sans-serif`), no `<style>`, `class`, `foreignObject` or CSS variable. A
+   font name may hold letters, digits, spaces, `-` and `_` only.
+5. **Every figure can be traced back.** The cut-offs in force, the hit
+   filters and the test are written under the plot options on the page
+   (`#viewnote`), under each figure (the "cut-offs" line, which can be
+   switched off), and always inside the file: SVG `<title>` and `<desc>`; PNG
+   an `iTXt` `Description` chunk, and a `pHYs` chunk so that 300 dpi means
+   300 dpi in a layout program. A figure that rests on the report's saved
+   cut-offs (heatmap, over-representation) says so. A low-confidence or
+   fold-change-only comparison says so in its figure whatever is switched off.
+6. **Palettes.** The default, Okabe and Ito's colour-blind-safe set, greyscale
+   (every colour, the inks too; the heatmap becomes one light-to-dark ramp),
+   and custom up / down / neutral. Backgrounds: white, dark, transparent
+   (dark text, for a light slide).
+7. **PNG is the browser's job.** The report draws the SVG onto a canvas.
+   `ionomos export` writes SVG only: the standard library cannot rasterise,
+   and no dependency was added. `--format png` explains this and exits 2.
+8. **The zip is written by hand**: a store-only writer (local headers, data,
+   central directory, CRC-32), about 40 lines, no library. The JS tests read
+   it back with their own reader and CRC.
+9. **The style lives in the browser** (`localStorage`, `ionomos.export.v1`,
+   like the highlight groups) and starts from the lab's `analysis.export`
+   (sent with each report as `exportDefaults`). Nothing is stored until
+   something is changed. **A loaded style file is untrusted**: at most 20 kB,
+   must be JSON with `"ionomos_export_style": 1`, and each key is taken only
+   if its value passes its check (a list of allowed words, a number range, a
+   `#rrggbb` colour, a font-name pattern); the rest is named in a text
+   message and dropped. The same checks run on what storage and the report's
+   payload hold. In `config.yaml` an unknown key or a bad value is an error,
+   as for every other analysis setting.
+10. **File names** go through one function (`safeName` / `charts.safe_name`):
+    ASCII letters, digits and `. _ + -`, no `..`, no dot or underscore at
+    either end, not a Windows device name, at most 120 characters. A name with
+    a line break cannot add a line to the README or to a `<desc>`: control
+    characters are replaced by spaces. Text cells in CSV exports that start
+    with `=`, `+`, `-` or `@` get a leading apostrophe.
+11. **`ionomos export` reads the report, and writes only what is its own.**
+    The figures are drawn from the JSON inside `results/report.html`, so they
+    show the report's numbers and nothing is analysed again. Style order: the
+    defaults, the style the report was made with, the lab's `analysis.export`
+    now, `--style FILE`, the flags. A file of the same name is replaced only
+    when Ionomos wrote it (its figures and README say so inside); otherwise
+    the new file gets `_2`. Nothing is deleted.
+12. **The watcher writes no extra figures unless asked**
+    (`analysis.export.figures`, default `[]`). `volcano_<comparison>.svg` is
+    unchanged: it follows the browser's light / dark setting and is what the
+    fallback page embeds.
+13. **Options.** Labels became plain words with units; every control has a
+    tooltip; the cut-off bar says what a log2 fold change is in fold; **Reset**
+    became **Reset cut-offs**, and **Reset to lab defaults** puts the
+    cut-offs, plot options and hit filters back. Plot options and hit filters
+    are still not kept between reports: a hit filter left on would change the
+    hit counts of the next report without a word.
+
+**Verified**: 86 JS tests (jsdom) and the Python suite. In Chromium (the
+desktop app's browser pane, a report from `ionomos demo` served from a local
+web server): the dialog and its preview in light and dark page themes; the
+volcano at 16:9, half a slide with the colour-blind palette on a dark
+background, and the heatmap at one journal column in greyscale on a
+transparent background; "Export for slides" (25 figures as SVG and PNG, the
+tables, the style, the README; every CRC right; PNG at 2560 × 1440 with the
+`pHYs` and `iTXt` chunks; the PNGs shown back in the page); the four
+`ionomos export` SVG files opened as pictures. The zip a jsdom run wrote was
+also listed and tested by Python's `zipfile` and by `unzip -t`.
+
+**Not verified**: the SVG files in PowerPoint, Illustrator or Inkscape (text
+editable, fonts, `viewBox` scaling, mm sizes); Firefox, Safari, Edge; a real
+clipboard write (the test and the browser check replaced
+`navigator.clipboard.write`); a report opened from `file://` on Windows;
+Windows at all. Text widths are estimated (0.56 × the text size per
+character), so a legend can wrap earlier than needed, and a long title is cut
+with "…".
+
+**For the maintainer to confirm**: the default size and text (16:9, 14 pt,
+Arial); that the SVG / PNG buttons now use the export style instead of the
+on-screen size; `figures: []` as the default; the apostrophe before formula
+cells in CSV exports; SVG and PNG both in the zip by default; the lab's
+current `analysis.export` winning over the style a report was made with in
+`ionomos export`.

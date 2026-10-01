@@ -48,7 +48,11 @@ missingness, p-value shape) and adds views beyond the volcano:
 - comparison against comparison
 - rank-based pathways
 - a power curve
-- search by gene lists, wildcards or pathway terms The app's Analysis tab re-runs any experiment with
+- search by gene lists, wildcards or pathway terms
+- figures for slides: every chart as SVG or PNG in one export style, or all of them in one .zip
+  (`ionomos export` writes the main ones without a browser)
+
+The app's Analysis tab re-runs any experiment with
 other conditions, samples or comparisons. See
 [docs/ROADMAP.md](docs/ROADMAP.md), and [docs/DEPLOY_WINDOWS.md](docs/DEPLOY_WINDOWS.md)
 to put it on the PC.

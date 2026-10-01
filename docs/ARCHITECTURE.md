@@ -364,13 +364,29 @@ fragpipe/ ─▶ method prep ─▶ QuantMatrix ─▶ fpa.process ────�
              isodtb.py      features ×     samples chosen / renamed      one ~0+condition  PCA, correlation,   report.html (JSON +
              tmt.py         samples, log2  contaminants, % filters       model, eBayes,    missingness, CV,    report.js), TSVs,
              quant.py       + condition    median / GN normalisation     CIs, BH           heatmap, ORA        volcano_*.svg,
-                                           Perseus / MinProb / … impute  add_rejections                        fragpipe-analyst/
+                                           Perseus / MinProb / … impute  add_rejections                        fragpipe-analyst/,
+                                                                                                               figures/ (if asked)
                                                                                    insights (D35):
                                                                                    scorecard, batch,
                                                                                    missingness, π0,
                                                                                    on/off, power;
                                                                                    rank-based sets
 ```
+
+**Figures for slides** (D62). One export style (size, text, colours, title,
+legend; `charts.STYLE_DEFAULTS`, the same keys in `report.js`) is used in
+three places:
+
+| Where | What | How |
+|---|---|---|
+| The report | **SVG** / **PNG** / **Export…** on every chart, **Export for slides** (a .zip of every figure, the tables as CSV, the style, a README) | `report.js` "figure export": the chart's part of the report is drawn again with the style answering `css()`, `widthOf()` and `heightOf()`; `svgTools()` hands the SVG over; a title, a legend and the cut-offs are put around it. PNG through a canvas; the zip by a store-only writer. The style is kept in `localStorage` and starts from the payload's `exportDefaults` |
+| `ionomos export <folder>` | volcano, PCA, heatmap, correlation as SVG in `results/figures/` + `README.txt` | `downstream/slides.py` reads the JSON inside `report.html` and `charts.figures()` draws from it: no browser, nothing analysed again. SVG only |
+| After each analysis | the same files, when `analysis.export.figures` lists any (default: none) | the `figures` stage of `downstream.analyze`, isolated like the others; listed in `analysis.json` → `figures` and in the report's Files |
+
+The exported SVG has no CSS: text is `<text>`, colours are written out, and
+`<desc>` holds the experiment, comparison, cut-offs and test. `volcano_*.svg`
+(below) is older and different: it follows the browser's light / dark setting
+through CSS and is what the fallback page embeds.
 
 The insights stage writes `sample_qc.tsv`, `presence_absence.tsv` and
 `gene_set_ranks.tsv`, adds a `quality` block to `analysis.json`, and feeds

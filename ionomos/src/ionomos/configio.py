@@ -49,6 +49,8 @@ def defaults(root: str | None = None, users_root: str | None = None) -> dict:
                      "filter_condition_pct": 50, "normalize": "median", "imputation": "auto", "min_valid": 2,
                      "enrichment": True, "enrichment_libraries": ["Hallmark", "GO Biological Process", "Reactome"],
                      "enrichment_gmt": "", "top_labels": 15,
+                     "export": {"size": "slide169", "font_pt": 14, "font_family": "Arial", "palette": "default",
+                                "background": "light", "figures": []},
                      "control_keywords": ["DMSO", "vehicle", "veh", "ctrl", "control", "mock", "untreated", "NT",
                                           "WT", "EV", "scr", "scramble", "siNT", "PBS"],
                      "competition_keywords": ["comp", "competition", "competitor", "competed", "compete",
@@ -250,6 +252,15 @@ def dump_config(d: dict) -> str:
       "cell_type, disease, cleavage_agent (default: from the workflow)")
     for k, v in meta.items():
         a(f"    {_y(str(k))}: {_y(str(v))}")
+    ex = an.get("export") if isinstance(an.get("export"), dict) else {}
+    a("  export:   # exported figures: the lab's style. The report's Export starts from it, `ionomos export` uses it")
+    for k, dflt, what in _EXPORT_KEYS:
+        if k == "font_pt":  # not set: the text size that suits the size (7 pt for a journal column)
+            dflt = _EXPORT_FONT.get(str(ex.get("size", "slide169")), dflt)
+        a(f"    {k}: {_y(ex.get(k, dflt))}   # {what}")
+    for k, v in ex.items():  # the rest of the style (width, height, unit, up, down, neutral, line_scale, title ...)
+        if k not in [x[0] for x in _EXPORT_KEYS]:
+            a(f"    {_y(str(k))}: {_y(v)}")
     a("")
     q = d.get("qc_trend") if isinstance(d.get("qc_trend"), dict) else {}
     a("qc_trend:   # instrument QC: runs of the lab's QC standard (HeLa, K562 ...) trended in logs/qc_trend.html")
@@ -330,6 +341,19 @@ def dump_config(d: dict) -> str:
     a("")
     return "\n".join(L)
 
+
+# analysis.export keys the writer always shows, with their default and what they take (downstream/charts.py)
+_EXPORT_KEYS = (
+    ("size", "slide169", "slide169 (16:9, 1280 x 720 px) | slide43 | half | col1 (85 mm) | col2 (180 mm) | custom "
+                         "(+ width, height, unit: px | mm)"),
+    ("font_pt", 14, "text size in points in the finished figure (14 suits a slide, 7 a journal column)"),
+    ("font_family", "Arial", "the font's name; it must be installed where the figure is opened"),
+    ("palette", "default", "default | colorblind | grey | custom (+ up, down, neutral: \"#rrggbb\")"),
+    ("background", "light", "light | dark | transparent"),
+    ("figures", [], "static SVG written to results/figures after each analysis: any of volcano, pca, heatmap, "
+                    "correlation ([] = none)"),
+)
+_EXPORT_FONT = {"slide169": 14, "slide43": 14, "half": 12, "col1": 7, "col2": 7}  # charts.SIZES (a test compares)
 
 BACKUP_DIR = "config-backups"
 

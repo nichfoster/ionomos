@@ -22,7 +22,7 @@ section, in page order:
 | File | Section id | What it covers |
 |---|---|---|
 | `getting_started.md` | `start` | naming a folder and its raw files, the inbox, the review window, where results go, DONE / FAILED / REJECTED notes, pop-ups, analysing a table anywhere |
-| `reading.md` | `report` | the report, section by section and chart by chart (`report.*`), and each QC tab (`qc.<tab>`, the keys of `QC_TABS` in report.js) |
+| `reading.md` | `report` | the report, section by section and chart by chart (`report.*`, incl. the plot options and figure export), and each QC tab (`qc.<tab>`, the keys of `QC_TABS` in report.js) |
 | `glossary.md` | `glossary` | the words, in plain language (`glossary.*`) |
 | `troubleshooting.md` | `trouble` | attention kinds (`attention.<kind>`), intake rejections (`intake.<kind>`), held searches (`search.hold-*`), failed searches, every doctor issue code (`issue.<CODE>`) |
 | `safety.md` | `safety` | what Ionomos will never do to your data |
