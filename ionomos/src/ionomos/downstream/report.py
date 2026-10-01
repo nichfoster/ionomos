@@ -16,6 +16,8 @@ The page carries its data as JSON and draws everything in the browser
     Heatmap        significant features, row-centred, clustered
     Enrichment     over-represented gene sets among the hits, and a rank-based test on every protein
     Dose-response  (a titration) CurveCurator's curves: a table by class, each curve over its points, potency vs effect
+    Liganded sites (isoDTB) per compound the liganded fraction and a ratio rank plot; a site x compound table of
+                   competition ratios with the call, selectivity and, with a site annotation, known / new
     QC             sample scorecard, PCA (with what explains each PC), correlation, missing values, missingness
                    against intensity, distributions, CV, mean-variance, abundance rank, identifications,
                    imputation, power (minimum detectable fold change against replicates)
@@ -64,7 +66,7 @@ def _level_word(m: QuantMatrix | None) -> tuple[str, str]:
 
 def payload(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: list[DiffResult], notes: list[str],
             files: list[str], s: Settings, qcd: dict, enrichment: list[dict], ranked: list[dict] | None = None,
-            insight: dict | None = None, dose: dict | None = None) -> dict:
+            insight: dict | None = None, dose: dict | None = None, cys: dict | None = None) -> dict:
     pm = p.m if p else m
     title, word = _level_word(pm)
     d: dict = {
@@ -83,6 +85,7 @@ def payload(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: li
         "imputationLabel": fpa.IMPUTATION_LABELS.get(p.imputation, "") if p else "",
         "qc": {}, "enr": [], "enrNote": "", "gsea": [], "evidence": "", "rep": [],
         "dose": dose or {"ran": False, "found": False, "reason": "No dose-response curves were fitted."},
+        "cys": cys or {"ran": False, "reason": ""},
         "help": _help_payload(ctx.get("issues")),
     }
     if pm is None:
@@ -349,6 +352,16 @@ def _dose_methods(dose: dict) -> str:
             "Jacobian; q-values are Benjamini–Hochberg on the curve p-values.")
 
 
+def _cys_methods(cys: dict) -> str:
+    ann = cys.get("annotation") or {}
+    return (f"A cysteine was called liganded by a compound when its competition ratio reached {escape(cys['rule'])}, "
+            "on the measured site ratios (no normalisation or imputation); sites reaching it in fewer replicates "
+            "were called inconsistent, and sites measured in fewer replicates than that were not assessed. A site "
+            "was called selective when one compound liganded it and every other compound was measured as not "
+            "liganding it." + (f" Sites were compared with the lab's site annotation {escape(ann['file'])} "
+                               f"({ann['sites_in_file']:,} sites)." if ann else ""))
+
+
 def _pipeline(p: fpa.Processed | None, diffs: list[DiffResult]) -> str:
     if p is None:
         return ""
@@ -431,18 +444,19 @@ def _sdrf_note(info: dict) -> str:
 def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: list[DiffResult], notes: list[str],
            files: list[str], s: Settings | None = None, qcd: dict | None = None,
            enrichment: list[dict] | None = None, ranked: list[dict] | None = None, insight: dict | None = None,
-           dose: dict | None = None) -> str:
+           dose: dict | None = None, cys: dict | None = None) -> str:
     s = s or Settings()
     enrichment = enrichment or []
     ranked = [b for b in ranked or [] if b["terms"]]
     title = ctx.get("experiment") or "Experiment"
     meta = " · ".join(x for x in (ctx.get("user"), ctx.get("method"), ctx.get("date"),
                                   f"generated {datetime.now():%Y-%m-%d %H:%M}", f"Ionomos {ctx.get('version', '')}") if x)
-    data = json.dumps(payload(ctx, m, p, diffs, notes, files, s, qcd or {}, enrichment, ranked, insight, dose),
+    data = json.dumps(payload(ctx, m, p, diffs, notes, files, s, qcd or {}, enrichment, ranked, insight, dose, cys),
                       separators=(",", ":"), allow_nan=False).replace("</", "<\\/").replace("<!--", "<\\u0021--")
     pm = p.m if p else m
     ratio = pm is not None and pm.kind == "ratio"
     dose_shown = bool(dose and (dose.get("ran") or dose.get("found")))
+    cys_shown = bool(cys and cys.get("ran"))
     b = [f"<main><div class='top'><div><h1>{escape(title)}</h1><div class='meta'>{escape(meta)}</div></div>"
          "<div><button id='theme' title='Light / dark'>◐</button> <button id='share' title='Copy a link to this view "
          "(comparison, cut-offs, search)'>Link</button> <button onclick='window.print()'>Print</button></div></div>",
@@ -451,6 +465,7 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
          + ("" if ratio else "<a href='#onoff'>Only in one</a>")
          + "<a href='#heat'>Heatmap</a><a href='#enrichment'>Enrichment</a>"
          + "<a href='#dose' id='navdose'" + ("" if dose_shown else " hidden") + ">Dose-response</a>"
+         + "<a href='#cys' id='navcys'" + ("" if cys_shown else " hidden") + ">Liganded sites</a>"
          + "<a href='#quality'>Quality control</a>"
          "<a href='#methods'>Methods</a><a href='#files'>Files</a><a href='#help'>Help</a></nav>",
          "<noscript><div class='notes'>This report draws its charts with JavaScript. The volcano_*.svg and *.tsv "
@@ -530,6 +545,11 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
              "A curve per feature across the doses (CurveCurator's 4-parameter log-logistic fit, ratio to the "
              "control). Only curves classed up or down have a potency worth reading; click a row or a point to "
              "draw its curve over the measured values.</p><div id='dosebody'></div></section>")
+    b.append("<section id='cys'" + ("" if cys_shown else " hidden") + "><h2>Liganded sites</h2><p class='sub'>"
+             "Which cysteines each compound engages: a site is liganded when its competition ratio R reaches the "
+             "threshold in enough replicates. This is the chemoproteomics convention, not a p-value; the volcano "
+             "above tests whether a ratio differs from 1. Click a row to see the site's replicates.</p>"
+             "<div id='cysbody'></div></section>")
     b.append("<section id='quality'><h2>Quality control</h2><div id='qc'></div></section>")
     method = ctx.get("method", "")
     text = methods_text(pm, p, diffs, s, method, ctx.get("fragpipe", ""), enrichment, ranked, ctx.get("engine"),
@@ -537,6 +557,8 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
     b.append(f"<section id='methods'><h2>Methods</h2><p class='methods'>{text}</p>")
     if dose and dose.get("ran"):
         b.append(f"<p class='methods'>{_dose_methods(dose)}</p>")
+    if cys_shown:
+        b.append(f"<p class='methods'>{_cys_methods(cys)}</p>")
     b.append(_provenance_table(ctx.get("engine") or {}))
     b.append("<h3>Settings used</h3>" + _settings_table(s, p, ctx.get("model")))
     if any(f.startswith("fragpipe-analyst/") for f in files):

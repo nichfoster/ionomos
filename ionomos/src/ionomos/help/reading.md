@@ -255,6 +255,41 @@ A curve fitted on few points or with a wide pEC50 interval is a lead to
 confirm, not a measured potency. The numbers are also in
 `results/dose_response.tsv`.
 
+## Liganded sites {#report.cys}
+
+Shown for isoDTB (cysteine site ratio) experiments. Each condition is a
+compound competed against the probe, and each site has a
+[competition ratio](#glossary.competition-ratio) R per replicate. A site is
+[liganded](#glossary.liganded) when R reaches the threshold in enough
+replicates; the rule in use (by default R ≥ 4 in at least 2 replicates) is
+written above the table.
+
+- **Tiles**: per compound, how many sites are liganded out of those measured
+  in enough replicates (the liganded fraction). With several compounds, also
+  how many sites only one of them hits.
+- **Rank plot**: every measured site of the chosen compound, sorted by R. The
+  dashed line is the threshold. Sites above it in colour are liganded; amber
+  ones reach it in too few replicates (*inconsistent*).
+- **Table**: one row per site, one R column per compound, shaded by how
+  strongly the site is competed. *Selective* means one compound liganded the
+  site and every other compound was measured as not liganding it; *shared*
+  means several did; *unresolved* means the other compounds weren't measured
+  well enough to say. Use **Show** to switch between liganded, inconsistent,
+  selective and all sites. Click a row to see the site's replicates.
+- **Proteins**: proteins with a liganded cysteine, and how many of their
+  cysteines are. When most of a protein's sites are liganded, suspect a
+  change in the amount of the protein, not one site.
+- With a site annotation (a table downloaded from CysDB, set as
+  `site_annotation` under `analysis:`), each site is marked *known liganded*,
+  *known hyperreactive*, *seen before* or *new*.
+
+These calls are a convention, not a statistical test: the volcano plot tests
+whether a ratio differs from 1. If the ratio is the other way round in your
+experiment (the treated sample carries the heavy tag), set
+`liganded_direction: low`. Change the threshold with `liganded_ratio` and
+`liganded_min_replicates`. Everything is also in `results/cysteine_sites.tsv`
+and `results/cysteine_proteins.tsv`.
+
 ## Quality control {#report.quality}
 
 Tabs of checks on the samples and the data. Start with the **Sample

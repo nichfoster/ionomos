@@ -1198,3 +1198,41 @@ through `runner.py` as for DIA-NN and MaxQuant, D39 / D50).
 
 Tested end to end with stand-ins (`ionomos fake-sage`, `fake-rawparser`);
 the formats come from Sage's source (0.14 / 0.15), not yet from a real run.
+
+
+### D52 — Liganded cysteines are called by the field's rule, with the lab's thresholds as settings
+**2026-09-30.** Chemoproteomics is the niche Ionomos is for (ROADMAP
+positioning), and until now an isoDTB report only tested each site's ratio
+against 0. That answers "is the ratio different from 1", not the question
+the field asks: which cysteines does the compound engage. `downstream/cys.py`
+adds the convention used in isoTOP-ABPP / isoDTB work.
+
+1. **The rule is a threshold on replicates, not a test.** A site is liganded
+   when its competition ratio R reaches `liganded_ratio` (4) in at least
+   `liganded_min_replicates` (2) replicates. Sites reaching it in fewer are
+   *inconsistent*, and sites measured in fewer replicates than the rule
+   needs are not assessed. The moderated test stays in the Differential
+   section; the two are shown side by side and the report says they answer
+   different questions.
+2. **Built before the lab confirmed its thresholds**, at the maintainer's
+   request, so every part of the rule is a setting, lab-wide or per
+   experiment. The defaults are the common R ≥ 4 in 2 of 3.
+3. **The ratio's direction is a setting with a check.** FragPipe gives
+   log2 heavy / light. Which tag the treated sample carries is the lab's
+   choice, so `liganded_direction` is `high` (R = heavy / light) or `low`.
+   When far more sites would be liganded the other way round, the doctor
+   warns (`LIGANDED_DIRECTION`) rather than switching by itself.
+4. **Measured ratios only.** No normalisation and no imputation: a liganded
+   call must never rest on a made-up value.
+5. **Selectivity needs evidence on both sides.** A site is *selective* only
+   when every other compound was measured as not liganding it; if they
+   weren't measured well enough it is *unresolved*.
+6. **CysDB is not bundled.** The lab downloads the table; Ionomos reads any
+   site table with a recognisable key (`site_annotation`), so it also works
+   with a lab's own list. The column layout was taken from the CysDB paper
+   (identifier `UniProtKBID_C#`; identified / hyperreactive / ligandable),
+   not from a real download.
+7. **Left out: the protein-abundance correction** (MSstatsPTM). It needs a
+   matching unenriched proteome per condition, and where that comes from is
+   a question for the lab. The per-protein view ("most of this protein's
+   cysteines are liganded") is the warning available without it.

@@ -410,6 +410,29 @@ number then becomes a blocking factor in the model, so each comparison is
 made within a batch ([How to re-run](#faq.rerun)). Next time, randomise the
 preparation and run order.
 
+## Liganded sites: the ratio may be the other way round {#issue.LIGANDED_DIRECTION}
+
+Far more sites would count as [liganded](#glossary.liganded) if the
+[competition ratio](#glossary.competition-ratio) were read the other way
+round. Ionomos reads R as heavy / light, which is right when the
+compound-treated sample carries the light tag. Check which sample got which
+tag. If the treated one is heavy, add `liganded_direction: low` under
+`analysis:` in the experiment's `experiment.yaml` (or in the lab's settings,
+if the lab always labels that way) and re-run the analysis
+([How to re-run](#faq.rerun)). If the tags are as assumed, the compound may
+make many sites more reactive, or the two samples were mixed unevenly; the
+[Liganded sites](#report.cys) rank plot shows which.
+
+## The site annotation could not be used {#issue.SITE_ANNOTATION}
+
+`site_annotation` names a table of known sites (for example a CysDB
+download) that wasn't found, or that has no readable site column. Put the
+file in the experiment folder, or give its full path. It needs one column of
+site keys like `P04406_C152`, or a protein accession column plus a residue
+number column; yes / no columns such as `ligandable` and `hyperreactive`
+become the known / new marks. The liganded calls themselves don't depend on
+it.
+
 ## Dose-response: the doses need a look {#issue.DOSES}
 
 Ionomos found what looks like a titration but couldn't read every dose, so

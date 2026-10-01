@@ -384,6 +384,10 @@ analysis:                   # results/report.html for this experiment (lab defau
     Cmpd_high: 1 uM
     Cmpd_top: 10 uM
   dose_min_doses: 4         # doses above 0 a compound needs before curves are fitted (default 4)
+  liganded_ratio: 4         # isoDTB: the competition ratio R that calls a cysteine liganded (D52) ...
+  liganded_min_replicates: 2   # ... in at least this many replicates
+  liganded_direction: high  # high: R = heavy / light (treated sample = light tag) | low: the other way round
+  site_annotation: cysdb.csv   # a downloaded site table (CysDB) in this folder: marks known / new sites
 
 notes: "24 h treatment, 1 µM"   # copied into ionomos.json for provenance
 ```

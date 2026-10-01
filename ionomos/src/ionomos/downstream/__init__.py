@@ -18,6 +18,8 @@ Layout it reads and writes (inside the experiment folder):
       presence_absence.tsv          features measured in one group and never in the other
       gene_set_ranks.tsv            rank-based gene-set test on every protein (enrichment on)
       dose_response.tsv             a titration (4+ doses): a fitted curve per feature, pEC50, F, p, class
+      cysteine_sites.tsv            isoDTB: per site and compound the competition ratio, liganded call, selectivity
+      cysteine_proteins.tsv         isoDTB: proteins with a liganded cysteine, how many of their sites are
       sdrf.tsv                      SDRF-Proteomics sample metadata: a row per raw file (and label), for PRIDE
       analysis.json                what was done, with which settings (reproducibility), + "quality"
 
@@ -32,6 +34,7 @@ Pipeline stages, each a module:
                   design.py + deqms.py         (blocks / covariates, the moderated F, DEqMS; D42, D43)
     QC, insights  qc.py + insights.py + enrich.py  (PCA, scorecard, batch, missingness, on/off, gene sets)
     dose-response doseresponse.py              (CurveCurator's curves, when the conditions are doses)
+    cysteines     cys.py                       (site ratio data: liganded calls, selectivity, a site annotation)
     metadata      sdrf.py                      (SDRF-Proteomics, from the manifest, workflow and FASTA)
     presentation  charts.py + report.py        (SVG + HTML)
 
@@ -48,7 +51,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from ionomos.downstream import analysis, anytable, charts, engines, isodtb, plex, quant, report, sdrfdesign, tmt
+from ionomos.downstream import analysis, anytable, charts, cys, engines, isodtb, plex, quant, report, sdrfdesign, tmt
 from ionomos.downstream.tables import read_header, write_tsv
 
 log = logging.getLogger("ionomos.downstream")
@@ -373,6 +376,8 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     comps: list = []
     dose_info: dict = {"ran": False, "reason": "no processed quantities to fit"}
     dose_view: dict | None = None
+    cys_info: dict = {"ran": False, "reason": "not site ratio data (isoDTB)"}
+    cys_view: dict | None = None
     model = analysis.Model()
     ftest = None
 
@@ -534,6 +539,14 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
             else:
                 dose_info, dose_view, f.dose_problems, dnotes = dose
                 notes += dnotes
+            if cys.applies(pm):
+                say("liganded cysteines")
+                called = stage("cysteines", _cysteines, processed, settings, results, out, dest)
+                if called is None:
+                    cys_info = {"ran": False, "reason": "the liganded-site step failed (see analysis_error.txt)"}
+                else:
+                    cys_info, cys_view, f.cys_problems, cnotes2 = called
+                    notes += cnotes2
         if diffs and settings.enrichment:
             say("enrichment (hits, and every protein ranked)")
             libs = stage("enrichment", _libraries, settings, enr_notes, dest) or {}
@@ -566,7 +579,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
            for p in out.files]
     out.report = results / "report.html"
     html = stage("report", report.render, ctx, m, processed, diffs, out.warnings, rel, settings, qcd, enrichment,
-                 ranked, insight, dose=dose_view)
+                 ranked, insight, dose=dose_view, cys=cys_view)
     if html is None:  # the fallback page: issues, notes and the volcano plots themselves
         out.issues = doctor.check(f)
         ctx["issues"] = [i.as_dict() for i in out.issues]
@@ -604,6 +617,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
                            for b in ranked],
         "quality": _quality_summary(insight),
         "dose_response": dose_info,
+        "cysteines": cys_info,
         "sdrf": sdrf_info,
         "design": _design_summary(m, settings),
         "tmt": tmt_info,
@@ -640,6 +654,33 @@ def _dose_response(p, settings, results: Path, out: Outcome, say) -> tuple[dict,
         table = f"{RESULTS}/dose_response.tsv"
     return (dr.summary(res, plan, table), dr.report_payload(res, plan), plan.problems,
             res.notes if res is not None else plan.notes)
+
+def _cysteines(p, settings, results: Path, out: Outcome, dest: Path) -> tuple[dict, dict, list, list[str]]:
+    """results/cysteine_sites.tsv and cysteine_proteins.tsv for site ratio data (cys.py). Returns (analysis.json
+    summary, the report's payload, problems for the doctor, notes)."""
+    if not settings.liganded:
+        off = "liganded-site calls are switched off (analysis.liganded)"
+        return cys.summary(None, off), cys.report_payload(None, off), [], []
+    problems: list[tuple[str, str]] = []
+    annotation = None
+    if settings.site_annotation:
+        path = cys.find_annotation(settings.site_annotation, dest)
+        if path is None:
+            problems.append(("warning", f"site annotation {settings.site_annotation!r} was not found in "
+                                        f"{dest.name}/ (give a file in the experiment folder, or a full path)"))
+        else:
+            try:
+                annotation = cys.load_annotation(path)
+            except cys.AnnotationError as exc:
+                problems.append(("warning", str(exc)))
+    res = cys.run(p, settings, annotation)
+    out.files.append(write_tsv(results / "cysteine_sites.tsv", cys.columns(res), cys.table_rows(res)))
+    prot = None
+    if res.proteins:
+        out.files.append(write_tsv(results / "cysteine_proteins.tsv", cys.protein_columns(res), cys.protein_rows(res)))
+        prot = f"{RESULTS}/cysteine_proteins.tsv"
+    return (cys.summary(res, table=f"{RESULTS}/cysteine_sites.tsv", proteins=prot), cys.report_payload(res),
+            problems + res.problems, res.notes)
 
 def _design_summary(m, settings) -> dict:
     """Where each sample's condition came from, highest first (D47): sample_conditions, an input SDRF, the

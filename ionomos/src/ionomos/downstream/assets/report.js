@@ -633,7 +633,7 @@
     ST.highlight = null;
     syncControls();
     renderSearchInfo();
-    renderVolcano(); renderTable(true); renderCompare(); safe(renderHeatmap, "#heatmap"); safe(doseOnSearch, "#dosebody");
+    renderVolcano(); renderTable(true); renderCompare(); safe(renderHeatmap, "#heatmap"); safe(doseOnSearch, "#dosebody"); safe(renderCys, "#cysbody");
     writeHash();
   }
   function setHighlight(set, name) {
@@ -641,7 +641,7 @@
     ST.highlightName = name || "";
     syncControls();
     renderSearchInfo();
-    renderVolcano(); renderTable(true); renderCompare(); safe(renderHeatmap, "#heatmap"); safe(doseOnSearch, "#dosebody");
+    renderVolcano(); renderTable(true); renderCompare(); safe(renderHeatmap, "#heatmap"); safe(doseOnSearch, "#dosebody"); safe(renderCys, "#cysbody");
   }
   function markedList() {
     const out = [];
@@ -1936,6 +1936,160 @@
     download("dose_response_" + (S.name || "curves") + ".csv", lines.join("\n") + "\n", "text/csv");
   }
 
+  // ------------------------------------------------------- liganded sites
+  // D.cys (cys.py report_payload): site ratio data (isoDTB). Per compound, columns over the sites: r = median log2
+  // competition ratio, n / over = replicates measured / at or over the threshold, cls = index into D.cys.classes.
+  // The calls are made in Python; the page only shows them.
+  const CS = { c: 0, show: "lig", q: "", sortKey: "r", sortDir: -1, page: 0, rows: "sites" };
+  const cysColor = (k) => css(k === 0 ? "--up" : k === 1 ? "--c3" : k === 2 ? "--ns" : "--c6");
+  const fmtR = (r) => (r == null ? "–" : +Math.pow(2, r).toPrecision(3) >= 100 ? Math.round(Math.pow(2, r)).toLocaleString() : String(+Math.pow(2, r).toPrecision(3)));
+  function cysCompound() { const X = D.cys; return X && X.ran && X.compounds && X.compounds.length ? X.compounds[Math.min(CS.c, X.compounds.length - 1)] : null; }
+  function cysRows() {
+    const X = D.cys, S = cysCompound(), q = CS.q.trim().toLowerCase(), out = [];
+    for (let k = 0; k < X.i.length; k++) {
+      if (CS.show === "lig" && S.cls[k] !== 0) continue;
+      if (CS.show === "inc" && S.cls[k] !== 1) continue;
+      if (CS.show === "any" && !X.nlig[k]) continue;
+      if (CS.show === "sel" && X.sel[k] !== 1) continue;
+      if (CS.show === "new" && !(X.nlig[k] && X.annotation && X.annotation.status[k] === "new")) continue;
+      if (CS.show === "all" && S.r[k] == null) continue;
+      if (q) {
+        const i = X.i[k], t = ((D.f.label[i] || "") + " " + (D.f.id[i] || "") + " " + (D.f.desc[i] || "")).toLowerCase();
+        if (!t.includes(q)) continue;
+      }
+      out.push(k);
+    }
+    const key = CS.sortKey, m = /^c(\d+)$/.exec(key);
+    const val = (k) => (m ? X.compounds[+m[1]].r[k] : key === "name" ? nameOf(X.i[k]).toLowerCase() : key === "cls" ? S.cls[k] : key === "over" ? S.over[k] :
+      key === "nlig" ? X.nlig[k] : key === "sel" ? (X.sel[k] || 9) : key === "status" ? X.annotation.status[k] : S.r[k]);
+    out.sort((a, b) => {
+      const x = val(a), y = val(b);
+      if (x == null || y == null) return x == null ? (y == null ? 0 : 1) : -1;
+      return (x > y ? 1 : x < y ? -1 : 0) * CS.sortDir;
+    });
+    return out;
+  }
+  function renderCys() {
+    const host = $("#cysbody");
+    if (!host) return;
+    const X = D.cys || {}, S = cysCompound();
+    if (X.ran) ["#cys", "#navcys"].forEach((s) => { const e = $(s); if (e) e.hidden = false; });
+    if (!S) { host.innerHTML = "<div class='empty'>" + esc(X.reason || "No liganded-site calls were made.") + "</div>"; return; }
+    CS.c = X.compounds.indexOf(S);
+    const many = X.compounds.length > 1, ann = X.annotation;
+    if ((CS.show === "sel" && !many) || (CS.show === "new" && !ann)) CS.show = "lig";
+    const pct = (c) => (c.fraction == null ? "–" : (100 * c.fraction).toFixed(1) + "%");
+    let h = "<div class='tiles'>" + X.compounds.map((c) => "<div class='tile'><div class='k'>" + esc(c.name) + "</div><div class='v'>" + fmtInt(c.counts.liganded) +
+      "</div><div class='d'>liganded of " + fmtInt(c.assessed) + " assessed (" + pct(c) + ")" + (c.counts.inconsistent ? " · " + fmtInt(c.counts.inconsistent) + " inconsistent" : "") +
+      (c.counts["too few"] ? " · " + fmtInt(c.counts["too few"]) + " with too few replicates" : "") + "</div></div>").join("");
+    if (many) h += "<div class='tile'><div class='k'>Selective sites</div><div class='v'>" + fmtInt(X.selectivity.selective) + "</div><div class='d'>one compound only · " +
+      fmtInt(X.selectivity.shared) + " shared · " + fmtInt(X.selectivity.unresolved) + " unresolved</div></div>";
+    if (ann) h += "<div class='tile'><div class='k'>New liganded sites</div><div class='v'>" + fmtInt(ann.liganded_new) + "</div><div class='d'>not in " + esc(ann.file) + " · " +
+      fmtInt(ann.liganded_known) + " in it</div></div>";
+    const opts = [["lig", "liganded by " + S.name], ["inc", "inconsistent in " + S.name]].concat(many ? [["any", "liganded by any compound"], ["sel", "selective"]] : [],
+      ann ? [["new", "liganded and new"]] : [], [["all", "every site measured in " + S.name]]);
+    h += "</div><div class='row'>" + (many ? "<label class='ctl'>Compound <select id='ccomp'>" + X.compounds.map((c, k) => "<option value='" + k + "'" + (k === CS.c ? " selected" : "") + ">" + esc(c.name) + "</option>").join("") + "</select></label>" : "") +
+      "<label class='ctl'>Show <select id='cshow'>" + opts.map((o) => "<option value='" + o[0] + "'" + (o[0] === CS.show ? " selected" : "") + ">" + esc(o[1]) + "</option>").join("") + "</select></label>" +
+      "<input type='search' id='cq' placeholder='Find a site' aria-label='Find a site' value='" + esc(CS.q) + "'>" +
+      "<span class='seg'><button id='csites'" + (CS.rows === "sites" ? " class='on'" : "") + ">Sites</button><button id='cprot'" + (CS.rows === "proteins" ? " class='on'" : "") + ">Proteins</button></span>" +
+      "<span class='muted'>liganded: " + esc(X.rule) + (S.minRep !== X.minRep ? " (" + esc(S.name) + ": " + S.minRep + " of " + S.reps + ")" : "") + " · every site: <a href='cysteine_sites.tsv'>cysteine_sites.tsv</a></span></div>" +
+      "<div class='card chart' id='cysrank'></div><div class='legend'>" + X.classes.map((c, k) => "<span><span class='sw' style='background:" + cysColor(k) + "'></span>" + esc(c) + "</span>").join("") + "</div><div id='cystable'></div>";
+    host.innerHTML = h;
+    const comp = $("#ccomp");
+    if (comp) comp.onchange = (e) => { CS.c = +e.target.value; CS.page = 0; renderCys(); };
+    $("#cshow").onchange = (e) => { CS.show = e.target.value; CS.page = 0; safe(renderCysTable, "#cystable"); };
+    $("#cq").oninput = (e) => { CS.q = e.target.value; CS.page = 0; safe(renderCysTable, "#cystable"); };
+    $("#csites").onclick = () => { CS.rows = "sites"; renderCys(); };
+    $("#cprot").onclick = () => { CS.rows = "proteins"; renderCys(); };
+    safe(renderCysRank, "#cysrank");
+    safe(renderCysTable, "#cystable");
+  }
+  /** Every measured site of the compound, ranked by its competition ratio, against the threshold. */
+  function renderCysRank() {
+    const X = D.cys, S = cysCompound(), host = $("#cysrank");
+    if (!S || !host) return;
+    const ks = [];
+    for (let k = 0; k < X.i.length; k++) if (S.r[k] != null) ks.push(k);
+    ks.sort((a, b) => S.r[b] - S.r[a]);
+    const W = widthOf(host, 900), H = 300, L = 56, R = 16, T = 16, B = 44;
+    const root = frame(host, W, H);
+    if (!ks.length) { text(root, W / 2, H / 2, "No site of " + S.name + " has a ratio", { "text-anchor": "middle" }); return; }
+    const thr = Math.log2(X.ratio);
+    let y0 = Math.min(S.r[ks[ks.length - 1]], -thr), y1 = Math.max(S.r[ks[0]], thr);
+    const py = (y1 - y0) * 0.06 || 0.5;
+    y0 -= py; y1 += py;
+    const n = ks.length, Xs = (v) => L + (n > 1 ? v / (n - 1) : 0.5) * (W - L - R), Y = (v) => T + (1 - (v - y0) / (y1 - y0)) * (H - T - B);
+    const g = svg("g", {}, root);
+    axes(g, (v) => Xs(v - 1), Y, niceTicks(1, n, 6).filter((v) => v >= 1 && v <= n), niceTicks(y0, y1, 6), L, R, T, B, W, H, "sites, ranked by competition ratio", "log2 R (" + (X.dir === "high" ? "heavy / light" : "light / heavy") + ")");
+    const muted = css("--muted"), mark = anyMark(), sel = css("--sel");
+    svg("line", { x1: L, x2: W - R, y1: Y(thr), y2: Y(thr), stroke: muted, "stroke-dasharray": "4 4" }, g);
+    text(g, W - R - 4, Y(thr) - 5, "R = " + X.ratio, { "text-anchor": "end" });
+    svg("line", { x1: L, x2: W - R, y1: Y(0), y2: Y(0), stroke: css("--axis") }, g);
+    ks.forEach((k, pos) => {
+      const hit = mark && matches(X.i[k]), lig = S.cls[k] === 0;
+      const c = svg("circle", { cx: Xs(pos), cy: Y(S.r[k]), r: lig ? 3.2 : 2.2, fill: cysColor(S.cls[k]), "fill-opacity": lig ? 0.9 : 0.55, stroke: hit ? sel : null, "stroke-width": hit ? 1.6 : null, "data-k": k, style: "cursor:pointer" }, g);
+      c.onmouseenter = (e) => showTip(e, "<b>" + esc(nameOf(X.i[k])) + "</b> · " + esc(X.classes[S.cls[k]]) + "<br>R " + fmtR(S.r[k]) + " · " + S.over[k] + " of " + S.n[k] + " replicates at R ≥ " + X.ratio);
+      c.onmouseleave = hideTip;
+      c.onclick = () => setFocus(X.i[k]);
+    });
+    svgTools(host, root, "liganded_rank_" + S.name);
+  }
+  function renderCysTable() {
+    const X = D.cys, S = cysCompound(), host = $("#cystable");
+    if (!S || !host) return;
+    if (CS.rows === "proteins") { renderCysProteins(host); return; }
+    const many = X.compounds.length > 1, ann = X.annotation, lim = 2 * Math.log2(X.ratio);
+    const cols = [{ k: "name", t: "Site" }].concat(X.compounds.map((c, j) => ({ k: "c" + j, t: "R " + c.name, n: 1, comp: j })),
+      [{ k: "over", t: "replicates ≥ R", n: 1 }, { k: "cls", t: "call" }], many ? [{ k: "nlig", t: "liganded by", n: 1 }, { k: "sel", t: "selectivity" }] : [],
+      ann ? [{ k: "status", t: "annotation" }] : [], [{ k: "desc", t: "Description" }]);
+    const rows = cysRows(), per = 50, pages = Math.max(1, Math.ceil(rows.length / per));
+    CS.page = Math.min(CS.page, pages - 1);
+    const mark = anyMark();
+    const sortKey = CS.sortKey === "r" ? "c" + CS.c : CS.sortKey;
+    let h = "<div class='tablewrap'><table><thead><tr>" + cols.map((c) => "<th data-k='" + c.k + "'" + (c.k === sortKey ? " data-dir='" + (CS.sortDir > 0 ? "asc" : "desc") + "'" : "") + ">" + esc(c.t) + "</th>").join("") + "</tr></thead><tbody>";
+    rows.slice(CS.page * per, CS.page * per + per).forEach((k) => {
+      const i = X.i[k], hit = mark && matches(i);
+      h += "<tr data-k='" + k + "'" + (i === ST.focus ? " class='focus'" : "") + (hit ? " style='font-weight:650'" : "") + ">" + cols.map((c) => {
+        if (c.comp != null) {
+          const P = X.compounds[c.comp], r = P.r[k];
+          return "<td class='n' title='" + esc(P.name + ": " + X.classes[P.cls[k]] + ", " + P.over[k] + " of " + P.n[k] + " replicates") + "'" +
+            (r == null ? "" : " style='background:" + seqColor(Math.max(0, r) / lim) + (P.cls[k] === 0 ? ";font-weight:650" : "") + "'") + ">" + fmtR(r) + "</td>";
+        }
+        if (c.k === "name") return "<td>" + esc(nameOf(i)) + "</td>";
+        if (c.k === "over") return "<td class='n'>" + S.over[k] + " / " + S.n[k] + "</td>";
+        if (c.k === "cls") return "<td><span class='dot' style='background:" + cysColor(S.cls[k]) + "'></span> " + esc(X.classes[S.cls[k]]) + "</td>";
+        if (c.k === "nlig") return "<td class='n'>" + X.nlig[k] + "</td>";
+        if (c.k === "sel") return "<td>" + esc(X.selNames[X.sel[k]]) + "</td>";
+        if (c.k === "status") return "<td>" + esc(ann.status[k]) + "</td>";
+        return "<td class='desc'>" + esc((D.f.desc[i] || "").slice(0, 120)) + "</td>";
+      }).join("") + "</tr>";
+    });
+    if (!rows.length) h += "<tr><td colspan='" + cols.length + "' class='muted'>No site matches. Try another choice under Show.</td></tr>";
+    host.innerHTML = h + "</tbody></table></div><div class='pager'>" + fmtInt(rows.length) + " sites · page " + (CS.page + 1) + " of " + pages + " <button id='cprev'>‹</button><button id='cnext'>›</button></div>";
+    $$("th", host).forEach((th) => (th.onclick = () => {
+      const k = th.dataset.k;
+      if (k === "desc") return;
+      if (sortKey === k) CS.sortDir *= -1; else { CS.sortKey = k; CS.sortDir = k === "name" || k === "cls" || k === "sel" || k === "status" ? 1 : -1; }
+      CS.page = 0; renderCysTable();
+    }));
+    $$("tbody tr[data-k]", host).forEach((tr) => (tr.onclick = () => setFocus(X.i[+tr.dataset.k])));
+    $("#cprev").onclick = () => { CS.page = Math.max(0, CS.page - 1); renderCysTable(); };
+    $("#cnext").onclick = () => { CS.page = Math.min(pages - 1, CS.page + 1); renderCysTable(); };
+  }
+  /** Proteins with a liganded cysteine: most of a protein's sites moving together hints at its amount, not a site. */
+  function renderCysProteins(host) {
+    const X = D.cys, q = CS.q.trim().toLowerCase();
+    const rows = (X.proteins || []).filter((e) => !q || (e.g + " " + e.p).toLowerCase().includes(q));
+    let h = "<div class='tablewrap'><table><thead><tr><th>Gene</th><th>Protein</th><th>sites</th>" + X.compounds.map((c) => "<th>" + esc(c.name) + " liganded / assessed</th>").join("") + "</tr></thead><tbody>";
+    rows.slice(0, 500).forEach((e, k) => {
+      h += "<tr data-k='" + k + "'><td>" + esc(e.g) + "</td><td>" + esc(String(e.p).slice(0, 40)) + "</td><td class='n'>" + e.s + "</td>" + e.per.map((v) => "<td class='n'>" + v[1] + " / " + v[0] +
+        (v[2] ? " <span class='badge imp' title='At least half of this protein&#39;s assessed cysteines are liganded: possibly the protein amount, not one site'>most sites</span>" : "") + "</td>").join("") + "</tr>";
+    });
+    if (!rows.length) h += "<tr><td colspan='" + (3 + X.compounds.length) + "' class='muted'>No protein has a liganded cysteine.</td></tr>";
+    host.innerHTML = h + "</tbody></table></div><div class='pager'>" + fmtInt(rows.length) + " proteins" + (rows.length > 500 ? " (first 500 shown)" : "") + " · click one to mark its sites</div>";
+    $$("tbody tr[data-k]", host).forEach((tr) => (tr.onclick = () => { const e = rows[+tr.dataset.k]; setHighlight(new Set(e.x), e.g + " sites"); }));
+  }
+
   // ----------------------------------------------------------------- help
   // Plain-language help from ionomos/help/*.md, rendered to safe HTML in Python (report.py _help_payload):
   // a "?" beside each section title, QC tab and issue opens its entry inline, and the Help section at the
@@ -1945,7 +2099,7 @@
   const HELP_AT = [["#differential > h2", "report.differential"], ["#differential > p.sub", "report.search"],
     ["#differential-body > .bar", "report.cutoffs"], ["#differential-body > h3", "report.phist"],
     ["#differential-body > .tablebar", "report.table"], ["#compare > h2", "report.compare"], ["#onoff > h2", "report.onoff"],
-    ["#heat > h2", "report.heatmap"], ["#enrichment > h2", "report.enrichment"], ["#dose > h2", "report.dose"], ["#quality > h2", "report.quality"],
+    ["#heat > h2", "report.heatmap"], ["#enrichment > h2", "report.enrichment"], ["#dose > h2", "report.dose"], ["#cys > h2", "report.cys"], ["#quality > h2", "report.quality"],
     ["#methods > h2", "report.methods"], ["#files > h2", "report.files"]];
   const HELP_H = { "Data source": "report.source", "Settings used": "report.methods", "Sample metadata": "report.sdrf",
     "Cross-check": "report.fpa", "Highlight groups": "report.groups", "Hits": "report.hitfilters" };
@@ -2094,7 +2248,7 @@
       $("#adj").onchange = (e) => { ST.adj = e.target.checked; renderDiff(); };
       $("#labels").oninput = (e) => { ST.labels = Math.max(0, parseInt(e.target.value, 10) || 0); renderVolcano(); };
       const box = $("#search");
-      box.oninput = () => { ST.search = box.value.trim(); ST.q = parseQuery(ST.search); ST.highlight = null; syncControls(); renderSearchInfo(); renderVolcano(); renderTable(true); suggest(); safe(doseOnSearch, "#dosebody"); writeHash(); };
+      box.oninput = () => { ST.search = box.value.trim(); ST.q = parseQuery(ST.search); ST.highlight = null; syncControls(); renderSearchInfo(); renderVolcano(); renderTable(true); suggest(); safe(doseOnSearch, "#dosebody"); safe(renderCys, "#cysbody"); writeHash(); };
       box.onkeydown = (e) => {
         if (e.key === "ArrowDown") { if (moveSug(1)) e.preventDefault(); }
         else if (e.key === "ArrowUp") { if (moveSug(-1)) e.preventDefault(); }
@@ -2147,6 +2301,7 @@
     safe(renderHeatmap, "#heatmap");
     safe(renderEnrichment, "#enrich");
     safe(renderDose, "#dosebody");
+    safe(renderCys, "#cysbody");
     safe(renderQC, "#qc");
     safe(renderHelp, "#helpbody");
     const theme = $("#theme");
@@ -2165,7 +2320,7 @@
   }
   function redraw() {
     if (D.comps.length) { safe(renderVolcano, "#volcano"); safe(renderPHist, "#phist"); safe(renderDetail, "#detail"); safe(renderCompare, "#comparebody"); }
-    safe(renderHeatmap, "#heatmap"); safe(renderEnrichment, "#enrich"); safe(renderDose, "#dosebody"); safe(renderQC, "#qc");
+    safe(renderHeatmap, "#heatmap"); safe(renderEnrichment, "#enrich"); safe(renderDose, "#dosebody"); safe(renderCys, "#cysbody"); safe(renderQC, "#qc");
   }
   let rt = null;
   window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(redraw, 150); });

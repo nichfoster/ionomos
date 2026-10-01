@@ -66,6 +66,23 @@ samples get the light and the heavy tag and are measured together; the
 heavy/light ratio of each cysteine site says how much a compound blocked it.
 Ionomos tests each site's log2 ratio against 0.
 
+## Competition ratio (R) {#glossary.competition-ratio}
+
+In a competitive isoDTB experiment the compound-treated sample and the
+control get different tags. For each cysteine, R is the control signal
+divided by the treated signal. R = 1 means the compound left the site alone;
+R = 4 means it blocked three quarters of the probe labelling (engagement
+1 − 1/R = 75%); R = 10 means 90%. Ionomos takes R as heavy / light unless
+`liganded_direction: low` says the tags are the other way round.
+
+## Liganded {#glossary.liganded}
+
+A cysteine counts as liganded by a compound when its
+[competition ratio](#glossary.competition-ratio) reaches a threshold in
+enough replicates: by default R ≥ 4 in at least 2. A site that reaches it in
+fewer replicates is *inconsistent*; one measured in too few replicates is
+not assessed. See [Liganded sites](#report.cys).
+
 ## LFQ {#glossary.lfq}
 
 Label-free quantification: each sample is its own run and is compared by its

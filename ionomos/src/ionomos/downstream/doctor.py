@@ -59,6 +59,7 @@ class Findings:
     insights: dict = field(default_factory=dict)          # insights.py: scorecard, pcs, missingness, phist, ...
     tmt: dict | None = None                               # plex.py: what IRS did (or why not) across TMT plexes
     dose_problems: list = field(default_factory=list)     # [(severity, message)] from doseresponse.plan_series
+    cys_problems: list = field(default_factory=list)      # [(severity, message)] from cys.run / the site annotation
     model: object = None                # analysis.Model: the design used, or why an asked-for one wasn't
 
 # the tables each method needs, and why they might be missing
@@ -371,6 +372,23 @@ def check(f: Findings) -> list[Issue]:
                    "A condition name holds two doses (a combination), or the vehicle isn't named DMSO / vehicle"],
                   ["List every condition's dose in experiment.yaml analysis.doses (DMSO: 0, Cmpd_A: 10 nM, ...) "
                    "and Run analysis"], {"message": msg}))
+
+    # ---- liganded cysteines (cys.py): a ratio that looks the other way round, an annotation that can't be used
+    for sev, msg in f.cys_problems:
+        if "the other way round" in msg:
+            add(Issue("LIGANDED_DIRECTION", sev, "Liganded sites: the ratio may be the other way round", msg,
+                      ["The compound-treated sample carries the heavy tag in this experiment, not the light one",
+                       "The compound makes many sites more reactive, or the two samples were mixed unevenly"],
+                      ["Check which sample got the heavy and which the light tag. If the treated one is heavy, set "
+                       "liganded_direction: low under analysis: in experiment.yaml (or for the whole lab in "
+                       "config.yaml) and Run analysis"], {"message": msg}))
+        else:
+            add(Issue("SITE_ANNOTATION", sev, "The site annotation could not be used", msg,
+                      ["The file named in analysis.site_annotation was moved or renamed",
+                       "The table has no column of site keys like P04406_C152"],
+                      ["Put the downloaded table (e.g. CysDB) in the experiment folder, or give its full path in "
+                       "analysis.site_annotation, and Run analysis", "The liganded calls themselves are not affected"],
+                      {"message": msg}))
 
     # ---- statistics and plots
     _result_checks(f, s, add)

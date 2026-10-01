@@ -161,11 +161,10 @@ small anonymised real experiment as a test fixture and public example data
     charge states.
   - Run-order drift, once acquisition times are recorded.
   - Protein complexes (CORUM, whose licence needs checking).
-  - For isoDTB:
-    - competition-ratio classes, once the lab confirms the ratio direction
-      and thresholds
-    - a CysDB overlay (liganded / hyperreactive / novel)
-    - site selectivity across compounds
+  - For isoDTB: → 2026-09-30, done as Phase 5C #3 (D52): liganded calls with
+    configurable thresholds, a site-annotation (CysDB) overlay, selectivity
+    across compounds. The lab still has to confirm the ratio direction and
+    thresholds.
 - `ionomos status` as a tiny local web page if people ask.
 - Auto-archive finished experiments to `D:\<user>\` after N days.
 - Optional: auto-pull from `C:\Proteomics_File_Sharing` (reversing D3) once
@@ -302,12 +301,14 @@ real data:
    - the recalibrated F statistic and relevance score
 
    Compound titrations are central to chemoproteomics.
-3. [ ] **Cysteine chemoproteomics:**
-   - liganded-site calls with configurable thresholds (R ≥ 4 in ≥ 2 of 3
+3. [ ] **Cysteine chemoproteomics** (2026-09-30, D52: `downstream/cys.py`; the abundance correction still to do):
+   - [x] liganded-site calls with configurable thresholds (R ≥ 4 in ≥ 2 of 3
      replicates)
-   - site changes corrected for protein abundance (MSstatsPTM formulas)
-   - a site × compound selectivity map and a liganded fraction per compound
-   - an optional CysDB annotation the user downloads (AGPL: not bundled)
+   - [ ] site changes corrected for protein abundance (MSstatsPTM formulas):
+     needs a matching unenriched proteome; the lab has to say where it
+     comes from
+   - [x] a site × compound selectivity map and a liganded fraction per compound
+   - [x] an optional CysDB annotation the user downloads (AGPL: not bundled)
 4. [x] **DEqMS** (2026-09-30, D43, #58; checked against DEqMS 1.30.0; limpa still to do) (variance tied to peptide count, which is now read). Later, a
    limpa-style detection-probability model, which would replace imputation
    for DIA and probably wants optional numpy.
@@ -485,7 +486,11 @@ Collected from the other docs; resolve before/during Phase 1.
       in use (`V` vehicle, `T` treated …)? Set `naming.condition_codes` accordingly (D34).
 - [ ] D35 warnings: are the sample-outlier / batch / imputation-mismatch thresholds right on real experiments?
       Should an outlier sample pop up (input) rather than stay a warning?
-- [ ] isoDTB: which ratio direction and threshold call a cysteine "liganded" (e.g. R ≥ 4)? Then add ratio classes.
+- [ ] isoDTB: which ratio direction and threshold call a cysteine "liganded"? Built with defaults (D52: R ≥ 4 as
+      heavy / light in 2 replicates); set `liganded_direction`, `liganded_ratio`, `liganded_min_replicates` once the
+      lab confirms. Also: check the site annotation reader against a real CysDB download.
+- [ ] isoDTB: for the protein-abundance correction of site ratios, where does the matching proteome come from
+      (a paired unenriched run per condition)?
 - [ ] Is a review window on every drop right long-term, or only for new users / methods / code patterns?
       Watch how it feels on the PC for a few weeks (`gui.review_drops`).
 - [ ] Phase 5: allow numpy as an *optional* speed-up (dose-response, limpa)? The base install stays

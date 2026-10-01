@@ -203,7 +203,9 @@ def dump_config(d: dict) -> str:
     a(f"  control_keywords: {_y(list(an.get('control_keywords') or []))}   # how the control condition is recognised")
     for k in ("impute_shift", "impute_scale", "seed", "pca_features", "heatmap_max", "control", "variance_prior",
               "block", "block_from", "covariates",  # DEqMS and the design (downstream/design.py)
-              "dose_response", "dose_min_doses", "dose_alpha", "dose_fc_lim", "dose_unit"):  # dose-response: D44
+              "dose_response", "dose_min_doses", "dose_alpha", "dose_fc_lim", "dose_unit",  # dose-response: D44
+              "liganded", "liganded_ratio", "liganded_min_replicates", "liganded_direction",  # cys.py: D52
+              "site_annotation"):
         if an.get(k) not in (None, ""):
             a(f"  {k}: {_y(an[k])}")
     if isinstance(an.get("doses"), dict) and an["doses"]:
