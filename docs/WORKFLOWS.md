@@ -18,6 +18,10 @@ fragpipe.exe --headless --workflow <wf> --manifest <mf> --workdir <out>
   to `fragpipe.exe` (GUI wrapper); ionomos uses the `.bat` and swaps a configured
   `.exe` for the `.bat` beside it. On the lab PC, FragPipe 24.0 came from its Windows installer: `C:\FragPipe\FragPipe-24.0\bin\FragPipe-24.0.exe`, `lib\fragpipe-24.0.jar`, `jre\`, `tools\` (MSFragger 4.4.1, IonQuant 1.11.20, diaTracer 2.2.1, DIA-NN 2.3.2) — from the first Ionomos report, 2026-09-23. Whether that exe prints headless output like the old .bat is confirmed by the first real search.
 - Manifest = `.fp-manifest`, tab-separated: `path \t experiment \t bioreplicate \t DDA|DIA`.
+- The isoDTB / TMT / DIA sections below apply to a method by its kind, not its
+  key: a method under another key that is `like:` one of them (or run by
+  another engine) is treated as that method throughout (D54,
+  NAMING_CONVENTION.md "Other conventions").
 - The FASTA is baked into the `.workflow` file (`database.db-path`). ionomos
   writes a per-job copy of the pinned workflow with `database.db-path` set to the
   method's FASTA from `fasta_dir`, so "FASTA file path is empty" can't happen. If

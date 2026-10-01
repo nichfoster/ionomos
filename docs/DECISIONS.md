@@ -546,7 +546,7 @@ Choices:
   on the method's name (isoDTB sites, TMT annotation, DIA `pg_matrix`), so a
   renamed DIA method gets the generic analysis. The documented way to use
   another word for DIA is to add it to `methods.DIA.aliases`. Carrying `like`
-  into the pipeline is left open.
+  into the pipeline is left open. (Decided in D54: it carries through.)
 - **Mistakes fail at load and name the setting** (`naming.methods.DIA:
   '{rep}_{fraction}' needs {sample} once, outside [ ]`). The watcher then
   keeps its last good config (D34) and the app won't save. Unknown keys under
@@ -1274,3 +1274,61 @@ adds the tests.
 p and adjusted p, the fold changes, the trend t and p and the interaction F,
 for the plain model, a replicate block and data with missing values, to
 1e-8.
+
+
+### D54 — `like:` makes a method that method everywhere; one resolver says what a key behaves as
+**2026-10-01.** D37 left `naming.methods.<X>: {like: DIA}` as a rule for
+names only, so a lab's `DIA_phospho` or `TMTpro` method was searched with its
+own workflow and then analysed as generic label-free: no TMT annotation, no
+site tables, a control asked for where there is none. A second DIA or TMT
+workflow under its own key is an ordinary thing to want, so `like:` now
+carries through.
+
+1. **A method has a kind.** `naming.method_kind()` returns it, and is the
+   only place that decides:
+   - the engine first: `engine: diann` is DIA, `engine: maxquant` and
+     `engine: sage` are label-free (`LFQ`)
+   - else the `like:` target (`isoDTB`, `TMT` or `DIA`)
+   - else the key itself. A key that is not a built-in method is a method of
+     the lab's own: label-free, read from `combined_protein.tsv`, as before.
+
+   `naming.analysis_method()` is the same with MaxQuant's and Sage's own
+   tables for those engines. `Config.kind()` and `Config.analysis_method()`
+   wrap them.
+2. **Everything that branched on the key asks for the kind.** FragPipe's
+   expected outputs and the TMT `annotation.txt` (`fragpipe.py`); the review
+   window's control and summary (`resolve.py`, through `Draft.kinds`); the
+   analysis, with statistics on or off (`postprocess.py`). The analysis
+   itself (`downstream/`) is unchanged: it is handed the kind, so its
+   loaders, the SDRF and the doctor's messages need no second lookup.
+3. **The lab's name stays where a person reads it.** The job, its
+   `<key>.workflow` copy, the ledger, the QC trend's series and the report's
+   header keep the key. `analysis.json` → `method` is the kind, as it already
+   was the engine's table for MaxQuant and Sage.
+4. **The engine beats `like:`.** docs/ENGINES.md used `LFQ: {like: isoDTB}`
+   to give a MaxQuant or Sage method the `<sample>_<rep>_<fraction>` names.
+   Those configs keep working as label-free: the engine decides. The docs
+   now write the template out, which says what is meant.
+5. **`ionomos.json` records `method_config.analysis_method`,** so a folder
+   analysed without its lab's config (`ionomos analyze <folder>` elsewhere)
+   is still read as it was there. Older folders have no such entry and
+   behave as before.
+6. **`ionomos analyze --method` takes the config's own keys** besides the
+   built-in names, and `ionomos names test` prints what a custom method is
+   run as.
+
+**What changes for an existing config:** nothing for the built-in keys, and
+nothing for a config without `like:`. A FragPipe method that used `like:`
+only to borrow a rule's shape for a different kind of experiment (say a
+label-free method with `like: isoDTB`) is now analysed as isoDTB; it should
+write the template out instead (docs/NAMING_CONVENTION.md). A DIA-NN method
+under a key other than `DIA` used to get no analysis and now gets DIA's.
+
+**Left as it was:** the SDRF reads fractions with the built-in rule of the
+kind, not the lab's own template; a method cannot be `like:` another custom
+method; the QC trend's `methods:` list and series names use the lab's keys.
+
+**Checked** end to end with the testbed's fake FragPipe, DIA-NN and MaxQuant
+(`tests/test_method_kinds.py`): a custom key like each built-in gives the
+same analysis, SDRF, annotation, control handling and doctor messages as the
+built-in method. The FragPipe-Analyst and R goldens pass unchanged.

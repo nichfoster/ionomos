@@ -255,9 +255,10 @@ not a gap.
 Found while building 5A/5B (2026-09-30), to fix:
 - ~~`…_DIA_CV-35.raw` is read as replicate 35, but CV-35 is a FAIMS
   compensation voltage.~~ Fixed 2026-09-30 (D41).
-- `naming.methods.<X>: {like: DIA}` borrows DIA's name rules only. The
+- ~~`naming.methods.<X>: {like: DIA}` borrows DIA's name rules only. The
   downstream analysis, TMT annotation and control detection still branch on
-  the method's key. Decide whether `like:` should carry through to them.
+  the method's key. Decide whether `like:` should carry through to them.~~
+  Fixed 2026-10-01 (D54): it does.
 - The demo's clean simulated data sometimes flags one sample as "warn". That
   is borderline: check the scorecard floors on real data.
 

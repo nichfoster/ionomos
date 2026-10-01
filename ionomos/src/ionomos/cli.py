@@ -543,6 +543,11 @@ def cmd_init(args) -> int:
     return 1 if any(i.status == "fail" for i in items) else 0
 
 
+# what `analyze --method` takes besides the config's own method keys
+ANALYZE_METHODS = ("isoDTB", "TMT", "DIA", "LFQ", "DIA-NN", "MaxQuant", "Sage", "Spectronaut", "AlphaDIA",
+                   "MSstats", "MSstatsTMT", "PD", "table", "auto")
+
+
 def cmd_analyze(args) -> int:
     """Re-run the downstream analysis for a job (by id) or any experiment / FragPipe folder."""
     from ionomos import postprocess
@@ -552,6 +557,14 @@ def cmd_analyze(args) -> int:
         cfg = load(args.config, check_paths=False)
     except ConfigError:
         pass  # analysing a folder works without a lab config (defaults)
+    if args.method and args.method not in ANALYZE_METHODS:
+        # a method of the lab's own: postprocess.prepare reads it as its kind (like: / engine:, D54)
+        own = list(cfg.methods) if cfg is not None else []
+        key = next((k for k in own if k.lower() == args.method.lower()), None)
+        if key is None:
+            print(f"--method {args.method!r} is not one of {', '.join([*ANALYZE_METHODS, *own])}", file=sys.stderr)
+            return 2
+        args.method = key
     target = args.target
     if target.isdigit():
         if cfg is None or not cfg.database.is_file():
@@ -870,10 +883,11 @@ def main(argv: list[str] | None = None) -> int:
     az = sub.add_parser("analyze", help="(re)run statistics, volcano plots and the report for a job or folder")
     az.add_argument("target", help="job id, experiment folder, a results folder from FragPipe, DIA-NN, MaxQuant, "
                                    "Spectronaut, AlphaDIA, or any protein / results table (.csv .tsv .txt .xlsx .parquet)")
-    az.add_argument("--method", choices=["isoDTB", "TMT", "DIA", "LFQ", "DIA-NN", "MaxQuant", "Sage", "Spectronaut", "AlphaDIA",
-                                         "MSstats", "MSstatsTMT", "PD", "table", "auto"], default=None,
-                    help="default: from ionomos.json, else detected from the files (FragPipe, DIA-NN, MaxQuant, "
-                         "Spectronaut, AlphaDIA, MSstats / MSstatsTMT format, Proteome Discoverer, any table)")
+    az.add_argument("--method", default=None, metavar="METHOD",
+                    help=f"one of {', '.join(ANALYZE_METHODS)}, or a method of your config.yaml (analysed as the "
+                         "method it is like:). Default: from ionomos.json, else detected from the files (FragPipe, "
+                         "DIA-NN, MaxQuant, Spectronaut, AlphaDIA, MSstats / MSstatsTMT format, Proteome "
+                         "Discoverer, any table)")
     az.add_argument("--control", help="control condition (default: recognised by name, e.g. DMSO)")
     az.add_argument("--compare", action="append", metavar="'A vs B'", help="comparison; repeatable")
     az.add_argument("--log2fc", type=float, help="fold-change threshold (log2)")
