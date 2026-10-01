@@ -1376,3 +1376,67 @@ raw file. `downstream/psmqc.py` adds that, as a **Search quality** QC tab,
 **Not checked on real data.** The `psm.tsv` column names are from the
 FragPipe documentation, as in the testbed's fake FragPipe. The tests use
 tables with those names and planted values.
+
+### D58 — Notifications are off by default, say little, and can never touch a job
+**2026-10-01.** ROADMAP Phase 4 asked for "email/Slack/Teams notify on
+done/failed" and log rotation. The lab's rule is that nothing leaves the PC
+unasked, so the first is built to be safe to ignore (`notify.py`).
+
+1. **Off unless configured.** No `notify:` block, or `enabled: false`, sends
+   nothing and writes nothing. `enabled: true` with no channel is a config
+   error, not a silent no-op.
+2. **Four channels, standard library only**: a generic JSON webhook, Teams,
+   Slack (`urllib`) and SMTP (`smtplib`). PyYAML stays the only dependency.
+   Teams gets one Adaptive Card in a `message` (the shape both a Workflows
+   webhook and the older incoming webhook accept); Slack gets `{"text": …}`.
+3. **A fixed, short list of what is sent**: status, job number, time,
+   experiment name, user, method, the reason (first 600 characters), the hit
+   counts per comparison, the local path of the report, the PC's name.
+   Never a file, a table, a feature name or a measured value: the log tail
+   and likely causes of a failure stay in `FAILED.txt` and the pop-up.
+   `include_names: false` cuts it to the job number, status and time. The
+   generic webhook's JSON is this list and nothing else, and the tests check
+   the keys.
+4. **Secrets.** Webhook addresses are bearer secrets, like the SMTP
+   password. They may come from an environment variable (`url_env`,
+   `password_env`; the variable wins over the file). They are never logged:
+   errors are reduced to "HTTP 404", "could not connect" and so on. The
+   diagnostics report and bundle redact the `config.yaml` they include and
+   scrub every other file in them for the same values (and for anything
+   shaped like a Slack / Teams hook address), also when the config doesn't
+   parse. `config-backups/` keeps full copies: it never leaves the PC.
+5. **https only.** `http://` is refused except for this computer
+   (`localhost`), because the address is the secret. Redirects are not
+   followed. An SMTP password with `security: none` is a config error.
+6. **A job never waits for a message.** The worker calls `announce` after the
+   ledger, `ionomos.json` and `DONE.txt` / `FAILED.txt` are written; it
+   builds the message and hands it to a daemon thread. One try per channel,
+   a timeout (`timeout_seconds`, 1 to 60, default 10), no retries, no queue
+   of unsent messages: a message lost while the network was down is lost.
+   A channel's error is logged once until it changes or the channel works
+   again.
+7. **"Held" once per job and reason.** The worker polls a held job every few
+   seconds. The reasons already sent are kept in
+   `<log_dir>/notify_state.json` (numbers removed, so "12 GB free" and
+   "11 GB free" are one reason), which also covers a restart. The entry is
+   dropped when the job finishes. A search cancelled by a person sends
+   nothing, and neither does one re-queued because Ionomos was stopped.
+8. **`on:` and YAML.** PyYAML reads a bare `on:` key as the boolean `true`
+   (YAML 1.1). The loader and the config writer accept both, so the block
+   can be written the natural way.
+9. **Settings live in `config.yaml`, not the app, for now.** A tab would
+   need GUI tests and a place to show secrets. The app's Save keeps the
+   block (`configio.py` writes it, commented). The worker reads `notify:`
+   at start: restart the watcher after a change.
+10. **Log rotation existed** (`ionomos.log`, 5 MB, 5 old files). What was
+    missing is Windows: a rename refused because another process has the
+    file open made the stock handler drop records. The handler now keeps
+    appending and retries a minute later. Size and count are constants in
+    `names.py`, not settings.
+11. **Left alone**: auto-archive to `D:` (it moves user data) and a status
+    web page (it adds a server). The disk-space hold already existed
+    (`fragpipe.check_raws`, `fragpipe.min_free_gb`).
+
+**Not verified**: a real Teams, Slack or SMTP server. The tests use an HTTP
+server and a small SMTP server inside the test process, and a stub for
+STARTTLS + login.

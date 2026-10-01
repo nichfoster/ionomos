@@ -143,6 +143,16 @@ small anonymised real experiment as a test fixture and public example data
 
 - Log rotation, disk-space check before accepting a job (C: has 99 GB free;
   refuse if < 2× raw size), email/Slack/Teams notify on done/failed.
+  → 2026-10-01 (D58): done.
+  - notifications: a JSON webhook, Teams, Slack and SMTP email on done /
+    failed / held, off by default, under `notify:` in `config.yaml`;
+    `ionomos notify-test`. Not checked against a real Teams / Slack / SMTP
+    server yet. Open: a tab in the app; per-user recipients (each person
+    told about their own jobs)
+  - log rotation: was there (5 MB, 5 files); now also safe when Windows
+    refuses the rename
+  - disk space: was there since 0.3.0 as a hold (`fragpipe.min_free_gb` +
+    the raws), not a refusal: the job waits and starts when space is back
 - **Data presentation**: volcano plot + summary at the end of each run —
   either an HTML report (plotly, no server) or a small Shiny/Streamlit app.
   FragPipe Analyst ships R code that can be reused for the stats.

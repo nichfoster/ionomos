@@ -116,6 +116,22 @@ def config_env() -> str | None:
 REMOVED_DIR = ".removed"
 NAMING_HISTORY_FILE = "naming-history.jsonl"
 
+# The watcher log rotates by size (health.rotating_log_handler): ionomos.log, ionomos.log.1 ... .LOG_BACKUPS
+LOG_MAX_BYTES = 5_000_000
+LOG_BACKUPS = 5
+
+
+def log_files(log_dir: Path) -> list[Path]:
+    """The watcher log and its rotated copies (ionomos.log, ionomos.log.1, ...), old labwatch.log* too."""
+    out: list[Path] = []
+    for n in (LOG_FILE, *LEGACY_LOG_FILES):
+        out += sorted(Path(log_dir).glob(f"{n}*"))
+    return out
+
+
+# Notifications (D58): which "held" messages were already sent, so a restart doesn't repeat them.
+NOTIFY_STATE = "notify_state.json"
+
 # Instrument QC trending (D45): the per-run metric store and the trend page, both in log_dir.
 QC_TREND_STORE = "qc_trend.jsonl"
 QC_TREND_PAGE = "qc_trend.html"

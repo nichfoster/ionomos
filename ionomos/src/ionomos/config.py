@@ -92,6 +92,7 @@ class Config:
     file_rules: dict[str, FileRule] = field(default_factory=lambda: dict(DEFAULT_FILE_RULES))  # naming.methods
     date_formats: tuple[str, ...] = DEFAULT_DATE_FORMATS  # naming.date_formats
     qc_trend: dict = field(default_factory=dict)  # instrument QC trending (qctrend.py, D45); {} = defaults
+    notify: dict = field(default_factory=dict)  # messages on done / failed / held (notify.py, D58); {} = off
 
     @property
     def method_aliases(self) -> dict[str, list[str]]:
@@ -279,6 +280,7 @@ def load(path: str | Path, check_paths: bool = True) -> Config:
         config_path=p,
         analysis=_analysis(raw.get("analysis")),
         qc_trend=_qc_trend(raw.get("qc_trend")),
+        notify=_notify(raw.get("notify")),
         user_ignore=tuple(str(x) for x in (users.get("ignore") if users.get("ignore") is not None else DEFAULT_USER_IGNORE)),
     )
 
@@ -360,6 +362,16 @@ def _qc_trend(raw) -> dict:
         return settings_from(raw)
     except QCTrendError as exc:
         raise ConfigError(f"qc_trend.{exc}" if not str(exc).startswith("must") else f"qc_trend: {exc}") from None
+
+
+def _notify(raw) -> dict:
+    """notify: section (messages on done / failed / held, D58), validated by the module that uses it."""
+    from ionomos.notify import NotifyError, settings_from
+
+    try:
+        return settings_from(raw)
+    except NotifyError as exc:
+        raise ConfigError(f"notify.{exc}" if not str(exc).startswith("must") else f"notify: {exc}") from None
 
 
 def _read_learned(path: Path) -> dict[str, list[str]]:
