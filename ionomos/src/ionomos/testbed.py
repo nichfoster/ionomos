@@ -72,9 +72,11 @@ SAMPLES: dict[str, dict] = {
     "tmt_good": dict(
         folder="20260126_Aman_TMT_KL6159A-9plex",
         raws=[f"KL6159A_TMT_F{i}.raw" for i in range(1, 5)],
+        # every channel of the label type is listed (FragPipe refuses a shorter list); NA = not used
         yaml={"tmt": {"tag": "TMT-10", "channels": {"126": "DMSO_1_126", "127N": "DMSO_1_127N", "127C": "DMSO_1_127C",
                                                        "128N": "Drug_1_128N", "128C": "Drug_1_128C",
-                                                       "129N": "Drug_1_129N"}}},
+                                                       "129N": "Drug_1_129N", "129C": "NA", "130N": "NA",
+                                                       "130C": "NA", "131N": "NA"}}},
         shows="TMT, 4 fractions, biorep 1, channel map in experiment.yaml -> queued",
     ),
     "glued_initials": dict(
@@ -144,98 +146,43 @@ def build_sample(dest_parent: Path, name: str, size: int = 4096) -> Path:
 # ---------------------------------------------------------------------- init --
 
 def fake_fragpipe(argv: list[str]) -> int:
-    """Fake FragPipe (`ionomos fake-fragpipe ...`): same headless flags, same checks, plausible output.
+    """Fake FragPipe (`ionomos fake-fragpipe ...`): FragPipe's headless options, checks, console output and
+    output files, without a search. See fake_fragpipe.py for what is copied from the real one and from where."""
+    from ionomos import fake_fragpipe as fake
 
-    Fails like the real one when the workflow's database.db-path doesn't exist or a
-    manifest file is missing, and on purpose when a raw path contains FAKEFAIL.
-    Run time: IONOMOS_FAKE_FP_SECONDS (default 4).
-    """
-    import argparse
-
-    ap = argparse.ArgumentParser(prog="fragpipe (fake)")
-    ap.add_argument("--headless", action="store_true")
-    for flag in ("--workflow", "--manifest", "--workdir", "--threads", "--ram", "--config-tools-folder",
-                 "--config-diann"):
-        ap.add_argument(flag)
-    a, _ = ap.parse_known_args(argv)
-    say = lambda *x: print("FAKE FragPipe:", *x, flush=True)  # noqa: E731
-    if not (a.headless and a.workflow and a.manifest and a.workdir):
-        say("usage: --headless --workflow W --manifest M --workdir D")
-        return 2
-    wf_text = Path(a.workflow).read_text(encoding="utf-8") if Path(a.workflow).is_file() else ""
-    db = next((ln.split("=", 1)[1].strip() for ln in wf_text.splitlines() if ln.startswith("database.db-path")), "")
-    if not db:
-        say("ERROR: FASTA file path is empty")
-        return 1
-    if not Path(db).is_file():
-        say(f"ERROR: FASTA file not found: {db}")
-        return 1
-    rows = [ln.split("\t") for ln in Path(a.manifest).read_text(encoding="utf-8").splitlines() if ln.strip()]
-    for r in rows:
-        if not Path(r[0]).is_file():
-            say(f"ERROR: file in manifest does not exist: {r[0]}")
-            return 1
-    say(f"{len(rows)} files, workflow {Path(a.workflow).name}, database {Path(db).name}")
-    # IONOMOS_FAKE_FP_MODE simulates real failure modes: oom | msfragger | step-fail-exit0 | step-fail-neg-exit0 | silent-exit0
-    mode = os.environ.get("IONOMOS_FAKE_FP_MODE", "")
-    if mode == "oom":
-        print("Exception in thread \"main\" java.lang.OutOfMemoryError: Java heap space", flush=True)
-        return 1
-    if mode == "msfragger":
-        print("MSFragger jar not found. Please download MSFragger in the Config tab.", flush=True)
-        return 1
-    if mode == "step-fail-exit0":
-        print(f"MSFragger [Work dir: {a.workdir}]", flush=True)
-        print("Process 'MSFragger' finished, exit code: 137", flush=True)
-        Path(a.workdir).mkdir(parents=True, exist_ok=True)
-        (Path(a.workdir) / "partial.txt").write_text("x", encoding="utf-8")
-        return 0
-    if mode == "step-fail-neg-exit0":
-        print(f"MSFragger [Work dir: {a.workdir}]", flush=True)
-        print("Process 'MSFragger' finished, exit code: -11", flush=True)
-        Path(a.workdir).mkdir(parents=True, exist_ok=True)
-        (Path(a.workdir) / "partial.txt").write_text("x", encoding="utf-8")
-        return 0
-    if mode == "silent-exit0":
-        return 0
-    total = float(os.environ.get("IONOMOS_FAKE_FP_SECONDS", "4"))
-    for step in ("MSFragger", "MSBooster", "Percolator", "ProteinProphet", "IonQuant"):
-        print(f"{step} [Work dir: {a.workdir}]", flush=True)  # FragPipe's own format
-        time.sleep(total / 5)
-        if step == "IonQuant" and any("FAKEFAIL" in r[0] for r in rows):
-            say("ERROR: IonQuant crashed (this sample fails on purpose)")
-            print(f"Process '{step}' finished, exit code: 1", flush=True)
-            return 1
-        print(f"Process '{step}' finished, exit code: 0", flush=True)
-    wd = Path(a.workdir)
-    wd.mkdir(parents=True, exist_ok=True)
-    (wd / "fragpipe.workflow").write_text(wf_text, encoding="utf-8")
-    (wd / "fragpipe-files.fp-manifest").write_text(Path(a.manifest).read_text(encoding="utf-8"), encoding="utf-8")
-    (wd / f"log_{time.strftime('%Y-%m-%d_%H-%M-%S')}.txt").write_text("fake FragPipe log\n", encoding="utf-8")
-    _fake_results(wd, rows, Path(a.workflow).name)
-    say("done")
-    return 0
+    return fake.fake_fragpipe(argv)
 
 
-def _fake_results(wd: Path, rows: list[list[str]], workflow_name: str) -> None:
-    """Realistic result tables with planted hits (ionomos.downstream.simulate), so reports have content."""
+def _fake_results(wd: Path, rows: list[list[str]], workflow_name: str, annotations: dict | None = None,
+                  label: str = "TMT-10") -> None:
+    """Realistic result tables with planted hits (ionomos.downstream.simulate), so reports have content.
+
+    rows: the manifest as FragPipe read it (experiment names already FragPipe's). annotations (TMT):
+    {plex: its annotation file or None}; a plex without one gets FragPipe's own names, <plex>_<channel>."""
     import zlib
 
     from ionomos.downstream import simulate
+    from ionomos.fake_fragpipe import TMT_CHANNELS
 
     seed = zlib.crc32("".join(r[0] for r in rows).encode())
     if any(len(r) > 3 and r[3] == "DIA" for r in rows):
-        (wd / "diann-output" / "report.tsv").parent.mkdir(parents=True, exist_ok=True)
-        (wd / "diann-output" / "report.tsv").write_text("Run\tProtein.Group\tPrecursor.Quantity\n", encoding="utf-8")
-        simulate.dia_pg_matrix(wd / "diann-output" / "report.pg_matrix.tsv", [(r[0], r[1]) for r in rows], seed)
-        fake_diann_stats(wd / "diann-output" / "report.stats.tsv", [r[0] for r in rows])
-    elif "tmt" in workflow_name.lower():
-        ann = Path(rows[0][0]).parent / "annotation.txt"
-        names = []
-        if ann.is_file():
-            names = [ln.split("\t")[1].strip() for ln in ann.read_text(encoding="utf-8").splitlines() if "\t" in ln]
-        names = names or ["DMSO_1_126", "DMSO_1_127N", "DMSO_1_127C", "Drug_1_128N", "Drug_1_128C", "Drug_1_129N"]
+        out = wd / "dia-quant-output"  # FragPipe 24's folder (CmdDiann); earlier versions wrote diann-output
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "report.tsv").write_text("Run\tProtein.Group\tPrecursor.Quantity\n", encoding="utf-8")
+        simulate.dia_pg_matrix(out / "report.pg_matrix.tsv", [(r[0], r[1]) for r in rows], seed)
+        fake_diann_stats(out / "report.stats.tsv", [r[0] for r in rows])
+    elif annotations is not None or "tmt" in workflow_name.lower():
+        names: list[str] = []
+        for exp in dict.fromkeys(r[1] for r in rows):
+            ann = (annotations or {}).get(exp)
+            if ann is not None and Path(ann).is_file():
+                pairs = [ln.split() for ln in Path(ann).read_text(encoding="utf-8").splitlines() if ln.strip()]
+                names += [p[1] for p in pairs if len(p) == 2 and p[1].lower() != "na"]
+            else:
+                names += [f"{exp}_{ch}" for ch in TMT_CHANNELS.get(label, TMT_CHANNELS["TMT-10"])]
         simulate.tmt_abundance(wd / "tmt-report" / "abundance_gene_MD.tsv", names, seed)
+        for name, raws in _groups(rows).items():
+            fake_psm(wd / name / "psm.tsv", raws)
     else:
         exps: dict[str, list[int]] = {}
         for r in rows:
@@ -244,11 +191,16 @@ def _fake_results(wd: Path, rows: list[list[str]], workflow_name: str) -> None:
                 exps[r[1]].append(int(r[2]))
         simulate.isodtb_label_quant(wd / "combined_modified_peptide_label_quant.tsv",
                                     {e: sorted(v) for e, v in exps.items()}, seed)
-        groups: dict[str, list[str]] = {}
-        for r in rows:  # FragPipe writes one psm.tsv per <experiment>_<bioreplicate> folder
-            groups.setdefault(f"{r[1]}_{r[2]}", []).append(r[0])
-        for name, raws in groups.items():
+        for name, raws in _groups(rows).items():
             fake_psm(wd / name / "psm.tsv", raws)
+
+
+def _groups(rows: list[list[str]]) -> dict[str, list[str]]:
+    """FragPipe writes one psm.tsv per <experiment>_<bioreplicate> folder."""
+    groups: dict[str, list[str]] = {}
+    for r in rows:
+        groups.setdefault(f"{r[1]}_{r[2]}", []).append(r[0])
+    return groups
 
 
 DIANN_STATS_HEADER = ["File.Name", "Precursors.Identified", "Proteins.Identified", "Total.Quantity", "MS1.Signal",
@@ -777,6 +729,58 @@ def write_fake_launcher(folder: Path) -> Path:
     return exe
 
 
+def workflow_text(kind: str) -> str:
+    """A small .workflow for the testbed: the switches Ionomos and the fake FragPipe read, with the values of
+    FragPipe 24.0's stock chemprot-ABPP-isoDTB / TMT10-MS3 / DIA_SpecLib_Quant workflows (a real one has ~400
+    keys). The isoDTB one has match-between-runs on, as the lab's SOP asks."""
+    tmt, dia = kind == "TMT", kind == "DIA"
+    keys = {
+        "crystalc.run-crystalc": "false",
+        "database.decoy-tag": "rev_",
+        "diann.run-dia-nn": str(dia).lower(),
+        "diatracer.run-diatracer": "false",
+        "diaumpire.run-diaumpire": "false",
+        "freequant.run-freequant": "false",
+        "ionquant.heavy": "" if tmt or dia else "C567.3462",
+        "ionquant.light": "" if tmt or dia else "C561.3387",
+        "ionquant.mbr": "0" if tmt or dia else "1",
+        "ionquant.run-ionquant": "true",
+        "ionquant.use-labeling": str(not (tmt or dia)).lower(),
+        "ionquant.use-lfq": "false",
+        "msbooster.run-msbooster": "true",
+        "msfragger.calibrate_mass": "2",
+        "msfragger.misc.slice-db": "1",
+        "msfragger.run-msfragger": "true",
+        "msfragger.search_enzyme_name_1": "stricttrypsin",
+        "peptide-prophet.run-peptide-prophet": "false",
+        "percolator.run-percolator": "true",
+        "phi-report.run-report": "true",
+        "protein-prophet.run-protein-prophet": "true",
+        "ptmprophet.run-ptmprophet": "false",
+        "ptmshepherd.run-shepherd": "false",
+        "quantitation.run-label-free-quant": str(not (tmt or dia)).lower(),
+        "run-psm-validation": "true",
+        "run-validation-tab": "true",
+        "speclibgen.run-speclibgen": str(dia).lower(),
+        "tab-run.delete_temp_files": "false",
+        "tmtintegrator.add_Ref": "1" if tmt else "-1",
+        "tmtintegrator.channel_num": "TMT-10" if tmt else "TMT-6",
+        "tmtintegrator.extraction_tool": "IonQuant",
+        "tmtintegrator.ref_tag": "Bridge",
+        "tmtintegrator.run-tmtintegrator": str(tmt).lower(),
+        "workflow.input.data-type.im-ms": "false",
+        "workflow.input.data-type.regular-ms": "true",
+        # FragPipe's stock workflows say true and then write <workdir>/sdrf.tsv, which the analysis reads as the
+        # experiment's own design (downstream/sdrfdesign.py). Off here until that is settled (docs/ROADMAP.md);
+        # tests/test_fragpipe_real.py runs one job with it on.
+        "workflow.misc.save-sdrf": "false",
+        "workflow.misc.sdrf-type": "Default",
+        "workflow.saved-with-ver": "24.0-build27",
+    }
+    return (f"# Workflow: {kind} (Ionomos testbed)\n\n" + "".join(f"{k}={v}\n" for k, v in keys.items())
+            + "database.db-path=FAKE.fas\n")
+
+
 def init(root: Path, slow_defaults: bool = False) -> Path:
     root = Path(root).resolve()
     auto = root / "Fragpipe_Auto"
@@ -785,10 +789,10 @@ def init(root: Path, slow_defaults: bool = False) -> Path:
         d.mkdir(parents=True, exist_ok=True)
     for u in USERS:
         (general / u).mkdir(parents=True, exist_ok=True)
-    for wf in ("isoDTB.workflow", "TMT10-MS3.workflow", "DIA.workflow"):
+    for wf, kind in (("isoDTB.workflow", "isoDTB"), ("TMT10-MS3.workflow", "TMT"), ("DIA.workflow", "DIA")):
         p = auto / "workflows" / wf
         if not p.exists():
-            p.write_text(f"# placeholder workflow for the testbed ({wf})\ndatabase.db-path=FAKE.fas\n", encoding="utf-8")
+            p.write_text(workflow_text(kind), encoding="utf-8", newline="\n")
     (auto / "fasta" / "human_reviewed_decoys.fas").write_text(
         ">sp|FAKE1|FAKE1_HUMAN fake protein 1\nMKVLAAGIVGLLLAC\n>sp|FAKE2|FAKE2_HUMAN fake protein 2\nMSTNPKPQRKTKRNT\n"
         ">rev_sp|FAKE1|FAKE1_HUMAN\nCALLLGVIGAALVKM\n>rev_sp|FAKE2|FAKE2_HUMAN\nTNRKTKRQPKPNTSM\n", encoding="utf-8")

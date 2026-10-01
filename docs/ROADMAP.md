@@ -131,6 +131,16 @@ any differences from the GUI / R / FragPipe-Analyst path here, and keep one
 small anonymised real experiment as a test fixture and public example data
 (Phase 5A).
 
+2026-10-01 (D59): the FragPipe runner checked against FragPipe's headless
+tutorial and its 24.0 / 23.1 source, before the first real runs. Fixed:
+`JAVA_HOME` for `fragpipe.bat`, the window `.exe` never run, the hint that
+matched `database.db-path` in every log, a retry judged by an earlier
+attempt's log, the progress line, TMT annotation files, decoy rules. New:
+`ionomos preflight` (starts FragPipe for `--help` and a dry run per method),
+`run_fingerprint.json` after every search, a fake FragPipe that copies the
+real one's output. **Still not run against a real FragPipe**: FIRST_REAL_RUN.md
+is the checklist for that day, and the fingerprints are what to send back.
+
 ## Phase 3 — DIA, then TMT
 
 - DIA: pin workflow, `data_type: DIA`, sort out DIA-NN version/`--config-diann`.
@@ -505,7 +515,13 @@ Collected from the other docs; resolve before/during Phase 1.
 - [ ] Where are FASTA files kept, which ones, how often updated?
 
 **Machine**
-- [ ] Exact FragPipe 24.0 launcher path and whether `--headless` works on it as installed.
+- [ ] FragPipe 24.0 launcher: from FragPipe's build it is `C:\FragPipe\FragPipe-24.0\bin\fragpipe.bat`, next to
+      `FragPipe-24.0.exe` (D59). Confirm on the PC that the `.bat` is there and that `ionomos preflight` shows
+      "FragPipe starts" (that also proves `JAVA_HOME` → FragPipe's `jre` works).
+- [ ] D59: does a real headless run print to the console Ionomos captures, ending in `ALL JOBS DONE IN x MINUTES`?
+      (Without the line a done job only gets a warning. Once confirmed it could become a failure.)
+- [ ] D59: does FragPipe's `--dry-run` accept the preflight's 64-byte placeholder `.raw`? (From the source it
+      doesn't open the file. If it complains: `ionomos preflight --raw <a real file>`.)
 - [ ] Direction/type of the `Proteomics_File_Sharing` share.
 - [ ] Sleep/power policy and whether Task Scheduler can run at logon for the shared account.
 - [ ] Should results go to C: (fast, 99 GB free) or D: (slow USB, 14 TB free)? Proposal:
@@ -513,8 +529,28 @@ Collected from the other docs; resolve before/during Phase 1.
 - [ ] Install git on the PC, or deploy via zip/wheel?
 
 **Software**
-- [ ] How does FragPipe 24.0 headless locate the TMT `annotation.txt`?
-- [ ] Does bundled DIA-NN suffice or is `--config-diann` needed for 2.3.2?
+- [x] How does FragPipe 24.0 headless locate the TMT `annotation.txt`? → 2026-10-01 (D59), from `TmtiPanel`
+      (same in 23.1): the one file whose name ends in `annotation.txt` in the folder holding all of the plex's
+      LC-MS files; with none or several it writes its own `<workdir>\<plex>\<plex>_annotation.txt` naming the
+      channels `<plex>_<channel>`. Not yet seen on the PC.
+- [ ] D59: several TMT plexes in one experiment need a folder each for FragPipe to find their annotations. Intake
+      files raws at the top level or in `raw\`: should a multi-plex drop be laid out as `<plex>\*.raw`?
+- [ ] D59: FragPipe 24's stock workflows write `fragpipe\sdrf.tsv` (`workflow.misc.save-sdrf=true`). The analysis
+      reads any `sdrf.tsv` in the experiment folder as the experiment's own design (`downstream/sdrfdesign.py`):
+      for isoDTB it then reports "The SDRF doesn't describe these runs" on every search. Decide: skip FragPipe's
+      own file there (its `source name` column is all "not available"), or switch the setting off in the job's
+      workflow copy. Until then expect that pop-up on a real run; it changes nothing in the results.
+- [ ] D59: FragPipe replaces everything but letters, digits and `_` in experiment names (`EJQ-2-027` →
+      `EJQ_2_027`), so its tables and Ionomos' `_sites.tsv` carry the `_` form. Ionomos warns per job. Should
+      intake write the `_` form into the manifest from the start?
+- [ ] D59: FragPipe's DIA workflow notes say "For quantification using DIA-NN, Thermo/Sciex DIA files should be in
+      mzML format". Does the lab's DIA route (bundled DIA-NN 1.8.2 beta 8, or 2.3.2 via `fragpipe.config_diann`)
+      read `.raw` directly on the PC? The first DIA run answers it.
+- [ ] D59: is .NET needed by FragPipe 24 on Windows for `.raw` files? Its documentation only asks for Mono on Linux;
+      its log prints ".NET Core Info". The PC has .NET 10 only. If a search stops on a .NET message, the hint
+      names the runtime to install.
+- [ ] Does bundled DIA-NN suffice or is `--config-diann` needed for 2.3.2? (FragPipe 24 falls back to its own
+      `tools\diann\1.8.2_beta_8\windows\DiaNN.exe`; the file to name is `DiaNN.exe`, not `DIA-NN.exe`.)
 - [ ] Confirm the DIA condition codes with the lab: is `C` always "Compound" (not "Control")? Other codes
       in use (`V` vehicle, `T` treated …)? Set `naming.condition_codes` accordingly (D34).
 - [ ] D35 warnings: are the sample-outlier / batch / imputation-mismatch thresholds right on real experiments?

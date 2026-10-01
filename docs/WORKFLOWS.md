@@ -7,31 +7,96 @@ folders seen in the inventory. This is what the runners have to reproduce.
 
 ## Common: headless FragPipe
 
+Checked on 2026-10-01 against FragPipe's
+[headless tutorial](https://fragpipe.nesvilab.org/docs/tutorial_headless.html)
+and the source of FragPipe 24.0, compared with 23.1 where it could differ
+(D59). **Not yet seen on the PC**: every line below is from documentation or
+source, and [FIRST_REAL_RUN.md](FIRST_REAL_RUN.md) is how it gets confirmed.
+
 ```
-fragpipe.exe --headless --workflow <wf> --manifest <mf> --workdir <out>
-             [--threads N] [--ram G]
-             [--config-tools-folder <dir>] [--config-diann <DiaNN.exe>]
+bin\fragpipe.bat --headless --workflow <wf> --manifest <mf> --workdir <out>
+                 [--threads N] [--ram G] [--dry-run]
+                 [--config-tools-folder <dir>] [--config-diann <DiaNN.exe>] [--config-python <dir>]
 ```
 
-- Confirmed CLI shape in `prior-work/fragpipe_runner.py`. Launcher: the 22.0
-  copy in the inventory has `fragpipe\bin\fragpipe.bat` (headless, console) next
-  to `fragpipe.exe` (GUI wrapper); ionomos uses the `.bat` and swaps a configured
-  `.exe` for the `.bat` beside it. On the lab PC, FragPipe 24.0 came from its Windows installer: `C:\FragPipe\FragPipe-24.0\bin\FragPipe-24.0.exe`, `lib\fragpipe-24.0.jar`, `jre\`, `tools\` (MSFragger 4.4.1, IonQuant 1.11.20, diaTracer 2.2.1, DIA-NN 2.3.2) — from the first Ionomos report, 2026-09-23. Whether that exe prints headless output like the old .bat is confirmed by the first real search.
-- Manifest = `.fp-manifest`, tab-separated: `path \t experiment \t bioreplicate \t DDA|DIA`.
+- **Launcher.** The 23 / 24 installer puts `bin\fragpipe.bat`,
+  `bin\FragPipe-24.0.exe`, `lib\`, `jre\`, `tools\`, `python\`,
+  `workflows\` and (after first use) `cache\` under
+  `C:\FragPipe\FragPipe-24.0\`. `fragpipe.bat` is the headless launcher. It
+  needs `JAVA_HOME` or `java` on PATH; Ionomos sets `JAVA_HOME` to the
+  installation's `jre`. The `.exe` is a window program (launch4j) that
+  returns at once: Ionomos swaps it for the `.bat` beside it and holds the
+  job if there is none. Zip builds up to 22 have `fragpipe\bin\fragpipe.bat`.
+- **Options.** The eleven above are all FragPipe knows; any other stops it
+  ("Cannot recognize the argument", exit code 1). `--help` alone prints the
+  version, OS, Java and .NET lines and the usage, and exits with code 1.
+  There is no `--version`. `--ram 0` lets FragPipe decide; `--threads`
+  defaults to cores − 1. Command-line values override the workflow's
+  `workflow.ram` / `workflow.threads`.
+- **`--dry-run`** makes every check of a real run (workflow, files, FASTA,
+  decoys, tools, TMT annotation), prints the commands it would run and "It's
+  a dry-run, not running the commands.", and exits 0. `ionomos preflight`
+  uses it.
+- **Tools, DIA-NN, Python.** Without `--config-*`, FragPipe uses what its
+  window was last set to (`<install>\cache\fragpipe-ui.cache`); its tutorial
+  says a first headless run must name them. DIA-NN falls back to the bundled
+  `tools\diann\1.8.2_beta_8\windows\DiaNN.exe`; `--config-diann` must name
+  `DiaNN.exe` itself. On Windows FragPipe 24 always uses the `python\`
+  folder in its installation (packages are put there by the installer).
+  MSFragger, IonQuant and diaTracer jars and MSFragger's `ext\` folder (the
+  Thermo / Bruker readers) come from FragPipe's Config tab → Download /
+  Update; a commercial `license.dat` beside the installation is passed on.
+- **Manifest** = `.fp-manifest`, UTF-8, tab-separated:
+  `path \t experiment \t bioreplicate \t data type`. Lines starting `#` or
+  `//` are skipped. Data types: `DDA`, `DDA+`, `DIA`, `GPF-DIA`,
+  `DIA-Quant`, `DIA-Lib` (anything else is read as `DDA`); Ionomos writes
+  `DDA` or `DIA`. Bioreplicate is a whole number or empty. **A file that
+  does not exist is dropped without a message**, which is why Ionomos checks
+  the raws itself before every run. Two files with the same name stop the
+  run.
+- **Experiment names** keep only letters, digits and `_`: FragPipe turns
+  every other character into `_` (`EJQ-2-027` → `EJQ_2_027`). Output
+  folders are `<experiment>_<bioreplicate>\`, and one flat folder when the
+  spectral library or DIA-NN runs. Ionomos warns when a name will change.
 - The isoDTB / TMT / DIA sections below apply to a method by its kind, not its
   key: a method under another key that is `like:` one of them (or run by
   another engine) is treated as that method throughout (D54,
   NAMING_CONVENTION.md "Other conventions").
-- The FASTA is baked into the `.workflow` file (`database.db-path`). ionomos
-  writes a per-job copy of the pinned workflow with `database.db-path` set to the
-  method's FASTA from `fasta_dir`, so "FASTA file path is empty" can't happen. If
-  that FASTA isn't there, the workflow's own path is used when it exists.
-  The FASTA must already contain decoys (FragPipe's "Add decoys").
-- **No spaces in any path** (SOP: "Directory must not contain any spaces!").
-- Output dir must be empty (SOP). Our `--workdir` is always a fresh `fragpipe\` subfolder.
-- Every existing run folder contains: `fragpipe.workflow`, `fragpipe.job`,
-  `fragpipe-files.fp-manifest`, `filelist_ionquant.txt`, `modmasses_ionquant.txt`.
-  These are written by FragPipe itself — good provenance, keep them.
+- **FASTA.** It is in the `.workflow` (`database.db-path`); stock workflows
+  have none. Ionomos writes a per-job copy of the pinned workflow with
+  `database.db-path` set to the method's FASTA from `fasta_dir`. If that
+  FASTA isn't there, the workflow's own path is used when it exists.
+  **Decoys**: headless FragPipe stops unless 40-60 % of the entries start
+  with `database.decoy-tag` (`rev_`); files of 1 GB or more are not
+  counted. Ionomos holds a job whose FASTA would be refused.
+- **No spaces in any path.** FragPipe refuses an output folder or a tools
+  path with whitespace.
+- **Output folder.** A non-empty one is only a warning to FragPipe; Ionomos
+  still gives every attempt a fresh `fragpipe\` and moves the old one aside.
+- **What FragPipe prints** (the lines Ionomos reads):
+
+  | Line | When | Ionomos |
+  |---|---|---|
+  | `N commands to execute:` then every step's name and command | before the run | the total for "4 of 31 step(s) done"; not counted as steps starting |
+  | `MSFragger [Work dir: C:\…]` | a step starts (steps like `CheckCentroid` have no folder) | the progress line |
+  | `Process 'MSFragger' finished, exit code: 0` | a step ends | steps done; a non-zero code fails the job and names the step |
+  | `Process returned non-zero exit code, stopping` / `Cancelling N remaining tasks` | after a failed step | failed, also when the launcher exits 0 |
+  | `2026-10-01 14:03:11,532 ERROR - <message>` | a check failed before any step | quoted in the reason; explained in plain words |
+  | `=====…ALL JOBS DONE IN 12.3 MINUTES=====…` | every step ran | missing = a warning on a done job (D59) |
+
+- **Exit code**: 0 when every step ran; the failing step's code otherwise;
+  1 when a check fails before any step.
+- **Files FragPipe writes itself** in the output folder: `fragpipe.workflow`
+  (the settings used), `fragpipe-files.fp-manifest`, `fragpipe.job`,
+  `log_<date>_<time>.txt` (its console, good run or bad),
+  `experiment_annotation.tsv`, `sdrf.tsv` (when the workflow has
+  `workflow.misc.save-sdrf=true`, as the stock ones do), `filelist_*.txt`,
+  `modmasses_ionquant.txt`. Good provenance, keep them. ⚠ The analysis
+  currently reads that `sdrf.tsv` as the experiment's own design: open in
+  ROADMAP.
+- **After every search** Ionomos writes `ionomos_run\run_fingerprint.json`:
+  the command line, FragPipe's version block, key settings, output file
+  names and sizes, the ends of the console log and what the parsers read.
 
 ## isoDTB (best-defined; build first)
 
@@ -95,10 +160,21 @@ names (`fragpipe_pax8.workflow`) — check those for lab-specific settings.
 
 **Manifest**: each raw = one plex (or one fraction of a plex). experiment =
 plex name, bioreplicate = 1 (per SOP) unless overridden. **Plus** an
-`annotation.txt` per plex: `<channel>\t<sample_name>` lines — FragPipe looks
-for it next to the raw files / in the workdir (confirm exact lookup rule for
-24.0 headless: it is referenced from the workflow's TMT-Integrator section as
-`tmtintegrator.annotation` or found by name — check).
+annotation file per plex, `<channel> <sample_name>` per line (any
+whitespace between them). How FragPipe finds it (`TmtiPanel`, 23.1 and
+24.0): the **one** file whose name ends in `annotation.txt` in the folder
+that holds all of the plex's LC-MS files. With none, or more than one, it
+writes its own `<workdir>\<plex>\<plex>_annotation.txt` naming the channels
+`<plex>_<channel>`. What it then requires (`CmdTmtIntegrator`), or the run
+stops: as many lines as the workflow's label type has channels
+(`tmtintegrator.channel_num`, e.g. `TMT-10`), `NA` as the name of an unused
+channel, no spaces in a name, no name twice across plexes, and, with a
+reference sample set in the workflow, a name containing its tag
+(`tmtintegrator.ref_tag`). Ionomos writes `annotation.txt` from
+`experiment.yaml` `tmt:` for one plex (not beside a user's own
+`*annotation.txt`), one per folder for plexes in their own folders, and
+none for plexes sharing a folder (a warning; D59). A channel map FragPipe
+would refuse fails the job before the search.
 
 **Key output**: `<workdir>\tmt-report\abundance_gene_MD.tsv` (and `_MD` variants
 for peptide/site).
@@ -131,7 +207,12 @@ require pointing at an external `DiaNN.exe` for 2.x. DIA-NN 2.3.2 is installed
 on the PC. Try the bundled one first; if the headless run complains, set
 `fragpipe.config_diann` in config.
 
-**Key output**: `<workdir>\diann-output\report.tsv` (+ `report.pg_matrix.tsv`, etc.).
+**Key output**: `<workdir>\dia-quant-output\report.tsv` (+
+`report.pg_matrix.tsv`, `report.stats.tsv`) in FragPipe 24; earlier versions
+wrote `diann-output\`. With a spectral library or DIA-NN in the workflow
+there are no per-experiment folders. ⚠ The stock workflow's own notes say
+"For quantification using DIA-NN, Thermo/Sciex DIA files should be in mzML
+format": whether `.raw` works on the PC is for the first DIA run to show.
 
 **Post-processing**: none known. Leave `postprocess: []` and ask users what
 they do next (FragPipe Analyst upload?).
@@ -145,7 +226,9 @@ they do next (FragPipe Analyst upload?).
       `log*.txt`) to develop parsers/post-proc against.
 - [ ] One R-script output per method to diff the Python port against.
 - [ ] Answer: what is the TMT "Peak Picking & zero Samples" pre-step tool?
-- [ ] Answer: how does FragPipe 24.0 headless locate `annotation.txt`?
+- [x] Answer: how does FragPipe 24.0 headless locate `annotation.txt`? → the one
+      `*annotation.txt` in the plex's folder (TMT section above).
+- [ ] The `run_fingerprint.json` of the first real search of each method.
 
 ## Downstream (all methods): statistics, volcano plots, report
 

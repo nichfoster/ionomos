@@ -26,7 +26,7 @@
       ]
     },
     {
-      "content": "The search of 20260910_Chris_DIA_crash-test_FAKEFAIL failed in the IonQuant step, which ended with exit code 1 [job:2] [log:2#14] [log:2#15]."
+      "content": "The search of 20260910_Chris_DIA_crash-test_FAKEFAIL failed in the DIA-NN step, which ended with exit code 1 [job:2] [log:2#240] [log:2#241]."
     }
   ],
   "rubric": {
@@ -35,10 +35,10 @@
       "log_tail"
     ],
     "must_cite": [
-      "log:2#14"
+      "log:2#240"
     ],
     "must_mention": [
-      "IonQuant"
+      "DIA-NN"
     ],
     "must_not": [
       "(?i)\\b(retried|re-?queued|deleted|removed) (it|them|the|your|all)"

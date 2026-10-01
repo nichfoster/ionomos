@@ -381,6 +381,25 @@ def cmd_check(args) -> int:
     return 0 if ok_all else 1
 
 
+def cmd_preflight(args) -> int:
+    """Everything about FragPipe that can be checked without a search (preflight.py, D59)."""
+    from ionomos import preflight
+
+    print(f"ionomos {__version__}  FragPipe preflight  config: {args.config}")
+    try:
+        cfg = load(args.config, check_paths=False)
+    except ConfigError as exc:
+        print(f" ✗ config  {exc}")
+        return 1
+    if not args.static:
+        print("starting FragPipe for --help" + ("" if args.no_dry_run else " and one dry run per method")
+              + " (no search; this can take a few minutes)…", flush=True)
+    checks = preflight.run(cfg, dry=not args.no_dry_run, methods=args.method or None,
+                           raw=Path(args.raw) if args.raw else None, start=not args.static)
+    print(preflight.text(checks))
+    return 1 if any(c.status == "fail" for c in checks) else 0
+
+
 def cmd_status(args) -> int:
     from ionomos import fragpipe, health
     from ionomos.worker import paused
@@ -905,6 +924,14 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--no-gui", action="store_true", help="never open the resolver window")
     r.set_defaults(fn=cmd_run)
     sub.add_parser("check", help="verify config, folders, users, GUI").set_defaults(fn=cmd_check)
+    pf = sub.add_parser("preflight", help="check FragPipe without a search: starts it for --help and a dry run "
+                                          "of each method")
+    pf.add_argument("--method", action="append", help="only this method (repeatable)")
+    pf.add_argument("--raw", metavar="PATH", help="a real .raw file or folder for the dry run's file list "
+                                                  "(default: a placeholder file)")
+    pf.add_argument("--no-dry-run", action="store_true", help="start FragPipe for --help only")
+    pf.add_argument("--static", action="store_true", help="read the disk only; start nothing")
+    pf.set_defaults(fn=cmd_preflight)
     s = sub.add_parser("status", help="list jobs")
     s.add_argument("--all", action="store_true", help="include done jobs")
     s.set_defaults(fn=cmd_status)

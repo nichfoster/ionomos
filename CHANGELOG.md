@@ -7,7 +7,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **FragPipe preflight** (D59; `preflight.py`): `ionomos preflight`, and the
+  app's **Check FragPipe install** now runs it. Besides reading the
+  installation from disk it starts FragPipe twice over, without a window and
+  without a search: `fragpipe.bat --help` (version, Java, .NET) and one
+  `--headless --dry-run` per FragPipe method, in which FragPipe itself
+  checks its tools, the FASTA, the workflow and the TMT annotation and lists
+  the commands it would run. It also checks: the launcher is `fragpipe.bat`,
+  FragPipe's own Java, MSFragger / IonQuant / diaTracer and the Thermo
+  reader folder, Philosopher, Python, DIA-NN, FragPipe's settings cache,
+  each workflow's tools against what is installed, decoys, paths without
+  spaces, free disk, RAM and threads against the settings, room for long
+  paths, write permission. Each line says what to do. `--static` starts
+  nothing; `--raw PATH` uses a real file for the dry run; `--method M`
+  limits it. Its files go to a new folder under `<log_dir>\preflight\`.
+- **Run fingerprint** (D59; `fingerprint.py`): every search, whatever its
+  outcome, leaves `ionomos_run\run_fingerprint.json` next to the job: the
+  launcher and command line, FragPipe's version block, the workflow's key
+  settings, the names and sizes of the output files, the first and last
+  lines of the console log, what Ionomos' parsers read out of it, and the
+  timings. Text only, a few tens of kB; an earlier one is kept as
+  `run_fingerprint_<time>.json`. It is for checking the parsers against the
+  first real runs.
+- **More failed searches get a plain cause** (`fragpipe.EXPLANATIONS`, from
+  FragPipe's source and issue tracker): no Java for `fragpipe.bat`, an
+  option FragPipe doesn't know, decoys missing or not about half, a path
+  with a space, a licence that expired, MSFragger's `ext` folder missing, a
+  missing .NET runtime, "Not enough memory allocated to MSFragger", the page
+  file running out, a path or command line too long for Windows, DIA-NN that
+  can't be started, a failed DIA-NN step, Python / FragPipe-SpecLib not set
+  up, a TMT annotation FragPipe refuses, two raw files with one name,
+  contradicting workflow settings, antivirus or a sync tool holding a file,
+  odd characters in the FASTA.
+- `fragpipe.config_python` (FragPipe's `--config-python`), in `config.yaml`
+  and the app's Advanced tab. FragPipe 24 on Windows uses the Python inside
+  its installation whatever this says; it is for other setups.
+
+### Changed
+
+- **A failed search's reason names the step and what it said**: "FragPipe
+  step MSFragger failed (exit code 1); it said: …" with that step's last
+  lines, instead of FragPipe's closing "Cancelling N remaining tasks".
+- **The progress line** counts steps ("MSFragger (4 of 31 step(s) done)")
+  and knows step names with brackets or a colon.
+- **TMT**: a channel map FragPipe would stop on fails the job before the
+  search, with the rule (every channel of the label type listed, `NA` for
+  unused ones, one name without spaces per channel, no name twice). Plexes
+  that share a folder get no annotation file and a warning; plexes each in
+  their own folder get one `annotation.txt` each.
+- **A FASTA without usable decoys holds the job** ("waiting: FASTA … can't
+  be searched") instead of letting FragPipe fail on it, and is a ✗ on the
+  setup checklist.
+- **The testbed's fake FragPipe copies the real one** (`fake_fragpipe.py`):
+  its options, checks, messages, console layout, exit codes and output
+  files, with the source of each named. New failure modes for testing:
+  `IONOMOS_FAKE_FP_MODE=speclib | no-java | locked | diann | cancel-exit0 |
+  no-done-line | child`. The sample TMT drop lists all ten channels; the
+  failing sample (`fp_fail`, a DIA drop) now fails in the DIA-NN step, as a
+  DIA search has no IonQuant step.
+- The default launcher path is `C:/FragPipe/FragPipe-24.0/bin/fragpipe.bat`
+  (the 23 / 24 installer's layout).
+
 ### Fixed
+
+- **`fragpipe.bat` found no Java on the lab PC's kind of setup.** The
+  launcher is Gradle's start script and needs `JAVA_HOME` or `java` on PATH;
+  the PC has neither. Ionomos now sets `JAVA_HOME` for it to the `jre`
+  folder in the FragPipe installation.
+- **`FragPipe-24.0.exe` without a `fragpipe.bat` beside it is no longer
+  run.** It is a window program that returns at once; the job is held with
+  that explanation.
+- **Every failed real search would have been blamed on the FASTA.** The hint
+  "No protein database" matched the bare setting name `database.db-path`,
+  which FragPipe prints on every run with all its other settings. It now
+  needs FragPipe's own messages. A test runs every hint against a healthy
+  FragPipe log.
+- **A successful retry could be marked failed** because of the failed step
+  of an earlier attempt still in the console log. Only the latest attempt's
+  part of the log is judged, also for the progress line.
+- **The progress line named the last step from the start.** FragPipe lists
+  every command before running any; that list was read as steps starting.
+- **Two TMT plexes in one folder got two annotation files**, which makes
+  FragPipe use neither. See Changed.
+- A run in which FragPipe cancelled its remaining tasks, or only did a dry
+  run, but exited 0 is now a failed search.
+- FragPipe 24 writes DIA-NN's tables to `dia-quant-output\`; the fake and
+  the docs said `diann-output\` (the analysis already read both).
 
 - A failed FragPipe search on .raw files no longer gets the cause "A .raw
   file couldn't be read" from Thermo's `RawFileReader reading tool` banner,

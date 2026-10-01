@@ -4,7 +4,7 @@
 paths:
   inbox:        C:/Fragpipe_Auto/inbox
   users_root:   C:/Fragpipe_General          # jobs land in users_root/<USER>/<experiment>
-  fragpipe_exe: C:/FragPipe/FragPipe-24.0/fragpipe/bin/fragpipe.bat   # headless launcher; CONFIRM on the PC
+  fragpipe_exe: C:/FragPipe/FragPipe-24.0/bin/fragpipe.bat   # the headless launcher (not FragPipe-24.0.exe)
   workflow_dir: C:/Fragpipe_Auto/workflows
   fasta_dir:    C:/Fragpipe_Auto/fasta
   database:     C:/Fragpipe_Auto/ionomos.db
@@ -23,6 +23,7 @@ fragpipe:
   min_free_gb: 20             # a search waits while the data drive has less free space than this + its raws
   config_tools_folder: ""     # leave blank unless the first headless run can't find tools
   config_diann: ""            # e.g. C:/DIA-NN/2.3.2/DiaNN.exe — DIA only, if needed
+  config_python: ""           # e.g. C:/FragPipe/FragPipe-24.0/python — only if FragPipe can't find its Python
 
 # What happens after FragPipe: statistics, volcano plots and results/report.html.
 # An experiment can override any of these in its experiment.yaml under analysis:

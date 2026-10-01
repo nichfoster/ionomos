@@ -138,3 +138,13 @@ QC_TREND_PAGE = "qc_trend.html"
 
 # The assistant's audit log (ROADMAP Phase 6, D49 / D57): append-only JSONL in the app-data folder.
 ASSISTANT_AUDIT_FILE = "assistant-audit.jsonl"
+
+# FragPipe hardening (D59). The run fingerprint: one small text file per finished search, in the job's run
+# folder, for checking Ionomos' parsers against a real FragPipe. The preflight's own scratch folder, in log_dir.
+FINGERPRINT_FILE = "run_fingerprint.json"
+PREFLIGHT_DIR = "preflight"
+
+
+def fingerprint_path(dest: Path) -> Path:
+    """The latest search's fingerprint; earlier ones sit beside it as run_fingerprint_<time>.json."""
+    return run_dir(dest) / FINGERPRINT_FILE

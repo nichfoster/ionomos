@@ -173,8 +173,10 @@ JOBS TAB (6)
   Pause searches: no new FragPipe runs start (the running one finishes) —
   e.g. while someone needs the PC. Resume to continue.
   Check FragPipe install: finds FragPipe's version, bundled Java, MSFragger,
-  IonQuant, diaTracer, DIA-NN, and checks each method's workflow + FASTA
-  (including whether the FASTA has decoys).
+  IonQuant, diaTracer, DIA-NN and Python, then starts FragPipe itself (no
+  window, no search) for its version and a dry run of each method: FragPipe
+  checks the workflow, the FASTA (decoys) and its tools and says what it
+  would run. Takes up to a few minutes. Same as: ionomos-cli.exe preflight
 
 METHODS TAB: IMPORT WORKFLOW
   Select a method -> Import workflow… -> pick a .workflow file (e.g. the
@@ -420,6 +422,7 @@ class App:
         d["fragpipe"]["auto_run"] = self.bv("fragpipe.auto_run", True).get()
         d["fragpipe"]["config_tools_folder"] = self.v("fragpipe.config_tools_folder").get().strip()
         d["fragpipe"]["config_diann"] = self.v("fragpipe.config_diann").get().strip()
+        d["fragpipe"]["config_python"] = self.v("fragpipe.config_python").get().strip()
         d["watcher"]["group_loose_files"] = self.bv("watcher.group_loose_files", True).get()
         d["gui"]["enabled"] = self.bv("gui.enabled").get()
         d["gui"]["popups"] = self.bv("gui.popups", True).get()
@@ -468,7 +471,7 @@ class App:
             ("paths.fasta_dir", "FASTA folder", "dir", "Protein databases (with decoys) the workflows use."),
             ("paths.log_dir", "Logs folder", "dir", ""),
             ("paths.database", "Job ledger (SQLite file)", "save", "Created automatically; its folder must exist."),
-            ("paths.fragpipe_exe", "FragPipe launcher", "file", "fragpipe.bat in FragPipe's bin folder, e.g. C:/FragPipe/FragPipe-24.0/fragpipe/bin/fragpipe.bat — 'Find FragPipe' looks for it."),
+            ("paths.fragpipe_exe", "FragPipe launcher", "file", "fragpipe.bat in FragPipe's bin folder, e.g. C:/FragPipe/FragPipe-24.0/bin/fragpipe.bat — 'Find FragPipe' looks for it."),
         ]
         self.path_rows: dict[str, PathRow] = {}
         for key, label, kind, hint in rows:
@@ -490,7 +493,7 @@ class App:
             self.set_status(f"found FragPipe: {found} (press Save)")
         else:
             messagebox.showinfo("Find FragPipe", "No fragpipe.bat found under C:/FragPipe or your Downloads.\n"
-                                "Use Browse… and pick <FragPipe folder>/fragpipe/bin/fragpipe.bat.")
+                                "Use Browse… and pick <FragPipe folder>/bin/fragpipe.bat.")
 
     def apply_quick(self):
         d = configio.defaults(self.v("quick.root").get().strip(), self.v("quick.users").get().strip())
@@ -890,9 +893,13 @@ class App:
         ttk.Entry(fp, textvariable=self.v("fragpipe.config_tools_folder"), width=34).grid(row=5, column=1, columnspan=2, sticky="ew", **PAD)
         ttk.Label(fp, text="DIA-NN exe").grid(row=6, column=0, sticky="e", **PAD)
         ttk.Entry(fp, textvariable=self.v("fragpipe.config_diann"), width=34).grid(row=6, column=1, columnspan=2, sticky="ew", **PAD)
-        ttk.Label(fp, text="Off = experiments are only filed and queued. Tools folder / DIA-NN exe are optional: "
-                           "only if the first headless run can't find MSFragger / DIA-NN. Restart the watcher after changes.",
-                  foreground="#666", wraplength=380).grid(row=7, column=0, columnspan=3, sticky="w", padx=6)
+        ttk.Label(fp, text="Python folder").grid(row=7, column=0, sticky="e", **PAD)
+        ttk.Entry(fp, textvariable=self.v("fragpipe.config_python"), width=34).grid(row=7, column=1, columnspan=2, sticky="ew", **PAD)
+        ttk.Label(fp, text="Off = experiments are only filed and queued. Tools folder / DIA-NN exe / Python folder are "
+                           "optional: only if a search can't find MSFragger / DIA-NN / Python (Jobs → Check "
+                           "FragPipe install tells; FragPipe 24 on Windows always uses its own Python). Restart "
+                           "the watcher after changes.",
+                  foreground="#666", wraplength=380).grid(row=8, column=0, columnspan=3, sticky="w", padx=6)
 
         g = group("Resolver window", 0, 1)
         ttk.Checkbutton(g, text="Open a window when a folder can't be interpreted", variable=self.bv("gui.enabled")).grid(row=0, column=0, columnspan=3, sticky="w", **PAD)
@@ -2094,20 +2101,15 @@ class App:
 
     def check_fragpipe(self):
         cfg_path = self.config_path
-        self.jdetail.write("checking the FragPipe installation and each method's workflow + FASTA…", clear=True)
+        self.jdetail.write("checking FragPipe: the installation, then FragPipe itself is started for its version "
+                           "and a dry run of each method (no search; up to a few minutes)…", clear=True)
 
         def go():
-            from ionomos import fragpipe
+            from ionomos import preflight
 
             try:
                 cfg = load(cfg_path, check_paths=False)
-                mark = {True: "✓", None: "!", False: "✗"}
-                lines = [f"{mark[ok]} {label:<16} {detail}" for ok, label, detail in fragpipe.install_report(cfg)]
-                for k in cfg.methods:
-                    lines.append("")
-                    lines.append(f"{k}:")
-                    lines += [f"  {mark[ok]} {t}" for ok, t in fragpipe.describe_method(cfg, k)]
-                text = "\n".join(lines)
+                text = preflight.text(preflight.run(cfg))  # same as `ionomos preflight` (D59)
             except Exception as exc:  # noqa: BLE001
                 text = f"could not check: {exc} (save the config first?)"
             self.post(lambda: self.jdetail.write(text, clear=True))

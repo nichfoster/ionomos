@@ -173,7 +173,41 @@ list of violations (exit 1). The invariants: no raw file lost or duplicated
 (count + bytes), every drop filed or noted, no job stuck queued/running,
 DONE/FAILED notes present, ledger integrity OK, no CRITICAL log record.
 Failure modes of the fake FragPipe for manual testing:
-`IONOMOS_FAKE_FP_MODE=oom | msfragger | step-fail-exit0 | silent-exit0`.
+`IONOMOS_FAKE_FP_MODE=oom | msfragger | speclib | no-java | locked | diann |
+step-fail-exit0 | step-fail-neg-exit0 | cancel-exit0 | silent-exit0 |
+no-done-line | child` (what each acts out: `fake_fragpipe.MODES`).
+
+## FragPipe as it really behaves
+
+`tests/test_fragpipe_real.py` (D59) holds what Ionomos expects of the real
+FragPipe, none of it from a real run:
+
+- **A healthy log** assembled from FragPipe's own layout and from logs users
+  attached to its issue tracker. Every failure hint is run against it and
+  must not match: FragPipe echoes every workflow setting and command line on
+  each run, and a hint once matched the bare setting name `database.db-path`.
+- **About 40 failure excerpts**, each as FragPipe or its tool prints it, with
+  the source named beside it, and the hint it must get first. A new entry in
+  `fragpipe.EXPLANATIONS` without an excerpt fails
+  `test_every_explanation_is_exercised_by_a_test`.
+- **The run loop on the fake FragPipe**: a complete run and the files it
+  leaves; each failure mode; exit code 0 with a failed step, with cancelled
+  tasks, with no output; a dry run taken for a search; a retry after a
+  failure; three runs keeping two `fragpipe_previous_*`; stop, cancel and the
+  time limit each ending the launcher **and** a process it started.
+- The launcher (`fragpipe.bat`, `JAVA_HOME`, the window `.exe`), the options
+  passed, the decoy rule, TMT annotation rules, the fingerprint, the
+  preflight.
+
+The fake itself is `ionomos/src/ionomos/fake_fragpipe.py`; its header lists
+what is copied from FragPipe and from which file, and what is invented. Its
+output must keep the real shapes: when a real `run_fingerprint.json` comes
+back from the PC, compare its `console.head` / `console.tail` and `outputs`
+with the fake's and fix the fake first, then the parsers.
+
+`IONOMOS_FAKE_FP_STRICT=1` makes the fake refuse paths with spaces as real
+FragPipe does (always on under Windows). One test is an expected failure:
+FragPipe's own `sdrf.tsv` being read as the user's design (ROADMAP).
 
 ## The assistant's scenario corpus
 

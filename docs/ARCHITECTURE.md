@@ -25,14 +25,17 @@
 | `manifest.py` | Read/validate `experiment.yaml`; build `.fp-manifest` + TMT `annotation.txt` | `prior-work/fragpipe_runner.build_manifest` |
 | `intake.py` | Validate a stable folder, show it for review (or hand unresolvable names to the resolver), move it to the user dir, write `ionomos.json`, insert ledger row. The watcher passes a `config.LiveConfig`, so edits to config.yaml apply to the next drop | — |
 | `resolve.py` | tkinter window for fixing user/method/file tails; writes `experiment.yaml` + learned aliases | — |
-| `testbed.py` | Fake lab + sample drops + fake FragPipe for testing on any OS | — |
+| `testbed.py` | Fake lab + sample drops + the fake engines for testing on any OS | — |
+| `fake_fragpipe.py` | The testbed's FragPipe (`ionomos fake-fragpipe`): FragPipe 24's options, checks, messages, console layout, exit codes and output files, each copied from a named source; no search (D59) | FragPipe's source |
 | `demo.py` | `ionomos demo`: a simulated DIA experiment (`downstream/simulate.py`, planted hits, on/off proteins and gene-set shifts; bundled `assets/demo_gene_sets.gmt`) written to a new folder, then analysed. Offline, no lab config, no Tk (the pip install; docs/QUICKSTART.md) | — |
 | `app.py` | tkinter setup wizard / control panel: folders, users, methods, every parameter, start/stop, startup task, testbed | — |
 | `configio.py` | config.yaml as a dict; writes a commented file | — |
 | `service.py` | child processes, PID file, Task Scheduler, remembered config path, exe routing; dev install: git update, diagnostics bundle | — |
 | `ledger.py` | SQLite job table + status transitions; source of truth for "what's queued" | `prior-work/store.py` |
 | `worker.py` | Thread inside `ionomos run`: first runnable `queued` job → FragPipe or DIA-NN (runner.py) → done/failed; holds jobs whose setup files are missing. Sequential. | `prior-work/queue_worker.py` |
-| `fragpipe.py` | Prepare a job (launcher, workflow with `database.db-path` patched to the method's FASTA, manifest, TMT annotation), run headless with timeout/stop, kill the process tree | `prior-work/fragpipe_runner.py` |
+| `fragpipe.py` | Prepare a job (launcher `fragpipe.bat` with FragPipe's own Java, workflow with `database.db-path` patched to the method's FASTA, manifest, TMT annotation; a FASTA FragPipe would refuse holds the job), run headless with timeout/stop, kill the process tree, read the console (steps, exit codes, `ALL JOBS DONE`), explain failures (`EXPLANATIONS`), the install report | `prior-work/fragpipe_runner.py` |
+| `preflight.py` | `ionomos preflight` / the app's Check FragPipe install: the install report, FragPipe started for `--help` and a `--dry-run` per method, PC checks (spaces, disk, RAM, long paths, permissions), each workflow's tools against the installation (D59) | — |
+| `fingerprint.py` | After every search: `ionomos_run/run_fingerprint.json`, a small text record of what ran and what the parsers read, for checking them against a real FragPipe (D59) | — |
 | `maxquant.py` | `engine: maxquant` methods: the lab's `mqpar` or MaxQuant's own `--create` template, patched with the job's raws, experiments, fractions, FASTA, threads and output folder into `ionomos_run/mqpar.xml`; output in `maxquant/` (D50) | — |
 | `sage.py` | `engine: sage` methods: `ionomos_run/sage.json` (the lab's Sage JSON or Ionomos' defaults, with the job's FASTA, mzML paths and output folder) and `sage_job.json`; the job runs as `ionomos sage-job`, one process that converts each `.raw` to `sage_mzml/*.mzML` with ThermoRawFileParser (reused on retry) and then starts Sage with its telemetry off; output in `sage/` (D51). A lab `sage_config` with `quant.tmt` makes it a TMT job: `tmt.tsv` is expected, and the analysis rolls it up per plex and channel (D56) | — |
 | `diann.py`, `runner.py` | `engine: diann` methods: prepare a DIA-NN job (the lab's `diann_exe`, FASTA or spectral library, `ionomos_run/diann.cfg`), output in `diann/`; `runner` picks FragPipe, DIA-NN, MaxQuant or Sage per method, and all use `fragpipe.run`'s start / cancel / stop / timeout loop (D39) | — |
@@ -58,7 +61,7 @@
 | `runners/isodtb.py` | Post-proc: modified-peptide → site merge — thin entry point delegating to `downstream/isodtb.py`, which holds the algorithm | port of `lab-scripts/isoDTB_…R` |
 | `runners/tmt.py` | Post-proc: experimental annotation fix | port of `lab-scripts/correct_experimental_annotation…R` |
 | `runners/dia.py` | Post-proc: (TBD — probably nothing beyond copying `report.tsv` up) | — |
-| `cli.py` | `ionomos setup / run / check / status / dry-run / names test / retry / testbed / diagnose / notify-test / update / help / ask`; no args → app; hidden `fake-fragpipe` for the testbed | — |
+| `cli.py` | `ionomos setup / run / check / preflight / status / dry-run / names test / retry / testbed / diagnose / notify-test / update / help / ask`; no args → app; hidden `fake-fragpipe` for the testbed | — |
 
 ## Data flow for one job
 
@@ -89,9 +92,10 @@
                   write dest\ionomos_run\<method>.workflow  (database.db-path = method FASTA)
                   (TMT) write annotation.txt next to the raws (never over a user's own)
                   run fragpipe.bat --headless --workflow <wf> --manifest <mf>
-                      --workdir dest\fragpipe --threads N --ram G
+                      --workdir dest\fragpipe --threads N --ram G      (JAVA_HOME = FragPipe's jre)
                   tee → dest\ionomos_run\fragpipe_console.log
-                  exit 0 + output → postproc(method) → status=done, DONE.txt
+                  write dest\ionomos_run\run_fingerprint.json        (whatever the outcome)
+                  exit 0 + output + no failed step → postproc(method) → status=done, DONE.txt
                   else / timeout  → status=failed, FAILED.txt, reason in ionomos.json + ledger
                   ionomos stopped → FragPipe tree killed, job back to queued
 
@@ -116,6 +120,7 @@ C:\Fragpipe_Auto\                    ← the app lives here (no spaces!)
     qc_trend.jsonl                  ← instrument QC: one line per QC-standard run (D45)
     qc_trend.html                   ← the QC trend page (Levey-Jennings charts, Westgard rules)
     help\help.html                  ← the help page, rewritten each time it is opened (D46)
+    preflight\<time>\               ← one FragPipe preflight's files: --help output, each method's dry run (D59)
   ionomos.db                        ← SQLite ledger
 
 C:\Fragpipe_General\<user>\<experiment>\    ← where jobs land
@@ -126,12 +131,13 @@ C:\Fragpipe_General\<user>\<experiment>\    ← where jobs land
     fragpipe-files.fp-manifest
     <method>.workflow                ← pinned workflow, database.db-path set
     fragpipe_console.log             ← FragPipe's console output (all attempts)
+    run_fingerprint.json             ← what the latest search did (D59); earlier: run_fingerprint_<time>.json
   fragpipe\                          ← --workdir; all FragPipe output
     fragpipe.workflow                ← FragPipe copies the workflow used here
   fragpipe_previous_<ts>\            ← an earlier attempt's output (never deleted)
     combined_modified_peptide_label_quant.tsv   (isoDTB)
     tmt-report\abundance_gene_MD.tsv            (TMT)
-    report.tsv / diann-output\                   (DIA)
+    dia-quant-output\report.tsv                  (DIA; diann-output\ before FragPipe 24)
   results\                           ← post-processing output
     <experiment>_sites.tsv           (isoDTB)
     experimental_annotation.tsv      (TMT)
@@ -174,7 +180,7 @@ a job that takes the PC down can't loop. `ionomos retry` resets the count.
 paths:
   inbox:        C:/Fragpipe_Auto/inbox
   users_root:   C:/Fragpipe_General          # dest = users_root/<user>/<experiment>
-  fragpipe_exe: C:/FragPipe/FragPipe-24.0/fragpipe/bin/fragpipe.exe   # CONFIRM on install
+  fragpipe_exe: C:/FragPipe/FragPipe-24.0/bin/fragpipe.bat   # the headless launcher, not FragPipe-24.0.exe
   workflow_dir: C:/Fragpipe_Auto/workflows
   fasta_dir:    C:/Fragpipe_Auto/fasta
   database:     C:/Fragpipe_Auto/ionomos.db
@@ -190,6 +196,8 @@ fragpipe:
   ram_gb: 48                # of 64
   timeout_minutes: 240      # 3×7 isoDTB takes 30–60 min; TMT phospho can be longer
   config_diann: C:/DIA-NN/2.3.2/DiaNN.exe   # only if FragPipe can't find its bundled one
+  config_tools_folder: ""   # only if FragPipe's window was never used with this installation
+  config_python: ""         # FragPipe 24 on Windows uses its own python folder whatever this says
 
 users:
   aliases:                  # initials / alternate spellings -> folder under users_root
@@ -266,7 +274,11 @@ by default and its `base_url` must be on this PC. See ASSISTANT.md.
 | Disk nearly full | a search is held ("waiting: low disk space") until `min_free_gb` + its raws are free |
 | Inbox share disappears | logged once, watched until it's back |
 | Invalid config saved from the app | validated as a candidate file first; the good file is never replaced; every save backed up to `config-backups/` |
-| FragPipe says exit 0 but a step failed / wrote nothing | parsed from the console (`Process 'X' finished, exit code: N`) → failed |
+| FragPipe says exit 0 but a step failed / cancelled its tasks / only did a dry run / wrote nothing | parsed from the latest attempt's part of the console (`Process 'X' finished, exit code: N`, `Cancelling N remaining tasks`) → failed |
+| The launcher is FragPipe's window `.exe` (returns at once, FragPipe runs on unseen) | never run: swapped for `fragpipe.bat`, else the job is held |
+| `fragpipe.bat` finds no Java (none on PATH) | `JAVA_HOME` set to the installation's `jre` for the launcher |
+| The FASTA has no decoys, or not about half | the job is held with the rule; FragPipe is not started |
+| A search behaves in a way the parsers don't know | `ionomos_run\run_fingerprint.json` records what ran and what was read, for every search |
 | An analysis stage crashes (QC, enrichment, export, report) | isolated: recorded in `analysis_error.txt` + an issue; the rest (volcanos, tables, report or its fallback page) is still made |
 | Instrument QC trending crashes, or a QC table can't be read | isolated after the analysis: a note on the run's row, a log line; the job is done regardless |
 | The analysis can't decide (one condition, no control, a group of 1, unmatched runs) | runs on the best guess, then a pop-up with the experiment editor asks; the answer goes to experiment.yaml |
