@@ -321,3 +321,24 @@ def test_sage_is_never_taken_from_the_path():
     """`sage` on a PATH is usually SageMath: only a configured file or the Windows install folders count."""
     assert sage.find_exe("sage") is None
     assert not any("/usr" in c or c == "sage" for c in sage.EXE_CANDIDATES)
+
+
+def test_a_failed_search_after_good_conversions_does_not_blame_the_raw_files(bed, monkeypatch):
+    dest = _queue(bed)
+    monkeypatch.setenv("IONOMOS_FAKE_FP_MODE", "fail")
+    Worker(bed["cfg"], bed["ledger"]).run_once()
+    job = bed["ledger"].get(1)
+    assert job.status == "failed" and "Sage exited with code 1" in job.reason
+    assert _log(dest).count("FAKE ThermoRawFileParser: converted") == 12   # the converter is named, and it worked
+    assert ".raw file couldn't be read" not in job.reason
+    assert ".raw file couldn't be read" not in (dest / "FAILED.txt").read_text(encoding="utf-8")
+    assert not any(".raw file" in h for h in fragpipe.explain(_log(dest)))
+
+
+def test_a_failed_conversion_does_blame_the_raw_file(bed, monkeypatch):
+    dest = _queue(bed)
+    monkeypatch.setenv("IONOMOS_FAKE_CONVERT_MODE", "fail")
+    Worker(bed["cfg"], bed["ledger"]).run_once()
+    job = bed["ledger"].get(1)
+    assert job.status == "failed" and job.reason.startswith("A .raw file couldn't be read")
+    assert "A .raw file couldn't be read" in (dest / "FAILED.txt").read_text(encoding="utf-8")

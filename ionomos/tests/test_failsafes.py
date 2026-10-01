@@ -192,6 +192,48 @@ def test_explain(console, expect):
         assert hints and expect in hints[0]
 
 
+RAW_HINT = "A .raw file couldn't be read"
+
+
+@pytest.mark.parametrize("console", [
+    # sage.py's own line, with the real converter's messages (log4net: "<date> LEVEL message") above it
+    "2026-09-30 10:00:01 ERROR Unable to access the RAW file using the native Thermo API\n"
+    "ionomos sage-job: ERROR: converting DMSO_1_1.raw failed (ThermoRawFileParser exit code 1, no mzML written)",
+    "ionomos sage-job: ERROR: converting 20250301_EJQ_HeLa_1.raw failed (ThermoRawFileParser exit code 0, no mzML written)",
+    "FAKE ThermoRawFileParser: ERROR RawFileReader could not open DMSO_1_1.raw",
+    "ThermoRawFileParser failed with exit code 1",
+    "Exception thrown by RawFileReader while opening the file",
+    "RawFileReader: unable to open the file",
+    "Error reading D:\\Fragpipe_General\\EJQ\\x\\DMSO_1_1.raw",
+    "error loading spectra from DMSO_1_1.raw",
+    "DMSO_1_1.raw appears to be truncated",
+    "File Drug_2_1.raw is corrupt",
+])
+def test_explain_blames_a_raw_file_that_could_not_be_read(console):
+    assert any(RAW_HINT in h for h in fragpipe.explain(console))
+
+
+@pytest.mark.parametrize("console", [
+    "FAKE ThermoRawFileParser: converted DMSO_1_1.raw",
+    # what the real converter prints for a good file: it never names itself
+    "2026-09-30 10:00:01 INFO Started parsing D:\\x\\DMSO_1_1.raw\n2026-09-30 10:00:09 INFO Finished parsing "
+    "D:\\x\\DMSO_1_1.raw\n2026-09-30 10:00:09 INFO Processing completed 0 errors, 0 warnings",
+    # the banner in every FragPipe log of a .raw search, here followed by an unrelated failure
+    "RawFileReader reading tool. Copyright (c) 2016 by Thermo Fisher Scientific, Inc. All rights reserved.\n"
+    "Process 'MSFragger' finished, exit code: 1",
+    # the name inside a path or a .NET namespace is not the tool reporting anything
+    "ionomos sage-job: ERROR: could not start the raw converter (C:/ThermoRawFileParser/ThermoRawFileParser.exe): "
+    "[WinError 2] The system cannot find the file specified",
+    "Error: C:\\ThermoRawFileParser\\ThermoRawFileParser.exe is not a valid Win32 application",
+    "   at ThermoFisher.CommonCore.RawFileReader.RawFileReaderAdapter.FileFactory(String fileName)",
+    "FAKE ThermoRawFileParser: converted Drug_3_2.raw\nionomos sage-job: Sage telemetry switched off\n"
+    "FAKE Sage: Error: fake failure",
+    "[1/12] converting DMSO_1_1.raw -> DMSO_1_1.mzML",
+])
+def test_explain_does_not_blame_raw_files_for_a_mention_of_the_reader(console):
+    assert not any(RAW_HINT in h for h in fragpipe.explain(console))
+
+
 def test_progress_parses_fragpipe_format(tmp_path):
     log = tmp_path / "c.log"
     log.write_text("MSFragger [Work dir: C:/x]\nProcess 'MSFragger' finished, exit code: 0\n"

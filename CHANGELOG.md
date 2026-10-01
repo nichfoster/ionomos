@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A failed FragPipe search on .raw files no longer gets the cause "A .raw
+  file couldn't be read" from Thermo's `RawFileReader reading tool` banner,
+  which FragPipe logs on every such search. 0.13.0 fixed this for the
+  converter's name in Sage jobs; the reader's name was still matched alone.
+  Either name now needs an error word on its line, or `ionomos sage-job`'s
+  own `converting X failed` line (also with exit code 0 and no mzML
+  written). A name inside a path does not count, so a converter that could
+  not be started is no longer reported as a bad raw file.
+
 ## [0.13.0] - 2026-10-01
 
 ### Added
