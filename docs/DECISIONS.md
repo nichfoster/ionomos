@@ -1565,3 +1565,103 @@ unasked, so the first is built to be safe to ignore (`notify.py`).
 **Not verified**: a real Teams, Slack or SMTP server. The tests use an HTTP
 server and a small SMTP server inside the test process, and a stub for
 STARTTLS + login.
+
+### D61 — Conditions have roles; a competition experiment gets its own comparisons and a specific-targets call
+**2026-10-01.** The maintainer's priority: the analysis should know that
+"DMSO vs competitive vs compound will have DMSO have less samples". Until now
+a control was recognised by keyword and every other condition was compared
+with it. `downstream/roles.py` adds the design.
+
+1. **Five roles**: control, compound, competition, reference (pool /
+   bridge), qc. Every condition that is nothing else is a compound. A
+   competition is linked to the compound it competes.
+2. **Where a role comes from**, highest first: `analysis.roles`
+   (`{Probe_Comp: competition of Probe}`), `analysis.control`, an SDRF
+   column `characteristics[role]` (not part of the SDRF specification; a
+   convenience), then the name. `find_control` honours `analysis.roles`, so
+   the dose-response, time-course and F-test code see the same control.
+3. **Competition keywords**, matched as a whole word of the name (split at
+   `_ - . + space` and at a lower-to-upper step, so `ProbeComp` works for
+   TMT, where the lab's names allow one word): `comp`, `competition`,
+   `competitor`, `competed`, `compete`, `competing`, `excess`. Only `Comp`
+   is from the lab (the folder `KL6283A_TMTPD_Comp_KL6159A` in
+   `reference/pc-inventory/`); the SOPs name none. The rest are the usual
+   words. **Unconfirmed.**
+4. **Weak keywords** (`pre`, `pretreat…`, `block…`, `cold`, and a number
+   followed by `x`) also mean other things (pre / post, a dose). They make a
+   competition only when the rest of the name is another condition
+   (`Probe_pre` next to `Probe`), the guess is used, and the doctor asks
+   (`ROLES_UNSURE`, input). Without that condition they change nothing.
+5. **Linking**: the compound whose name the competition's name contains
+   (the longest such), else the only compound. With several compounds and no
+   match the competition is compared with the control only, and the doctor
+   asks.
+6. **Default comparisons** (only for `de_type: control` without explicit
+   `comparisons:`, and only when a competition condition exists): compound
+   vs control, competition vs its compound, competition vs control. Not
+   compared: a second control with the control, a pool or QC standard, a
+   competition with another compound. Probe and probe + competitor without
+   a vehicle give one comparison and no "which is the control?" question.
+7. **Explicit settings win.** `comparisons:` and `de_type: all | others`
+   are untouched. `control:` names the control and the role comparisons are
+   still made, because the Analysis tab writes `control:` on every run; with
+   it set, every condition is still compared with that control, so the set
+   of comparisons is the earlier one plus competition vs compound.
+   `role_comparisons: false` gives the earlier behaviour. The statistics of
+   a comparison do not depend on how it was chosen (one limma model, BH per
+   comparison), which a test checks.
+8. **Specific targets**: significant up in compound vs control and
+   significant down in competition vs compound, each by that comparison's
+   own call (so the cut-offs, adjusted or raw p, and fold change only where
+   there are no replicates). This is the common reading of a competition
+   pulldown; the lab has not confirmed it. Alternatives not built: a
+   threshold on the share competed off, an interaction test.
+9. **Unequal groups.** What was checked on simulated 2 / 4 / 4 data, and
+   what changed:
+   - *Missing-value filter*: unchanged. It asks for values in 50 % of one
+     condition, whichever, so a small control cannot remove a feature. One
+     of two values is 50 %, so a feature can pass on one DMSO value alone:
+     6 of 12,000 features in 8 simulated DIA experiments, left as it is.
+   - *`min_valid` without imputation*: changed, with a setting. With DMSO
+     n=2 one missing DMSO value left the feature untested against DMSO:
+     6.1 % of features (20 simulated TMT experiments × 1,000 genes, 3 %
+     missing) against 0.03 % with four DMSO channels. Now the smaller group
+     of an unequal comparison needs half its samples
+     (`small_group_min_valid: half`): 0.1 % untested, 1,205 features tested
+     on one DMSO value, 49 hits among them, all true, no false hit among
+     the 1,156 unchanged ones; specific targets found 400 of 400 instead of
+     375. The justification: limma's residual variance comes from every
+     group, and D32 already tests a group of one this way. Equal groups are
+     not touched. limma only; Welch and Student keep `min_valid`.
+   - *Imputation-driven flags*: unchanged. The rule is a share (half of a
+     group), so one imputed value of two flags the hit and one of four
+     does not. With two controls more hits rest on imputed values (57
+     against 11 in 8 simulated DIA experiments), and they are flagged.
+   - *limma*: unchanged. The pooled variance and the `sqrt(1/n1 + 1/n2)`
+     standard error are checked against the formula for 2 / 4 / 4. R's
+     limma was not available for an unequal-groups golden file.
+   - *Power*: per comparison with its own n; the single "per group" number
+     used the median group size (4 for 2 / 4 / 4).
+   - *Scorecard*: changed. A sample with one mate scatters √2 σ around it,
+     one with five mates √1.2 σ around their mean. In clean 2 / 6 / 6 data
+     the DMSO samples' z-score was 3.25 (median of 40 simulations, max
+     4.42; the flag starts at 3.5) and is now 0.01 (max 0.92). No sample
+     was flagged before either, because the flag also needs 1.5× the
+     typical spread, but the margin was thin. Equal groups: the factor is
+     1.
+   - *Low confidence*: unchanged for one control. Two controls are tested
+     normally. The title said "a group has one sample" also when
+     `min_valid: 3` made a group of two low confidence; it now says the
+     number.
+10. **Found on the way, not fixed**: median normalisation assumes most
+    features don't change. In the simulated pulldown 8 % were enriched in
+    one direction, which shifted the unchanged features by about 0.26 log2
+    between DMSO and probe; with two controls that produced false hits just
+    over |log2FC| = 1 (without imputation 17 in 8 experiments against 0 with
+    four controls; with it 14 against 2). On the roadmap.
+11. **isoDTB** is a competition experiment by construction: every
+    condition has the role competition (of the probe), nothing is asked, and
+    the comparisons and `cys.py` are unchanged.
+
+**Not verified**: any real lab experiment; the report section in a browser
+other than the one check made while building; R's limma on unequal groups.

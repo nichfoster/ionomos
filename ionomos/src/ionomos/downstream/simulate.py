@@ -8,6 +8,8 @@ Column names and layouts follow the real files:
                                                          ReferenceIntensity, one log2 column per sample)
     doses   dose_titration / dose_pg_matrix             (a compound titration: DMSO + Cmpd_<dose> runs, planted
                                                          log-logistic curves with known pEC50s, flat and noisy features)
+    roles   competition_pg_matrix / competition_tmt     (a competition experiment with unequal groups: DMSO n=2,
+                                                         Probe n=4, Probe_Comp n=4; specific and unspecific binders)
 
 Each writer returns the planted truth so a test can measure recall and false
 discoveries of the whole downstream pipeline.
@@ -131,9 +133,15 @@ def dia_pg_matrix(path: Path, runs: list[tuple[str, str]], seed: int = 1, n_prot
 
 
 def tmt_abundance(path: Path, samples: list[str], seed: int = 1, n_genes: int = 500,
-                  changed_fraction: float = 0.08, effect: float = 1.5) -> dict[str, dict[str, int]]:
-    """samples = column names (lab convention condition_1_channel). Returns {condition: {gene: +1/-1}}."""
+                  changed_fraction: float = 0.08, effect: float = 1.5,
+                  planted: dict[str, dict[str, float]] | None = None, missing: float = 0.03
+                  ) -> dict[str, dict[str, int]]:
+    """samples = column names (lab convention condition_1_channel). Returns {condition: {gene: +1/-1}}.
+
+    planted: {condition: {gene: log2 effect}} on top of the random changes (and winning over them); missing: the
+    share of values left blank. Without them the output is unchanged for a seed."""
     rng = random.Random(seed)
+    planted = planted or {}
     cond_of = {s: s.split("_")[0] for s in samples}
     conds = list(dict.fromkeys(cond_of.values()))
     ctrl = _control(conds)
@@ -148,9 +156,61 @@ def tmt_abundance(path: Path, samples: list[str], seed: int = 1, n_genes: int = 
                 sign = rng.choice((1, -1))
                 eff[c] = sign * effect
                 truth[c][g] = sign
-        vals = [f"{rng.gauss(eff.get(cond_of[s], 0.0), 0.25):.4f}" if rng.random() > 0.03 else "" for s in samples]
+            if g in planted.get(c, {}):
+                eff[c] = planted[c][g]
+                if eff[c]:
+                    truth[c][g] = 1 if eff[c] > 0 else -1
+                else:
+                    truth[c].pop(g, None)
+        vals = [f"{rng.gauss(eff.get(cond_of[s], 0.0), 0.25):.4f}" if rng.random() > missing else "" for s in samples]
         lines.append([g, str(rng.randint(2, 80)), f"P{30000 + i}", "1.0000", f"{rng.gauss(18, 1.5):.3f}", *vals])
     _write(path, header, lines)
+    return truth
+
+
+def competition_design(sizes: dict[str, int] | None = None, n: int = 600, specific: int = 20, unspecific: int = 20,
+                       effect: float = 3.0, compound: str = "Probe", competition: str = "Probe_Comp",
+                       control: str = "DMSO", genes: list[str] | None = None
+                       ) -> tuple[dict[str, int], list[str], dict, dict[str, set[str]]]:
+    """A competition experiment with unequal groups (default DMSO n=2, Probe n=4, Probe_Comp n=4), as the lab
+    runs them. Returns (sizes, gene names, planted effects for dia_pg_matrix / tmt_abundance, truth).
+
+    truth["specific"]: enriched by the compound and competed back to the control level by the competitor;
+    truth["unspecific"]: enriched by the compound and just as much with the competitor (it binds something the
+    competitor doesn't block). Everything else doesn't change. genes: the names to use (default TGT<i>,
+    STICKY<i>, BG<i>); the first `specific` are specific, the next `unspecific` unspecific."""
+    sizes = sizes or {control: 2, compound: 4, competition: 4}
+    if genes is None:
+        genes = [f"TGT{i}" for i in range(specific)] + [f"STICKY{i}" for i in range(unspecific)]
+        genes += [f"BG{i}" for i in range(n - len(genes))]
+    spec, uns = set(genes[:specific]), set(genes[specific:specific + unspecific])
+    planted = {compound: {g: effect for g in spec | uns},
+               competition: {**{g: 0.0 for g in spec}, **{g: effect for g in uns}}}
+    return sizes, genes, planted, {"specific": spec, "unspecific": uns}
+
+
+def competition_pg_matrix(path: Path, sizes: dict[str, int] | None = None, seed: int = 1, n: int = 600, **kw
+                          ) -> dict[str, set[str]]:
+    """A DIA-NN report.pg_matrix.tsv of competition_design (runs named <condition>_<rep>.raw). Returns the truth."""
+    sizes, genes, planted, truth = competition_design(sizes, n, **kw)
+    runs = [(f"C:\\raw\\{c}_{r}.raw", c) for c, k in sizes.items() for r in range(1, k + 1)]
+    dia_pg_matrix(path, runs, seed=seed, n_proteins=n, changed_fraction=0.0, genes=genes, planted=planted)
+    return truth
+
+
+def competition_tmt(path: Path, sizes: dict[str, int] | None = None, seed: int = 1, n: int = 500,
+                    missing: float = 0.03, competition: str = "ProbeComp", **kw) -> dict[str, set[str]]:
+    """A TMT-Integrator abundance table of competition_design: one plex, the competition named in one word
+    (ProbeComp), as the lab's condition_1_channel names need. TMT is not imputed by default, so min_valid
+    applies. Returns the truth (gene names as tmt_abundance writes them)."""
+    from ionomos.downstream.plex import TMT_ORDERS
+
+    sizes, _genes, planted, truth = competition_design(sizes, n, competition=competition,
+                                                       genes=[_gene(i) for i in range(n)], **kw)
+    order = TMT_ORDERS[min(k for k in (10, 11, 16, 18) if k >= sum(sizes.values()))]
+    names = [c for c, k in sizes.items() for _ in range(k)]
+    samples = [f"{c}_1_{ch}" for c, ch in zip(names, order, strict=False)]
+    tmt_abundance(path, samples, seed=seed, n_genes=n, changed_fraction=0.0, planted=planted, missing=missing)
     return truth
 
 

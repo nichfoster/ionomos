@@ -158,7 +158,10 @@ hints that the protein amount changed rather than one site.
 
 A comparison where a group has **one sample** is still tested (it borrows the
 spread from the other groups) and is labelled **Low confidence**. Treat its
-hits as leads to confirm.
+hits as leads to confirm. A group of two or more is tested normally, also
+when the other group is larger (two DMSO against four of a compound): the
+count under the volcano says how many samples each side had, and
+[Power](#qc.power) says what that comparison can detect.
 
 When no condition has replicates at all, nothing can estimate the noise, so
 the comparison is **Fold change only**: no p-values, features ranked by fold
@@ -194,6 +197,32 @@ change against another's for every feature:
 The right chart (an UpSet plot) counts the hits found in exactly the
 comparisons marked with a dark dot. Click a bar to mark those features on the
 volcano.
+
+## Specific targets {#report.specific}
+
+Shown for a competition experiment: a [control](#glossary.control), a
+[compound](#glossary.compound) (the probe), and the probe plus a competitor
+(a [competition](#glossary.competition)). The chips at the top say which
+[role](#glossary.role) each condition was given and how many samples it has.
+
+The chart has one point per feature:
+
+- across, **enrichment**: compound against control. Right = the probe pulls
+  it down or labels it.
+- up, **competed off**: compound against competition. Up = the competitor
+  takes it off the probe.
+
+The marked top-right quadrant holds the **specific targets**: enriched
+against the control *and* competed off, each significant at the cut-offs of
+the Differential section (they update live). **Enriched, not competed** is
+what the probe binds that the competitor doesn't block: unspecific binding,
+or another site. The table lists both fold changes and both adjusted
+p-values; `results/specific_targets.tsv` has every feature at the saved
+cut-offs.
+
+This rule is the usual reading of a competition experiment; the lab has not
+confirmed it. If a condition got the wrong role, see
+[Check the roles](#issue.ROLES_UNSURE).
 
 ## Only in one condition {#report.onoff}
 
@@ -433,6 +462,12 @@ covers the quieter and noisier half of the features. The box above it says
 what your current replicates can find, and how many replicates your fold-change
 cut-off would need. Use it to plan the next experiment. See
 [Power](#glossary.power).
+
+The table under the chart takes each comparison as it is, with the samples
+it has on each side. Two controls against four treated samples detect about
+what 2.7 per group would: the noise is estimated from every sample of the
+experiment, so the small group costs precision of its mean only. A group is
+never flagged for being small.
 
 ## Search quality {#qc.psm}
 

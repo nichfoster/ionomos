@@ -507,6 +507,32 @@ turns the per-run records into the TSV, the `psm_qc` entry of
 the two warnings. A table over 4,096 MB is not read. What is shown and the
 limits: WORKFLOWS.md.
 
+**Roles** (`downstream/roles.py`, D61). `roles.plan(matrix, settings)` gives
+every condition a role and, when one is a competition, the default
+comparisons. `analysis.choose_comparisons` asks it (a thin hook; explicit
+`comparisons:` and `de_type: all | others` never reach it), and `analyze()`
+keeps the plan for the doctor, `analysis.json` (`roles`) and the report:
+
+```
+conditions ─▶ roles.infer ─▶ roles.plan ─────────▶ comparisons ─▶ limma (unchanged)
+ names,        control /      compound vs control                      │
+ analysis.     compound /     competition vs compound                  ▼
+ roles, SDRF   competition    competition vs control        roles.specific_targets
+ role column   (of X) / ...   (nothing else by default)     up in the first AND down in the second
+                                                            ─▶ specific_targets.tsv, analysis.json,
+                                                               the report's Specific targets section
+```
+
+An SDRF's `characteristics[role]` column is read by `sdrfdesign.py` into
+`meta["roles"]` and merged into the settings (which win) before anything
+else looks at them. Unequal groups touch three places:
+`analysis.group_needs` (what `min_valid` asks of the smaller group, passed
+to `fpa.limma_contrasts` / `design.limma_design`), `insights.power`
+(`pairs=`: each comparison with its own n) and `insights.sample_scorecard`
+(the spread is scaled to the usual group size before it is compared). The
+report recomputes the specific-targets calls from the comparisons with its
+live cut-offs; the TSV has them at the saved ones.
+
 `results/dose_response.tsv` (`downstream/doseresponse.py`, D44) is made when
 the conditions are a titration: names like `Cmpd_10nM` (or
 `analysis.doses`) and at least `dose_min_doses` (4) doses above the control.

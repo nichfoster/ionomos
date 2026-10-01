@@ -341,9 +341,17 @@ real data:
    - Levey-Jennings charts with run rules
 
    Intake already sees every run.
-7. [ ] Phospho: localisation filter and KSEA kinase activity. Only if a lab
+7. [x] **Roles and competition experiments** (2026-10-01, D61: `downstream/roles.py`): control / compound /
+   competition, comparisons that follow the design, a specific-targets call,
+   unequal groups handled knowingly. Simulated data only. Still to do:
+   - [ ] roles in the experiment editor and the review window (a GUI change)
+   - [ ] a normalisation that holds when many features are enriched in one
+     direction (a pulldown): median centring shifts the unchanged ones (D61
+     point 10)
+   - [ ] an R (limma) golden file for unequal groups
+8. [ ] Phospho: localisation filter and KSEA kinase activity. Only if a lab
    runs phospho; PhosphoSitePlus is non-commercial, so it is a user download.
-8. [ ] STRING / CORUM overlays: low priority.
+9. [ ] STRING / CORUM overlays: low priority.
 
 Stay deterministic. The one credible published "AI interpretation"
 (GeneAgent, Nat Methods 2025) verifies every claim against databases. Plain
@@ -524,6 +532,17 @@ Collected from the other docs; resolve before/during Phase 1.
       lab confirms. Also: check the site annotation reader against a real CysDB download.
 - [ ] isoDTB: for the protein-abundance correction of site ratios, where does the matching proteome come from
       (a paired unenriched run per condition)?
+- [ ] Roles (D61): which words does the lab put in a condition name for "probe plus competitor"? Built: `comp`,
+      `competition`, `competitor`, `competed`, `compete`, `competing`, `excess` (only `Comp` was seen on the PC), and,
+      asked about each time, `pre`, `pretreat…`, `block…`, `cold`, `10x`. Set `analysis.competition_keywords`.
+- [ ] Roles (D61): is "enriched against the control and competed off, each at the report's cut-offs" the lab's
+      rule for a specific target, or is it a share competed off (e.g. ≥ 75 %), or a ratio to DMSO after competition?
+- [ ] Roles (D61): with `control:` set, every condition is still compared with it and competition vs compound is
+      added. Is that right, or should a set control switch the role comparisons off?
+- [ ] Roles (D61): should a pool or a QC standard also be left out of the comparisons when there is no competition
+      condition? (Now: only in a competition experiment, so nothing changed for other experiments.)
+- [ ] Unequal groups (D61): is `small_group_min_valid: half` right as the default (a feature with one of two DMSO
+      values is tested), and should the filter ask for at least two values in the condition that keeps a feature?
 - [ ] Is a review window on every drop right long-term, or only for new users / methods / code patterns?
       Watch how it feels on the PC for a few weeks (`gui.review_drops`).
 - [ ] Phase 5: allow numpy as an *optional* speed-up (dose-response, limpa)? The base install stays

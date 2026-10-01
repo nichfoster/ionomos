@@ -20,6 +20,10 @@ joined with " | " unless the `sdrf_factor` setting names the one(s) to use. Samp
 their conditions and replicate numbers change, so sample_conditions written for a table stay valid. Runs the SDRF
 doesn't describe keep their earlier condition and become a doctor issue (SDRF_UNMATCHED_RUNS).
 
+A column `characteristics[role]` (or `[sample role]`, `[experimental role]`, `comment[role]`) gives each
+condition its role for the comparisons (roles.py, D61): control, compound, competition or "competition of
+Probe", reference, qc. It is not part of the SDRF specification. analysis.roles wins over it.
+
 Ionomos writes its own SDRF to results/sdrf.tsv (sdrf.py); results/ is output and is never read back here.
 """
 from __future__ import annotations
@@ -57,6 +61,7 @@ class Row:
     pooled: bool
     techrep: int = 1
     fraction: int = 1
+    role: str = ""       # characteristics[role]: control, compound, competition of X ... (roles.py)
 
 
 @dataclass
@@ -182,7 +187,9 @@ def read(path: Path, factor: list[str] | str | None = None) -> Design:
           "label": col("comment[label]"),
           "biorep": col("characteristics[biological replicate]", "comment[biological replicate]"),
           "techrep": col("comment[technical replicate]"), "fraction": col("comment[fraction identifier]"),
-          "pooled": col("characteristics[pooled sample]")}
+          "pooled": col("characteristics[pooled sample]"),
+          "role": col("characteristics[role]", "characteristics[sample role]", "characteristics[experimental role]",
+                      "comment[role]", "comment[sample role]")}
 
     def cell(r: list[str], k: str) -> str:
         j = ix[k]
@@ -206,8 +213,10 @@ def read(path: Path, factor: list[str] | str | None = None) -> Design:
         pooled_col = cell(r, "pooled").lower()
         pooled = (bio.lower() == "pooled" or pooled_col.startswith(("pooled", "sn=")) or
                   (cond or "").lower() in POOLED_WORDS)
+        role = cell(r, "role")
         rows.append(Row(cell(r, "source"), cell(r, "assay"), file, run_stem(file), label, channel, cond,
-                        _int(bio), pooled, _int(cell(r, "techrep")) or 1, _int(cell(r, "fraction")) or 1))
+                        _int(bio), pooled, _int(cell(r, "techrep")) or 1, _int(cell(r, "fraction")) or 1,
+                        "" if role.lower() in RESERVED else role))
     if not rows:
         raise DesignError(f"{path.name} has no rows with a data file")
     d = Design(path, rows, list(dict.fromkeys(n for _j, n in fcols)), notes)
@@ -289,6 +298,16 @@ def apply(m: QuantMatrix, d: Design) -> tuple[QuantMatrix, dict]:
     if refs:
         m.meta["reference_samples"] = refs
         m.meta.setdefault("reference_from", f"SDRF {rel} (pooled)")
+    said: dict[str, set[str]] = defaultdict(set)   # condition -> the role(s) its rows give it
+    for s, r in hits.items():
+        if r.role:
+            said[m.condition[s]].add(r.role)
+    for c, rs in said.items():
+        if len(rs) > 1:
+            info["notes"].append(f"the SDRF gives {c} more than one role ({', '.join(sorted(rs))}); not used")
+    given = {c: next(iter(rs)) for c, rs in said.items() if len(rs) == 1}
+    if given:
+        m.meta["roles"] = given
     if not plex:
         m.meta.pop("plex", None)
     # technical replicates / fractions of one sample kept as separate columns: say so

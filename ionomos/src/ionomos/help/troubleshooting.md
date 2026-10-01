@@ -395,6 +395,40 @@ pick the control in the window and **Run analysis**. The choice is remembered
 for the experiment. A control name the lab always uses can be added to the
 control keywords (tab 7 Analysis → Lab defaults).
 
+## Check the roles of the conditions {#issue.ROLES_UNSURE}
+
+Ionomos gives each condition a [role](#glossary.role) from its name, and
+here it is not sure. The message says which condition and why:
+
+- a name has a word that often, but not always, means "plus a competitor"
+  (`pre`, `block`, `10x`): it was read as a
+  [competition](#glossary.competition) and the comparisons were made that
+  way;
+- or a competition can't be linked to one compound, because there are
+  several and its name doesn't say which. It was then only compared with the
+  control.
+
+Say what each condition is under `analysis:` in the experiment's
+`experiment.yaml`, then re-run the analysis ([How to re-run](#faq.rerun)):
+`roles: {DMSO: control, Probe: compound, Probe_Comp: competition of Probe}`.
+A condition that is not a competition gets `compound`. Listing
+`comparisons:` yourself also settles it.
+
+## Read as a competition experiment {#issue.COMPETITION_DESIGN}
+
+A note, not a problem. One condition's name says it is the compound plus a
+competitor, so the comparisons follow the design instead of "everything
+against the control": each compound vs the control (what it enriches), each
+[competition](#glossary.competition) vs its compound (what the competitor
+takes off) and vs the control (what is left). Nothing else is compared by
+default: not two controls, not a pool or a QC standard, not one compound's
+competition with another compound. The report gets a
+[Specific targets](#report.specific) section.
+
+If a role is wrong, set `roles:` under `analysis:` in `experiment.yaml`
+(see [Check the roles](#issue.ROLES_UNSURE)). For the old behaviour, every
+condition against the control, set `role_comparisons: false`.
+
 ## A sample has far fewer identifications {#issue.LOW_SAMPLE}
 
 One sample has less than 40% of the typical number of identifications: a
@@ -604,10 +638,11 @@ real on/off changes (see [Only in one condition](#report.onoff)). In the
 report, tick **ignore imputation-driven hits** (Options → Hits) to see the hits
 that stand on measured values.
 
-## Low confidence (a group has one sample) {#issue.LOW_CONFIDENCE}
+## Low confidence (a group has too few samples) {#issue.LOW_CONFIDENCE}
 
-The comparison was tested, but a group has only one sample, so the noise
-estimate comes from the other groups. If replicates exist, fix the conditions
+The comparison was tested, but a group has only one sample (or fewer than
+the `min_valid` setting asks for), so the noise estimate comes from the
+other groups. If replicates exist, fix the conditions
 and **Run analysis**; otherwise confirm the hits in another experiment. See
 [Low confidence and fold change only](#report.confidence).
 

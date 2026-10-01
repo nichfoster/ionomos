@@ -172,6 +172,13 @@ features × samples matrix of log2 values and runs the same statistics:
   control, default), `all` (every pair, control as reference), `others` (each
   vs the rest), or an explicit `comparisons:` list. isoDTB: each condition's
   ratios vs 0 (moderated one-sample test).
+- **Roles** (`downstream/roles.py`, D61). Each condition is a control, a
+  compound, a competition (probe plus competitor), a pooled reference or a
+  QC standard, read from its name, from `analysis.roles`, or from an SDRF's
+  `characteristics[role]` column. With a competition condition the default
+  comparisons are compound vs control, competition vs its compound and
+  competition vs control (see "Competition experiments" below). isoDTB is
+  a competition experiment by construction and is unchanged.
 - **Per experiment** (Analysis tab or `experiment.yaml analysis:`):
   `sample_conditions: {Drug_4: DMSO}`, `exclude_samples: [DMSO_3]`,
   comparisons and any setting above.
@@ -196,6 +203,19 @@ features × samples matrix of log2 values and runs the same statistics:
   plot is **fold change only**. It shows log2FC against mean abundance (or
   rank, for ratio data), and candidates are features with |log2FC| ≥ the
   cut-off. No p-values are invented.
+
+- **Unequal groups** (D61). Two DMSO against four of each compound is a
+  normal design and is not flagged. limma estimates each feature's variance
+  from all samples of all conditions, so a comparison with a small group
+  borrows the variance from the larger ones; its standard error is
+  `s·√(1/n₁ + 1/n₂)`. The report gives the samples on each side of every
+  comparison (Methods, under the volcano, `analysis.json` → `comparisons[].samples`)
+  and the minimum detectable fold change per comparison (Quality control →
+  Power; `analysis.json` → `quality.detectable_log2fc`). Without imputation
+  (TMT), the smaller group of an unequal comparison needs half its samples
+  measured instead of `min_valid` (`small_group_min_valid: half`; `same`
+  for the earlier rule); the features this lets in are counted in the notes
+  and their n is in the table. A group of one is low confidence as before.
 
 - **Any table** (`downstream/anytable.py`, D33): `ionomos analyze <file>` or
   Analysis tab → **Table…**. TSV, CSV (including `;` with decimal commas),
@@ -234,7 +254,9 @@ features × samples matrix of log2 values and runs the same statistics:
   | BAD_COMPARISON | decide | chosen comparisons don't fit; defaults used meanwhile |
   | EACH_OWN_CONDITION | decide | every sample is its own condition (replicates named with letters?) — grouping suggested |
   | SMALL_GROUP | decide | a group is too small and not even a fold change could be computed |
-  | LOW_CONFIDENCE | note | a group has one sample: tested anyway, p borrowed from the replicated groups (D32) |
+  | ROLES_UNSURE | decide | a condition's role can't be told from its name (`Probe_pre`, `Probe_10x`), or a competition can't be linked to one compound; the guess is used meanwhile (D61) |
+  | COMPETITION_DESIGN | note | read as a competition experiment: the roles and comparisons chosen, and how to change them (D61) |
+  | LOW_CONFIDENCE | note | a group has one sample (or fewer than `min_valid`): tested anyway, p borrowed from the replicated groups (D32) |
   | FOLD_CHANGE_ONLY | note | no replicates anywhere (1 vs 1, one isoDTB replicate, a table without p): fold change only |
   | LOW_SAMPLE | decide | a sample has < 40 % of the median identifications (failed injection?) |
   | ZERO_TESTED / NO_VOLCANO / CRASH_* | problem | nothing testable, plot not written, a step crashed |
@@ -271,6 +293,47 @@ control section has a **Search quality** tab with one row per raw file:
 - Output: `results/psm_qc.tsv`, `analysis.json` → `psm_qc`.
 - Not tested on real FragPipe output: the column names are from the FragPipe
   documentation.
+
+**Competition experiments** (`downstream/roles.py`, D61). A condition whose
+name has `comp`, `competition`, `competitor`, `competed`, `compete`,
+`competing` or `excess` as a word (`Probe_Comp`, `Probe+Comp`, `ProbeComp`,
+`KL6283A_Comp_KL6159A`) is the compound plus a competitor, linked to the
+compound named by the rest of it (or the only compound).
+
+| Comparison | Reads as |
+|---|---|
+| compound vs control | enrichment / engagement |
+| competition vs its compound | what the competitor displaces (down = competed off) |
+| competition vs control | what is left with the competitor |
+
+- **Specific targets** of a compound: significant *up* in compound vs
+  control and significant *down* in competition vs compound, each at the
+  report's cut-offs. *Enriched, not competed* is listed beside them.
+- Not compared by default: two controls, a pool, a QC standard, one
+  compound's competition with another compound.
+- `pre`, `pretreat…`, `block…`, `cold` and `10x` count only when the rest
+  of the name is another condition (`Probe_pre` next to `Probe`); the
+  analysis runs on that reading and asks (`ROLES_UNSURE`).
+
+```yaml
+analysis:                      # experiment.yaml (one experiment) or config.yaml (lab)
+  roles: {DMSO: control, Probe: compound, Probe_Comp: competition of Probe}
+  competition_keywords: [comp, competition, competitor, competed, compete, competing, excess]
+  competition_keywords_weak: [pre, pretreat, pretreated, pretreatment, block, blocked, blocking, cold]
+  role_comparisons: true       # false: every condition vs the control, as before
+```
+
+- `comparisons:`, `de_type: all | others` work as before. With `control:`
+  set, every condition is still compared with it and competition vs
+  compound is added.
+- Output: `results/specific_targets.tsv` (per compound and feature: the
+  call, enrichment log2FC / p / adjusted p, competition log2FC / p /
+  adjusted p, % competed off, what is left, measured n per group),
+  `analysis.json` → `roles`, `specific_targets`, and the report's
+  **Specific targets** section (enrichment across, competed off up, the
+  quadrant of specific binders marked; the calls follow the live cut-offs).
+- Not confirmed by the lab: the keywords and the rule. Not tested on a real
+  experiment.
 
 **Time courses** (`downstream/timecourse.py`, D53). When a series has three
 or more time points (`Drug_0h`, `Drug_1h`, `Drug_4h`, … or `analysis.times`),
@@ -342,7 +405,8 @@ analysis:                      # config.yaml (lab) or experiment.yaml (one exper
   MSstatsPTM adjustment). It needs a matching unenriched proteome, and the
   lab has to say where that comes from.
 
-Open questions for the lab: which tag the compound-treated sample carries
+Open questions for the lab: which words mark a competition condition and
+what the lab calls a specific target (D61, ROADMAP); which tag the compound-treated sample carries
 (`liganded_direction`) and which R and replicate count the lab calls
 liganded; which comparisons matter for isoDTB (vs 0, or
 compound vs compound?); whether DIA should use FragPipe's own

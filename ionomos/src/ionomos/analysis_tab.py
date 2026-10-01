@@ -198,7 +198,9 @@ class AnalysisTab:
                         variable=self.bv("analysis.use_adjusted", True)).grid(row=4, column=1, columnspan=2, sticky="w", **PAD)
         row(st, 5, "Control keywords", ttk.Entry(st, textvariable=self.v("analysis.control_keywords"), width=30),
             "the first condition matching one of these is the control")
-        row(st, 6, "Names on volcano", ttk.Entry(st, textvariable=self.v("analysis.top_labels"), width=8))
+        row(st, 6, "Competition keywords", ttk.Entry(st, textvariable=self.v("analysis.competition_keywords"), width=30),
+            "a condition with one of these words is the compound plus a competitor (Probe_Comp)")
+        row(st, 7, "Names on volcano", ttk.Entry(st, textvariable=self.v("analysis.top_labels"), width=8))
 
         ttk.Checkbutton(pr, text="Remove contaminants (contam_ proteins)",
                         variable=self.bv("analysis.remove_contaminants", True)).grid(row=0, column=0, columnspan=3, sticky="w", **PAD)
@@ -279,6 +281,10 @@ class AnalysisTab:
         for name in LIBRARIES:
             self.bv(f"analysis.lib.{name}").set(name in libs)
         self.v("analysis.control_keywords").set(", ".join(an.get("control_keywords") or []))
+        from ionomos.downstream.roles import DEFAULT_COMPETITION_KEYWORDS
+
+        words = an.get("competition_keywords")
+        self.v("analysis.competition_keywords").set(", ".join(DEFAULT_COMPETITION_KEYWORDS if words is None else words))
 
     def collect(self, d: dict) -> None:
         from ionomos.config import ConfigError
@@ -300,4 +306,6 @@ class AnalysisTab:
         an["enrichment_libraries"] = [n for n in LIBRARIES if self.bv(f"analysis.lib.{n}").get()]
         an["enrichment_gmt"] = self.v("analysis.enrichment_gmt").get().strip()
         an["control_keywords"] = [x.strip() for x in self.v("analysis.control_keywords").get().split(",") if x.strip()]
+        an["competition_keywords"] = [x.strip() for x in self.v("analysis.competition_keywords").get().split(",")
+                                      if x.strip()]
         d["analysis"] = an
