@@ -380,6 +380,17 @@ channels by the loader, as MSstatsTMT does) are never scaled again. The values
 before IRS are kept in `meta["bridge_before"]`, so the report's PCA can show
 before / after and colour by plex; `analysis.json` → `tmt` says what was done.
 
+`results/time_course.tsv` (`downstream/timecourse.py`, D53) is made when the
+conditions are time points: names like `Drug_4h` (or `analysis.times`) and at
+least `time_min_points` (3) per series. It reuses the comparisons' own model
+(`~0 + condition` plus any block / covariates) and variance prior, and asks
+three questions as contrasts between the time points' coefficients: change
+over time (moderated F, every time point against the first), a trend
+(moderated t on the linear contrast over the ordered time points), and, with
+a control series, whether the series responds differently (moderated F on
+the interaction contrasts). The changing features are then grouped into
+patterns by a k-means with a fixed start. Intensity data and limma only.
+
 `results/cysteine_sites.tsv` (`downstream/cys.py`, D52) is made for site
 ratio data (isoDTB), after the dose-response stage and isolated like it. It
 reads the processed matrix's *measured* ratios and classifies each site per

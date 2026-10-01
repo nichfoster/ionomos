@@ -255,6 +255,33 @@ A curve fitted on few points or with a wide pEC50 interval is a lead to
 confirm, not a measured potency. The numbers are also in
 `results/dose_response.tsv`.
 
+## Time course {#report.time}
+
+Shown when the conditions are time points: at least three per series, named
+with their time (`Drug_0h`, `Drug_1h`, `Drug_4h`, `Drug_24h`; units `s`,
+`min`, `h`, `d`) or listed under `times` in `experiment.yaml`. Conditions
+sharing the rest of the name are one series. A control with no time in its
+name (`DMSO`) counts as time 0.
+
+- **Changing** features pass two cut-offs: the F-test across the time points
+  ([adjusted p](#glossary.adjp)) and a large enough
+  [log2 fold change](#glossary.log2fc) against the first time point. *up* and
+  *down* say which way; *mixed* goes both ways at different times.
+- **Trend** tests a steady rise or fall across the time points in their
+  order. A feature can change (a pulse) without a trend.
+- **Patterns**: the changing features grouped by the shape of their profile.
+  Each small chart is the median of its group. Click one to list its
+  features; click it again to clear.
+- **The profile** at the right shows the clicked feature: every replicate as
+  a point, the mean as a line. With a control series (for example `DMSO_0h`,
+  `DMSO_4h` …) its mean is the dashed line, and **differs from** tests
+  whether the feature behaves differently over time than in the control.
+
+The time points are treated as separate groups, so no curve is assumed; with
+two or three points per series this is the honest reading. The pairwise
+comparisons in the volcano plot are unchanged. The numbers are also in
+`results/time_course.tsv`.
+
 ## Liganded sites {#report.cys}
 
 Shown for isoDTB (cysteine site ratio) experiments. Each condition is a

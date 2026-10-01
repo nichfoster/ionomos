@@ -633,7 +633,7 @@
     ST.highlight = null;
     syncControls();
     renderSearchInfo();
-    renderVolcano(); renderTable(true); renderCompare(); safe(renderHeatmap, "#heatmap"); safe(doseOnSearch, "#dosebody"); safe(renderCys, "#cysbody");
+    renderVolcano(); renderTable(true); renderCompare(); safe(renderHeatmap, "#heatmap"); safe(doseOnSearch, "#dosebody"); safe(renderCys, "#cysbody"); safe(timeOnSearch, "#timebody");
     writeHash();
   }
   function setHighlight(set, name) {
@@ -641,7 +641,7 @@
     ST.highlightName = name || "";
     syncControls();
     renderSearchInfo();
-    renderVolcano(); renderTable(true); renderCompare(); safe(renderHeatmap, "#heatmap"); safe(doseOnSearch, "#dosebody"); safe(renderCys, "#cysbody");
+    renderVolcano(); renderTable(true); renderCompare(); safe(renderHeatmap, "#heatmap"); safe(doseOnSearch, "#dosebody"); safe(renderCys, "#cysbody"); safe(timeOnSearch, "#timebody");
   }
   function markedList() {
     const out = [];
@@ -1936,6 +1936,182 @@
     download("dose_response_" + (S.name || "curves") + ".csv", lines.join("\n") + "\n", "text/csv");
   }
 
+  // ----------------------------------------------------------- time course
+  // D.time (timecourse.py report_payload): per series the tested features as columns (i = feature, cls, pat, F, p,
+  // q, tt / tq = trend, max, peak, fc = log2 fold change against the first time point per time) and the series'
+  // samples with their times. The tests are limma's, made in Python; the page draws them.
+  const TS = { s: 0, show: "changing", pat: 0, q: "", sortKey: "p", sortDir: 1, page: 0, focus: null };
+  const TIME_CLS = ["up", "down", "mixed", "not"];
+  const timeColor = (c) => css(c === "up" ? "--up" : c === "down" ? "--down" : c === "mixed" ? "--c3" : "--ns");
+  function timeSeries() { const X = D.time; return X && X.ran && X.series && X.series.length ? X.series[Math.min(TS.s, X.series.length - 1)] : null; }
+  const TIME_COLS = [
+    { k: "name", t: D.kind === "ratio" ? "Site" : "Gene", f: (S, k) => esc(nameOf(S.i[k])) },
+    { k: "cls", t: "class", f: (S, k) => "<span class='dot' style='background:" + timeColor(S.cls[k]) + "'></span> " + esc(S.cls[k]) },
+    { k: "pat", t: "pattern", n: 1, f: (S, k) => (S.pat[k] == null ? "" : String(S.pat[k])) },
+    { k: "F", t: "F", n: 1, f: (S, k) => fmt(S.F[k]) },
+    { k: "p", t: "p", n: 1, f: (S, k) => fmtP(S.p[k]) },
+    { k: "q", t: "adj. p", n: 1, f: (S, k) => fmtP(S.q[k]) },
+    { k: "tt", t: "trend t", n: 1, f: (S, k) => fmt(S.tt[k]) },
+    { k: "tq", t: "trend adj. p", n: 1, f: (S, k) => fmtP(S.tq[k]) },
+    { k: "max", t: "largest log2FC", n: 1, f: (S, k) => fmt(S.max[k]) },
+    { k: "peak", t: "at", f: (S, k) => esc(S.labels[S.peak[k]]) },
+  ];
+  const timeCols = (S) => TIME_COLS.concat(S.iq ? [{ k: "iq", t: "differs from " + S.vs + " adj. p", n: 1, f: (S2, k) => fmtP(S2.iq[k]) }] : []);
+  function timeRows(S, withText) {
+    const X = D.time, q = withText ? TS.q.trim().toLowerCase() : "", out = [];
+    for (let k = 0; k < S.i.length; k++) {
+      const c = S.cls[k];
+      if (TS.show === "changing" && c === "not") continue;
+      if (TS.show === "differs" && !(S.iq && S.iq[k] != null && S.iq[k] <= X.alpha)) continue;
+      if (TIME_CLS.includes(TS.show) && c !== TS.show) continue;
+      if (TS.pat && S.pat[k] !== TS.pat) continue;
+      if (q) {
+        const i = S.i[k], t = ((D.f.label[i] || "") + " " + (D.f.id[i] || "") + " " + (D.f.desc[i] || "")).toLowerCase();
+        if (!t.includes(q)) continue;
+      }
+      out.push(k);
+    }
+    const key = TS.sortKey, val = (k) => (key === "name" ? nameOf(S.i[k]).toLowerCase() : key === "cls" ? TIME_CLS.indexOf(S.cls[k]) : key === "max" || key === "tt" ? (S[key][k] == null ? null : Math.abs(S[key][k])) : S[key] ? S[key][k] : null);
+    out.sort((a, b) => {
+      const x = val(a), y = val(b);
+      if (x == null || y == null) return x == null ? (y == null ? 0 : 1) : -1;
+      return (x > y ? 1 : x < y ? -1 : 0) * TS.sortDir;
+    });
+    return out;
+  }
+  function renderTime() {
+    const host = $("#timebody");
+    if (!host) return;
+    const X = D.time || {}, S = timeSeries();
+    if (X.ran || X.found) ["#time", "#navtime"].forEach((s) => { const e = $(s); if (e) e.hidden = false; });
+    if (!S) { host.innerHTML = "<div class='empty'>" + esc(X.reason || "No time course was found.") + "</div>"; return; }
+    TS.s = X.series.indexOf(S);
+    if (TS.show === "differs" && !S.iq) TS.show = "changing";
+    if (TS.pat > S.patterns.length) TS.pat = 0;
+    const count = { changing: 0 };
+    S.cls.forEach((c) => { count[c] = (count[c] || 0) + 1; if (c !== "not") count.changing++; });
+    const differ = S.iq ? S.iq.filter((v) => v != null && v <= X.alpha).length : 0;
+    const opts = [["changing", "changing (" + count.changing + ")"]].concat(TIME_CLS.map((c) => [c, c + " (" + (count[c] || 0) + ")"]), [["all", "all tested (" + S.i.length + ")"]],
+      S.iq ? [["differs", "differs from " + S.vs + " (" + differ + ")"]] : []);
+    let h = "<div class='row'>";
+    if (X.series.length > 1) h += "<label class='ctl'>Series <select id='tseries'>" + X.series.map((x, k) => "<option value='" + k + "'" + (k === TS.s ? " selected" : "") + ">" + esc(x.name || "time course") + "</option>").join("") + "</select></label>";
+    h += "<label class='ctl'>Show <select id='tshow'>" + opts.map((o) => "<option value='" + o[0] + "'" + (o[0] === TS.show ? " selected" : "") + ">" + esc(o[1]) + "</option>").join("") + "</select></label>" +
+      "<input type='search' id='tq' placeholder='Find a feature' aria-label='Find a feature' value='" + esc(TS.q) + "'>" +
+      "<span class='muted'>" + S.labels.length + " time points: " + esc(S.labels.join(", ")) + " · changing: F adj. p ≤ " + X.alpha + " and |log2FC| ≥ " + X.lfc + " against " + esc(S.labels[0]) +
+      (S.untested ? " · " + fmtInt(S.untested) + " not tested (not measured at every time point)" : "") + " · <a href='time_course.tsv'>time_course.tsv</a></span></div>" +
+      "<div id='timepatterns' class='tiles'></div><div id='timehl' class='muted'></div>" +
+      "<div class='split'><div id='timetable'></div><div class='card detail'><div id='timehead'></div><div class='chart' id='timeprofile'></div></div></div>";
+    host.innerHTML = h;
+    const ser = $("#tseries");
+    if (ser) ser.onchange = (e) => { TS.s = +e.target.value; TS.focus = null; TS.pat = 0; TS.page = 0; renderTime(); };
+    $("#tshow").onchange = (e) => { TS.show = e.target.value; TS.page = 0; safe(renderTimeTable, "#timetable"); };
+    $("#tq").oninput = (e) => { TS.q = e.target.value; TS.page = 0; safe(renderTimeTable, "#timetable"); };
+    if (TS.focus == null || TS.focus >= S.i.length) TS.focus = S.i.length ? 0 : null;
+    const marked = anyMark() ? S.i.filter((i) => matches(i)).length : 0;
+    $("#timehl").textContent = anyMark() ? marked + " of these features match the search (bold)" : "";
+    safe(renderTimePatterns, "#timepatterns");
+    safe(renderTimeTable, "#timetable");
+    safe(renderTimeProfile, "#timeprofile");
+  }
+  function timeOnSearch() {
+    const S = timeSeries();
+    if (!S) return;
+    if (anyMark()) { const k = S.i.findIndex((i) => matches(i)); if (k >= 0) TS.focus = k; }
+    renderTime();
+  }
+  /** One small chart per pattern: the median log2 fold change of its features at each time point. */
+  function renderTimePatterns() {
+    const S = timeSeries(), host = $("#timepatterns");
+    if (!S || !host) return;
+    host.innerHTML = "";
+    if (!S.patterns.length) { host.innerHTML = "<div class='muted'>No feature changes over time at these cut-offs.</div>"; return; }
+    const lim = Math.max.apply(null, S.patterns.map((p) => Math.max.apply(null, p.profile.map((v) => Math.abs(v || 0))))) || 1;
+    S.patterns.forEach((p, j) => {
+      const card = document.createElement("div");
+      card.className = "tile";
+      card.dataset.pat = j + 1;
+      card.style.cursor = "pointer";
+      if (TS.pat === j + 1) card.style.borderColor = css("--accent");
+      card.innerHTML = "<div class='k'>Pattern " + (j + 1) + " · " + fmtInt(p.n) + " feature" + (p.n === 1 ? "" : "s") + "</div>";
+      const W = 170, H = 70, n = p.profile.length;
+      const root = svg("svg", { viewBox: "0 0 " + W + " " + H, width: W, height: H, role: "img" }, card);
+      title(root, "Pattern " + (j + 1) + ": median log2 fold change " + p.profile.map((v, k) => S.labels[k] + " " + fmt(v)).join(", "));
+      const X = (k) => 8 + (k / Math.max(1, n - 1)) * (W - 16), Y = (v) => H / 2 - (v / lim) * (H / 2 - 8);
+      svg("line", { x1: 8, x2: W - 8, y1: Y(0), y2: Y(0), stroke: css("--axis") }, root);
+      const up = p.profile[p.profile.reduce((a, v, k) => (Math.abs(v) > Math.abs(p.profile[a]) ? k : a), 0)] >= 0;
+      svg("path", { d: p.profile.map((v, k) => (k ? "L" : "M") + X(k).toFixed(1) + " " + Y(v).toFixed(1)).join(""), fill: "none", stroke: css(up ? "--up" : "--down"), "stroke-width": 2 }, root);
+      p.profile.forEach((v, k) => svg("circle", { cx: X(k), cy: Y(v), r: 2.4, fill: css(up ? "--up" : "--down") }, root));
+      card.onclick = () => { TS.pat = TS.pat === j + 1 ? 0 : j + 1; if (TS.show === "not") TS.show = "changing"; TS.page = 0; renderTime(); };
+      host.appendChild(card);
+    });
+  }
+  function timeFocus(k) { TS.focus = k; safe(renderTimeTable, "#timetable"); safe(renderTimeProfile, "#timeprofile"); }
+  /** The focused feature over time: every replicate, the mean per time point, and the control series' mean. */
+  function renderTimeProfile() {
+    const X = D.time, S = timeSeries(), host = $("#timeprofile"), head = $("#timehead");
+    if (!S || !host) return;
+    const k = TS.focus;
+    if (k == null) { host.innerHTML = "<div class='empty'>Click a row to draw a feature over time.</div>"; if (head) head.innerHTML = ""; return; }
+    const i = S.i[k];
+    if (head) head.innerHTML = "<h4>" + esc(nameOf(i)) + " <span class='badge' style='color:" + timeColor(S.cls[k]) + ";border-color:" + timeColor(S.cls[k]) + "'>" + esc(S.cls[k]) + "</span></h4>" +
+      "<div class='muted'>F " + fmt(S.F[k]) + " · adj. p " + fmtP(S.q[k]) + " · largest change " + fmt(S.max[k]) + " at " + esc(S.labels[S.peak[k]]) + (S.iq && S.iq[k] != null ? " · differs from " + esc(S.vs) + ": adj. p " + fmtP(S.iq[k]) : "") + "</div>";
+    const pointsOf = (Q) => Q.samples.map((j, a) => [Q.times.indexOf(Q.stime[a]), D.v[i] ? D.v[i][j] : null, j]).filter((p) => p[1] != null && p[0] >= 0);
+    const meansOf = (Q, pts) => Q.times.map((_t, a) => { const v = pts.filter((p) => p[0] === a).map((p) => p[1]); return v.length ? v.reduce((x, y) => x + y, 0) / v.length : null; });
+    const pts = pointsOf(S), means = meansOf(S, pts);
+    const other = S.vs ? X.series.find((q) => q.name === S.vs) : null;
+    // the control series on this series' time axis (the shared time points)
+    const opts = other ? pointsOf(other).map((p) => [S.times.indexOf(other.times[p[0]]), p[1], p[2]]).filter((p) => p[0] >= 0) : [];
+    const omeans = other ? S.times.map((_t, a) => { const v = opts.filter((p) => p[0] === a).map((p) => p[1]); return v.length ? v.reduce((x, y) => x + y, 0) / v.length : null; }) : [];
+    const W = widthOf(host, 420), H = 300, L = 52, R = 14, T = 14, B = 44;
+    const root = frame(host, W, H);
+    const ys = pts.concat(opts).map((p) => p[1]);
+    if (!ys.length) { text(root, W / 2, H / 2, "No measured values", { "text-anchor": "middle" }); return; }
+    let y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
+    const py = (y1 - y0) * 0.1 || 0.5;
+    y0 -= py; y1 += py;
+    const n = S.times.length, Xs = (a) => L + 14 + (a / Math.max(1, n - 1)) * (W - L - R - 28), Y = (v) => T + (1 - (v - y0) / (y1 - y0)) * (H - T - B);
+    const g = svg("g", {}, root);
+    axes(g, Xs, Y, [], niceTicks(y0, y1, 5), L, R, T, B, W, H, "time", D.kind === "ratio" ? "log2 ratio" : "log2 intensity");
+    S.labels.forEach((lab, a) => text(g, Xs(a), H - B + 16, lab, { "text-anchor": "middle" }));
+    const line = (m, col, dash) => {
+      let d = "", pen = false;
+      m.forEach((v, a) => { if (v == null) { pen = false; return; } d += (pen ? "L" : "M") + Xs(a).toFixed(1) + " " + Y(v).toFixed(1); pen = true; });
+      if (d) svg("path", { d: d, fill: "none", stroke: col, "stroke-width": 2, "stroke-dasharray": dash }, g);
+    };
+    const muted = css("--muted"), col = timeColor(S.cls[k] === "not" ? "not" : S.cls[k]) || css("--c0");
+    if (other) {
+      line(omeans, muted, "5 4");
+      opts.forEach((p) => title(svg("circle", { cx: Xs(p[0]) + 5, cy: Y(p[1]), r: 2.8, fill: "none", stroke: muted, "stroke-width": 1.2, "data-ctrl": 1 }, g), D.samples[p[2]] + ": " + fmt(p[1])));
+    }
+    line(means, S.cls[k] === "not" ? css("--text2") : col, null);
+    pts.forEach((p) => title(svg("circle", { cx: Xs(p[0]) - (other ? 5 : 0), cy: Y(p[1]), r: 3.2, fill: S.cls[k] === "not" ? css("--text2") : col, "fill-opacity": isImputed(i, p[2]) ? 0.3 : 0.85, "data-j": p[2] }, g),
+      D.samples[p[2]] + ": " + fmt(p[1]) + (isImputed(i, p[2]) ? " (imputed)" : "")));
+    if (other) text(g, L + 8, T + 10, "dashed: " + other.name, { "text-anchor": "start" });
+    svgTools(host, root, "time_course_" + nameOf(i));
+  }
+  function renderTimeTable() {
+    const S = timeSeries(), host = $("#timetable");
+    if (!S || !host) return;
+    const cols = timeCols(S), rows = timeRows(S, true), per = 25, pages = Math.max(1, Math.ceil(rows.length / per));
+    TS.page = Math.min(TS.page, pages - 1);
+    const mark = anyMark();
+    let h = "<div class='tablewrap'><table><thead><tr>" + cols.map((c) => "<th data-k='" + c.k + "'" + (c.k === TS.sortKey ? " data-dir='" + (TS.sortDir > 0 ? "asc" : "desc") + "'" : "") + ">" + esc(c.t) + "</th>").join("") + "</tr></thead><tbody>";
+    rows.slice(TS.page * per, TS.page * per + per).forEach((k) => {
+      const hit = mark && matches(S.i[k]);
+      h += "<tr data-k='" + k + "'" + (k === TS.focus ? " class='focus'" : "") + (hit ? " style='font-weight:650'" : "") + ">" + cols.map((c) => "<td" + (c.n ? " class='n'" : "") + ">" + c.f(S, k) + "</td>").join("") + "</tr>";
+    });
+    if (!rows.length) h += "<tr><td colspan='" + cols.length + "' class='muted'>No feature matches. Try another choice under Show" + (TS.pat ? ", or click the pattern again to clear it" : "") + ".</td></tr>";
+    host.innerHTML = h + "</tbody></table></div><div class='pager'>" + fmtInt(rows.length) + " features" + (TS.pat ? " in pattern " + TS.pat : "") + " · page " + (TS.page + 1) + " of " + pages + " <button id='tprev'>‹</button><button id='tnext'>›</button></div>";
+    $$("th", host).forEach((th) => (th.onclick = () => {
+      const k = th.dataset.k;
+      if (TS.sortKey === k) TS.sortDir *= -1; else { TS.sortKey = k; TS.sortDir = k === "F" || k === "max" || k === "tt" ? -1 : 1; }
+      TS.page = 0; renderTimeTable();
+    }));
+    $$("tbody tr[data-k]", host).forEach((tr) => (tr.onclick = () => timeFocus(+tr.dataset.k)));
+    $("#tprev").onclick = () => { TS.page = Math.max(0, TS.page - 1); renderTimeTable(); };
+    $("#tnext").onclick = () => { TS.page = Math.min(pages - 1, TS.page + 1); renderTimeTable(); };
+  }
+
   // ------------------------------------------------------- liganded sites
   // D.cys (cys.py report_payload): site ratio data (isoDTB). Per compound, columns over the sites: r = median log2
   // competition ratio, n / over = replicates measured / at or over the threshold, cls = index into D.cys.classes.
@@ -2099,7 +2275,7 @@
   const HELP_AT = [["#differential > h2", "report.differential"], ["#differential > p.sub", "report.search"],
     ["#differential-body > .bar", "report.cutoffs"], ["#differential-body > h3", "report.phist"],
     ["#differential-body > .tablebar", "report.table"], ["#compare > h2", "report.compare"], ["#onoff > h2", "report.onoff"],
-    ["#heat > h2", "report.heatmap"], ["#enrichment > h2", "report.enrichment"], ["#dose > h2", "report.dose"], ["#cys > h2", "report.cys"], ["#quality > h2", "report.quality"],
+    ["#heat > h2", "report.heatmap"], ["#enrichment > h2", "report.enrichment"], ["#dose > h2", "report.dose"], ["#time > h2", "report.time"], ["#cys > h2", "report.cys"], ["#quality > h2", "report.quality"],
     ["#methods > h2", "report.methods"], ["#files > h2", "report.files"]];
   const HELP_H = { "Data source": "report.source", "Settings used": "report.methods", "Sample metadata": "report.sdrf",
     "Cross-check": "report.fpa", "Highlight groups": "report.groups", "Hits": "report.hitfilters" };
@@ -2248,7 +2424,7 @@
       $("#adj").onchange = (e) => { ST.adj = e.target.checked; renderDiff(); };
       $("#labels").oninput = (e) => { ST.labels = Math.max(0, parseInt(e.target.value, 10) || 0); renderVolcano(); };
       const box = $("#search");
-      box.oninput = () => { ST.search = box.value.trim(); ST.q = parseQuery(ST.search); ST.highlight = null; syncControls(); renderSearchInfo(); renderVolcano(); renderTable(true); suggest(); safe(doseOnSearch, "#dosebody"); safe(renderCys, "#cysbody"); writeHash(); };
+      box.oninput = () => { ST.search = box.value.trim(); ST.q = parseQuery(ST.search); ST.highlight = null; syncControls(); renderSearchInfo(); renderVolcano(); renderTable(true); suggest(); safe(doseOnSearch, "#dosebody"); safe(renderCys, "#cysbody"); safe(timeOnSearch, "#timebody"); writeHash(); };
       box.onkeydown = (e) => {
         if (e.key === "ArrowDown") { if (moveSug(1)) e.preventDefault(); }
         else if (e.key === "ArrowUp") { if (moveSug(-1)) e.preventDefault(); }
@@ -2301,7 +2477,7 @@
     safe(renderHeatmap, "#heatmap");
     safe(renderEnrichment, "#enrich");
     safe(renderDose, "#dosebody");
-    safe(renderCys, "#cysbody");
+    safe(renderCys, "#cysbody"); safe(renderTime, "#timebody");
     safe(renderQC, "#qc");
     safe(renderHelp, "#helpbody");
     const theme = $("#theme");
@@ -2320,7 +2496,7 @@
   }
   function redraw() {
     if (D.comps.length) { safe(renderVolcano, "#volcano"); safe(renderPHist, "#phist"); safe(renderDetail, "#detail"); safe(renderCompare, "#comparebody"); }
-    safe(renderHeatmap, "#heatmap"); safe(renderEnrichment, "#enrich"); safe(renderDose, "#dosebody"); safe(renderCys, "#cysbody"); safe(renderQC, "#qc");
+    safe(renderHeatmap, "#heatmap"); safe(renderEnrichment, "#enrich"); safe(renderDose, "#dosebody"); safe(renderCys, "#cysbody"); safe(renderTime, "#timebody"); safe(renderQC, "#qc");
   }
   let rt = null;
   window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(redraw, 150); });

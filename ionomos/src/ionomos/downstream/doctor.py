@@ -59,6 +59,7 @@ class Findings:
     insights: dict = field(default_factory=dict)          # insights.py: scorecard, pcs, missingness, phist, ...
     tmt: dict | None = None                               # plex.py: what IRS did (or why not) across TMT plexes
     dose_problems: list = field(default_factory=list)     # [(severity, message)] from doseresponse.plan_series
+    time_problems: list = field(default_factory=list)     # [(severity, message)] from timecourse.plan_series
     cys_problems: list = field(default_factory=list)      # [(severity, message)] from cys.run / the site annotation
     model: object = None                # analysis.Model: the design used, or why an asked-for one wasn't
 
@@ -372,6 +373,14 @@ def check(f: Findings) -> list[Issue]:
                    "A condition name holds two doses (a combination), or the vehicle isn't named DMSO / vehicle"],
                   ["List every condition's dose in experiment.yaml analysis.doses (DMSO: 0, Cmpd_A: 10 nM, ...) "
                    "and Run analysis"], {"message": msg}))
+
+    # ---- time course (timecourse.py): times that can't be read, two conditions at one time
+    for sev, msg in f.time_problems:
+        add(Issue("TIMES", sev, "Time course: the time points need a look", msg,
+                  ["analysis.times names a condition that isn't in this experiment, or a time without a unit",
+                   "A condition name holds two times, or two conditions of one series are at the same time"],
+                  ["List every condition's time in experiment.yaml analysis.times (Drug_a: 0, Drug_b: 4 h, ...) "
+                   "and Run analysis", "Or switch the time-course tests off: time_course: false"], {"message": msg}))
 
     # ---- liganded cysteines (cys.py): a ratio that looks the other way round, an annotation that can't be used
     for sev, msg in f.cys_problems:

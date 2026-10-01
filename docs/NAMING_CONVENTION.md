@@ -384,6 +384,10 @@ analysis:                   # results/report.html for this experiment (lab defau
     Cmpd_high: 1 uM
     Cmpd_top: 10 uM
   dose_min_doses: 4         # doses above 0 a compound needs before curves are fitted (default 4)
+  times:                    # a time course (D53); default: read from the condition names (Drug_0h, Drug_30min,
+    Drug_start: 0           #   Drug_4h, 2d; units s, min, h, d). 3+ time points per series get the time-course
+    Drug_early: 30 min      #   tests; a bare number needs time_unit
+    Drug_late: 4 h
   liganded_ratio: 4         # isoDTB: the competition ratio R that calls a cysteine liganded (D52) ...
   liganded_min_replicates: 2   # ... in at least this many replicates
   liganded_direction: high  # high: R = heavy / light (treated sample = light tag) | low: the other way round
@@ -424,6 +428,14 @@ more conditions every report also has a moderated F-test ("any change").
    the report gets dose-response curves (`results/dose_response.tsv`). A name
    with two doses (`A_1uM_B_10nM`, a combination) is left out with a warning;
    list the doses in `analysis.doses` instead.
+
+8. time courses: a condition whose name holds one time is a time point of the
+   series named by the rest (`Drug_0h`, `Drug_30min`, `Drug_4h`, `T24h`, `2d_KO`
+   → series `Drug` / `KO`). Units `s`, `min`, `h`, `d`; a decimal point as `p`
+   (`0p5h`). A control with no time in its name is time 0 of the series that
+   have none. With 3 or more time points (`time_min_points`) the report gets
+   the time-course tests (`results/time_course.tsv`). A name with two times is
+   left out with a warning; list the times in `analysis.times` instead.
 
 ## Still to confirm with the lab
 
