@@ -25,6 +25,8 @@ results from any supported engine can be analysed with `ionomos analyze <folder>
                         Condition / BioReplicate / Intensity: summarised as MSstatsTMT's proteinSummarization
                         (MedianPolish), one sample per mixture and channel, plexes on the Norm channels' scale
     Proteome Discoverer a Proteins table exported as text (Abundance / Abundances (Normalized) columns)
+    Sage                lfq.tsv (peptide ions x files): proteins by Occam's razor grouping and Tukey median
+                        polish; peptide and protein q-values at 1%
     any table           the fallback (anytable.py, D33)
 
 Ionomos never runs or ships these engines here; it only reads what they wrote. Nothing is written into the
@@ -782,11 +784,229 @@ def load_pd(path: Path) -> QuantMatrix:
     return m
 
 
+# -------------------------------------------------------------------- Sage --
+
+_SAGE_META = ("peptide", "charge", "proteins", "q_value", "score", "spectral_angle")
+_UNIPROT = re.compile(r"^(?:sp|tr)\|([^|]+)\|(\S+)$")
+
+
+def _sage_score(path: Path) -> float:
+    h = _header(path)
+    return 0.95 if h[:1] == ["peptide"] and {"proteins", "q_value", "spectral_angle"} <= set(h) else 0.0
+
+
+def _sage_settings(folder: Path) -> dict:
+    """results.json, Sage's record of the search (version and every parameter), next to lfq.tsv; {} without it."""
+    import json
+
+    try:
+        data = json.loads((folder / "results.json").read_text(encoding="utf-8", errors="replace"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _sage_protein_q(path: Path) -> dict[str, float]:
+    """peptide -> the best protein q-value of its target PSMs in results.sage.tsv (read line by line: the
+    table has a row per PSM)."""
+    out: dict[str, float] = {}
+    try:
+        with open(path, encoding="utf-8", errors="replace", newline="") as fh:
+            rd = csv.reader(fh, delimiter="\t")
+            head = next(rd, [])
+            if "peptide" not in head or "protein_q" not in head:
+                return {}
+            pi, qi = head.index("peptide"), head.index("protein_q")
+            li = head.index("label") if "label" in head else None
+            for r in rd:
+                if len(r) <= max(pi, qi) or (li is not None and len(r) > li and r[li].strip() == "-1"):
+                    continue
+                q = num(r[qi])
+                if q is not None and q < out.get(r[pi], math.inf):
+                    out[r[pi]] = q
+    except (OSError, csv.Error):
+        return {}
+    return out
+
+
+def _fasta_names(path: Path, limit_bytes: int = 1024**3) -> dict[str, tuple[str, str]]:
+    """UniProt accession -> (gene name, description) from a FASTA's header lines; {} when it can't be read."""
+    out: dict[str, tuple[str, str]] = {}
+    try:
+        if not path.is_file() or path.stat().st_size > limit_bytes:
+            return out
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if not line.startswith(">"):
+                    continue
+                m = re.match(r"^>(?:sp|tr)\|([^|]+)\|\S+\s*(.*)$", line.rstrip())
+                if not m:
+                    continue
+                rest = m.group(2)
+                gene = re.search(r"\bGN=(\S+)", rest)
+                out[m.group(1)] = (gene.group(1) if gene else "", re.split(r"\s(?:OS|OX|GN|PE|SV)=", rest)[0].strip())
+    except OSError:
+        return {}
+    return out
+
+
+def razor_groups(pep_prots: dict[str, tuple[str, ...]]) -> dict[str, tuple[str, ...]]:
+    """peptide -> its protein group, by Occam's razor (as MaxQuant's razor peptides): proteins identified by
+    exactly the same peptides are one group; a peptide shared between groups goes to the group with the most
+    peptides (ties: the first by name). A group left with no peptide of its own disappears."""
+    by_prot: dict[str, set[str]] = defaultdict(set)
+    for pep, prots in pep_prots.items():
+        for p in prots:
+            by_prot[p].add(pep)
+    same: dict[frozenset, list[str]] = defaultdict(list)
+    for p, peps in by_prot.items():
+        same[frozenset(peps)].append(p)
+    group_of: dict[str, tuple[str, ...]] = {}
+    size: dict[tuple[str, ...], int] = {}
+    for peps, prots in same.items():
+        g = tuple(sorted(prots))
+        size[g] = len(peps)
+        for p in prots:
+            group_of[p] = g
+    return {pep: min({group_of[p] for p in prots}, key=lambda g: (-size[g], g)) for pep, prots in pep_prots.items()}
+
+
+def load_sage(path: Path, sample_map: dict[str, tuple[str, int]] | None = None) -> QuantMatrix:
+    """Sage's lfq.tsv (a row per peptide ion, a column per file) -> protein matrix.
+
+      filters    peptide q-value <= 1% (lfq.tsv q_value); with results.sage.tsv beside it, also the peptide's
+                 best protein q-value <= 1%; decoy proteins are left out
+      samples    sample_map (file stem -> (condition, replicate), the watcher's manifest): the files of one
+                 sample are its fractions, and their intensities are added; without it, one sample per file
+      proteins   razor_groups(); gene names and descriptions from the search's FASTA when it is still there
+      quantity   per protein group, Tukey median polish of log2 ion intensities over the samples (the summary
+                 MSstats uses), from the ions assigned to the group"""
+    from ionomos.downstream.doctor import suggest_conditions
+    from ionomos.downstream.quant import match_run_stem
+
+    header, rows = anytable.read_table(path)
+    ix = {h: j for j, h in enumerate(header)}
+    if not {"peptide", "proteins"} <= set(ix):
+        raise anytable.TableError(f"{path.name}: not Sage's lfq.tsv (needs peptide, proteins and a column per file)")
+    files = [h for h in header if h not in _SAGE_META]
+    if not files:
+        raise anytable.TableError(f"{path.name}: Sage's lfq.tsv has no file columns")
+    settings = _sage_settings(path.parent)
+    decoy = str((settings.get("database") or {}).get("decoy_tag") or "rev_")
+    results = path.parent / "results.sage.tsv"
+    prot_q = _sage_protein_q(results) if results.is_file() else {}
+    sample_map = sample_map or {}
+
+    # files -> samples (fractions of a sample share one)
+    stems = {f: run_stem(re.sub(r"(?i)\.gz(ip)?$", "", f)) for f in files}
+    sample_of: dict[str, str] = {}
+    cond: dict[str, str] = {}
+    reps: dict[str, int] = {}
+    runs: dict[str, list[str]] = defaultdict(list)
+    unmatched, matched = [], set()
+    for f in files:
+        key = match_run_stem(stems[f], sample_map) if sample_map else None
+        if key is not None:
+            matched.add(key)
+            c, rep = sample_map[key]
+            s = f"{c}_{rep}"
+            cond[s], reps[s] = c, int(rep)
+        else:
+            s = stems[f]
+            if sample_map:
+                unmatched.append(s)
+        sample_of[f] = s
+        runs[s].append(key if key is not None else stems[f])
+    samples = list(dict.fromkeys(sample_of[f] for f in files))
+    guessed = suggest_conditions([s for s in samples if s not in cond])
+    for s in samples:
+        if s not in cond:
+            cond[s] = guessed[s]
+            if s.rsplit("_", 1)[-1].isdigit():
+                reps[s] = int(s.rsplit("_", 1)[1])
+    col = {s: j for j, s in enumerate(samples)}
+
+    ions: dict[tuple[str, str], list[float]] = {}
+    pep_prots: dict[str, tuple[str, ...]] = {}
+    above_pep = above_prot = 0
+    for r in rows:
+        pep = r[ix["peptide"]]
+        prots = tuple(p for p in r[ix["proteins"]].split(";") if p and not p.startswith(decoy))
+        if not pep or not prots:
+            continue
+        q = num(r[ix["q_value"]]) if "q_value" in ix else None
+        if q is not None and q > LONG_FDR:
+            above_pep += 1
+            continue
+        if prot_q.get(pep, 0.0) > LONG_FDR:
+            above_prot += 1
+            continue
+        pep_prots[pep] = prots
+        vals = ions.setdefault((pep, r[ix["charge"]] if "charge" in ix else ""), [0.0] * len(samples))
+        for f in files:
+            v = num(r[ix[f]])
+            if v is not None and v > 0:
+                vals[col[sample_of[f]]] += v
+    if not ions:
+        raise anytable.TableError(f"{path.name}: no peptide passes q ≤ {LONG_FDR:g} in Sage's lfq.tsv")
+
+    group = razor_groups(pep_prots)
+    by_group: dict[tuple[str, ...], list[tuple[str, list[float]]]] = defaultdict(list)
+    for (pep, _z), vals in ions.items():
+        if any(vals):
+            by_group[group[pep]].append((pep, vals))
+    shared = sum(1 for pep, prots in pep_prots.items() if any(p not in group[pep] for p in prots))
+    fasta = Path(str((settings.get("database") or {}).get("fasta") or ""))
+    names = _fasta_names(fasta) if str(fasta) not in ("", ".") else {}
+    feats, values = [], []
+    for g in sorted(by_group):
+        parsed = [_UNIPROT.match(p) for p in g]
+        acc = [m_.group(1) if m_ else p for m_, p in zip(parsed, g, strict=True)]
+        first = parsed[0]
+        gene, desc = names.get(acc[0], ("", ""))
+        label = gene or (first.group(2).split("_")[0] if first else g[0])
+        mat = [[_log2(v) for v in vals] for _pep, vals in by_group[g]]
+        feats.append(Feature(id=";".join(acc), label=label, description=desc,
+                             peptides=len({pep for pep, _v in by_group[g]})))
+        values.append(median_polish(mat))
+    version = str(settings.get("version") or "")
+    notes = [f"Sage{' ' + version if version else ''} {path.name}: {len(feats):,} protein groups from {len(ions):,} "
+             f"peptide ions at peptide q ≤ {LONG_FDR:g}"
+             + (f" and protein q ≤ {LONG_FDR:g}" if prot_q else " (no results.sage.tsv beside it, so no protein "
+                                                                 "q-value filter)")
+             + "; proteins grouped by razor peptides and summarised by Tukey median polish"]
+    if above_pep or above_prot:
+        notes.append(f"{above_pep:,} ion(s) above the peptide q-value and {above_prot:,} above the protein q-value "
+                     "were left out")
+    if shared:
+        notes.append(f"{shared:,} peptide(s) shared between protein groups were given to the group with the most "
+                     "peptides")
+    fractions = {s: len(v) for s, v in runs.items() if len(v) > 1}
+    if fractions:
+        notes.append(f"the intensities of each sample's fractions were added ({len(fractions)} sample(s) with "
+                     f"{min(fractions.values())}–{max(fractions.values())} files)")
+    if names:
+        notes.append(f"gene names from {fasta.name}")
+    for s in unmatched:
+        notes.append(f"Run {s} did not match the manifest; inferred condition {cond[s]!r}. Check sample labels.")
+    missing = sorted(set(sample_map) - matched)
+    if missing:
+        notes.append("Expected runs missing from Sage's lfq.tsv: " + ", ".join(missing))
+    meta = {"engine": "Sage", "evidence": "peptides", "quantity": "median polish of lfq.tsv ion intensities",
+            "runs": {s: list(v) for s, v in runs.items()}, "missing_runs": missing, "unmatched_runs": unmatched}
+    if matched:
+        meta["manifest_run"] = {s: v[0] for s, v in runs.items() if v[0] in sample_map}
+    first_file = {s: next(f for f in files if sample_of[f] == s) for s in samples}
+    return QuantMatrix("intensity", "protein", feats, samples, values, cond, str(path), notes=notes, exp="LFQ",
+                       replicate=reps, columns=first_file, meta=meta)
+
+
 # ----------------------------------------------------------------- registry --
 
 # (engine, method key, file-name filter, scorer, loader)
 ADAPTERS = [
     ("MaxQuant", "MaxQuant", lambda p: p.name == "proteinGroups.txt", _maxquant_score, load_maxquant),
+    ("Sage", "Sage", lambda p: p.name == "lfq.tsv", _sage_score, load_sage),
     ("Spectronaut", "Spectronaut", lambda p: p.suffix.lower() in (".tsv", ".csv", ".txt", ".xls"),
      _spectronaut_score, load_spectronaut),
     ("AlphaDIA", "AlphaDIA", lambda p: p.name.lower() in ("pg.matrix.tsv", "protein_groups.tsv"),
@@ -828,12 +1048,16 @@ def detect(workdir: Path) -> Detected | None:
     return found[0] if found else None
 
 
-def load(method: str, workdir: Path) -> tuple[QuantMatrix | None, list[str]]:
-    """Load the best table of this engine under workdir (or workdir itself when it is the table)."""
+def load(method: str, workdir: Path, sample_map: dict[str, tuple[str, int]] | None = None
+         ) -> tuple[QuantMatrix | None, list[str]]:
+    """Load the best table of this engine under workdir (or workdir itself when it is the table). sample_map:
+    the watcher's manifest (file stem -> (condition, replicate)), for engines whose table has a column per file."""
     adapter = METHODS[method]
     cands = [d for d in detect_all(workdir) if d.method == method]
     if not cands:
         return None, [f"no {adapter[0]} results found in {Path(workdir).name}/"]
+    if method == "Sage":
+        return load_sage(cands[0].path, sample_map), []
     return adapter[4](cands[0].path), []
 
 
@@ -912,6 +1136,17 @@ def provenance(workdir: Path, method: str | None, source: str = "", meta: dict |
         if mqpar:
             out["files"].append(rel(mqpar))
             out["version"] = out["version"] or _first_match(mqpar, r"<maxQuantVersion>([^<]+)<")
+    elif method == "Sage":
+        out["engine"] = "Sage"
+        rec = next((p for p in files if p.name == "results.json" and (p.parent / "lfq.tsv").is_file()), None)
+        if rec:
+            out["files"].append(rel(rec))
+            settings = _sage_settings(rec.parent)
+            out["version"] = str(settings.get("version") or "")
+            fasta = str((settings.get("database") or {}).get("fasta") or "")
+            if fasta:
+                out["fasta"] = fasta
+        out["fdr"] = f"peptide and protein q ≤ {LONG_FDR:g}"
     elif method == "AlphaDIA":
         cfg = next((p for p in files if p.name == "frozen_config.yaml"), None)
         if cfg:

@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Sage as a search engine** (ROADMAP 5B #5, D51, [docs/ENGINES.md](docs/ENGINES.md)).
+  - **Run:** a DDA method with `engine: sage` is searched by the lab's own
+    [Sage](https://github.com/lazear/sage) (open source, MIT). Thermo `.raw`
+    files are first converted to mzML with the lab's ThermoRawFileParser
+    (`raw_converter:`) into `<experiment>/sage_mzml/`; a retry reuses what is
+    already converted, and the raw files are never touched. Settings are the
+    lab's own Sage JSON (`sage_config:`) or Ionomos' defaults (tryptic,
+    high-resolution MS2, label-free), written to `ionomos_run/sage.json`.
+    Watching, holding, cancel, Retry, pop-ups and the analysis work as for
+    FragPipe; results go to `<experiment>/sage/`, and a second run keeps the
+    first as `sage_previous_<time>/`. Sage's usage telemetry is switched off
+    whenever the installed Sage has the flag for it.
+  - **Import:** `ionomos analyze <Sage output folder>` reads `lfq.tsv`:
+    peptides at q ≤ 1% (and proteins at q ≤ 1% when `results.sage.tsv` is
+    there), proteins grouped by razor peptides, each sample's fractions
+    added, protein quantities by Tukey median polish, gene names from the
+    search's FASTA. The report's Data source shows Sage's version and FASTA
+    from `results.json`.
+  - New help entries for a held Sage job (Sage not found, raw file converter
+    not found, Sage settings missing or unusable); held MaxQuant jobs now
+    open their own help entry too.
+
+  Tested against stand-ins for Sage and ThermoRawFileParser only
+  (`ionomos fake-sage`, `ionomos fake-rawparser`), with the file formats
+  taken from Sage's source. Not yet run against a real Sage.
+
 ## [0.12.0] - 2026-09-30
 
 ### Added

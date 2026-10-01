@@ -488,6 +488,145 @@ def write_fake_maxquant(folder: Path) -> Path:
     return exe
 
 
+def _write_wrapper(folder: Path, name: str, sub: str) -> Path:
+    """<name>.bat / .sh in `folder` running `ionomos <sub>` with its arguments."""
+    from ionomos.service import ionomos_command
+
+    cmd = ionomos_command(console=True)
+    folder.mkdir(parents=True, exist_ok=True)
+    if os.name == "nt":
+        exe = folder / f"{name}.bat"
+        exe.write_text("@echo off\r\n" + " ".join(f'"{c}"' for c in cmd) + f" {sub} %*\r\n", encoding="utf-8")
+    else:
+        exe = folder / f"{name}.sh"
+        exe.write_text("#!/bin/sh\nexec " + " ".join(f"'{c}'" for c in cmd) + f' {sub} "$@"\n', encoding="utf-8")
+        exe.chmod(exe.stat().st_mode | stat.S_IEXEC)
+    return exe
+
+
+SAGE_NO_TELEMETRY = "--disable-telemetry-i-dont-want-to-improve-sage"
+FAKE_SAGE_VERSION = "0.14.7"
+
+
+def fake_sage(argv: list[str]) -> int:
+    """Fake Sage (`ionomos fake-sage [options] sage.json`): --help prints the real usage (with the telemetry
+    switch unless IONOMOS_FAKE_SAGE_OLD=1, an older Sage, which then refuses the flag); a run checks the FASTA
+    and every mzML like the real one, then writes lfq.tsv (three peptide ions per protein, one shared between
+    two proteins, a decoy-only and a high-q row), results.sage.tsv and results.json into output_directory.
+    IONOMOS_FAKE_FP_MODE=fail exits 1."""
+    import json
+    import re as _re
+    import tempfile
+
+    from ionomos.downstream import simulate
+
+    say = lambda *x: print("FAKE Sage:", *x, flush=True)  # noqa: E731
+    old = os.environ.get("IONOMOS_FAKE_SAGE_OLD") == "1"
+    if "--help" in argv or "-h" in argv:
+        print("Usage: sage [OPTIONS] <parameters> [mzml_paths]...\n\nOptions:\n  -f, --fasta <fasta>\n"
+              "  -o, --output_directory <output_directory>\n      --batch-size <batch-size>\n      --parquet\n"
+              "      --write-pin\n" + ("" if old else f"      {SAGE_NO_TELEMETRY}\n          Disable sending "
+                                                        "telemetry data\n") + "  -h, --help\n  -V, --version")
+        return 0
+    if SAGE_NO_TELEMETRY in argv and old:
+        say(f"error: unexpected argument '{SAGE_NO_TELEMETRY}' found")
+        return 2
+    params = [a for a in argv if a.lower().endswith(".json")]
+    if not params or not Path(params[-1]).is_file():
+        say("error: the following required arguments were not provided: <parameters>")
+        return 2
+    cfg = json.loads(Path(params[-1]).read_text(encoding="utf-8"))
+    fasta = (cfg.get("database") or {}).get("fasta") or ""
+    paths = cfg.get("mzml_paths") or []
+    out = cfg.get("output_directory")
+    if not Path(fasta).is_file():
+        say(f"Error: Failed to build database from `{fasta}`: No such file or directory")
+        return 1
+    if not paths or not out:
+        say("Error: `mzml_paths` must be set. For more information try '--help'")
+        return 1
+    for f in paths:
+        if not Path(f).exists():
+            say(f"Error: failed to read {f}: No such file or directory")
+            return 1
+    if os.environ.get("IONOMOS_FAKE_FP_MODE") == "fail":
+        say("Error: fake failure")
+        return 1
+    say("telemetry", "off" if SAGE_NO_TELEMETRY in argv else "ON",
+        "| threads", os.environ.get("RAYON_NUM_THREADS", "all"))
+    names = [Path(f).name for f in paths]
+    samples: dict[str, str] = {}  # file -> its sample: fractions (a second trailing number) share one
+    for n in names:
+        stem = _re.sub(r"(?i)\.mzml(\.gz)?$|\.d$", "", n)
+        m = _re.match(r"^(.*_\d+)_\d+$", stem)
+        samples[n] = m.group(1) if m else stem
+    order = list(dict.fromkeys(samples.values()))
+    with tempfile.TemporaryDirectory() as td:
+        pg = Path(td) / "pg.tsv"
+        simulate.dia_pg_matrix(pg, [(x, _re.sub(r"[_-]?\d+$", "", x) or x) for x in order], seed=len(order),
+                               n_proteins=300)
+        head, *rows = [ln.split("\t") for ln in pg.read_text(encoding="utf-8").splitlines()]
+    col = {x: 7 + j for j, x in enumerate(order)}
+    share = {n: 1.0 / sum(1 for v in samples.values() if v == samples[n]) for n in names}  # split over fractions
+    lfq = ["\t".join(["peptide", "charge", "proteins", "q_value", "score", "spectral_angle", *names])]
+    psm = ["\t".join(["psm_id", "peptide", "proteins", "num_proteins", "filename", "scannr", "rank", "label",
+                      "spectrum_q", "peptide_q", "protein_q"])]
+
+    def ion(pep, prots, q, factor, r):
+        vals = []
+        for n in names:
+            v = r[col[samples[n]]] if r is not None else ""
+            vals.append(f"{float(v) * factor * share[n]:.1f}" if v else "0.0")
+        lfq.append("\t".join([pep, "-1", prots, f"{q:g}", "1.5", "0.9", *vals]))
+        psm.append("\t".join([str(len(psm)), pep, prots, str(prots.count(";") + 1), names[0], "scan=1", "1", "1",
+                              "0.001", f"{min(q, 1):g}", "0.001" if "FAILS" not in pep else "0.2"]))
+
+    for k, r in enumerate(rows):
+        prot = f"sp|{r[0]}|{r[2]}"
+        for j, factor in enumerate((1.0, 0.5, 0.25)):
+            ion(f"PEPTIDE{k}K{'A' * j}R", prot, 0.001, factor, r)
+        if k % 50 == 1:   # shared with the previous protein, which has as many peptides: the razor picks by name
+            ion(f"SHARED{k}R", f"sp|{rows[k - 1][0]}|{rows[k - 1][2]};{prot}", 0.001, 0.3, r)
+    ion("HIGHQPEPTIDEK", "sp|P99990|HIGHQ_HUMAN", 0.2, 1.0, rows[0])          # above the peptide q-value
+    ion("PROTEINFAILSK", "sp|P99991|PROTQ_HUMAN", 0.001, 1.0, rows[0])        # its protein is above the protein q
+    ion("DECOYONLYK", "rev_sp|P99992|DECOY_HUMAN", 0.001, 1.0, rows[0])
+    outdir = Path(out)
+    outdir.mkdir(parents=True, exist_ok=True)
+    (outdir / "lfq.tsv").write_text("\n".join(lfq) + "\n", encoding="utf-8")
+    (outdir / "results.sage.tsv").write_text("\n".join(psm) + "\n", encoding="utf-8")
+    (outdir / "results.json").write_text(json.dumps({"version": FAKE_SAGE_VERSION, **cfg}, indent=2), encoding="utf-8")
+    say("finished")
+    return 0
+
+
+def fake_rawparser(argv: list[str]) -> int:
+    """Fake ThermoRawFileParser (`ionomos fake-rawparser -i=RAW -o=DIR -f=2`): writes DIR/<stem>.mzML.
+    IONOMOS_FAKE_CONVERT_MODE=fail exits 1 without writing; =empty exits 0 without writing."""
+    opts = dict(a.split("=", 1) for a in argv if a.startswith("-") and "=" in a)
+    raw, out = Path(opts.get("-i", "")), Path(opts.get("-o", ""))
+    if not raw.is_file() or not out.is_dir():
+        print(f"FAKE ThermoRawFileParser: ERROR input {raw} or output folder {out} not found", flush=True)
+        return 1
+    mode = os.environ.get("IONOMOS_FAKE_CONVERT_MODE")
+    if mode == "fail":
+        print(f"FAKE ThermoRawFileParser: ERROR RawFileReader could not open {raw.name}", flush=True)
+        return 1
+    if mode != "empty":
+        (out / f"{raw.stem}.mzML").write_text(f"<mzML><!-- fake, from {raw.name} --></mzML>\n", encoding="utf-8")
+    print(f"FAKE ThermoRawFileParser: converted {raw.name}", flush=True)
+    return 0
+
+
+def write_fake_sage(folder: Path) -> Path:
+    """sage.bat / .sh in `folder` running `ionomos fake-sage` (for `engine: sage` tests)."""
+    return _write_wrapper(folder, "sage", "fake-sage")
+
+
+def write_fake_rawparser(folder: Path) -> Path:
+    """ThermoRawFileParser.bat / .sh in `folder` running `ionomos fake-rawparser`."""
+    return _write_wrapper(folder, "ThermoRawFileParser", "fake-rawparser")
+
+
 def write_fake_launcher(folder: Path) -> Path:
     """fragpipe.bat / fragpipe.sh in `folder` that runs `ionomos fake-fragpipe` (works frozen or from a venv)."""
     from ionomos.service import ionomos_command

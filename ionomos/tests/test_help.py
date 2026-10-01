@@ -79,7 +79,7 @@ def test_every_held_search_reason_has_help():
     ents = helpdoc.entries()
     assert all(hid in ents for _rx, hid in helpdoc.HOLD_TOPICS)
     reasons = []
-    for name in ("fragpipe.py", "diann.py"):
+    for name in ("fragpipe.py", "diann.py", "maxquant.py", "sage.py"):
         text = (SRC / name).read_text(encoding="utf-8")
         reasons += [re.sub(r"\{[^}]*\}", "", m) for m in re.findall(r'raise Hold\(f?"([^"]*)"', text)]
     assert len(reasons) >= 8

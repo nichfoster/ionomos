@@ -24,7 +24,7 @@ Layout it reads and writes (inside the experiment folder):
 Pipeline stages, each a module:
     method prep   isodtb.py / tmt.py           (ports of the lab R scripts)
     quantities    quant.py   -> QuantMatrix    (one shape for every method)
-                  engines.py                   (other engines' outputs: DIA-NN, MaxQuant, Spectronaut, AlphaDIA,
+                  engines.py                   (other engines' outputs: DIA-NN, MaxQuant, Sage, Spectronaut, AlphaDIA,
                                                 MSstats / MSstatsTMT format, Proteome Discoverer; provenance)
     SDRF design   sdrfdesign.py                (an SDRF in the folder sets conditions / replicates / plexes)
     TMT plexes    plex.py                      (IRS: several plexes on one scale, before the processing)
@@ -83,7 +83,7 @@ def detect_method(workdir: Path) -> str | None:
         return "DIA"
     if _find(workdir, "combined_protein.tsv"):
         return "LFQ"
-    found = engines.detect(workdir)  # DIA-NN standalone, MaxQuant, Spectronaut, AlphaDIA, MSstats format, PD
+    found = engines.detect(workdir)  # DIA-NN standalone, MaxQuant, Sage, Spectronaut, AlphaDIA, MSstats format, PD
     if found:
         return found.method
     if anytable.find_table(workdir):
@@ -142,7 +142,7 @@ def _load_quantities(method: str | None, workdir: Path, results: Path, record: d
     notes: list[str] = []
     results.mkdir(parents=True, exist_ok=True)
     if method in engines.METHODS:  # results from another engine (engines.py)
-        m, enotes = engines.load(method, Path(table) if table is not None else workdir)
+        m, enotes = engines.load(method, Path(table) if table is not None else workdir, _sample_map(record))
         return m, files, notes + enotes
     if table is not None or method == "table":
         path = Path(table) if table is not None else anytable.find_table(workdir)

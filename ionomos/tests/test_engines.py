@@ -338,6 +338,111 @@ def test_fragpipe_provenance_reads_versions_tools_and_fasta(tmp_path):
     assert "Raw files were searched with FragPipe 24.0 (workflow DIA.workflow; MSFragger 4.3" in html
 
 
+# -------------------------------------------------------------------- Sage --
+
+SAGE_HEAD = ["peptide", "charge", "proteins", "q_value", "score", "spectral_angle"]
+
+
+def _sage(folder: Path, prots, vals, version: str = "0.14.7", fasta: str = "") -> Path:
+    """Sage's output folder: lfq.tsv with three ions per protein (1, 1/2 and 1/4 of its quantity), results.json."""
+    rows = []
+    for pid, gene, _desc, _n in prots:
+        for k, factor in enumerate((1.0, 0.5, 0.25)):
+            rows.append([f"PEPTIDE{pid}{'A' * k}K", -1, f"sp|{pid}|{gene}_HUMAN", 0.001, 1.2, 0.9,
+                         *[(vals[r][pid] or 0) * factor for r in RUNS]])
+    _write(folder / "lfq.tsv", SAGE_HEAD + [f"{r}.mzML" for r in RUNS], rows)
+    (folder / "results.json").write_text(json.dumps({"version": version, "database": {"fasta": fasta,
+                                                                                      "decoy_tag": "rev_"}}),
+                                         encoding="utf-8")
+    return folder / "lfq.tsv"
+
+
+def test_razor_groups():
+    g = engines.razor_groups({"p1": ("A",), "p2": ("A",), "p3": ("A", "B", "C"), "p4": ("B",), "p5": ("E", "D"),
+                              "p6": ("F", "G"), "p7": ("F",), "p8": ("G",)})
+    assert g["p1"] == g["p2"] == g["p3"] == ("A",)      # shared: to the group with the most peptides; C disappears
+    assert g["p4"] == ("B",)
+    assert g["p5"] == ("D", "E")                        # the same peptides: one group
+    assert g["p6"] == ("F",) and g["p8"] == ("G",)      # a tie goes to the first by name
+
+
+def test_sage_lfq_is_rolled_up_to_proteins(tmp_path):
+    prots, vals, truth = _truth(tmp_path)
+    fasta = tmp_path / "human.fasta"
+    fasta.write_text("".join(f">sp|{pid}|{gene}_HUMAN {desc} OS=Homo sapiens OX=9606 GN={gene}x PE=1 SV=1\nMK\n"
+                             for pid, gene, desc, _n in prots[:5]), encoding="utf-8")
+    lfq = _sage(tmp_path / "exp" / "sage", prots, vals, fasta=str(fasta))
+    assert downstream.detect_method(tmp_path / "exp") == "Sage"
+    m = engines.load_sage(lfq)
+    assert m.samples == RUNS and m.condition["Drug_2"] == "Drug" and m.replicate["Drug_2"] == 2 and m.exp == "LFQ"
+    pid, gene, desc, _n = prots[0]
+    f = m.features[[x.id for x in m.features].index(pid)]
+    assert (f.label, f.description, f.peptides) == (f"{gene}x", desc, 3)       # gene and description from the FASTA
+    assert m.features[[x.id for x in m.features].index(prots[9][0])].label == prots[9][1]  # else the entry name
+    # median polish of ions at 1, 1/2 and 1/4 of the protein quantity: the middle one
+    for r in RUNS:
+        got, want = m.values[m.features.index(f)][m.samples.index(r)], vals[r][pid]
+        assert (got is None) == (want is None)
+        if want is not None:
+            assert got == pytest.approx(math.log2(want * 0.5), abs=1e-6)
+    out = downstream.analyze(tmp_path / "exp", analysis_cfg=CFG)
+    assert out.method == "Sage" and _recall(_hits(out), truth) > 0.7
+    s = json.loads((out.results_dir / "analysis.json").read_text(encoding="utf-8"))
+    assert s["engine"] == {"engine": "Sage", "version": "0.14.7", "files": ["sage/results.json"],
+                           "quantity": "median polish of lfq.tsv ion intensities", "fasta": str(fasta),
+                           "fdr": "peptide and protein q ≤ 0.01", "table": "sage/lfq.tsv"}
+    assert "Quantities from Sage 0.14.7 (sage/lfq.tsv) were read by Ionomos" in out.report.read_text(encoding="utf-8")
+    assert not (tmp_path / "exp" / "sage" / "results").exists()   # nothing written into the engine's folder
+
+
+def test_sage_filters_fractions_and_the_manifest(tmp_path):
+    files = ["a_1.mzML", "a_2.mzML.gz", "b_1.mzML", "b_2.mzML", "stray.mzML"]
+    rows = [
+        ["AAAK", 2, "sp|P1|ONE_HUMAN", 0.001, 1, 0.9, 100, 300, 800, 0, 50],
+        ["AAAK", 3, "sp|P1|ONE_HUMAN", 0.002, 1, 0.9, 200, 200, 400, 400, 50],
+        ["CCCK", 2, "sp|P1|ONE_HUMAN;sp|P2|TWO_HUMAN", 0.001, 1, 0.9, 10, 10, 10, 10, 10],     # razor: to P1
+        ["DDDK", 2, "sp|P2|TWO_HUMAN", 0.001, 1, 0.9, 64, 64, 64, 64, 64],
+        ["HIGHQK", 2, "sp|P3|THREE_HUMAN", 0.05, 1, 0.9, 1e9, 1e9, 1e9, 1e9, 1e9],             # peptide q > 1%
+        ["PROTQK", 2, "sp|P4|FOUR_HUMAN", 0.001, 1, 0.9, 1e9, 1e9, 1e9, 1e9, 1e9],             # protein q > 1%
+        ["DECOYK", 2, "rev_sp|P5|FIVE_HUMAN", 0.001, 1, 0.9, 1e9, 1e9, 1e9, 1e9, 1e9],
+        ["CONK", 2, "contam_sp|P6|SIX_HUMAN", 0.001, 1, 0.9, 5, 5, 5, 5, 5],
+    ]
+    lfq = _write(tmp_path / "lfq.tsv", SAGE_HEAD + files, rows)
+    _write(tmp_path / "results.sage.tsv", ["psm_id", "peptide", "proteins", "label", "protein_q"],
+           [[1, "AAAK", "sp|P1|ONE_HUMAN", 1, 0.001], [2, "PROTQK", "sp|P4|FOUR_HUMAN", 1, 0.3],
+            [3, "PROTQK", "sp|P4|FOUR_HUMAN", -1, 0.0001]])
+    smap = {"a_1": ("Ctrl", 1), "a_2": ("Ctrl", 1), "b_1": ("Drug", 1), "b_2": ("Drug", 1), "gone": ("Drug", 2)}
+    m = engines.load_sage(lfq, smap)
+    assert m.samples == ["Ctrl_1", "Drug_1", "stray"] and m.condition["Drug_1"] == "Drug"
+    assert [f.id for f in m.features] == ["contam_sp|P6|SIX_HUMAN", "P1", "P2"]
+    _con, p1, p2 = m.features
+    assert p1.label == "ONE" and p1.peptides == 2            # AAAK (two charges) and the razor peptide CCCK
+    assert p2.peptides == 1
+    assert m.values[2] == [pytest.approx(7.0), pytest.approx(7.0), pytest.approx(6.0)]   # DDDK: 64 + 64 fractions
+    # P1: ions AAAK/2 = 400, 800, 50; AAAK/3 = 400, 800, 50; CCCK = 20, 20, 10
+    assert m.values[1][0] == pytest.approx(math.log2(400)) and m.values[1][1] == pytest.approx(math.log2(800))
+    assert m.meta["runs"] == {"Ctrl_1": ["a_1", "a_2"], "Drug_1": ["b_1", "b_2"], "stray": ["stray"]}
+    assert m.meta["missing_runs"] == ["gone"] and m.meta["unmatched_runs"] == ["stray"]
+    text = " | ".join(m.notes)
+    assert "1 ion(s) above the peptide q-value and 1 above the protein q-value" in text
+    assert "1 peptide(s) shared between protein groups" in text and "fractions were added (2 sample(s)" in text
+    from ionomos.downstream import fpa
+
+    assert fpa.remove_contaminants(m)[1] == 1
+    # without results.sage.tsv there is no protein filter, and the note says so
+    (tmp_path / "results.sage.tsv").unlink()
+    m2 = engines.load_sage(lfq)
+    assert "P4" in [f.id for f in m2.features] and "no protein q-value filter" in m2.notes[0]
+    assert m2.samples == ["a_1", "a_2", "b_1", "b_2", "stray"]
+
+
+def test_sage_table_without_passing_peptides_is_an_error(tmp_path):
+    lfq = _write(tmp_path / "lfq.tsv", SAGE_HEAD + ["a.mzML"], [["AAK", 2, "rev_sp|P1|X_HUMAN", 0.001, 1, 0.9, 5]])
+    with pytest.raises(anytable.TableError, match="no peptide passes"):
+        engines.load_sage(lfq)
+    assert engines._sage_score(_write(tmp_path / "other" / "lfq.tsv", ["peptide", "x"], [["A", 1]])) == 0.0
+
+
 def test_detection_prefers_fragpipe_tables_and_ignores_results_folder(tmp_path):
     prots, vals, _ = _truth(tmp_path, n=30)
     d = tmp_path / "mixed"
@@ -362,6 +467,7 @@ def test_every_engine_finds_the_same_hits_in_the_same_data(tmp_path):
     head = ["R.Condition", "R.FileName", "R.Replicate", "PG.ProteinGroups", "PG.Genes", "PG.Quantity"]
     _write(tmp_path / "c" / "Report.tsv", head, [[r.split("_")[0], r, r.split("_")[1], p, g, vals[r][p]]
                                                   for p, g, _d, _n in prots for r in RUNS if vals[r][p]])
-    hits = [_hits(downstream.analyze(tmp_path / x, analysis_cfg=CFG)) for x in ("a", "b", "c")]
-    assert hits[0] and hits[0] == hits[1] == hits[2]
+    _sage(tmp_path / "d", prots, vals)
+    hits = [_hits(downstream.analyze(tmp_path / x, analysis_cfg=CFG)) for x in ("a", "b", "c", "d")]
+    assert hits[0] and hits[0] == hits[1] == hits[2] == hits[3]
 

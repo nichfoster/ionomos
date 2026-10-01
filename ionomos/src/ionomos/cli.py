@@ -870,7 +870,7 @@ def main(argv: list[str] | None = None) -> int:
     az = sub.add_parser("analyze", help="(re)run statistics, volcano plots and the report for a job or folder")
     az.add_argument("target", help="job id, experiment folder, a results folder from FragPipe, DIA-NN, MaxQuant, "
                                    "Spectronaut, AlphaDIA, or any protein / results table (.csv .tsv .txt .xlsx .parquet)")
-    az.add_argument("--method", choices=["isoDTB", "TMT", "DIA", "LFQ", "DIA-NN", "MaxQuant", "Spectronaut", "AlphaDIA",
+    az.add_argument("--method", choices=["isoDTB", "TMT", "DIA", "LFQ", "DIA-NN", "MaxQuant", "Sage", "Spectronaut", "AlphaDIA",
                                          "MSstats", "MSstatsTMT", "PD", "table", "auto"], default=None,
                     help="default: from ionomos.json, else detected from the files (FragPipe, DIA-NN, MaxQuant, "
                          "Spectronaut, AlphaDIA, MSstats / MSstatsTMT format, Proteome Discoverer, any table)")
@@ -940,6 +940,18 @@ def main(argv: list[str] | None = None) -> int:
         ok, why = gui_available()
         print("ok" if ok else why)
         return 0 if ok else 1
+    if argv[:1] == ["sage-job"]:  # hidden: the two steps of an `engine: sage` job (convert, search), run by the worker
+        from ionomos.sage import run_job
+
+        return run_job(argv[1:])
+    if argv[:1] == ["fake-sage"]:  # hidden: the testbed's stand-ins for Sage and ThermoRawFileParser (engine: sage)
+        from ionomos.testbed import fake_sage
+
+        return fake_sage(argv[1:])
+    if argv[:1] == ["fake-rawparser"]:
+        from ionomos.testbed import fake_rawparser
+
+        return fake_rawparser(argv[1:])
     if argv[:1] == ["fake-maxquant"]:  # hidden: the testbed's stand-in for MaxQuantCmd (engine: maxquant)
         from ionomos.testbed import fake_maxquant
 

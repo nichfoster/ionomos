@@ -60,6 +60,8 @@ the same gap. The messages are explained below:
 [FASTA](#search.hold-fasta), [disk space](#search.hold-disk),
 [DIA-NN](#search.hold-diann), [spectral library](#search.hold-library),
 [MaxQuant](#search.hold-maxquant), [MaxQuant parameters](#search.hold-mqpar),
+[Sage](#search.hold-sage), [raw file converter](#search.hold-converter),
+[Sage settings](#search.hold-sage-config),
 [method](#search.hold-method).
 
 ## A folder was not taken in {#attention.intake_rejected}
@@ -196,6 +198,32 @@ workflow folder. In the MaxQuant GUI, set up the search you normally use,
 then **File → Save parameters**, and put the file in the workflow folder
 under that name. Or remove `mqpar:` to use MaxQuant's defaults with
 label-free quantification.
+
+## Sage not found {#search.hold-sage}
+
+The method is set to run Sage (`engine: sage`) but `sage.exe` isn't where the
+settings say. Download Sage (it is free and open source:
+github.com/lazear/sage, Releases), unzip it into a folder without spaces such
+as `C:\sage`, and set the method's `sage_exe` to the file. The search starts
+by itself once it is found.
+
+## Raw file converter not found {#search.hold-converter}
+
+Sage can't read Thermo `.raw` files, so Ionomos first converts each one to
+mzML with ThermoRawFileParser. Download it
+(github.com/compomics/ThermoRawFileParser, Releases), unzip it into a folder
+without spaces such as `C:\ThermoRawFileParser`, and set the method's
+`raw_converter` to `ThermoRawFileParser.exe`. The converted files go to
+`sage_mzml\` in the experiment folder; your `.raw` files are not touched.
+
+## Sage settings missing or unusable {#search.hold-sage-config}
+
+The method names a Sage settings file (`sage_config:`) that isn't in the
+workflow folder, isn't valid JSON, or asks for TMT quantification, which
+Ionomos can't analyse from Sage yet. Put a working Sage JSON there (the one
+from a search that worked: `results.json` in its output folder is a complete
+copy), or remove `sage_config:` to use Ionomos' defaults: tryptic,
+high-resolution MS2, label-free quantification.
 
 ## The method is no longer set up {#search.hold-method}
 
