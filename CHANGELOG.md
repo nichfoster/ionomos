@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Sage TMT** (ROADMAP 5B #5, D56, [docs/ENGINES.md](docs/ENGINES.md)).
+  - **Import:** `ionomos analyze <Sage output folder>` reads `tmt.tsv`
+    (reporter ions per spectrum) with `results.sage.tsv` (the PSMs) beside
+    it. PSMs are targets of rank 1 at spectrum, peptide and protein
+    q ≤ 1%, joined to their reporter ions by file and scan. Proteins are
+    grouped by razor peptides and summarised per plex and channel as the
+    MSstatsTMT format already is (one PSM per peptide ion, fractions
+    combined, global median normalisation, Tukey median polish). Several
+    plexes are then joined by IRS on the reference channel, as for the
+    other engines (D48). `tmt_1 … tmt_n` are the kit's channels in order.
+  - **Run:** a lab `sage_config` with `quant.tmt` (`Tmt6` … `Tmt18`) no
+    longer holds the job. Label-free quantification is not switched on
+    for it; the job expects `tmt.tsv`. The files of a plex are its
+    fractions (`<plex>_F<fraction>.raw`, the TMT naming rule).
+  - **Channel names:** experiment.yaml's `tmt:` map names the channels and
+    gives them their condition (the text before the first `_`, as for
+    FragPipe TMT); a channel it calls `NA` or `empty` is left out. Without
+    a map the channels are `<plex>_<channel>` with condition `unassigned`,
+    and the analysis asks for the conditions (Analysis tab, or an SDRF).
+    Plexes whose channels have no condition yet are not scaled by their
+    own means.
+  - **Instrument QC from Sage:** a QC-standard run searched by Sage is
+    trended from `results.sage.tsv`: PSMs, peptides, proteins, summed
+    fragment signal, a signed precursor mass error, missed cleavages,
+    charge and RT ([docs/QC_TREND.md](docs/QC_TREND.md)).
+  - A method whose `sage_args` has `--parquet` is held: Sage's Parquet
+    output is not read (Sage itself calls the format unstable).
+
+  Tested against the stand-in Sage only (`ionomos fake-sage` now writes
+  `tmt.tsv` and the full `results.sage.tsv` header). The `tmt.tsv` and
+  `results.sage.tsv` layouts come from Sage's source, not from a real run.
+
 - **Time courses** (ROADMAP 5C #1, D53; `downstream/timecourse.py`). When the
   conditions are time points (`Drug_0h`, `Drug_1h`, `Drug_4h`, `Drug_24h`,
   or `analysis.times`) and a series has at least 3, every feature gets

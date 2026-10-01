@@ -1274,3 +1274,63 @@ adds the tests.
 p and adjusted p, the fold changes, the trend t and p and the interaction F,
 for the plain model, a replicate block and data with missing values, to
 1e-8.
+
+
+### D56 — Sage TMT is summarised as MSstatsTMT input is; plexes are left to IRS
+**2026-10-01.** D51 held a Sage job whose settings asked for TMT, because
+`tmt.tsv` holds reporter ions per spectrum and nothing rolled them up.
+ROADMAP 5B #5 listed it as still to do.
+
+1. **The join.** `tmt.tsv` has a row per MS2 / MS3 spectrum (`filename`,
+   `scannr`, `ion_injection_time`, then a column per reporter);
+   `results.sage.tsv` has the PSMs. They are joined on (filename, scannr):
+   for MS3 quantification Sage writes the MS2 scan's id there. Both files
+   are read line by line, since both have a row per spectrum.
+2. **Which PSMs.** Targets (`label` 1) of `rank` 1 with `spectrum_q`,
+   `peptide_q` and `protein_q` ≤ 1%. A spectrum with more than one such PSM
+   (a chimeric search) is left out, since its reporter ions belong to both
+   peptides. A reporter intensity of 0 (no peak) is missing.
+3. **No new summary.** The PSMs go through the summary the MSstatsTMT
+   importer uses (`engines._tmt_summarise`, checked against MSstatsTMT 2.20
+   in D48): one PSM per peptide ion and file, fractions of a plex combined,
+   global median normalisation, Tukey median polish per plex. Proteins are
+   the razor groups of D51. A test checks that Sage input and the same PSMs
+   as MSstatsTMT rows give the same numbers.
+4. **Between plexes: IRS, not MSstatsTMT's reference normalisation.** Sage
+   records no `Norm` condition, so the loader stops after the median polish
+   and `plex.py` joins the plexes on the reference channel
+   (`tmt.reference_channel`, the SDRF, or a channel named pool), as for
+   MaxQuant and Proteome Discoverer (D48).
+5. **Channels.** Sage names the columns `tmt_1 … tmt_n` in the kit's order,
+   so they map through `plex.TMT_ORDERS`. A custom list of reporter masses
+   (`User`, columns `user_1 …`) keeps Sage's names.
+6. **Plexes.** With the watcher's manifest, a file's experiment is its
+   plex, and the files of a plex are its fractions. Without it, the lab's
+   TMT file rule (`<plex>[_TMT][_F<fraction>]`).
+7. **Names and conditions.** experiment.yaml's `tmt:` map is used as
+   FragPipe's annotation is: the name is the sample, and the condition is
+   the text before the first `_`. A channel it calls NA / empty is left
+   out before the summary. A channel nothing names is `<plex>_<channel>`
+   with condition `unassigned`: one condition for all, so the analysis asks
+   (`ONE_CONDITION`) instead of testing channels against each other.
+   `irs: auto` does not fall back to the plex means while a channel is
+   unassigned, because nothing says the plexes hold the same mix.
+8. **The runner.** A lab `sage_config` with `quant.tmt` runs. Label-free
+   quantification is not forced on for it, and the job expects `tmt.tsv`.
+   An unknown kit name still holds the job. The default settings stay
+   label-free: TMT needs the lab's own modifications and MS level, so there
+   is no TMT default to ship.
+9. **QC trending** reads `results.sage.tsv` per file. The mass error is
+   computed from `expmass` and `calcmass` (signed, isotope-corrected), not
+   taken from `precursor_ppm`. `fragment_ppm` is an unsigned average, so it
+   gives no MS2 mass error.
+10. **Left out: Parquet.** `--parquet` writes one `results.sage.parquet`
+    with the reporter ions as a list column and `lfq.parquet` in long
+    format: different layouts from the `.tsv` files, which Sage's own log
+    calls unstable. Reading them is a second loader, not a small addition
+    to the optional pyarrow reader. A method with `--parquet` in
+    `sage_args` is held with that explanation.
+
+Tested with stand-ins only. The layouts are from Sage's source
+(`sage-cli/src/runner.rs`, `sage/src/tmt.rs`, master in September 2026),
+not from a real run.

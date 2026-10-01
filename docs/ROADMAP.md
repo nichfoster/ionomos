@@ -243,7 +243,7 @@ installed.
 | 2 ✅ | MaxQuant | import ✅ `proteinGroups.txt`; run ✅ (`engine: maxquant`, D50, #54; tested against a stand-in MaxQuant only) | Free incl. commercial use; not redistributable. Run mode patches an `mqpar.xml` made by the installed version (`--create`), never a shipped template. |
 | 3 ✅ | MSstats long format + SDRF design | import ✅ label-free MSstats, MSstatsTMT (D48) and an SDRF as the design (D47), #60 | One importer covers quantms, Skyline and anything with an MSstats converter; protein summary by Tukey median polish (MSstats' default). |
 | 4 ✅ | Spectronaut | import ✅ pivot + long reports (the `.rs` schema still to ship) | Common in cores; ship an Ionomos report schema (`.rs`), read `PG.Quantity` pivots or the long BGS report. |
-| 5 ✅ | Sage | import ✅ `lfq.tsv`; run ✅ (`engine: sage`, D51; tested against stand-ins for Sage and ThermoRawFileParser only) | MIT and cross-platform. Not bundled: the lab downloads Sage and ThermoRawFileParser (.raw → mzML, Thermo's RawFileReader licence). Proteins are rolled up from `lfq.tsv` by razor grouping and median polish. Still to do: Sage TMT (`tmt.tsv`), Parquet output. |
+| 5 ✅ | Sage | import ✅ `lfq.tsv`, `tmt.tsv` (D56); run ✅ (`engine: sage`, D51; TMT with the lab's `sage_config`, D56; tested against stand-ins for Sage and ThermoRawFileParser only) | MIT and cross-platform. Not bundled: the lab downloads Sage and ThermoRawFileParser (.raw → mzML, Thermo's RawFileReader licence). Proteins are rolled up from `lfq.tsv` by razor grouping and median polish; `tmt.tsv` as MSstatsTMT input is, plexes joined by IRS. QC trending reads `results.sage.tsv`. Not built: Parquet output (`--parquet` has other layouts, and Sage calls it unstable). |
 | 6 ✅ | AlphaDIA | import ✅ `pg.matrix.tsv` | Apache-2.0, pip-installable; column names changed between 1.x and 2.x. |
 | 7 ✅ | Proteome Discoverer | import ✅ (column format from the docs, not yet a real export) | Protein-table text export only; no supported headless mode. |
 
@@ -289,6 +289,13 @@ real data:
   with a FragPipe LFQ search of the same files. Check the default tolerances
   (±20 ppm) suit the instrument, and whether the median-polish roll-up or a
   MaxLFQ would agree better with FragPipe's `combined_protein.tsv`.
+- Sage TMT (D56) is built from Sage's source, not a real `tmt.tsv`. On a
+  real TMT search check: that `scannr` in `tmt.tsv` matches
+  `results.sage.tsv` for MS3 quantification; that `tmt_1 … tmt_n` are in
+  kit order; how many spectra a chimeric search drops (more than one
+  passing PSM); and the proteins against FragPipe's TMT-Integrator on the
+  same files. Decide whether PSMs should also be filtered on reporter
+  signal or purity, which Sage does not report.
 
 ### 5C — More analysis (value × feasibility; all possible in pure Python)
 

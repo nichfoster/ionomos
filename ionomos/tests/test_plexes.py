@@ -6,6 +6,9 @@
 - reference channels from the setting, the SDRF, names; the plex-mean fallback only for balanced designs
 - TMT-Integrator abundances are never scaled a second time
 - MaxQuant with several experiments and Proteome Discoverer files as plexes, end to end with the report
+- Sage's tmt.tsv + results.sage.tsv (engines.load_sage_tmt, D56): the same numbers as the MSstatsTMT summary of
+  the same PSMs, plexes and fractions from the file names, channels named by experiment.yaml's tmt: map, and
+  IRS on the pool channels, end to end
 """
 from __future__ import annotations
 
@@ -376,3 +379,161 @@ def test_proteome_discoverer_files_are_plexes(tmp_path):
     assert m.exp == "TMT" and set(m.meta["plex"].values()) == {"F1", "F2"} and m.meta["channel"][m.samples[1]] == "127N"
     m2, info, _ = plex.normalise(m, _settings())  # the pools are named "Pool" by the export's conditions
     assert info["applied"] and len(m2.samples) == 16
+
+
+# ------------------------------------------------------------------ Sage TMT --
+
+SAGE_PSM = ["psm_id", "peptide", "proteins", "filename", "scannr", "rank", "label", "charge", "spectrum_q",
+            "peptide_q", "protein_q"]
+SAGE_TMT = ["filename", "scannr", "ion_injection_time", *[f"tmt_{k}" for k in range(1, 11)]]
+
+
+def _tsv(path: Path, head: list[str], rows: list[list]) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join("\t".join(str(x) for x in r) for r in [head, *rows]) + "\n", encoding="utf-8")
+    return path
+
+
+def _write_sage_tmt(folder: Path, prots, sim) -> tuple[Path, list[dict]]:
+    """Sage's output for the simulated plexes: three peptides per protein, one PSM each, spread over the two
+    fraction files of a plex (<plex>_F1.mzML, <plex>_F2.mzML). Returns tmt.tsv and the same PSMs as MSstatsTMT
+    rows."""
+    rng = random.Random(3)
+    peps = {p: [(f"PEP{p[1:]}{a}K", 2 ** rng.uniform(-1.5, 1.5)) for a in "ACD"] for p in prots}
+    psm, tmt, long = [], [], []
+    for mix, chans in sim.items():
+        for k, p in enumerate(prots):
+            for j, (pep, share) in enumerate(peps[p]):
+                file, scan = f"{mix}_F{1 + (k + j) % 2}.mzML", f"controllerType=0 controllerNumber=1 scan={len(psm) + 1}"
+                vals = [round(chans[c][p] * share * 2 ** rng.gauss(0, 0.05), 3) for c in TMT10]
+                psm.append([len(psm) + 1, pep, f"sp|{p}|G{p[1:]}_HUMAN", file, scan, 1, 1, 2, 0.001, 0.001, 0.001])
+                tmt.append([file, scan, 50.0, *vals])
+                long += [{"ProteinName": p, "PeptideSequence": pep, "Charge": 2, "PSM": scan, "Mixture": mix,
+                          "TechRepMixture": 1, "Run": file, "Channel": c, "Condition": _cond(c), "BioReplicate": c,
+                          "Intensity": v} for c, v in zip(TMT10, vals, strict=True)]
+    rng.shuffle(tmt)   # Sage writes its rows from parallel workers: in no order
+    _tsv(folder / "results.sage.tsv", SAGE_PSM, psm)
+    (folder / "results.json").write_text(json.dumps({"version": "0.14.7", "quant": {"tmt": "Tmt10"},
+                                                     "database": {"decoy_tag": "rev_"}}), encoding="utf-8")
+    return _tsv(folder / "tmt.tsv", SAGE_TMT, tmt), long
+
+
+def test_sage_tmt_is_the_msstatstmt_summary_of_its_psms(tmp_path):
+    prots, sim, _ = _sim(n=40)
+    path, long = _write_sage_tmt(tmp_path / "sage", prots, sim)
+    assert engines.detect(tmp_path).path == path and engines.detect(tmp_path).method == "Sage"
+    m = engines.load_sage_tmt(path)
+    assert m.exp == "TMT" and len(m.samples) == 30 and m.samples[:2] == ["Exp1_126", "Exp1_127N"]
+    assert m.meta["plex"]["Exp3_131"] == "Exp3" and m.meta["channel"]["Exp3_131"] == "131"   # tmt_10 of a Tmt10 kit
+    assert m.meta["runs"]["Exp2_126"] == ["Exp2_F1", "Exp2_F2"]                              # the plex's fractions
+    assert set(m.condition.values()) == {plex.UNASSIGNED} and m.replicate == {}
+    assert [f.id for f in m.features] == prots and m.features[0].label == "G00000" and m.features[0].peptides == 3
+    want = engines.msstats_tmt_summary(*_msstats_tmt_rows(long))["before"]   # no Norm: nothing between the plexes
+    for f, row in zip(m.features, m.values, strict=True):
+        for s, v in zip(m.samples, row, strict=True):
+            assert v == pytest.approx(want[f.id][(f"{m.meta['plex'][s]}_1", m.meta["channel"][s])], abs=1e-9)
+    # the plexes are still apart: that is plex.py's job, and it refuses to guess while the channels have no condition
+    m2, info, notes = plex.normalise(m, _settings())
+    assert m2 is m and not info["applied"] and "no condition yet" in info["reason"]
+    m3, info3, _ = plex.normalise(m, _settings(tmt_reference=["126", "131"]))
+    assert info3["applied"] and len(m3.samples) == 24
+
+
+def test_sage_tmt_end_to_end_with_the_experiment_yaml_channel_map(tmp_path):
+    from ionomos import postprocess
+
+    prots, sim, hits = _sim(n=150, hits=15)
+    _write_sage_tmt(tmp_path / "exp" / "sage", prots, sim)
+    names = {c: ("NA" if c == "131" else f"{_cond(c)}_{c}") for c in TMT10}    # the second pool is called unused
+    (tmp_path / "exp" / "experiment.yaml").write_text(
+        "tmt:\n  reference_channel: 126\n  channels:\n" + "".join(f"    '{c}': {n}\n" for c, n in names.items())
+        + "analysis:\n  enrichment: false\n", encoding="utf-8")
+    out = postprocess.run_for_folder(tmp_path / "exp", None)
+    s = json.loads((out.results_dir / "analysis.json").read_text(encoding="utf-8"))
+    assert s["method"] == "Sage" and s["tmt"]["applied"] and s["tmt"]["reference_from"] == "tmt_reference 126"
+    assert s["tmt"]["plexes"] == {"Exp1": 9, "Exp2": 9, "Exp3": 9}             # 131 left out before the summary
+    assert len(s["samples"]) == 24 and s["samples"]["Exp2_Drug_129N"] == "Drug"
+    assert s["design"]["conditions_from"] == "experiment.yaml tmt: channel map"
+    assert any("3 channel(s) called NA / empty" in n for n in s["notes"])
+    with open(out.results_dir / "Drug_vs_DMSO_differential.tsv", encoding="utf-8") as fh:
+        sig = {r["id"] for r in csv.DictReader(fh, delimiter="\t") if r["significant"]}
+    assert len(sig & hits) >= 0.8 * len(hits) and len(sig - hits) <= 2
+    html = out.report.read_text(encoding="utf-8")
+    assert "internal reference scaling" in html and '"pcaBefore"' in html and "Quantities from Sage 0.14.7" in html
+    assert not (tmp_path / "exp" / "sage" / "results").exists()                # nothing written into Sage's folder
+
+
+def test_sage_tmt_filters_and_joins_on_file_and_scan(tmp_path):
+    f = "plexA_F1.mzML"
+    psm = [
+        [1, "AAAK", "sp|P1|ONE_HUMAN", f, "scan=1", 1, 1, 2, 0.001, 0.001, 0.001],
+        [2, "AAAK", "sp|P1|ONE_HUMAN", f, "scan=2", 1, 1, 2, 0.001, 0.001, 0.001],    # the weaker PSM of the ion
+        [3, "CCCK", "sp|P1|ONE_HUMAN;sp|P2|TWO_HUMAN;rev_sp|P9|X_HUMAN", f, "scan=3", 1, 1, 2, 0.001, 0.001, 0.001],
+        [4, "DDDK", "sp|P2|TWO_HUMAN", "plexA_F2.mzML.gz", "scan=1", 1, 1, 3, 0.001, 0.001, 0.001],   # same scan id,
+        [5, "DECOYK", "rev_sp|P3|THREE_HUMAN", f, "scan=4", 1, -1, 2, 0.001, 0.001, 0.001],            # another file
+        [6, "RANKK", "sp|P4|FOUR_HUMAN", f, "scan=4", 2, 1, 2, 0.001, 0.001, 0.001],
+        [7, "SPECQK", "sp|P4|FOUR_HUMAN", f, "scan=5", 1, 1, 2, 0.05, 0.001, 0.001],
+        [8, "PEPQK", "sp|P4|FOUR_HUMAN", f, "scan=6", 1, 1, 2, 0.001, 0.05, 0.001],
+        [9, "PROTQK", "sp|P4|FOUR_HUMAN", f, "scan=7", 1, 1, 2, 0.001, 0.001, 0.05],
+        [10, "CHIMERAK", "sp|P5|FIVE_HUMAN", f, "scan=8", 1, 1, 2, 0.001, 0.001, 0.001],
+        [11, "CHIMERBK", "sp|P5|FIVE_HUMAN", f, "scan=8", 1, 1, 2, 0.001, 0.001, 0.001],   # two peptides, one spectrum
+        [12, "NOIONSK", "sp|P6|SIX_HUMAN", f, "scan=9", 1, 1, 2, 0.001, 0.001, 0.001],     # reporters all 0
+        [13, "NOROWK", "sp|P6|SIX_HUMAN", f, "scan=10", 1, 1, 2, 0.001, 0.001, 0.001],     # no row in tmt.tsv
+    ]
+    six = ["filename", "scannr", "ion_injection_time", *[f"tmt_{k}" for k in range(1, 7)]]
+    big = [1e9] * 6
+    tmt = [[f, "scan=1", 20, 400, 800, 1600, 0, 400, 400], [f, "scan=2", 20, 1, 1, 1, 1, 1, 1],
+           [f, "scan=3", 20, 100, 200, 400, 100, 100, 100], ["plexA_F2.mzML.gz", "scan=1", 20, 64, 64, 64, 64, 64, 64],
+           [f, "scan=3", 20, 1, 1, 1, 1, 1, 1],                 # a second MS3 of scan 3: the larger total is kept
+           *[[f, f"scan={k}", 20, *big] for k in (4, 5, 6, 7, 8)], [f, "scan=9", 20, 0, 0, 0, 0, 0, 0],
+           [f, "scan=99", 20, *big]]                            # a spectrum nothing identified
+    _tsv(tmp_path / "results.sage.tsv", SAGE_PSM, psm)
+    path = _tsv(tmp_path / "tmt.tsv", six, tmt)
+    m = engines.load_sage_tmt(path, tmt={"channels": {126: "Ctrl_1", 127: "Ctrl_2", 128: "Drug_1", 129: "Drug_2",
+                                                      130: "empty", "131": "NA"}})
+    assert m.samples == ["Ctrl_1", "Ctrl_2", "Drug_1", "Drug_2"] and m.replicate["Drug_2"] == 2
+    assert m.condition == {"Ctrl_1": "Ctrl", "Ctrl_2": "Ctrl", "Drug_1": "Drug", "Drug_2": "Drug"}
+    assert m.meta["channel"] == {"Ctrl_1": "126", "Ctrl_2": "127", "Drug_1": "128", "Drug_2": "129"}   # the Tmt6 kit
+    assert set(m.meta["plex"].values()) == {"plexA"} and m.meta["runs"]["Ctrl_1"] == ["plexA_F1", "plexA_F2"]
+    assert [x.id for x in m.features] == ["P1", "P2"] and [x.peptides for x in m.features] == [2, 1]
+    # channel medians over AAAK (scan 1), CCCK (the first scan 3) and DDDK (scan 1 of the other file): 100, 200, 400,
+    # so the global median normalisation leaves P1 level over 126-128 and takes the flat DDDK down 1 per channel
+    p1, p2 = m.values
+    assert p1[0] == pytest.approx(p1[1]) and p1[1] == pytest.approx(p1[2]) and p1[3] is not None
+    assert p2[0] - p2[1] == pytest.approx(1.0) and p2[1] - p2[2] == pytest.approx(1.0)
+    text = " | ".join(m.notes)
+    assert "2 protein groups in 1 plex(es) from 4 PSMs" in text
+    assert "of 13 PSMs in results.sage.tsv, left out: 1 decoy, 1 of lower rank, 3 above a q-value" in text
+    assert "1 spectra with more than one passing PSM" in text and "2 passing PSM(s) had no reporter ions" in text
+    assert "1 peptide(s) shared" in text and "2 channel(s) called NA / empty" in text
+    assert "1 features had several PSMs in a run" in text and "fractions combined within 1 mixture run(s)" in text
+    # the manifest names the plex of each file; a file it doesn't know keeps the plex in its name
+    m2 = engines.load_sage_tmt(path, {"plexA_F1": ("mix1", 1), "gone_F1": ("mix2", 1)})
+    assert set(m2.meta["plex"].values()) == {"mix1", "plexA"} and m2.samples[0] == "mix1_126"
+    assert m2.meta["missing_runs"] == ["gone_F1"] and m2.meta["unmatched_runs"] == ["plexA_F2"]
+    # custom reporter masses: no kit, so no channel labels
+    user = _tsv(tmp_path / "u" / "tmt.tsv", [*six[:3], "user_1", "user_2"], [[f, "scan=1", 20, 5, 6]])
+    _tsv(tmp_path / "u" / "results.sage.tsv", SAGE_PSM, psm[:1])
+    m3 = engines.load_sage_tmt(user)
+    assert m3.samples == ["plexA_user_1", "plexA_user_2"] and "channel" not in m3.meta
+    assert any("not one of Sage's TMT kits" in n for n in m3.notes)
+    # without the PSM table, or with nothing passing, the table can't be used
+    (tmp_path / "u" / "results.sage.tsv").unlink()
+    with pytest.raises(anytable.TableError, match="results.sage.tsv"):
+        engines.load_sage_tmt(user)
+    _tsv(tmp_path / "u" / "results.sage.tsv", SAGE_PSM, psm[4:9])
+    with pytest.raises(anytable.TableError, match="no PSM"):
+        engines.load_sage_tmt(user)
+
+
+def test_sage_folder_with_both_tables_is_read_as_tmt(tmp_path):
+    prots, sim, _ = _sim(n=20, plexes=1)
+    path, _long = _write_sage_tmt(tmp_path / "sage", prots, sim)
+    _tsv(tmp_path / "sage" / "lfq.tsv", ["peptide", "charge", "proteins", "q_value", "score", "spectral_angle",
+                                         "Exp1_F1.mzML"], [["AAAK", 2, "sp|P1|ONE_HUMAN", 0.001, 1, 0.9, 100]])
+    assert [d.path.name for d in engines.detect_all(tmp_path)] == ["tmt.tsv", "lfq.tsv"]
+    m, _notes = engines.load("Sage", tmp_path)
+    assert m.exp == "TMT" and plex.normalise(m, _settings())[1] is None      # one plex: nothing to put on one scale
+    prov = engines.provenance(tmp_path, "Sage", m.source, m.meta)
+    assert prov["version"] == "0.14.7" and prov["fdr"] == "spectrum, peptide and protein q ≤ 0.01"
+    assert prov["files"] == ["sage/results.json"] and prov["table"] == "sage/tmt.tsv"
