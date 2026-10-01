@@ -591,11 +591,10 @@ Collected from the other docs; resolve before/during Phase 1.
       channels `<plex>_<channel>`. Not yet seen on the PC.
 - [ ] D59: several TMT plexes in one experiment need a folder each for FragPipe to find their annotations. Intake
       files raws at the top level or in `raw\`: should a multi-plex drop be laid out as `<plex>\*.raw`?
-- [ ] D59: FragPipe 24's stock workflows write `fragpipe\sdrf.tsv` (`workflow.misc.save-sdrf=true`). The analysis
-      reads any `sdrf.tsv` in the experiment folder as the experiment's own design (`downstream/sdrfdesign.py`):
-      for isoDTB it then reports "The SDRF doesn't describe these runs" on every search. Decide: skip FragPipe's
-      own file there (its `source name` column is all "not available"), or switch the setting off in the job's
-      workflow copy. Until then expect that pop-up on a real run; it changes nothing in the results.
+- [x] D59: FragPipe 24's stock workflows write `fragpipe\sdrf.tsv` (`workflow.misc.save-sdrf=true`), which the
+      analysis took for the experiment's own design. Fixed in 0.14.0: an SDRF with no factor value column and no
+      sample names is skipped with a note (`sdrfdesign._engine_template`). Confirm on the first real run that the
+      real file looks like that.
 - [ ] D59: FragPipe replaces everything but letters, digits and `_` in experiment names (`EJQ-2-027` →
       `EJQ_2_027`), so its tables and Ionomos' `_sites.tsv` carry the `_` form. Ionomos warns per job. Should
       intake write the `_` form into the manifest from the start?

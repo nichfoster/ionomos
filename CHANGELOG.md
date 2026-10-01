@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-01
+
 ### Added
 
 - **The analysis knows the experiment's design** (D61; `downstream/roles.py`).
@@ -136,31 +138,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the app's Advanced tab. FragPipe 24 on Windows uses the Python inside
   its installation whatever this says; it is for other setups.
 
-### Changed
-
-- **A failed search's reason names the step and what it said**: "FragPipe
-  step MSFragger failed (exit code 1); it said: …" with that step's last
-  lines, instead of FragPipe's closing "Cancelling N remaining tasks".
-- **The progress line** counts steps ("MSFragger (4 of 31 step(s) done)")
-  and knows step names with brackets or a colon.
-- **TMT**: a channel map FragPipe would stop on fails the job before the
-  search, with the rule (every channel of the label type listed, `NA` for
-  unused ones, one name without spaces per channel, no name twice). Plexes
-  that share a folder get no annotation file and a warning; plexes each in
-  their own folder get one `annotation.txt` each.
-- **A FASTA without usable decoys holds the job** ("waiting: FASTA … can't
-  be searched") instead of letting FragPipe fail on it, and is a ✗ on the
-  setup checklist.
-- **The testbed's fake FragPipe copies the real one** (`fake_fragpipe.py`):
-  its options, checks, messages, console layout, exit codes and output
-  files, with the source of each named. New failure modes for testing:
-  `IONOMOS_FAKE_FP_MODE=speclib | no-java | locked | diann | cancel-exit0 |
-  no-done-line | child`. The sample TMT drop lists all ten channels; the
-  failing sample (`fp_fail`, a DIA drop) now fails in the DIA-NN step, as a
-  DIA search has no IonQuant step.
-- The default launcher path is `C:/FragPipe/FragPipe-24.0/bin/fragpipe.bat`
-  (the 23 / 24 installer's layout).
-
 - **A bundle for troubleshooting and validation** (D63; `bundle.py`,
   docs/DEV_LOOP.md). **Report a problem…** is now a window with the note,
   the jobs, three boxes and a list of what will go into the zip with its
@@ -255,6 +232,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     new list in the report and the `trust` key: the FragPipe-Analyst, limma
     and R golden tests pass as they were.
 
+### Changed
+
+- **A failed search's reason names the step and what it said**: "FragPipe
+  step MSFragger failed (exit code 1); it said: …" with that step's last
+  lines, instead of FragPipe's closing "Cancelling N remaining tasks".
+- **The progress line** counts steps ("MSFragger (4 of 31 step(s) done)")
+  and knows step names with brackets or a colon.
+- **TMT**: a channel map FragPipe would stop on fails the job before the
+  search, with the rule (every channel of the label type listed, `NA` for
+  unused ones, one name without spaces per channel, no name twice). Plexes
+  that share a folder get no annotation file and a warning; plexes each in
+  their own folder get one `annotation.txt` each.
+- **A FASTA without usable decoys holds the job** ("waiting: FASTA … can't
+  be searched") instead of letting FragPipe fail on it, and is a ✗ on the
+  setup checklist.
+- **The testbed's fake FragPipe copies the real one** (`fake_fragpipe.py`):
+  its options, checks, messages, console layout, exit codes and output
+  files, with the source of each named. New failure modes for testing:
+  `IONOMOS_FAKE_FP_MODE=speclib | no-java | locked | diann | cancel-exit0 |
+  no-done-line | child`. The sample TMT drop lists all ten channels; the
+  failing sample (`fp_fail`, a DIA drop) now fails in the DIA-NN step, as a
+  DIA search has no IonQuant step.
+- The default launcher path is `C:/FragPipe/FragPipe-24.0/bin/fragpipe.bat`
+  (the 23 / 24 installer's layout).
+
 ### Fixed
 
 - **`fragpipe.bat` found no Java on the lab PC's kind of setup.** The
@@ -312,6 +314,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     byte, `:`, `?`) crashed the read step when its site table was written.
   - A table with one feature said "nothing could be tested" without the
     reason (median normalisation leaves nothing). A note now says it.
+- **FragPipe's own `sdrf.tsv` is no longer taken for the experiment's design.**
+  FragPipe 24's stock workflows write one into the output folder with no
+  sample names and no conditions; the analysis read it as the user's SDRF and
+  raised "needs your input" (`SDRF_UNMATCHED_RUNS`) on every search. It is now
+  skipped with a note.
 
 ## [0.13.0] - 2026-10-01
 

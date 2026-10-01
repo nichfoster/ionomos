@@ -1566,6 +1566,201 @@ unasked, so the first is built to be safe to ignore (`notify.py`).
 server and a small SMTP server inside the test process, and a stub for
 STARTTLS + login.
 
+### D59 — FragPipe is run the way its source says, checked before a search, and recorded after one
+**2026-10-01.** Every search so far ran against the testbed's fake FragPipe,
+which was written from guesses. Before the first real runs, the runner was
+checked line by line against FragPipe's headless tutorial and the source of
+FragPipe 24.0 (and 23.1 where it could differ). What follows is what was
+decided; the mismatches found are in CHANGELOG (Unreleased) and the sources are
+named in `fake_fragpipe.py` and WORKFLOWS.md.
+
+1. **The launcher is `bin\fragpipe.bat`, with FragPipe's own Java.**
+   `fragpipe.bat` is the start script FragPipe's build makes for every
+   release (Gradle's): it runs `%JAVA_HOME%\bin\java.exe`, else `java` from
+   PATH, else stops. The lab PC has no Java on PATH, so Ionomos sets
+   `JAVA_HOME` for the launcher to the `jre` folder in the installation (the
+   one FragPipe's `.exe` uses). It does this whenever that folder exists,
+   also when the PC has another Java: FragPipe is built and tested with its
+   own.
+2. **`FragPipe-24.0.exe` is never run.** It is a launch4j wrapper with the
+   window ("gui") header: by launch4j's documentation it starts `javaw` and
+   returns without waiting or passing output on. Run by Ionomos it would end
+   at once with exit code 0 while the search went on unseen. A configured
+   `.exe` is swapped for the `fragpipe.bat` beside it, as before; without
+   one the job is **held** with that explanation instead of started.
+   *To confirm on the PC:* `C:\FragPipe\FragPipe-24.0\bin\fragpipe.bat`
+   exists (the build says it does; the first Ionomos report only named the
+   `.exe`).
+3. **A FASTA FragPipe would refuse holds the job.** Headless FragPipe stops
+   at once unless 40-60 % of the FASTA's entries start with the decoy tag
+   (`FragpipeRun.checkDbConfig`; in the window it is a question one can
+   click through). Ionomos applies the same rule before starting, when the
+   workflow says Percolator, PeptideProphet or the report runs: the job
+   waits ("waiting: FASTA … can't be searched") and starts when the file is
+   fixed. A FASTA of 1 GB or more is not counted, as in FragPipe.
+4. **TMT channel maps are checked with FragPipe's rules, and plexes sharing
+   a folder get no annotation file.** FragPipe takes a plex's annotation
+   from the folder that holds its files, and only when exactly one file
+   ending in `annotation.txt` is there. So: one plex → `annotation.txt`
+   (not written beside a user's own `*annotation.txt`); plexes each in their
+   own folder → one `annotation.txt` per folder; plexes sharing a folder →
+   none is written, a warning says FragPipe will name the channels
+   `<plex>_<channel>`. A map FragPipe would stop on (not every channel of
+   the label type listed, a name with a space, a name used twice) fails the
+   job before the search, with the rule.
+5. **Exit code 0 is not enough, and one line is not yet required.** A run
+   fails when its log has a step with a non-zero exit code, or "Cancelling N
+   remaining tasks", or the dry-run notice, or when nothing was written. A
+   finished run also prints `ALL JOBS DONE IN x MINUTES`; a log without it
+   is a **warning** on a done job, not a failure, until a real headless run
+   has shown that line in the console Ionomos captures.
+6. **Only the latest attempt's part of the console log is judged.** The log
+   keeps every attempt. An earlier attempt's failed step used to fail a
+   successful retry whose output fitted in the 400 kB read back.
+7. **A failure's reason quotes the step that failed.** After a failing step
+   FragPipe prints only "Process returned non-zero exit code, stopping" and
+   "Cancelling N remaining tasks", so "last lines" said nothing. The reason
+   is now "FragPipe step X failed (exit code N); it said: …" with the
+   step's own last lines.
+8. **The preflight starts FragPipe, and says so.** `ionomos preflight` (and
+   the app's Check FragPipe install) runs `fragpipe.bat --help` and one
+   `--headless --dry-run` per FragPipe method, each with a time limit, its
+   output in a file, no window, and its files in a new folder under
+   `<log_dir>\preflight\`. A dry run makes all of FragPipe's own checks
+   (tools, FASTA, workflow, annotation) and lists the commands it would run.
+   Its file list names a 64-byte placeholder `.raw` unless `--raw` gives a
+   real file; `--static` starts nothing. FragPipe saves its settings cache
+   on every run, dry or not, as it does for any headless run.
+9. **Every search leaves a fingerprint**:
+   `ionomos_run\run_fingerprint.json` (`names.FINGERPRINT_FILE`), written by
+   the worker whatever the outcome, never in the job's way. Text only, tens
+   of kB: launcher, command line, FragPipe's version block, the workflow's
+   key settings, output file names and sizes, the first 80 and last 120
+   console lines, what the parsers read (steps, exit codes, end marker),
+   timings. An earlier one is kept as `run_fingerprint_<time>.json`. It
+   holds names and paths, as the console log does; the diagnostics bundle
+   is what strips them before anything leaves the PC.
+10. **The fake FragPipe copies the real one, with its sources named**
+    (`fake_fragpipe.py`): options and exit codes, the checks and their
+    messages, the console layout, experiment names (`-` becomes `_`), group
+    folders, `dia-quant-output`, `experiment_annotation.tsv`, `sdrf.tsv`.
+    The tools' own chatter and every number are invented and the file says
+    so. The testbed's workflows are small real-looking ones (39 settings).
+11. **Not changed here, and open** (ROADMAP "Open questions"): FragPipe 24's
+    stock workflows write `fragpipe\sdrf.tsv`, which the analysis reads as
+    the experiment's own design (`downstream/sdrfdesign.py`) and then
+    reports that it describes none of the runs. The testbed's workflows
+    switch it off; `test_fragpipes_own_sdrf_is_not_taken_for_the_users_design`
+    is the expected-failure test for it.
+
+**Verified**: against FragPipe's source and documentation, and by the test
+suite on the fake. **Not verified**: anything against a running FragPipe.
+The launch4j behaviour of the `.exe` (2), that `fragpipe.bat` honours
+`JAVA_HOME` on the PC (1), that a dry run accepts a placeholder `.raw` (8)
+and the exact text of the tools' own error lines are from documentation and
+issue reports, not from the lab PC.
+
+
+### D60 — Accuracy is something the lab can measure, and messy tables are analysed and talked about
+**2026-10-01.** The analysis was checked against R on golden files, which a
+lab member cannot repeat on their own data, and it had only met tidy tables.
+Four pieces, all in new modules ([VALIDATION.md](VALIDATION.md)):
+
+1. **`ionomos compare`** (`downstream/compare.py`) compares an analysed
+   folder with a reference: another analysed folder, or a results table read
+   by `anytable.py` (D33), plus MSstats' long format. It reads both and
+   changes neither.
+   - Features are matched by accession (any member of a protein group) or
+     by gene, whichever matches more. A reference row is used once.
+   - The slope is the major axis, not least squares: both sides carry noise,
+     and least squares would report a slope below 1 for two equally good
+     results. The offset is the median difference.
+   - The verdict's thresholds (r ≥ 0.95, slope 0.9 to 1.1, |offset| ≤ 0.10
+     log2, 70 % of the hits shared when there are at least 10; at least 20
+     and half of the features matched to judge at all) are **Ionomos' own
+     choice**. They are constants, printed on the page, and the numbers
+     stand beside the verdict.
+   - An offset is its own verdict ("agrees after an offset of …"), because a
+     normalisation difference is the commonest reason two correct analyses
+     disagree. Hit lists are not judged then.
+   - A reference the other way round is flipped only when its name says so
+     (`DMSO vs Drug`). Fold changes that merely anti-correlate are reported
+     and `--flip` is suggested: the direction is not guessed.
+   - Exit code 1 for "differs" or "not judged", so a script can use it.
+2. **`ionomos benchmark`** (`downstream/benchmark.py`).
+   - *Simulated.* It calls the pipeline's own loader, `fpa.process`,
+     `run_contrasts` and `to_diff` (`run_pipeline`; a test holds it equal to
+     `analyze()`), not `analyze()` itself: a grid of 2,250 runs must not
+     write 2,250 reports. `simulate.dia_pg_matrix` got three options (noise,
+     a per-protein spread of the noise, a missingness scale); without them
+     its output is byte-identical, so every existing fixture stands. The
+     benchmark uses a per-protein spread, because proteins that all share
+     one SD are limma's best case.
+   - FDP is reported twice: with the analysis' cut-offs, and at adjusted
+     p ≤ alpha alone. Only the second is what Benjamini-Hochberg promises,
+     so only it is compared with the nominal alpha.
+   - A scenario's FDP enters a quoted range only with 50 or more calls.
+   - *Real.* The expected ratios are a small YAML, per species or per
+     protein list. Species are read, in this order, from the protein lists,
+     a named column, UniProt entry names / `OS=` in the feature's own text
+     and in its row of the quant table, and a FASTA. A protein group with
+     two species is left out and counted. It needs an analysed folder and
+     does not analyse by itself: one command, one thing written.
+   - Real and simulated results have different file names
+     (`benchmark.*`, `benchmark_simulated.*`), so both can sit in one
+     results folder.
+3. **Messy input** (`downstream/guards.py`, `anytable.py`).
+   - The rule: `analyze()` never raises, always writes a report, and a
+     repair is always said. A stage crash (`CRASH_*`) on a plausible table
+     is a bug; the fuzz test fails on one.
+   - Values beyond 2^±100, NaN and infinities become missing right after
+     loading, for every loader, with a count. 2^100 is far beyond any
+     intensity; the limit exists so that no later step can overflow.
+   - `anytable.read_table` reads decimal commas and thousands separators in
+     tab and comma files only when asked (the `notes` argument), so the
+     engines' readers behave as before. `1,234` alone is ambiguous and is
+     read as 1234, with a note saying so.
+   - A column without a name is left out, not guessed: it has no condition,
+     and it is as likely a row number as a sample.
+   - Statistical guards only read. `NO_RESIDUAL_DF`, `ZERO_VARIANCE`,
+     `VARIANCE_PRIOR` and `IDENTICAL_SAMPLES` are warnings (no pop-up): the
+     numbers are limma's, and limma is not overruled. An infinite prior df
+     (one pooled variance) is not raised, because it is the right answer
+     for alike variances; a prior that stops at the lower edge of the
+     search (df 2) is.
+   - What the fuzz found is listed in the changelog (nine bugs: one that
+     ran the statistics on unlogged intensities, one that read a column
+     twice, the rest crashes of single stages or refused tables).
+4. **"How far to trust this"** (`downstream/trust.py`) is a list, not a
+   score: any single number would hide which check failed and invite a
+   threshold nobody can defend. Each line repeats an existing check with its
+   number, and "check" marks a line whose own threshold was crossed. Two
+   thresholds are new and are stated: fewer than 3 samples in a group, and
+   groups that differ 2-fold in size. The block is static HTML written by
+   `report.py`; `report.js` and `report.css` are untouched. A compare or
+   benchmark result in the results folder is shown with whether the
+   analysis settings are still the same (a digest of the settings); it is
+   picked up at the next `ionomos analyze`, because a command that reads
+   two results should not rewrite a report.
+
+**Measured** (simulated, standard grid, 2026-10-01): default settings
+(Perseus + median) 4.0 % observed FDP at adjusted p ≤ 0.05, 30 % of 2-fold
+and 71 % of 4-fold changes found; no imputation 4.6 %, 47 % and 86 %; no
+normalisation 14 – 21 %; `zero` imputation 8.0 % and a fold-change bias of
++0.41 log2. The test suite's guard allows 8.5 % (its fixed seeds measure
+1.7 – 6.3 %).
+
+**Not verified**: anything on real data. No mixed-species sample has been
+run; no real FragPipe-Analyst, MSstats or Perseus export has been compared
+(the layouts are the documented ones); the fuzz damages simulated tables.
+
+**For the maintainer to confirm**: the verdict thresholds of `compare`; the
+8.5 % tolerance of the guard; that Perseus-type imputation stays the default
+although it found fewer planted changes than no imputation on the simulated
+data (a real benchmark sample should decide); the two new "check"
+thresholds; that a nameless numeric column is left out.
+
+
 ### D61 — Conditions have roles; a competition experiment gets its own comparisons and a specific-targets call
 **2026-10-01.** The maintainer's priority: the analysis should know that
 "DMSO vs competitive vs compound will have DMSO have less samples". Until now
@@ -1665,6 +1860,7 @@ with it. `downstream/roles.py` adds the design.
 
 **Not verified**: any real lab experiment; the report section in a browser
 other than the one check made while building; R's limma on unequal groups.
+
 
 ### D62 — One export style; a figure is exported by drawing it again; every file says where it came from
 **2026-10-01.** The maintainer asked for figures that are easy to export for
@@ -1782,99 +1978,6 @@ cells in CSV exports; SVG and PNG both in the zip by default; the lab's
 current `analysis.export` winning over the style a report was made with in
 `ionomos export`.
 
-### D59 — FragPipe is run the way its source says, checked before a search, and recorded after one
-**2026-10-01.** Every search so far ran against the testbed's fake FragPipe,
-which was written from guesses. Before the first real runs, the runner was
-checked line by line against FragPipe's headless tutorial and the source of
-FragPipe 24.0 (and 23.1 where it could differ). What follows is what was
-decided; the mismatches found are in CHANGELOG (Unreleased) and the sources are
-named in `fake_fragpipe.py` and WORKFLOWS.md.
-
-1. **The launcher is `bin\fragpipe.bat`, with FragPipe's own Java.**
-   `fragpipe.bat` is the start script FragPipe's build makes for every
-   release (Gradle's): it runs `%JAVA_HOME%\bin\java.exe`, else `java` from
-   PATH, else stops. The lab PC has no Java on PATH, so Ionomos sets
-   `JAVA_HOME` for the launcher to the `jre` folder in the installation (the
-   one FragPipe's `.exe` uses). It does this whenever that folder exists,
-   also when the PC has another Java: FragPipe is built and tested with its
-   own.
-2. **`FragPipe-24.0.exe` is never run.** It is a launch4j wrapper with the
-   window ("gui") header: by launch4j's documentation it starts `javaw` and
-   returns without waiting or passing output on. Run by Ionomos it would end
-   at once with exit code 0 while the search went on unseen. A configured
-   `.exe` is swapped for the `fragpipe.bat` beside it, as before; without
-   one the job is **held** with that explanation instead of started.
-   *To confirm on the PC:* `C:\FragPipe\FragPipe-24.0\bin\fragpipe.bat`
-   exists (the build says it does; the first Ionomos report only named the
-   `.exe`).
-3. **A FASTA FragPipe would refuse holds the job.** Headless FragPipe stops
-   at once unless 40-60 % of the FASTA's entries start with the decoy tag
-   (`FragpipeRun.checkDbConfig`; in the window it is a question one can
-   click through). Ionomos applies the same rule before starting, when the
-   workflow says Percolator, PeptideProphet or the report runs: the job
-   waits ("waiting: FASTA … can't be searched") and starts when the file is
-   fixed. A FASTA of 1 GB or more is not counted, as in FragPipe.
-4. **TMT channel maps are checked with FragPipe's rules, and plexes sharing
-   a folder get no annotation file.** FragPipe takes a plex's annotation
-   from the folder that holds its files, and only when exactly one file
-   ending in `annotation.txt` is there. So: one plex → `annotation.txt`
-   (not written beside a user's own `*annotation.txt`); plexes each in their
-   own folder → one `annotation.txt` per folder; plexes sharing a folder →
-   none is written, a warning says FragPipe will name the channels
-   `<plex>_<channel>`. A map FragPipe would stop on (not every channel of
-   the label type listed, a name with a space, a name used twice) fails the
-   job before the search, with the rule.
-5. **Exit code 0 is not enough, and one line is not yet required.** A run
-   fails when its log has a step with a non-zero exit code, or "Cancelling N
-   remaining tasks", or the dry-run notice, or when nothing was written. A
-   finished run also prints `ALL JOBS DONE IN x MINUTES`; a log without it
-   is a **warning** on a done job, not a failure, until a real headless run
-   has shown that line in the console Ionomos captures.
-6. **Only the latest attempt's part of the console log is judged.** The log
-   keeps every attempt. An earlier attempt's failed step used to fail a
-   successful retry whose output fitted in the 400 kB read back.
-7. **A failure's reason quotes the step that failed.** After a failing step
-   FragPipe prints only "Process returned non-zero exit code, stopping" and
-   "Cancelling N remaining tasks", so "last lines" said nothing. The reason
-   is now "FragPipe step X failed (exit code N); it said: …" with the
-   step's own last lines.
-8. **The preflight starts FragPipe, and says so.** `ionomos preflight` (and
-   the app's Check FragPipe install) runs `fragpipe.bat --help` and one
-   `--headless --dry-run` per FragPipe method, each with a time limit, its
-   output in a file, no window, and its files in a new folder under
-   `<log_dir>\preflight\`. A dry run makes all of FragPipe's own checks
-   (tools, FASTA, workflow, annotation) and lists the commands it would run.
-   Its file list names a 64-byte placeholder `.raw` unless `--raw` gives a
-   real file; `--static` starts nothing. FragPipe saves its settings cache
-   on every run, dry or not, as it does for any headless run.
-9. **Every search leaves a fingerprint**:
-   `ionomos_run\run_fingerprint.json` (`names.FINGERPRINT_FILE`), written by
-   the worker whatever the outcome, never in the job's way. Text only, tens
-   of kB: launcher, command line, FragPipe's version block, the workflow's
-   key settings, output file names and sizes, the first 80 and last 120
-   console lines, what the parsers read (steps, exit codes, end marker),
-   timings. An earlier one is kept as `run_fingerprint_<time>.json`. It
-   holds names and paths, as the console log does; the diagnostics bundle
-   is what strips them before anything leaves the PC.
-10. **The fake FragPipe copies the real one, with its sources named**
-    (`fake_fragpipe.py`): options and exit codes, the checks and their
-    messages, the console layout, experiment names (`-` becomes `_`), group
-    folders, `dia-quant-output`, `experiment_annotation.tsv`, `sdrf.tsv`.
-    The tools' own chatter and every number are invented and the file says
-    so. The testbed's workflows are small real-looking ones (39 settings).
-11. **Not changed here, and open** (ROADMAP "Open questions"): FragPipe 24's
-    stock workflows write `fragpipe\sdrf.tsv`, which the analysis reads as
-    the experiment's own design (`downstream/sdrfdesign.py`) and then
-    reports that it describes none of the runs. The testbed's workflows
-    switch it off; `test_fragpipes_own_sdrf_is_not_taken_for_the_users_design`
-    is the expected-failure test for it.
-
-**Verified**: against FragPipe's source and documentation, and by the test
-suite on the fake. **Not verified**: anything against a running FragPipe.
-The launch4j behaviour of the `.exe` (2), that `fragpipe.bat` honours
-`JAVA_HOME` on the PC (1), that a dry run accepts a placeholder `.raw` (8)
-and the exact text of the tools' own error lines are from documentation and
-issue reports, not from the lab PC.
 
 ### D63 — A bundle is saved, never sent; names are replaced word by word and the zip is checked before it exists
 
@@ -1975,102 +2078,3 @@ back with the key gives the lab's own file. **Not verified**: real lab data
 and real FragPipe / DIA-NN / MaxQuant / Sage tables (their column names are
 from the engines' documentation and Ionomos' loaders); Windows (CI only);
 the window on screen; a bundle over a few hundred MB.
-
-### D60 — Accuracy is something the lab can measure, and messy tables are analysed and talked about
-**2026-10-01.** The analysis was checked against R on golden files, which a
-lab member cannot repeat on their own data, and it had only met tidy tables.
-Four pieces, all in new modules ([VALIDATION.md](VALIDATION.md)):
-
-1. **`ionomos compare`** (`downstream/compare.py`) compares an analysed
-   folder with a reference: another analysed folder, or a results table read
-   by `anytable.py` (D33), plus MSstats' long format. It reads both and
-   changes neither.
-   - Features are matched by accession (any member of a protein group) or
-     by gene, whichever matches more. A reference row is used once.
-   - The slope is the major axis, not least squares: both sides carry noise,
-     and least squares would report a slope below 1 for two equally good
-     results. The offset is the median difference.
-   - The verdict's thresholds (r ≥ 0.95, slope 0.9 to 1.1, |offset| ≤ 0.10
-     log2, 70 % of the hits shared when there are at least 10; at least 20
-     and half of the features matched to judge at all) are **Ionomos' own
-     choice**. They are constants, printed on the page, and the numbers
-     stand beside the verdict.
-   - An offset is its own verdict ("agrees after an offset of …"), because a
-     normalisation difference is the commonest reason two correct analyses
-     disagree. Hit lists are not judged then.
-   - A reference the other way round is flipped only when its name says so
-     (`DMSO vs Drug`). Fold changes that merely anti-correlate are reported
-     and `--flip` is suggested: the direction is not guessed.
-   - Exit code 1 for "differs" or "not judged", so a script can use it.
-2. **`ionomos benchmark`** (`downstream/benchmark.py`).
-   - *Simulated.* It calls the pipeline's own loader, `fpa.process`,
-     `run_contrasts` and `to_diff` (`run_pipeline`; a test holds it equal to
-     `analyze()`), not `analyze()` itself: a grid of 2,250 runs must not
-     write 2,250 reports. `simulate.dia_pg_matrix` got three options (noise,
-     a per-protein spread of the noise, a missingness scale); without them
-     its output is byte-identical, so every existing fixture stands. The
-     benchmark uses a per-protein spread, because proteins that all share
-     one SD are limma's best case.
-   - FDP is reported twice: with the analysis' cut-offs, and at adjusted
-     p ≤ alpha alone. Only the second is what Benjamini-Hochberg promises,
-     so only it is compared with the nominal alpha.
-   - A scenario's FDP enters a quoted range only with 50 or more calls.
-   - *Real.* The expected ratios are a small YAML, per species or per
-     protein list. Species are read, in this order, from the protein lists,
-     a named column, UniProt entry names / `OS=` in the feature's own text
-     and in its row of the quant table, and a FASTA. A protein group with
-     two species is left out and counted. It needs an analysed folder and
-     does not analyse by itself: one command, one thing written.
-   - Real and simulated results have different file names
-     (`benchmark.*`, `benchmark_simulated.*`), so both can sit in one
-     results folder.
-3. **Messy input** (`downstream/guards.py`, `anytable.py`).
-   - The rule: `analyze()` never raises, always writes a report, and a
-     repair is always said. A stage crash (`CRASH_*`) on a plausible table
-     is a bug; the fuzz test fails on one.
-   - Values beyond 2^±100, NaN and infinities become missing right after
-     loading, for every loader, with a count. 2^100 is far beyond any
-     intensity; the limit exists so that no later step can overflow.
-   - `anytable.read_table` reads decimal commas and thousands separators in
-     tab and comma files only when asked (the `notes` argument), so the
-     engines' readers behave as before. `1,234` alone is ambiguous and is
-     read as 1234, with a note saying so.
-   - A column without a name is left out, not guessed: it has no condition,
-     and it is as likely a row number as a sample.
-   - Statistical guards only read. `NO_RESIDUAL_DF`, `ZERO_VARIANCE`,
-     `VARIANCE_PRIOR` and `IDENTICAL_SAMPLES` are warnings (no pop-up): the
-     numbers are limma's, and limma is not overruled. An infinite prior df
-     (one pooled variance) is not raised, because it is the right answer
-     for alike variances; a prior that stops at the lower edge of the
-     search (df 2) is.
-   - What the fuzz found is listed in the changelog (nine bugs: one that
-     ran the statistics on unlogged intensities, one that read a column
-     twice, the rest crashes of single stages or refused tables).
-4. **"How far to trust this"** (`downstream/trust.py`) is a list, not a
-   score: any single number would hide which check failed and invite a
-   threshold nobody can defend. Each line repeats an existing check with its
-   number, and "check" marks a line whose own threshold was crossed. Two
-   thresholds are new and are stated: fewer than 3 samples in a group, and
-   groups that differ 2-fold in size. The block is static HTML written by
-   `report.py`; `report.js` and `report.css` are untouched. A compare or
-   benchmark result in the results folder is shown with whether the
-   analysis settings are still the same (a digest of the settings); it is
-   picked up at the next `ionomos analyze`, because a command that reads
-   two results should not rewrite a report.
-
-**Measured** (simulated, standard grid, 2026-10-01): default settings
-(Perseus + median) 4.0 % observed FDP at adjusted p ≤ 0.05, 30 % of 2-fold
-and 71 % of 4-fold changes found; no imputation 4.6 %, 47 % and 86 %; no
-normalisation 14 – 21 %; `zero` imputation 8.0 % and a fold-change bias of
-+0.41 log2. The test suite's guard allows 8.5 % (its fixed seeds measure
-1.7 – 6.3 %).
-
-**Not verified**: anything on real data. No mixed-species sample has been
-run; no real FragPipe-Analyst, MSstats or Perseus export has been compared
-(the layouts are the documented ones); the fuzz damages simulated tables.
-
-**For the maintainer to confirm**: the verdict thresholds of `compare`; the
-8.5 % tolerance of the guard; that Perseus-type imputation stays the default
-although it found fewer planted changes than no imputation on the simulated
-data (a real benchmark sample should decide); the two new "check"
-thresholds; that a nameless numeric column is left out.

@@ -2237,7 +2237,7 @@
     const host = $("#spplot"), S = specificSet();
     if (!host || !S) return;
     const E = D.comps[S.e], K = D.comps[S.k];
-    const W = widthOf(host, 520), H = Math.min(480, Math.max(340, W * 0.85)), L = 56, R = 14, T = 16, B = 44;
+    const W = widthOf(host, 520), H = heightOf(Math.min(480, Math.max(340, W * 0.85))), L = 56, R = 14, T = 16, B = 44;
     const pts = [];
     let x0 = -1, x1 = 1, y0 = -1, y1 = 1;
     for (let i = 0; i < nF; i++) {

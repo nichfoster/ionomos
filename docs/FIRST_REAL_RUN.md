@@ -80,7 +80,7 @@ or press **Report a problem…**, which bundles them.
 | FAILED, "FragPipe step X failed (exit code N); it said: …" | A tool stopped. The quoted lines are that tool's last words. |
 | FAILED, "exited 0 but wrote nothing" | The launcher returned without running FragPipe. Check tab 1 says `fragpipe.bat`. |
 | DONE with the note "no 'ALL JOBS DONE' line" | FragPipe's end marker was not in the console Ionomos captured. Send the fingerprint: this decides whether the marker can be required. |
-| Pop-up "The SDRF doesn't describe these runs" | FragPipe's own `fragpipe\sdrf.tsv` was read as your design (open question in ROADMAP). Nothing is wrong with the results; close it. |
+| Pop-up "The SDRF doesn't describe these runs" | Since 0.14.0 FragPipe's own `fragpipe\sdrf.tsv` is skipped, so this should not appear for it. If it does, the real file differs from what was assumed: send a bundle. |
 | The progress line never changes from "starting" | The console is empty or in a shape Ionomos doesn't know: send `fragpipe_console.log`. |
 
 After fixing a cause: **Retry**. The earlier output is kept as
