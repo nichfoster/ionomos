@@ -83,6 +83,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`ionomos fake-sage`, `ionomos fake-rawparser`), with the file formats
   taken from Sage's source. Not yet run against a real Sage.
 
+### Fixed
+
+- A failed search no longer blames the raw files just because the log names
+  the raw reader. The "A .raw file couldn't be read" cause matched any mention
+  of `RawFileReader` or `ThermoRawFileParser`, so it led the failure reason,
+  the attention item and `FAILED.txt` for an `engine: sage` job whose
+  conversions had all succeeded, and for FragPipe jobs on .raw files, whose
+  log carries Thermo's `RawFileReader reading tool` banner. The name now
+  needs an error word on its line, or `ionomos sage-job`'s own
+  `converting X failed` line; a name inside a path does not count.
+
 ## [0.12.0] - 2026-09-30
 
 ### Added

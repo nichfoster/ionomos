@@ -491,6 +491,8 @@ def read_tail_text(path: Path, max_bytes: int = 400_000) -> str:
 
 _FAILED_STEP = re.compile(r"Process '([^']+)' finished, exit code: (-?[1-9]\d*)")
 
+_RAW_ERR = r"\b(error|exception|fail(ed|ure|s)?|unable|cannot|could not|corrupt(ed)?)\b"
+
 # (regex on FragPipe's console output, plain-English explanation + what to do). First match first.
 EXPLANATIONS: list[tuple[str, str]] = [
     (r"raw file\(s\) are empty",
@@ -516,7 +518,13 @@ EXPLANATIONS: list[tuple[str, str]] = [
      "FragPipe can't find DIA-NN: set 'DIA-NN exe' in Advanced (e.g. C:/DIA-NN/2.3.2/DiaNN.exe)"),
     (r"used by another process|cannot access the file",
      "A file was open in another program (Xcalibur, Excel, Explorer preview): close it, then Retry"),
-    (r"(?i)(RawFileReader|ThermoRawFileParser|error (loading|reading).{0,60}\.raw|\.raw.{0,60}(corrupt|truncated))",
+    # The reader's name alone is no error: FragPipe logs Thermo's "RawFileReader reading tool. Copyright ..." banner
+    # on every .raw search and the converter's path holds its name, so the name needs an error word on its line
+    # (or sage.py's own "converting X failed" line).
+    (r"(?i)(converting .{0,200}failed \(ThermoRawFileParser|"
+     r"(?<![\w./\\])(RawFileReader|ThermoRawFileParser)(?![\w/\\]|\.\w).{0,80}" + _RAW_ERR + r"|"
+     + _RAW_ERR + r".{0,80}(?<![\w./\\])(RawFileReader|ThermoRawFileParser)(?![\w/\\]|\.\w)|"
+     r"error (loading|reading).{0,60}\.raw|\.raw.{0,60}(corrupt|truncated))",
      "A .raw file couldn't be read: it may be incomplete or corrupt — re-copy it from the instrument PC"),
     (r"UnsupportedClassVersionError|Unsupported class file major version",
      "Wrong Java version: FragPipe must use its bundled Java — reinstall FragPipe or set its launcher again"),
