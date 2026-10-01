@@ -95,6 +95,15 @@ function stubBrowser(win, errors) {
     return `blob:fake-${win.__blobs.length}`;
   };
   win.URL.revokeObjectURL = () => {};
+  // ...and download() clicks an <a download>: record the file name with its blob instead of letting jsdom
+  // try to navigate to it, so tests can check what a file is called.
+  win.__downloads = [];
+  const click = win.HTMLAnchorElement.prototype.click;
+  win.HTMLAnchorElement.prototype.click = function () {
+    if (!this.hasAttribute("download")) return click.call(this);
+    const k = /^blob:fake-(\d+)$/.exec(this.href);
+    win.__downloads.push({ name: this.download, blob: k ? win.__blobs[+k[1] - 1] : null });
+  };
   if (errors) {
     win.addEventListener("error", (e) => errors.push(`uncaught: ${e.error?.stack || e.message}`));
   }
@@ -114,9 +123,11 @@ function waitReady(win) {
 
 /**
  * Load the report with `data` (defaults to the fixture's own payload).
+ * `storage` ({ key: value }) is put in localStorage before the report script runs (what an earlier report
+ * left in this browser); `before(window)` runs then too, for stubs a test needs in place from the start.
  * Returns { window, document, errors } after setup() has run.
  */
-export async function loadReport({ data, url } = {}) {
+export async function loadReport({ data, url, storage, before } = {}) {
   const html = readFixture();
   const js = reportJs();
   const shell =
@@ -134,11 +145,13 @@ export async function loadReport({ data, url } = {}) {
   vc.on("error", (...a) => errors.push(a.map(String).join(" ")));
   const dom = new JSDOM(shell, {
     runScripts: "outside-only",
-    url: url || "file:///report.html",
+    url: url || (storage ? "http://localhost/report.html" : "file:///report.html"),  // a file:// page has no localStorage in jsdom
     virtualConsole: vc,
     beforeParse: (win) => stubBrowser(win, errors),
   });
   const { window } = dom;
+  for (const [k, v] of Object.entries(storage || {})) window.localStorage.setItem(k, typeof v === "string" ? v : JSON.stringify(v));
+  if (before) before(window);
   window.eval(js); // registers setup on DOMContentLoaded (or runs it at once)
   await waitReady(window);
   return { window, document: window.document, errors };
@@ -187,4 +200,115 @@ export function withData(base, patch) {
         : v;
   }
   return out;
+}
+
+/** Read a jsdom Blob as bytes. */
+export function blobBytes(win, blob) {
+  return new Promise((resolve, reject) => {
+    const fr = new win.FileReader();
+    fr.onload = () => resolve(new Uint8Array(fr.result));
+    fr.onerror = () => reject(fr.error);
+    fr.readAsArrayBuffer(blob);
+  });
+}
+
+/** CRC-32 (the zip and PNG checksum), written out here so the tests do not check the report's with its own. */
+export function crc32(bytes) {
+  let c = 0xffffffff;
+  for (const b of bytes) {
+    c ^= b;
+    for (let k = 0; k < 8; k++) c = c & 1 ? (c >>> 1) ^ 0xedb88320 : c >>> 1;
+  }
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+/**
+ * Read a store-only .zip the way an unzip program does: find the end record, walk the central directory,
+ * and check each entry against its local header. Returns [{ name, data, crc, crcOk, method, flags }].
+ */
+export function unzip(bytes) {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const end = bytes.length - 22;
+  if (end < 0 || dv.getUint32(end, true) !== 0x06054b50) throw new Error("no end-of-central-directory record");
+  const n = dv.getUint16(end + 10, true), cdSize = dv.getUint32(end + 12, true), cdAt = dv.getUint32(end + 16, true);
+  if (dv.getUint16(end + 8, true) !== n) throw new Error("entry counts differ");
+  if (cdAt + cdSize !== end) throw new Error("the central directory does not end at the end record");
+  const dec = new TextDecoder("utf-8", { fatal: true });
+  const out = [];
+  let p = cdAt;
+  for (let i = 0; i < n; i++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) throw new Error("bad central header " + i);
+    const flags = dv.getUint16(p + 8, true), method = dv.getUint16(p + 10, true), crc = dv.getUint32(p + 16, true);
+    const size = dv.getUint32(p + 20, true), usize = dv.getUint32(p + 24, true), nl = dv.getUint16(p + 28, true);
+    const extra = dv.getUint16(p + 30, true), comment = dv.getUint16(p + 32, true), at = dv.getUint32(p + 42, true);
+    const name = dec.decode(bytes.subarray(p + 46, p + 46 + nl));
+    if (dv.getUint32(at, true) !== 0x04034b50) throw new Error("bad local header for " + name);
+    const lnl = dv.getUint16(at + 26, true), lextra = dv.getUint16(at + 28, true);
+    const lname = dec.decode(bytes.subarray(at + 30, at + 30 + lnl));
+    if (lname !== name || dv.getUint32(at + 14, true) !== crc || dv.getUint32(at + 18, true) !== size || size !== usize) {
+      throw new Error("local and central headers differ for " + name);
+    }
+    const data = bytes.subarray(at + 30 + lnl + lextra, at + 30 + lnl + lextra + size);
+    out.push({ name, data, crc, crcOk: crc32(data) === crc, method, flags });
+    p += 46 + nl + extra + comment;
+  }
+  if (p !== end) throw new Error("central directory size is wrong");
+  return out;
+}
+
+/** The chunks of a PNG: [{ type, data, crcOk }]. */
+export function pngChunks(bytes) {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const out = [];
+  for (let p = 8; p + 12 <= bytes.length;) {
+    const n = dv.getUint32(p), type = String.fromCharCode(...bytes.subarray(p + 4, p + 8));
+    out.push({ type, data: bytes.subarray(p + 8, p + 8 + n), crcOk: crc32(bytes.subarray(p + 4, p + 8 + n)) === dv.getUint32(p + 8 + n) });
+    p += 12 + n;
+  }
+  return out;
+}
+
+/**
+ * jsdom draws no pictures: give the page an Image that "loads" at once and canvases that hand back a small
+ * real PNG (header, one data chunk, end), so the report's PNG path (canvas -> bytes -> pHYs + iTXt -> file)
+ * runs. Returns the list of canvases the page turned into PNGs ([{ width, height }]).
+ */
+export function fakePng(win) {
+  const chunk = (type, data) => {
+    const o = new Uint8Array(12 + data.length), v = new DataView(o.buffer);
+    v.setUint32(0, data.length);
+    for (let i = 0; i < 4; i++) o[4 + i] = type.charCodeAt(i);
+    o.set(data, 8);
+    v.setUint32(8 + data.length, crc32(o.subarray(4, 8 + data.length)));
+    return o;
+  };
+  const ihdr = new Uint8Array(13);
+  new DataView(ihdr.buffer).setUint32(0, 1);
+  new DataView(ihdr.buffer).setUint32(4, 1);
+  ihdr[8] = 8; ihdr[9] = 6;
+  const parts = [new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk("IHDR", ihdr), chunk("IDAT", new Uint8Array([0x78, 0x9c, 0x63, 0, 1, 0, 0, 5, 0, 1])), chunk("IEND", new Uint8Array(0))];
+  const png = new Uint8Array(parts.reduce((a, b) => a + b.length, 0));
+  let at = 0;
+  for (const x of parts) { png.set(x, at); at += x.length; }
+  const made = [];
+  win.Image = class {
+    set src(v) { this._src = v; setTimeout(() => this.onload && this.onload(), 0); }
+    get src() { return this._src; }
+  };
+  win.HTMLCanvasElement.prototype.toBlob = function (cb) {
+    made.push({ width: this.width, height: this.height });
+    cb(new win.Blob([png], { type: "image/png" }));
+  };
+  return made;
+}
+
+/** Wait until `test()` is truthy (the report makes PNGs and zips with callbacks). */
+export async function until(test, ms = 8000) {
+  const t0 = Date.now();
+  for (;;) {
+    const v = test();
+    if (v) return v;
+    if (Date.now() - t0 > ms) throw new Error("timed out waiting");
+    await new Promise((r) => setTimeout(r, 10));
+  }
 }

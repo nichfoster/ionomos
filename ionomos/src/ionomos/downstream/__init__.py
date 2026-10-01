@@ -14,6 +14,8 @@ Layout it reads and writes (inside the experiment folder):
       <level>_matrix_log2.tsv       the quantities that went into the statistics
       <comparison>_differential.tsv every feature: log2FC, p, q, significance
       volcano_<comparison>.svg      standalone plot (opens in any browser, pastes into slides)
+      figures/*.svg + README.txt    (analysis.export.figures, or `ionomos export`) the figures for slides in the
+                                    lab's export style: volcano, PCA, heatmap, correlation (slides.py, D62)
       sample_qc.tsv                 the per-sample scorecard (insights.py)
       presence_absence.tsv          features measured in one group and never in the other
       gene_set_ranks.tsv            rank-based gene-set test on every protein (enrichment on)
@@ -594,6 +596,12 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     ctx["issues"] = [i.as_dict() for i in out.issues]
     ctx["sdrf"] = sdrf_info
     ctx["model"], ctx["ftest"] = model, ftest
+    figure_files: list[Path] = []
+    if settings.export.get("figures") and (processed is not None or diffs):
+        say("figures for slides")
+        figure_files = stage("figures", _static_figures, results, ctx, m, processed, diffs, settings, qcd, enrichment,
+                             ranked, insight) or []
+        out.files += figure_files
     say("writing the report")
     rel = [str(p.relative_to(results)).replace("\\", "/") if p.is_relative_to(results) else p.name
            for p in out.files]
@@ -641,6 +649,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
         "cysteines": cys_info,
         "psm_qc": psm_info,
         "sdrf": sdrf_info,
+        "figures": [f"{RESULTS}/{p.relative_to(results).as_posix()}" for p in figure_files],
         "design": _design_summary(m, settings),
         "tmt": tmt_info,
         "source": m.source if m else None,
@@ -806,6 +815,17 @@ def _f_summary(ftest, settings) -> dict | None:
 def _state(issues) -> str:
     sev = {i.severity for i in issues}
     return "failed" if "error" in sev else "needs_input" if "input" in sev else "ok"
+
+def _static_figures(results: Path, ctx: dict, m, processed, diffs, settings, qcd, enrichment, ranked,
+                    insight) -> list[Path]:
+    """results/figures/: the figures for slides the lab asks for after every analysis (analysis.export.figures),
+    drawn from the report's own data in the lab's export style (slides.py, D62)."""
+    from ionomos.downstream import slides
+
+    d = report.payload({**ctx, "issues": []}, m, processed, diffs, [], [], settings, qcd, enrichment, ranked, insight)
+    style = charts.style_from(settings.export, lenient=True)
+    return slides.write(results / slides.FOLDER, d, style, style["figures"],
+                        f"Ionomos {ctx.get('version', '')}".strip())
 
 def _write_volcano(results: Path, d, stage) -> Path | None:
     """Every comparison gets a volcano file, checked after writing; an empty comparison gets an empty plot."""

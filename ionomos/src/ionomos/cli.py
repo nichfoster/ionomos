@@ -14,6 +14,10 @@ Command line.
     ionomos analyze  JOB_ID|FOLDER [--control C] [--compare 'A vs B'] [--de-type all] [--imputation none]
                      [--exclude SAMPLE] [--log2fc F] [--open]
                                                    statistics + volcano plots + results/report.html
+    ionomos export   JOB_ID|FOLDER [--preset slide169|slide43|half|col1|col2] [--palette colorblind]
+                     [--font-pt N] [--figures volcano,pca] [--style FILE] [--out DIR]
+                                                   figures for slides as SVG, from the finished report, in the
+                                                   lab's export style (analysis.export); PNG: the report's Export
     ionomos demo     [FOLDER] [--open]            a simulated experiment + its report (offline, no lab setup)
     ionomos help     [TOPIC] [--open]             plain-language help: prints TOPIC (NO_TABLE, pca, ...) and
                                                    writes help.html (--open: in the browser, at TOPIC)
@@ -628,6 +632,80 @@ def cmd_analyze(args) -> int:
     return 0 if out.report else 1
 
 
+_EXPORT_SIZES = ("slide169", "slide43", "half", "col1", "col2")  # charts.SIZES without "custom" (a test compares them)
+
+
+def cmd_export(args) -> int:
+    """Figures for slides from a finished analysis: static SVG in the export style (downstream/slides.py)."""
+    import json
+
+    from ionomos.downstream import charts, slides
+
+    if args.format != "svg":
+        print("ionomos export writes SVG only: making a PNG needs a renderer, and Ionomos adds no dependency for "
+              "it. Open report.html and use Export (PNG, copy as an image, a .zip of everything), or open the "
+              "SVG in PowerPoint or Inkscape.", file=sys.stderr)
+        return 2
+    cfg = None
+    try:
+        cfg = load(args.config, check_paths=False)
+    except ConfigError:
+        pass  # exporting works without a lab config: the report carries the style it was made with
+    target = args.target
+    if target.isdigit():
+        if cfg is None or not cfg.database.is_file():
+            print("no job ledger here; give a folder path instead", file=sys.stderr)
+            return 2
+        job = Ledger(cfg.database).get(int(target))
+        if job is None:
+            print(f"no job {target}", file=sys.stderr)
+            return 2
+        target = job.dest_dir
+    flags = {"size": args.preset, "width": args.width, "height": args.height, "unit": args.unit,
+             "font_pt": args.font_pt, "font_family": args.font_family, "palette": args.palette, "up": args.up,
+             "down": args.down, "neutral": args.neutral, "background": args.background, "line_scale": args.line_scale,
+             "point_scale": args.point_scale, "label_count": args.labels}
+    flags = {k: v for k, v in flags.items() if v is not None}
+    if (args.width is not None or args.height is not None) and args.preset is None:
+        flags["size"] = "custom"
+    if args.labels == 0:
+        flags["labels"] = "none"
+    for off in ("title", "subtitle", "legend", "note"):
+        if getattr(args, f"no_{off}"):
+            flags[off] = False
+    try:
+        report = slides.find_report(Path(target))
+        d = slides.read_payload(report)
+        saved = {}
+        if args.style:
+            try:
+                saved = json.loads(Path(args.style).read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                raise slides.SlidesError(f"cannot read the style file {args.style}: {exc}") from exc
+        # the style the report was made with, the lab's style now, a saved style file, the command line
+        style = charts.style_from(charts.style_layer(d.get("exportDefaults"), lenient=True),
+                                  ((cfg.analysis or {}).get("export") if cfg is not None else None), saved, flags)
+        which = charts.style_layer({"figures": args.figures})["figures"] if args.figures else None
+    except (slides.SlidesError, charts.StyleError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    folder = Path(args.out) if args.out else report.parent / slides.FOLDER
+    try:
+        written = slides.write(folder, d, style, which, f"ionomos export (Ionomos {__version__})")
+    except OSError as exc:
+        print(f"cannot write to {folder}: {exc}", file=sys.stderr)
+        return 1
+    if not written:
+        print(f"nothing to draw: {report} has no comparison, PCA, heatmap or correlation", file=sys.stderr)
+        return 1
+    print(f"style: {charts.style_text(style)}")
+    for p in written:
+        print(f"  {p}")
+    print(f"{len(written) - 1} figure(s) and {slides.README} in {folder}. PNG, the other charts, other cut-offs: "
+          "open report.html and use Export.")
+    return 0
+
+
 def _open_report(report) -> None:
     """--open: the report in the default browser. A machine without one (a server, no xdg-open) gets a note."""
     from ionomos.service import open_path
@@ -962,6 +1040,33 @@ def main(argv: list[str] | None = None) -> int:
     az.add_argument("--quiet", action="store_true", help="no progress lines")
     az.add_argument("--open", action="store_true", help="open the report when done")
     az.set_defaults(fn=cmd_analyze)
+    ex = sub.add_parser("export", help="figures for slides (SVG) from a finished analysis, in the export style")
+    ex.add_argument("target", help="job id, experiment folder, its results folder, or a report.html")
+    ex.add_argument("--preset", choices=list(_EXPORT_SIZES),
+                    help="size: 16:9 slide (1280x720 px), 4:3 slide, half a slide, journal column (85 mm), "
+                         "two columns (180 mm). Default: the lab's analysis.export, else slide169")
+    ex.add_argument("--width", type=float, help="a custom width (with --height; --unit px or mm)")
+    ex.add_argument("--height", type=float)
+    ex.add_argument("--unit", choices=["px", "mm"])
+    ex.add_argument("--font-pt", dest="font_pt", type=float, help="text size in points in the finished figure")
+    ex.add_argument("--font-family", dest="font_family", help="font name, e.g. Arial or 'Times New Roman'")
+    ex.add_argument("--palette", choices=["default", "colorblind", "grey", "custom"])
+    ex.add_argument("--up", help="colour of up hits with --palette custom, e.g. '#d55e00'")
+    ex.add_argument("--down")
+    ex.add_argument("--neutral")
+    ex.add_argument("--background", choices=["light", "dark", "transparent"])
+    ex.add_argument("--line-scale", dest="line_scale", type=float, help="line width as a multiple (default 1)")
+    ex.add_argument("--point-scale", dest="point_scale", type=float, help="point size as a multiple (default 1)")
+    ex.add_argument("--labels", type=int, metavar="N", help="name the N most significant hits (0: none)")
+    for off in ("title", "subtitle", "legend", "note"):
+        ex.add_argument(f"--no-{off}", dest=f"no_{off}", action="store_true",
+                        help=f"leave the {'cut-offs line' if off == 'note' else off} out")
+    ex.add_argument("--figures", help="which, comma-separated: volcano,pca,heatmap,correlation (default: all)")
+    ex.add_argument("--format", default="svg", choices=["svg", "png"],
+                    help="svg (png is not available here: it needs a browser; use the report's Export)")
+    ex.add_argument("--style", metavar="FILE", help="an export style saved from the report (export_style.json)")
+    ex.add_argument("--out", metavar="DIR", help="where to write (default: <results>/figures)")
+    ex.set_defaults(fn=cmd_export)
     dm = sub.add_parser("demo", help="write a small simulated experiment and its report (offline; try this first)")
     dm.add_argument("folder", nargs="?", help="a new or empty folder (default: ./ionomos_demo, or ionomos_demo_2, "
                                               "... if taken; nothing existing is touched)")

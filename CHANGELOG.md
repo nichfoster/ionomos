@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Export for slides, and one export style** (D62). Every chart in the
+  report has **SVG**, **PNG** and **Export…**; the top bar has **Export for
+  slides**.
+  - **Export…** opens one dialog with a preview: the size (16:9 slide, 4:3
+    slide, half a slide, one or two journal columns, or a custom width and
+    height in px or mm), text size (pt) and font, line and point size, the
+    palette (the default, colour-blind safe, greyscale, or your own up / down
+    / neutral colours), a white, dark or transparent background, title and
+    subtitle (on / off, editable), legend, the cut-offs line, which names are
+    drawn, and the PNG resolution (1× to 4×, or 150 / 300 / 600 dpi). The
+    figure can be downloaded as SVG or PNG, or copied to the clipboard as an
+    image where the browser allows it.
+  - The SVG keeps text as text, writes colours out (no CSS), names the font
+    with fallbacks and uses no `foreignObject`. Every file records the
+    experiment, comparison, cut-offs, hit filters and test (SVG `<title>` and
+    `<desc>`; PNG a `Description` text chunk and its print size), so a figure
+    on a slide can be traced back.
+  - **Export for slides** saves one .zip, built in the browser: every figure
+    (a volcano and p-value histogram per comparison, compare, heatmap,
+    enrichment with a result, each QC tab, and what else the report shows) as
+    SVG and / or PNG, the tables as CSV, the style, and a README that lists
+    each file with its cut-offs. File names are safe on Windows.
+  - The style is kept in the browser and used by every report opened in it.
+    **Save style** / **Load style** share it as a small JSON file; **Reset to
+    lab defaults** goes back to the lab's style. A loaded file is checked key
+    by key.
+  - **`ionomos export <experiment or results folder>`** writes the volcano,
+    PCA, heatmap and correlation figures as SVG to `results/figures/` from
+    the finished report's own data, with the same style options (`--preset`,
+    `--palette`, `--font-pt`, `--style FILE` …). SVG only: PNG needs a
+    renderer, and no dependency was added for it; the command says so.
+  - **`analysis.export:`** in `config.yaml` (or `experiment.yaml`) holds the
+    lab's style and `figures:`, the static figures written after every
+    analysis (default: none). The config writer keeps the block, commented.
+  - The heatmap, a canvas on screen, exports as SVG. The CV charts got export
+    buttons.
+  - **Options are easier to read**: plain labels with units, a tooltip on
+    every control and QC tab, a **?** on the Plot and export groups, the
+    cut-offs in force written under the options, and **Reset to lab
+    defaults** (cut-offs, plot options, hit filters). **Reset** is now called
+    **Reset cut-offs**. No option was removed and no default changed.
+  - Changed with it: the SVG and PNG buttons now use the export style (before:
+    the chart at its on-screen size, PNG at 3×). Text cells in every CSV
+    export that start with `=`, `+`, `-` or `@` get a leading apostrophe.
+  - **Not checked**: opening the SVG files in PowerPoint, Illustrator or
+    Inkscape; any browser but Chromium; the real clipboard; Windows.
+    docs/DECISIONS.md D62 lists what was verified and how.
+
 ### Fixed
 
 - A failed FragPipe search on .raw files no longer gets the cause "A .raw

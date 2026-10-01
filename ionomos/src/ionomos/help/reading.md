@@ -60,7 +60,10 @@ condition names in the bottom corners say which side is which.
   threshold.
 - A **triangle** (△) marks a feature measured in one group only, tested with
   imputed values.
-- **Options** → Plot: how many labels, point and label size, cut-off lines.
+- **Options** → [Plot](#report.plotoptions): how many names, point and name
+  size, cut-off lines.
+- **SVG**, **PNG**, **Export…** at the top right:
+  [export the figure](#report.export).
 
 ## Cut-offs {#report.cutoffs}
 
@@ -71,7 +74,9 @@ at or below the p cut-off. Tick **adjusted** to apply the p cut-off to the
 Changing them here updates the plot, the table, the counts and the key
 findings at once. It does **not** change the TSV files, the heatmap or the
 enrichment, which use the saved settings; a note under the bar says so.
-**Reset** goes back to the saved values. To change the saved values, see
+**Reset cut-offs** goes back to the saved values. The line under the options
+always says which cut-offs are in force, and every exported figure carries
+them. To change the saved values, see
 [How do I re-run with other settings?](#faq.rerun)
 
 ## MA plot {#report.ma}
@@ -122,13 +127,45 @@ open on this computer. They are not saved inside the report file.
 
 **Options** → Hits:
 
-- **ignore imputation-driven hits**: a hit where at least half of one group's
+- **Ignore imputation-driven hits**: a hit where at least half of one group's
   values were [imputed](#glossary.imputation) is not counted.
-- **at least N peptides**: a hit identified by fewer peptides (or PSMs) is not
-  counted.
+- **A hit needs at least N peptides**: a hit identified by fewer peptides (or
+  PSMs) is not counted.
 
 Filtered hits stay on the plot in grey with a coloured ring, so you can see
 what the filter removed.
+
+## Plot options {#report.plotoptions}
+
+**Options** → Plot changes how the volcano is drawn, not which features are
+hits:
+
+- **Names on the plot**: how many of the most significant hits are named.
+- **Point size**, **Name size**: larger for a slide, smaller for a crowded
+  plot.
+- **Name search matches**, **Cut-off lines**, **Mark features only in one
+  condition**: each on or off.
+
+**Reset to lab defaults** puts the cut-offs, these options and the
+[hit filters](#report.hitfilters) back to how the report was made.
+
+## Export figures {#report.export}
+
+Each chart has **SVG**, **PNG** and **Export…** at its top right. **Export for
+slides** in the top bar saves every figure, the tables as CSV and a README in
+one .zip.
+
+**Export…** sets one style for all of them: the size (a 16:9 or 4:3 slide,
+half a slide, a journal column, or your own in px or mm), text size and font,
+line and point size, colours (also colour-blind safe and greyscale), a white,
+dark or transparent background, title, legend, and which names are drawn.
+**Copy image** puts the figure on the clipboard. The style is kept in this
+browser; **Save style** and **Load style** share it as a file, and **Reset to
+lab defaults** goes back to the lab's style.
+
+A figure shows the report as you set it up: comparison, cut-offs, search.
+SVG keeps text as text, so it can be edited in PowerPoint, Illustrator or
+Inkscape. Each file records its cut-offs, so a slide can be traced back.
 
 ## The protein panel {#report.detail}
 
@@ -500,7 +537,9 @@ Every file the analysis wrote, next to the report in `results\`:
 - `<comparison>_differential.tsv`: every feature with log2FC, confidence
   interval, p, adjusted p and up/down,
 - a table with all comparisons side by side,
-- `volcano_<comparison>.svg`: the static plot, for slides,
+- `volcano_<comparison>.svg`: the static plot, for viewing without the report,
+- `figures\`: figures for slides, when the lab switched them on or someone
+  ran `ionomos export` ([Export figures](#report.export) makes them here),
 - `enrichment.tsv`, `gene_set_ranks.tsv`, `sample_qc.tsv`,
   `presence_absence.tsv`, `psm_qc.tsv`, `analysis.json`, `sdrf.tsv`.
 

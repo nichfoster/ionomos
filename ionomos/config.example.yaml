@@ -39,6 +39,20 @@ analysis:
   control_keywords: [DMSO, vehicle, veh, ctrl, control, mock, untreated, NT, WT, EV, scr, scramble, siNT, PBS]
   # block: replicate         # the replicate number as a block (batch / pair) in the limma model (D42)
   # variance_prior: deqms    # limma (default) | deqms: prior variance by peptide count (D43)
+  # Exported figures (D62): the lab's style. The report's Export dialog starts from it ("Reset to lab
+  # defaults" goes back to it), and `ionomos export <experiment>` writes static SVG figures with it.
+  export:
+    size: slide169           # slide169 (16:9, 1280 x 720 px) | slide43 | half | col1 (85 mm) | col2 (180 mm)
+                             # | custom, with width: 900, height: 600, unit: px (or mm)
+    font_pt: 14              # text size in points in the finished figure (14 suits a slide, 7 a journal column)
+    font_family: Arial       # the font's name; it must be installed where the figure is opened
+    palette: default         # default | colorblind (Okabe-Ito) | grey | custom, with up: "#d55e00",
+                             # down: "#0072b2", neutral: "#b3b3b3"
+    background: light        # light | dark | transparent
+    figures: []              # static SVG written to results/figures/ after each analysis: any of
+                             # volcano, pca, heatmap, correlation (or all). [] = none; the report exports all
+    # also: line_scale: 1, point_scale: 1, title / subtitle / legend / note: true, labels: screen | top | none,
+    # label_count: 15, png_scale: 2, png_dpi: 0 (the report's PNG), zip_format: both | svg | png
 
 # Instrument QC (docs/QC_TREND.md): runs of the lab's QC standard (a HeLa / K562 digest) are trended
 # in logs/qc_trend.html, with Levey-Jennings charts and Westgard rules. Does nothing until one is searched.

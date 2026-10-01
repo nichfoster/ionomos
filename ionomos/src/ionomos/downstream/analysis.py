@@ -63,6 +63,15 @@ experiment.yaml `analysis:` block:
       site_annotation: cysdb.csv  # a downloaded site table (CysDB) in the experiment folder, or a full path
 
       psm_qc: true                # false: don't read psm.tsv for the per-run search quality (psmqc.py)
+
+      export:                     # the lab's style for exported figures (charts.py STYLE_DEFAULTS; D62): the
+        size: slide169            #   report's Export dialog starts from it, `ionomos export` uses it
+        font_pt: 14               #   slide169 | slide43 | half | col1 | col2 | custom (+ width, height, unit)
+        font_family: Arial
+        palette: default          #   default | colorblind | grey | custom (+ up, down, neutral: "#rrggbb")
+        background: light         #   light | dark | transparent
+        figures: []               #   static figures written to results/figures/ after each analysis:
+                                  #   any of volcano, pca, heatmap, correlation (or all)
 """
 from __future__ import annotations
 
@@ -132,6 +141,7 @@ class Settings:
     block_from: str = ""               # regex on sample names: the block is group "block", else group 1
     covariates: dict[str, dict] = field(default_factory=dict)   # name -> {sample: value}
     variance_prior: str = "limma"      # limma | deqms
+    export: dict = field(default_factory=dict)  # the keys the lab / experiment set for exported figures (charts.py)
 
     @property
     def has_design(self) -> bool:
@@ -324,6 +334,8 @@ def settings_from(*layers: dict | None) -> Settings:
                     s.block = ""
                 elif k == "covariates":
                     v = _covariates(v)
+                elif k == "export":
+                    v = {**s.export, **_export_style(v)}  # a later layer adds to / overrides the lab's style
                 elif k == "variance_prior":
                     v = str(v).strip().lower()
                     v = "limma" if v == "ebayes" else v
@@ -359,6 +371,14 @@ def settings_from(*layers: dict | None) -> Settings:
     _check_doses(s)
     _check_times(s)
     return s
+
+def _export_style(v) -> dict:
+    from ionomos.downstream.charts import StyleError, style_layer
+
+    try:
+        return style_layer(v)
+    except StyleError as exc:
+        raise AnalysisError(f"analysis.{exc}") from exc
 
 def _dose_unit(v) -> str:
     from ionomos.downstream.doseresponse import DoseError, normalize_unit

@@ -28,6 +28,11 @@ The page carries its data as JSON and draws everything in the browser
     Help           what each section shows (also behind a "?" beside each title and QC tab), a glossary, and
                    what to do about the issues found in this report (content: ionomos/help/*.md)
 
+Every chart has SVG / PNG / Export… buttons, and the top bar has "Export for slides": one export style (size,
+text, colours, title, legend; kept in the browser, saved and loaded as a JSON file, starting from the lab's
+analysis.export in the payload's exportDefaults) for single figures, the clipboard, and a .zip of every
+figure with the tables and a README (report.js "figure export"; D62).
+
 The page state (comparison, cut-offs, search) is kept in the address (#...), so a link or a bookmark
 reopens the same view. The static volcano_*.svg files next to it are for slides and for viewing without scripts.
 """
@@ -92,6 +97,7 @@ def payload(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: li
         "cys": cys or {"ran": False, "reason": ""},
         "time": time or {"ran": False, "found": False, "reason": "No time course was found."},
         "help": _help_payload(ctx.get("issues")),
+        "exportDefaults": _export_defaults(s),
     }
     if psm:  # search quality per run (psmqc.py): shown even when there are no quantities
         d["qc"]["psm"] = psm
@@ -186,6 +192,16 @@ def payload(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: li
     elif ctx.get("enrichment_notes"):
         d["enrNote"] = "; ".join(ctx["enrichment_notes"])
     return d
+
+
+def _export_defaults(s: Settings) -> dict:
+    """The lab's export style (analysis.export), complete, for the report's Export dialog to start from."""
+    try:
+        from ionomos.downstream import charts
+
+        return charts.style_from(s.export, lenient=True)
+    except Exception:  # noqa: BLE001 - a style must never cost a report: the page has its own defaults
+        return {}
 
 
 def _help_payload(issues) -> dict:
@@ -486,8 +502,11 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
     cys_shown = bool(cys and cys.get("ran"))
     time_shown = bool(time and (time.get("ran") or time.get("found")))
     b = [f"<main><div class='top'><div><h1>{escape(title)}</h1><div class='meta'>{escape(meta)}</div></div>"
-         "<div><button id='theme' title='Light / dark'>◐</button> <button id='share' title='Copy a link to this view "
-         "(comparison, cut-offs, search)'>Link</button> <button onclick='window.print()'>Print</button></div></div>",
+         "<div><span id='slidesmsg' class='muted' role='status'></span> <button id='theme' title='Light / dark'>◐</button> "
+         "<button id='share' title='Copy a link to this view (comparison, cut-offs, search)'>Link</button> "
+         "<button id='slides' title='Every figure of this report at the export settings, the tables as CSV and a "
+         "README, in one .zip. Set the size, text and colours under Options, Figure export'>Export for slides</button> "
+         "<button onclick='window.print()'>Print</button></div></div>",
          "<nav class='toc'><a href='#overview'>Overview</a><a href='#differential'>Differential</a>"
          + "<a href='#compare' id='navcompare'" + ("" if len(diffs) >= 2 else " hidden") + ">Compare</a>"
          + ("" if ratio else "<a href='#onoff'>Only in one</a>")
@@ -510,30 +529,45 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
              "row for details. Search takes a gene, a pasted list, <code>KRT*</code>, <code>/^RPL\\d/</code>, "
              "<code>desc:kinase</code> or <code>term:apoptosis</code>; press <kbd>/</kbd> to jump to it.</p>"
              "<div id='differential-body'>"
-             "<div class='bar'><label class='ctl'>Comparison <select id='comp'></select></label>"
-             "<label class='ctl'>|log2FC| ≥ <input type='number' id='lfc' step='0.1' min='0'></label>"
-             "<label class='ctl'>p ≤ <input type='number' id='alpha' step='0.01' min='0' max='1'></label>"
-             "<label class='ctl'><input type='checkbox' id='adj'> adjusted</label>"
+             "<div class='bar'><label class='ctl' title='Which two groups are compared'>Comparison "
+             "<select id='comp'></select></label>"
+             "<label class='ctl' title='How large a change must be to count as a hit, in log2 units: 1 = 2-fold, "
+             "2 = 4-fold, 0.58 = 1.5-fold'>Fold change |log2FC| ≥ <input type='number' id='lfc' step='0.1' min='0'>"
+             "<span id='foldhint' class='muted'></span></label>"
+             "<label class='ctl' title='How small the p-value must be to count as a hit (0.05 = 5%)'>p-value ≤ "
+             "<input type='number' id='alpha' step='0.01' min='0' max='1'></label>"
+             "<label class='ctl' title='Apply the p-value cut-off to the adjusted p (Benjamini-Hochberg, corrected for "
+             "testing many features). Leave it ticked unless you know why not'><input type='checkbox' id='adj'> "
+             "adjusted</label>"
              "<div class='searchbox'><input type='search' id='search' autocomplete='off' spellcheck='false' "
              "placeholder='Find genes, proteins, a list, KRT*, term:…' aria-label='Search' aria-autocomplete='list'>"
              "<div id='suggest' class='suggest' role='listbox' hidden></div></div>"
              "<span class='seg'><button id='volc' class='on'>Volcano</button><button id='ma'>MA</button></span>"
              "<span class='seg' title='What dragging on the plot does'><button id='dzoom' class='on'>Zoom</button>"
              "<button id='dsel'>Select</button></span>"
-             "<button id='opts' aria-expanded='false'>Options</button>"
-             "<button id='reset' title='Back to the saved cut-offs'>Reset</button><span id='hl'></span></div>"
+             "<button id='opts' aria-expanded='false' title='Plot options, hit filters, highlight groups, figure "
+             "export'>Options</button>"
+             "<button id='reset' title='The fold-change and p-value cut-offs back to the ones saved with the report'>"
+             "Reset cut-offs</button><span id='hl'></span></div>"
              "<div id='optpanel' class='card optpanel' hidden>"
              "<div><h4>Plot</h4>"
-             "<label class='ctl'>labels <input type='number' id='labels' min='0' max='200' value='" + str(s.top_labels) + "'></label>"
-             "<label class='ctl'>point size <input type='range' id='ptsize' min='0.5' max='2.5' step='0.1' value='1'></label>"
-             "<label class='ctl'>label size <input type='range' id='labsize' min='8' max='18' step='0.5' value='11.5'></label>"
-             "<label class='ctl'><input type='checkbox' id='labmatch' checked> label search matches</label>"
-             "<label class='ctl'><input type='checkbox' id='lines' checked> cut-off lines</label>"
-             "<label class='ctl'><input type='checkbox' id='markonoff' checked> mark on/off features (▲)</label></div>"
+             "<label class='ctl' title='How many of the most significant hits have their name written on the plot'>"
+             "Names on the plot <input type='number' id='labels' min='0' max='200' value='" + str(s.top_labels) + "'> top hits</label>"
+             "<label class='ctl' title='Size of the points, as a multiple of the normal size'>Point size "
+             "<input type='range' id='ptsize' min='0.5' max='2.5' step='0.1' value='1'><span id='ptsizev' class='muted'></span></label>"
+             "<label class='ctl' title='Size of the names on the plot, in pixels'>Name size "
+             "<input type='range' id='labsize' min='8' max='18' step='0.5' value='11.5'><span id='labsizev' class='muted'></span></label>"
+             "<label class='ctl' title='Also name what the search found or a selection marked (the 40 most significant)'>"
+             "<input type='checkbox' id='labmatch' checked> Name search matches</label>"
+             "<label class='ctl' title='Dashed lines at the fold-change and p-value cut-offs'>"
+             "<input type='checkbox' id='lines' checked> Cut-off lines</label>"
+             "<label class='ctl' title='A triangle on features measured in one group and never in the other'>"
+             "<input type='checkbox' id='markonoff' checked> Mark features only in one condition (△)</label></div>"
              "<div><h4>Hits</h4>"
              "<label class='ctl' title='A hit whose group has at least half of its values imputed is not counted'>"
-             "<input type='checkbox' id='hideimp'> ignore imputation-driven hits</label>"
-             "<label class='ctl' id='minpepwrap'>at least <input type='number' id='minpep' min='0' max='20' value='0'> "
+             "<input type='checkbox' id='hideimp'> Ignore imputation-driven hits</label>"
+             "<label class='ctl' id='minpepwrap' title='A hit identified by fewer than this is not counted (0 = no filter)'>"
+             "A hit needs at least <input type='number' id='minpep' min='0' max='20' value='0'> "
              "<span id='evword'>peptides</span></label>"
              "<p class='muted'>Filtered hits are drawn grey with a coloured ring, so you can see what the filter removed.</p></div>"
              "<div><h4>Highlight groups</h4><div id='groups'></div>"
@@ -541,7 +575,16 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
              "<textarea id='ggenes' rows='3' placeholder='Genes or proteins (any separator)'></textarea>"
              "<div class='chips'><button id='gadd'>Add group</button><button id='gexport'>Export .gmt</button>"
              "<label class='filebtn'>Import .gmt / .txt<input type='file' id='gimport' accept='.gmt,.txt,.tsv,.csv'></label></div>"
-             "<p class='muted'>Groups are kept in this browser and show in every Ionomos report.</p></div></div>"
+             "<p class='muted'>Groups are kept in this browser and show in every Ionomos report.</p></div>"
+             "<div><h4>Figures for slides</h4>"
+             "<p class='muted'>One style for every exported figure: size, text, colours, title, legend.</p>"
+             "<div class='chips'><button id='xopen' title='Choose the size, text and colours, see the figure, download "
+             "or copy it'>Figure export…</button><button id='xzipnow' title='Every figure and table of this report "
+             "in one .zip, at the export settings'>Export for slides (.zip)</button></div></div>"
+             "<div class='optfoot'><button id='optreset' title='The cut-offs, the plot options and the hit filters back "
+             "to how this report was made. Highlight groups and the export style are kept'>Reset to lab defaults</button> "
+             "<span id='optmsg' class='muted' role='status'></span></div></div>"
+             "<div class='muted' id='viewnote'></div>"
              "<div class='muted' id='searchinfo'></div>"
              "<div class='muted' id='cutnote'></div>"
              "<div class='split'><div><div class='card chart' id='volcano'></div><div id='vcount' class='meta'></div>"

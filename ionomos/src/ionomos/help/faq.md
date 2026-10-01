@@ -37,13 +37,25 @@ with the control picked in the box beside it, "all pairs", "each condition vs
 all others", or "just these" (for example `Drug vs DMSO; Drug2 vs DMSO`). Then **Run analysis**. On the command
 line: `--control DMSO`, `--compare "Drug vs DMSO"`, `--de-type all`.
 
-## How do I get a plot into my slides? {#faq.slides}
+## How do I get a figure into a slide? {#faq.slides}
 
-Every chart in the report has **SVG** and **PNG** buttons at its top right.
-SVG stays sharp and can be edited in PowerPoint, Illustrator or Inkscape; PNG
-is a high-resolution picture. Set up the view first (cut-offs, labels, search
-matches); the download shows what you see. `results\volcano_<comparison>.svg`
-has each volcano plot at the saved cut-offs.
+- **One figure**: set up the view (comparison, cut-offs, search), then use
+  **SVG** or **PNG** at the chart's top right, or **Export…** and **Copy
+  image**, and paste it into the slide.
+- **All of them**: **Export for slides** in the report's top bar saves a .zip
+  with every figure, the tables as CSV and a README that lists the files and
+  the cut-offs.
+- **The look**: **Export…** sets the size (16:9, 4:3, half a slide, a journal
+  column), text size, font, colours and what is drawn. **Save style** gives a
+  file the whole lab can load; `analysis.export` in `config.yaml` sets the
+  lab's defaults.
+- **Without opening the report**: `ionomos export <experiment folder>` writes
+  the volcano, PCA, heatmap and correlation plots as SVG to
+  `results\figures\`, at the saved cut-offs.
+
+SVG stays sharp and its text can be edited in PowerPoint, Illustrator or
+Inkscape; PNG is a picture. Each file records the cut-offs it was made with,
+so a figure on a slide can be traced back to its report.
 
 ## How do I share the report? {#faq.share}
 

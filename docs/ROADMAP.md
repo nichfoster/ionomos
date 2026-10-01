@@ -165,7 +165,22 @@ small anonymised real experiment as a test fixture and public example data
   - power
   - list / wildcard / term search, highlight groups, and the view in the link
 
+  → 2026-10-01 (D62): figures for slides. One export style (size presets,
+  text, colours, title, legend) for every chart, as SVG, PNG or on the
+  clipboard; "Export for slides" (a .zip of every figure, the tables and a
+  README); `ionomos export`; `analysis.export` for the lab's style. The plot
+  options got plain labels, tooltips and a reset.
+
   Still open:
+  - Open the exported SVG files in PowerPoint, Illustrator and Inkscape on
+    the lab PC (text editable? fonts? mm sizes?), and try the export in the
+    browser the lab uses. None of this has been checked (D62).
+  - PNG from `ionomos export` (needs a renderer; SVG only for now).
+  - The Analysis tab has no fields for `analysis.export`; it is edited in
+    `config.yaml` (the app keeps the block).
+  - Static figures for dose-response, time courses and liganded sites
+    (`ionomos export` draws volcano, PCA, heatmap, correlation; the report
+    exports them all).
   - Tune the D35 warning thresholds on real lab experiments.
   - PSM-level technical QC from `psm.tsv`: mass error, missed cleavages,
     charge states. → 2026-10-01, done (D55): the Search quality QC tab,
@@ -535,6 +550,10 @@ Collected from the other docs; resolve before/during Phase 1.
       mass error and missed-cleavage share does the lab call a problem (built: 10 ppm and 50 %, both wide)? Should
       a run unlike the others in its experiment be flagged too, and how are TMT fractions to be judged? Is the
       isoDTB search an offset search, so that its mass errors need another reading?
+- [ ] Figure export (D62): confirm the defaults (16:9 slide, 14 pt Arial, SVG and PNG in the .zip), that the SVG / PNG
+      buttons use the export style rather than the on-screen size, and whether the watcher should write
+      `results/figures/` after every job (built: off, `analysis.export.figures: []`). Does the lab have a house
+      style (font, colours) to put in `analysis.export`? Which program do the figures go into?
 - [ ] Phase 5: which pilot labs can we reach? Does this lab run titrations or phospho? (Orders 5C.)
 - [ ] Phase 6: is the PC's RAM in all 6 memory channels (speed of a local model)? Is a GPU present? May the assistant
       ever use a cloud model (institutional data policy), or strictly local?
