@@ -2236,11 +2236,10 @@ class App:
 
 def _setup_app_log() -> None:
     """The app's own log (%APPDATA%/Ionomos/app.log): what was clicked, what failed. Goes into every report."""
-    import logging.handlers
+    from ionomos import health
 
     try:
-        fh = logging.handlers.RotatingFileHandler(service.appdata_dir() / "app.log", maxBytes=1_000_000,
-                                                  backupCount=2, encoding="utf-8")
+        fh = health.rotating_log_handler(service.appdata_dir() / "app.log", max_bytes=1_000_000, backups=2)
     except OSError:
         return
     fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)-7s %(name)s: %(message)s"))

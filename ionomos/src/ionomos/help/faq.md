@@ -91,6 +91,33 @@ Only a failed search can be retried (app → Jobs tab → **Retry**, or
 experiment again with other settings, drop a new copy of the raw files as a
 new folder (for example with `_redo` in the name).
 
+## Can I get a message when my search is done? {#faq.notify}
+
+Yes, if the person who looks after Ionomos turns it on. It is off by
+default, because nothing leaves the PC unless the lab asks for it
+([what a message holds](#safety.notify)).
+
+To set it up, edit `config.yaml` (the app has no tab for this yet). Under
+`notify:` set `enabled: true` and fill in at least one of:
+
+- `slack:` `url:` a Slack incoming-webhook address
+- `teams:` `url:` a Teams webhook address (in Teams: Workflows, "Post to a
+  channel when a webhook request is received")
+- `webhook:` `url:` any service that accepts a JSON POST
+- `email:` `host`, `port`, `from`, `to` and, if the server needs them,
+  `username` and `password`
+
+`on: [done, failed, held]` chooses which events send a message; "held"
+means a search is waiting for something (a FASTA, disk space). A waiting
+search sends one message per reason, not one every few seconds. To keep an
+address or the password out of the file, put it in an environment variable
+and give its name as `url_env:` or `password_env:`.
+
+Then run `ionomos notify-test`: it sends a test message to each one and
+says which arrived. Restart the watcher (app → **Stop**, **Start**) so it
+uses the new settings. A message that can't be sent never fails or slows a
+search ([A notification did not arrive](#trouble.notify)).
+
 ## Where is this help, and can I change it? {#faq.help}
 
 The report has a **Help** section at the end and a **?** beside each section.

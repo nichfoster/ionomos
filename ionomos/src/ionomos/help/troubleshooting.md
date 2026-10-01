@@ -230,6 +230,35 @@ high-resolution MS2, label-free quantification.
 The experiment's method was removed from the settings after it was queued.
 Add the method back (tab 3 Methods), or change the experiment's method.
 
+## A notification did not arrive {#trouble.notify}
+
+A message that can't be sent is given up on after a few seconds and noted
+once in the log ("could not notify by ..."). The search itself is not
+affected: its status, `DONE.txt` / `FAILED.txt` and the report are written
+before the message is sent.
+
+Run `ionomos notify-test`. It sends a test message to every channel in
+`config.yaml` and says what happened to each:
+
+- **notifications are not set up**: there is no channel under `notify:`
+  ([how to set one up](#faq.notify)).
+- **notify.enabled is false**: the channels work, but jobs send nothing
+  until `enabled: true`.
+- **the server answered HTTP 404 / 403 / 410**: the webhook address is
+  wrong or was removed. Make a new one in Teams or Slack and paste it in.
+- **could not connect** or **no answer in time**: the PC has no route to
+  the service (no internet, a firewall, a proxy), or the address is wrong.
+- **environment variable ... is not set**: `url_env` / `password_env`
+  names a variable the watcher can't see. Set it for the Windows account
+  that runs Ionomos, then sign out and in again.
+- **email**: "authentication" errors mean the user name or password is
+  wrong, or the mail server wants an app password; "certificate" errors
+  mean `security` or `port` don't match the server (587 with `starttls`,
+  465 with `ssl`).
+
+The test works but jobs send nothing: restart the watcher after changing
+`config.yaml`, and check `on:` lists the event (`done`, `failed`, `held`).
+
 ## Why a search fails {#search.failed}
 
 The most common causes, with what to do, are listed in `FAILED.txt` and the

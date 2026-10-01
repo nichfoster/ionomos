@@ -53,6 +53,35 @@ qc_trend:
   baseline_to: ""
   popup: false                # true: a broken rule opens a window (default: only the attention list)
 
+# Notifications (docs/ARCHITECTURE.md "Notifications"): a message when a search is done, failed or
+# waiting. OFF by default: nothing leaves this PC unless you turn it on. A message carries the experiment
+# name, user, method, status, the reason or the hit counts, and the local path of the report. Never a
+# file, never a quantity. Webhook addresses and the password are secrets: they are left out of logs and
+# of every diagnostics report. Try it with: ionomos notify-test   (restart the watcher after a change)
+notify:
+  enabled: false
+  on: [done, failed, held]    # which events send a message (held = a search is waiting for something)
+  include_names: true         # false: only the job number and the status are sent
+  timeout_seconds: 10         # a channel that doesn't answer is given up on; jobs never wait for it
+  webhook:                    # any service that takes a JSON POST
+    url: ""                   # https://...
+    url_env: ""               # or the NAME of an environment variable that holds the address
+  teams:                      # Microsoft Teams: a Workflows "when a webhook request is received" address
+    url: ""
+    url_env: ""
+  slack:                      # Slack: an incoming-webhook address (https://hooks.slack.com/services/...)
+    url: ""
+    url_env: ""
+  email:                      # SMTP; no host = no email
+    host: ""                  # e.g. smtp.office365.com
+    port: 587
+    security: starttls        # starttls | ssl (port 465) | none (an internal relay; no password allowed)
+    username: ""
+    password: ""
+    password_env: ""          # better than password: the NAME of an environment variable that holds it
+    from: ""                  # e.g. proteomics-pc@yourlab.org
+    to: []                    # e.g. [you@yourlab.org]
+
 # Who is who. Users are the subfolders of users_root; a new user = a new folder.
 # Aliases let initials in a folder name resolve to that folder.
 users:

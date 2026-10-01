@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import logging.handlers
 import os
 import re
 import shutil
@@ -412,6 +413,44 @@ def log_problems(log_file: Path, max_items: int = 25, scan_bytes: int = 2_000_00
     if cur:
         items.append("\n".join(cur))
     return items[-max_items:]
+
+
+# ------------------------------------------------------------- log rotation --
+
+
+class SafeRotatingFileHandler(logging.handlers.RotatingFileHandler):
+    """Size-based rotation that can't lose lines on Windows.
+
+    Windows refuses to rename a file another process has open (the app following the log, a virus
+    scanner, a backup). The stock handler then drops every record until the file is free. This one
+    keeps appending to the same file and tries the rotation again a minute later."""
+
+    RETRY_SECONDS = 60.0
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._retry_at = 0.0
+
+    def shouldRollover(self, record) -> bool:  # noqa: N802 - logging's name
+        if time.monotonic() < self._retry_at:
+            return False
+        return bool(super().shouldRollover(record))
+
+    def doRollover(self) -> None:  # noqa: N802
+        try:
+            super().doRollover()
+        except OSError:
+            self._retry_at = time.monotonic() + self.RETRY_SECONDS
+            if self.stream is None:
+                self.stream = self._open()
+
+
+def rotating_log_handler(path: Path, max_bytes: int | None = None, backups: int | None = None) -> logging.Handler:
+    """The file handler for ionomos.log / app.log: at most `max_bytes` per file, `backups` old files kept."""
+    from ionomos import names
+
+    return SafeRotatingFileHandler(path, maxBytes=names.LOG_MAX_BYTES if max_bytes is None else max_bytes,
+                                   backupCount=names.LOG_BACKUPS if backups is None else backups, encoding="utf-8")
 
 
 # ------------------------------------------------------------- detailed logging --

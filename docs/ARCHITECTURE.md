@@ -51,12 +51,13 @@
 | `updates.py` | Asks GitHub for the newest release, downloads the Setup (size + SHA-256 verified), or finds one in Downloads; stops the watcher, runs the installer, restarts the watcher after | — |
 | `loose.py` | `.raw` files dropped without a folder: grouped by shared name into folders in the inbox once stable | — |
 | `tkutil.py` | Tk variables that can be garbage-collected on any thread (plain ones abort the process on Windows) | — |
-| `health.py` | Failsafes: single-instance lock, heartbeat, thread supervisor, crash hooks/files, disk/RAM facts, log-problem extraction | — |
+| `health.py` | Failsafes: single-instance lock, heartbeat, thread supervisor, crash hooks/files, disk/RAM facts, log-problem extraction, the rotating log handler | — |
+| `notify.py` | Messages when a search is done / failed / held (D58): `notify:` settings, the message, the webhook / Teams / Slack / email senders, redaction of secrets. Off by default | — |
 | `stress.py` | `ionomos testbed stress`: messy drops + chaos against a real watcher/worker, invariant checks; name fuzzer | — |
 | `runners/isodtb.py` | Post-proc: modified-peptide → site merge — thin entry point delegating to `downstream/isodtb.py`, which holds the algorithm | port of `lab-scripts/isoDTB_…R` |
 | `runners/tmt.py` | Post-proc: experimental annotation fix | port of `lab-scripts/correct_experimental_annotation…R` |
 | `runners/dia.py` | Post-proc: (TBD — probably nothing beyond copying `report.tsv` up) | — |
-| `cli.py` | `ionomos setup / run / check / status / dry-run / names test / retry / testbed / diagnose / update / help`; no args → app; hidden `fake-fragpipe` for the testbed | — |
+| `cli.py` | `ionomos setup / run / check / status / dry-run / names test / retry / testbed / diagnose / notify-test / update / help`; no args → app; hidden `fake-fragpipe` for the testbed | — |
 
 ## Data flow for one job
 
@@ -109,7 +110,8 @@ C:\Fragpipe_Auto\                    ← the app lives here (no spaces!)
     DIA.workflow
   fasta\                             ← pinned databases with decoys
   logs\
-    ionomos.log                     ← rotating
+    ionomos.log                     ← rotating: 5 MB, then ionomos.log.1 … .5
+    notify_state.json               ← which "waiting" messages were sent (only with notify: on, D58)
     qc_trend.jsonl                  ← instrument QC: one line per QC-standard run (D45)
     qc_trend.html                   ← the QC trend page (Levey-Jennings charts, Westgard rules)
     help\help.html                  ← the help page, rewritten each time it is opened (D46)
@@ -203,6 +205,12 @@ gui:
 naming:
   condition_codes: {D: DMSO, C: Compound}   # DIA X_D1 = DMSO rep 1
 
+notify:                     # off by default; see "Notifications" below
+  enabled: false
+  on: [done, failed, held]
+  include_names: true
+  slack: {url: "", url_env: ""}   # also webhook:, teams:, email:
+
 methods:                    # keyed by canonical METHOD keyword; aliases are matched in folder names
   isoDTB:
     aliases: [isodtb, iso-dtb]
@@ -260,6 +268,89 @@ that database and (b) record provenance. See WORKFLOWS.md.
 | A search fails / is held / a folder is rejected / a raw file is 0 bytes | an attention item → pop-up with likely causes, log tail, Retry; closes itself when fixed |
 | A GUI button throws | `report_callback_exception` → dialog + crash file; the app keeps running |
 | `check`/diagnose on a wedged display | the Tk probe runs in a child process with a timeout |
+| The log grows without end | `ionomos.log` rotates at 5 MB, 5 old files kept (`names.LOG_MAX_BYTES`, `LOG_BACKUPS`) |
+| Windows refuses to rotate the log (another program has it open) | the watcher keeps writing to the same file and tries again a minute later; no line is lost |
+| A notification can't be sent (dead webhook, no network, wrong password) | sent from its own thread after the status is recorded, one try, a timeout; logged once; the job is unaffected |
+| A webhook address or the SMTP password ends up in a report | never logged; `diagnose`, the bundle and Report a problem redact `config.yaml` and scrub every included file |
+
+## Notifications (D58)
+
+Off unless `config.yaml` has `notify: enabled: true` and a channel. The
+worker calls `notify.announce` after a job's status is recorded:
+
+```
+worker: status in ledger + ionomos.json + DONE.txt / FAILED.txt
+   │
+   ▼
+notify.announce(cfg, event, job, reason, summary)        returns at once, never raises
+   │  off, or event not in notify.on            → nothing
+   │  held, same job and reason as before        → nothing (<log_dir>/notify_state.json)
+   ▼
+build(...) → Message                                     the only thing that leaves the PC
+   ▼
+daemon thread: deliver → webhook, teams, slack, email    one try each, timeout_seconds, no retries
+   ▼
+log: "notified by slack: job 12 done"  /  "could not notify by slack: …" (once per channel and error)
+```
+
+```yaml
+notify:
+  enabled: false              # nothing is sent while this is false
+  on: [done, failed, held]    # held = a search is waiting (FASTA, workflow, disk space …)
+  include_names: true         # false: job number, status and time only
+  timeout_seconds: 10         # 1–60
+  webhook: {url: "", url_env: ""}   # any service that takes a JSON POST
+  teams:   {url: "", url_env: ""}   # a Teams Workflows webhook address
+  slack:   {url: "", url_env: ""}   # a Slack incoming-webhook address
+  email:
+    host: ""                  # no host = no email
+    port: 587
+    security: starttls        # starttls | ssl | none (no password allowed with none)
+    username: ""
+    password: ""
+    password_env: ""          # the NAME of an environment variable; it wins over password
+    from: ""
+    to: []
+```
+
+**What is sent.** Exactly these fields; the generic webhook gets them as
+one JSON object, the others as a title and lines of text:
+
+| Field | Example | With `include_names: false` |
+|---|---|---|
+| `app`, `version` | `Ionomos`, `0.12.0` | sent |
+| `event` | `done`, `failed`, `held` | sent |
+| `job_id` | `12` | sent |
+| `time` | `2026-10-01T14:03:11-07:00` | sent |
+| `text` | the message as plain text (the title and the lines below) | `Ionomos: job 12 done` |
+| `experiment` | `20260902_EJQ_isoDTB_EJQ-2-027_1uM-3h` | left out |
+| `user`, `method` | `EJQ`, `isoDTB` | left out |
+| `reason` | `FragPipe ran out of memory …` (failed / held; at most 600 characters) | left out |
+| `hits` | `[{"comparison": "Compound vs DMSO", "up": 12, "down": 3, "tested": 4021}]` | left out |
+| `report` | `C:\Fragpipe_General\EJQ\…\results\report.html` (a path, not the file) | left out |
+| `pc` | the computer's name | left out |
+
+Never sent: raw files, result tables, protein or site names, intensities or
+ratios, the report, the search log, `config.yaml`. An SMTP server also sees
+what every mail server sees (the PC's address and host name).
+
+**Payloads.** Slack: `{"text": "*title*\nlabel: value\n…"}`. Teams:
+`{"type": "message", "attachments": [{"contentType":
+"application/vnd.microsoft.card.adaptive", "contentUrl": null, "content":
+{AdaptiveCard 1.2: a TextBlock title and a FactSet}}]}`. Email: the title
+as the subject, the lines as plain text.
+
+**Secrets.** A webhook address is a password: anyone who has it can post to
+the channel. `url_env` / `password_env` keep it out of the file. Addresses
+must be `https://` (`http://` only for `localhost`), and a redirect is not
+followed. `notify.scrub` and `notify.redact_config_text` keep the values
+out of the log, `ionomos diagnose`, `diagnostics-*.txt`, the bundle and
+Report a problem. `config-backups/` holds full copies of `config.yaml` and
+stays on the PC.
+
+`ionomos notify-test` sends a test message on every configured channel
+(also with `enabled: false`) and prints one line per channel. The worker
+reads `notify:` when the watcher starts: restart it after a change.
 
 ## Downstream pipeline (0.6.0: FragPipe-Analyst)
 

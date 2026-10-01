@@ -21,6 +21,7 @@ Command line.
     ionomos qc-trend [--rebuild] [--open]         instrument QC: the QC-standard runs trended (logs/qc_trend.html)
     ionomos cancel   JOB_ID                       stop a running search / drop a queued job
     ionomos pause | resume                        hold / release the FragPipe queue
+    ionomos notify-test                           send a test message to the channels in config.yaml notify:
     ionomos repair-ledger [--force]               rebuild the job list from the experiment folders
     ionomos update                                git pull + reinstall (only when running from a git checkout)
 
@@ -36,7 +37,6 @@ import signal
 import sys
 import threading
 import time
-from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from ionomos import __version__
@@ -61,9 +61,10 @@ def _setup_logging(log_dir: Path | None, verbose: bool) -> None:
         root.addHandler(sh)
     if log_dir:
         log_dir.mkdir(parents=True, exist_ok=True)
+        from ionomos import health
         from ionomos.names import LOG_FILE
 
-        fh = RotatingFileHandler(log_dir / LOG_FILE, maxBytes=5_000_000, backupCount=5, encoding="utf-8")
+        fh = health.rotating_log_handler(log_dir / LOG_FILE)  # size-based, names.LOG_BACKUPS old files kept
         fh.setFormatter(fmt)
         root.addHandler(fh)
 
@@ -331,6 +332,9 @@ def cmd_check(args) -> int:
             detail + ("; jobs wait until it's set" if ok is False and label == "launcher" else ""))
     row(True if cfg.auto_run else None, "fragpipe.auto_run",
         "on: queued jobs are searched automatically" if cfg.auto_run else "off: jobs are only filed and queued")
+    from ionomos import notify
+
+    row(True if cfg.notify.get("enabled") else None, "notifications", notify.describe(cfg.notify))
     if paused(cfg.log_dir):
         row(None, "searches", "PAUSED (ionomos resume / app: Jobs -> Resume)")
     users = cfg.known_users()
@@ -782,6 +786,29 @@ def cmd_pause(args) -> int:
     return 0
 
 
+def cmd_notify_test(args) -> int:
+    """Send a test message on every channel in config.yaml notify: and say what happened to each."""
+    from ionomos import notify
+
+    cfg = _load(args, check_paths=False)
+    s = cfg.notify
+    chans = notify.channels(s)
+    if not chans:
+        print("notifications are not set up: config.yaml has no notify: channel (webhook, teams, slack or email).\n"
+              "Nothing was sent. See: ionomos help notify")
+        return 1
+    if not s["enabled"]:
+        print("notify.enabled is false: jobs send nothing. Testing the configured channel(s) anyway.")
+    print(f"sending a test message by {', '.join(chans)} (waiting up to {s['timeout_seconds']:g} s each) ...")
+    results = notify.send_test(s)
+    for r in results:
+        print(f" {'✓' if r.ok else '✗'} {r.channel:<8} {'sent' if r.ok else 'NOT sent'}: {r.detail}")
+    bad = [r for r in results if not r.ok]
+    print("\nall sent; check that the message arrived" if not bad
+          else f"\n{len(bad)} of {len(results)} could not be sent; jobs are not affected by this")
+    return 1 if bad else 0
+
+
 def cmd_repair_ledger(args) -> int:
     from ionomos import health
     from ionomos import ledger as ledger_mod
@@ -919,6 +946,8 @@ def main(argv: list[str] | None = None) -> int:
     cn.set_defaults(fn=cmd_cancel)
     sub.add_parser("pause", help="start no new FragPipe searches").set_defaults(fn=cmd_pause)
     sub.add_parser("resume", help="undo pause").set_defaults(fn=cmd_pause)
+    sub.add_parser("notify-test", help="send a test message to the channels in config.yaml notify:").set_defaults(
+        fn=cmd_notify_test)
     rl = sub.add_parser("repair-ledger", help="rebuild the job ledger from the experiment folders")
     rl.add_argument("--force", action="store_true")
     rl.set_defaults(fn=cmd_repair_ledger)

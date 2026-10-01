@@ -9,6 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Notifications when a search is done, failed or waiting** (ROADMAP
+  Phase 4, D58; `notify.py`). Off by default; set up under `notify:` in
+  `config.yaml`:
+  - channels: a generic JSON webhook, a Microsoft Teams webhook (an Adaptive
+    Card), a Slack incoming webhook, and SMTP email (STARTTLS or SSL).
+    Standard library only
+  - a message holds the experiment name, user, method, status, the reason
+    or the hit counts, and the local path of the report; never a file or a
+    quantity. `notify.include_names: false` sends the job number and status
+    only
+  - `on: [done, failed, held]` picks the events. A waiting search sends one
+    message per reason, also across a restart
+  - a message is sent after the status is recorded, in its own thread, with
+    a timeout and no retries: a dead webhook can't fail or delay a job. A
+    channel's error is logged once
+  - webhook addresses and the SMTP password can come from environment
+    variables (`url_env`, `password_env`), are never logged, and are
+    replaced by `***` in `ionomos diagnose`, the diagnostics bundle and
+    **Report a problem…**
+  - `ionomos notify-test` sends a test message to every channel and says
+    what happened; `ionomos check` shows whether notifications are on
+  - not in the app yet: edit `config.yaml` (the app keeps the block when it
+    saves)
+- **Log rotation that is safe on Windows** (`health.SafeRotatingFileHandler`).
+  `ionomos.log` already rotated at 5 MB with 5 old files kept, but a rename
+  refused by Windows (another program has the file open) made the stock
+  handler drop every log line until the file was free. Now the watcher keeps
+  writing to the same file and tries the rotation again a minute later.
+  `app.log` uses the same handler.
+
 - **Time courses** (ROADMAP 5C #1, D53; `downstream/timecourse.py`). When the
   conditions are time points (`Drug_0h`, `Drug_1h`, `Drug_4h`, `Drug_24h`,
   or `analysis.times`) and a series has at least 3, every feature gets
