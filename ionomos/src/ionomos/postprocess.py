@@ -27,6 +27,19 @@ def context_for(dest: Path, record: dict, method: str) -> dict:
             "method": method, "date": folder.get("date") or "", "fragpipe": f"workflow {wf}" if wf else ""}
 
 
+def analysis_method(cfg, method: str | None, record: dict | None = None) -> str | None:
+    """What the analysis reads for a lab's method key (Config.analysis_method, D54): its engine's own table,
+    its like: target, else the key. A key the config doesn't have falls back to what intake recorded, so a
+    folder analysed without its lab's config still reads as it did there. Anything else passes through
+    (a kind, another engine's name, "table", "auto")."""
+    if cfg is not None and method in (getattr(cfg, "methods", None) or {}):
+        return cfg.analysis_method(method)
+    filed = ((record or {}).get("plan") or {}).get("folder") or {}
+    if method and method == filed.get("method"):
+        return ((record or {}).get("method_config") or {}).get("analysis_method") or method
+    return method
+
+
 def prepare(dest: Path, cfg, method: str | None = None, extra: dict | None = None) -> dict:
     """Everything analyze() needs for one folder: the status record (with experiment.yaml file corrections
     applied), lab settings, the experiment's analysis overrides, method, context."""
@@ -37,7 +50,8 @@ def prepare(dest: Path, cfg, method: str | None = None, extra: dict | None = Non
         record = json.loads(status_path(dest).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         record = {}
-    method = method or ((record.get("plan") or {}).get("folder") or {}).get("method")
+    filed = ((record.get("plan") or {}).get("folder") or {}).get("method")  # the lab's key for this experiment
+    method = method or filed
     overrides = ((record.get("plan") or {}).get("overrides") or {}).get("analysis") or {}
     try:  # an experiment.yaml edited after intake (e.g. new comparisons) wins
         from ionomos.manifest import load_overrides
@@ -48,6 +62,8 @@ def prepare(dest: Path, cfg, method: str | None = None, extra: dict | None = Non
         if isinstance(tmt, dict) and tmt.get("reference_channel") not in (None, "") and \
                 "tmt_reference" not in overrides:  # experiment.yaml tmt.reference_channel = analysis.tmt_reference
             overrides = {**overrides, "tmt_reference": tmt["reference_channel"]}
+        if current.tmt:  # the channel map as it is now names Sage's TMT channels (engines.load_sage_tmt)
+            record.setdefault("plan", {}).setdefault("overrides", {})["tmt"] = current.tmt
         from ionomos.downstream.quant import run_stem
 
         by_stem = {run_stem(name): value for name, value in current.files.items()}
@@ -62,16 +78,17 @@ def prepare(dest: Path, cfg, method: str | None = None, extra: dict | None = Non
         pass
     lab = dict(getattr(cfg, "analysis", {}) or {}) if cfg is not None else {}
     lab.pop("enabled", None)
+    methods = (getattr(cfg, "methods", None) or {}) if cfg is not None else {}
+    # the analysis follows the method's kind, whatever the lab calls it (naming.method_kind, D54)
+    reads = analysis_method(cfg, method, record)
+    label = method
+    if method != filed and filed in methods and analysis_method(cfg, filed, record) == reads:
+        method = label = filed  # asked for by its kind (the Analysis tab does): still this experiment's method
     mod_mass = "561.3387"
-    if cfg is not None and method in getattr(cfg, "methods", {}):
-        mod_mass = str(cfg.methods[method].extra.get("isodtb_mod_mass", mod_mass))
-    analysis_method = method
-    if cfg is not None and method in getattr(cfg, "methods", {}):
-        # read the engine's own table whatever the lab calls the method (engines.py)
-        analysis_method = {"maxquant": "MaxQuant", "sage": "Sage"}.get(
-            str(cfg.methods[method].extra.get("engine", "")).lower(), method)
-    return {"dest": dest, "method": analysis_method, "lab": lab, "overrides": {**overrides, **(extra or {})},
-            "record": record, "context": context_for(dest, record, method or "?"), "mod_mass": mod_mass}
+    if method in methods:
+        mod_mass = str(methods[method].extra.get("isodtb_mod_mass", mod_mass))
+    return {"dest": dest, "method": reads, "lab": lab, "overrides": {**overrides, **(extra or {})},
+            "record": record, "context": context_for(dest, record, label or "?"), "mod_mass": mod_mass}
 
 
 def table_workspace(table: Path) -> Path:
@@ -189,7 +206,8 @@ def _analyse(job, spec, cfg) -> tuple[list[str], dict]:
 
         dest = Path(job.dest_dir)
         try:
-            _m, files, notes = downstream.load_quantities(job.method, dest / "fragpipe", dest / downstream.RESULTS, None)
+            _m, files, notes = downstream.load_quantities(analysis_method(cfg, job.method, getattr(job, "parsed", None)),
+                                                          dest / "fragpipe", dest / downstream.RESULTS, None)
         except Exception as exc:  # noqa: BLE001
             return [f"post-processing failed: {exc}"], {}
         return [f"post-processing: {n}" for n in notes], {"files": [f"{downstream.RESULTS}/{f.name}" for f in files]}

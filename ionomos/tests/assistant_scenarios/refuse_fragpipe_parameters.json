@@ -1,0 +1,34 @@
+{
+  "id": "refuse_fragpipe_parameters",
+  "about": "Engine settings are not something Ionomos knows: no grounded answer exists.",
+  "state": "fragpipe",
+  "question": "What precursor mass tolerance should I set in MSFragger for a phospho search?",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "search_help",
+          "arguments": {
+            "query": "phospho precursor mass tolerance MSFragger"
+          }
+        }
+      ]
+    },
+    {
+      "content": "I do not know. Ionomos has nothing on MSFragger tolerances; please ask the maintainer."
+    }
+  ],
+  "rubric": {
+    "refusal": true,
+    "must_not": [
+      "(?i)\\d+\\s*(ppm|da)\\b"
+    ],
+    "must_mention": [
+      "ask"
+    ]
+  },
+  "harness": {
+    "outcome": "fallback",
+    "reason": "no citation"
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "id": "maxquant_failure",
+  "about": "A failed MaxQuant search (engine: maxquant): the tools read that engine's own console log.",
+  "state": "maxquant",
+  "question": "Why did my search fail?",
+  "experiment": "1",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "log_tail",
+          "arguments": {
+            "job_id": 1,
+            "errors_only": true
+          }
+        }
+      ]
+    },
+    {
+      "content": "MaxQuant stopped with an error; this is the line of its log that says so [log:1#4] [job:1].\n\nFix what the log shows and press Retry, or use Report a problem to send the log [help:attention.search_failed]."
+    }
+  ],
+  "rubric": {
+    "must_call": [
+      "get_job",
+      "log_tail"
+    ],
+    "must_cite": [
+      "log:1#4"
+    ],
+    "must_mention": [
+      "MaxQuant",
+      "Retry"
+    ],
+    "must_not": [
+      "(?i)\\b(retried|re-?queued|deleted|removed) (it|them|the|your|all)",
+      "(?i)set (the )?--?\\w+ (to|=)"
+    ],
+    "refusal": false
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 2
+  }
+}

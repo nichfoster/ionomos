@@ -54,6 +54,7 @@ def defaults(root: str | None = None, users_root: str | None = None) -> dict:
         "qc_trend": {"enabled": True, "match": ["hela", "k562", "qc_std", "qcstd", "_qc_"], "exclude": [],
                      "methods": [], "instrument": "", "baseline_runs": 10, "baseline_from": "", "baseline_to": "",
                      "popup": False},
+        "notify": copy.deepcopy(_notify_defaults()),
         "users": {"aliases": {}, "default": "", "learned_aliases_file": f"{root}/learned_aliases.yaml",
                   "ignore": ["FragPipe*", "Fasta*", "New folder*", "~*"]},
         "methods": {
@@ -66,6 +67,18 @@ def defaults(root: str | None = None, users_root: str | None = None) -> dict:
                     "fasta": "human_reviewed_decoys.fas", "data_type": "DIA", "postprocess": []},
         },
     }
+
+
+def _notify_defaults() -> dict:
+    from ionomos.notify import DEFAULTS
+
+    return DEFAULTS
+
+
+def _notify_keys(d: dict) -> dict:
+    from ionomos.notify import fix_keys
+
+    return fix_keys(d)
 
 
 def _merge(base: dict, over: dict) -> dict:
@@ -86,6 +99,8 @@ def read_config(path: str | Path) -> dict:
     raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
     if not isinstance(raw, dict):
         raw = {}
+    if isinstance(raw.get("notify"), dict):
+        raw["notify"] = _notify_keys(raw["notify"])  # a bare `on:` key loads as True
     return _normalise(_merge(defaults(), raw))
 
 
@@ -206,7 +221,8 @@ def dump_config(d: dict) -> str:
               "dose_response", "dose_min_doses", "dose_alpha", "dose_fc_lim", "dose_unit",  # dose-response: D44
               "liganded", "liganded_ratio", "liganded_min_replicates", "liganded_direction",  # cys.py: D52
               "site_annotation",
-              "time_course", "time_min_points", "time_unit"):  # time courses: D53
+              "time_course", "time_min_points", "time_unit",  # time courses: D53
+              "psm_qc"):  # search quality per run: D55
         if an.get(k) not in (None, ""):
             a(f"  {k}: {_y(an[k])}")
     if isinstance(an.get("times"), dict) and an["times"]:
@@ -238,6 +254,48 @@ def dump_config(d: dict) -> str:
     if q.get("max_file_mb") not in (None, ""):
         a(f"  max_file_mb: {_y(q['max_file_mb'])}   # larger tables are skipped")
     a("")
+    n = d.get("notify") if isinstance(d.get("notify"), dict) else {}
+    n = _merge(_notify_defaults(), {k: ({"url": v} if isinstance(v, str) and k in ("webhook", "teams", "slack") else v)
+                                    for k, v in _notify_keys(n).items() if v is not None})
+    a("notify:   # a message when a search is done, failed or waiting. Off by default: nothing leaves this PC")
+    a("          # unless you turn it on. What is sent: docs/ARCHITECTURE.md \"Notifications\". Test: ionomos notify-test")
+    a(f"  enabled: {_y(n['enabled'])}")
+    a(f"  on: {_y(n['on'])}   # which of done, failed, held (= waiting) send a message")
+    a(f"  include_names: {_y(n['include_names'])}   # false: only the job number and status are sent")
+    a(f"  timeout_seconds: {_y(n['timeout_seconds'])}   # a channel that doesn't answer is given up on; jobs never wait")
+    for name, what in (("webhook", "any service that takes a JSON POST"),
+                       ("teams", "a Microsoft Teams webhook (Workflows) address"),
+                       ("slack", "a Slack incoming-webhook address")):
+        c = n[name] if isinstance(n[name], dict) else {}
+        a(f"  {name}:   # {what}")
+        a(f"    url: {_y(c.get('url') or '')}   # a secret: left out of diagnostics and logs")
+        a(f"    url_env: {_y(c.get('url_env') or '')}   # or the NAME of an environment variable that holds it")
+        for k, v in c.items():
+            if k not in ("url", "url_env"):
+                a(f"    {_y(str(k))}: {_y(v)}")
+    e = n["email"] if isinstance(n["email"], dict) else {}
+    a("  email:   # SMTP; no host = no email")
+    a(f"    host: {_y(e.get('host') or '')}")
+    a(f"    port: {_y(e.get('port', 587))}")
+    a(f"    security: {_y(e.get('security') or 'starttls')}   # starttls | ssl | none (none: no password allowed)")
+    a(f"    username: {_y(e.get('username') or '')}")
+    a(f"    password: {_y(e.get('password') or '')}   # a secret: left out of diagnostics and logs")
+    a(f"    password_env: {_y(e.get('password_env') or '')}   # or the NAME of an environment variable that holds it")
+    a(f"    from: {_y(e.get('from') or '')}")
+    a(f"    to: {_y(e.get('to') if e.get('to') is not None else [])}")
+    for k, v in e.items():
+        if k not in ("host", "port", "security", "username", "password", "password_env", "from", "to"):
+            a(f"    {_y(str(k))}: {_y(v)}")
+    for k, v in n.items():  # a typo is written back as it was, so the loader can name it
+        if k not in _notify_defaults():
+            a(f"  {_y(str(k))}: {_y(v)}")
+    a("")
+
+    if isinstance(d.get("assistant"), dict) and d["assistant"]:  # the app doesn't edit these; keep them (D57)
+        a("assistant:   # the local assistant, `ionomos ask` (docs/ASSISTANT.md); off unless enabled with a model")
+        for k, v in d["assistant"].items():
+            a(f"  {_y(str(k))}: {_y(v)}")
+        a("")
     a("users:   # users are the subfolders of users_root; aliases map initials -> folder")
     a("  aliases:")
     for user, als in (u.get("aliases") or {}).items():

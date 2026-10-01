@@ -222,7 +222,7 @@ def _workdir(dest: Path, record: dict) -> Path:
     wd = (record.get("run") or {}).get("workdir")
     if wd and Path(wd).is_dir():
         return Path(wd)
-    for name in ("fragpipe", "diann"):
+    for name in ("fragpipe", "diann", "sage"):
         if (dest / name).is_dir():
             return dest / name
     return dest

@@ -21,8 +21,9 @@ Layout it reads and writes (inside the experiment folder):
       time_course.tsv               a time course (3+ time points): change over time (F), trend, class, pattern
       cysteine_sites.tsv            isoDTB: per site and compound the competition ratio, liganded call, selectivity
       cysteine_proteins.tsv         isoDTB: proteins with a liganded cysteine, how many of their sites are
+      psm_qc.tsv                    search quality per run: PSMs, mass error, missed cleavages, charge states
       sdrf.tsv                      SDRF-Proteomics sample metadata: a row per raw file (and label), for PRIDE
-      analysis.json                what was done, with which settings (reproducibility), + "quality"
+      analysis.json               what was done, with which settings (reproducibility), + "quality"
 
 Pipeline stages, each a module:
     method prep   isodtb.py / tmt.py           (ports of the lab R scripts)
@@ -37,6 +38,7 @@ Pipeline stages, each a module:
     dose-response doseresponse.py              (CurveCurator's curves, when the conditions are doses)
     time course   timecourse.py                (limma's F over time, trend, series vs control; patterns)
     cysteines     cys.py                       (site ratio data: liganded calls, selectivity, a site annotation)
+    search QC     psmqc.py + qcmetrics.py      (per run, from psm.tsv: mass error, missed cleavages, charge states)
     metadata      sdrf.py                      (SDRF-Proteomics, from the manifest, workflow and FASTA)
     presentation  charts.py + report.py        (SVG + HTML)
 
@@ -147,7 +149,8 @@ def _load_quantities(method: str | None, workdir: Path, results: Path, record: d
     notes: list[str] = []
     results.mkdir(parents=True, exist_ok=True)
     if method in engines.METHODS:  # results from another engine (engines.py)
-        m, enotes = engines.load(method, Path(table) if table is not None else workdir, _sample_map(record))
+        tmt_map = (((record or {}).get("plan") or {}).get("overrides") or {}).get("tmt")  # experiment.yaml tmt:
+        m, enotes = engines.load(method, Path(table) if table is not None else workdir, _sample_map(record), tmt_map)
         return m, files, notes + enotes
     if table is not None or method == "table":
         path = Path(table) if table is not None else anytable.find_table(workdir)
@@ -382,6 +385,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     time_view: dict | None = None
     cys_info: dict = {"ran": False, "reason": "not site ratio data (isoDTB)"}
     cys_view: dict | None = None
+    psm_view: dict | None = None
     model = analysis.Model()
     ftest = None
 
@@ -566,6 +570,12 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
         exported = stage("export", export.fragpipe_analyst, results / "fragpipe-analyst", m, processed, diffs,
                          settings, comps, model)
         out.files += exported or []
+    searched = stage("psm_qc", _psm_qc, workdir, settings, results, out, say)
+    if searched is None:
+        psm_info = {"ran": False, "reason": "the search-quality step failed (see analysis_error.txt)"}
+    else:
+        psm_info, psm_view, f.psm_problems, qnotes = searched
+        notes += qnotes
     say("sample metadata (SDRF)")
     sdrf_info = stage("sdrf", _sdrf, method, dest, workdir, record, m, processed, settings, __version__, results,
                       out) or {"file": None, "reason": "the SDRF step failed (see analysis_error.txt)"}
@@ -589,7 +599,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
            for p in out.files]
     out.report = results / "report.html"
     html = stage("report", report.render, ctx, m, processed, diffs, out.warnings, rel, settings, qcd, enrichment,
-                 ranked, insight, dose=dose_view, cys=cys_view, time=time_view)
+                 ranked, insight, dose=dose_view, cys=cys_view, time=time_view, psm=psm_view)
     if html is None:  # the fallback page: issues, notes and the volcano plots themselves
         out.issues = doctor.check(f)
         ctx["issues"] = [i.as_dict() for i in out.issues]
@@ -629,6 +639,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
         "dose_response": dose_info,
         "time_course": time_info,
         "cysteines": cys_info,
+        "psm_qc": psm_info,
         "sdrf": sdrf_info,
         "design": _design_summary(m, settings),
         "tmt": tmt_info,
@@ -712,6 +723,22 @@ def _cysteines(p, settings, results: Path, out: Outcome, dest: Path) -> tuple[di
         prot = f"{RESULTS}/cysteine_proteins.tsv"
     return (cys.summary(res, table=f"{RESULTS}/cysteine_sites.tsv", proteins=prot), cys.report_payload(res),
             problems + res.problems, res.notes)
+
+def _psm_qc(workdir: Path, settings, results: Path, out: Outcome, say) -> tuple[dict, dict | None, list, list[str]]:
+    """results/psm_qc.tsv when the search wrote psm.tsv files or a DIA-NN stats.tsv (psmqc.py). Returns
+    (analysis.json summary, the report's payload or None, problems for the doctor, notes)."""
+    from ionomos.downstream import psmqc
+
+    if not settings.psm_qc:
+        return psmqc.summary(None, reason="search quality is switched off (analysis.psm_qc)"), None, [], []
+    say("search quality per run (PSMs, mass error, missed cleavages)")
+    res = psmqc.run(workdir)
+    table = None
+    if res.found:
+        out.files.append(write_tsv(results / "psm_qc.tsv", psmqc.columns(res), psmqc.table_rows(res)))
+        table = f"{RESULTS}/psm_qc.tsv"
+    return (psmqc.summary(res, table), psmqc.report_payload(res), res.problems,
+            [f"search quality: {n}" for n in res.notes])
 
 def _design_summary(m, settings) -> dict:
     """Where each sample's condition came from, highest first (D47): sample_conditions, an input SDRF, the

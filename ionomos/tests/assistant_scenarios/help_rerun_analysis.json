@@ -1,0 +1,34 @@
+{
+  "id": "help_rerun_analysis",
+  "about": "A how-to from the FAQ.",
+  "state": "empty",
+  "question": "How do I re-run the analysis with other settings?",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "search_help",
+          "arguments": {
+            "query": "re-run the analysis with other settings"
+          }
+        }
+      ]
+    },
+    {
+      "content": "The steps are in the help entry \"How do I re-run the analysis with other settings?\" [help:faq.rerun]."
+    }
+  ],
+  "rubric": {
+    "must_call": [
+      "search_help"
+    ],
+    "must_cite": [
+      "help:faq.rerun"
+    ],
+    "refusal": false
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 2
+  }
+}

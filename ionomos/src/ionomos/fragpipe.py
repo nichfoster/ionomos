@@ -61,8 +61,8 @@ LAUNCHER_GLOBS = (
 )
 
 
-# Files that mean "the search produced its main table", per method. Missing
-# ones are recorded as warnings, not failures (names vary between versions).
+# Files that mean "the search produced its main table", per method kind (Config.kind, D54).
+# Missing ones are recorded as warnings, not failures (names vary between versions).
 EXPECTED_OUTPUTS = {
     "isoDTB": ("combined_modified_peptide_label_quant.tsv", "combined_modified_peptide.tsv"),
     "TMT": ("tmt-report/abundance_gene_MD.tsv", "tmt-report"),
@@ -96,6 +96,7 @@ class RunSpec:
     annotations: dict[str, str] = field(default_factory=dict)  # TMT: file name (in raw dir) -> content
     raw_dir: Path | None = None
     warnings: list[str] = field(default_factory=list)
+    kind: str = ""  # what the method behaves as (Config.kind); "" = its own key
 
     @property
     def run_dir(self) -> Path:
@@ -133,7 +134,7 @@ class RunSpec:
     engine_name = "FragPipe"  # the program run, for messages
 
     def expected_outputs(self) -> tuple[str, ...]:
-        return EXPECTED_OUTPUTS.get(self.method, ())
+        return EXPECTED_OUTPUTS.get(self.kind or self.method, ())
 
     @property
     def method_is_dia(self) -> bool:
@@ -300,7 +301,8 @@ def prepare(job: Job, cfg: Config) -> RunSpec:
 
     raw_dir = dest / plan["raw_dir"] if plan.get("raw_dir") else dest
     annotations: dict[str, str] = {}
-    if job.method == "TMT":
+    kind = cfg.kind(job.method)
+    if kind == "TMT":
         experiments = sorted({line[1] for line in lines})
         try:
             ov = parse_overrides({"tmt": overrides["tmt"]}) if overrides.get("tmt") else None
@@ -321,7 +323,7 @@ def prepare(job: Job, cfg: Config) -> RunSpec:
         job_id=job.id or 0, method=job.method, dest=dest, exe=exe, workflow_src=wf, fasta=fasta,
         manifest_lines=lines, threads=cfg.threads, ram_gb=cfg.ram_gb, timeout_minutes=cfg.timeout_minutes,
         config_tools_folder=cfg.config_tools_folder, config_diann=cfg.config_diann,
-        annotations=annotations, raw_dir=raw_dir, warnings=warnings,
+        annotations=annotations, raw_dir=raw_dir, warnings=warnings, kind=kind,
     )
 
 
@@ -516,7 +518,8 @@ EXPLANATIONS: list[tuple[str, str]] = [
      "FragPipe can't find DIA-NN: set 'DIA-NN exe' in Advanced (e.g. C:/DIA-NN/2.3.2/DiaNN.exe)"),
     (r"used by another process|cannot access the file",
      "A file was open in another program (Xcalibur, Excel, Explorer preview): close it, then Retry"),
-    (r"(?i)(RawFileReader|ThermoRawFileParser|error (loading|reading).{0,60}\.raw|\.raw.{0,60}(corrupt|truncated))",
+    (r"(?i)(RawFileReader|ThermoRawFileParser exit code [1-9]|ThermoRawFileParser.{0,40}(error|exception)|"
+     r"error (loading|reading).{0,60}\.raw|\.raw.{0,60}(corrupt|truncated))",
      "A .raw file couldn't be read: it may be incomplete or corrupt — re-copy it from the instrument PC"),
     (r"UnsupportedClassVersionError|Unsupported class file major version",
      "Wrong Java version: FragPipe must use its bundled Java — reinstall FragPipe or set its launcher again"),

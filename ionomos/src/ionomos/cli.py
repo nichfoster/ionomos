@@ -17,10 +17,14 @@ Command line.
     ionomos demo     [FOLDER] [--open]            a simulated experiment + its report (offline, no lab setup)
     ionomos help     [TOPIC] [--open]             plain-language help: prints TOPIC (NO_TABLE, pca, ...) and
                                                    writes help.html (--open: in the browser, at TOPIC)
+    ionomos ask      "QUESTION" [--experiment JOB_ID|NAME] [--item ID] [--json]
+                                                   the local assistant: an answer grounded in the job's log, the
+                                                   doctor's findings and the help; changes nothing (docs/ASSISTANT.md)
     ionomos init     [--root DIR] [--users DIR]   create folders + a config without the app (headless setup)
     ionomos qc-trend [--rebuild] [--open]         instrument QC: the QC-standard runs trended (logs/qc_trend.html)
     ionomos cancel   JOB_ID                       stop a running search / drop a queued job
     ionomos pause | resume                        hold / release the FragPipe queue
+    ionomos notify-test                           send a test message to the channels in config.yaml notify:
     ionomos repair-ledger [--force]               rebuild the job list from the experiment folders
     ionomos update                                git pull + reinstall (only when running from a git checkout)
 
@@ -36,7 +40,6 @@ import signal
 import sys
 import threading
 import time
-from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from ionomos import __version__
@@ -61,9 +64,10 @@ def _setup_logging(log_dir: Path | None, verbose: bool) -> None:
         root.addHandler(sh)
     if log_dir:
         log_dir.mkdir(parents=True, exist_ok=True)
+        from ionomos import health
         from ionomos.names import LOG_FILE
 
-        fh = RotatingFileHandler(log_dir / LOG_FILE, maxBytes=5_000_000, backupCount=5, encoding="utf-8")
+        fh = health.rotating_log_handler(log_dir / LOG_FILE)  # size-based, names.LOG_BACKUPS old files kept
         fh.setFormatter(fmt)
         root.addHandler(fh)
 
@@ -331,6 +335,9 @@ def cmd_check(args) -> int:
             detail + ("; jobs wait until it's set" if ok is False and label == "launcher" else ""))
     row(True if cfg.auto_run else None, "fragpipe.auto_run",
         "on: queued jobs are searched automatically" if cfg.auto_run else "off: jobs are only filed and queued")
+    from ionomos import notify
+
+    row(True if cfg.notify.get("enabled") else None, "notifications", notify.describe(cfg.notify))
     if paused(cfg.log_dir):
         row(None, "searches", "PAUSED (ionomos resume / app: Jobs -> Resume)")
     users = cfg.known_users()
@@ -366,6 +373,10 @@ def cmd_check(args) -> int:
     crashes = health.recent_crashes(cfg.log_dir, 1)
     if crashes:
         row(None, "last crash report", str(crashes[-1]))
+    from ionomos import assistant
+
+    st, why = assistant.state(assistant.settings_of(cfg))
+    row(True if st == "ready" else None, "assistant", why if st != "not_set_up" else f"not set up: {why}")
     print("\nall good" if ok_all else "\nfix the ✗ items above")
     return 0 if ok_all else 1
 
@@ -543,6 +554,11 @@ def cmd_init(args) -> int:
     return 1 if any(i.status == "fail" for i in items) else 0
 
 
+# what `analyze --method` takes besides the config's own method keys
+ANALYZE_METHODS = ("isoDTB", "TMT", "DIA", "LFQ", "DIA-NN", "MaxQuant", "Sage", "Spectronaut", "AlphaDIA",
+                   "MSstats", "MSstatsTMT", "PD", "table", "auto")
+
+
 def cmd_analyze(args) -> int:
     """Re-run the downstream analysis for a job (by id) or any experiment / FragPipe folder."""
     from ionomos import postprocess
@@ -552,6 +568,14 @@ def cmd_analyze(args) -> int:
         cfg = load(args.config, check_paths=False)
     except ConfigError:
         pass  # analysing a folder works without a lab config (defaults)
+    if args.method and args.method not in ANALYZE_METHODS:
+        # a method of the lab's own: postprocess.prepare reads it as its kind (like: / engine:, D54)
+        own = list(cfg.methods) if cfg is not None else []
+        key = next((k for k in own if k.lower() == args.method.lower()), None)
+        if key is None:
+            print(f"--method {args.method!r} is not one of {', '.join([*ANALYZE_METHODS, *own])}", file=sys.stderr)
+            return 2
+        args.method = key
     target = args.target
     if target.isdigit():
         if cfg is None or not cfg.database.is_file():
@@ -693,6 +717,27 @@ def cmd_help(args) -> int:
     return 0
 
 
+def cmd_ask(args) -> int:
+    """Ask the local assistant (assistant/, D49 / D57). Read-only. When the assistant is not set up, the model
+    is not answering or its answer can't be backed by what Ionomos knows, Ionomos's own text is printed."""
+    import json
+
+    from ionomos import assistant
+
+    cfg = _load(args, check_paths=False)
+    ans = assistant.ask(cfg, " ".join(args.question), experiment=args.experiment, item_id=args.item)
+    if args.json:
+        print(json.dumps(ans.as_dict(), indent=2, default=str))
+        return 0
+    print(ans.text)
+    if ans.sources:
+        print("\nSources:")
+        for line in ans.sources:
+            print(f"  {line}")
+    print(f"\n(assistant: {ans.outcome}" + (f", model {ans.model}" if ans.grounded else "") + ")")
+    return 0
+
+
 def cmd_attention(args) -> int:
     """What needs a person: list, show one, dismiss."""
     from ionomos import attention
@@ -780,6 +825,29 @@ def cmd_pause(args) -> int:
         resume(cfg.log_dir)
         print("searches resumed")
     return 0
+
+
+def cmd_notify_test(args) -> int:
+    """Send a test message on every channel in config.yaml notify: and say what happened to each."""
+    from ionomos import notify
+
+    cfg = _load(args, check_paths=False)
+    s = cfg.notify
+    chans = notify.channels(s)
+    if not chans:
+        print("notifications are not set up: config.yaml has no notify: channel (webhook, teams, slack or email).\n"
+              "Nothing was sent. See: ionomos help notify")
+        return 1
+    if not s["enabled"]:
+        print("notify.enabled is false: jobs send nothing. Testing the configured channel(s) anyway.")
+    print(f"sending a test message by {', '.join(chans)} (waiting up to {s['timeout_seconds']:g} s each) ...")
+    results = notify.send_test(s)
+    for r in results:
+        print(f" {'✓' if r.ok else '✗'} {r.channel:<8} {'sent' if r.ok else 'NOT sent'}: {r.detail}")
+    bad = [r for r in results if not r.ok]
+    print("\nall sent; check that the message arrived" if not bad
+          else f"\n{len(bad)} of {len(results)} could not be sent; jobs are not affected by this")
+    return 1 if bad else 0
 
 
 def cmd_repair_ledger(args) -> int:
@@ -870,10 +938,11 @@ def main(argv: list[str] | None = None) -> int:
     az = sub.add_parser("analyze", help="(re)run statistics, volcano plots and the report for a job or folder")
     az.add_argument("target", help="job id, experiment folder, a results folder from FragPipe, DIA-NN, MaxQuant, "
                                    "Spectronaut, AlphaDIA, or any protein / results table (.csv .tsv .txt .xlsx .parquet)")
-    az.add_argument("--method", choices=["isoDTB", "TMT", "DIA", "LFQ", "DIA-NN", "MaxQuant", "Sage", "Spectronaut", "AlphaDIA",
-                                         "MSstats", "MSstatsTMT", "PD", "table", "auto"], default=None,
-                    help="default: from ionomos.json, else detected from the files (FragPipe, DIA-NN, MaxQuant, "
-                         "Spectronaut, AlphaDIA, MSstats / MSstatsTMT format, Proteome Discoverer, any table)")
+    az.add_argument("--method", default=None, metavar="METHOD",
+                    help=f"one of {', '.join(ANALYZE_METHODS)}, or a method of your config.yaml (analysed as the "
+                         "method it is like:). Default: from ionomos.json, else detected from the files (FragPipe, "
+                         "DIA-NN, MaxQuant, Spectronaut, AlphaDIA, MSstats / MSstatsTMT format, Proteome "
+                         "Discoverer, any table)")
     az.add_argument("--control", help="control condition (default: recognised by name, e.g. DMSO)")
     az.add_argument("--compare", action="append", metavar="'A vs B'", help="comparison; repeatable")
     az.add_argument("--log2fc", type=float, help="fold-change threshold (log2)")
@@ -905,6 +974,12 @@ def main(argv: list[str] | None = None) -> int:
     hp.add_argument("--open", action="store_true", help="open help.html in the browser, at the topic")
     hp.add_argument("--out", metavar="DIR", help="folder for help.html (default: the log folder, else app data)")
     hp.set_defaults(fn=cmd_help)
+    ak = sub.add_parser("ask", help="ask the local assistant about a job, an issue or the help (read-only)")
+    ak.add_argument("question", nargs="+", help="the question, in plain words")
+    ak.add_argument("--experiment", metavar="JOB_ID|NAME", help="the job the question is about")
+    ak.add_argument("--item", metavar="ID", help="an attention item (ionomos attention lists them)")
+    ak.add_argument("--json", action="store_true", help="print the answer with its tool calls and citations as JSON")
+    ak.set_defaults(fn=cmd_ask)
     at = sub.add_parser("attention", help="what needs a person (analysis decisions, failed searches, ...)")
     at.add_argument("action", nargs="?", choices=["list", "show", "dismiss"], default="list")
     at.add_argument("item", nargs="?", help="item id (from the list)")
@@ -919,6 +994,8 @@ def main(argv: list[str] | None = None) -> int:
     cn.set_defaults(fn=cmd_cancel)
     sub.add_parser("pause", help="start no new FragPipe searches").set_defaults(fn=cmd_pause)
     sub.add_parser("resume", help="undo pause").set_defaults(fn=cmd_pause)
+    sub.add_parser("notify-test", help="send a test message to the channels in config.yaml notify:").set_defaults(
+        fn=cmd_notify_test)
     rl = sub.add_parser("repair-ledger", help="rebuild the job ledger from the experiment folders")
     rl.add_argument("--force", action="store_true")
     rl.set_defaults(fn=cmd_repair_ledger)

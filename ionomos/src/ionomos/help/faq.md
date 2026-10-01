@@ -91,6 +91,61 @@ Only a failed search can be retried (app → Jobs tab → **Retry**, or
 experiment again with other settings, drop a new copy of the raw files as a
 new folder (for example with `_redo` in the name).
 
+## Can I get a message when my search is done? {#faq.notify}
+
+Yes, if the person who looks after Ionomos turns it on. It is off by
+default, because nothing leaves the PC unless the lab asks for it
+([what a message holds](#safety.notify)).
+
+To set it up, edit `config.yaml` (the app has no tab for this yet). Under
+`notify:` set `enabled: true` and fill in at least one of:
+
+- `slack:` `url:` a Slack incoming-webhook address
+- `teams:` `url:` a Teams webhook address (in Teams: Workflows, "Post to a
+  channel when a webhook request is received")
+- `webhook:` `url:` any service that accepts a JSON POST
+- `email:` `host`, `port`, `from`, `to` and, if the server needs them,
+  `username` and `password`
+
+`on: [done, failed, held]` chooses which events send a message; "held"
+means a search is waiting for something (a FASTA, disk space). A waiting
+search sends one message per reason, not one every few seconds. To keep an
+address or the password out of the file, put it in an environment variable
+and give its name as `url_env:` or `password_env:`.
+
+Then run `ionomos notify-test`: it sends a test message to each one and
+says which arrived. Restart the watcher (app → **Stop**, **Start**) so it
+uses the new settings. A message that can't be sent never fails or slows a
+search ([A notification did not arrive](#trouble.notify)).
+
+## Can I ask Ionomos a question in plain words? {#faq.assistant}
+
+Yes, if your lab has set up the assistant: `ionomos ask "why did my search
+fail?" --experiment 12` (the job number is in the Jobs tab; an experiment's
+name works too). It answers from that job's log, what the analysis found and
+this help, and each statement ends with its source in square brackets, such as
+`[log:12#41]` (line 41 of job 12's search log) or `[help:faq.rerun]`
+(`ionomos help faq.rerun` shows it).
+
+- It only reads. It cannot retry, change, move or delete anything, whatever
+  you type. Use the buttons in the windows for that.
+- It runs on this computer. Nothing you ask and nothing about your data is
+  sent anywhere ([Your data stays on the computer](#safety.private)).
+- If it cannot back an answer with a source, it does not answer. You then get
+  Ionomos's own text: the likely causes, what to do, and the help entry.
+- It does not know FragPipe settings or statistics beyond what Ionomos did
+  with your data. Ask the person who looks after Ionomos for those.
+
+## The assistant says it is not set up {#faq.assistant-setup}
+
+That is a normal state, and everything else works without it. You still get
+Ionomos's own explanation of the problem and the matching help. Setting it up
+is a job for the person who looks after Ionomos: a model has to be installed
+on this computer and named under `assistant:` in `config.yaml`. `ionomos
+check` has a row named assistant that shows its state. "Not this PC" means the
+address in `config.yaml` points at another computer; Ionomos refuses that and
+sends nothing.
+
 ## Where is this help, and can I change it? {#faq.help}
 
 The report has a **Help** section at the end and a **?** beside each section.

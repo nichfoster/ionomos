@@ -113,7 +113,8 @@ def reparse(files: list[DraftFile], method: str, codes: dict[str, str] | None = 
 
 
 def has_control(method: str) -> bool:
-    """isoDTB is a ratio vs 0 per sample; TMT conditions live in the channel annotation, not the file names."""
+    """isoDTB is a ratio vs 0 per sample; TMT conditions live in the channel annotation, not the file names.
+    method here and in summarize() is the method's kind (Draft.kind_of), so a `like: TMT` method is TMT."""
     return method not in ("isoDTB", "TMT")
 
 
@@ -192,8 +193,8 @@ class Answer:
     control: str = ""
 
 
-def validate(a: Answer, known_methods: list[str]) -> str:
-    """Return an error message, or '' if the answer is usable."""
+def validate(a: Answer, known_methods: list[str], kinds: dict[str, str] | None = None) -> str:
+    """Return an error message, or '' if the answer is usable. kinds: Draft.kinds."""
     if not a.user.strip():
         return "User is required"
     if not re.match(r"^[A-Za-z0-9._-]+$", a.user.strip()):
@@ -207,7 +208,7 @@ def validate(a: Answer, known_methods: list[str]) -> str:
             return "Date must be YYYY-MM-DD (or blank)"
     if not a.files:
         return "At least one raw file is required"
-    if a.control and has_control(a.method) and a.control not in conditions_of(a.files):
+    if a.control and has_control((kinds or {}).get(a.method, a.method)) and a.control not in conditions_of(a.files):
         return f"Control {a.control!r} is not one of the conditions — pick it again"
     seen = set()
     for f in a.files:
@@ -248,7 +249,7 @@ def to_overrides(a: Answer, d: Draft) -> Overrides:
             ov.files[f.filename] = FileOverride(
                 experiment=exp, bioreplicate=rep, fraction=int(frac) if frac else -1
             )
-    if a.control and has_control(a.method):
+    if a.control and has_control(d.kind_of(a.method)):
         automatic = guess_control(conditions_of(a.files), d.control_keywords)
         if a.control != automatic or d.control:  # pin it only when it isn't what the analysis would pick anyway
             ov.analysis["control"] = a.control
@@ -455,7 +456,7 @@ class TkResolver:
 
         def update_summary(*_):
             try:
-                files, method = current_files(), meth_v.get()
+                files, method = current_files(), d.kind_of(meth_v.get())
                 conds = conditions_of(files)
                 for w in (ctl_lbl, ctl_cb, ctl_note):
                     w.pack_forget()
@@ -521,7 +522,7 @@ class TkResolver:
             if not win.winfo_exists():
                 return
             a = answer()
-            msg = validate(a, d.known_methods)
+            msg = validate(a, d.known_methods, d.kinds)
             if msg:
                 err_v.set(msg)
                 return

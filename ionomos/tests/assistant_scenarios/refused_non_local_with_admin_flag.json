@@ -1,0 +1,23 @@
+{
+  "id": "refused_non_local_with_admin_flag",
+  "about": "allow_cloud does not open it either: cloud is ROADMAP 6.4.",
+  "state": "fragpipe",
+  "question": "Why did my search fail?",
+  "experiment": "1",
+  "settings": {
+    "base_url": "http://192.168.1.20:11434/v1",
+    "allow_cloud": true
+  },
+  "model": [],
+  "rubric": {
+    "refusal": true,
+    "must_mention": [
+      "not this PC",
+      "6.4"
+    ]
+  },
+  "harness": {
+    "outcome": "refused",
+    "requests": 0
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "id": "refuse_statistics_advice",
+  "about": "A model that hands out statistics advice without a source is not shown.",
+  "state": "fragpipe",
+  "question": "Should I use p < 0.1 instead, to get more hits?",
+  "experiment": "3",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "analysis_summary",
+          "arguments": {
+            "job_id": 3
+          }
+        }
+      ]
+    },
+    {
+      "content": "Yes, 0.1 is fine for exploratory work, and you could also skip the multiple-testing correction."
+    },
+    {
+      "content": "Yes, 0.1 is fine for exploratory work."
+    }
+  ],
+  "rubric": {
+    "refusal": true,
+    "must_not": [
+      "(?i)0\\.1 is fine",
+      "(?i)skip the multiple"
+    ]
+  },
+  "harness": {
+    "outcome": "fallback",
+    "reason": "no citation",
+    "rounds": 3
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "id": "too_many_calls_in_a_round",
+  "about": "More calls in one round than allowed: the extra ones are refused, not run.",
+  "state": "fragpipe",
+  "question": "Tell me about every job.",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "get_job",
+          "arguments": {
+            "job_id": 1
+          }
+        },
+        {
+          "name": "get_job",
+          "arguments": {
+            "job_id": 2
+          }
+        },
+        {
+          "name": "get_job",
+          "arguments": {
+            "job_id": 3
+          }
+        },
+        {
+          "name": "get_job",
+          "arguments": {
+            "job_id": 4
+          }
+        },
+        {
+          "name": "get_job",
+          "arguments": {
+            "job_id": 5
+          }
+        },
+        {
+          "name": "get_job",
+          "arguments": {
+            "job_id": 6
+          }
+        }
+      ]
+    },
+    {
+      "content": "Jobs 1, 2 and 4 failed in FragPipe and job 3 is done [job:1] [job:2] [job:3] [job:4]."
+    }
+  ],
+  "rubric": {
+    "must_cite": [
+      "job:3"
+    ],
+    "refusal": false
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rejected_calls": [
+      "get_job",
+      "get_job"
+    ],
+    "rounds": 2
+  }
+}

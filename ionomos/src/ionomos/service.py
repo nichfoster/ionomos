@@ -654,7 +654,10 @@ def diagnostics(config_path: Path, log_lines: int = 150) -> str:
         cfg_text = Path(config_path).read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
         cfg_text = f"(could not read: {exc})"
-    section("config.yaml", cfg_text)
+    from ionomos import notify
+
+    hide = notify.file_secrets(config_path)  # webhook addresses / SMTP password never go in a report (D58)
+    section("config.yaml", notify.redact_config_text(cfg_text, hide))
 
     if log_dir and log_dir.is_dir():
         lf = names.log_file(log_dir)
@@ -680,7 +683,7 @@ def diagnostics(config_path: Path, log_lines: int = 150) -> str:
         section("inbox", "\n".join(items) or "(empty)")
         for n in notes[-5:]:
             section(f"note {n.name}", n.read_text(encoding="utf-8", errors="replace"))
-    return "\n".join(out) + "\n"
+    return notify.scrub("\n".join(out) + "\n", hide)
 
 
 def save_diagnostics(config_path: Path) -> tuple[str, Path | None]:
@@ -738,8 +741,9 @@ def save_diagnostics_zip(config_path: Path, dest: Path | None = None, note: str 
     import tempfile
     import zipfile
 
-    from ionomos import fragpipe, health
+    from ionomos import fragpipe, health, notify
 
+    hide = notify.file_secrets(config_path)  # never in a bundle: webhook addresses, the SMTP password (D58)
     stamp = f"{datetime.datetime.now():%Y%m%d-%H%M%S}"
     paths = _raw_paths(config_path)
     log_dir = paths.get("log_dir")
@@ -754,7 +758,10 @@ def save_diagnostics_zip(config_path: Path, dest: Path | None = None, note: str 
         try:
             if src.is_file():
                 data = src.read_bytes()
-                z.writestr(arc, data[-cap:] if len(data) > cap else data)
+                data = data[-cap:] if len(data) > cap else data
+                for secret in hide:
+                    data = data.replace(secret.encode("utf-8"), notify.HIDDEN.encode())
+                z.writestr(arc, data)
         except OSError:
             pass
 
@@ -768,9 +775,13 @@ def save_diagnostics_zip(config_path: Path, dest: Path | None = None, note: str 
         app_log = appdata_dir() / "app.log"
         for f in sorted(app_log.parent.glob("app.log*"))[:3]:
             add(z, f, f"logs/app/{f.name}")
-        add(z, Path(config_path), "config.yaml")
+        try:
+            z.writestr("config.yaml", notify.redact_config_text(
+                Path(config_path).read_text(encoding="utf-8", errors="replace"), hide))
+        except OSError:
+            pass
         if log_dir and log_dir.is_dir():
-            for f in sorted([*log_dir.glob("ionomos.log*"), *log_dir.glob("labwatch.log*"), *log_dir.glob("app.log*")])[:8]:
+            for f in sorted([*names.log_files(log_dir), *log_dir.glob("app.log*")])[:8]:
                 add(z, f, f"logs/{f.name}")
             for f in health.recent_crashes(log_dir, 5):
                 add(z, f, f"crashes/{f.name}")

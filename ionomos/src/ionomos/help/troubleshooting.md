@@ -219,16 +219,49 @@ without spaces such as `C:\ThermoRawFileParser`, and set the method's
 ## Sage settings missing or unusable {#search.hold-sage-config}
 
 The method names a Sage settings file (`sage_config:`) that isn't in the
-workflow folder, isn't valid JSON, or asks for TMT quantification, which
-Ionomos can't analyse from Sage yet. Put a working Sage JSON there (the one
-from a search that worked: `results.json` in its output folder is a complete
-copy), or remove `sage_config:` to use Ionomos' defaults: tryptic,
-high-resolution MS2, label-free quantification.
+workflow folder, isn't valid JSON, or names a TMT kit Sage doesn't have
+(`quant.tmt` must be `Tmt6`, `Tmt10`, `Tmt11`, `Tmt16`, `Tmt18` or
+`{"User": [reporter masses]}`). Put a working Sage JSON there (the one from a
+search that worked: `results.json` in its output folder is a complete copy),
+or remove `sage_config:` to use Ionomos' defaults: tryptic, high-resolution
+MS2, label-free quantification.
+
+The job is also held when the method's `sage_args` has `--parquet`: Ionomos
+reads Sage's `.tsv` tables, so take that option out.
 
 ## The method is no longer set up {#search.hold-method}
 
 The experiment's method was removed from the settings after it was queued.
 Add the method back (tab 3 Methods), or change the experiment's method.
+
+## A notification did not arrive {#trouble.notify}
+
+A message that can't be sent is given up on after a few seconds and noted
+once in the log ("could not notify by ..."). The search itself is not
+affected: its status, `DONE.txt` / `FAILED.txt` and the report are written
+before the message is sent.
+
+Run `ionomos notify-test`. It sends a test message to every channel in
+`config.yaml` and says what happened to each:
+
+- **notifications are not set up**: there is no channel under `notify:`
+  ([how to set one up](#faq.notify)).
+- **notify.enabled is false**: the channels work, but jobs send nothing
+  until `enabled: true`.
+- **the server answered HTTP 404 / 403 / 410**: the webhook address is
+  wrong or was removed. Make a new one in Teams or Slack and paste it in.
+- **could not connect** or **no answer in time**: the PC has no route to
+  the service (no internet, a firewall, a proxy), or the address is wrong.
+- **environment variable ... is not set**: `url_env` / `password_env`
+  names a variable the watcher can't see. Set it for the Windows account
+  that runs Ionomos, then sign out and in again.
+- **email**: "authentication" errors mean the user name or password is
+  wrong, or the mail server wants an app password; "certificate" errors
+  mean `security` or `port` don't match the server (587 with `starttls`,
+  465 with `ssl`).
+
+The test works but jobs send nothing: restart the watcher after changing
+`config.yaml`, and check `on:` lists the event (`done`, `failed`, `held`).
 
 ## Why a search fails {#search.failed}
 
@@ -409,6 +442,31 @@ the experiment's `experiment.yaml` and re-run the analysis. The replicate
 number then becomes a blocking factor in the model, so each comparison is
 made within a batch ([How to re-run](#faq.rerun)). Next time, randomise the
 preparation and run order.
+
+## Precursor masses are off in some runs {#issue.PSM_MASS_ERROR}
+
+In the runs named, the measured precursor masses are 10 ppm or more away from
+the calculated ones (the median over the run's PSMs, from FragPipe's
+`psm.tsv`). The usual cause is the instrument's mass calibration: a lock mass
+that was off, or a calibration that is due. The search corrects a steady
+offset, so the results usually stand, but tell whoever looks after the
+instrument and calibrate before the next runs. If a flagged run also has far
+fewer PSMs than the others, re-acquire it. A search that allows mass offsets
+can also give this warning without anything being wrong. The numbers per run
+are in the [Search quality](#qc.psm) tab. The 10 ppm limit is a wide default,
+not yet the lab's own.
+
+## Many missed cleavages in some runs {#issue.PSM_MISSED_CLEAVAGES}
+
+In the runs named, half or more of the PSMs are peptides with a site the
+enzyme did not cut. That points to an incomplete digestion (too little
+enzyme, too short, the wrong pH, old enzyme), or to a workflow whose enzyme is
+not the one used. A sample digested less completely than the others measures
+different peptides, so its quantities can differ for that reason alone:
+compare it with its replicates in the [scorecard](#qc.card) and
+[PCA](#qc.pca) before trusting it. The numbers per run are in the
+[Search quality](#qc.psm) tab. The 50% limit is a wide default, not yet the
+lab's own.
 
 ## Time course: the time points need a look {#issue.TIMES}
 

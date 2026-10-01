@@ -11,14 +11,18 @@ Sage run directly by the watcher, for a DDA method with `engine: sage` (D51, ROA
         sage_config: lab_sage.json                 # optional: the lab's own Sage parameters, in workflow_dir
         sage_args: "--batch-size 2"                # optional, added to the sage command line
 
+A lab sage_config with quant.tmt (Tmt6 ... Tmt18) makes it a TMT job: Sage writes tmt.tsv, the reporter ions per
+spectrum, and the analysis reads that instead of lfq.tsv (D56). experiment.yaml's tmt: map names the channels.
+
 Sage reads mzML, not Thermo .raw, so a job has two steps: ThermoRawFileParser converts each .raw to
 <experiment>/sage_mzml/<name>.mzML (kept, so a retry doesn't convert again), then Sage searches them with
 ionomos_run/sage.json, the job's reproducible settings. The settings are the lab's own Sage JSON, or
 Ionomos' defaults for high-resolution DDA with label-free quantification; only the FASTA, the mzML paths
-and the output folder are replaced. Both steps run inside one process, `ionomos sage-job
-ionomos_run/sage_job.json`, so the shared run loop (fragpipe.run: log, cancel, stop, timeout, kill the
-process tree) covers them as it covers FragPipe. Output goes to <experiment>/sage/; the analysis rolls
-lfq.tsv up to proteins (downstream/engines.py).
+and the output folder are replaced (and label-free quantification is switched on, unless the job is TMT).
+Both steps run inside one process, `ionomos sage-job ionomos_run/sage_job.json`, so the shared run loop
+(fragpipe.run: log, cancel, stop, timeout, kill the process tree) covers them as it covers FragPipe. Output
+goes to <experiment>/sage/; the analysis rolls lfq.tsv, or tmt.tsv with results.sage.tsv, up to proteins
+(downstream/engines.py).
 
 Sage sends anonymous usage telemetry by default (version, sizes, run time, OS). Ionomos switches it off
 whenever the installed Sage has the flag for it: nothing about a lab's runs should leave the PC unasked.
@@ -36,6 +40,7 @@ from pathlib import Path
 from ionomos.config import Config
 from ionomos.fragpipe import Hold, JobError, RunSpec, _find_file, check_raws
 from ionomos.ledger import Job
+from ionomos.manifest import OverridesError, parse_overrides, tmt_annotation_files
 
 WORKDIR = "sage"
 MZML_DIR = "sage_mzml"       # converted raw files; Ionomos' own, safe to delete once the search is done
@@ -49,6 +54,7 @@ CONVERTER_CANDIDATES = ("C:/ThermoRawFileParser*/ThermoRawFileParser.exe",
                         "C:/Program Files/ThermoRawFileParser*/ThermoRawFileParser.exe")
 # read directly by Sage (Bruker .d from 0.14 on)
 DIRECT = (".mzml", ".mzml.gz", ".d")
+TMT_KITS = ("Tmt6", "Tmt10", "Tmt11", "Tmt16", "Tmt18")   # Sage's quant.tmt values; or {"User": [masses]}
 
 # Tryptic, high-resolution MS1 and MS2 (Orbitrap HCD), carbamidomethyl C, oxidised M, label-free
 # quantification with match-between-runs style feature mapping. A lab with other needs gives sage_config.
@@ -134,10 +140,23 @@ def load_lab_config(path: Path) -> dict:
     if not isinstance(data, dict):
         raise Hold(f"Sage settings {path.name} can't be read as JSON (it is not an object); fix the file in "
                    f"{path.parent}")
-    if (data.get("quant") or {}).get("tmt"):
-        raise Hold(f"Sage settings {path.name} ask for TMT quantification, which Ionomos can't analyse from Sage "
-                   f"yet; remove quant.tmt (label-free), or search TMT with FragPipe")
+    quant = data.get("quant")
+    if quant is not None and not isinstance(quant, dict):
+        raise Hold(f"Sage settings {path.name}: quant must be an object; fix the file in {path.parent}")
+    kit = (quant or {}).get("tmt")
+    user = isinstance(kit, dict) and isinstance(kit.get("User"), list) and len(kit["User"]) > 0
+    if kit and not user and not (isinstance(kit, str) and kit in TMT_KITS):
+        raise Hold(f"Sage settings {path.name}: quant.tmt is {kit!r}, but Sage knows {', '.join(TMT_KITS)} or "
+                   f'{{"User": [reporter masses]}}; fix the file in {path.parent}')
     return data
+
+
+def tmt_kit(config: dict | None) -> str:
+    """'Tmt16', 'User (8 reporter masses)' or '' (label-free): what a Sage JSON's quant.tmt asks for."""
+    kit = ((config or {}).get("quant") or {}).get("tmt")
+    if isinstance(kit, dict):
+        return f"User ({len(kit.get('User') or [])} reporter masses)"
+    return str(kit or "")
 
 
 @dataclass
@@ -167,8 +186,12 @@ class SageSpec(RunSpec):
     def console_log(self) -> Path:
         return self.run_dir / CONSOLE_LOG
 
+    @property
+    def tmt(self) -> str:  # the TMT kit of a lab sage_config, '' for a label-free job
+        return tmt_kit(self.lab_config)
+
     def expected_outputs(self) -> tuple[str, ...]:
-        return ("lfq.tsv",)
+        return ("tmt.tsv",) if self.tmt else ("lfq.tsv",)
 
     def command(self) -> list[str]:
         from ionomos.service import ionomos_command
@@ -189,8 +212,8 @@ class SageSpec(RunSpec):
         """sage.json: the lab's settings or the defaults, with this job's FASTA, files and output folder."""
         cfg = json.loads(json.dumps(self.lab_config if self.lab_config is not None else DEFAULT_CONFIG))
         cfg.setdefault("database", {})["fasta"] = str(self.fasta)
-        quant = cfg.setdefault("quant", {})
-        quant["lfq"] = True   # the analysis reads lfq.tsv
+        if not self.tmt:
+            cfg.setdefault("quant", {})["lfq"] = True   # the analysis reads lfq.tsv (a TMT job: tmt.tsv)
         cfg["mzml_paths"] = [p for p, _raw in self.inputs()]
         cfg["output_directory"] = str(self.workdir)
         return cfg
@@ -242,12 +265,30 @@ def prepare(job: Job, cfg: Config) -> SageSpec:
         if key in stems and stems[key] != raw:
             raise JobError(f"two raw files share the name {Path(raw).stem}: {stems[key]} and {raw}")
         stems[key] = raw
+    args = _args(mcfg.extra.get("sage_args"))
+    if "--parquet" in args:
+        raise Hold(f"Sage settings: methods.{job.method}.sage_args has --parquet, and Ionomos reads Sage's .tsv "
+                   f"tables (lfq.tsv, tmt.tsv, results.sage.tsv); remove it in config.yaml")
     spec = SageSpec(job_id=job.id or 0, method=job.method, dest=dest, exe=exe,
                     workflow_src=template or Path(CONFIG_NAME), fasta=fasta, manifest_lines=lines,
                     threads=cfg.threads, ram_gb=0, timeout_minutes=cfg.timeout_minutes,
                     raw_dir=dest / plan["raw_dir"] if plan.get("raw_dir") else dest, converter=converter,
-                    lab_config=lab, args=_args(mcfg.extra.get("sage_args")))
-    if lab is not None and (lab.get("quant") or {}).get("lfq") is False:
+                    lab_config=lab, args=args)
+    if spec.tmt:
+        plexes = sorted({line[1] for line in lines})
+        try:  # the same check as for a FragPipe TMT job: a plexes: map must name every plex
+            ov = parse_overrides({"tmt": overrides["tmt"]}) if overrides.get("tmt") else None
+            named = tmt_annotation_files(ov, plexes) if ov else {}
+        except OverridesError as exc:
+            raise JobError(str(exc)) from exc
+        if not named:
+            spec.warnings.append("TMT job without a tmt: channel map in experiment.yaml: the channels will be named "
+                                 "<plex>_<channel> and need their conditions from the Analysis tab or an SDRF")
+        if len({line[2] for line in lines}) > 1:
+            spec.warnings.append(f"the {job.method} file names carry replicate numbers, so each sample and "
+                                 f"replicate is read as its own TMT plex; name TMT files <plex>_F<fraction> "
+                                 f"(naming.methods.{job.method}: {{like: TMT}})")
+    elif lab is not None and (lab.get("quant") or {}).get("lfq") is False:
         spec.warnings.append(f"{template.name} has label-free quantification off; switched on for this job "
                              "(the analysis reads lfq.tsv)")
     return spec
@@ -282,13 +323,16 @@ def describe(cfg: Config, key: str) -> list[tuple[bool | None, str]]:
         ok, text = found is not None, f"Sage settings {m.extra['sage_config']}" + ("" if found else " missing")
         if found:
             try:
-                load_lab_config(found)
+                kit = tmt_kit(load_lab_config(found))
+                text += f" (TMT quantification, {kit}: the analysis reads tmt.tsv)" if kit else ""
             except Hold as exc:
                 ok, text = False, str(exc)
         out.append((ok, text))
     else:
         out.append((None, "no lab Sage settings: Ionomos' defaults (tryptic, high-resolution MS2, label-free); "
-                          "give sage_config for your own"))
+                          "give sage_config for your own (TMT needs one, with quant.tmt)"))
+    if "--parquet" in _args(m.extra.get("sage_args")):
+        out.append((False, "sage_args has --parquet: Ionomos reads Sage's .tsv tables, remove it"))
     return out
 
 

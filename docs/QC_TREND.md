@@ -60,6 +60,28 @@ recomputed from spectra.
 | Missed cleavages | `Average.Missed.Tryptic.Cleavages` | mean `Number of Missed Cleavages` | higher |
 | Mean charge | `Average.Peptide.Charge` | mean `Charge` (the 2+/3+/… mix is kept too) | either way |
 
+The same reader (`downstream/qcmetrics.py`) feeds the **Search quality** tab
+of every experiment's report (D55, [WORKFLOWS.md](WORKFLOWS.md)): per raw
+file, the mass-error quartiles, missed cleavages, charge states and peptide
+length. That tab shows one experiment's runs side by side; this page follows
+the QC standard over time.
+
+**DDA searched by Sage** (`engine: sage`) is read from `results.sage.tsv`,
+per file: target PSMs of rank 1 at `spectrum_q` ≤ 1 %.
+
+| Metric | Sage `results.sage.tsv` |
+|---|---|
+| PSMs | rows that pass |
+| Peptides | distinct `peptide` at `peptide_q` ≤ 1 % |
+| Proteins | distinct `proteins` entries at `protein_q` ≤ 1 % (a count of protein sets, not of razor groups) |
+| Signal | summed `ms2_intensity` (matched fragment intensity, not MS1) |
+| MS1 mass error | median of `expmass` vs `calcmass`, ppm, isotope-error corrected. It is computed from the masses so that it is signed whatever a Sage version writes in `precursor_ppm` |
+| RT shift | `rt` (minutes) of the 200 peptides with the most intense spectra |
+| Missed cleavages, mean charge | mean `missed_cleavages`, mean `charge` |
+
+There is no MS2 mass error from Sage: its `fragment_ppm` is an unsigned
+average. The column names are from Sage's source, not from a real run.
+
 **RT shift** is the median, over the peptides both share, of each peptide's
 RT minus its median RT in the baseline runs. At least 5 shared peptides are
 needed. That makes the "fixed peptide set" the standard's own most intense
@@ -147,7 +169,7 @@ back within the baseline closes the item by itself. A run with no numbers
 |---|---|
 | The store | `<log_dir>/qc_trend.jsonl`: one JSON object per line, appended. A re-searched run's new line replaces its old one when read, and the file is compacted when mostly superseded. It is Ionomos' own file: experiment folders are only read. |
 | The page | `<log_dir>/qc_trend.html`: self-contained (the report's stylesheet inlined, static SVG charts, no script, no network). Rewritten after each QC run, and by `ionomos qc-trend`. |
-| The code | `qctrend.py` (matching, store, rules, hook), `downstream/qcmetrics.py` (reading the tables), `downstream/qcpage.py` (the page) |
+| The code | `qctrend.py` (matching, store, rules, hook), `downstream/qcmetrics.py` (reading the tables: DIA-NN, FragPipe, Sage), `downstream/qcpage.py` (the page) |
 
 ## Commands
 
@@ -181,6 +203,7 @@ qc_trend:
 ## Not yet
 
 - TMT runs are not trended (a TMT QC standard is rare).
+- MaxQuant searches are not trended yet (`engine: maxquant`).
 - The RT shift for DIA-NN 2.x reads `report.tsv` only; with only
   `report.parquet`, the other metrics still come from `report.stats.tsv`.
 - One `instrument` label per config. Runs from two instruments that share a

@@ -434,6 +434,33 @@ what your current replicates can find, and how many replicates your fold-change
 cut-off would need. Use it to plan the next experiment. See
 [Power](#glossary.power).
 
+## Search quality {#qc.psm}
+
+What the search made of each raw file, read from FragPipe's `psm.tsv` (a
+[PSM](#glossary.peptides) is one spectrum matched to a peptide). The other
+tabs are about samples; this one is about the instrument and the sample
+preparation. Runs of one experiment should look alike:
+
+- **PSMs, peptides, proteins**: a run far below the others is a weak
+  injection or a failed spray.
+- **Mass error**: measured minus calculated precursor mass, in ppm. The
+  median says how well the instrument was calibrated, and the middle half how
+  much it scatters. Close to 0 and tight is good. A run is flagged at 10 ppm
+  or more ([what to do](#issue.PSM_MASS_ERROR)).
+- **Missed cleavage**: the share of PSMs whose peptide has a site the enzyme
+  did not cut. A sample far above the others was digested less completely,
+  so different peptides were measured for it. A run is flagged at 50% or
+  more ([what to do](#issue.PSM_MISSED_CLEAVAGES)).
+- **Charge states** (2+, 3+, …) and **length**: they shift with the spray,
+  the gradient and the digestion. One run unlike the rest is worth a look.
+
+The two limits are set wide and are not yet the lab's own, so an unflagged
+run is not proof of a good one: compare the runs. For TMT, a run is a
+fraction of a plex, not a sample, and fractions differ from each other. With
+DIA, the tab shows DIA-NN's own summary of each run instead. Everything is
+also in `results\psm_qc.tsv`. To skip it, set `psm_qc: false` under
+`analysis:`.
+
 ## Methods and settings {#report.methods}
 
 A paragraph describing the analysis, ready to paste into a notebook or a
@@ -475,7 +502,7 @@ Every file the analysis wrote, next to the report in `results\`:
 - a table with all comparisons side by side,
 - `volcano_<comparison>.svg`: the static plot, for slides,
 - `enrichment.tsv`, `gene_set_ranks.tsv`, `sample_qc.tsv`,
-  `presence_absence.tsv`, `analysis.json`, `sdrf.tsv`.
+  `presence_absence.tsv`, `psm_qc.tsv`, `analysis.json`, `sdrf.tsv`.
 
 ## Link, print and theme {#report.link}
 

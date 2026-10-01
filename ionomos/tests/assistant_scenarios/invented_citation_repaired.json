@@ -1,0 +1,29 @@
+{
+  "id": "invented_citation_repaired",
+  "about": "An invented citation gets one chance to be corrected.",
+  "state": "fragpipe",
+  "question": "Why did my search fail?",
+  "experiment": "1",
+  "model": [
+    {
+      "content": "The disk was full [log:1#99]."
+    },
+    {
+      "content": "FragPipe ran out of memory [log:1#5]."
+    }
+  ],
+  "rubric": {
+    "must_cite": [
+      "log:1#5"
+    ],
+    "must_not": [
+      "(?i)disk was full"
+    ],
+    "refusal": false
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 2,
+    "requests": 2
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "id": "failed_jobs_of_a_user",
+  "about": "Filters are arguments checked against the schema (status, user).",
+  "state": "fragpipe",
+  "question": "Which of Isaac's experiments failed?",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "list_experiments",
+          "arguments": {
+            "status": "failed",
+            "user": "Isaac"
+          }
+        }
+      ]
+    },
+    {
+      "content": "One: IJD05_isoDTB_FLAGpull, job 5 [job:5]."
+    }
+  ],
+  "rubric": {
+    "must_call": [
+      "list_experiments"
+    ],
+    "must_cite": [
+      "job:5"
+    ],
+    "must_mention": [
+      "IJD05_isoDTB_FLAGpull"
+    ],
+    "refusal": false
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 2
+  }
+}

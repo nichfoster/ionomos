@@ -191,6 +191,7 @@ class Worker:
               reason, severity="input", causes=_waiting_causes(reason),
               fixes=["Fix what's named above (the Setup checklist, tab ✓, shows it too); the search then starts "
                      "by itself — nothing else to do"])
+        _notify(self.cfg, "held", job, reason)
 
     # ------------------------------------------------------------- running --
 
@@ -283,6 +284,7 @@ class Worker:
               + (f"Hits:\n{hits}" if hits else "")
               + ("".join(f"Note: {w}\n" for w in warnings)))
         log.info("job %d: done%s", job.id, f" ({len(warnings)} warning(s))" if warnings else "")
+        _notify(self.cfg, "done", job, headline or "", summary)
 
     def _postprocess(self, job: Job, spec: fragpipe.RunSpec) -> tuple[list[str], dict]:
         """Downstream analysis (never fails the job; see postprocess.py)."""
@@ -319,6 +321,8 @@ class Worker:
                   f"After fixing the cause: Ionomos app -> Run & Test -> Retry a failed job, "
                   f"or  ionomos retry {job.id}\n")
         log.error("job %d failed: %s", job.id, reason)
+        if reason != "cancelled by user":
+            _notify(self.cfg, "failed", job, reason)
 
 
 # -------------------------------------------------------- telling a person --
@@ -355,3 +359,14 @@ def _close(cfg, job: Job, *kinds: str) -> None:
             attention.resolve_where(getattr(cfg, "log_dir", None), kind=kind, job_id=job.id)
     except Exception:  # noqa: BLE001
         log.exception("could not close attention items for job %s", job.id)
+
+
+def _notify(cfg, event: str, job: Job, reason: str = "", summary: dict | None = None) -> None:
+    """A message to the lab's channel (notify.py; off unless config.yaml notify: asks). Called after the
+    status is recorded; it returns at once and can't fail the job."""
+    try:
+        from ionomos import notify
+
+        notify.announce(cfg, event, job, reason, summary)
+    except Exception:  # noqa: BLE001
+        log.warning("could not notify about job %s", job.id)
