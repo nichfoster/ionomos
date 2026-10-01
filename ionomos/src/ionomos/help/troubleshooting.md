@@ -410,6 +410,31 @@ number then becomes a blocking factor in the model, so each comparison is
 made within a batch ([How to re-run](#faq.rerun)). Next time, randomise the
 preparation and run order.
 
+## Precursor masses are off in some runs {#issue.PSM_MASS_ERROR}
+
+In the runs named, the measured precursor masses are 10 ppm or more away from
+the calculated ones (the median over the run's PSMs, from FragPipe's
+`psm.tsv`). The usual cause is the instrument's mass calibration: a lock mass
+that was off, or a calibration that is due. The search corrects a steady
+offset, so the results usually stand, but tell whoever looks after the
+instrument and calibrate before the next runs. If a flagged run also has far
+fewer PSMs than the others, re-acquire it. A search that allows mass offsets
+can also give this warning without anything being wrong. The numbers per run
+are in the [Search quality](#qc.psm) tab. The 10 ppm limit is a wide default,
+not yet the lab's own.
+
+## Many missed cleavages in some runs {#issue.PSM_MISSED_CLEAVAGES}
+
+In the runs named, half or more of the PSMs are peptides with a site the
+enzyme did not cut. That points to an incomplete digestion (too little
+enzyme, too short, the wrong pH, old enzyme), or to a workflow whose enzyme is
+not the one used. A sample digested less completely than the others measures
+different peptides, so its quantities can differ for that reason alone:
+compare it with its replicates in the [scorecard](#qc.card) and
+[PCA](#qc.pca) before trusting it. The numbers per run are in the
+[Search quality](#qc.psm) tab. The 50% limit is a wide default, not yet the
+lab's own.
+
 ## Time course: the time points need a look {#issue.TIMES}
 
 Ionomos found what looks like a time course but couldn't place every

@@ -1388,17 +1388,17 @@
 
   // ------------------------------------------------------------------- QC
   const QC_TABS = [["card", "Sample scorecard"], ["pca", "PCA"], ["corr", "Correlation"], ["missing", "Missing values"], ["mnar", "Missing vs intensity"], ["dist", "Distributions"], ["cv", "CV"],
-    ["mv", "Mean–variance"], ["rank", "Abundance rank"], ["ids", "Identifications"], ["imp", "Imputation"], ["power", "Power"]];
+    ["mv", "Mean–variance"], ["rank", "Abundance rank"], ["ids", "Identifications"], ["imp", "Imputation"], ["power", "Power"], ["psm", "Search quality"]];
   let qcTab = null;
   function renderQC() {
     const host = $("#qc");
     if (!host) return;
-    const tabs = QC_TABS.filter(([k]) => (k !== "imp" || D.imp) && (k !== "card" || (D.qc.scorecard && D.qc.scorecard.length)) && (k !== "mnar" || D.qc.mnar) && (k !== "power" || D.qc.power) && (k !== "mv" || D.kind !== "ratio" || nS > 2));
+    const tabs = QC_TABS.filter(([k]) => (k !== "imp" || D.imp) && (k !== "card" || (D.qc.scorecard && D.qc.scorecard.length)) && (k !== "mnar" || D.qc.mnar) && (k !== "power" || D.qc.power) && (k !== "mv" || D.kind !== "ratio" || nS > 2) && (k !== "psm" || D.qc.psm));
     if (!qcTab || !tabs.some(([k]) => k === qcTab)) qcTab = tabs.some(([k]) => k === "card") ? "card" : "pca";
     host.innerHTML = "<div class='tabs'>" + tabs.map(([k, t]) => "<button data-k='" + k + "'" + (k === qcTab ? " class='on'" : "") + ">" + t + "</button>").join("") + "</div><div id='qcbody'></div>";
     $$(".tabs button", host).forEach((b) => (b.onclick = () => { qcTab = b.dataset.k; renderQC(); }));
     const body = $("#qcbody");
-    safe(() => ({ card: qcCard, pca: qcPCA, corr: qcCorr, missing: qcMissing, mnar: qcMNAR, dist: qcDist, cv: qcCV, mv: qcMV, rank: qcRank, ids: qcIds, imp: qcImp, power: qcPower })[qcTab](body), body);
+    safe(() => ({ card: qcCard, pca: qcPCA, corr: qcCorr, missing: qcMissing, mnar: qcMNAR, dist: qcDist, cv: qcCV, mv: qcMV, rank: qcRank, ids: qcIds, imp: qcImp, power: qcPower, psm: qcPsm })[qcTab](body), body);
     addHelp($(":scope > .sub", body), "qc." + qcTab);
   }
   function legend() { return "<div class='legend'>" + D.conditions.map((c) => "<span><span class='sw' style='background:" + condColor(c) + "'></span>" + esc(c) + "</span>").join("") + "</div>"; }
@@ -1748,6 +1748,81 @@
     text(g, L + 4, Y(ST.lfc) + 14, "your cut-off (|log2FC| " + fmt(ST.lfc, 2) + ")", { "font-size": 11 });
     if (P.n.includes(P.current)) svg("line", { x1: X(P.current), x2: X(P.current), y1: T, y2: H - B, stroke: css("--accent"), "stroke-dasharray": "2 3" }, g);
     svgTools(ch, root, "power");
+  }
+  /** Search quality per raw file (psmqc.py): FragPipe's psm.tsv per run, and DIA-NN's own per-run summary as it is. */
+  function qcPsm(host) {
+    const P = D.qc.psm, runs = P.runs || [], dn = P.diann || [], lim = P.limits || {}, zs = P.z || [];
+    const st = qcPsm._st || (qcPsm._st = { chart: "ppm" });
+    const has = (r, f) => (r.flags || []).includes(f);
+    const cell = (s, bad) => "<td class='n" + (bad ? " zbad" : "") + "'>" + s + "</td>";
+    const charts = [["ppm", "Mass error"], ["mc", "Missed cleavages"], ["z", "Charge states"], ["len", "Peptide length"]];
+    let h = "<p class='sub'>What the search made of each raw file: the spectra it identified (PSMs), how far the measured precursor masses are from the calculated ones, how complete the digestion was, and the charge states. " +
+      "Runs of one experiment should look alike." + (runs.length ? " A run is flagged when its median mass error is " + fmt(lim.ppm, 0) + " ppm or more from 0, or " + pct(lim.missed) + " or more of its PSMs have a missed cleavage (wide limits, not yet the lab's own)." : "") +
+      " Also in <a href='psm_qc.tsv'>psm_qc.tsv</a>.</p>" + ((P.notes || []).length ? "<p class='muted'>" + P.notes.map(esc).join("<br>") + "</p>" : "");
+    if (runs.length) {
+      const samples = runs.some((r) => r.sample && r.sample !== r.run);
+      h += "<div class='row'><label class='ctl'>Chart <select id='psmsel'>" + charts.map(([k, t]) => "<option value='" + k + "'" + (k === st.chart ? " selected" : "") + ">" + t + "</option>").join("") + "</select></label></div><div class='chart card' id='psmchart'></div>" +
+        "<div class='tablewrap'><table id='psmtable'><thead><tr><th>Run</th>" + (samples ? "<th title='The folder the psm.tsv is in (FragPipe&#39;s experiment)'>Sample</th>" : "") + "<th>PSMs</th><th>Peptides</th><th>Proteins</th>" +
+        "<th title='Median precursor mass error: measured minus calculated mass, isotope-corrected'>mass error (ppm)</th><th title='25th to 75th percentile of the mass error'>middle half</th><th title='PSMs with at least one missed cleavage'>missed cleavage</th>" +
+        zs.map((z) => "<th title='Share of PSMs with charge " + esc(z) + "'>" + esc(z) + "+</th>").join("") + "<th title='Median peptide length, amino acids'>length</th><th>Flags</th></tr></thead><tbody>" +
+        runs.map((r) => "<tr><td>" + esc(r.run) + "</td>" + (samples ? "<td>" + esc(r.sample) + "</td>" : "") + cell(fmtInt(r.psms)) + cell(fmtInt(r.pep)) + cell(fmtInt(r.prot)) +
+          cell(r.ppm ? (r.ppm[2] >= 0 ? "+" : "") + fmt(r.ppm[2]) : "–", has(r, "mass error")) + cell(r.ppm ? fmt(r.ppm[1]) + " to " + fmt(r.ppm[3]) : "–") + cell(pct(r.mcRate, 1), has(r, "missed cleavages")) +
+          zs.map((_z, k) => cell((r.z || [])[k] == null ? "–" : fmt(r.z[k], 1) + "%")).join("") + cell(fmt(r.len, 0)) + "<td class='desc'>" + esc((r.flags || []).join("; ")) + "</td></tr>").join("") + "</tbody></table></div>";
+    }
+    if (dn.length) {
+      h += "<h3>DIA-NN's own summary per run</h3><p class='muted'>From DIA-NN's stats.tsv, as DIA-NN reports it. Its mass accuracy is DIA-NN's own number (Median.Mass.Acc), not the signed error FragPipe's PSMs give; no run is flagged on it.</p>" +
+        "<div class='tablewrap'><table id='psmdiann'><thead><tr><th>Run</th><th>Precursors</th><th>Proteins</th><th>MS1 mass accuracy (ppm)</th><th>MS2 mass accuracy (ppm)</th><th>mean missed cleavages</th><th>mean charge</th><th>peak width (FWHM, min)</th></tr></thead><tbody>" +
+        dn.map((r) => "<tr><td>" + esc(r.run) + "</td>" + cell(fmtInt(r.precursors)) + cell(fmtInt(r.proteins)) + cell(fmt(r.ms1_ppm)) + cell(fmt(r.ms2_ppm)) + cell(fmt(r.missed, 3)) + cell(fmt(r.charge)) + cell(fmt(r.fwhm, 3)) + "</tr>").join("") + "</tbody></table></div>";
+    }
+    host.innerHTML = h;
+    if (!runs.length) return;
+    $("#psmsel").onchange = (e) => { st.chart = e.target.value; qcPsm(host); };
+    const ch = $("#psmchart"), n = runs.length, W = widthOf(ch), H = 300, L = 56, R = 10, T = 14, B = st.chart === "len" ? 44 : n <= 60 ? 90 : 24;
+    const root = frame(ch, W, H), g = svg("g", {}, root), bw = (W - L - R) / n;
+    const name = (j) => {  // the run under its bar; too many runs to read: the bar's tooltip names it
+      if (n > 60) return;
+      const t = text(g, 0, 0, runs[j].run.slice(0, 16), { "font-size": 10.5, transform: "translate(" + (L + bw * (j + 0.5) + 3) + "," + (H - B + 10) + ") rotate(60)" });
+      t.setAttribute("x", 0);
+    };
+    if (st.chart === "ppm") {  // per run: 5th to 95th percentile (line), middle half (box), median
+      const ok = runs.filter((r) => r.ppm);
+      let lo = Math.min(0, ...ok.map((r) => r.ppm[0])), hi = Math.max(0, ...ok.map((r) => r.ppm[4]));
+      const pad = (hi - lo) * 0.08 || 1;
+      lo -= pad; hi += pad;
+      const Y = (v) => H - B - ((v - lo) / (hi - lo)) * (H - T - B);
+      axes(g, () => 0, Y, [], niceTicks(lo, hi, 5), L, R, T, B, W, H, "", "precursor mass error (ppm)");
+      svg("line", { x1: L, x2: W - R, y1: Y(0), y2: Y(0), stroke: css("--muted"), "stroke-dasharray": "4 4" }, g);
+      runs.forEach((r, j) => {
+        name(j);
+        if (!r.ppm) return;
+        const cx = L + bw * (j + 0.5), w = Math.min(28, bw * 0.6), col = css(has(r, "mass error") ? "--up" : "--c0"), q = r.ppm;
+        svg("line", { x1: cx, x2: cx, y1: Y(q[0]), y2: Y(q[4]), stroke: css("--muted") }, g);
+        title(svg("rect", { x: cx - w / 2, y: Y(q[3]), width: w, height: Math.max(1, Y(q[1]) - Y(q[3])), fill: col, "fill-opacity": 0.35, stroke: col, "data-run": j }, g),
+          r.run + "\nmedian " + fmt(q[2]) + " ppm · middle half " + fmt(q[1]) + " to " + fmt(q[3]) + " · 5th to 95th percentile " + fmt(q[0]) + " to " + fmt(q[4]) + " · " + fmtInt(r.ppmN) + " PSMs");
+        svg("line", { x1: cx - w / 2, x2: cx + w / 2, y1: Y(q[2]), y2: Y(q[2]), stroke: css("--text"), "stroke-width": 2 }, g);
+      });
+    } else if (st.chart === "len") {  // every run together
+      const bins = (P.len && P.len.n) || [], lo = (P.len && P.len.lo) || 0, m = Math.max(1, bins.length), ymax = Math.max(1, ...bins), w = (W - L - R) / m;
+      const X = (v) => L + (v - lo + 0.5) * w, Y = (v) => H - B - (v / ymax) * (H - T - B);
+      axes(g, X, Y, niceTicks(lo, lo + m - 1, 8).filter((v) => v >= lo && v < lo + m && v === Math.round(v)), niceTicks(0, ymax, 4), L, R, T, B, W, H, "peptide length (amino acids), all runs", "PSMs");
+      bins.forEach((v, k) => title(svg("rect", { x: X(lo + k) - w / 2 + 0.5, y: Y(v), width: Math.max(1, w - 1), height: H - B - Y(v), fill: css("--c0"), "fill-opacity": 0.75 }, g), (lo + k) + " amino acids: " + fmtInt(v) + " PSMs"));
+    } else {  // stacked shares of each run's PSMs
+      const mc = st.chart === "mc", names = mc ? ["no missed cleavage", "1", "2 or more"] : zs.map((z) => z + "+");
+      const Y = (v) => H - B - v * (H - T - B);
+      axes(g, () => 0, Y, [], [0, 0.25, 0.5, 0.75, 1], L, R, T, B, W, H, "", "share of PSMs");
+      runs.forEach((r, j) => {
+        name(j);
+        const tot = mc && r.mc ? r.mc[0] + r.mc[1] + r.mc[2] : 0;
+        const share = mc ? (tot ? r.mc.map((v) => v / tot) : []) : (r.z || []).map((v) => (v || 0) / 100);
+        let at = 0;
+        share.forEach((v, k) => {
+          title(svg("rect", { x: L + bw * j + bw * 0.15, y: Y(at + v), width: bw * 0.7, height: Math.max(0, Y(at) - Y(at + v)), fill: css("--c" + (k % 8)), "data-k": k }, g), r.run + ": " + names[k] + " · " + pct(v, 1));
+          at += v;
+        });
+      });
+      ch.insertAdjacentHTML("beforeend", "<div class='legend'>" + names.map((s, k) => "<span><span class='sw' style='background:" + css("--c" + (k % 8)) + "'></span>" + esc(s) + "</span>").join("") + "</div>");
+    }
+    svgTools(ch, root, "search_quality_" + st.chart);
   }
 
   // -------------------------------------------------------- dose-response

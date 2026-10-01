@@ -1274,3 +1274,48 @@ adds the tests.
 p and adjusted p, the fold changes, the trend t and p and the interaction F,
 for the plain model, a replicate block and data with missing values, to
 1e-8.
+
+
+### D55 — Search quality per run comes from the QC trend's reader, with two wide warnings
+**2026-10-01.** D35 left PSM-level QC for later. The report's QC tabs judge
+samples from the quantities; none of them says how the search went for each
+raw file. `downstream/psmqc.py` adds that, as a **Search quality** QC tab,
+`results/psm_qc.tsv` and `analysis.json` → `psm_qc`.
+
+1. **One reader.** `qcmetrics.read_psm` (D45) already streamed `psm.tsv`
+   for the instrument QC trend. It now also keeps, per run, the quantiles of
+   the mass error and the PSM counts by missed cleavages, charge and peptide
+   length. `psmqc.py` only arranges those numbers. The trend's own metrics
+   are unchanged.
+2. **Every run, no manifest.** The trend matches runs against the
+   experiment's file list. The report takes every run the tables name
+   (`qcmetrics.search_tables`), so it also works for a folder analysed
+   without an `ionomos.json`. DIA-NN's big `report.tsv` is not opened.
+3. **A run is a raw file.** For TMT that is a fraction of a plex, not a
+   sample. The folder the `psm.tsv` is in (FragPipe's experiment) is shown
+   beside it as the sample.
+4. **Mass error is the uncalibrated one** (`Observed Mass` against
+   `Calculated Peptide Mass`, isotope-error corrected, as in D45), because
+   the question is the instrument's calibration, not what the search made
+   of it. Errors over 50 ppm are mass offsets and are left out.
+5. **Spread is shown as quartiles**, with the 5th and 95th percentile in the
+   chart, not as a standard deviation: a few wrong matches would dominate it.
+6. **Two warnings, both wide.** `PSM_MASS_ERROR`: a run's median error is
+   10 ppm or more from 0. `PSM_MISSED_CLEAVAGES`: half or more of a run's
+   PSMs have a missed cleavage. A run needs 100 PSMs to be judged. These are
+   not the lab's limits: they were chosen so that only a run nobody would
+   call normal is flagged, and they are constants in `psmqc.py` until the lab
+   has seen its own numbers. Both are notes (no pop-up) and are raised even
+   when there is no quant table, because they may be why.
+7. **Left out:** a warning for a run with few PSMs (TMT fractions differ by
+   design, and `LOW_SAMPLE` covers samples); a warning for a run unlike the
+   others (it needs the lab's numbers first); warnings on DIA-NN's summary,
+   which is shown as DIA-NN reports it; settings for the limits.
+8. **Size.** Files are read row by row; one over 4,096 MB (the trend's
+   default) is not read and the report says so. A simulated 90 MB file with
+   400,000 PSMs took about 2 s on the development Mac; the lab PC was not
+   timed. `psm_qc: false` switches the step off.
+
+**Not checked on real data.** The `psm.tsv` column names are from the
+FragPipe documentation, as in the testbed's fake FragPipe. The tests use
+tables with those names and planted values.

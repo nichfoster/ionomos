@@ -206,7 +206,8 @@ def dump_config(d: dict) -> str:
               "dose_response", "dose_min_doses", "dose_alpha", "dose_fc_lim", "dose_unit",  # dose-response: D44
               "liganded", "liganded_ratio", "liganded_min_replicates", "liganded_direction",  # cys.py: D52
               "site_annotation",
-              "time_course", "time_min_points", "time_unit"):  # time courses: D53
+              "time_course", "time_min_points", "time_unit",  # time courses: D53
+              "psm_qc"):  # search quality per run: D55
         if an.get(k) not in (None, ""):
             a(f"  {k}: {_y(an[k])}")
     if isinstance(an.get("times"), dict) and an["times"]:

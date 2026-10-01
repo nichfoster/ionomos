@@ -60,6 +60,12 @@ recomputed from spectra.
 | Missed cleavages | `Average.Missed.Tryptic.Cleavages` | mean `Number of Missed Cleavages` | higher |
 | Mean charge | `Average.Peptide.Charge` | mean `Charge` (the 2+/3+/… mix is kept too) | either way |
 
+The same reader (`downstream/qcmetrics.py`) feeds the **Search quality** tab
+of every experiment's report (D55, [WORKFLOWS.md](WORKFLOWS.md)): per raw
+file, the mass-error quartiles, missed cleavages, charge states and peptide
+length. That tab shows one experiment's runs side by side; this page follows
+the QC standard over time.
+
 **RT shift** is the median, over the peptides both share, of each peptide's
 RT minus its median RT in the baseline runs. At least 5 shared peptides are
 needed. That makes the "fixed peptide set" the standard's own most intense
