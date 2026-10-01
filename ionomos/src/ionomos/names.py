@@ -148,3 +148,15 @@ PREFLIGHT_DIR = "preflight"
 def fingerprint_path(dest: Path) -> Path:
     """The latest search's fingerprint; earlier ones sit beside it as run_fingerprint_<time>.json."""
     return run_dir(dest) / FINGERPRINT_FILE
+
+
+# The troubleshooting / validation bundle (bundle.py, D63): a zip a person copies off the PC, and its key file,
+# which turns the pseudonyms back into the lab's names and stays in the lab.
+BUNDLE_PREFIX = "Ionomos-bundle"
+BUNDLE_KEY_SUFFIX = "-KEY-keep-in-the-lab-DO-NOT-SHARE.json"
+BUNDLE_MANIFEST = "BUNDLE.json"
+BUNDLE_README = "README.txt"
+REPORT_PREFIX = "Ionomos-report"  # what "Report a problem" has always called its zip
+# A search's "run fingerprint" (the versions and settings of that run), in the run folder when there is one.
+RUN_FINGERPRINT = "run_fingerprint.json"
+RUN_FINGERPRINT_GLOB = "run_fingerprint*.json"

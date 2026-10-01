@@ -18,6 +18,27 @@ watcher**, and send **Report a problem…** so it can be fixed. **"another
 ionomos watcher is already running"**: the startup task already runs one.
 That is fine; use the app to see it.
 
+## Report a problem: the zip was not saved, or files were left out {#trouble.bundle}
+
+**Report a problem…** saves a zip on the Desktop
+([how](#faq.bundle), [what is in it](#safety.bundle)).
+
+- **"LEAK CHECK FAILED"**: after replacing the names, Ionomos searched the
+  zip and still found one, so it saved nothing. The message names the file
+  and the text. Your data is fine; this is a fault in Ionomos. Report the
+  message. Until it is fixed, a zip of fewer jobs or without the result
+  tables may pass the check.
+- **Files were left out**: the window and `README.txt` in the zip list them
+  with the reason. A zip has a size limit (2,000 MB before compression;
+  `ionomos bundle --max-mb` raises it). A PSM table above 25 MB is cut down
+  to every n-th row. A picture or another file that is not text is left out
+  when names are replaced, because the names in it can't be.
+- **It was saved in the log folder, not on the Desktop**: there was no
+  Desktop folder to write to. The message gives the place.
+- **A name is still readable in the zip**: see the list of what the replacing
+  cannot do in [The zip for troubleshooting](#safety.bundle), and delete the
+  zip if it should not be sent.
+
 ## An analysis needs your decision {#attention.analysis_input}
 
 The analysis ran, but on a guess that a person should confirm: which samples

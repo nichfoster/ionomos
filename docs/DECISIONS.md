@@ -1875,3 +1875,103 @@ The launch4j behaviour of the `.exe` (2), that `fragpipe.bat` honours
 `JAVA_HOME` on the PC (1), that a dry run accepts a placeholder `.raw` (8)
 and the exact text of the tools' own error lines are from documentation and
 issue reports, not from the lab PC.
+
+### D63 — A bundle is saved, never sent; names are replaced word by word and the zip is checked before it exists
+
+2026-10-01. The maintainer needs the lab's files to troubleshoot and to
+validate the analysis, and will carry them by hand (Desktop → Dropbox).
+"Report a problem" already wrote a diagnostics zip; it is generalised
+(`bundle.py`) instead of adding a second mechanism. `save_problem_report`,
+`save_diagnostics_zip` and `ionomos diagnose --zip` now make a `diagnose`
+bundle.
+
+1. **Ionomos sends nothing.** It writes a zip to the Desktop (the registry's
+   shell folder first, so a OneDrive-redirected Desktop works; else
+   `%OneDrive*%\Desktop`, `%USERPROFILE%\Desktop`), else the log folder,
+   else the home folder. No upload code exists. The bundle only reads
+   experiment folders; it writes the zip (as `.part`, renamed after the
+   check) and the key file, and numbers a name that is taken.
+2. **Two levels.** `diagnose` is what the old zip had plus the whole run
+   folder (so a `run_fingerprint.json` comes along; the name is
+   `names.RUN_FINGERPRINT`), needs-attention items and `analysis.json`.
+   `validate` adds the tables the analysis reads and `results/`. With no job
+   named: the running, waiting and last five failed jobs; `validate` also
+   takes the last finished job, so that a plain `ionomos bundle --level
+   validate` has something to validate.
+3. **Never raw data, FASTA or libraries**, by extension and name, also inside
+   `results/`. A FASTA is described (name, size, entries, decoys, SHA-256).
+   DIA-NN's main report is not taken: the analysis starts from the protein
+   matrix.
+4. **Limits said out loud.** 2,000 MB per bundle before compression, small
+   files first so a log is never the thing dropped. A PSM-level table over
+   25 MB is row-sampled (header + every n-th row) under its own name, so the
+   analysis still runs; the job is then marked not fully reproducible. A
+   quant table is never cut: it is in or out.
+5. **Anonymised by default.** Replaced: users and aliases, the OS account and
+   any home folder in a path, the PC name, experiment / inbox folder names,
+   raw-file, sample and condition names, e-mail and IP addresses. Secrets go
+   through `notify.scrub` / `redact_config_text` whether or not names are
+   replaced.
+6. **Word by word, not name by name.** `Drug_10uM_3h_2` becomes
+   `condA_10uM_3h_2`: the analysis reads conditions (text before the first
+   `_`), doses, times, TMT channels and replicates from the shape of a name,
+   so the shape must survive. Kept words: numbers with units, replicate
+   marks, control / reference words, the config's method names, the
+   analysis' setting names and a short list of Ionomos' own words. The
+   maintainer's examples (`user_01`, `exp_003`, `sample_A1`) have an
+   underscore; the pseudonyms have none (`user01`, `exp001`, `condA_1`),
+   because an added `_` changes what `condition_of` returns.
+7. **Generic role words are kept by default** (DMSO, vehicle, WT, pool, but
+   also drug, compound, treated): they say what a group is and name nobody.
+   `--keep-conditions` keeps every condition word. There is no option to
+   replace the control words: the analysis would lose its control.
+8. **Order is part of the numbers.** Perseus imputation (`fpa.impute`) draws
+   per sample in byte order of the names. `cond` pseudonyms are assigned in
+   the originals' order and get a leading letter that keeps them on the same
+   side of the kept words (`CondA` < `DMSO` < `condB`). Each job's names are
+   checked afterwards and the bundle says when the order changed. Users are
+   numbered, not ordered.
+9. **A plain word is only replaced inside its name.** Folder and file names
+   are made of ordinary words (`pulldown`, `enrichment`); replacing those
+   everywhere would rewrite `enrichment.tsv`, a setting name or a JSON key
+   and break the unpacked experiment. So: whole names, their `_`-prefixes
+   and re-joined forms (`A-B_c` = `A_B_c`) are replaced; a word alone only
+   when it is itself a user, sample or condition name, or has letters and
+   digits (a compound or notebook number). A run of name characters that
+   holds a known name is treated as a name. Experiment folders are replaced
+   as a whole (`exp001`); a folder path outside the lab's tree as a whole
+   (`folder01`).
+10. **Identifiers are never rewritten.** Protein / gene / peptide columns of
+    tab-separated tables are left as they are, even when a user's initials
+    are a gene symbol (`AR`). Such hits are counted by the check and listed
+    in the key file, not failed. In files that are not tables (the report's
+    embedded JSON) the same word is replaced; the re-run report has it
+    right.
+11. **Structured first, then text.** `ionomos.json` and `experiment.yaml` are
+    parsed: `notes` is removed (free text), the folder's `tokens` list is
+    rewritten as names. Everything, also those, then goes line by line
+    through the same scrub. Files that are not text cannot be scrubbed and
+    are left out with a reason (UTF-16 text is read).
+12. **Verify the product, not the process.** The finished zip is reopened and
+    every file and file name searched for every original. A hit triggers one
+    rewrite (a home-folder name first met in a late file), then
+    `BundleLeak`: no zip. The tests add a search of their own (plain
+    substring / word search over every file, the HTML report included) that
+    does not use `bundle.py`; it found a real miss during development
+    (multi-word user folders).
+13. **The key stays in the lab**: `<zip>-KEY-keep-in-the-lab-DO-NOT-SHARE.json`
+    next to the zip, never in it. `ionomos bundle translate` applies it.
+14. **The reader gets the lab's settings.** `unpack` writes a `config.yaml`
+    from the bundled one (methods, `analysis:` defaults) with every path
+    under `_lab/` and no `notify:` / `assistant:`, so `ionomos --config …
+    analyze` repeats the lab's analysis and cannot send or touch anything.
+15. **"Copy diagnostics" is unchanged**: a text block with real names,
+    secrets redacted. The bundle is the anonymised route.
+
+**Verified**: the round trip on the testbed (fake FragPipe DIA job with
+conditions on both sides of `DMSO`, isoDTB and TMT by hand): every result
+table of the re-run is byte-identical to the bundled one, and translating it
+back with the key gives the lab's own file. **Not verified**: real lab data
+and real FragPipe / DIA-NN / MaxQuant / Sage tables (their column names are
+from the engines' documentation and Ionomos' loaders); Windows (CI only);
+the window on screen; a bundle over a few hundred MB.

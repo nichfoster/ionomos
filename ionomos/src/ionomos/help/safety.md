@@ -58,8 +58,59 @@ Enrichment downloads public gene-set libraries once; after that the tests run
 on the computer, and your gene lists are never sent anywhere. The report is
 one file with no links that load anything from the internet (the UniProt,
 STRING and GeneCards links open only when you click them). **Report a
-problem…** collects settings, logs and the search logs of failed jobs, never
-raw data or result tables, and saves it on your Desktop for you to send.
+problem…** saves a zip on your Desktop and sends nothing: see
+[The zip for troubleshooting](#safety.bundle).
+
+## The zip for troubleshooting leaves the PC only if you copy it {#safety.bundle}
+
+**Report a problem…** (and `ionomos bundle`) writes one zip file to the
+Desktop, or to the log folder when there is no Desktop. Ionomos does not
+upload it, email it or put it in a shared folder. It leaves the PC only when
+a person copies it somewhere. Making it only reads your experiment folders;
+it writes the zip and its key file, and never over a file that is already
+there.
+
+What is in it:
+
+- always: the settings (passwords and webhook addresses shown as three
+  stars), the logs, crash files, and for each chosen job its status, the
+  search log and the files Ionomos gave the search engine
+- only if you tick the box for result tables: the search's result tables
+  (protein, peptide and site tables) and Ionomos' `results` folder, so the
+  analysis can be run again on another computer
+- never: raw files, mzML or `.d` files, FASTA files (their name, size, number
+  of entries and a checksum are noted instead) or spectral libraries
+
+Names are replaced before the zip is written, unless you untick that box:
+user names, the name of the PC, experiment and folder names, raw file and
+sample names, e-mail and IP addresses. `user01`, `exp001` and `condA` stand
+in for them, the same one for the same name in every file. Protein and gene
+names and all numbers stay as they are, because they are what has to be
+checked. Words the analysis needs stay too: DMSO, pool, the method names,
+doses such as `10uM`, replicate numbers.
+
+A second file is saved next to the zip, with `KEY` and `DO-NOT-SHARE` in its
+name. It lists which pseudonym stands for which real name. **Keep it in the
+lab and do not send it.** With it, an answer about `condA` can be read as
+your compound again.
+
+After writing, Ionomos searches the finished zip for every name it replaced.
+If one is still there, no zip is saved and the message says so.
+
+What the replacing cannot do:
+
+- text someone typed: `notes:` in `experiment.yaml` is removed, but the
+  sentence you type into the window goes in as you wrote it
+- a name written inside a longer word, with no space, `_` or `-` around it
+- a plain word of a name standing alone somewhere else (`pulldown` from
+  `FLAG_pulldown`); a word with letters and digits, such as a compound
+  number, is replaced everywhere
+- a name that is also a protein or gene name is kept in the protein and gene
+  columns of tables; the key file lists where
+- pictures, and files that are not text: they are left out and listed
+- names Ionomos has no record of, such as folders above the users folder
+
+Look into the zip before you send it if the experiment is sensitive.
 
 ## Notifications: off unless the lab turns them on {#safety.notify}
 
@@ -83,8 +134,9 @@ With `notify.include_names: false` a message holds only the job number,
 the status and the time ("Ionomos: job 12 done").
 
 The webhook addresses and the email password in `config.yaml` are secrets.
-Ionomos does not write them to its log, and **Report a problem…** and
-`ionomos diagnose` leave them out (three stars are shown instead). See
+Ionomos does not write them to its log, and **Report a problem…**,
+`ionomos bundle` and `ionomos diagnose` leave them out (three stars are
+shown instead), also when names are not replaced. See
 [Can I get a message when my search is done?](#faq.notify).
 
 ## Updates and uninstalling leave your data alone {#safety.updates}

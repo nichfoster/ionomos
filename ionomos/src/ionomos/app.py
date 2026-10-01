@@ -99,10 +99,13 @@ UPDATING A DEVELOPMENT INSTALL (git checkout)
   ledger and lab data are never touched by an update.
 
 REPORTING A PROBLEM
-  Run & Test tab -> "Save diagnostics bundle (.zip)" — one file with the
-  report, config, logs, crash reports and the FragPipe logs of failed or
-  running jobs (never raw data). Or "Copy diagnostics" for the text only.
-  Send it with a sentence about what you expected.
+  "Report a problem…" (bottom right) -> a sentence, the jobs, Save the zip.
+  One file on the Desktop with the report, config, logs, crash reports and
+  the search logs of the chosen jobs (never raw data); tick the result
+  tables when the numbers are to be checked. Names are replaced by
+  pseudonyms; the KEY file saved next to the zip stays in the lab. Nothing
+  is sent: copy the zip yourself. "Copy diagnostics" (Run & Test tab) is the
+  text only, with real names.
 
 FRAGPIPE SEARCHES
   Each filed experiment is searched with its method's workflow + FASTA.
@@ -1366,7 +1369,7 @@ class App:
             open_path=lambda p: self._open(p),
             lab_settings=lambda: dict((self.data or {}).get("analysis") or {}),
             popups_enabled=lambda: bool((self.data.get("gui") or {}).get("popups", True)),
-            report_problem=lambda note: self.report_problem(note), open_setup=lambda: self.nb.select(self.tab_setup),
+            report_problem=lambda note, job_id=None: self.report_problem(note, job_id), open_setup=lambda: self.nb.select(self.tab_setup),
             on_change=self._attention_badge, database=lambda: self._active_paths().get("database"))
         self.popups = Popups(self.root, host, is_app=True)
         self.popups.start()
@@ -1394,71 +1397,14 @@ class App:
         except Exception:  # noqa: BLE001
             log.exception("attention refresh failed")
 
-    def report_problem(self, note: str = ""):
-        """One dialog -> one zip on the Desktop, selected in Explorer, ready to drag into a chat."""
-        from ionomos import health
+    def report_problem(self, note: str = "", job_id: int | None = None):
+        """One window -> one zip (bundle.py, D63) on the Desktop, selected in Explorer, and its key file."""
+        from ionomos.bundle_dialog import BundleDialog
 
-        win = tk.Toplevel(self.root)
-        win.title("Report a problem")
-        win.transient(self.root)
-        f = ttk.Frame(win, padding=14)
-        f.pack(fill="both", expand=True)
-        ttk.Label(f, text="What happened, and what did you expect?", font=("", 11, "bold")).pack(anchor="w")
-        ttk.Label(f, text="A sentence is enough — e.g. \"dropped EJQ_isoDTB_x at 3pm, nothing moved\".",
-                  foreground="#666").pack(anchor="w", pady=(0, 6))
-        txt = tk.Text(f, width=64, height=6, wrap="word")
-        txt.pack(fill="both", expand=True)
-        if note:
-            txt.insert("1.0", note)
-        dbg = tkutil.BooleanVar(master=win, value=False)
-        ttk.Checkbutton(f, text="Also turn on detailed logging for the next 24 hours (for problems that come and go; "
-                                "send another report after it happens again)", variable=dbg).pack(anchor="w", pady=(8, 0))
-        ttk.Label(f, text="The report has the settings, logs and the FragPipe logs of failed/running jobs — "
-                          "never raw data.", foreground="#666", wraplength=520).pack(anchor="w", pady=(6, 10))
-        bb = ttk.Frame(f)
-        bb.pack(fill="x")
-        cfg = self.config_path
-
-        def create():
-            note = txt.get("1.0", "end").strip()
-            if dbg.get():
-                try:
-                    until = health.set_debug(self._active_log_dir(), 24)
-                    note += f"\n\n[detailed logging turned on until {until:%Y-%m-%d %H:%M}]"
-                except OSError:
-                    pass
-            win.destroy()
-            self.set_status("building the report…")
-            log.info("problem report requested: %s", note[:200])
-
-            def go():
-                try:
-                    z = service.save_problem_report(cfg, note)
-                    msg = None
-                except Exception as exc:  # noqa: BLE001
-                    z, msg = None, f"could not build the report: {exc}"
-
-                def done():
-                    if z is None:
-                        messagebox.showerror("Report a problem", msg)
-                        return
-                    self.root.clipboard_clear()
-                    self.root.clipboard_append(str(z))
-                    service.reveal(z)
-                    self.set_status(f"report saved: {z.name}")
-                    messagebox.showinfo("Report a problem", f"Saved on your Desktop:\n\n{z.name}\n\n"
-                                        "It's selected in the window that just opened — drag it into the chat. "
-                                        "(Its location is also on the clipboard.)")
-
-                self.post(done)
-
-            threading.Thread(target=go, daemon=True).start()
-
-        ttk.Button(bb, text="Create report", command=create).pack(side="right")
-        self.report_win, self.report_text, self.report_debug, self.report_create = win, txt, dbg, create  # tests
-        ttk.Button(bb, text="Cancel", command=win.destroy).pack(side="right", padx=6)
-        txt.focus_set()
-        win.bind("<Escape>", lambda e: win.destroy())
+        d = BundleDialog(self.root, self.config_path, self.post, note=note, job_id=job_id,
+                         log_dir=self._active_log_dir, on_status=self.set_status)
+        self.report_dialog = d
+        self.report_win, self.report_text, self.report_debug, self.report_create = d.win, d.text, d.debug, d.save  # tests
 
     def check_downloaded_update(self, auto: bool = True):
         """Ask GitHub for a newer release (and look in Downloads). auto=False: also say "you're up to date"."""
@@ -1591,7 +1537,8 @@ class App:
                 self.out.write(msg)
                 if z:
                     messagebox.showinfo("Diagnostics bundle", f"Saved:\n{z}\n\nIt contains the report, config, logs and the "
-                                        "FragPipe logs of failed/running jobs — no raw data. Send this file.")
+                                        "FragPipe logs of failed/running jobs — no raw data, names replaced by "
+                                        "pseudonyms. Send this file; the KEY file next to it stays in the lab.")
                     self._open(str(Path(z).parent))
 
             self.post(show)
@@ -1888,7 +1835,7 @@ class App:
         for text, action in (("Open report", "report"), ("Open folder", "folder"), ("FragPipe log", "log"),
                              ("Re-run analysis", "analyze"), ("Analysis options…", "studio"), ("Retry", "retry"),
                              ("Cancel", "cancel"),
-                             ("Copy details", "copy")):
+                             ("Copy details", "copy"), ("Zip for troubleshooting…", "bundle")):
             ttk.Button(b, text=text, command=lambda a=action: self.job_action(a)).pack(side="left", padx=4)
         ttk.Label(b, text="double-click = open the report", foreground="#666").pack(side="left", padx=12)
         self.jdetail = OutputPane(f, height=10)
@@ -2011,6 +1958,8 @@ class App:
                 messagebox.showinfo("Re-run analysis", "Only finished (done) jobs have FragPipe output to analyse.")
                 return
             self._rerun_analysis(j)
+        elif action == "bundle":
+            self.report_problem(job_id=j.id)
         elif action == "folder":
             self._open(j.dest_dir)
         elif action == "log":

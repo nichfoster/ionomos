@@ -49,7 +49,7 @@ class PopupHost:
     open_path: Callable[[str], None]
     lab_settings: Callable[[], dict] = lambda: {}
     popups_enabled: Callable[[], bool] = lambda: True
-    report_problem: Callable[[str], None] | None = None   # the app's dialog; None = zip straight to the Desktop
+    report_problem: Callable[..., None] | None = None      # the app's dialog (note, job id); None = zip straight to the Desktop
     open_setup: Callable[[], None] | None = None           # the app's checklist tab; None = start the app
     on_change: Callable[[list], None] = lambda items: None  # badge updates
     database: Callable[[], Path | None] = lambda: None
@@ -352,14 +352,15 @@ class ItemWindow:
     def report(self) -> None:
         note = f"{self.item.title}\n{self.item.message}\n\n{self.item.details[-3000:]}"
         if self.host.report_problem is not None:
-            self.host.report_problem(note)
+            self.host.report_problem(note, self.item.job_id)
             return
-        from ionomos import service
+        from ionomos import bundle, service
 
-        try:
-            z = service.save_problem_report(self.host.config_path(), note)
-            service.reveal(z)
-            self.msg.configure(text=f"Saved {z.name} on the Desktop — send it to whoever looks after Ionomos.")
+        try:  # no app open (the watcher's own window): the zip for this job, with the default choices
+            target = [str(self.item.job_id)] if self.item.job_id else [self.item.dest] if self.item.dest else []
+            res = bundle.create(self.host.config_path(), target, bundle.Options(level="diagnose", note=note))
+            service.reveal(res.path)
+            self.msg.configure(text=res.message)
         except Exception as exc:  # noqa: BLE001
             messagebox.showerror("Report a problem", str(exc), parent=self.win)
 
