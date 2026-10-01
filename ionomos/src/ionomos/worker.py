@@ -223,12 +223,14 @@ class Worker:
                  len(spec.manifest_lines), attempt)
         for w in spec.warnings:
             log.warning("job %d: %s", job.id, w)
+        for n in getattr(spec, "notes", ()):
+            log.info("job %d: %s", job.id, n)
         _update_status(job, status="running", reason=None, run={
             "attempt": attempt, "started_at": now_iso(), "finished_at": None, "exit_code": None,
             "workflow": str(spec.workflow), "workflow_source": str(spec.workflow_src),
             "fasta": str(spec.fasta) if spec.fasta else None, "manifest": str(spec.manifest),
             "workdir": str(spec.workdir), "console_log": str(spec.console_log),
-            "command": spec.command(), "warnings": list(spec.warnings),
+            "command": spec.command(), "warnings": list(spec.warnings), "notes": list(getattr(spec, "notes", ())),
         })
         (dest / FAILED_NOTE).unlink(missing_ok=True)
 
@@ -248,6 +250,8 @@ class Worker:
         res = fragpipe.run(spec, self._stop, on_start=started, on_poll=polled)
         self.current = None
         finished = now_iso()
+        spec.warnings.extend(res.warnings)
+        _fingerprint(job, spec, res, attempt, finished)
         if res.cancelled:
             (spec.run_dir / fragpipe.CANCEL_FILE).unlink(missing_ok=True)
             _update_status(job, run={"finished_at": finished, "exit_code": res.code})
@@ -325,11 +329,30 @@ class Worker:
             _notify(self.cfg, "failed", job, reason)
 
 
+def _fingerprint(job: Job, spec: fragpipe.RunSpec, res: fragpipe.RunResult, attempt: int, finished: str) -> None:
+    """The run fingerprint (fingerprint.py, D59): what this search did, for checking the parsers. Whatever the
+    outcome, and never in the job's way."""
+    try:
+        from ionomos import fingerprint
+
+        path = fingerprint.write(spec, res, attempt, finished)
+        if path is not None:
+            _update_status(job, run={"fingerprint": str(path), "seconds": res.seconds})
+    except Exception:  # noqa: BLE001
+        log.exception("job %s: could not write the run fingerprint", job.id)
+
+
 # -------------------------------------------------------- telling a person --
 
 
 def _waiting_causes(reason: str) -> list[str]:
     r = reason.lower()
+    if "window program" in r:
+        return ["The launcher set on tab 1 is FragPipe's window program (the .exe); searches need fragpipe.bat, "
+                "which FragPipe installs next to it — tab 1 Folders → Find FragPipe"]
+    if "can't be searched" in r:
+        return ["FragPipe refuses this FASTA: it needs decoys for about half its entries — add them in "
+                "FragPipe's Database tab, then pick that file on tab 3 Methods"]
     if "fasta" in r:
         return ["The method's protein database (FASTA) isn't set or the file was moved — tab 3 Methods"]
     if "workflow" in r:

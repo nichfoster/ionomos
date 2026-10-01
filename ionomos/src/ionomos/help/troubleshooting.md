@@ -57,7 +57,8 @@ free disk space. Nothing is lost and nothing needs retrying: fix what the
 message names and the search starts by itself. The app's ✓ Setup tab shows
 the same gap. The messages are explained below:
 [launcher](#search.hold-launcher), [workflow](#search.hold-workflow),
-[FASTA](#search.hold-fasta), [disk space](#search.hold-disk),
+[the wrong launcher](#search.hold-launcher-window),
+[FASTA](#search.hold-fasta), [decoys](#search.hold-decoys), [disk space](#search.hold-disk),
 [DIA-NN](#search.hold-diann), [spectral library](#search.hold-library),
 [MaxQuant](#search.hold-maxquant), [MaxQuant parameters](#search.hold-mqpar),
 [Sage](#search.hold-sage), [raw file converter](#search.hold-converter),
@@ -156,6 +157,15 @@ fixed. See [A search is waiting](#attention.search_waiting).
 Ionomos can't find FragPipe. App → tab 1 Folders → **Find FragPipe**, or set
 `fragpipe_exe` in the settings. FragPipe must not be under a path with spaces.
 
+## The launcher is FragPipe's window program {#search.hold-launcher-window}
+
+The launcher set on tab 1 is FragPipe's `.exe` (for example
+`bin\FragPipe-24.0.exe`), and there is no `fragpipe.bat` next to it. The
+`.exe` opens FragPipe's window and returns at once, so Ionomos could not
+follow a search started with it. FragPipe 23 and 24 install `fragpipe.bat`
+in the same `bin` folder; Ionomos uses it by itself when it is there. If it
+is missing, reinstall FragPipe, then tab 1 → **Find FragPipe**.
+
 ## Workflow file missing {#search.hold-workflow}
 
 The method's FragPipe workflow isn't in the workflows folder. App → tab 3
@@ -166,7 +176,17 @@ Methods → **Import workflow…** and pick a `.workflow` file (for example the
 
 The method's protein database isn't set or was moved. App → tab 3 Methods: pick
 the FASTA. It must contain decoys (`rev_` entries); **Check FragPipe install**
-on the Jobs tab checks that.
+on the Jobs tab checks that (see [decoys](#search.hold-decoys)).
+
+## The FASTA has no usable decoys {#search.hold-decoys}
+
+FragPipe run without its window stops at once when the protein database has
+no decoys, or when decoys are not about half of its entries (40-60 %). A
+decoy is an entry whose name starts with the workflow's decoy tag, usually
+`rev_`. In FragPipe's window: Database tab → **Add decoys** (once, on a
+FASTA without any), copy the new file into the FASTA folder and pick it for
+the method on tab 3. The search then starts by itself. The usual mistakes
+are a FASTA straight from UniProt (no decoys) and decoys added twice.
 
 ## Low disk space {#search.hold-disk}
 
@@ -278,6 +298,16 @@ pop-up. After fixing the cause, press **Retry**; the earlier output is kept.
 - **experiment.yaml asks for a workflow or FASTA that isn't there**: fix the
   name in the experiment's `experiment.yaml`, or put the file in the
   workflows / FASTA folder.
+- **FragPipe step X failed (exit code N)**: one of FragPipe's tools stopped.
+  The reason quotes the last lines that tool printed, which usually name the
+  cause; the list below explains the common ones.
+- **FragPipe stopped early, or only did a dry run**: FragPipe ended without
+  finishing its steps. Open the log from the pop-up and send **Report a
+  problem…** if the cause isn't in the list below.
+- **experiment.yaml tmt: ...** (TMT): the channel list doesn't fit what
+  FragPipe accepts. List every channel of the label type once, with one
+  sample name without spaces per channel, `NA` for an unused channel, and
+  no name twice.
 - **A path has a space in it** (DIA-NN): DIA-NN can't take spaces in paths.
   Rename the folder or file.
 - **The experiment folder is gone**: it was moved or renamed after filing.

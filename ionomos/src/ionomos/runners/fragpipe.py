@@ -11,8 +11,8 @@ Port of reference/prior-work/proteomics-qc-pkg/fragpipe_runner.py — take
 build_command() and run_fragpipe() nearly verbatim; drop build_manifest()
 (lives in manifest.py now).
 
-CONFIRM-ON-INSTALL: launcher path for FragPipe 24.0
-(C:/FragPipe/FragPipe-24.0/fragpipe/bin/fragpipe.exe vs fragpipe.bat).
+Superseded: the runner that is used lives in ionomos/fragpipe.py (launcher
+C:/FragPipe/FragPipe-24.0/bin/fragpipe.bat, D59).
 """
 from __future__ import annotations
 

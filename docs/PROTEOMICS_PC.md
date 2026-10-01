@@ -23,7 +23,7 @@ Source: [`reference/pc-inventory/2026-09-15/`](../reference/pc-inventory/2026-09
 
 | Software | Version | Location / notes |
 |---|---|---|
-| FragPipe | **24.0** | `C:\FragPipe\FragPipe-24.0\` — `javaw.exe` running from `…\jre\bin\`, so it has a bundled JRE. Exact launcher path (`fragpipe\bin\fragpipe.exe`?) **not captured** |
+| FragPipe | **24.0** | `C:\FragPipe\FragPipe-24.0\` — `javaw.exe` running from `…\jre\bin\`, so it has a bundled JRE. Launcher: the first Ionomos report (2026-09-23) saw `bin\FragPipe-24.0.exe`; FragPipe's build also puts the headless launcher `bin\fragpipe.bat` there (D59), **not yet confirmed on the PC** |
 | FragPipe | 23.1 | `C:\FragPipe\FragPipe-23.1\` |
 | FragPipe | 22.0 | unzipped in Downloads (`FragPipe-jre-22.0\`), has stock `workflows\isoDTB-ABPP.workflow`, MSFragger 4.1, IonQuant 1.10.27 |
 | DIA-NN | 2.3.2 Academia | installed (MSI); path not captured |
@@ -31,10 +31,10 @@ Source: [`reference/pc-inventory/2026-09-15/`](../reference/pc-inventory/2026-09
 | Python | 3.14.5 (user) | `C:\Users\Daniel Nomura\AppData\Local\Python\pythoncore-3.14-64` |
 | Python | 3.9.13 | system-wide; `py` launcher at `C:\Windows\py.exe` |
 | `python` on PATH | — | resolves to the **WindowsApps store stub** (`0.0.0.0`). Do not rely on `python`; use `py -3.14` or the absolute path |
-| Java on PATH | — | **not found** (FragPipe uses its own JRE — fine) |
+| Java on PATH | — | **not found**. `fragpipe.bat` needs `JAVA_HOME` or `java` on PATH, so Ionomos sets `JAVA_HOME` to FragPipe's own `jre` (D59) |
 | R / Rscript | — | **not installed** → the lab's R scripts are currently run… somewhere else? Or R was removed. Either way: port to Python |
 | git | — | not installed. Deploy by copying / `pip install` from a wheel, or install git |
-| .NET | 10.0 | present (irrelevant) |
+| .NET | 10.0 | present. FragPipe prints a ".NET Core Info" line; whether its Thermo reader needs a particular runtime on Windows is open (ROADMAP) |
 
 ## How the lab currently works (inferred)
 

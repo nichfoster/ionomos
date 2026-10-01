@@ -82,7 +82,7 @@ Back in the app: tab 3 → select the method → pick the files → **Apply chan
 ### A4b. First real search (15–60 min, once)
 
 0. Easiest way to get the workflow: tab 3 → select the method → **Import workflow…** → pick the `fragpipe.workflow` inside a recent run that worked. Its FASTA is copied in too.
-1. Tab 1 → **Find FragPipe** (fills `…\fragpipe\bin\fragpipe.bat`) → **Save**. Tab 6 → **Check FragPipe install**: MSFragger/IonQuant ✓ and each FASTA has decoys.
+1. Tab 1 → **Find FragPipe** (fills `C:\FragPipe\FragPipe-24.0\bin\fragpipe.bat`) → **Save**. Tab 6 → **Check FragPipe install** (or `ionomos-cli.exe preflight`): it starts FragPipe, without a window or a search, for its version and a dry run of each method, and lists what would stop a search. The full checklist for the first real run is [FIRST_REAL_RUN.md](FIRST_REAL_RUN.md).
 2. Tab 5 → **Save & Check**: `FragPipe launcher` ✓ and `methods.isoDTB` ✓ (workflow + FASTA).
 3. Drop a *small* real isoDTB folder (e.g. one replicate, 2–3 fractions).
 4. Watch tab 5: *FragPipe: RUNNING job N* → *done*. In the experiment folder:
@@ -161,7 +161,7 @@ py -3.14 -c "import tkinter; print('ok')"
 | analyse an old FragPipe run | tab 7 → **Analyse a folder…** or `ionomos-cli.exe analyze <folder>` |
 | get a message when a search is done / failed / waiting | off by default. Edit `notify:` in `C:\Fragpipe_Auto\config.yaml` (Teams, Slack, a webhook or email; what is sent: ARCHITECTURE.md "Notifications"), run `ionomos-cli.exe notify-test`, restart the watcher |
 | keep the PC free for a while | tab 6 → **Pause searches** (the running search finishes; nothing new starts) |
-| check FragPipe is installed right | tab 6 → **Check FragPipe install** (MSFragger / IonQuant / DIA-NN, decoys in each FASTA) |
+| check FragPipe is installed right | tab 6 → **Check FragPipe install**, or `ionomos-cli.exe preflight` (launcher, Java, MSFragger / IonQuant / DIA-NN / Python, decoys in each FASTA, and a FragPipe dry run of each method; a few minutes) |
 | stop / start the watcher | tab 5 buttons; the startup task restarts it at next logon |
 | add a user | tab 2 → Add; or just create the folder under `C:\Fragpipe_General` |
 | see what a folder would do | `ionomos-cli.exe dry-run "C:\path\to\folder"` |
@@ -180,8 +180,9 @@ py -3.14 -c "import tkinter; print('ok')"
 - **Watcher says NOT RESPONDING** (tab 5). Stop watcher → Start watcher. Send the diagnostics bundle.
 - **"another ionomos watcher is already running"**: the startup task already runs one — that's fine; use the app to see it.
 - **Job list damaged** (check says ledger ✗): the watcher rebuilds it automatically at start; or `ionomos-cli.exe repair-ledger`.
-- **Job FAILED.** Tab 6 shows the *most likely cause* in plain English. `FAILED.txt` in the experiment folder has the reason;
-  `ionomos_run\fragpipe_console.log` has FragPipe's full output. Fix, then
+- **Job FAILED.** Tab 6 shows the *most likely cause* in plain English. `FAILED.txt` in the experiment folder has the reason
+  (the FragPipe step that failed and its last lines); `ionomos_run\fragpipe_console.log` has FragPipe's full output and
+  `ionomos_run\run_fingerprint.json` a short record of the run to send along. Fix, then
   tab 5 → **Retry a failed job…** (old output is kept as `fragpipe_previous_<time>\`).
 - **Stopping/updating Ionomos during a search** kills that FragPipe run; the job
   re-runs from the start when the watcher starts again.

@@ -1,217 +1,134 @@
-# First real runs — isoDTB, then DIA
+# First real runs: the checklist
 
-Every pipeline run so far — in CI, the test suite and the testbed — used a
-fake FragPipe. This page is the runbook for the first real ones on the lab
-PC: the exit tests for [ROADMAP.md](ROADMAP.md) Phase 1 (watcher + intake)
-and Phase 2 (isoDTB end-to-end), plus a first look at Phase 3 (DIA). The
-[README](../README.md) status line — "Phase 2 in progress — automatic
-FragPipe searches built, awaiting the first real run on the PC" — is what
-this page closes.
+Nothing in Ionomos has run against a real FragPipe yet. The runner was
+checked against FragPipe's headless tutorial and the source of FragPipe 24.0
+(D59), and the test suite runs it against a fake that copies FragPipe's
+output. This page is what to do on the lab PC, in order, the first time.
+It closes [ROADMAP.md](ROADMAP.md) Phase 2. Installing is
+[DEPLOY_WINDOWS.md](DEPLOY_WINDOWS.md); what each method needs is
+[WORKFLOWS.md](WORKFLOWS.md).
 
-Work through it from the PC, logged in as the shared lab account. Installing
-and day-to-day operation are [DEPLOY_WINDOWS.md](DEPLOY_WINDOWS.md); what
-each method needs is [WORKFLOWS.md](WORKFLOWS.md).
+Work as the shared lab account. `ionomos-cli.exe` is in `C:\Ionomos`.
 
-## Before you start
+## 1. Before any data (15 min)
 
-- [ ] **Latest release** (≥ 0.7.0): **Update to x.y.z** in the bottom bar, or *Run & Test → Check for updates*. The first real run should exercise the newest failure reporting and pop-ups, so update first.
-- [ ] **✓ Setup all green**: tab 5 → **Save & Check**. A `!` on the FragPipe launcher or a method means those jobs will *wait* until it's fixed.
-- [ ] **FragPipe install checked**: tab 6 → **Check FragPipe install** — MSFragger, IonQuant and DIA-NN found, decoys in each FASTA.
-- [ ] **isoDTB workflow + FASTA pinned**: tab 3 → **Import workflow…** → pick the `fragpipe.workflow` inside a recent run that worked (its FASTA is copied in too). Details: [DEPLOY_WINDOWS.md](DEPLOY_WINDOWS.md), A4.
-- [ ] **Disk space**: at least twice the raw folder size free on C: — the 2026-09-15 inventory found ~99 GB free, and one 3×7 isoDTB drop is ~20 GB of raws before mzML conversion.
-- [ ] **PC won't sleep**: Settings → System → Power → Sleep: Never (plugged in).
-- [ ] **Watcher running**: tab 5 → **Start watcher**, with the startup task installed so it comes back after every logon.
+- [ ] **Update Ionomos** (bottom bar → **Update to x.y.z**).
+- [ ] **Launcher**: tab 1 → **Find FragPipe** → **Save**. It must end in
+      `bin\fragpipe.bat`. If `C:\FragPipe\FragPipe-24.0\bin\` has only
+      `FragPipe-24.0.exe`, stop and note it: Ionomos will not run the
+      `.exe` (it opens FragPipe's window and returns at once).
+- [ ] **Open FragPipe's own window once** with this installation and check
+      its Config tab shows MSFragger, IonQuant and (for DIA) DIA-NN and
+      Python as found. A headless run reads those settings from
+      `C:\FragPipe\FragPipe-24.0\cache`.
+- [ ] **Workflow + FASTA per method**: tab 3 → **Import workflow…** → the
+      `fragpipe.workflow` of a GUI run that worked. The FASTA must have
+      decoys (about half its entries start with `rev_`).
+- [ ] **Preflight**: tab 6 → **Check FragPipe install**, or
 
-One setting matters throughout: *Run FragPipe automatically* (tab 4
-Advanced). **Off**, Ionomos only files experiments — the Phase 1 behaviour.
-**On**, the full pipeline runs — Phase 2. Each run below says which it needs.
+      ```powershell
+      C:\Ionomos\ionomos-cli.exe preflight
+      ```
 
-## Run 1 — isoDTB: intake, then the first real search
+      It starts FragPipe (no window, no search) for `--help` and a dry run
+      of each method. Takes a few minutes. Wanted: no ✗.
 
-### Name the folder and the raws
+      | Line | If it is ✗ or ! |
+      |---|---|
+      | FragPipe starts | The launcher is not `fragpipe.bat`, or Java was not found. The line says which. |
+      | MSFragger / IonQuant / Thermo .raw reader | FragPipe window → Config → **Download / Update**. |
+      | FragPipe settings | FragPipe's window was never used with this installation: open it once, or set *Tools folder* (tab 4). |
+      | `<method>`: tools it runs | The workflow runs a tool that is not installed. |
+      | `<method>`: FASTA | No decoys, or not about half. Database tab → **Add decoys**, once. |
+      | `<method>`: FragPipe dry run | FragPipe itself refused: the line quotes its message and gives the log. If it complains about the placeholder file, run `preflight --raw C:\path\to\one.raw`. |
+      | Room for long paths | A warning only: keep experiment and raw file names short. |
 
-Folder name: your initials and the `isoDTB` keyword, ideally
-`YYYYMMDD_<initials>_<method>_<whatever>` — e.g.
-`20260925_EJQ_isoDTB_EJQ-2-027_1uM-3h`. Raw files
-`<sample>_<rep>_<fraction>.raw` (`EJQ_2_027_1_1.raw … _3_7.raw`), every
-replicate with the same fraction set, at the top level or in a `raw\`
-subfolder. The full rules (and what gets rejected) are in
-[NAMING_CONVENTION.md](NAMING_CONVENTION.md).
+- [ ] **Keep the preflight's output** (copy the text, or the folder named on
+      its last line under `C:\Fragpipe_Auto\logs\preflight\`). It is the
+      first real evidence of how FragPipe answers.
+- [ ] Disk: at least twice the raw folder's size free on C:. Sleep: Never.
+- [ ] **Watcher running** (tab 5), startup task installed.
 
-Check a folder before dropping it — this moves nothing:
+## 2. First search: isoDTB, small
 
-```powershell
-ionomos-cli.exe dry-run "C:\path\to\folder"
-```
+- [ ] Tab 4 → *Run FragPipe automatically* **on** → **Save**. (Anything
+      already queued starts too: tab 6 → **Pause searches** first if needed.)
+- [ ] Drop a **small** isoDTB folder (one replicate, 2-3 fractions), named
+      `YYYYMMDD_<initials>_isoDTB_<what>`, raws `<sample>_<rep>_<fraction>.raw`.
+      `ionomos-cli.exe dry-run "C:\path\to\folder"` shows how it is read
+      without moving anything.
+- [ ] Accept the review window. Watch tab 6: the job's line should move
+      through FragPipe's steps ("MSFragger (4 of 31 step(s) done)").
 
-### The Phase 1 week — intake only
+**Done looks like**: `DONE.txt` next to the raws; `fragpipe\` with
+`combined_modified_peptide_label_quant.tsv` and a `log_<date>.txt`;
+`results\report.html`; `results\<prefix>_sites.tsv`.
 
-Set *Run FragPipe automatically* **off** (tab 4 → **Save**). Over the next
-week, drop real folders into `C:\Fragpipe_Auto\inbox\` as the lab works. Each
-correctly named folder — ≥1 `.raw`, unchanged for 60 s — opens the **review
-window** (user, conditions, replicates, which condition is the control). Check
-it, fix anything read wrong, **Accept & queue**; it should then land in
-`C:\Fragpipe_General\<user>\<experiment>\` with `ionomos.json` saying
-`queued` and nothing else happening. A bad name opens the same window with the
-problem at the top (or gets a `.REJECTED.txt` next to the folder when no one
-is logged on). Users or aliases added in the app show up in an open window
-within seconds — no watcher restart.
+**Whatever happened, collect these** from the experiment folder (small text
+files, no data):
 
-> **Exit:** on the PC, dropping a correctly named folder of raws lands it in the
-> right user directory with `ionomos.json` saying `queued` and nothing else
-> happens. A bad name gets a `.REJECTED.txt`. Runs for a week without falling over.
+- [ ] `ionomos_run\run_fingerprint.json`  ← the important one
+- [ ] `ionomos_run\fragpipe_console.log`
+- [ ] `FAILED.txt` if there is one
 
-- [ ] Dropping a correctly named folder of raws lands it in the right user directory, with `ionomos.json` saying `queued` — and nothing else happens.
-- [ ] A bad name gets a `.REJECTED.txt`.
-- [ ] It runs for a week without falling over.
+or press **Report a problem…**, which bundles them.
 
-### The first real search
-
-Set *Run FragPipe automatically* **on** (tab 4 → **Save**). Anything still
-`queued` from the week starts processing — one job at a time, oldest first —
-so tab 6 → **Pause searches** first if you'd rather pick. Then drop a
-*small* real isoDTB folder (one replicate, 2–3 fractions) and watch tab 5:
-*FragPipe: RUNNING job N* → *done*. A full 3×7 experiment takes ~30–60 min.
-
-⚠ This first search also settles an open question ([ROADMAP.md](ROADMAP.md),
-0.5.1): whether `FragPipe-24.0.exe` prints headless console output like the
-old `.bat`. The live step line in the queue and the "a step failed inside
-FragPipe" detection both read that console — if the run succeeds but
-`ionomos_run\fragpipe_console.log` stays empty, note it and report back
-(below).
-
-### What done looks like
-
-- `DONE.txt` next to the raws — the report path, the FragPipe output folder and per-comparison hit counts.
-- `fragpipe\` populated; FragPipe's console at `ionomos_run\fragpipe_console.log`.
-- `results\report.html` — the full analysis report.
-- A bad name never got this far: `.REJECTED.txt`, or the resolver window.
-
-> **Exit:** one real isoDTB experiment processed with no manual steps; the
-> `_sites.tsv` matches the R output on the same input.
-
-- [ ] One real isoDTB experiment processed with no manual steps.
-- [ ] The `_sites.tsv` matches the R output on the same input — the procedure is in "The Phase 2 exit test" below.
-
-## Run 2 — DIA: the first DIA search
-
-⚠ DIA is ROADMAP Phase 3 territory and there is **no lab SOP yet** —
-[WORKFLOWS.md](WORKFLOWS.md) says exactly that. Two things are unknown going
-in, and this run is how they get answered:
-
-- **Which workflow the lab uses.** The stock candidates are
-  `DIA_SpecLib_Quant` and `DIA_DIA-Umpire_SpecLib_Quant`; ask the lab, and
-  pin it via tab 3 → **Import workflow…** from a good past run. A missing
-  workflow file only makes the job wait ("waiting: …"), so this is safe to
-  get wrong once.
-- **Which DIA-NN runs.** Try the bundled one first; if the headless run
-  complains, set `fragpipe.config_diann` in `config.yaml` (DIA-NN 2.3.2 is
-  installed on the PC).
-
-Raw files are `<condition>_<biorep>.raw` — `DMSO_1.raw`, `Drug_1.raw` (top
-level or `raw\`). What done looks like: `DONE.txt`; the DIA-NN tables in
-`fragpipe\diann-output\` (`report.tsv`, `report.pg_matrix.tsv`); a report at
-`results\report.html` — the statistics run protein-level, condition vs
-control, on `report.pg_matrix.tsv`. Conditions are guessed from the file
-names, so expect *decide* pop-ups (`UNMATCHED_RUNS`, `NO_CONTROL`) asking
-you to confirm them.
-
-What happens *after* a DIA run is itself an open question — the lab's
-post-processing is unknown; ask what they do next (a FragPipe Analyst
-upload?). TMT is the Phase 3 step after this and has open questions of its
-own (see [ROADMAP.md](ROADMAP.md)).
-
-- [ ] The search completes (`DONE.txt`, not `FAILED.txt`).
-- [ ] `fragpipe\diann-output\report.pg_matrix.tsv` exists.
-- [ ] `results\report.html` opens, with the conditions confirmed or sensibly guessed.
-- [ ] The workflow the lab actually uses is pinned and noted for the repo (below).
-
-## Verifying the results
-
-- `results\report.html` — the doctor banner at the top lists the *decide* and *problem* items with their fixes; below it, volcano plots, the site/protein tables, enrichment and QC.
-- `results\analysis.json` — the machine-readable summary: `state` (`ok` / `needs_input` / `failed`) and every comparison's up/down/tested counts.
-- isoDTB: `results\<prefix>_sites.tsv`, one per sample prefix — the Phase 2 exit table.
-- `results\fragpipe-analyst\` — `experiment_annotation.tsv` and `reproduce_in_R.R`, for reproducing the analysis in the lab's FragPipe-Analyst sessions. Comparing those against this report on a real experiment is a ROADMAP open item.
-- **Any other table** (MaxQuant, Spectronaut, Perseus, limma, Excel…): `ionomos-cli.exe analyze <file>` or tab 7 → **Table…**; results land in `<file>_ionomos\` beside it.
-- **Re-runs without re-searching**: `ionomos-cli.exe analyze <folder> --test welch` (also `--control`, `--compare 'A vs B'`, `--log2fc`, `--alpha`), or tab 7 → **Analyse an experiment** / **Analyse a folder…**. Expect to tune here: the analysis defaults (imputation, control keywords, the LOW_SAMPLE threshold) are provisional until real data says otherwise.
-
-## The Phase 2 exit test — `_sites.tsv` vs the R output
-
-The Phase 2 exit sentence says the `_sites.tsv` must match the R output on
-the same input. Concretely:
-
-1. Let Ionomos finish, and keep both tables: FragPipe's
-   `fragpipe\combined_modified_peptide_label_quant.tsv` (what the port
-   reads) and Ionomos's `results\<prefix>_sites.tsv` (what it wrote).
-2. Run the lab's R script
-   `isoDTB_Fragpipe_merge-individual-peptides-to-Site.R` on the same
-   `combined_modified_peptide_label_quant.tsv`.
-
-⚠ R is not installed on the PC — the 2026-09-15 inventory found none, and
-the lab's R scripts are run "somewhere else" today. Run the R half on
-whatever machine that is (or install R + tidyverse if there is nowhere). The
-script's three settings are hard-coded at the top and must be edited by hand
-each run. Filled in for an example drop `20260925_EJQ_isoDTB_EJQ-2-027`
-containing `EJQ_2_027_1_1.raw … _3_7.raw`:
-
-```r
-input_tsv      <- "C:/Fragpipe_General/EJQ/20260925_EJQ_isoDTB_EJQ-2-027/fragpipe/combined_modified_peptide_label_quant.tsv"
-output_tsv     <- "C:/Fragpipe_General/EJQ/20260925_EJQ_isoDTB_EJQ-2-027/combined_modified_peptide_label_quant_output.tsv"
-sample_prefix  <- "EJQ_2_027"
-```
-
-`sample_prefix` is the FragPipe experiment name — the shared prefix of the
-raw file names; Ionomos names its table after it
-(`results\EJQ_2_027_sites.tsv`).
-
-3. Compare the R script's `…_output.tsv` with `results\<prefix>_sites.tsv`:
-
-| Must match | Detail |
+| What you see | What it means |
 |---|---|
-| Rows | keyed on Protein + ModifiedResidue + ResiduePositionInProtein — same rows (order may differ) |
-| PeptideCount, ExamplePeptides | identical |
-| Ratios | the per-replicate `Mean_<prefix>_<n> Log2 Ratio HL` columns and the overall `Mean_Log2_Ratio_HL`, equal to ≥10 decimal places |
-| Blanks | NA in exactly the same cells |
+| Job stays "waiting: …" | Not started; the reason names what is missing. Fix it, the job starts by itself. |
+| FAILED within seconds, reason starts "FragPipe exited with code 1" | FragPipe refused before any step. The reason quotes its ERROR line; the preflight's dry run should have shown the same. |
+| FAILED, "FragPipe step X failed (exit code N); it said: …" | A tool stopped. The quoted lines are that tool's last words. |
+| FAILED, "exited 0 but wrote nothing" | The launcher returned without running FragPipe. Check tab 1 says `fragpipe.bat`. |
+| DONE with the note "no 'ALL JOBS DONE' line" | FragPipe's end marker was not in the console Ionomos captured. Send the fingerprint: this decides whether the marker can be required. |
+| Pop-up "The SDRF doesn't describe these runs" | FragPipe's own `fragpipe\sdrf.tsv` was read as your design (open question in ROADMAP). Nothing is wrong with the results; close it. |
+| The progress line never changes from "starting" | The console is empty or in a shape Ionomos doesn't know: send `fragpipe_console.log`. |
 
-**What counts as agreement:** identical rows and counts with ratios matching
-to display precision — **not** byte equality. Ionomos reimplements R's
-`mean()`; on the PC's x86 Windows that agrees to ~1e-15 relative rather than
-bit-for-bit. (In the test suite the port is byte-identical against the
-goldens in `ionomos/tests/golden/` — this real-data comparison replays that
-check on real data, where it has never run before.)
+After fixing a cause: **Retry**. The earlier output is kept as
+`fragpipe_previous_<time>\`, the earlier fingerprint as
+`run_fingerprint_<time>.json`.
 
-⚠ One quirk is kept deliberately, in both implementations: the script counts
-*every* letter before the label, so an N-terminal mod written `n[42.0106]`
-shifts that site's position by one. Don't "fix" either side mid-comparison.
+## 3. Then
 
-4. Record the outcome, and file the R output into `ionomos/tests/golden/` —
-   [WORKFLOWS.md](WORKFLOWS.md) asks for exactly one R-script output per
-   method to diff the Python port against.
+- [ ] A full isoDTB experiment (3 × 7; 30-60 min in the GUI).
+- [ ] **The Phase 2 exit test**: run the lab's R script
+      `isoDTB_Fragpipe_merge-individual-peptides-to-Site.R` on the same
+      `fragpipe\combined_modified_peptide_label_quant.tsv` (R is not on the
+      PC: use the machine the script normally runs on; `sample_prefix` is
+      FragPipe's experiment name, as in the table's column names). Compare
+      its output with `results\<prefix>_sites.tsv`: same rows (Protein +
+      residue + position), same PeptideCount and ExamplePeptides, ratios
+      equal to 10 decimals, NA in the same cells. Not byte equality. Keep
+      the R output for `ionomos/tests/golden/`.
+- [ ] **DIA** (no lab SOP yet): pin the workflow the lab uses, run the
+      preflight for it, drop a small folder (`<condition>_<rep>.raw`).
+      FragPipe 24 writes DIA-NN's tables to `fragpipe\dia-quant-output\`.
+      If the DIA-NN step fails on `.raw` files, note its message: FragPipe's
+      workflow notes ask for mzML for Thermo DIA.
+- [ ] **TMT**: one plex per experiment for now. List all channels of the
+      label type in the review window / `experiment.yaml` (`NA` for unused).
 
-## If something looks wrong
+## 4. Report back
 
-| When | Do |
-|---|---|
-| Nothing happened after a drop | Is the watcher running (tab 5 status line)? The folder needs ≥1 `.raw` and must be unchanged for 60 s. |
-| `<name>.REJECTED.txt` in the inbox | Open it — it says why. Fix the folder (or add an `experiment.yaml`); it is retried automatically. Deleting the note also retries. |
-| Job says "waiting: …" | A setup file is missing — the FragPipe launcher or that method's workflow/FASTA. Fix it; the job starts by itself. |
-| Job FAILED | Tab 6 shows the most likely cause in plain English. `FAILED.txt` has the reason; `ionomos_run\fragpipe_console.log` has FragPipe's full output. Fix, then **Retry a failed job…** — the old output is kept as `fragpipe_previous_<time>\`. |
-| Stopping or updating mid-search | Kills that FragPipe run; the job re-runs from the start when the watcher starts again. Nothing is lost — old output is never overwritten. |
-| The PC is needed for something else | Tab 6 → **Pause searches** (the running search finishes; nothing new starts). |
-| Something needs a person | A pop-up appears with the likely cause and fix; the bottom bar shows **⚠ N need attention**; `ionomos-cli.exe attention` lists them all. |
-| Still stuck | **Report a problem…** (bottom right) → a zip lands on the Desktop → send it. The log itself is `C:\Fragpipe_Auto\logs\ionomos.log`. |
+Send, per search: `run_fingerprint.json`, and for a failure also
+`fragpipe_console.log`. Plus the preflight's output. With those, these
+open questions close:
 
-## After the runs: report back
+- [ ] `bin\fragpipe.bat` exists on the PC and starts with FragPipe's own Java.
+- [ ] A headless run prints its console to Ionomos and ends in `ALL JOBS DONE`.
+- [ ] The dry run works with a placeholder file.
+- [ ] The step names and exit-code lines are as the parsers expect.
+- [ ] isoDTB `_sites.tsv` equals the R output.
+- [ ] Which DIA workflow, which DIA-NN, and whether `.raw` works for DIA.
+- [ ] How the pop-ups felt; the LOW_SAMPLE threshold; imputation default.
 
-These runs answer open questions the repo is explicitly waiting on:
+## What is verified and what is not
 
-- [ ] Did `FragPipe-24.0.exe` print headless console output? (The ROADMAP 0.5.1 open item — live progress and step-failure detection depend on it.)
-- [ ] The R comparison result for the Phase 2 exit — and the R output itself, filed into `ionomos/tests/golden/`.
-- [ ] Did the bundled DIA-NN work, or was `fragpipe.config_diann` needed?
-- [ ] Which DIA workflow the lab actually uses, so it can be pinned and documented.
-- [ ] How the pop-ups felt with real data, and what the LOW_SAMPLE threshold and control keywords should be (the ROADMAP 0.7.0 open items).
-- [ ] The lab's default for imputation (Perseus vs none), once the report is compared with their own analyses (the ROADMAP 0.6.0 open item).
+Verified from FragPipe's source and documentation: the launcher and its Java,
+every option Ionomos passes, the manifest format, how the TMT annotation is
+found, the decoy rule, the exit codes, and the log lines Ionomos reads.
+Verified by tests on the fake: the whole run loop (done, failed step,
+time limit, cancel, stop, the process tree being killed, re-runs keeping
+earlier output).
 
-When reporting problems, **Copy diagnostics** (or
-`ionomos-cli.exe diagnose --zip`) bundles the version, config, status and
-the last 150 log lines into one file.
+Not verified: anything against a running FragPipe on the PC. That is what
+this page is for.

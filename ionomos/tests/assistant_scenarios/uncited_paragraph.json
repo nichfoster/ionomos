@@ -6,10 +6,10 @@
   "experiment": "1",
   "model": [
     {
-      "content": "FragPipe ran out of memory [log:1#5].\n\nYou should also reinstall Java and raise the page file to 64 GB."
+      "content": "FragPipe ran out of memory [log:1#257].\n\nYou should also reinstall Java and raise the page file to 64 GB."
     },
     {
-      "content": "FragPipe ran out of memory [log:1#5].\n\nReinstalling Java usually helps."
+      "content": "FragPipe ran out of memory [log:1#257].\n\nReinstalling Java usually helps."
     }
   ],
   "rubric": {

@@ -6,12 +6,12 @@
   "experiment": "1",
   "model": [
     {
-      "content": "<think>The user wants the cause. Maybe the disk [log:1#99]?</think>FragPipe ran out of memory [log:1#5]."
+      "content": "<think>The user wants the cause. Maybe the disk [log:1#99]?</think>FragPipe ran out of memory [log:1#257]."
     }
   ],
   "rubric": {
     "must_cite": [
-      "log:1#5"
+      "log:1#257"
     ],
     "must_not": [
       "(?i)<think>|the user wants"

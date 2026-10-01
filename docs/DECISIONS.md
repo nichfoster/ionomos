@@ -1781,3 +1781,97 @@ on-screen size; `figures: []` as the default; the apostrophe before formula
 cells in CSV exports; SVG and PNG both in the zip by default; the lab's
 current `analysis.export` winning over the style a report was made with in
 `ionomos export`.
+
+### D59 — FragPipe is run the way its source says, checked before a search, and recorded after one
+**2026-10-01.** Every search so far ran against the testbed's fake FragPipe,
+which was written from guesses. Before the first real runs, the runner was
+checked line by line against FragPipe's headless tutorial and the source of
+FragPipe 24.0 (and 23.1 where it could differ). What follows is what was
+decided; the mismatches found are in CHANGELOG (Unreleased) and the sources are
+named in `fake_fragpipe.py` and WORKFLOWS.md.
+
+1. **The launcher is `bin\fragpipe.bat`, with FragPipe's own Java.**
+   `fragpipe.bat` is the start script FragPipe's build makes for every
+   release (Gradle's): it runs `%JAVA_HOME%\bin\java.exe`, else `java` from
+   PATH, else stops. The lab PC has no Java on PATH, so Ionomos sets
+   `JAVA_HOME` for the launcher to the `jre` folder in the installation (the
+   one FragPipe's `.exe` uses). It does this whenever that folder exists,
+   also when the PC has another Java: FragPipe is built and tested with its
+   own.
+2. **`FragPipe-24.0.exe` is never run.** It is a launch4j wrapper with the
+   window ("gui") header: by launch4j's documentation it starts `javaw` and
+   returns without waiting or passing output on. Run by Ionomos it would end
+   at once with exit code 0 while the search went on unseen. A configured
+   `.exe` is swapped for the `fragpipe.bat` beside it, as before; without
+   one the job is **held** with that explanation instead of started.
+   *To confirm on the PC:* `C:\FragPipe\FragPipe-24.0\bin\fragpipe.bat`
+   exists (the build says it does; the first Ionomos report only named the
+   `.exe`).
+3. **A FASTA FragPipe would refuse holds the job.** Headless FragPipe stops
+   at once unless 40-60 % of the FASTA's entries start with the decoy tag
+   (`FragpipeRun.checkDbConfig`; in the window it is a question one can
+   click through). Ionomos applies the same rule before starting, when the
+   workflow says Percolator, PeptideProphet or the report runs: the job
+   waits ("waiting: FASTA … can't be searched") and starts when the file is
+   fixed. A FASTA of 1 GB or more is not counted, as in FragPipe.
+4. **TMT channel maps are checked with FragPipe's rules, and plexes sharing
+   a folder get no annotation file.** FragPipe takes a plex's annotation
+   from the folder that holds its files, and only when exactly one file
+   ending in `annotation.txt` is there. So: one plex → `annotation.txt`
+   (not written beside a user's own `*annotation.txt`); plexes each in their
+   own folder → one `annotation.txt` per folder; plexes sharing a folder →
+   none is written, a warning says FragPipe will name the channels
+   `<plex>_<channel>`. A map FragPipe would stop on (not every channel of
+   the label type listed, a name with a space, a name used twice) fails the
+   job before the search, with the rule.
+5. **Exit code 0 is not enough, and one line is not yet required.** A run
+   fails when its log has a step with a non-zero exit code, or "Cancelling N
+   remaining tasks", or the dry-run notice, or when nothing was written. A
+   finished run also prints `ALL JOBS DONE IN x MINUTES`; a log without it
+   is a **warning** on a done job, not a failure, until a real headless run
+   has shown that line in the console Ionomos captures.
+6. **Only the latest attempt's part of the console log is judged.** The log
+   keeps every attempt. An earlier attempt's failed step used to fail a
+   successful retry whose output fitted in the 400 kB read back.
+7. **A failure's reason quotes the step that failed.** After a failing step
+   FragPipe prints only "Process returned non-zero exit code, stopping" and
+   "Cancelling N remaining tasks", so "last lines" said nothing. The reason
+   is now "FragPipe step X failed (exit code N); it said: …" with the
+   step's own last lines.
+8. **The preflight starts FragPipe, and says so.** `ionomos preflight` (and
+   the app's Check FragPipe install) runs `fragpipe.bat --help` and one
+   `--headless --dry-run` per FragPipe method, each with a time limit, its
+   output in a file, no window, and its files in a new folder under
+   `<log_dir>\preflight\`. A dry run makes all of FragPipe's own checks
+   (tools, FASTA, workflow, annotation) and lists the commands it would run.
+   Its file list names a 64-byte placeholder `.raw` unless `--raw` gives a
+   real file; `--static` starts nothing. FragPipe saves its settings cache
+   on every run, dry or not, as it does for any headless run.
+9. **Every search leaves a fingerprint**:
+   `ionomos_run\run_fingerprint.json` (`names.FINGERPRINT_FILE`), written by
+   the worker whatever the outcome, never in the job's way. Text only, tens
+   of kB: launcher, command line, FragPipe's version block, the workflow's
+   key settings, output file names and sizes, the first 80 and last 120
+   console lines, what the parsers read (steps, exit codes, end marker),
+   timings. An earlier one is kept as `run_fingerprint_<time>.json`. It
+   holds names and paths, as the console log does; the diagnostics bundle
+   is what strips them before anything leaves the PC.
+10. **The fake FragPipe copies the real one, with its sources named**
+    (`fake_fragpipe.py`): options and exit codes, the checks and their
+    messages, the console layout, experiment names (`-` becomes `_`), group
+    folders, `dia-quant-output`, `experiment_annotation.tsv`, `sdrf.tsv`.
+    The tools' own chatter and every number are invented and the file says
+    so. The testbed's workflows are small real-looking ones (39 settings).
+11. **Not changed here, and open** (ROADMAP "Open questions"): FragPipe 24's
+    stock workflows write `fragpipe\sdrf.tsv`, which the analysis reads as
+    the experiment's own design (`downstream/sdrfdesign.py`) and then
+    reports that it describes none of the runs. The testbed's workflows
+    switch it off; `test_fragpipes_own_sdrf_is_not_taken_for_the_users_design`
+    is the expected-failure test for it.
+
+**Verified**: against FragPipe's source and documentation, and by the test
+suite on the fake. **Not verified**: anything against a running FragPipe.
+The launch4j behaviour of the `.exe` (2), that `fragpipe.bat` honours
+`JAVA_HOME` on the PC (1), that a dry run accepts a placeholder `.raw` (8)
+and the exact text of the tools' own error lines are from documentation and
+issue reports, not from the lab PC.

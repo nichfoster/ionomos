@@ -33,7 +33,7 @@ def defaults(root: str | None = None, users_root: str | None = None) -> dict:
         "paths": {
             "inbox": f"{root}/inbox",
             "users_root": users_root,
-            "fragpipe_exe": "C:/FragPipe/FragPipe-24.0/fragpipe/bin/fragpipe.bat",
+            "fragpipe_exe": "C:/FragPipe/FragPipe-24.0/bin/fragpipe.bat",
             "workflow_dir": f"{root}/workflows",
             "fasta_dir": f"{root}/fasta",
             "database": f"{root}/ionomos.db",
@@ -41,7 +41,7 @@ def defaults(root: str | None = None, users_root: str | None = None) -> dict:
         },
         "watcher": {"poll_seconds": 10, "stable_seconds": 60, "min_raw_files": 1, "group_loose_files": True},
         "fragpipe": {"auto_run": True, "threads": 28, "ram_gb": 48, "timeout_minutes": 240, "min_free_gb": 20, "config_tools_folder": "",
-                     "config_diann": ""},
+                     "config_diann": "", "config_python": ""},
         "gui": {"enabled": True, "review_drops": True, "timeout_minutes": 0, "popups": True},
         "naming": {"condition_codes": {"D": "DMSO", "C": "Compound"}},
         "analysis": {"enabled": True, "test": "limma", "de_type": "control", "log2fc": 1.0, "alpha": 0.05,
@@ -173,6 +173,7 @@ def dump_config(d: dict) -> str:
     a(f"  min_free_gb: {_y(f.get('min_free_gb', 20))}   # jobs wait while the data drive has less free than this + the raws")
     a(f"  config_tools_folder: {_y(f.get('config_tools_folder', '') or '')}   # only if FragPipe can't find its tools")
     a(f"  config_diann: {_y(f.get('config_diann', '') or '')}   # DIA only, path to DiaNN.exe if needed")
+    a(f"  config_python: {_y(f.get('config_python', '') or '')}   # only if FragPipe can't find its Python (spectral library)")
     a("")
     a("gui:")
     a(f"  enabled: {_y(bool(g.get('enabled', True)))}   # the naming window (problems, and reviews below)")
