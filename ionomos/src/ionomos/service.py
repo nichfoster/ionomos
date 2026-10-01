@@ -9,7 +9,6 @@ Config path precedence (used by the app when no --config is given):
 from __future__ import annotations
 
 import base64
-import json
 import os
 import subprocess
 import sys
@@ -702,18 +701,45 @@ def save_diagnostics(config_path: Path) -> tuple[str, Path | None]:
     return text, where
 
 
+def _windows_desktop() -> Path | None:
+    """The Desktop Windows itself uses (the registry's User Shell Folders): with OneDrive backup on, it is
+    under OneDrive, and %USERPROFILE%\\Desktop may not exist or may be a second, unseen folder."""
+    try:
+        import winreg
+
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders") as key:
+            value, _kind = winreg.QueryValueEx(key, "Desktop")
+        return Path(os.path.expandvars(str(value))) if value else None
+    except Exception:  # noqa: BLE001 - no registry (not Windows), no value, no rights
+        return None
+
+
 def desktop_dir() -> Path:
-    d = Path(os.environ.get("USERPROFILE", str(Path.home()))) / "Desktop" if os.name == "nt" else Path.home() / "Desktop"
-    return d if d.is_dir() else Path.home()
+    """The user's Desktop, also when OneDrive has moved it; the home folder when there is none."""
+    cands: list[Path] = []
+    if os.name == "nt":
+        reg = _windows_desktop()
+        if reg is not None:
+            cands.append(reg)
+        for var in ("OneDrive", "OneDriveCommercial", "OneDriveConsumer"):
+            if os.environ.get(var):
+                cands.append(Path(os.environ[var]) / "Desktop")
+        cands.append(Path(os.environ.get("USERPROFILE", str(Path.home()))) / "Desktop")
+    else:
+        cands.append(Path.home() / "Desktop")
+    return next((d for d in cands if d.is_dir()), Path.home())
 
 
 def save_problem_report(config_path: Path, note: str = "", dest_dir: Path | None = None) -> Path:
-    """The 'Report a problem' file: diagnostics bundle + the user's note + the app's log, on the Desktop."""
+    """The 'Report a problem' file as it has always been called: a `diagnose` bundle (bundle.py, D63) with the
+    user's note, on the Desktop. Anonymised; its key file is written next to it."""
     import datetime
 
-    from ionomos import __version__
+    from ionomos import __version__, bundle
 
-    dest = (dest_dir or desktop_dir()) / f"Ionomos-report-{datetime.datetime.now():%Y%m%d-%H%M}-v{__version__}.zip"
+    folder = dest_dir or bundle.output_dir(config_path)
+    dest = folder / f"{names.REPORT_PREFIX}-{datetime.datetime.now():%Y%m%d-%H%M}-v{__version__}.zip"
     return save_diagnostics_zip(config_path, dest, note=note)
 
 
@@ -732,74 +758,16 @@ def reveal(path: Path) -> None:
 
 
 def save_diagnostics_zip(config_path: Path, dest: Path | None = None, note: str = "") -> Path:
-    """A .zip with the report, config, logs, crash reports and the problem jobs' FragPipe logs.
-
-    Never includes raw data or FragPipe result tables — only small text files,
-    with each log capped at its last 3 MB.
-    """
+    """A .zip with the report, config, logs, crash reports and the problem jobs' search logs: the `diagnose`
+    level of bundle.py (D63), anonymised, with its key file next to it. Never raw data or result tables.
+    An existing file is not replaced (the name gets -2, -3 ...); the path written is returned."""
     import datetime
     import tempfile
-    import zipfile
 
-    from ionomos import fragpipe, health, notify
+    from ionomos import bundle
 
-    hide = notify.file_secrets(config_path)  # never in a bundle: webhook addresses, the SMTP password (D58)
-    stamp = f"{datetime.datetime.now():%Y%m%d-%H%M%S}"
-    paths = _raw_paths(config_path)
-    log_dir = paths.get("log_dir")
     if dest is None:
+        log_dir = _raw_paths(config_path).get("log_dir")
         base = log_dir if log_dir and log_dir.is_dir() else Path(tempfile.gettempdir())
-        dest = base / f"diagnostics-{stamp}.zip"
-    dest = Path(dest)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    cap = 3_000_000
-
-    def add(z: zipfile.ZipFile, src: Path, arc: str):
-        try:
-            if src.is_file():
-                data = src.read_bytes()
-                data = data[-cap:] if len(data) > cap else data
-                for secret in hide:
-                    data = data.replace(secret.encode("utf-8"), notify.HIDDEN.encode())
-                z.writestr(arc, data)
-        except OSError:
-            pass
-
-    with zipfile.ZipFile(dest, "w", compression=zipfile.ZIP_DEFLATED) as z:
-        from ionomos.buildinfo import info, one_line
-
-        if note.strip():
-            z.writestr("note.txt", f"{one_line()}\n{datetime.datetime.now():%Y-%m-%d %H:%M}\n\n{note.strip()}\n")
-        z.writestr("build.json", json.dumps(info(), indent=2))
-        z.writestr("report.txt", diagnostics(config_path))
-        app_log = appdata_dir() / "app.log"
-        for f in sorted(app_log.parent.glob("app.log*"))[:3]:
-            add(z, f, f"logs/app/{f.name}")
-        try:
-            z.writestr("config.yaml", notify.redact_config_text(
-                Path(config_path).read_text(encoding="utf-8", errors="replace"), hide))
-        except OSError:
-            pass
-        if log_dir and log_dir.is_dir():
-            for f in sorted([*names.log_files(log_dir), *log_dir.glob("app.log*")])[:8]:
-                add(z, f, f"logs/{f.name}")
-            for f in health.recent_crashes(log_dir, 5):
-                add(z, f, f"crashes/{f.name}")
-            add(z, log_dir / health.HEARTBEAT_NAME, "logs/heartbeat.json")
-        db = paths.get("database")
-        if db:
-            for j in _problem_jobs(db, limit_failed=5):
-                d = Path(j.dest_dir)
-                arc = f"jobs/{j.id}-{j.inbox_name}"
-                rd = names.run_dir(d)
-                for src, rel in ((names.status_path(d), names.status_path(d).name), (d / "FAILED.txt", "FAILED.txt"),
-                                 (d / "DONE.txt", "DONE.txt"), (d / "experiment.yaml", "experiment.yaml"),
-                                 (rd / fragpipe.CONSOLE_LOG, f"{rd.name}/{fragpipe.CONSOLE_LOG}"),
-                                 (rd / fragpipe.MANIFEST_NAME, f"{rd.name}/{fragpipe.MANIFEST_NAME}"),
-                                 (d / "results" / "analysis.json", "results/analysis.json"),
-                                 (d / "results" / "analysis_error.txt", "results/analysis_error.txt")):
-                    add(z, src, f"{arc}/{rel}")
-                wf = next(rd.glob("*.workflow"), None) if rd.is_dir() else None
-                if wf:
-                    add(z, wf, f"{arc}/{rd.name}/{wf.name}")
-    return dest
+        dest = base / f"diagnostics-{datetime.datetime.now():%Y%m%d-%H%M%S}.zip"
+    return bundle.create(config_path, opts=bundle.Options(level="diagnose", note=note), dest=Path(dest)).path

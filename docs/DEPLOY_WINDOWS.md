@@ -7,7 +7,7 @@ runs FragPipe):
 |---|---|
 | **install** | download `Ionomos-Setup-<version>.exe` from [Releases](https://github.com/nichfoster/ionomos/releases/latest) → run it → Next, Finish. Ionomos opens on its **✓ Setup** checklist → **Auto-setup** → work down the list. |
 | **update** | nothing to download by hand: Ionomos checks GitHub when it opens and every 6 hours. When a new version is out, **Update to x.y.z** appears in the bottom bar → click → Yes. It downloads (checksum-verified), stops the watcher cleanly, installs, reopens and restarts the watcher. Settings and data are kept. *Run & Test → Check for updates* checks right now. |
-| **report a problem** | **Report a problem…** (bottom right, every tab) → a sentence → **Create report** → a zip lands on the Desktop, selected → drag it into the chat. |
+| **report a problem** | **Report a problem…** (bottom right, every tab) → a sentence → **Save the zip** → a zip lands on the Desktop, selected → copy it to where it should go (Dropbox, a chat). Names in it are replaced by pseudonyms; the `KEY…DO-NOT-SHARE` file next to it stays on the PC. Tick the result-tables box when the numbers are to be checked. Details: [DEV_LOOP.md](DEV_LOOP.md#bundles-the-labs-files-on-the-developers-side-d63). |
 | **uninstall** | Settings → Apps → **Ionomos** → Uninstall. Removes the program, startup task and shortcuts. Keeps `config.yaml`, the job list, logs and every experiment folder. |
 | **start over completely** | `deploy\clean_slate.ps1` (also removes LabWatch leftovers; still keeps data). |
 
@@ -153,7 +153,7 @@ py -3.14 -c "import tkinter; print('ok')"
 | change any setting | open `Ionomos.exe`, edit, **Save** (restart the watcher for timing changes) |
 | see the queue | tab 5 → **Show queue**, or `ionomos-cli.exe status` |
 | see the log | tab 5 → tick *follow the watcher log*, or `C:\Fragpipe_Auto\logs\ionomos.log` |
-| report a problem | **Report a problem…** (bottom right) → zip on the Desktop → send it (or `ionomos-cli.exe diagnose --zip`). Tick *detailed logging* for problems that come and go. |
+| report a problem | **Report a problem…** (bottom right) → zip on the Desktop → send it, keep the `KEY` file (or `ionomos-cli.exe bundle`; `bundle 12 --level validate` adds job 12's result tables). Nothing is uploaded. Tick *detailed logging* for problems that come and go. |
 | see / retry / cancel jobs | tab **6 Jobs** (double-click = open the report; failed jobs show the likely cause) |
 | something needs you | a window pops up by itself (analysis decision, failed search, rejected folder) with the likely cause and the fix; the bottom bar shows **⚠ N need attention** until it's dealt with |
 | look at results | `results\report.html` in the experiment folder (interactive volcano, protein details, heatmap, enrichment, QC); tab 6 → **Open report** |

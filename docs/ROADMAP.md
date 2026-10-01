@@ -177,6 +177,17 @@ small anonymised real experiment as a test fixture and public example data
     configurable thresholds, a site-annotation (CysDB) overlay, selectivity
     across compounds. The lab still has to confirm the ratio direction and
     thresholds.
+- **A bundle the maintainer can carry off the PC** (anonymised zip on the
+  Desktop for troubleshooting and for re-running the analysis; nothing is
+  uploaded). → 2026-10-01 (D63): built. `ionomos bundle`, the **Report a
+  problem** window, `bundle inspect / unpack / translate`. Still open:
+  - run it on the lab's real folders and read the zip by eye before the
+    first one is shared (the leak check only knows the names Ionomos knows)
+  - the window has not been seen on screen (GUI tests run in CI only)
+  - "Copy diagnostics" still copies real names; decide whether it should be
+    anonymised too
+  - DIA-NN's main report and peptide-level tables are not bundled; add them
+    behind an option if a validation needs them
 - `ionomos status` as a tiny local web page if people ask.
 - Auto-archive finished experiments to `D:\<user>\` after N days.
 - Optional: auto-pull from `C:\Proteomics_File_Sharing` (reversing D3) once
@@ -535,6 +546,10 @@ Collected from the other docs; resolve before/during Phase 1.
       mass error and missed-cleavage share does the lab call a problem (built: 10 ppm and 50 %, both wide)? Should
       a run unlike the others in its experiment be flagged too, and how are TMT fractions to be judged? Is the
       isoDTB search an offset search, so that its mass errors need another reading?
+- [ ] Bundle (D63): confirm the defaults: generic role words (DMSO, drug, compound, pool) stay readable and
+      other condition words are replaced; pseudonyms without an underscore (`user01`, `exp001`, `condA`); the
+      2,000 MB and 25 MB limits; with no job named, `validate` takes the last finished job. Is a date in a raw
+      file name (kept, as every number is) acceptable?
 - [ ] Phase 5: which pilot labs can we reach? Does this lab run titrations or phospho? (Orders 5C.)
 - [ ] Phase 6: is the PC's RAM in all 6 memory channels (speed of a local model)? Is a GPU present? May the assistant
       ever use a cloud model (institutional data policy), or strictly local?

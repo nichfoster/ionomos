@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A bundle for troubleshooting and validation** (D63; `bundle.py`,
+  docs/DEV_LOOP.md). **Report a problem…** is now a window with the note,
+  the jobs, three boxes and a list of what will go into the zip with its
+  size; it is also in the failed-search and failed-analysis pop-ups and on
+  the Jobs tab (**Zip for troubleshooting…**). The zip is saved on the
+  Desktop (also a OneDrive Desktop; else the log folder). Ionomos sends
+  nothing. `ionomos bundle [JOB | FOLDER …] [--level diagnose|validate]
+  [--out DIR] [--no-anonymise] [--keep-conditions] [--max-mb N] [--dry-run]`
+  does the same from a terminal.
+  - `diagnose`: settings, logs, crash files, needs-attention items, each
+    job's status, run folder (workflow, manifest, console logs, a
+    `run_fingerprint.json` when present) and `analysis.json`.
+  - `validate`: also the search's result tables and `results/`, so that
+    `ionomos bundle unpack ZIP DIR` and `ionomos --config DIR/config.yaml
+    analyze DIR/<experiment>` repeat the analysis. `ionomos bundle inspect
+    ZIP` says what a bundle holds.
+  - Never raw / mzML / `.d` files, FASTA files (name, size, entry count and
+    SHA-256 are recorded) or spectral libraries. A size limit (2,000 MB) and
+    row-sampling of PSM tables over 25 MB, both listed in the zip.
+  - Names are replaced by default: users, the PC, experiments, raw files,
+    samples and conditions, e-mail and IP addresses, the same pseudonym for
+    the same name in every file, table header and file name. Protein and
+    gene identifiers and all numbers are kept. The key file is saved next to
+    the zip, not in it (`ionomos bundle translate KEY FILE` turns an answer
+    back). The finished zip is searched for every original; if one is found,
+    no zip is saved.
+  - `BUNDLE.json` and `README.txt` in the zip: version and build, level,
+    what was included, capped or left out and why, file hashes.
+  - `ionomos diagnose --zip` and the app's **Save diagnostics bundle** now
+    make a `diagnose` bundle (anonymised, with a key file), and no longer
+    replace a file of the same name.
+  - Limits of the replacing (free text, names inside longer words, plain
+    words of a name standing alone, pictures) are listed in the help
+    (**What Ionomos will never do** → the zip for troubleshooting).
+    **Not run on the lab's real folders or on Windows outside CI.**
+
 ### Fixed
 
 - A failed FragPipe search on .raw files no longer gets the cause "A .raw

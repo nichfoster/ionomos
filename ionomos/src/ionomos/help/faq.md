@@ -53,6 +53,29 @@ current view (comparison, cut-offs, search, open protein). Send the link to
 someone who has the same file (for example on the lab drive), or paste the
 part after `#` into the address of their copy.
 
+## How do I send a problem, or my results, to be checked? {#faq.bundle}
+
+Press **Report a problem…** (bottom right in the app, in a failed-search or
+failed-analysis window, or **Zip for troubleshooting…** on the Jobs tab for
+the selected job). Type a sentence, choose the jobs, and press **Save the
+zip**. The window lists what will go in and how large it will be.
+
+- Leave the boxes as they are to send a problem: settings, logs and the
+  search logs.
+- Tick **Include the search's result tables…** when the numbers are to be
+  checked: the analysis can then be run again from the zip.
+- Names are replaced by pseudonyms unless you untick that box.
+
+The zip is saved on the Desktop and shown in a folder window. Ionomos sends
+nothing: copy the zip to where it should go (a shared Dropbox folder, an
+email). The file next to it with `KEY` in its name stays in the lab. See
+[The zip for troubleshooting](#safety.bundle) for what is in it and what the
+replacing of names cannot do.
+
+From a terminal: `ionomos bundle 12 --level validate` (job 12), and
+`ionomos bundle translate <key file> answer.txt` puts the real names back
+into an answer you received.
+
 ## How do I open the data in FragPipe-Analyst? {#faq.fpa}
 
 In FragPipe-Analyst, upload the quantification table from `fragpipe\` (for

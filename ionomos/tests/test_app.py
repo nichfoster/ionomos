@@ -502,10 +502,49 @@ def test_report_a_problem_puts_one_zip_on_the_desktop(app, tmp_path, monkeypatch
     app.report_create()
     assert _pump_until(app, lambda: shown)
     z = revealed[0]
-    assert z.parent == tmp_path and z.name.startswith("Ionomos-report-") and clip == [str(z)]
+    assert z.parent == tmp_path and z.name.startswith("Ionomos-bundle-") and "-diagnose-" in z.name
+    assert clip == [str(z)]
     note = zipfile.ZipFile(z).read("note.txt").decode()
     assert "stopped after lunch" in note and "detailed logging turned on" in note
     assert (tmp_path / "Auto" / "logs" / "DEBUG_UNTIL").is_file()
+    # anonymised by default: the key file is next to the zip, and the message says it stays in the lab
+    key = app.report_dialog.result.key_path
+    assert key.parent == tmp_path and "DO-NOT-SHARE" in key.name and key.name not in zipfile.ZipFile(z).namelist()
+    assert "stays in the lab" in shown[0][1] and str(tmp_path) in shown[0][1]
+
+
+def test_report_window_lists_what_goes_in_and_follows_its_boxes(app, tmp_path, monkeypatch):
+    import zipfile
+    from tkinter import messagebox
+
+    from ionomos import service
+
+    _lab_app(app, tmp_path)
+    shown = []
+    monkeypatch.setattr(service, "desktop_dir", lambda: tmp_path)
+    monkeypatch.setattr(service, "reveal", lambda p: None)
+    monkeypatch.setattr(messagebox, "showinfo", lambda *a, **k: shown.append(a))
+    monkeypatch.setattr(app.root, "clipboard_clear", lambda: None)
+    monkeypatch.setattr(app.root, "clipboard_append", lambda s: None)
+    app.report_problem("the analysis failed")
+    d = app.report_dialog
+
+    def listed():
+        return d.preview.get("1.0", "end")
+
+    assert d.text.get("1.0", "end").strip() == "the analysis failed"
+    assert _pump_until(app, lambda: "Level: diagnose" in listed())
+    assert "Estimated size" in listed() and "replaced by pseudonyms" in listed()
+    d.validate.set(True)
+    d.anonymise.set(False)
+    d.refresh()
+    assert _pump_until(app, lambda: "Level: validate" in listed() and "NOT anonymised" in listed())
+    d.save()
+    assert _pump_until(app, lambda: shown)
+    res = d.result
+    assert "-validate-" in res.path.name and res.key_path is None and "NOT anonymised" in shown[0][1]
+    assert "BUNDLE.json" in zipfile.ZipFile(res.path).namelist()
+    assert not list(tmp_path.glob("*DO-NOT-SHARE*"))
 
 
 def test_update_banner_appears_for_a_downloaded_installer(app, tmp_path, monkeypatch):

@@ -82,7 +82,7 @@ to put it on the PC.
 | [PROTEOMICS_PC.md](docs/PROTEOMICS_PC.md) | Facts about the target machine from the inventory, and what's still unknown |
 | [DECISIONS.md](docs/DECISIONS.md) | Decision log (why polling, why folder-level, why Python not R, …) |
 | [ROADMAP.md](docs/ROADMAP.md) | Phased build plan and open questions to resolve with the lab |
-| [DEV_LOOP.md](docs/DEV_LOOP.md) | **Start here for prototyping:** Mac ↔ GitHub ↔ PC loop, updates and diagnostics |
+| [DEV_LOOP.md](docs/DEV_LOOP.md) | **Start here for prototyping:** Mac ↔ GitHub ↔ PC loop, updates and diagnostics; the anonymised **bundle** the lab saves for troubleshooting and validation, and how to inspect, unpack and re-analyse it |
 | [DEPLOY_WINDOWS.md](docs/DEPLOY_WINDOWS.md) | Step-by-step install of the finished tool on the proteomics PC |
 | [TESTING.md](docs/TESTING.md) | Test suite + testbed on macOS and Windows |
 | [FIRST_REAL_RUN.md](docs/FIRST_REAL_RUN.md) | Runbook for the first real FragPipe run on the PC (isoDTB, then DIA) |

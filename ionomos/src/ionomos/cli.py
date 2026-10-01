@@ -11,6 +11,9 @@ Command line.
     ionomos retry    JOB_ID [--config PATH]       failed -> queued
     ionomos testbed  ...                          build/drive a fake lab for testing (see testbed.py)
     ionomos diagnose [--zip [PATH]]               everything needed to report a problem (text, or a .zip bundle)
+    ionomos bundle   [JOB|FOLDER ...] [--level diagnose|validate] [--out DIR] [--no-anonymise]
+                                                   an anonymised zip on the Desktop for troubleshooting / validation;
+                                                   bundle inspect ZIP | unpack ZIP DIR | translate KEY [FILE] (bundle.py)
     ionomos analyze  JOB_ID|FOLDER [--control C] [--compare 'A vs B'] [--de-type all] [--imputation none]
                      [--exclude SAMPLE] [--log2fc F] [--open]
                                                    statistics + volcano plots + results/report.html
@@ -502,6 +505,12 @@ def cmd_diagnose(args) -> int:
     return 0
 
 
+def cmd_bundle(args) -> int:
+    from ionomos import bundle
+
+    return bundle.run_cli(args)
+
+
 def cmd_stop(args) -> int:
     """Gracefully stop the watcher of this config (it re-queues a running search). Used by the installer."""
     from ionomos import health
@@ -926,6 +935,9 @@ def main(argv: list[str] | None = None) -> int:
     dg.add_argument("--zip", nargs="?", const="auto", metavar="PATH",
                     help="write a .zip bundle (report, logs, failed jobs' FragPipe logs) instead")
     dg.set_defaults(fn=cmd_diagnose)
+    from ionomos import bundle
+
+    bundle.add_parser(sub).set_defaults(fn=cmd_bundle)
     sp = sub.add_parser("stop", help="gracefully stop the running watcher (re-queues a running search)")
     sp.add_argument("--wait", type=float, default=60, help="seconds to wait before forcing it (default 60)")
     sp.add_argument("--remember", action="store_true", help="start it again when the app next opens (updates)")

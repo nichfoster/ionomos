@@ -29,7 +29,9 @@
 | `demo.py` | `ionomos demo`: a simulated DIA experiment (`downstream/simulate.py`, planted hits, on/off proteins and gene-set shifts; bundled `assets/demo_gene_sets.gmt`) written to a new folder, then analysed. Offline, no lab config, no Tk (the pip install; docs/QUICKSTART.md) | — |
 | `app.py` | tkinter setup wizard / control panel: folders, users, methods, every parameter, start/stop, startup task, testbed | — |
 | `configio.py` | config.yaml as a dict; writes a commented file | — |
-| `service.py` | child processes, PID file, Task Scheduler, remembered config path, exe routing; dev install: git update, diagnostics bundle | — |
+| `service.py` | child processes, PID file, Task Scheduler, remembered config path, exe routing, the Desktop folder (also when OneDrive moved it); dev install: git update, the diagnostics text; `save_problem_report` / `save_diagnostics_zip` are the old names for a `diagnose` bundle | — |
+| `bundle.py` | The troubleshooting / validation bundle (D63, see "The bundle" below): `collect` (what would go in; sizes only), `learn` + `Anonymiser` (the pseudonyms), `create` (streams the zip, then `verify` searches it for every original; the key file next to it), `inspect` / `unpack` / `translate` for the reader, the `ionomos bundle` command, and what the window says (`Choice`, `summary_lines`) | — |
+| `bundle_dialog.py` | The **Report a problem** window (Tk only; every decision is in `bundle.py`) | — |
 | `ledger.py` | SQLite job table + status transitions; source of truth for "what's queued" | `prior-work/store.py` |
 | `worker.py` | Thread inside `ionomos run`: first runnable `queued` job → FragPipe or DIA-NN (runner.py) → done/failed; holds jobs whose setup files are missing. Sequential. | `prior-work/queue_worker.py` |
 | `fragpipe.py` | Prepare a job (launcher, workflow with `database.db-path` patched to the method's FASTA, manifest, TMT annotation), run headless with timeout/stop, kill the process tree | `prior-work/fragpipe_runner.py` |
@@ -58,7 +60,7 @@
 | `runners/isodtb.py` | Post-proc: modified-peptide → site merge — thin entry point delegating to `downstream/isodtb.py`, which holds the algorithm | port of `lab-scripts/isoDTB_…R` |
 | `runners/tmt.py` | Post-proc: experimental annotation fix | port of `lab-scripts/correct_experimental_annotation…R` |
 | `runners/dia.py` | Post-proc: (TBD — probably nothing beyond copying `report.tsv` up) | — |
-| `cli.py` | `ionomos setup / run / check / status / dry-run / names test / retry / testbed / diagnose / notify-test / update / help / ask`; no args → app; hidden `fake-fragpipe` for the testbed | — |
+| `cli.py` | `ionomos setup / run / check / status / dry-run / names test / retry / testbed / diagnose / bundle / notify-test / update / help / ask`; no args → app; hidden `fake-fragpipe` for the testbed | — |
 
 ## Data flow for one job
 
@@ -277,6 +279,9 @@ by default and its `base_url` must be on this PC. See ASSISTANT.md.
 | Windows refuses to rotate the log (another program has it open) | the watcher keeps writing to the same file and tries again a minute later; no line is lost |
 | A notification can't be sent (dead webhook, no network, wrong password) | sent from its own thread after the status is recorded, one try, a timeout; logged once; the job is unaffected |
 | A webhook address or the SMTP password ends up in a report | never logged; `diagnose`, the bundle and Report a problem redact `config.yaml` and scrub every included file |
+| A lab member's or an experiment's name leaves the PC in a bundle | names are replaced by default; the finished zip is searched for every original and is not saved if one is found (`BundleLeak`); the key file is never inside the zip |
+| A bundle overwrites a file, or changes an experiment | it only reads experiment folders; the zip is written as `.part`, renamed when it passed the check, and an existing name gets `-2`, `-3` … |
+| A multi-GB table is bundled | streamed line by line (a few MB of memory); a size limit per bundle and a row-sampled PSM table, both said in `BUNDLE.json`, `README.txt`, `inspect` and the window |
 
 ## Notifications (D58)
 
@@ -544,8 +549,77 @@ PC: C:\Ionomos\          program only (replaced by updates, removed by uninstall
 
 Update: app finds a newer release on GitHub (or a Setup in Downloads) → verified download → `request_stop` (graceful; running
 search re-queued) → `RESTART_WATCHER` note → silent Setup → app reopens →
-watcher restarted. Report: **Report a problem…** → `save_problem_report` →
-`Ionomos-report-<ts>-v<ver>.zip` on the Desktop (note, build.json, report.txt,
-config, watcher + app logs, crash files, problem jobs' FragPipe logs; never
-raw data) → selected in Explorer. Detailed logging: `logs/DEBUG_UNTIL`,
+watcher restarted. Report: **Report a problem…** → the bundle window →
+`Ionomos-bundle-<ts>-<level>-v<ver>.zip` and its key file on the Desktop →
+selected in Explorer (next section). Detailed logging: `logs/DEBUG_UNTIL`,
 honoured by the running watcher within 30 s, expires by itself.
+
+## The bundle (D63)
+
+One zip a person copies off the PC, for a developer who has never seen it:
+to find why a search or analysis failed (`diagnose`) or to repeat the
+analysis on the lab's tables (`validate`). Ionomos uploads nothing. The
+round trip and the list of what each level holds are in
+[DEV_LOOP.md](DEV_LOOP.md).
+
+```
+collect(config, jobs, Options)        file sizes only; the window's list and `--dry-run`
+   │   system files, then each job's small files, then (validate) tables and results/,
+   │   then the size limit: what does not fit is left out, never a log
+   ▼
+learn(plan) → Anonymiser              names from config.yaml (users, aliases, methods), users_root,
+   │                                  the whole job list, the inbox, the bundled jobs' ionomos.json,
+   │                                  experiment.yaml, annotation.txt, analysis.json, table headers,
+   │                                  the OS account and host name
+   ▼
+_write → <name>.zip.part              per file: structured rewrite (ionomos.json: folder tokens;
+   │                                  experiment.yaml: notes removed; config.yaml: secrets), then every
+   │                                  line through notify.scrub + Anonymiser.text; tables keep their
+   │                                  identifier columns; file names in the zip are rewritten too
+   ▼
+verify(zip, anonymiser)               every file and file name searched for every original
+   │  hit → write once more (a name first met half-way), still a hit → BundleLeak, .part removed
+   ▼
+rename to <name>.zip (never over a file) + <name>-KEY-keep-in-the-lab-DO-NOT-SHARE.json beside it
+```
+
+**In the zip**: `BUNDLE.json` (format, version and build, level, whether and
+how names were replaced, the kept words, per job: status, method, FASTA
+facts, `reproducible`, `order_preserved`; every file with size and SHA-256;
+what was capped, left out or not found), `README.txt` (the same for a
+person), `note.txt`, `build.json`, `report.txt`, `config.yaml`, `logs/`,
+`crashes/`, `attention/`, and `jobs/<id>-<folder>/…` laid out as the
+experiment folder is. `unpack` turns `jobs/<id>-<folder>/` into
+`<dir>/<folder>/` and writes `<dir>/config.yaml` from the bundled one with
+every path under `<dir>/_lab/` and without `notify:` / `assistant:`.
+
+**Pseudonyms** (`Anonymiser`). A name is split into words at `_`, `-` and
+any other non-alphanumeric character. A word is *kept* when the analysis or
+a file format reads meaning from it: numbers with a unit (`10uM`, `3h`,
+`127N`, `9plex`), replicate / fraction marks (`F3`, `rep2`), control and
+reference words (`analysis.DEFAULT_CONTROL_KEYWORDS`, the lab's
+`control_keywords`, pool / bridge / norm …), the config's method keys and
+aliases, the analysis' setting names, and a short list of Ionomos' own
+words (results, sample, enrichment …). Every other word gets a pseudonym:
+
+| What | Pseudonym | Replaced where |
+|---|---|---|
+| user folders, aliases, the OS account, any `C:\Users\<name>` | `user01`, aliases `user01a` … | everywhere it stands as a word |
+| the PC name | `pc01` | everywhere |
+| experiment / inbox folder names | `exp001` (the whole name) | everywhere |
+| a folder path outside the lab's tree (raw paths in a foreign table) | `folder01` (the whole path) | everywhere |
+| words of raw-file, sample and condition names | `condA` … (letters, no `_`, so `condition_of` and the dose / time readers see the same shape) | inside any registered name, its `_`-prefixes and re-joined forms; alone only if the word is itself a sample / condition name or has letters and digits (`KL6159A`) |
+| words of other names (dropped files, inbox items, folder words) | `name01` … | as above |
+| e-mail, IPv4 (first number ≥ 10, so `1.4.3.0` stays a version), IPv6 / MAC | `email01@example.invalid`, `ip01` | by pattern |
+
+The `cond` pseudonyms are assigned in the byte order of the originals and
+given a first letter (`condA`, `CondA`, `FcondA` …) that keeps their order
+against the kept words too, because `fpa.impute` draws Perseus' random
+numbers per sample in byte order of the sample names. `order_kept` checks
+each job's names and `BUNDLE.json` says when the order changed. Matching is
+case-insensitive and on whole words; a run of name characters that holds one
+of the lab's names is treated as a name, so its short words are replaced
+too. In tab-separated tables the protein / gene / peptide columns
+(`bundle._ID_COLUMNS`, and `id`, `label`, `description` of Ionomos' own
+tables) are never rewritten; an original found there is listed in the key
+file as kept, not failed.

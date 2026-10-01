@@ -28,7 +28,7 @@ a = Analysis(
                    "ionomos.downstream.rrandom", "ionomos.analysis_tab", "ionomos.manifest",
                    "ionomos.naming_history", "ionomos.inbox", "ionomos.attention", "ionomos.popups",
                    "ionomos.experiment_editor", "ionomos.downstream.doctor", "ionomos.help",
-                   "ionomos.assistant"],
+                   "ionomos.assistant", "ionomos.bundle", "ionomos.bundle_dialog"],
     hookspath=[],
     runtime_hooks=[],
     excludes=["pandas", "numpy", "matplotlib", "scipy", "PIL", "pytest", "ruff", "pyarrow"],  # pyarrow: optional (engines.py)
