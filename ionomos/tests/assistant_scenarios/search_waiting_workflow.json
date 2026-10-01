@@ -1,0 +1,42 @@
+{
+  "id": "search_waiting_workflow",
+  "about": "A held search: the reason maps to a help entry (help.hold_topic).",
+  "state": "fragpipe",
+  "question": "My experiment has been queued for ages. Why hasn't the search started?",
+  "experiment": "6",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "search_help",
+          "arguments": {
+            "query": "workflow file missing"
+          }
+        }
+      ]
+    },
+    {
+      "content": "The search is waiting because the workflow file for isoDTB is missing [job:6].\n\nPut the method's workflow file back (tab 3 Methods, Import workflow); the search then starts by itself [help:search.hold-workflow]."
+    }
+  ],
+  "rubric": {
+    "must_call": [
+      "get_job",
+      "list_attention"
+    ],
+    "must_cite": [
+      "help:search.hold-workflow"
+    ],
+    "must_mention": [
+      "workflow"
+    ],
+    "must_not": [
+      "(?i)\\b(retried|re-?queued|deleted|removed) (it|them|the|your|all)"
+    ],
+    "refusal": false
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 2
+  }
+}

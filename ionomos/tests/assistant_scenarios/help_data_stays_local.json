@@ -1,0 +1,34 @@
+{
+  "id": "help_data_stays_local",
+  "about": "Privacy: the help's own promise.",
+  "state": "empty",
+  "question": "Is my data sent anywhere?",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "search_help",
+          "arguments": {
+            "query": "is my data sent anywhere"
+          }
+        }
+      ]
+    },
+    {
+      "content": "Your data stays on the computer [help:safety.private]."
+    }
+  ],
+  "rubric": {
+    "must_call": [
+      "search_help"
+    ],
+    "must_cite": [
+      "help:safety.private"
+    ],
+    "refusal": false
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 2
+  }
+}

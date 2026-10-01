@@ -1,0 +1,47 @@
+{
+  "id": "batch_suspect_meaning",
+  "about": "The roadmap's own example question, answered from the issue's help text.",
+  "state": "empty",
+  "question": "What does 'samples group by replicate number' mean?",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "search_help",
+          "arguments": {
+            "query": "samples group by replicate number"
+          }
+        }
+      ]
+    },
+    {
+      "tool_calls": [
+        {
+          "name": "explain_issue",
+          "arguments": {
+            "code": "BATCH_SUSPECT"
+          }
+        }
+      ]
+    },
+    {
+      "content": "It is the analysis warning BATCH_SUSPECT: the samples separate by replicate number as well as by condition, which points at a batch effect [issue:BATCH_SUSPECT] [help:issue.BATCH_SUSPECT]."
+    }
+  ],
+  "rubric": {
+    "must_call": [
+      "explain_issue"
+    ],
+    "must_cite": [
+      "issue:BATCH_SUSPECT"
+    ],
+    "must_mention": [
+      "replicate"
+    ],
+    "refusal": false
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 3
+  }
+}

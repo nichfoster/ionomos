@@ -1,0 +1,35 @@
+{
+  "id": "what_needs_attention",
+  "about": "The whole list: several jobs, each cited.",
+  "state": "fragpipe",
+  "question": "What needs my attention right now?",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "list_attention",
+          "arguments": {
+            "limit": 10
+          }
+        }
+      ]
+    },
+    {
+      "content": "Three searches failed in FragPipe: jobs 1, 2 and 4 [job:1] [job:2] [job:4] [help:attention.search_failed].\n\nJob 5 failed before the search started, and job 6 is waiting for its workflow file [job:5] [job:6] [help:search.hold-workflow].\n\nTwo dropped folders could not be taken in [help:attention.intake_rejected]."
+    }
+  ],
+  "rubric": {
+    "must_call": [
+      "list_attention"
+    ],
+    "must_cite": [
+      "job:1",
+      "job:6"
+    ],
+    "refusal": false
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 2
+  }
+}

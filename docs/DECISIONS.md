@@ -1274,3 +1274,66 @@ adds the tests.
 p and adjusted p, the fold changes, the trend t and p and the interaction F,
 for the plain model, a replicate block and data with missing values, to
 1e-8.
+
+
+### D57 — The assistant's first part is read-only, and is tested as a harness, not as a model
+**2026-10-01.** ROADMAP Phase 6.1 ("Explain") is built inside the rules D49
+set, in `ionomos/assistant/`. Phase 6.0 (measuring models on the PC) has not
+happened, so there is no default model, and nothing has run against a real
+model or runtime. The choices made on the way:
+
+1. **A fifth citation form, `[job:ID]`.** D49 lists issue, log, help and
+   analysis. "Is job 3 finished?" has an answer that none of them can carry,
+   so a job the tools returned can be cited too.
+2. **Every paragraph needs a valid citation, and one invalid citation sinks
+   the answer.** "Every claim cites" has to be something Ionomos can check
+   without understanding the text; a paragraph is the unit it can see. An
+   invented citation is treated as an invented claim. The model gets one
+   chance to correct an answer, then Ionomos's own text is shown.
+3. **A refusal is the silent branch.** There is no separate refusal message
+   to trust: an answer with no valid citation ("I don't know", a poem,
+   statistics advice) is never shown, and the fallback names who to ask.
+4. **What a citation proves is that the source exists, not that the sentence
+   follows from it.** The Sources lines under an answer are written by
+   Ionomos from the tools' results so a reader can compare. Whether models
+   misread their sources is for the scorecard on real models.
+5. **An answer that says "I retried / deleted / changed …" is not shown.**
+   No tool changes anything, so the claim is false whatever it cites. This
+   is a coarse pattern, not a proof, and stays until 6.2 gives actions a
+   dialog.
+6. **Non-local addresses are refused even with `assistant.allow_cloud:
+   true`.** D49 ties a cloud model to a banner and a preview of what is
+   sent. Neither exists before 6.4, so the flag is read and reported but
+   opens nothing. The request also ignores proxy settings and refuses
+   redirects, so a local address cannot become a remote one on the way.
+7. **A wrong `assistant:` address is not a config error.** Typos in the block
+   fail at load like any other section, but where `base_url` points is
+   checked when a question is asked: a bad address must not stop the watcher.
+8. **Ionomos does the obvious lookups itself.** With `--experiment` or
+   `--item` it fetches the job, its attention items and a failed search's
+   log tail before the model's first turn, in the shape of tool calls. The
+   system prompt and tool schemas stay byte-identical (about 1,000 tokens; a
+   test pins their digest) so a runtime can cache them.
+9. **Streaming is for timing only.** Nothing is shown before the citations
+   are checked, so tokens are not printed as they arrive. The stream gives
+   the time to first token for the audit log.
+10. **Help search is BM25 with a shared crude stemmer**, in SQLite FTS5 when
+    present and in plain Python otherwise, over the same tokens. No
+    embeddings (D49: only if the evaluation shows misses).
+11. **The audit log stores hashes of tool arguments and of the shown text**,
+    and the question in clear, in `assistant-audit.jsonl` (named in
+    `names.py`) in app data. It is never trimmed.
+12. **The scenario corpus is scripted, and says so.** The 53 scenarios in
+    `tests/assistant_scenarios/` carry model turns written by hand: what a
+    good or a misbehaving model would send. CI replays them through an
+    in-process fake of the chat endpoint. That tests the loop, the
+    validators, the citation check, the fallbacks and the audit log. It
+    does not measure a model. The rubrics in the same files are
+    model-independent and are what a real model will be scored on.
+
+**Left out:** the "Ask about this" button in the pop-ups (the backend,
+`ask(item_id=…)`, exists; the Tk part could not be checked without opening
+windows), a runner that scores a real model over the corpus, and runtime
+tuning (keep-alive, threads, priority). Phase 6.1's box stays unticked.
+
+**For the maintainer to confirm:** 1, 2 and 6.

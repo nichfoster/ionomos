@@ -1,0 +1,45 @@
+{
+  "id": "batch_suspect_in_my_job",
+  "about": "The same issue, for one job: the doctor's finding plus the quality field.",
+  "state": "fragpipe",
+  "question": "The report warns about replicates grouping together. Is that a problem in my data?",
+  "experiment": "3",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "explain_issue",
+          "arguments": {
+            "code": "BATCH_SUSPECT",
+            "job_id": 3
+          }
+        },
+        {
+          "name": "analysis_summary",
+          "arguments": {
+            "job_id": 3
+          }
+        }
+      ]
+    },
+    {
+      "content": "The analysis of job 3 raised the warning that samples group by replicate number, not only by condition [issue:BATCH_SUSPECT] [analysis:quality].\n\nWhat that means and what to do about it is in the help [help:issue.BATCH_SUSPECT]."
+    }
+  ],
+  "rubric": {
+    "must_call": [
+      "explain_issue"
+    ],
+    "must_cite": [
+      "issue:BATCH_SUSPECT"
+    ],
+    "must_not": [
+      "(?i)you (should|must) (remove|drop|exclude)"
+    ],
+    "refusal": false
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 2
+  }
+}

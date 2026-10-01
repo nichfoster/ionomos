@@ -1,0 +1,42 @@
+{
+  "id": "no_control_real_cv_names",
+  "about": "Real names from reference/pc-inventory (one sample at three FAIMS CVs): no condition looks like a control.",
+  "state": "doctor",
+  "question": "Why is it asking me which condition is the control?",
+  "experiment": "2",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "explain_issue",
+          "arguments": {
+            "code": "NO_CONTROL",
+            "job_id": 2
+          }
+        }
+      ]
+    },
+    {
+      "content": "None of the three conditions looks like a control, so Ionomos used CS_isoDTB_ELK_3_1-7_DIA_CV-35 and asks you to confirm [issue:NO_CONTROL] [job:2].\n\nPick the control in the window and Run analysis; the choice is remembered for this experiment [help:issue.NO_CONTROL]."
+    }
+  ],
+  "rubric": {
+    "must_call": [
+      "explain_issue"
+    ],
+    "must_cite": [
+      "issue:NO_CONTROL"
+    ],
+    "must_mention": [
+      "CV-35"
+    ],
+    "must_not": [
+      "(?i)\\b(retried|re-?queued|deleted|removed) (it|them|the|your|all)"
+    ],
+    "refusal": false
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 2
+  }
+}

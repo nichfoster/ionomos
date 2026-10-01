@@ -1,0 +1,35 @@
+{
+  "id": "unknown_experiment",
+  "about": "--experiment names nothing: the answer says so, and is still grounded in the help.",
+  "state": "fragpipe",
+  "question": "Why are there no hits?",
+  "experiment": "20250101_Nobody_DIA_nothing",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "search_help",
+          "arguments": {
+            "query": "why are there no hits"
+          }
+        }
+      ]
+    },
+    {
+      "content": "The help lists the usual reasons under \"Why are there no hits?\" [help:faq.no-hits]."
+    }
+  ],
+  "rubric": {
+    "must_cite": [
+      "help:faq.no-hits"
+    ],
+    "must_mention": [
+      "no experiment is called"
+    ],
+    "refusal": false
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 2
+  }
+}

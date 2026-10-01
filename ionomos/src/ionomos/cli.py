@@ -17,6 +17,9 @@ Command line.
     ionomos demo     [FOLDER] [--open]            a simulated experiment + its report (offline, no lab setup)
     ionomos help     [TOPIC] [--open]             plain-language help: prints TOPIC (NO_TABLE, pca, ...) and
                                                    writes help.html (--open: in the browser, at TOPIC)
+    ionomos ask      "QUESTION" [--experiment JOB_ID|NAME] [--item ID] [--json]
+                                                   the local assistant: an answer grounded in the job's log, the
+                                                   doctor's findings and the help; changes nothing (docs/ASSISTANT.md)
     ionomos init     [--root DIR] [--users DIR]   create folders + a config without the app (headless setup)
     ionomos qc-trend [--rebuild] [--open]         instrument QC: the QC-standard runs trended (logs/qc_trend.html)
     ionomos cancel   JOB_ID                       stop a running search / drop a queued job
@@ -366,6 +369,10 @@ def cmd_check(args) -> int:
     crashes = health.recent_crashes(cfg.log_dir, 1)
     if crashes:
         row(None, "last crash report", str(crashes[-1]))
+    from ionomos import assistant
+
+    st, why = assistant.state(assistant.settings_of(cfg))
+    row(True if st == "ready" else None, "assistant", why if st != "not_set_up" else f"not set up: {why}")
     print("\nall good" if ok_all else "\nfix the ✗ items above")
     return 0 if ok_all else 1
 
@@ -693,6 +700,27 @@ def cmd_help(args) -> int:
     return 0
 
 
+def cmd_ask(args) -> int:
+    """Ask the local assistant (assistant/, D49 / D57). Read-only. When the assistant is not set up, the model
+    is not answering or its answer can't be backed by what Ionomos knows, Ionomos's own text is printed."""
+    import json
+
+    from ionomos import assistant
+
+    cfg = _load(args, check_paths=False)
+    ans = assistant.ask(cfg, " ".join(args.question), experiment=args.experiment, item_id=args.item)
+    if args.json:
+        print(json.dumps(ans.as_dict(), indent=2, default=str))
+        return 0
+    print(ans.text)
+    if ans.sources:
+        print("\nSources:")
+        for line in ans.sources:
+            print(f"  {line}")
+    print(f"\n(assistant: {ans.outcome}" + (f", model {ans.model}" if ans.grounded else "") + ")")
+    return 0
+
+
 def cmd_attention(args) -> int:
     """What needs a person: list, show one, dismiss."""
     from ionomos import attention
@@ -905,6 +933,12 @@ def main(argv: list[str] | None = None) -> int:
     hp.add_argument("--open", action="store_true", help="open help.html in the browser, at the topic")
     hp.add_argument("--out", metavar="DIR", help="folder for help.html (default: the log folder, else app data)")
     hp.set_defaults(fn=cmd_help)
+    ak = sub.add_parser("ask", help="ask the local assistant about a job, an issue or the help (read-only)")
+    ak.add_argument("question", nargs="+", help="the question, in plain words")
+    ak.add_argument("--experiment", metavar="JOB_ID|NAME", help="the job the question is about")
+    ak.add_argument("--item", metavar="ID", help="an attention item (ionomos attention lists them)")
+    ak.add_argument("--json", action="store_true", help="print the answer with its tool calls and citations as JSON")
+    ak.set_defaults(fn=cmd_ask)
     at = sub.add_parser("attention", help="what needs a person (analysis decisions, failed searches, ...)")
     at.add_argument("action", nargs="?", choices=["list", "show", "dismiss"], default="list")
     at.add_argument("item", nargs="?", help="item id (from the list)")

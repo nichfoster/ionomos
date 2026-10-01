@@ -1,0 +1,25 @@
+{
+  "id": "reasoning_block_stripped",
+  "about": "A local model's <think> block is not part of the answer, nor of its citations.",
+  "state": "fragpipe",
+  "question": "Why did my search fail?",
+  "experiment": "1",
+  "model": [
+    {
+      "content": "<think>The user wants the cause. Maybe the disk [log:1#99]?</think>FragPipe ran out of memory [log:1#5]."
+    }
+  ],
+  "rubric": {
+    "must_cite": [
+      "log:1#5"
+    ],
+    "must_not": [
+      "(?i)<think>|the user wants"
+    ],
+    "refusal": false
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 1
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "id": "help_volcano",
+  "about": "A glossary question.",
+  "state": "empty",
+  "question": "What is a volcano plot?",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "search_help",
+          "arguments": {
+            "query": "volcano",
+            "limit": 2
+          }
+        }
+      ]
+    },
+    {
+      "content": "The help explains it under \"volcano plot\" in the glossary [help:glossary.volcano]."
+    }
+  ],
+  "rubric": {
+    "must_call": [
+      "search_help"
+    ],
+    "must_cite": [
+      "help:glossary.volcano"
+    ],
+    "refusal": false
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 2
+  }
+}

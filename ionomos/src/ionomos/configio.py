@@ -238,6 +238,11 @@ def dump_config(d: dict) -> str:
     if q.get("max_file_mb") not in (None, ""):
         a(f"  max_file_mb: {_y(q['max_file_mb'])}   # larger tables are skipped")
     a("")
+    if isinstance(d.get("assistant"), dict) and d["assistant"]:  # the app doesn't edit these; keep them (D57)
+        a("assistant:   # the local assistant, `ionomos ask` (docs/ASSISTANT.md); off unless enabled with a model")
+        for k, v in d["assistant"].items():
+            a(f"  {_y(str(k))}: {_y(v)}")
+        a("")
     a("users:   # users are the subfolders of users_root; aliases map initials -> folder")
     a("  aliases:")
     for user, als in (u.get("aliases") or {}).items():

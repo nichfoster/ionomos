@@ -90,6 +90,7 @@ class Config:
     file_rules: dict[str, FileRule] = field(default_factory=lambda: dict(DEFAULT_FILE_RULES))  # naming.methods
     date_formats: tuple[str, ...] = DEFAULT_DATE_FORMATS  # naming.date_formats
     qc_trend: dict = field(default_factory=dict)  # instrument QC trending (qctrend.py, D45); {} = defaults
+    assistant: dict = field(default_factory=dict)  # the local assistant (assistant/, D49 / D57); {} = off
 
     @property
     def method_aliases(self) -> dict[str, list[str]]:
@@ -265,6 +266,7 @@ def load(path: str | Path, check_paths: bool = True) -> Config:
         config_path=p,
         analysis=_analysis(raw.get("analysis")),
         qc_trend=_qc_trend(raw.get("qc_trend")),
+        assistant=_assistant(raw.get("assistant")),
         user_ignore=tuple(str(x) for x in (users.get("ignore") if users.get("ignore") is not None else DEFAULT_USER_IGNORE)),
     )
 
@@ -345,6 +347,16 @@ def _qc_trend(raw) -> dict:
         return settings_from(raw)
     except QCTrendError as exc:
         raise ConfigError(f"qc_trend.{exc}" if not str(exc).startswith("must") else f"qc_trend: {exc}") from None
+
+
+def _assistant(raw) -> dict:
+    """assistant: section (the local assistant, D49 / D57), validated by the package that uses it."""
+    from ionomos.assistant import AssistantError, settings_from
+
+    try:
+        return settings_from(raw)
+    except AssistantError as exc:
+        raise ConfigError(f"assistant.{exc}" if not str(exc).startswith("must") else f"assistant: {exc}") from None
 
 
 def _read_learned(path: Path) -> dict[str, list[str]]:

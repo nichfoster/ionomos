@@ -119,3 +119,6 @@ NAMING_HISTORY_FILE = "naming-history.jsonl"
 # Instrument QC trending (D45): the per-run metric store and the trend page, both in log_dir.
 QC_TREND_STORE = "qc_trend.jsonl"
 QC_TREND_PAGE = "qc_trend.html"
+
+# The assistant's audit log (ROADMAP Phase 6, D49 / D57): append-only JSONL in the app-data folder.
+ASSISTANT_AUDIT_FILE = "assistant-audit.jsonl"

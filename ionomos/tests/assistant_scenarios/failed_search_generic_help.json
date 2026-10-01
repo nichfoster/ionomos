@@ -1,0 +1,37 @@
+{
+  "id": "failed_search_generic_help",
+  "about": "Asked without a job: the help's own entry on failed searches.",
+  "state": "fragpipe",
+  "question": "What should I do when a search fails?",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "search_help",
+          "arguments": {
+            "query": "search failed"
+          }
+        }
+      ]
+    },
+    {
+      "content": "Read the likely cause in the window that opens, fix it, then press Retry [help:attention.search_failed] [help:search.failed]."
+    }
+  ],
+  "rubric": {
+    "must_call": [
+      "search_help"
+    ],
+    "must_cite": [
+      "help:attention.search_failed"
+    ],
+    "must_mention": [
+      "Retry"
+    ],
+    "refusal": false
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 2
+  }
+}

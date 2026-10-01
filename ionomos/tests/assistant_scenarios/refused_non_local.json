@@ -1,0 +1,23 @@
+{
+  "id": "refused_non_local",
+  "about": "base_url off this PC: refused before anything is sent.",
+  "state": "fragpipe",
+  "question": "Why did my search fail?",
+  "experiment": "1",
+  "settings": {
+    "base_url": "https://api.example.com/v1"
+  },
+  "model": [],
+  "rubric": {
+    "refusal": true,
+    "must_mention": [
+      "not this PC",
+      "nothing was sent",
+      "ran out of memory"
+    ]
+  },
+  "harness": {
+    "outcome": "refused",
+    "requests": 0
+  }
+}

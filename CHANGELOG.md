@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The assistant, read-only "Explain"** (ROADMAP Phase 6.1, D49, D57;
+  `ionomos/assistant/`, [docs/ASSISTANT.md](docs/ASSISTANT.md)).
+  `ionomos ask "why did my search fail?" --experiment 12` answers from the
+  job's log, the doctor's findings and the help, through a model running on
+  the PC. **Built and tested against a scripted fake model only: no real
+  model or runtime has been tried, none is recommended, and the assistant is
+  off by default.**
+  - It speaks the OpenAI-compatible chat API to `assistant.base_url`
+    (standard library only). An address that is not this PC is refused before
+    anything is sent.
+  - Seven read-only tools with schema-checked arguments: list experiments, a
+    job, attention items, an issue code in the help's words, a numbered log
+    tail, the analysis summary, help search (BM25; SQLite FTS5 or pure
+    Python). No file paths as arguments, no changes, no shell, no network.
+  - Every paragraph of an answer must cite `[issue:CODE]`, `[log:JOB#LINE]`,
+    `[help:ID]`, `[analysis:FIELD]` or `[job:ID]`, and each citation must be
+    something a tool returned. Otherwise the answer is not shown and Ionomos
+    prints its own text: likely causes, fixes, the help entry, and who to
+    ask. The same text is the answer when the assistant is not set up.
+  - Names, logs and `experiment.yaml` are treated as untrusted: tool results
+    are passed as data, cleaned of control characters and capped.
+  - Every question is appended to `assistant-audit.jsonl` in app data.
+  - New: `assistant:` in `config.yaml`, an `assistant` row in `ionomos
+    check`, help entries `faq.assistant` and `faq.assistant-setup`, and 53
+    scenarios in `tests/assistant_scenarios/` replayed in CI.
+  - Not built: the "Ask about this" button in the pop-ups, and a runner that
+    scores real models. Phase 6.1's exit criteria are still open.
 - **Time courses** (ROADMAP 5C #1, D53; `downstream/timecourse.py`). When the
   conditions are time points (`Drug_0h`, `Drug_1h`, `Drug_4h`, `Drug_24h`,
   or `analysis.times`) and a series has at least 3, every feature gets

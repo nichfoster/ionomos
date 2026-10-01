@@ -1,0 +1,37 @@
+{
+  "id": "job_status",
+  "about": "A plain status question: [job:ID] is the citation (D57).",
+  "state": "fragpipe",
+  "question": "Is job 3 finished?",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "get_job",
+          "arguments": {
+            "job_id": 3
+          }
+        }
+      ]
+    },
+    {
+      "content": "Yes. Job 3, 20260914_Isaac_DIA_FLAG-AR-pulldown, is done [job:3]."
+    }
+  ],
+  "rubric": {
+    "must_call": [
+      "get_job"
+    ],
+    "must_cite": [
+      "job:3"
+    ],
+    "must_mention": [
+      "done"
+    ],
+    "refusal": false
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 2
+  }
+}

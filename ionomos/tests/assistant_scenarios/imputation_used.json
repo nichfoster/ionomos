@@ -1,0 +1,47 @@
+{
+  "id": "imputation_used",
+  "about": "What Ionomos did, from analysis.json, with the glossary for the word.",
+  "state": "fragpipe",
+  "question": "Were missing values filled in, and how?",
+  "experiment": "3",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "analysis_summary",
+          "arguments": {
+            "job_id": 3
+          }
+        },
+        {
+          "name": "search_help",
+          "arguments": {
+            "query": "imputation"
+          }
+        }
+      ]
+    },
+    {
+      "content": "Yes. After filtering and median centring, 134 values (3.7%) were imputed with the Perseus-type method [analysis:3#processing] [analysis:imputation].\n\nImputation replaces missing values so that every feature can be tested [help:glossary.imputation]."
+    }
+  ],
+  "rubric": {
+    "must_call": [
+      "analysis_summary"
+    ],
+    "must_cite": [
+      "analysis:imputation"
+    ],
+    "must_mention": [
+      "Perseus"
+    ],
+    "must_not": [
+      "(?i)you should (use|switch to|try) (knn|minprob|mindet|zero)"
+    ],
+    "refusal": false
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 2
+  }
+}
