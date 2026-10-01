@@ -82,6 +82,19 @@ notify:
     from: ""                  # e.g. proteomics-pc@yourlab.org
     to: []                    # e.g. [you@yourlab.org]
 
+# The assistant: `ionomos ask "why did my search fail?" --experiment 12` (docs/ASSISTANT.md, D49 / D57).
+# Off by default. It needs a model runtime that the lab installs on this PC (Ollama, or llama.cpp's
+# llama-server): Ionomos ships no runtime and no model. It only reads, and it only talks to this PC.
+assistant:
+  enabled: false
+  base_url: http://127.0.0.1:11434/v1   # the runtime's OpenAI-compatible address on this PC (Ollama's default;
+                                        # llama-server: http://127.0.0.1:8080/v1). Any other computer is refused.
+  model: ""                   # the model's name in that runtime; none is recommended yet (ROADMAP Phase 6.0)
+  maintainer: ""              # who "ask the maintainer" names, e.g. "Nick (nick@lab.example)"
+  timeout_seconds: 120        # how long to wait for the model
+  stream: true                # false if the runtime can't stream tool calls
+  allow_cloud: false          # reserved for ROADMAP 6.4; a non-local base_url is refused whatever this says
+
 # Who is who. Users are the subfolders of users_root; a new user = a new folder.
 # Aliases let initials in a folder name resolve to that folder.
 users:

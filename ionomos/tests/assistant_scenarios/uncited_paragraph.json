@@ -1,0 +1,26 @@
+{
+  "id": "uncited_paragraph",
+  "about": "One grounded paragraph does not carry an ungrounded one.",
+  "state": "fragpipe",
+  "question": "Why did my search fail?",
+  "experiment": "1",
+  "model": [
+    {
+      "content": "FragPipe ran out of memory [log:1#5].\n\nYou should also reinstall Java and raise the page file to 64 GB."
+    },
+    {
+      "content": "FragPipe ran out of memory [log:1#5].\n\nReinstalling Java usually helps."
+    }
+  ],
+  "rubric": {
+    "must_not": [
+      "(?i)reinstall"
+    ],
+    "refusal": true
+  },
+  "harness": {
+    "outcome": "fallback",
+    "reason": "paragraph(s) without a citation",
+    "rounds": 2
+  }
+}

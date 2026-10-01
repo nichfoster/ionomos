@@ -1,0 +1,33 @@
+{
+  "id": "fragpipe_msfragger_missing",
+  "about": "The experiment is named, not numbered; the fix is the doctor's own sentence.",
+  "state": "fragpipe",
+  "question": "What went wrong with this one and how do I fix it?",
+  "experiment": "20260126_Aman_TMT_KL6159A-9plex",
+  "model": [
+    {
+      "content": "FragPipe could not find MSFragger [log:4#5].\n\nOpen the FragPipe GUI once, Config tab -> Download/Update MSFragger (accept the licence), then Retry [job:4]."
+    }
+  ],
+  "rubric": {
+    "must_call": [
+      "get_job",
+      "log_tail"
+    ],
+    "must_cite": [
+      "log:4#5",
+      "job:4"
+    ],
+    "must_mention": [
+      "Download/Update MSFragger"
+    ],
+    "must_not": [
+      "(?i)\\b(retried|re-?queued|deleted|removed) (it|them|the|your|all)"
+    ],
+    "refusal": false
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 1
+  }
+}

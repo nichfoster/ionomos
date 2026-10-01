@@ -1,0 +1,43 @@
+{
+  "id": "one_condition",
+  "about": "Ask about this on an analysis that needs a decision (doctor issue ONE_CONDITION).",
+  "state": "doctor",
+  "question": "Why is there no volcano plot?",
+  "item": "analysis_20260914_Isaac_DIA_vehicle-only-",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "explain_issue",
+          "arguments": {
+            "code": "ONE_CONDITION",
+            "job_id": 1
+          }
+        }
+      ]
+    },
+    {
+      "content": "All 4 samples were read as DMSO, so there is nothing to compare and no volcano plot can be made [issue:ONE_CONDITION] [job:1].\n\nGive each sample its condition in the window (Guess from names fills in a suggestion) and Run analysis [help:issue.ONE_CONDITION]."
+    }
+  ],
+  "rubric": {
+    "must_call": [
+      "get_job",
+      "explain_issue"
+    ],
+    "must_cite": [
+      "issue:ONE_CONDITION"
+    ],
+    "must_mention": [
+      "condition"
+    ],
+    "must_not": [
+      "(?i)\\b(retried|re-?queued|deleted|removed) (it|them|the|your|all)"
+    ],
+    "refusal": false
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 2
+  }
+}

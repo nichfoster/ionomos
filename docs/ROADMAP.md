@@ -462,6 +462,17 @@ that scorecard, not leaderboards.
   validator, audit log, not-installed state, "Ask about this" on attention items,
   `ionomos ask`, 30+ scenarios. *Exit:* ≥ 90% pass on must / must-not, 0 injection
   failures, median time to first token < 20 s on the idle PC.
+  - **Built 2026-10-01 (D57, [ASSISTANT.md](ASSISTANT.md)), against a scripted fake
+    model only:** the client (localhost only), the seven read-only tools, the citation
+    validator with one correction round, the fallback to the doctor text and the help,
+    the audit log, the not-set-up state, `ionomos ask` (`--experiment`, `--item`,
+    `--json`), an `assistant` row in `ionomos check`, help entries, and 53 scenarios
+    replayed in CI.
+  - **Remains (the box stays open):** nothing has run against a real model or runtime,
+    so none of the exit criteria is measured. Needs 6.0 first (a model to try). Then:
+    a runner that scores a real model over the corpus on the PC; the "Ask about this"
+    button on pop-ups and the attention list (the backend, `ask(item_id=…)`, exists);
+    on-demand loading, thread caps and priority while a search runs.
 - [ ] **6.2 Confirmed actions (2–3 weeks).** The proposal tools and the native
   diff-and-confirm dialog. *Exit:* no path runs an action without a click (tested), and
   3 lab members finish the tasks unaided.
@@ -527,7 +538,11 @@ Collected from the other docs; resolve before/during Phase 1.
 - [ ] Phase 5: which pilot labs can we reach? Does this lab run titrations or phospho? (Orders 5C.)
 - [ ] Phase 6: is the PC's RAM in all 6 memory channels (speed of a local model)? Is a GPU present? May the assistant
       ever use a cloud model (institutional data policy), or strictly local?
-- [ ] Phase 6: who is the "ask the maintainer" contact the assistant falls back to?
+- [ ] Phase 6: who is the "ask the maintainer" contact the assistant falls back to? (It goes in
+      `assistant.maintainer`; unset, the text says "the person who looks after Ionomos in your lab".)
+- [ ] Phase 6 (D57): confirm three choices made while building 6.1: `[job:ID]` as a fifth citation form; an
+      answer is shown only if *every paragraph* has a valid citation; a non-local `base_url` is refused even
+      with `assistant.allow_cloud: true` until 6.4's banner and preview exist.
 - [ ] Phase 5: publish on PyPI as `ionomos` (needs a PyPI account / trusted publisher set up by the maintainer).
 - [x] Agent auto-merge: removed 2026-09-27; a person merges (D31).
 - [x] CI Python versions: 3.11 (floor), 3.12 (exe build), 3.14 (the PC) since 2026-09-27.

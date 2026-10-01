@@ -1,0 +1,22 @@
+{
+  "id": "not_set_up_no_model",
+  "about": "Enabled but no model chosen: the same fallback.",
+  "state": "fragpipe",
+  "question": "Why did my search fail?",
+  "experiment": "4",
+  "settings": {
+    "model": ""
+  },
+  "model": [],
+  "rubric": {
+    "refusal": true,
+    "must_mention": [
+      "Download/Update MSFragger",
+      "assistant.model"
+    ]
+  },
+  "harness": {
+    "outcome": "not_set_up",
+    "requests": 0
+  }
+}

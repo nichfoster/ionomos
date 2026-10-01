@@ -1333,6 +1333,7 @@ method; the QC trend's `methods:` list and series names use the lab's keys.
 same analysis, SDRF, annotation, control handling and doctor messages as the
 built-in method. The FragPipe-Analyst and R goldens pass unchanged.
 
+
 ### D55 — Search quality per run comes from the QC trend's reader, with two wide warnings
 **2026-10-01.** D35 left PSM-level QC for later. The report's QC tabs judge
 samples from the quantities; none of them says how the search went for each
@@ -1376,6 +1377,130 @@ raw file. `downstream/psmqc.py` adds that, as a **Search quality** QC tab,
 **Not checked on real data.** The `psm.tsv` column names are from the
 FragPipe documentation, as in the testbed's fake FragPipe. The tests use
 tables with those names and planted values.
+
+
+### D56 — Sage TMT is summarised as MSstatsTMT input is; plexes are left to IRS
+**2026-10-01.** D51 held a Sage job whose settings asked for TMT, because
+`tmt.tsv` holds reporter ions per spectrum and nothing rolled them up.
+ROADMAP 5B #5 listed it as still to do.
+
+1. **The join.** `tmt.tsv` has a row per MS2 / MS3 spectrum (`filename`,
+   `scannr`, `ion_injection_time`, then a column per reporter);
+   `results.sage.tsv` has the PSMs. They are joined on (filename, scannr):
+   for MS3 quantification Sage writes the MS2 scan's id there. Both files
+   are read line by line, since both have a row per spectrum.
+2. **Which PSMs.** Targets (`label` 1) of `rank` 1 with `spectrum_q`,
+   `peptide_q` and `protein_q` ≤ 1%. A spectrum with more than one such PSM
+   (a chimeric search) is left out, since its reporter ions belong to both
+   peptides. A reporter intensity of 0 (no peak) is missing.
+3. **No new summary.** The PSMs go through the summary the MSstatsTMT
+   importer uses (`engines._tmt_summarise`, checked against MSstatsTMT 2.20
+   in D48): one PSM per peptide ion and file, fractions of a plex combined,
+   global median normalisation, Tukey median polish per plex. Proteins are
+   the razor groups of D51. A test checks that Sage input and the same PSMs
+   as MSstatsTMT rows give the same numbers.
+4. **Between plexes: IRS, not MSstatsTMT's reference normalisation.** Sage
+   records no `Norm` condition, so the loader stops after the median polish
+   and `plex.py` joins the plexes on the reference channel
+   (`tmt.reference_channel`, the SDRF, or a channel named pool), as for
+   MaxQuant and Proteome Discoverer (D48).
+5. **Channels.** Sage names the columns `tmt_1 … tmt_n` in the kit's order,
+   so they map through `plex.TMT_ORDERS`. A custom list of reporter masses
+   (`User`, columns `user_1 …`) keeps Sage's names.
+6. **Plexes.** With the watcher's manifest, a file's experiment is its
+   plex, and the files of a plex are its fractions. Without it, the lab's
+   TMT file rule (`<plex>[_TMT][_F<fraction>]`).
+7. **Names and conditions.** experiment.yaml's `tmt:` map is used as
+   FragPipe's annotation is: the name is the sample, and the condition is
+   the text before the first `_`. A channel it calls NA / empty is left
+   out before the summary. A channel nothing names is `<plex>_<channel>`
+   with condition `unassigned`: one condition for all, so the analysis asks
+   (`ONE_CONDITION`) instead of testing channels against each other.
+   `irs: auto` does not fall back to the plex means while a channel is
+   unassigned, because nothing says the plexes hold the same mix.
+8. **The runner.** A lab `sage_config` with `quant.tmt` runs. Label-free
+   quantification is not forced on for it, and the job expects `tmt.tsv`.
+   An unknown kit name still holds the job. The default settings stay
+   label-free: TMT needs the lab's own modifications and MS level, so there
+   is no TMT default to ship.
+9. **QC trending** reads `results.sage.tsv` per file. The mass error is
+   computed from `expmass` and `calcmass` (signed, isotope-corrected), not
+   taken from `precursor_ppm`. `fragment_ppm` is an unsigned average, so it
+   gives no MS2 mass error.
+10. **Left out: Parquet.** `--parquet` writes one `results.sage.parquet`
+    with the reporter ions as a list column and `lfq.parquet` in long
+    format: different layouts from the `.tsv` files, which Sage's own log
+    calls unstable. Reading them is a second loader, not a small addition
+    to the optional pyarrow reader. A method with `--parquet` in
+    `sage_args` is held with that explanation.
+
+Tested with stand-ins only. The layouts are from Sage's source
+(`sage-cli/src/runner.rs`, `sage/src/tmt.rs`, master in September 2026),
+not from a real run.
+
+
+### D57 — The assistant's first part is read-only, and is tested as a harness, not as a model
+**2026-10-01.** ROADMAP Phase 6.1 ("Explain") is built inside the rules D49
+set, in `ionomos/assistant/`. Phase 6.0 (measuring models on the PC) has not
+happened, so there is no default model, and nothing has run against a real
+model or runtime. The choices made on the way:
+
+1. **A fifth citation form, `[job:ID]`.** D49 lists issue, log, help and
+   analysis. "Is job 3 finished?" has an answer that none of them can carry,
+   so a job the tools returned can be cited too.
+2. **Every paragraph needs a valid citation, and one invalid citation sinks
+   the answer.** "Every claim cites" has to be something Ionomos can check
+   without understanding the text; a paragraph is the unit it can see. An
+   invented citation is treated as an invented claim. The model gets one
+   chance to correct an answer, then Ionomos's own text is shown.
+3. **A refusal is the silent branch.** There is no separate refusal message
+   to trust: an answer with no valid citation ("I don't know", a poem,
+   statistics advice) is never shown, and the fallback names who to ask.
+4. **What a citation proves is that the source exists, not that the sentence
+   follows from it.** The Sources lines under an answer are written by
+   Ionomos from the tools' results so a reader can compare. Whether models
+   misread their sources is for the scorecard on real models.
+5. **An answer that says "I retried / deleted / changed …" is not shown.**
+   No tool changes anything, so the claim is false whatever it cites. This
+   is a coarse pattern, not a proof, and stays until 6.2 gives actions a
+   dialog.
+6. **Non-local addresses are refused even with `assistant.allow_cloud:
+   true`.** D49 ties a cloud model to a banner and a preview of what is
+   sent. Neither exists before 6.4, so the flag is read and reported but
+   opens nothing. The request also ignores proxy settings and refuses
+   redirects, so a local address cannot become a remote one on the way.
+7. **A wrong `assistant:` address is not a config error.** Typos in the block
+   fail at load like any other section, but where `base_url` points is
+   checked when a question is asked: a bad address must not stop the watcher.
+8. **Ionomos does the obvious lookups itself.** With `--experiment` or
+   `--item` it fetches the job, its attention items and a failed search's
+   log tail before the model's first turn, in the shape of tool calls. The
+   system prompt and tool schemas stay byte-identical (about 1,000 tokens; a
+   test pins their digest) so a runtime can cache them.
+9. **Streaming is for timing only.** Nothing is shown before the citations
+   are checked, so tokens are not printed as they arrive. The stream gives
+   the time to first token for the audit log.
+10. **Help search is BM25 with a shared crude stemmer**, in SQLite FTS5 when
+    present and in plain Python otherwise, over the same tokens. No
+    embeddings (D49: only if the evaluation shows misses).
+11. **The audit log stores hashes of tool arguments and of the shown text**,
+    and the question in clear, in `assistant-audit.jsonl` (named in
+    `names.py`) in app data. It is never trimmed.
+12. **The scenario corpus is scripted, and says so.** The 53 scenarios in
+    `tests/assistant_scenarios/` carry model turns written by hand: what a
+    good or a misbehaving model would send. CI replays them through an
+    in-process fake of the chat endpoint. That tests the loop, the
+    validators, the citation check, the fallbacks and the audit log. It
+    does not measure a model. The rubrics in the same files are
+    model-independent and are what a real model will be scored on.
+
+**Left out:** the "Ask about this" button in the pop-ups (the backend,
+`ask(item_id=…)`, exists; the Tk part could not be checked without opening
+windows), a runner that scores a real model over the corpus, and runtime
+tuning (keep-alive, threads, priority). Phase 6.1's box stays unticked.
+
+**For the maintainer to confirm:** 1, 2 and 6.
+
 
 ### D58 — Notifications are off by default, say little, and can never touch a job
 **2026-10-01.** ROADMAP Phase 4 asked for "email/Slack/Teams notify on
@@ -1440,62 +1565,3 @@ unasked, so the first is built to be safe to ignore (`notify.py`).
 **Not verified**: a real Teams, Slack or SMTP server. The tests use an HTTP
 server and a small SMTP server inside the test process, and a stub for
 STARTTLS + login.
-
-### D56 — Sage TMT is summarised as MSstatsTMT input is; plexes are left to IRS
-**2026-10-01.** D51 held a Sage job whose settings asked for TMT, because
-`tmt.tsv` holds reporter ions per spectrum and nothing rolled them up.
-ROADMAP 5B #5 listed it as still to do.
-
-1. **The join.** `tmt.tsv` has a row per MS2 / MS3 spectrum (`filename`,
-   `scannr`, `ion_injection_time`, then a column per reporter);
-   `results.sage.tsv` has the PSMs. They are joined on (filename, scannr):
-   for MS3 quantification Sage writes the MS2 scan's id there. Both files
-   are read line by line, since both have a row per spectrum.
-2. **Which PSMs.** Targets (`label` 1) of `rank` 1 with `spectrum_q`,
-   `peptide_q` and `protein_q` ≤ 1%. A spectrum with more than one such PSM
-   (a chimeric search) is left out, since its reporter ions belong to both
-   peptides. A reporter intensity of 0 (no peak) is missing.
-3. **No new summary.** The PSMs go through the summary the MSstatsTMT
-   importer uses (`engines._tmt_summarise`, checked against MSstatsTMT 2.20
-   in D48): one PSM per peptide ion and file, fractions of a plex combined,
-   global median normalisation, Tukey median polish per plex. Proteins are
-   the razor groups of D51. A test checks that Sage input and the same PSMs
-   as MSstatsTMT rows give the same numbers.
-4. **Between plexes: IRS, not MSstatsTMT's reference normalisation.** Sage
-   records no `Norm` condition, so the loader stops after the median polish
-   and `plex.py` joins the plexes on the reference channel
-   (`tmt.reference_channel`, the SDRF, or a channel named pool), as for
-   MaxQuant and Proteome Discoverer (D48).
-5. **Channels.** Sage names the columns `tmt_1 … tmt_n` in the kit's order,
-   so they map through `plex.TMT_ORDERS`. A custom list of reporter masses
-   (`User`, columns `user_1 …`) keeps Sage's names.
-6. **Plexes.** With the watcher's manifest, a file's experiment is its
-   plex, and the files of a plex are its fractions. Without it, the lab's
-   TMT file rule (`<plex>[_TMT][_F<fraction>]`).
-7. **Names and conditions.** experiment.yaml's `tmt:` map is used as
-   FragPipe's annotation is: the name is the sample, and the condition is
-   the text before the first `_`. A channel it calls NA / empty is left
-   out before the summary. A channel nothing names is `<plex>_<channel>`
-   with condition `unassigned`: one condition for all, so the analysis asks
-   (`ONE_CONDITION`) instead of testing channels against each other.
-   `irs: auto` does not fall back to the plex means while a channel is
-   unassigned, because nothing says the plexes hold the same mix.
-8. **The runner.** A lab `sage_config` with `quant.tmt` runs. Label-free
-   quantification is not forced on for it, and the job expects `tmt.tsv`.
-   An unknown kit name still holds the job. The default settings stay
-   label-free: TMT needs the lab's own modifications and MS level, so there
-   is no TMT default to ship.
-9. **QC trending** reads `results.sage.tsv` per file. The mass error is
-   computed from `expmass` and `calcmass` (signed, isotope-corrected), not
-   taken from `precursor_ppm`. `fragment_ppm` is an unsigned average, so it
-   gives no MS2 mass error.
-10. **Left out: Parquet.** `--parquet` writes one `results.sage.parquet`
-    with the reporter ions as a list column and `lfq.parquet` in long
-    format: different layouts from the `.tsv` files, which Sage's own log
-    calls unstable. Reading them is a second loader, not a small addition
-    to the optional pyarrow reader. A method with `--parquet` in
-    `sage_args` is held with that explanation.
-
-Tested with stand-ins only. The layouts are from Sage's source
-(`sage-cli/src/runner.rs`, `sage/src/tmt.rs`, master in September 2026),
-not from a real run.

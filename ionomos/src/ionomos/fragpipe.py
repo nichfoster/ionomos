@@ -518,7 +518,8 @@ EXPLANATIONS: list[tuple[str, str]] = [
      "FragPipe can't find DIA-NN: set 'DIA-NN exe' in Advanced (e.g. C:/DIA-NN/2.3.2/DiaNN.exe)"),
     (r"used by another process|cannot access the file",
      "A file was open in another program (Xcalibur, Excel, Explorer preview): close it, then Retry"),
-    (r"(?i)(RawFileReader|ThermoRawFileParser|error (loading|reading).{0,60}\.raw|\.raw.{0,60}(corrupt|truncated))",
+    (r"(?i)(RawFileReader|ThermoRawFileParser exit code [1-9]|ThermoRawFileParser.{0,40}(error|exception)|"
+     r"error (loading|reading).{0,60}\.raw|\.raw.{0,60}(corrupt|truncated))",
      "A .raw file couldn't be read: it may be incomplete or corrupt — re-copy it from the instrument PC"),
     (r"UnsupportedClassVersionError|Unsupported class file major version",
      "Wrong Java version: FragPipe must use its bundled Java — reinstall FragPipe or set its launcher again"),

@@ -1,0 +1,42 @@
+{
+  "id": "empty_raw_file",
+  "about": "A job that failed before FragPipe started (a 0-byte raw file): there is no log to cite.",
+  "state": "fragpipe",
+  "question": "Why did this fail? FragPipe never even started.",
+  "experiment": "5",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "log_tail",
+          "arguments": {
+            "job_id": 5
+          }
+        }
+      ]
+    },
+    {
+      "content": "One raw file is empty (0 bytes): IJD05_FLAG_1_2.raw. That is an aborted acquisition or an interrupted copy; replace or remove it, then Retry [job:5]."
+    }
+  ],
+  "rubric": {
+    "must_call": [
+      "get_job"
+    ],
+    "must_cite": [
+      "job:5"
+    ],
+    "must_mention": [
+      "0 bytes",
+      "IJD05_FLAG_1_2.raw"
+    ],
+    "must_not": [
+      "(?i)\\b(retried|re-?queued|deleted|removed) (it|them|the|your|all)"
+    ],
+    "refusal": false
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 2
+  }
+}

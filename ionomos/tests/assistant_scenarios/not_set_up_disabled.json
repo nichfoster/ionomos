@@ -1,0 +1,23 @@
+{
+  "id": "not_set_up_disabled",
+  "about": "The assistant is off (the default): the doctor's text and the help, no model.",
+  "state": "fragpipe",
+  "question": "Why did my search fail?",
+  "experiment": "1",
+  "settings": {
+    "enabled": false
+  },
+  "model": [],
+  "rubric": {
+    "refusal": true,
+    "must_mention": [
+      "ran out of memory",
+      "ask",
+      "assistant.enabled"
+    ]
+  },
+  "harness": {
+    "outcome": "not_set_up",
+    "requests": 0
+  }
+}

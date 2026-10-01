@@ -1,0 +1,41 @@
+{
+  "id": "intake_rejected_unknown_user",
+  "about": "Ask about this on a rejected folder: no known user in its name.",
+  "state": "fragpipe",
+  "question": "Why wasn't my folder taken in?",
+  "item": "intake_XYZ99_isoDTB_run-",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "search_help",
+          "arguments": {
+            "query": "no known user"
+          }
+        }
+      ]
+    },
+    {
+      "content": "The folder XYZ99_isoDTB_run has no known user in its name [help:attention.intake_rejected].\n\nInclude your initials or your folder name in the folder's name [help:intake.user]."
+    }
+  ],
+  "rubric": {
+    "must_call": [
+      "list_attention"
+    ],
+    "must_cite": [
+      "help:intake.user"
+    ],
+    "must_mention": [
+      "initials"
+    ],
+    "must_not": [
+      "(?i)delete (the |your |all )?(raw|experiment|data|failed)"
+    ],
+    "refusal": false
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 2
+  }
+}

@@ -43,6 +43,7 @@
 | `attention.py` | Durable "needs a person" queue (`<log_dir>/attention/*.json`): raised by intake, worker, analysis, QC trending (`qc_trend`, a warning: no pop-up unless `qc_trend.popup`); closed when fixed | — |
 | `popups.py` | Pop-up windows + the "needs attention" list, in the app or (app closed) the watcher's own Tk loop; **More help** opens the help page at the item's topic | — |
 | `help/` | The help for users (D46, HELP.md): `*.md` content (getting started, the report, glossary, troubleshooting, never-do, FAQ) parsed and rendered with the stdlib; `report_payload()` for every report, `page()` = `help.html` (`ionomos help`, the app's Help button, pop-ups), `text()` for the terminal, `topic()` / `topic_for_item()` | — |
+| `assistant/` | The read-only "Explain" assistant (D49, D57, [ASSISTANT.md](ASSISTANT.md)): `ask()` runs one question through a model on this PC and shows the answer only if its citations check out, else Ionomos's own text (`fallback`). `client.py` (the OpenAI-compatible chat API over urllib, localhost only, no proxy or redirect), `tools.py` (seven read-only tools over the ledger, attention items, help, engine logs and analysis.json, with schema-checked arguments and cleaned, capped results), `helpsearch.py` (BM25 over the help: SQLite FTS5 or pure Python), `citations.py` (what the tools returned is what may be cited), `audit.py` (append-only JSONL in app data), `fake.py` (the scripted fake model for tests). Off unless `assistant.enabled` and a model are set; nothing else depends on it | — |
 | `downstream/doctor.py` | The analysis check-up: issues with severity, likely causes, fixes; condition suggestions from file names | — |
 | `downstream/` | FragPipe tables → `QuantMatrix` → FragPipe-Analyst processing + limma → interactive `results/report.html`. `isodtb.py`/`tmt.py` (R ports), `quant.py` (loaders), `engines.py` (other engines' outputs — DIA-NN standalone incl. 2.x Parquet, MaxQuant, Spectronaut, AlphaDIA, MSstats and MSstatsTMT format, Proteome Discoverer — and the provenance of any result; ENGINES.md, D36), `fpa.py` (FragPipeAnalystR port: filter, normalise, impute, `test_limma`), `design.py` (limma designs with blocks and covariates, the moderated F; D42), `deqms.py` (R's loess and DEqMS' peptide-count prior; D43), `doseresponse.py` (CurveCurator's dose-response curves for titrations; D44), `sdrfdesign.py` (an input SDRF as the design; D47), `plex.py` (IRS across TMT plexes; D48), `rrandom.py` (R's RNG), `analysis.py` (settings, comparisons), `qc.py` (PCA, clustering, CV, missingness), `insights.py` (sample scorecard, PC ↔ condition/replicate, missingness vs intensity, p-value shape + π0, on/off features, imputation-driven hits, power; D35), `enrich.py` (local ORA and a correlation-adjusted rank test on Enrichr libraries), `export.py` (result tables, FragPipe-Analyst annotation + R script), `sdrf.py` (SDRF-Proteomics sample metadata; D38), `report.py` + `assets/report.js`, `charts.py` (static SVG volcano), `stats.py`, `simulate.py` | the lab's R scripts; FragPipeAnalystR; limma |
 | `setupcheck.py` | The setup checklist (app ✓ Setup tab, `ionomos init`) | — |
@@ -57,7 +58,7 @@
 | `runners/isodtb.py` | Post-proc: modified-peptide → site merge — thin entry point delegating to `downstream/isodtb.py`, which holds the algorithm | port of `lab-scripts/isoDTB_…R` |
 | `runners/tmt.py` | Post-proc: experimental annotation fix | port of `lab-scripts/correct_experimental_annotation…R` |
 | `runners/dia.py` | Post-proc: (TBD — probably nothing beyond copying `report.tsv` up) | — |
-| `cli.py` | `ionomos setup / run / check / status / dry-run / names test / retry / testbed / diagnose / notify-test / update / help`; no args → app; hidden `fake-fragpipe` for the testbed | — |
+| `cli.py` | `ionomos setup / run / check / status / dry-run / names test / retry / testbed / diagnose / notify-test / update / help / ask`; no args → app; hidden `fake-fragpipe` for the testbed | — |
 
 ## Data flow for one job
 
@@ -234,6 +235,10 @@ methods:                    # keyed by canonical METHOD keyword; aliases are mat
 Note: the FASTA path lives **inside** the `.workflow` file, not on the command
 line. `fasta:` here is used to (a) sanity-check the workflow file references
 that database and (b) record provenance. See WORKFLOWS.md.
+
+An optional `assistant:` block (`enabled`, `base_url`, `model`, `maintainer`,
+`timeout_seconds`, `stream`, `allow_cloud`) configures `ionomos ask`. It is off
+by default and its `base_url` must be on this PC. See ASSISTANT.md.
 
 ## Failure handling principles
 

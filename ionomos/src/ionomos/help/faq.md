@@ -118,6 +118,34 @@ says which arrived. Restart the watcher (app → **Stop**, **Start**) so it
 uses the new settings. A message that can't be sent never fails or slows a
 search ([A notification did not arrive](#trouble.notify)).
 
+## Can I ask Ionomos a question in plain words? {#faq.assistant}
+
+Yes, if your lab has set up the assistant: `ionomos ask "why did my search
+fail?" --experiment 12` (the job number is in the Jobs tab; an experiment's
+name works too). It answers from that job's log, what the analysis found and
+this help, and each statement ends with its source in square brackets, such as
+`[log:12#41]` (line 41 of job 12's search log) or `[help:faq.rerun]`
+(`ionomos help faq.rerun` shows it).
+
+- It only reads. It cannot retry, change, move or delete anything, whatever
+  you type. Use the buttons in the windows for that.
+- It runs on this computer. Nothing you ask and nothing about your data is
+  sent anywhere ([Your data stays on the computer](#safety.private)).
+- If it cannot back an answer with a source, it does not answer. You then get
+  Ionomos's own text: the likely causes, what to do, and the help entry.
+- It does not know FragPipe settings or statistics beyond what Ionomos did
+  with your data. Ask the person who looks after Ionomos for those.
+
+## The assistant says it is not set up {#faq.assistant-setup}
+
+That is a normal state, and everything else works without it. You still get
+Ionomos's own explanation of the problem and the matching help. Setting it up
+is a job for the person who looks after Ionomos: a model has to be installed
+on this computer and named under `assistant:` in `config.yaml`. `ionomos
+check` has a row named assistant that shows its state. "Not this PC" means the
+address in `config.yaml` points at another computer; Ionomos refuses that and
+sends nothing.
+
 ## Where is this help, and can I change it? {#faq.help}
 
 The report has a **Help** section at the end and a **?** beside each section.

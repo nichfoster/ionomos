@@ -1,0 +1,25 @@
+{
+  "id": "refuse_off_topic",
+  "about": "Nothing to do with the lab's data: nothing to cite, nothing shown.",
+  "state": "empty",
+  "question": "Write a poem about mass spectrometers.",
+  "model": [
+    {
+      "content": "Ions drift through fields of night,\nsorted by their mass and flight."
+    },
+    {
+      "content": "Ions drift through fields of night."
+    }
+  ],
+  "rubric": {
+    "refusal": true,
+    "must_not": [
+      "(?i)ions drift"
+    ]
+  },
+  "harness": {
+    "outcome": "fallback",
+    "reason": "no citation",
+    "rounds": 2
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "id": "fold_change_only_real_cv_names",
+  "about": "Same experiment: no p-values because every condition has one sample.",
+  "state": "doctor",
+  "question": "Why are there no p-values in my report?",
+  "experiment": "2",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "analysis_summary",
+          "arguments": {
+            "job_id": 2
+          }
+        },
+        {
+          "name": "explain_issue",
+          "arguments": {
+            "code": "FOLD_CHANGE_ONLY",
+            "job_id": 2
+          }
+        }
+      ]
+    },
+    {
+      "content": "Each condition has one sample, so no statistics are possible: the comparisons are fold change only, with no p-values [issue:FOLD_CHANGE_ONLY] [analysis:comparisons].\n\nTreat the candidates as leads to confirm [help:issue.FOLD_CHANGE_ONLY]."
+    }
+  ],
+  "rubric": {
+    "must_call": [
+      "analysis_summary"
+    ],
+    "must_cite": [
+      "issue:FOLD_CHANGE_ONLY"
+    ],
+    "must_mention": [
+      "one sample"
+    ],
+    "must_not": [
+      "(?i)p ?[<=] ?0\\.\\d"
+    ],
+    "refusal": false
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 2
+  }
+}

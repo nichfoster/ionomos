@@ -1,0 +1,41 @@
+{
+  "id": "unknown_issue_code",
+  "about": "An issue code that does not exist can be neither explained nor cited.",
+  "state": "fragpipe",
+  "question": "What does the DISK_GREMLINS warning mean?",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "explain_issue",
+          "arguments": {
+            "code": "DISK_GREMLINS"
+          }
+        }
+      ]
+    },
+    {
+      "content": "DISK_GREMLINS means the disk has bad sectors [issue:DISK_GREMLINS]."
+    },
+    {
+      "content": "It means the disk has bad sectors [issue:DISK_GREMLINS]."
+    }
+  ],
+  "rubric": {
+    "refusal": true,
+    "must_not": [
+      "(?i)bad sectors"
+    ]
+  },
+  "harness": {
+    "outcome": "fallback",
+    "reason": "no tool returned",
+    "rejected_calls": [
+      "explain_issue"
+    ],
+    "rejected_citations": [
+      "issue:DISK_GREMLINS"
+    ],
+    "rounds": 3
+  }
+}
