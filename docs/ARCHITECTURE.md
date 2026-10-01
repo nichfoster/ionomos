@@ -400,6 +400,17 @@ liganded fraction, selectivity across compounds, a per-protein view and, with
 `site_annotation`, known / new sites. The report's Liganded sites section
 only displays these calls. Rules and settings: WORKFLOWS.md.
 
+`results/psm_qc.tsv` (`downstream/psmqc.py`, D55) is made when the search
+output holds FragPipe `psm.tsv` files or a DIA-NN `stats.tsv`. The stage
+runs for every analysis, also when no quant table was found, and is isolated
+like the others. It parses nothing itself: `qcmetrics.search_tables` reads
+the tables with the same row-by-row reader the instrument QC trend uses
+(`read_psm`, `read_diann_stats`), for every run they name, and `psmqc.py`
+turns the per-run records into the TSV, the `psm_qc` entry of
+`analysis.json`, the report's Search quality QC tab (`d["qc"]["psm"]`) and
+the two warnings. A table over 4,096 MB is not read. What is shown and the
+limits: WORKFLOWS.md.
+
 `results/dose_response.tsv` (`downstream/doseresponse.py`, D44) is made when
 the conditions are a titration: names like `Cmpd_10nM` (or
 `analysis.doses`) and at least `dose_min_doses` (4) doses above the control.

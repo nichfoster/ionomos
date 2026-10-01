@@ -54,6 +54,11 @@ VirtualConsole; tests assert the list stays empty.
   choices, text filter, sorting, compound switch, protein view, annotation
   column, hostile names).
 
+- `test/psm.test.mjs` — the Search quality QC tab (D55): absent for the
+  fixture, then a synthetic `qc.psm` payload (the table with flagged cells
+  and dashes, the four charts, many runs, DIA-NN's summary alone or below,
+  notes, the **?**, a report with no quantities, hostile names).
+
 - `test/help.test.mjs` — the help (D46): the Help nav entry and section, the
   **?** beside section titles, QC tabs and issue boxes and their panels,
   every help link resolving in the page, escaped issue titles and codes, and

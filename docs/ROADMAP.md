@@ -158,7 +158,9 @@ small anonymised real experiment as a test fixture and public example data
   Still open:
   - Tune the D35 warning thresholds on real lab experiments.
   - PSM-level technical QC from `psm.tsv`: mass error, missed cleavages,
-    charge states.
+    charge states. → 2026-10-01, done (D55): the Search quality QC tab,
+    `results/psm_qc.tsv`, two warnings with wide limits. Not yet checked on
+    real FragPipe output.
   - Run-order drift, once acquisition times are recorded.
   - Protein complexes (CORUM, whose licence needs checking).
   - For isoDTB: → 2026-09-30, done as Phase 5C #3 (D52): liganded calls with
@@ -500,6 +502,11 @@ Collected from the other docs; resolve before/during Phase 1.
       dependency-free either way.
 - [ ] Time courses (D53): does the lab run them, and are 3 time points the right minimum? Should the trend use the
       order of the time points (built) or the hours?
+- [ ] Search quality (D55): open a real `psm.tsv` from the PC and confirm the column names (`Spectrum`,
+      `Observed Mass`, `Calculated Peptide Mass`, `Number of Missed Cleavages`, `Charge`, `Peptide Length`). What
+      mass error and missed-cleavage share does the lab call a problem (built: 10 ppm and 50 %, both wide)? Should
+      a run unlike the others in its experiment be flagged too, and how are TMT fractions to be judged? Is the
+      isoDTB search an offset search, so that its mass errors need another reading?
 - [ ] Phase 5: which pilot labs can we reach? Does this lab run titrations or phospho? (Orders 5C.)
 - [ ] Phase 6: is the PC's RAM in all 6 memory channels (speed of a local model)? Is a GPU present? May the assistant
       ever use a cloud model (institutional data policy), or strictly local?

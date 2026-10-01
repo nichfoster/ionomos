@@ -2,6 +2,7 @@
 Per-run instrument QC metrics, read from what the searches already wrote (D45).
 
     found = run_metrics(workdir, runs)      # {run stem: {"metrics": {...}, "sources": {...}, "rt": {...}}}
+    psm, diann, notes = search_tables(workdir)   # the search-quality tables alone, every run (psmqc.py, D55)
 
 runs maps each run's file stem (the manifest's raw names) to (experiment, bioreplicate). Nothing is
 re-searched or re-computed from spectra; every number comes from an engine's own table:
@@ -15,7 +16,9 @@ re-searched or re-computed from spectra; every number comes from an engine's own
     FragPipe psm.tsv         per run (the Spectrum column's run name): PSMs, peptides, proteins, summed
                              Intensity, median precursor mass error (Observed Mass vs Calculated Peptide Mass,
                              isotope-error corrected, ppm), mean missed cleavages and charge, charge-state
-                             mix, RT of the 200 most intense peptides (Retention, seconds -> minutes)
+                             mix, RT of the 200 most intense peptides (Retention, seconds -> minutes);
+                             and, for the report's Search quality tab (psmqc.py), the record's "psm":
+                             quantiles of the mass error, PSMs by missed cleavages, charge and peptide length
             combined_protein.tsv  proteins for a run that is its experiment's only run (<exp> Spectral Count > 0)
 
 Reading is bounded: tables are streamed row by row, a file bigger than max_mb is skipped with a note, and
@@ -118,6 +121,28 @@ class _Matcher:
             found = hits[0] if len(hits) == 1 else None
         self._cache[name] = found
         return found
+
+
+class _AnyRun:
+    """No manifest to match against: every run a table names, by its file stem (without FragPipe's
+    _calibrated / _uncalibrated suffix)."""
+
+    def __init__(self):
+        self._cache: dict[str, str | None] = {}
+
+    def __call__(self, name: str) -> str | None:
+        if name not in self._cache:
+            stem = run_stem(name) if name else ""
+            self._cache[name] = re.sub(r"_(?:uncalibrated|calibrated)$", "", stem, flags=re.IGNORECASE) or None
+        return self._cache[name]
+
+
+def quantile(xs: list[float], q: float) -> float:
+    """Linear-interpolated quantile of a sorted, non-empty list."""
+    pos = q * (len(xs) - 1)
+    lo = int(pos)
+    hi = min(lo + 1, len(xs) - 1)
+    return xs[lo] + (xs[hi] - xs[lo]) * (pos - lo)
 
 
 def _top_rt(best: dict[str, tuple[float, float]]) -> dict[str, float]:
@@ -237,7 +262,7 @@ def read_psm(path: Path, match, found: dict, max_mb: float) -> None:
         a = acc.get(run)
         if a is None:
             a = acc[run] = {"psms": 0, "peptides": set(), "proteins": set(), "signal": 0.0, "ppm": [], "missed": [],
-                            "charge": {}, "best": {}}
+                            "charge": {}, "best": {}, "mc": {}, "len": {}}
         a["psms"] += 1
         pep = r.get("Peptide") or ""
         a["peptides"].add(pep)
@@ -252,6 +277,10 @@ def read_psm(path: Path, match, found: dict, max_mb: float) -> None:
         mc = num(r.get("Number of Missed Cleavages"))
         if mc is not None:
             a["missed"].append(mc)
+            a["mc"][int(mc)] = a["mc"].get(int(mc), 0) + 1
+        n_aa = num(r.get("Peptide Length")) or len(pep)
+        if n_aa:
+            a["len"][int(n_aa)] = a["len"].get(int(n_aa), 0) + 1
         z = num(r.get("Charge"))
         if z is not None:
             a["charge"][int(z)] = a["charge"].get(int(z), 0) + 1
@@ -280,6 +309,10 @@ def read_psm(path: Path, match, found: dict, max_mb: float) -> None:
         if "Retention" in header:
             rec["rt"] = _top_rt(a["best"])
             s["rt"] = f"{src}: Retention (s -> min), {len(rec['rt'])} most intense peptides"
+        ppm = sorted(a["ppm"])
+        rec["psm"] = {"folder": path.parent.name, "charge": a["charge"], "missed": a["mc"], "length": a["len"],
+                      "ppm_n": len(ppm),
+                      "ppm": [round(quantile(ppm, q), 4) for q in (0.05, 0.25, 0.5, 0.75, 0.95)] if ppm else None}
 
 
 def read_combined_protein(path: Path, runs: dict[str, tuple[str, int]], found: dict, max_mb: float) -> None:
@@ -350,3 +383,28 @@ def run_metrics(workdir: Path, runs: dict[str, tuple[str, int]], max_mb: float =
         notes.append("no table with per-run QC numbers (DIA-NN stats.tsv / pg_matrix, FragPipe psm.tsv) "
                      "named these runs")
     return found, notes
+
+
+def search_tables(workdir: Path, max_mb: float = 4096) -> tuple[dict, dict, list[str]]:
+    """The search-quality tables alone, for every run they name (no manifest needed): ({run: record} from
+    FragPipe's psm.tsv files, {run: record} from DIA-NN's stats.tsv, notes). DIA-NN's big report.tsv is not
+    opened. A table over max_mb is left unread, with a note."""
+    workdir = Path(workdir)
+    psm: dict[str, dict] = {}
+    diann: dict[str, dict] = {}
+    notes: list[str] = []
+    if not workdir.is_dir():
+        return psm, diann, notes
+    match = _AnyRun()
+    for pattern, fn, found in (("psm.tsv", read_psm, psm), ("*stats.tsv", read_diann_stats, diann)):
+        for p in _find(workdir, pattern):
+            rel = p.relative_to(workdir).as_posix()
+            try:
+                size = p.stat().st_size / 1024 ** 2
+                if max_mb and size > max_mb:
+                    notes.append(f"{rel} is {size:,.0f} MB, over the {max_mb:,.0f} MB limit; not read")
+                    continue
+                fn(p, match, found, 0)
+            except (OSError, MetricsError, csv.Error, ValueError) as exc:
+                notes.append(f"{rel}: {exc}")
+    return psm, diann, notes

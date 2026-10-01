@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Search quality per run** (ROADMAP Phase 4, D55; `downstream/psmqc.py`).
+  For FragPipe results with `psm.tsv` files, the report's Quality control
+  section gets a **Search quality** tab with, per raw file: PSMs, peptides
+  and proteins; the precursor mass error (median, quartiles, 5th to 95th
+  percentile, ppm); the share of PSMs with a missed cleavage; the charge
+  states; the peptide length. With DIA, it shows DIA-NN's own per-run
+  summary (`report.stats.tsv`). Output: `results/psm_qc.tsv` and
+  `analysis.json` → `psm_qc`. The numbers come from the reader the
+  instrument QC trend already uses (`qcmetrics.py`); files are streamed, and
+  one over 4,096 MB is left unread with a note. Two new warnings, with wide
+  limits the lab has not confirmed: `PSM_MASS_ERROR` (a run's median error
+  is 10 ppm or more from 0) and `PSM_MISSED_CLEAVAGES` (half or more of a
+  run's PSMs have a missed cleavage). New setting: `psm_qc` (false switches
+  it off). **Not tested on real FragPipe output**: the `psm.tsv` column
+  names are from the FragPipe documentation.
+
 - **Time courses** (ROADMAP 5C #1, D53; `downstream/timecourse.py`). When the
   conditions are time points (`Drug_0h`, `Drug_1h`, `Drug_4h`, `Drug_24h`,
   or `analysis.times`) and a series has at least 3, every feature gets

@@ -61,6 +61,8 @@ experiment.yaml `analysis:` block:
       liganded_min_replicates: 2  # ... in at least this many replicates
       liganded_direction: high    # high: R = heavy / light | low: R = light / heavy
       site_annotation: cysdb.csv  # a downloaded site table (CysDB) in the experiment folder, or a full path
+
+      psm_qc: true                # false: don't read psm.tsv for the per-run search quality (psmqc.py)
 """
 from __future__ import annotations
 
@@ -125,6 +127,7 @@ class Settings:
     liganded_min_replicates: int = 2
     liganded_direction: str = "high"   # high: R = heavy / light | low: R = light / heavy
     site_annotation: str = ""          # a site table (CysDB download): known / new sites
+    psm_qc: bool = True                # per-run search quality from psm.tsv / DIA-NN stats.tsv (psmqc.py)
     block: str | dict[str, str] = ""   # "" | "replicate" | {sample: block} (design.py)
     block_from: str = ""               # regex on sample names: the block is group "block", else group 1
     covariates: dict[str, dict] = field(default_factory=dict)   # name -> {sample: value}
@@ -241,7 +244,8 @@ def settings_from(*layers: dict | None) -> Settings:
                 elif k in ("min_valid", "top_labels", "seed", "pca_features", "heatmap_max", "dose_min_doses",
                            "liganded_min_replicates", "time_min_points"):
                     v = int(v)
-                elif k in ("use_adjusted", "remove_contaminants", "enrichment", "dose_response", "liganded", "time_course"):
+                elif k in ("use_adjusted", "remove_contaminants", "enrichment", "dose_response", "liganded", "time_course",
+                           "psm_qc"):
                     v = _bool(v)
                 elif k == "test":
                     v = str(v).lower()
