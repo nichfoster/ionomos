@@ -408,11 +408,13 @@ def _toptable(coef, su, post, dft, level: float = 0.95):
 
 
 def limma_contrasts(values: Matrix, samples: list[str], condition: dict[str, str],
-                    contrasts: list[tuple[str, str]], min_valid: int = 0, squeeze=None) -> list[ContrastResult]:
+                    contrasts: list[tuple[str, str]], min_valid: int = 0, squeeze=None,
+                    needs: dict | None = None) -> list[ContrastResult]:
     """FragPipeAnalystR test_limma(type = "all" | "control" | "manual"): one model over all conditions
     (~ 0 + condition), each contrast refitted from its two coefficients, one eBayes for all contrasts.
     min_valid > 0 additionally leaves a feature untested in a contrast when either group has fewer
-    measured values (used when nothing is imputed). squeeze replaces eBayes' variance prior (design.squeezer: DEqMS)."""
+    measured values (used when nothing is imputed). squeeze replaces eBayes' variance prior (design.squeezer: DEqMS).
+    needs: {(treatment, control): (values needed in each)} instead of min_valid for both (analysis.group_needs)."""
     conds = []
     for s in samples:
         if condition[s] not in conds:
@@ -423,9 +425,10 @@ def limma_contrasts(values: Matrix, samples: list[str], condition: dict[str, str
     out = []
     for a, b in contrasts:
         ia, ib = conds.index(a), conds.index(b)
+        va, vb = (needs or {}).get((a, b), (min_valid, min_valid))
         coef, su = [], []
         for n_r, m_r in zip(ns, means, strict=True):
-            ok = n_r[ia] > 0 and n_r[ib] > 0 and (not min_valid or (n_r[ia] >= min_valid and n_r[ib] >= min_valid))
+            ok = n_r[ia] > 0 and n_r[ib] > 0 and (not min_valid or (n_r[ia] >= va and n_r[ib] >= vb))
             coef.append(m_r[ia] - m_r[ib] if ok else math.nan)
             su.append(math.sqrt(1 / n_r[ia] + 1 / n_r[ib]) if ok else math.nan)
         t, p, lo, hi, q = _toptable(coef, su, post, dft)

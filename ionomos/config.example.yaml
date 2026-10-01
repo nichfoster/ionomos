@@ -37,6 +37,16 @@ analysis:
   normalize: median          # median | none (intensities only)
   top_labels: 15             # hit names written on each volcano
   control_keywords: [DMSO, vehicle, veh, ctrl, control, mock, untreated, NT, WT, EV, scr, scramble, siNT, PBS]
+  # Roles (D61): each condition is a control, a compound, a competition (probe + competitor), a pooled reference
+  # or a QC standard, read from its name. A competition changes the default comparisons to compound vs control,
+  # competition vs its compound, competition vs control, and adds results/specific_targets.tsv.
+  competition_keywords: [comp, competition, competitor, competed, compete, competing, excess]   # NOT confirmed by the lab
+  # competition_keywords_weak: [pre, pretreat, pretreated, pretreatment, block, blocked, blocking, cold]
+  #                            # count only next to the compound's own condition (Probe_pre + Probe); asked about
+  # roles: {DMSO: control, Probe: compound, Probe_Comp: competition of Probe}   # usually in experiment.yaml
+  # role_comparisons: false  # roles are shown, but every condition is compared with the control (as before 0.14)
+  # small_group_min_valid: same   # half (default): the smaller group of an unequal comparison (DMSO n=2 vs n=4)
+  #                               # needs half its samples measured instead of min_valid, when nothing is imputed
   # block: replicate         # the replicate number as a block (batch / pair) in the limma model (D42)
   # variance_prior: deqms    # limma (default) | deqms: prior variance by peptide count (D43)
 

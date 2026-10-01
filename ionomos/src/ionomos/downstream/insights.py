@@ -13,7 +13,12 @@ done every time and turned into numbers the report and the doctor can use.
                            the hits a t-test can't see (MS-DAP's differential detection, simplified)
     imputation_driven()    hits whose significance rests on imputed values (at least half of a group imputed)
     power()                minimum detectable log2 fold change against replicates per group, from this
-                           experiment's own variance (limma's prior when available)
+                           experiment's own variance (limma's prior when available); and for each comparison
+                           with the samples it really has on each side (DMSO n=2 against a compound n=4)
+
+Group sizes need not be equal (D61). A sample is never flagged for being in a small group: the spread around
+the group is put on one scale before it is compared across samples (a sample with one mate scatters more around
+that mate than a sample with three around their mean), and a group of one has no replicate numbers to judge.
 
 All plain Python, bounded by features x samples. Each function tolerates tiny or odd inputs and returns
 {} / [] rather than raising; analyze() also runs them as an isolated stage.
@@ -102,14 +107,20 @@ def sample_scorecard(measured: Matrix, samples: list[str], condition: dict[str, 
                 dev.append(abs(r[j] - sum(obs) / len(obs)))
         spread.append(stats.median(dev) if dev else None)
     loo = _leave_one_out_cv(measured, samples, condition, groups) if kind == "intensity" else [None] * ns
+    # x - mean(k mates) has variance s2 (1 + 1/k): put every sample on the scale of the usual group size, so a
+    # sample with one mate is not judged against samples with three (equal groups: the factor is 1, nothing changes)
+    mates_n = [len(groups[condition[s]]) - 1 for s in samples]
+    usual = stats.median([k for k in mates_n if k > 0]) if any(mates_n) else 0
+    scale = [math.sqrt((1 + 1 / usual) / (1 + 1 / k)) if k > 0 and usual else 1.0 for k in mates_n]
+    judged = [None if x is None else x * f for x, f in zip(spread, scale, strict=True)]
     z_ids = _robust_z([float(x) for x in ids], floor=max(1.0, 0.03 * (stats.median(ids) or 1)))
     z_corr = _robust_z(corr_group, floor=0.005)
-    z_spread = _robust_z(spread, floor=0.02)
+    z_spread = _robust_z(judged, floor=0.02)
     med_ids = stats.median(ids) or 0
     obs_med = [x for x in medians if x is not None]
     centre = stats.median(obs_med) if obs_med else None
     med_corr_all = stats.median([x for x in corr_group if x is not None]) if any(x is not None for x in corr_group) else None
-    med_spread = stats.median([x for x in spread if x is not None]) if any(x is not None for x in spread) else None
+    med_spread = stats.median([x for x in judged if x is not None]) if any(x is not None for x in judged) else None
     out = []
     for j, s in enumerate(samples):
         flags, severe = [], 0
@@ -123,8 +134,8 @@ def sample_scorecard(measured: Matrix, samples: list[str], condition: dict[str, 
                 and med_corr_all - corr_group[j] > 0.02):
             flags.append(f"correlates poorly with its replicates (r {corr_group[j]:.3f} vs ~{med_corr_all:.3f})")
             severe += 1
-        if (spread[j] is not None and med_spread and (z_spread[j] or 0) > 3.5 and spread[j] > 1.5 * med_spread):
-            flags.append(f"values scatter widely around its group (median |Δ| {spread[j]:.2f} vs ~{med_spread:.2f} log2)")
+        if (judged[j] is not None and med_spread and (z_spread[j] or 0) > 3.5 and judged[j] > 1.5 * med_spread):
+            flags.append(f"values scatter widely around its group (median |Δ| {judged[j]:.2f} vs ~{med_spread:.2f} log2)")
             severe += 1
         if loo[j] is not None and loo[j] <= -0.25:
             flags.append(f"its group's median CV drops {-100 * loo[j]:.0f}% without it")
@@ -393,11 +404,16 @@ def imputation_driven(imputed: list[list[bool]], samples: list[str], condition: 
 
 def power(values: Matrix, samples: list[str], condition: dict[str, str], prior: tuple[float, float] | None = None,
           kind: str = "intensity", alphas: tuple[float, ...] = (0.05, 0.001), beta: float = 0.2,
-          n_range: tuple[int, int] = (2, 10)) -> dict:
+          n_range: tuple[int, int] = (2, 10), pairs: list[tuple[str, int, int]] | None = None,
+          pooled: bool = True) -> dict:
     """Minimum detectable |log2FC| at 80% power for n replicates per group, at the 25th / 50th / 75th percentile
     of the per-feature SD (moderated with limma's prior when given). Two-group t-test for intensities
     (sqrt(2/n)), one-sample for ratios (sqrt(1/n)). alpha 0.05 is nominal; 0.001 is closer to what survives
-    a multiple-testing correction in a typical proteome."""
+    a multiple-testing correction in a typical proteome.
+
+    pairs: [(comparison, samples in the treatment, in the control)] adds "comparisons": the same number for each
+    comparison with the samples it has, sqrt(1/n1 + 1/n2) instead of sqrt(2/n). pooled (limma): the residual df
+    come from every condition (samples - conditions), as in the model; otherwise from the two groups."""
     groups = _groups(samples, condition)
     d0, s20 = prior if prior else (math.nan, math.nan)
     moderated = d0 is not None and s20 is not None and math.isfinite(d0) and math.isfinite(s20) and d0 > 0
@@ -431,5 +447,21 @@ def power(values: Matrix, samples: list[str], condition: dict[str, str], prior: 
             rows.append({k: factor * v for k, v in qs.items()})
         curves[str(a)] = rows
     current = sorted(len(v) for v in groups.values())
-    return {"n": ns, "sd": qs, "curves": curves, "moderated": moderated, "current_n": current[len(current) // 2],
-            "beta": beta}
+    out = {"n": ns, "sd": qs, "curves": curves, "moderated": moderated, "current_n": current[len(current) // 2],
+           "beta": beta}
+    model_df = sum(len(v) - 1 for v in groups.values())
+    comps = []
+    for name, n1, n2 in pairs or []:
+        if kind == "ratio" or n1 < 1 or n2 < 1:
+            continue
+        df = (model_df if pooled else n1 + n2 - 2) + (min(d0, 1000) if moderated else 0)
+        row = {"name": name, "n": [n1, n2], "df": df, "balanced_n": 2 / (1 / n1 + 1 / n2), "mdfc": {}}
+        for a in alphas:
+            row["mdfc"][str(a)] = None if df <= 0 else {
+                k: (stats.qt_upper(a, df) + stats.qt_upper(2 * beta, df)) * math.sqrt(1 / n1 + 1 / n2) * v
+                for k, v in qs.items()}
+        comps.append(row)
+    if comps:
+        out["comparisons"] = comps
+        out["unbalanced"] = any(r["n"][0] != r["n"][1] for r in comps)
+    return out

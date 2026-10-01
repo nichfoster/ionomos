@@ -16,14 +16,50 @@ the file names (`DMSO_1.raw` is condition DMSO), and you can change it
 ## Control {#glossary.control}
 
 The condition the others are compared with, the "vs" side of every volcano
-plot. Ionomos recognises it by name (DMSO, vehicle, ctrl, control, mock, WT,
-…); otherwise it asks you.
+plot: the vehicle (DMSO), a mock or an untreated sample. Ionomos recognises
+it by name (DMSO, vehicle, ctrl, control, mock, WT, …); otherwise it asks
+you. It is one of the [roles](#glossary.role) a condition can have. A
+control often has fewer samples than the treatments (two DMSO against four
+of each compound); that is fine, see [Power](#qc.power).
+
+## Role {#glossary.role}
+
+What a condition is in the experiment: a [control](#glossary.control), a
+[compound](#glossary.compound), a [competition](#glossary.competition), a
+pooled reference, or a QC standard. Ionomos reads the roles from the
+condition names and shows them under Methods → Settings used. Set them
+yourself with `roles:` under `analysis:` in `experiment.yaml`, for example
+`roles: {DMSO: control, Probe: compound, Probe_Comp: competition of Probe}`.
+With a competition among them, the comparisons follow the roles
+([Specific targets](#report.specific)).
+
+## Compound {#glossary.compound}
+
+A condition treated with a probe or a drug alone. Every condition that is
+not a control, a competition, a pooled reference or a QC standard is a
+compound. Compared with the control it shows what the compound enriches or
+engages.
+
+## Competition {#glossary.competition}
+
+A condition with the probe plus an excess of a competitor, usually the
+parent compound without the handle. What the competitor takes off the probe
+is bound at the competitor's site; what stays is not. Ionomos reads a
+condition as a competition when its name has `comp`, `competition`,
+`competitor` or `excess` as a word (`Probe_Comp`, `Probe+Comp`,
+`ProbeComp`), and links it to the compound it competes by the rest of the
+name. The lab has not confirmed these words: change them under
+`competition_keywords`, or set the [role](#glossary.role) yourself. In an
+isoDTB experiment every condition is a competition by construction (see
+[Competition ratio](#glossary.competition-ratio)).
 
 ## Comparison {#glossary.comparison}
 
 One question the statistics answer, written "treatment vs control", for
 example "Drug vs DMSO". By default each condition is compared with the
-control; "all pairs" and "each vs all others" are also possible.
+control; "all pairs" and "each vs all others" are also possible. In a
+[competition](#glossary.competition) experiment the default is compound vs
+control, competition vs its compound, and competition vs control.
 
 ## Replicate {#glossary.replicate}
 
@@ -69,7 +105,8 @@ Ionomos tests each site's log2 ratio against 0.
 ## Competition ratio (R) {#glossary.competition-ratio}
 
 In a competitive isoDTB experiment the compound-treated sample and the
-control get different tags. For each cysteine, R is the control signal
+control get different tags, so every condition is a
+[competition](#glossary.competition) of a compound with the probe. For each cysteine, R is the control signal
 divided by the treated signal. R = 1 means the compound left the site alone;
 R = 4 means it blocked three quarters of the probe labelling (engagement
 1 − 1/R = 75%); R = 10 means 90%. Ionomos takes R as heavy / light unless

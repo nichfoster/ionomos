@@ -255,6 +255,22 @@ calls its pipeline functions with the defaults its TOML parser fills in (OLS,
 (8 doses, one replicate), B replicated (5 doses × 3); both keep ≤ 16 dosed
 samples, so numpy's argsort keeps replicates in order as the port does.
 
+### Roles and unequal groups (`tests/test_roles.py`, `tests/js/test/specific.test.mjs`)
+
+No golden files: `simulate.competition_pg_matrix` (DIA) and
+`simulate.competition_tmt` (TMT, not imputed) write a competition
+experiment with DMSO n=2, Probe n=4, Probe_Comp n=4 and planted truth
+(specific targets, unspecific binders). The tests cover the role table
+(names from `reference/pc-inventory/` and the usual forms), the settings, the
+comparisons with and without a competition condition (the earlier rule is
+re-implemented in the test and compared), the specific-targets table against
+the truth, the SDRF role column, isoDTB, and for unequal groups: the filter,
+`small_group_min_valid`, limma's pooled variance against the formula, power
+per comparison, the scorecard, the imputation flags and the low-confidence
+wording. The numbers quoted in D61 come from larger runs of the same
+simulators (8 to 40 seeds), not from the test suite. Not covered: a real
+experiment; R's limma with unequal groups.
+
 **Windows during tests.** Tests that drive real Tk windows (the app, the naming
 / review window) skip on a dev machine so they don't cover the screen while you
 work. They run in CI (GitHub Actions sets `CI`; the Windows runner has a

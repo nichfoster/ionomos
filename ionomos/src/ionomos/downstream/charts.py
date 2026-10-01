@@ -104,7 +104,8 @@ def condition_slots(m: QuantMatrix) -> dict[str, int]:
 
 def _conf_banner(d: DiffResult, x: float, y: float) -> str:
     """The label every low-confidence / fold-change-only plot carries, so a copied SVG can't lose it."""
-    text = {"low": "LOW CONFIDENCE — a group has one sample; p-values borrowed",
+    few = "one sample" if not d.groups or min(d.groups) <= 1 else f"{min(d.groups)} samples"
+    text = {"low": f"LOW CONFIDENCE — a group has {few}; p-values borrowed",
             "none": "FOLD CHANGE ONLY — no replicates, no p-values"}.get(d.confidence)
     return f'<text class="warn" x="{_f(x)}" y="{_f(y)}" text-anchor="end">{text}</text>' if text else ""
 

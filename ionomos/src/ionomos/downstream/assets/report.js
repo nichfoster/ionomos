@@ -584,6 +584,7 @@
     $("#vcount").innerHTML = (c.conf ? "<div class='notes' style='margin:0 0 8px'><b>" + (fco ? "Fold change only" : "Low confidence") +
       ":</b> " + esc(c.confNote || "") + "</div>" : "") + '<span class="dot up"></span> <b>' + fmtInt(n.up) + '</b> up &nbsp; <span class="dot down"></span> <b>' +
       fmtInt(n.down) + "</b> down &nbsp;<span class='muted'>of " + fmtInt(n.tested) + (fco ? " ranked by fold change" : " tested") +
+      (c.size && c.size.length === 2 ? " · " + c.size[0] + " against " + c.size[1] + " samples" : "") +
       (n.filtered ? " · " + fmtInt(n.filtered) + " filtered out (grey with a ring)" : "") +
       " · drag to " + (ST.drag === "select" ? "select" : "zoom (alt-drag selects)") + ", double-click to reset, shift-click to pin</span>";
     renderGroupLegend();
@@ -1721,15 +1722,24 @@
     ch.insertAdjacentHTML("beforeend", "<div class='legend'><span><span class='sw' style='background:" + css("--c0") + "'></span>measured (" + fmtInt(meas.length) + ")</span><span><span class='sw' style='background:" + css("--c1") + "'></span>imputed (" + fmtInt(imp.length) + ")</span></div>");
     svgTools(ch, root, "imputation");
   }
+  /** Each comparison with the samples it has on each side: sqrt(1/n1 + 1/n2), not the balanced sqrt(2/n). */
+  function powerTable(P) {
+    const cs = P.comparisons || [];
+    if (!cs.length) return "";
+    const cell = (c, a) => { const r = c.mdfc[a]; return "<td class='n'" + (r && r.q50 > ST.lfc ? " title='Above the current cut-off: a typical " + esc(D.levelWord) + " changing by exactly the cut-off is detected less than " + pct(1 - P.beta) + " of the time'" : "") + ">" + (r ? fmt(r.q50, 2) + " <span class='muted'>(" + fmt(r.q25, 2) + "–" + fmt(r.q75, 2) + ")</span>" : "–") + "</td>"; };
+    return "<h3>Each comparison, with the samples it has</h3><div class='tablewrap' id='powcomps'><table><thead><tr><th>Comparison</th><th>samples</th><th title='The balanced design with the same standard error: 2 / (1/n1 + 1/n2)'>like n per group</th><th>detectable |log2FC| at p 0.05</th><th>at p 0.001</th></tr></thead><tbody>" +
+      cs.map((c) => "<tr><td>" + esc(c.name) + "</td><td class='n'>" + c.n[0] + " against " + c.n[1] + "</td><td class='n'>" + fmt(c.balanced, 1) + "</td>" + cell(c, "0.05") + cell(c, "0.001") + "</tr>").join("") +
+      "</tbody></table></div><p class='muted'>Typical " + esc(D.levelWord) + " (25th–75th percentile SD). The noise estimate uses every sample of the experiment (" + (cs[0].df == null ? "–" : fmt(cs[0].df, 0)) + " degrees of freedom), so a small group costs precision of its mean, not of the variance.</p>";
+  }
   function qcPower(host) {
     const P = D.qc.power;
     const a05 = P.curves["0.05"] || [], a001 = P.curves["0.001"] || [];
     const need = (curve) => { const k = curve.findIndex((r) => r && r.q50 <= ST.lfc); return k < 0 ? null : P.n[k]; };
     const n05 = need(a05), n001 = need(a001);
     host.innerHTML = "<p class='sub'>The smallest |log2 fold change| a " + (D.kind === "ratio" ? "one-sample" : "two-group") + " test detects with " + pct(1 - P.beta) + " power, against replicates per group, from this experiment's own noise (SD of a typical " + esc(D.levelWord) + ": " + fmt(P.sd.q50, 3) + " log2" + (P.moderated ? ", moderated with limma's prior" : "") + "). Band: the quieter and the noisier half of the " + esc(D.levelWord) + "s (25th–75th percentile SD).</p>" +
-      "<div class='card verdict'>With " + P.current + " per group now, a typical " + esc(D.levelWord) + " needs |log2FC| ≥ " + fmt(((a05[P.n.indexOf(P.current)] || {}).q50), 2) + " (p 0.05) or ≥ " + fmt(((a001[P.n.indexOf(P.current)] || {}).q50), 2) + " (p 0.001, closer to what survives the FDR). " +
+      "<div class='card verdict'>" + (P.unbalanced ? "The groups are not the same size (the table below gives each comparison as it is). " : "") + "With " + P.current + " per group" + (P.unbalanced ? " (the usual group here)" : " now") + ", a typical " + esc(D.levelWord) + " needs |log2FC| ≥ " + fmt(((a05[P.n.indexOf(P.current)] || {}).q50), 2) + " (p 0.05) or ≥ " + fmt(((a001[P.n.indexOf(P.current)] || {}).q50), 2) + " (p 0.001, closer to what survives the FDR). " +
       "For the current cut-off (|log2FC| ≥ " + fmt(ST.lfc, 2) + "): " + (n05 ? n05 + " replicates at p 0.05" : "more than " + P.n[P.n.length - 1] + " replicates at p 0.05") + ", " + (n001 ? n001 + " at p 0.001." : "more than " + P.n[P.n.length - 1] + " at p 0.001.") + "</div>" +
-      "<div class='chart card' id='powchart' style='max-width:700px'></div>";
+      "<div class='chart card' id='powchart' style='max-width:700px'></div>" + powerTable(P);
     const ch = $("#powchart"), W = widthOf(ch, 640), H = 300, L = 56, R = 16, T = 16, B = 44;
     let ymax = ST.lfc * 1.2;
     [a05, a001].forEach((cv) => cv.forEach((r) => { if (r) ymax = Math.max(ymax, Math.min(r.q75, 6)); }));
@@ -2187,6 +2197,116 @@
     $("#tnext").onclick = () => { TS.page = Math.min(pages - 1, TS.page + 1); renderTimeTable(); };
   }
 
+  // ----------------------------------------------------- specific targets
+  // D.roles (roles.py report_payload): the conditions' roles and, per compound with a competition, the comparisons
+  // that make its view: e = compound vs control (enrichment), k = competition vs compound (down = competed off),
+  // r = competition vs control (what is left). The calls use the live cut-offs, as the Differential section does.
+  const SP = { s: 0, show: "0", page: 0 };
+  const SP_CALLS = ["specific", "enriched, not competed", "competed, not enriched", "neither"];
+  const spColor = (k) => css(k === 0 ? "--up" : k === 1 ? "--c3" : k === 2 ? "--c0" : "--ns");
+  function specificSet() { const R = D.roles; return R && R.specific && R.specific.length ? R.specific[Math.min(SP.s, R.specific.length - 1)] : null; }
+  /** 0 specific, 1 enriched but not competed, 2 competed but not enriched, 3 neither; -1 not in both comparisons. */
+  function specificCall(S, i) {
+    const E = D.comps[S.e], K = D.comps[S.k];
+    if (!E || !K || E.fc[i] == null || K.fc[i] == null) return -1;
+    const up = sigOf(E, i) === "up", off = sigOf(K, i) === "down";
+    return up && off ? 0 : up ? 1 : off ? 2 : 3;
+  }
+  function roleChips() {
+    const R = D.roles || {};
+    return (R.conditions || []).map((c) => "<span class='step'><b>" + esc(c.name) + "</b> " + esc(c.role + (c.of ? " of " + c.of : "")) + " · n = " + c.n + "</span>").join(" ");
+  }
+  function renderSpecific() {
+    const host = $("#specificbody");
+    if (!host) return;
+    const S = specificSet(), R = D.roles || {};
+    ["#specific", "#navspecific"].forEach((s) => { const e = $(s); if (e) e.hidden = !S; });
+    if (!S) { host.innerHTML = ""; return; }
+    SP.s = R.specific.indexOf(S);
+    const E = D.comps[S.e], K = D.comps[S.k], cnt = [0, 0, 0, 0];
+    let tested = 0;
+    for (let i = 0; i < nF; i++) { const c = specificCall(S, i); if (c >= 0) { cnt[c]++; tested++; } }
+    host.innerHTML = "<div class='pipeline'>" + roleChips() + "</div>" +
+      (S.note ? "<div class='notes' style='margin:0 0 8px'>" + esc(S.note) + "</div>" : "") +
+      "<div class='tiles'><div class='tile'><div class='k'>Specific targets of " + esc(S.compound) + "</div><div class='v'>" + fmtInt(cnt[0]) + "</div><div class='d'>enriched against " + esc(S.control) + " and competed off · of " + fmtInt(tested) + " tested</div></div>" +
+      "<div class='tile'><div class='k'>Enriched, not competed</div><div class='v'>" + fmtInt(cnt[1]) + "</div><div class='d'>" + esc(S.competition) + " leaves them: unspecific, or a site the competitor doesn't reach</div></div>" +
+      "<div class='tile'><div class='k'>Samples</div><div class='v'>" + esc((E.size || []).join(" / ")) + "</div><div class='d'>" + esc(E.name) + " · " + esc(K.name) + ": " + esc((K.size || []).join(" / ")) + "</div></div></div>" +
+      "<div class='row'>" + (R.specific.length > 1 ? "<label class='ctl'>Compound <select id='spcomp'>" + R.specific.map((x, k) => "<option value='" + k + "'" + (k === SP.s ? " selected" : "") + ">" + esc(x.compound + " (" + x.competition + ")") + "</option>").join("") + "</select></label>" : "") +
+      "<label class='ctl'>Show <select id='spshow'>" + [["0", "specific targets"], ["1", "enriched, not competed"], ["2", "competed, not enriched"], ["all", "everything tested"]].map((o) => "<option value='" + o[0] + "'" + (o[0] === SP.show ? " selected" : "") + ">" + o[1] + "</option>").join("") + "</select></label>" +
+      "<span class='muted'>specific: up in " + esc(E.name) + " and down in " + esc(K.name) + ", each at |log2FC| ≥ " + fmt(ST.lfc, 2) + " and " + (ST.adj ? "adj. p" : "p") + " ≤ " + ST.alpha + " · saved cut-offs: <a href='specific_targets.tsv'>specific_targets.tsv</a></span></div>" +
+      "<div class='grid2 wide'><div><div class='card chart' id='spplot'></div><div class='legend'>" + SP_CALLS.map((c, k) => "<span><span class='sw' style='background:" + spColor(k) + "'></span>" + esc(c) + " (" + fmtInt(cnt[k]) + ")</span>").join("") + "</div></div><div id='sptable'></div></div>";
+    const comp = $("#spcomp");
+    if (comp) comp.onchange = (e) => { SP.s = +e.target.value; SP.page = 0; renderSpecific(); };
+    $("#spshow").onchange = (e) => { SP.show = e.target.value; SP.page = 0; safe(renderSpecificTable, "#sptable"); };
+    safe(renderSpecificPlot, "#spplot");
+    safe(renderSpecificTable, "#sptable");
+  }
+  /** Enrichment (compound vs control) across, competition (compound over competition) up: specific binders top right. */
+  function renderSpecificPlot() {
+    const host = $("#spplot"), S = specificSet();
+    if (!host || !S) return;
+    const E = D.comps[S.e], K = D.comps[S.k];
+    const W = widthOf(host, 520), H = Math.min(480, Math.max(340, W * 0.85)), L = 56, R = 14, T = 16, B = 44;
+    const pts = [];
+    let x0 = -1, x1 = 1, y0 = -1, y1 = 1;
+    for (let i = 0; i < nF; i++) {
+      const c = specificCall(S, i);
+      if (c < 0) continue;
+      const x = E.fc[i], y = -K.fc[i];
+      pts.push([i, x, y, c]);
+      x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+    }
+    const px = (x1 - x0) * 0.05, py = (y1 - y0) * 0.05;
+    x0 -= px; x1 += px; y0 -= py; y1 += py;
+    const X = (v) => L + ((v - x0) / (x1 - x0)) * (W - L - R), Y = (v) => H - B - ((v - y0) / (y1 - y0)) * (H - T - B);
+    const root = frame(host, W, H), g = svg("g", {}, root), mu = css("--muted");
+    const lfc = ST.lfc || 0;
+    title(svg("rect", { x: X(lfc), y: T, width: Math.max(0, W - R - X(lfc)), height: Math.max(0, Y(lfc) - T), fill: css("--up"), "fill-opacity": 0.07, id: "spquad" }, g), "specific: enriched and competed off");
+    axes(g, X, Y, niceTicks(x0, x1, 6), niceTicks(y0, y1, 6), L, R, T, B, W, H, "enrichment: log2 " + S.compound + " / " + S.control, "competed off: log2 " + S.compound + " / " + S.competition);
+    svg("line", { x1: X(0), x2: X(0), y1: T, y2: H - B, stroke: css("--axis") }, g);
+    svg("line", { x1: L, x2: W - R, y1: Y(0), y2: Y(0), stroke: css("--axis") }, g);
+    if (lfc > 0) {
+      svg("line", { x1: X(lfc), x2: X(lfc), y1: T, y2: H - B, stroke: mu, "stroke-dasharray": "4 4" }, g);
+      svg("line", { x1: L, x2: W - R, y1: Y(lfc), y2: Y(lfc), stroke: mu, "stroke-dasharray": "4 4" }, g);
+    }
+    text(g, W - R - 4, Y(lfc) - 6, "specific", { "text-anchor": "end", fill: css("--up"), "font-size": 11.5 });
+    pts.sort((a, b) => (b[3] === 3 ? 1 : 0) - (a[3] === 3 ? 1 : 0) || b[3] - a[3]);
+    const mark = anyMark(), sel = css("--sel"), screen = [];
+    pts.forEach(([i, x, y, c]) => {
+      const hit = mark && matches(i), cx = X(x), cy = Y(y);
+      screen.push([i, cx, cy]);
+      const dot = svg("circle", { cx: cx.toFixed(1), cy: cy.toFixed(1), r: c === 3 ? 2.2 : 3.3, fill: spColor(c), "fill-opacity": c === 3 ? 0.55 : 0.95, stroke: hit ? sel : null, "stroke-width": hit ? 1.6 : null, "data-i": i, "data-call": c, style: "cursor:pointer" }, g);
+      dot.onmouseenter = (e) => showTip(e, "<b>" + esc(nameOf(i)) + "</b> · " + esc(SP_CALLS[c]) + "<br>" + esc(E.name) + ": " + fmt(E.fc[i]) + " (adj. p " + fmtP(E.q[i]) + ")<br>" + esc(K.name) + ": " + fmt(K.fc[i]) + " (adj. p " + fmtP(K.q[i]) + ")");
+      dot.onmouseleave = hideTip;
+      dot.onclick = () => { ST.ci = S.e; syncControls(); renderDiff(); setFocus(i); };
+    });
+    const pos = new Map(screen.map((q) => [q[0], [q[1], q[2]]]));
+    const best = pts.filter((q) => q[3] === 0).sort((a, b) => (b[1] + b[2]) - (a[1] + a[2])).slice(0, 12).map((q) => q[0]);
+    placeLabels(g, best.map((i) => [i].concat(pos.get(i))), [L, W - R, T, H - B], 11, () => false);
+    svgTools(host, root, "specific_targets_" + S.compound);
+  }
+  function renderSpecificTable() {
+    const host = $("#sptable"), S = specificSet();
+    if (!host || !S) return;
+    const E = D.comps[S.e], K = D.comps[S.k], Rm = S.r == null ? null : D.comps[S.r];
+    const rows = [];
+    for (let i = 0; i < nF; i++) { const c = specificCall(S, i); if (c >= 0 && (SP.show === "all" || String(c) === SP.show)) rows.push([i, c]); }
+    rows.sort((a, b) => a[1] - b[1] || (E.fc[b[0]] - K.fc[b[0]]) - (E.fc[a[0]] - K.fc[a[0]]));
+    const per = 25, pages = Math.max(1, Math.ceil(rows.length / per));
+    SP.page = Math.min(SP.page, pages - 1);
+    let h = "<div class='tablewrap'><table><thead><tr><th>" + esc(D.levelTitle.replace(/s$/, "")) + "</th><th title='" + esc(E.name) + "'>enrichment log2FC</th><th>adj. p</th><th title='" + esc(K.name) + "'>competition log2FC</th><th>adj. p</th>" +
+      (Rm ? "<th title='" + esc(Rm.name) + "'>left log2FC</th>" : "") + "<th>call</th></tr></thead><tbody>";
+    rows.slice(SP.page * per, SP.page * per + per).forEach(([i, c]) => {
+      h += "<tr data-i='" + i + "'" + (i === ST.focus ? " class='focus'" : "") + "><td>" + esc(nameOf(i)) + "</td><td class='n'>" + fmt(E.fc[i]) + "</td><td class='n'>" + fmtP(E.q[i]) + "</td><td class='n'>" + fmt(K.fc[i]) + "</td><td class='n'>" + fmtP(K.q[i]) + "</td>" +
+        (Rm ? "<td class='n'>" + fmt(Rm.fc[i]) + "</td>" : "") + "<td><span class='dot' style='background:" + spColor(c) + "'></span> " + esc(SP_CALLS[c]) + "</td></tr>";
+    });
+    if (!rows.length) h += "<tr><td colspan='" + (Rm ? 7 : 6) + "' class='muted'>None at these cut-offs. Try another choice under Show.</td></tr>";
+    host.innerHTML = h + "</tbody></table></div><div class='pager'>" + fmtInt(rows.length) + " " + esc(D.levelWord) + "s · page " + (SP.page + 1) + " of " + pages + " <button id='spprev'>‹</button><button id='spnext'>›</button></div>";
+    $$("tbody tr[data-i]", host).forEach((tr) => (tr.onclick = () => { ST.ci = S.e; syncControls(); renderDiff(); setFocus(+tr.dataset.i); }));
+    $("#spprev").onclick = () => { SP.page = Math.max(0, SP.page - 1); renderSpecificTable(); };
+    $("#spnext").onclick = () => { SP.page = Math.min(pages - 1, SP.page + 1); renderSpecificTable(); };
+  }
+
   // ------------------------------------------------------- liganded sites
   // D.cys (cys.py report_payload): site ratio data (isoDTB). Per compound, columns over the sites: r = median log2
   // competition ratio, n / over = replicates measured / at or over the threshold, cls = index into D.cys.classes.
@@ -2349,7 +2469,7 @@
   const H = Object.assign({ entries: {}, report: [], glossary: [], more: [], issues: [] }, D.help || {});
   const HELP_AT = [["#differential > h2", "report.differential"], ["#differential > p.sub", "report.search"],
     ["#differential-body > .bar", "report.cutoffs"], ["#differential-body > h3", "report.phist"],
-    ["#differential-body > .tablebar", "report.table"], ["#compare > h2", "report.compare"], ["#onoff > h2", "report.onoff"],
+    ["#differential-body > .tablebar", "report.table"], ["#compare > h2", "report.compare"], ["#specific > h2", "report.specific"], ["#onoff > h2", "report.onoff"],
     ["#heat > h2", "report.heatmap"], ["#enrichment > h2", "report.enrichment"], ["#dose > h2", "report.dose"], ["#time > h2", "report.time"], ["#cys > h2", "report.cys"], ["#quality > h2", "report.quality"],
     ["#methods > h2", "report.methods"], ["#files > h2", "report.files"]];
   const HELP_H = { "Data source": "report.source", "Settings used": "report.methods", "Sample metadata": "report.sdrf",
@@ -2439,6 +2559,7 @@
     safe(renderFindings, "#findings");
     safe(renderSearchInfo, "#searchinfo");
     safe(renderCompare, "#comparebody");
+    safe(renderSpecific, "#specificbody");
     const c = C();
     const note = $("#cutnote");
     if (note) {
@@ -2570,7 +2691,7 @@
     });
   }
   function redraw() {
-    if (D.comps.length) { safe(renderVolcano, "#volcano"); safe(renderPHist, "#phist"); safe(renderDetail, "#detail"); safe(renderCompare, "#comparebody"); }
+    if (D.comps.length) { safe(renderVolcano, "#volcano"); safe(renderPHist, "#phist"); safe(renderDetail, "#detail"); safe(renderCompare, "#comparebody"); safe(renderSpecific, "#specificbody"); }
     safe(renderHeatmap, "#heatmap"); safe(renderEnrichment, "#enrich"); safe(renderDose, "#dosebody"); safe(renderCys, "#cysbody"); safe(renderTime, "#timebody"); safe(renderQC, "#qc");
   }
   let rt = null;

@@ -9,6 +9,13 @@ experiment.yaml `analysis:` block:
     analysis:
       de_type: control            # control (each condition vs the control) | all (every pair) | others (each vs the rest)
       control: DMSO               # default: first condition matching control_keywords
+      roles: {DMSO: control, Probe: compound, Probe_Comp: competition of Probe}   # default: read from the names
+                                  #   (roles.py, D61); a competition changes the default comparisons to compound vs
+                                  #   control, competition vs its compound, competition vs control
+      competition_keywords: [comp, competition, competitor, excess]   # a token of the name that means "plus a
+                                  #   competitor"; competition_keywords_weak (pre, block ...) count only next to
+                                  #   the compound's own condition
+      role_comparisons: true      # false: the roles are shown, the comparisons are every condition vs the control
       comparisons: ["Drug vs DMSO"]   # explicit list; wins over de_type
       log2fc: 1.0                 # |log2 fold change| threshold (FragPipe-Analyst "lfc")
       alpha: 0.05                 # significance threshold (FragPipe-Analyst "p")
@@ -20,6 +27,8 @@ experiment.yaml `analysis:` block:
       normalize: median           # median (default) | gn | none
       imputation: auto            # auto | none | perseus | min | zero | mindet | minprob | knn
       min_valid: 2                # measured values per group needed when nothing is imputed
+      small_group_min_valid: half # half: the smaller group of an unbalanced comparison (DMSO n=2 vs n=4) needs
+                                  #   half its samples measured, not min_valid | same: every group needs min_valid
       exclude_samples: [DMSO_3]   # leave samples out
       sample_conditions: {Drug_4: DMSO}   # give a sample another condition
       enrichment: true
@@ -73,6 +82,7 @@ from dataclasses import dataclass, field, fields, replace
 from ionomos.downstream import fpa, stats
 from ionomos.downstream.enrich import DEFAULT_LIBRARIES, LIBRARIES
 from ionomos.downstream.quant import QuantMatrix
+from ionomos.downstream.roles import DEFAULT_COMPETITION_KEYWORDS, DEFAULT_COMPETITION_KEYWORDS_WEAK
 
 DEFAULT_CONTROL_KEYWORDS = ("DMSO", "vehicle", "veh", "ctrl", "control", "mock", "untreated", "NT", "WT", "EV",
                             "scr", "scramble", "siNT", "PBS")
@@ -89,7 +99,13 @@ class Settings:
     control: str | None = None
     comparisons: list[tuple[str, str]] = field(default_factory=list)
     control_keywords: tuple[str, ...] = DEFAULT_CONTROL_KEYWORDS
+    # the roles of the conditions and the comparisons that follow (roles.py, D61)
+    roles: dict[str, str] = field(default_factory=dict)   # condition -> control | compound | competition of X | ...
+    competition_keywords: tuple[str, ...] = DEFAULT_COMPETITION_KEYWORDS
+    competition_keywords_weak: tuple[str, ...] = DEFAULT_COMPETITION_KEYWORDS_WEAK
+    role_comparisons: bool = True
     min_valid: int = 2
+    small_group_min_valid: str = "half"  # half | same: what the smaller group of an unbalanced comparison needs
     remove_contaminants: bool = True
     filter_global_pct: float = 0.0
     filter_condition_pct: float = 50.0
@@ -174,6 +190,15 @@ def _sdrf_meta(v) -> dict[str, str]:
     return out
 
 VARIANCE_PRIORS = ("limma", "deqms")
+SMALL_GROUP_RULES = ("half", "same")
+
+def _roles(v) -> dict[str, str]:
+    from ionomos.downstream import roles
+
+    try:
+        return roles.normalise(v)
+    except roles.RoleError as exc:
+        raise AnalysisError(f"roles: {exc}") from None
 
 def _block(v) -> str | dict[str, str]:
     if isinstance(v, dict):
@@ -245,7 +270,7 @@ def settings_from(*layers: dict | None) -> Settings:
                            "liganded_min_replicates", "time_min_points"):
                     v = int(v)
                 elif k in ("use_adjusted", "remove_contaminants", "enrichment", "dose_response", "liganded", "time_course",
-                           "psm_qc"):
+                           "psm_qc", "role_comparisons"):
                     v = _bool(v)
                 elif k == "test":
                     v = str(v).lower()
@@ -268,8 +293,15 @@ def settings_from(*layers: dict | None) -> Settings:
                         raise AnalysisError("imputation must be one of " + ", ".join(fpa.IMPUTATION_METHODS))
                 elif k == "comparisons":
                     v = [parse_comparison(c) for c in (v if isinstance(v, list) else [v])]
-                elif k == "control_keywords":
+                elif k in ("control_keywords", "competition_keywords", "competition_keywords_weak"):
                     v = tuple(_list(v))
+                elif k == "roles":
+                    v = {**s.roles, **_roles(v)}  # an experiment's roles add to / override the lab's
+                elif k == "small_group_min_valid":
+                    v = str(v).strip().lower()
+                    if v not in SMALL_GROUP_RULES:
+                        raise AnalysisError("small_group_min_valid must be half (the smaller group of an unbalanced "
+                                            "comparison needs half its samples measured) or same (min_valid)")
                 elif k in ("exclude_samples",):
                     v = _list(v)
                 elif k == "enrichment_libraries":
@@ -429,8 +461,14 @@ def find_control(conditions: list[str], s: Settings) -> str | None:
             if c.lower() == s.control.lower():
                 return c
         raise AnalysisError(f"control {s.control!r} is not one of the conditions: {', '.join(conditions)}")
+    given = {k.lower(): v for k, v in s.roles.items()}  # analysis.roles names the control, or says what isn't one
+    for c in conditions:
+        if given.get(c.lower()) == "control":
+            return c
     for kw in s.control_keywords:
         for c in conditions:
+            if c.lower() in given:
+                continue
             tokens = re.split(r"[_\-\s.]+", c.lower())
             if kw.lower() in tokens or c.lower() == kw.lower():
                 return c
@@ -457,6 +495,11 @@ def choose_comparisons(m: QuantMatrix, s: Settings) -> tuple[list[tuple[str, str
     ctrl = find_control(conds, s)
     if s.de_type == "all":
         return fpa.all_pairs(conds, ctrl), notes
+    from ionomos.downstream import roles
+
+    design = roles.plan(m, s)  # a competition experiment: the comparisons follow the roles (D61)
+    if design.active:
+        return list(design.comparisons), notes + design.notes
     if ctrl is None:
         ctrl = sorted(conds)[0]
         notes.append(f"no control condition recognised; using {ctrl!r} as control (alphabetically first). "
@@ -476,6 +519,9 @@ class DiffResult:
     prior: tuple[float, float] = (math.nan, math.nan)  # limma: (prior df, prior variance)
     confidence: str = ""          # "" normal | "low": a group of one, p borrowed | "none": fold change only
     confidence_note: str = ""
+    groups: tuple = ()            # samples on each side: (treatment, control); () for a results table
+    role: str = ""                # roles.KINDS: enrichment | competition | remaining ("" = no competition design)
+    relaxed: int = 0              # features tested with fewer than min_valid values in the smaller group
 
     @property
     def up(self) -> int:
@@ -587,6 +633,22 @@ def make_model(m: QuantMatrix, s: Settings, comps: list[tuple[str, str | None]])
         out.notes.append(f"the experimental design wasn't used: {exc}; the comparisons use ~0 + condition")
     return out
 
+def group_needs(m: QuantMatrix, pairs: list[tuple[str, str]], s: Settings, min_valid: int) -> dict:
+    """{(treatment, control): (values needed in the treatment, in the control)} for a limma comparison.
+    Every group needs min_valid measured values. With small_group_min_valid: half, the smaller group of an
+    unbalanced comparison needs only half its samples (never fewer than 1), so a feature is not left untested
+    because one of two control replicates is missing while the larger group is complete: limma's residual
+    variance comes from every group, and the larger group still has to reach min_valid."""
+    out = {}
+    for a, b in pairs:
+        na, nb = len(m.samples_of(a)), len(m.samples_of(b))
+        need = [min_valid, min_valid]
+        if min_valid and s.small_group_min_valid == "half" and na != nb:
+            k = 0 if na < nb else 1
+            need[k] = min(min_valid, max(1, math.ceil(min(na, nb) / 2)))
+        out[(a, b)] = (need[0], need[1])
+    return out
+
 def _counts(m: QuantMatrix, s: Settings) -> list[int | None] | None:
     return [f.peptides for f in m.features] if s.variance_prior == "deqms" else None
 
@@ -607,10 +669,12 @@ def run_contrasts(p: fpa.Processed, comps: list[tuple[str, str | None]], s: Sett
         sq = dz.squeezer(counts, s.variance_prior) if counts is not None else None
         for group, gmv in (([c for c in pairs if c not in low], mv), ([c for c in pairs if c in low], 0)):
             if group:  # eBayes is fitted on every condition's residuals, so splitting contrasts changes nothing else
+                needs = group_needs(m, group, s, gmv)
                 if des is not None:
-                    res, info = dz.limma_design(m.values, des, group, gmv, counts, s.variance_prior)
+                    res, info = dz.limma_design(m.values, des, group, gmv, counts, s.variance_prior, needs)
                 else:
-                    res = fpa.limma_contrasts(m.values, m.samples, m.condition, group, min_valid=gmv, squeeze=sq)
+                    res = fpa.limma_contrasts(m.values, m.samples, m.condition, group, min_valid=gmv, squeeze=sq,
+                                              needs=needs)
                     info = sq.info if sq else {}
                 if model is not None and info:
                     model.prior = info
@@ -704,6 +768,10 @@ def to_diff(p: fpa.Processed, r: fpa.ContrastResult, control: str | None, s: Set
     d = DiffResult(comparison_name(r.treatment, control), r.treatment, control, m.kind, rows, s, thr_p)
     d.test_used = s.test
     d.prior = r.prior
+    d.groups = (len(ia), len(ib)) if control is not None else (len(ia),)
+    if control not in (None, "others") and p.imputation == "none":
+        d.relaxed = sum(1 for x in rows if x["pvalue"] is not None
+                        and min(x["n_treatment"], x["n_control"]) < s.min_valid)
     return d
 
 def _split_name(name: str) -> tuple[str, str]:

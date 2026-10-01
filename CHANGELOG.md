@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The analysis knows the experiment's design** (D61; `downstream/roles.py`).
+  Each condition gets a role: control, compound, competition (the probe plus
+  a competitor), pooled reference or QC standard. Roles are read from the
+  condition names, from `analysis.roles` in `experiment.yaml` /
+  `config.yaml`, or from a `characteristics[role]` column of an SDRF, and
+  are shown in the report (Methods → Settings used) and in `analysis.json`
+  → `roles`.
+  - With a competition condition (`Probe_Comp`, `Probe+Comp`, `ProbeComp`,
+    `Comp`, `…_competition`, `…_excess`) the default comparisons follow the
+    design: compound vs control, competition vs its compound, competition vs
+    control. A second control, a pool and a QC standard are not compared.
+    `comparisons:`, `de_type: all | others` and `role_comparisons: false`
+    work as before; with `control:` set, every condition is still compared
+    with it. Without a competition condition nothing changes.
+  - **Specific targets**: per compound, the features enriched against the
+    control and competed off by the competitor, each at the report's
+    cut-offs. `results/specific_targets.tsv` (both fold changes, both
+    adjusted p-values), `analysis.json` → `specific_targets`, and a report
+    section with enrichment against competition and the quadrant of
+    specific binders marked.
+  - **Unequal groups** (DMSO n=2 against a compound n=4) are handled
+    knowingly. The report says how many samples each side of each
+    comparison had, and the Power tab gives the minimum detectable fold
+    change per comparison with those numbers. Without imputation (TMT), the
+    smaller group of an unequal comparison needs half its samples measured
+    instead of `min_valid` (`small_group_min_valid: half`; `same` is the
+    earlier rule): on simulated TMT data with two DMSO channels, 6.1 % of
+    the features were untested against DMSO before and 0.1 % are now, with
+    no false hit among them. The sample scorecard no longer scores a sample
+    of a small group as scattering more than the others. A low-confidence
+    label names the real group size.
+  - Two new notes: `COMPETITION_DESIGN` (what was read, how to change it)
+    and `ROLES_UNSURE` (asks, when a name is ambiguous: `Probe_pre`,
+    `Probe_10x`, or a competition that can't be linked to one compound).
+    Glossary entries for role, control, compound and competition.
+  - New settings: `roles`, `competition_keywords`,
+    `competition_keywords_weak`, `role_comparisons`,
+    `small_group_min_valid`. Competition keywords are also on the Analysis
+    tab (Lab defaults).
+  - **Not confirmed by the lab**: the competition keywords (`Comp` is the
+    one form seen on the lab PC) and the specific-targets rule. **Not
+    tested on a real experiment**: simulated data only.
+
 ### Fixed
 
 - A failed FragPipe search on .raw files no longer gets the cause "A .raw

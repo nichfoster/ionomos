@@ -50,7 +50,9 @@ def defaults(root: str | None = None, users_root: str | None = None) -> dict:
                      "enrichment": True, "enrichment_libraries": ["Hallmark", "GO Biological Process", "Reactome"],
                      "enrichment_gmt": "", "top_labels": 15,
                      "control_keywords": ["DMSO", "vehicle", "veh", "ctrl", "control", "mock", "untreated", "NT",
-                                          "WT", "EV", "scr", "scramble", "siNT", "PBS"]},
+                                          "WT", "EV", "scr", "scramble", "siNT", "PBS"],
+                     "competition_keywords": ["comp", "competition", "competitor", "competed", "compete",
+                                              "competing", "excess"]},
         "qc_trend": {"enabled": True, "match": ["hela", "k562", "qc_std", "qcstd", "_qc_"], "exclude": [],
                      "methods": [], "instrument": "", "baseline_runs": 10, "baseline_from": "", "baseline_to": "",
                      "popup": False},
@@ -216,6 +218,16 @@ def dump_config(d: dict) -> str:
     a(f"  enrichment_gmt: {_y(an.get('enrichment_gmt', '') or '')}   # optional extra gene sets (.gmt file)")
     a(f"  top_labels: {_y(an.get('top_labels', 15))}   # hit names written on each volcano")
     a(f"  control_keywords: {_y(list(an.get('control_keywords') or []))}   # how the control condition is recognised")
+    a(f"  competition_keywords: {_y(list(an.get('competition_keywords') or []))}   # a word of a condition name that "
+      "means 'plus a competitor' (Probe_Comp): its comparisons follow the design")
+    for k in ("competition_keywords_weak", "role_comparisons", "small_group_min_valid"):  # roles: D61
+        if an.get(k) not in (None, ""):
+            a(f"  {k}: {_y(list(an[k]) if isinstance(an[k], (list, tuple)) else an[k])}")
+    if isinstance(an.get("roles"), dict) and an["roles"]:
+        a("  roles:   # condition -> control | compound | competition of <compound> | reference | qc (usually per "
+          "experiment, in experiment.yaml)")
+        for k, v in an["roles"].items():
+            a(f"    {_y(str(k))}: {_y(v)}")
     for k in ("impute_shift", "impute_scale", "seed", "pca_features", "heatmap_max", "control", "variance_prior",
               "block", "block_from", "covariates",  # DEqMS and the design (downstream/design.py)
               "dose_response", "dose_min_doses", "dose_alpha", "dose_fc_lim", "dose_unit",  # dose-response: D44

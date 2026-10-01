@@ -407,6 +407,10 @@ analysis:                   # results/report.html for this experiment (lab defau
     Drug_start: 0           #   Drug_4h, 2d; units s, min, h, d). 3+ time points per series get the time-course
     Drug_early: 30 min      #   tests; a bare number needs time_unit
     Drug_late: 4 h
+  roles:                    # what each condition is (D61); default: read from the names. A competition (probe +
+    DMSO: control           #   competitor) changes the default comparisons: compound vs control, competition
+    Probe: compound         #   vs its compound, competition vs control, and adds results/specific_targets.tsv
+    Probe_Comp: competition of Probe   # also: reference (a pool), qc (a QC standard)
   liganded_ratio: 4         # isoDTB: the competition ratio R that calls a cysteine liganded (D52) ...
   liganded_min_replicates: 2   # ... in at least this many replicates
   liganded_direction: high  # high: R = heavy / light (treated sample = light tag) | low: the other way round
@@ -456,7 +460,30 @@ more conditions every report also has a moderated F-test ("any change").
    the time-course tests (`results/time_course.tsv`). A name with two times is
    left out with a warning; list the times in `analysis.times` instead.
 
+## Condition names and roles
+
+The analysis reads a role from each condition name (D61, WORKFLOWS.md
+"Competition experiments"). Nothing in the folder or raw-file rules above
+changes; this is about the condition part of a name.
+
+| Condition name | Role |
+|---|---|
+| `DMSO`, `Vehicle`, `Mock`, `WT_DMSO` … (the control keywords) | control |
+| `Probe_Comp`, `Probe+Comp`, `ProbeComp`, `Probe_competition`, `Probe_excess`, `KL6283A_Comp_KL6159A` | competition of `Probe` / `KL6283A` |
+| `Comp` (one compound in the experiment) | competition of that compound |
+| `Pool`, `Bridge`, `Reference`, `Norm` | reference |
+| `QC`, `HeLa`, `K562`, `Standard`, `Blank` | qc |
+| anything else | compound |
+
+A TMT condition is one word (the part before the first `_` of
+`ProbeComp_1_128N`), so write a TMT competition as `ProbeComp` or `Comp`.
+`Probe_pre`, `Probe_block` and `Probe_10x` are read as a competition only
+next to a `Probe` condition, and Ionomos asks. Say it yourself with
+`roles:` in `experiment.yaml`.
+
 ## Still to confirm with the lab
+
+- Which words mark "probe plus competitor" in a condition name? Only `Comp` was seen on the PC (D61).
 
 - Is user = folder under `C:\Fragpipe_General\` right? Which initials/aliases to configure?
 - Are there ever two methods in one drop? (Currently rejected.)
