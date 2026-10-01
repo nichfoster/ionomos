@@ -85,7 +85,8 @@ naming:
   #   DIA: '{sample}[_{rep}]'
   #   (or, for WT-a_rep1.raw / KO-b_rep2.raw:  DIA: '{condition}_rep{rep}')
   #   LFQ: {files: '{sample}_R{rep}_F{fraction}'}   # a new method (add methods.LFQ below too)
-  #   SWATH: {like: DIA}                         # DIA's rule under another method name
+  #   SWATH: {like: DIA}                         # a DIA method under another name: DIA's rule, search and analysis
+  #   (like: isoDTB | TMT | DIA makes the method that kind everywhere, not only for its names; D54)
   #   PLATE: {pattern: '(?P<sample>[A-H]\d{2})-(?P<rep>\d+)'}   # a regex with named groups
 
 # One entry per method. The key is canonical; `aliases` are the keywords
@@ -120,7 +121,8 @@ methods:
   #   library: human_lib.parquet         # optional, in workflow_dir or fasta_dir; else predicted from the FASTA
   #   diann_args: "--var-mods 1 --var-mod UniMod:35,15.994915,M"   # added to Ionomos' defaults
   # DDA label-free searched by the lab's own MaxQuant (docs/ENGINES.md, D50). A new method key also
-  # needs a file rule: naming: {methods: {LFQ: {like: isoDTB}}} for <sample>_<rep>[_<fraction>] names.
+  # needs a file rule: naming: {methods: {LFQ: '{sample}_{rep}[_{fraction}]'}} for <sample>_<rep>[_<fraction>] names.
+  # (The engine decides what the method is: label-free here, DIA for diann, whatever like: says.)
   # LFQ:
   #   engine: maxquant                   # fragpipe (default) | diann | maxquant
   #   maxquant_exe: C:/MaxQuant/2.6.7.0/bin/MaxQuantCmd.exe

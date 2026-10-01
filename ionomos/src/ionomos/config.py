@@ -25,9 +25,11 @@ from ionomos.naming import (
     DEFAULT_METHOD_ALIASES,
     FileRule,
     NamingError,
+    analysis_method,
     check_date_formats,
     check_method_aliases,
     file_rule,
+    method_kind,
 )
 
 log = logging.getLogger("ionomos.config")
@@ -94,6 +96,18 @@ class Config:
     @property
     def method_aliases(self) -> dict[str, list[str]]:
         return {k: list(m.aliases) for k, m in self.methods.items()}
+
+    def _engine(self, method: str) -> str:
+        m = self.methods.get(method)
+        return str(m.extra.get("engine") or "") if m else ""
+
+    def kind(self, method: str) -> str:
+        """What a method behaves as (naming.method_kind, D54): its engine's kind, its like: target, or its key."""
+        return method_kind(method, self.file_rules, self._engine(method))
+
+    def analysis_method(self, method: str) -> str:
+        """What the analysis reads for a method (naming.analysis_method)."""
+        return analysis_method(method, self.file_rules, self._engine(method))
 
     def known_users(self) -> list[str]:
         """Users = subfolders of users_root (a new user is just a new folder), minus not_users()."""
@@ -284,7 +298,8 @@ def _file_rules(raw, methods: dict[str, MethodConfig]) -> dict[str, FileRule]:
     """naming.methods: how each method's raw file names are read (D37). Absent = the built-in rules.
 
     A method's entry is a template string (shorthand for files:), or a mapping of
-    like (isoDTB | TMT | DIA), files (template), pattern (regex), condition_codes (true/false)."""
+    like (isoDTB | TMT | DIA), files (template), pattern (regex), condition_codes (true/false).
+    like: also makes the method that kind for the search and the analysis (Config.kind, D54)."""
     rules = dict(DEFAULT_FILE_RULES)
     if raw is None:
         return rules

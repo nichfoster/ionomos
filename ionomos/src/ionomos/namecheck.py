@@ -53,6 +53,7 @@ class FolderReading:
     method: str = ""
     method_error: str = ""
     rule: str = ""  # the method's file rule as configured (template or regex)
+    kind: str = ""  # what the method is searched and analysed as (Config.kind), when not its own name
     date: date | None = None
     files: list[FileReading] = field(default_factory=list)
     layout: list[str] = field(default_factory=list)
@@ -110,6 +111,8 @@ def _folder(name: str, raws: list[str], method: str | None, cfg: Config) -> Fold
             fr.method_error = str(exc)
     rule = cfg.file_rules.get(fr.method) if fr.method else None
     fr.rule = rule.source if rule else ""
+    if fr.method and cfg.kind(fr.method) != fr.method:
+        fr.kind = cfg.kind(fr.method)
     users = build_user_lookup(cfg.known_users(), cfg.user_aliases)
     try:
         fr.user = find_user(name, users, cfg.method_aliases)
@@ -229,7 +232,8 @@ def format_readings(readings: list[FolderReading | FileReading]) -> str:
         if r.safe and r.safe != r.name:
             lines.append(f"  renamed to : {r.safe}")
         lines.append(f"  user       : {r.user or '✗ ' + r.user_error}" + (f"  ({r.user_note})" if r.user_note else ""))
-        lines.append(f"  method     : {r.method or '✗ ' + r.method_error}")
+        lines.append(f"  method     : {r.method or '✗ ' + r.method_error}"
+                     + (f"  (searched and analysed as {r.kind})" if r.kind else ""))
         if r.rule:
             lines.append(f"  file rule  : {r.rule}")
         lines.append(f"  date       : {r.date.isoformat() if r.date else '(none in the name: the drop date is used)'}")

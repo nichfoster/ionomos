@@ -118,6 +118,13 @@ methods:
     diann_args: "--var-mods 1 --var-mod UniMod:35,15.994915,M"   # optional, added to the defaults
 ```
 
+The method's key is the lab's choice (D54). The engine decides what the
+method is: any `engine: diann` method is searched and analysed as DIA, and
+any `engine: maxquant` or `engine: sage` method as label-free, with a
+control and that engine's own protein table. For a FragPipe method under
+another key, `naming.methods.<key>: {like: isoDTB | TMT | DIA}` does the
+same (docs/NAMING_CONVENTION.md).
+
 Each job then writes `ionomos_run/diann.cfg` and runs
 `diann.exe --cfg ionomos_run/diann.cfg`. The cfg is the job's full,
 reproducible settings: every raw file, FASTA / library, output, threads and
@@ -155,7 +162,7 @@ methods:
     mqpar: lab_lfq_mqpar.xml   # optional: File -> Save parameters in the MaxQuant GUI, put in workflow_dir
 naming:
   methods:
-    LFQ: {like: isoDTB}        # <sample>_<rep>[_<fraction>] names (or your own template, D37)
+    LFQ: '{sample}_{rep}[_{fraction}]'   # <sample>_<rep>[_<fraction>] names (or your own template, D37)
 ```
 
 Ionomos never writes an `mqpar.xml` from scratch, because its layout
@@ -200,7 +207,7 @@ methods:
     sage_args: "--batch-size 2"                # optional: added to the sage command line
 naming:
   methods:
-    LFQ: {like: isoDTB}        # <sample>_<rep>[_<fraction>] names (or your own template, D37)
+    LFQ: '{sample}_{rep}[_{fraction}]'   # <sample>_<rep>[_<fraction>] names (or your own template, D37)
 ```
 
 A job has two steps, both in `ionomos_run/sage_console.log`:

@@ -25,7 +25,8 @@ the method:
 Another lab's convention is config, not code (config.yaml `naming:`, D37): each method's file
 rule is a template ("{sample}_{rep}[_{fraction}]", compile_template) or a named-group regex
 (compile_pattern). The defaults above are those templates and compile to the same regexes as
-before. Date formats and DIA condition codes are config too.
+before. Date formats and DIA condition codes are config too. A method that says `like: DIA` is DIA
+for the whole pipeline, not only for its names: method_kind() is the one place that says so (D54).
 """
 from __future__ import annotations
 
@@ -284,6 +285,7 @@ class FileRule:
     must: str  # what the error says when a name doesn't fit ("must end in ...")
     codes: bool = False  # DIA short forms: X_D1 = condition code D, rep 1 (naming.condition_codes)
     groups: tuple[tuple[str, str], ...] = (("sample", "sample"), ("rep", "rep"), ("frac", "frac"))
+    like: str = ""  # the built-in method named by like: (see method_kind); "" = none
 
     def read(self, m: re.Match[str]) -> tuple[str | None, str | None, str | None]:
         """(sample, rep, frac) from a match; None where the rule has no such part or it was absent."""
@@ -311,7 +313,8 @@ def file_rule(method: str, *, like: str | None = None, files: str | None = None,
     use_codes = (base == "DIA") if codes is None else bool(codes)
     if pattern is not None:
         rx, groups = compile_pattern(pattern)
-        return FileRule(rx, pattern, f"must match the pattern '{pattern}'", use_codes, tuple(groups.items()))
+        return FileRule(rx, pattern, f"must match the pattern '{pattern}'", use_codes, tuple(groups.items()),
+                        like=like or "")
     template = files if files is not None else DEFAULT_FILE_TEMPLATES[base]
     rx = compile_template(template)
     if template.strip() == DEFAULT_FILE_TEMPLATES["isoDTB"]:
@@ -319,10 +322,36 @@ def file_rule(method: str, *, like: str | None = None, files: str | None = None,
     else:
         t = template.strip()
         must = f"must look like {t[:-len(RAW_SUFFIX)] if t.lower().endswith(RAW_SUFFIX) else t}.raw"
-    return FileRule(rx, template, must, use_codes)
+    return FileRule(rx, template, must, use_codes, like=like or "")
 
 
 DEFAULT_FILE_RULES: dict[str, FileRule] = {m: file_rule(m) for m in DEFAULT_FILE_TEMPLATES}
+
+# ----------------------------------------------------------- method kinds --
+
+# What a search engine the watcher runs itself produces, whatever the lab calls the method
+# (config methods.<name>.engine): the kind, and the table the analysis reads (downstream/engines.py).
+ENGINE_KINDS: dict[str, str] = {"diann": "DIA", "maxquant": "LFQ", "sage": "LFQ"}
+ENGINE_TABLES: dict[str, str] = {"maxquant": "MaxQuant", "sage": "Sage"}
+
+
+def method_kind(method: str, rules: dict[str, FileRule] | None = None, engine: str | None = None) -> str:
+    """The method a method key behaves as, everywhere the pipeline branches on a method (D54):
+    isoDTB | TMT | DIA | LFQ, or the key itself for a method of the lab's own (generic label-free).
+
+    The engine decides first (DIA-NN makes DIA results, MaxQuant and Sage label-free ones), then
+    the rule's like:, then the key. rules: method -> FileRule (config naming.methods); None = built-in."""
+    by_engine = ENGINE_KINDS.get(str(engine or "").lower())
+    if by_engine:
+        return by_engine
+    rule = (DEFAULT_FILE_RULES if rules is None else rules).get(method)
+    return rule.like if rule is not None and rule.like else method
+
+
+def analysis_method(method: str, rules: dict[str, FileRule] | None = None, engine: str | None = None) -> str:
+    """What the downstream analysis is asked to read for a method: MaxQuant's or Sage's own table when
+    that engine ran the search, else the method's kind."""
+    return ENGINE_TABLES.get(str(engine or "").lower()) or method_kind(method, rules, engine)
 
 
 def check_method_aliases(aliases: dict[str, list[str]]) -> None:

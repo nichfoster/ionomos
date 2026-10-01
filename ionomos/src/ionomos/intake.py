@@ -155,6 +155,10 @@ class Draft:
     control_keywords: list[str] = field(default_factory=list)  # how the analysis recognises a control
     condition_codes: dict[str, str] = field(default_factory=dict)  # DIA X_D1 -> DMSO rep 1
     file_rules: dict = field(default_factory=dict)  # method -> naming.FileRule (config naming.methods); {} = built-in
+    kinds: dict[str, str] = field(default_factory=dict)  # method -> what it behaves as (Config.kind); {} = its key
+
+    def kind_of(self, method: str) -> str:
+        return self.kinds.get(method, method)
 
 
 class Resolver(Protocol):
@@ -400,6 +404,7 @@ def draft(folder: Path, cfg: Config, error: IntakeError | None = None, review: b
         files=files, layout_error=layout_error, allow_uneven=ov.allow_uneven_fractions, source=str(folder),
         review=review and error is None, control=str((ov.analysis or {}).get("control") or ""),
         control_keywords=keywords, condition_codes=dict(cfg.condition_codes), file_rules=dict(cfg.file_rules),
+        kinds={m: cfg.kind(m) for m in cfg.methods},
     )
 
 
@@ -695,6 +700,7 @@ def _intake(folder: Path, cfg: Config, ledger: Ledger, resolver: Resolver | None
                 "fasta": p.overrides.get("fasta") or mcfg.fasta,
                 "data_type": mcfg.data_type,
                 "postprocess": list(mcfg.postprocess),
+                "analysis_method": cfg.analysis_method(p.folder.method),  # what it is analysed as (D54)
             },
         }
         write_status(dest, record)

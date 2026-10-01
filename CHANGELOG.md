@@ -83,6 +83,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`ionomos fake-sage`, `ionomos fake-rawparser`), with the file formats
   taken from Sage's source. Not yet run against a real Sage.
 
+### Changed
+
+- **A method that is `like:` a built-in method is that method everywhere**
+  (D54; ROADMAP "found while building 5A/5B"). `naming.methods.<key>:
+  {like: isoDTB | TMT | DIA}` used to borrow the name rule only, and the
+  method was then analysed as generic label-free. Now a `DIA_phospho` or
+  `TMTpro` method gets the built-in method's whole behaviour: the TMT
+  `annotation.txt`, the expected FragPipe outputs, the control question in
+  the review window, the analysis, the SDRF and the doctor's messages. A
+  method run by another engine is what the engine makes (`engine: diann`:
+  DIA under any key, which used to get no analysis; `maxquant` / `sage`:
+  label-free), whatever `like:` says. One resolver decides
+  (`naming.method_kind`, `Config.kind`). Built-in keys and configs without
+  `like:` behave as before. A FragPipe method that used `like:` only for the
+  shape of its names should now write the template out
+  (`files: '{sample}_{rep}[_{fraction}]'`).
+  `ionomos analyze --method` also takes the config's own method keys, and
+  `ionomos names test` prints what a custom method is run as.
+
 ## [0.12.0] - 2026-09-30
 
 ### Added
