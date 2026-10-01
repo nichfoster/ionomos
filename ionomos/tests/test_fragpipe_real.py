@@ -892,10 +892,6 @@ def test_fake_skips_manifest_files_that_do_not_exist_like_fragpipe(bed):
         fragpipe.prepare(bed["ledger"].get(1), bed["cfg"])
 
 
-@pytest.mark.xfail(reason="FragPipe 24's stock workflows write <workdir>/sdrf.tsv (workflow.misc.save-sdrf=true); "
-                          "downstream/sdrfdesign.py reads it as the experiment's own design and raises "
-                          "SDRF_UNMATCHED_RUNS. Open in docs/ROADMAP.md; the testbed's workflows switch it off.",
-                   strict=False)
 def test_fragpipes_own_sdrf_is_not_taken_for_the_users_design(bed):
     wf = bed["cfg"].workflow_dir / "isoDTB.workflow"
     wf.write_text(wf.read_text(encoding="utf-8").replace("workflow.misc.save-sdrf=false", "workflow.misc.save-sdrf=true"),
@@ -905,6 +901,8 @@ def test_fragpipes_own_sdrf_is_not_taken_for_the_users_design(bed):
     assert (dest / "fragpipe" / "sdrf.tsv").read_text(encoding="utf-8").startswith("source name\tcharacteristics[organism]")
     analysis = json.loads((dest / "results" / "analysis.json").read_text(encoding="utf-8"))
     assert "SDRF_UNMATCHED_RUNS" not in json.dumps(analysis)
+    assert any("the search engine's own SDRF template" in n for n in analysis["notes"])
+    assert analysis["design"].get("sdrf") is None
 
 
 # --------------------------------------------------------------- fingerprint --

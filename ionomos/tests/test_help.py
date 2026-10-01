@@ -268,7 +268,7 @@ def test_report_payload_embeds_what_the_report_links_to():
         for target in re.findall(r'data-help="([^"]+)"', e["h"]):
             assert target in ents, f"{hid} links to {target}, which the report doesn't carry"
         assert all(h == f"#help-{t}" for h, t in re.findall(r'href="([^"]+)" data-help="([^"]+)"', e["h"]))
-    assert len(json.dumps(p)) < 60_000, "keep the report's payload modest"
+    assert len(json.dumps(p)) < 90_000, "keep the report's payload modest"   # ~110 entries by 0.14; a report is ~400 kB
 
 
 def test_report_has_the_help_nav_section_and_payload(tmp_path):

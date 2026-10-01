@@ -95,6 +95,31 @@ def _looks_like_sdrf(path: Path) -> bool:
     return "source name" in h and "comment[data file]" in h
 
 
+def _engine_template(path: Path, rows: int = 200) -> bool:
+    """An SDRF that describes no samples: no factor value column and every source name "not available". FragPipe
+    24's stock workflows write one into their output folder (workflow.misc.save-sdrf); it is FragPipe's
+    template for the user to fill in, not this experiment's design."""
+    try:
+        with open(path, encoding="utf-8-sig", errors="replace", newline="") as fh:
+            head = [h.strip().lower() for h in fh.readline().rstrip("\r\n").split("\t")]
+            if any(h.startswith("factor value") for h in head) or "source name" not in head:
+                return False
+            col = head.index("source name")
+            seen = 0
+            for line in fh:
+                cells = line.rstrip("\r\n").split("\t")
+                if not any(c.strip() for c in cells):
+                    continue
+                if (cells[col].strip().lower() if col < len(cells) else "") not in ("", "not available", "na"):
+                    return False
+                seen += 1
+                if seen >= rows:
+                    break
+            return seen > 0
+    except OSError:
+        return False
+
+
 def find(dest: Path, workdir: Path | None = None, table: Path | None = None) -> tuple[Path | None, list[str]]:
     """The SDRF describing this experiment: in the experiment folder (two levels deep, so fragpipe/ and raw/ are
     included) or next to the table given to `ionomos analyze`. results/, old runs and folders Ionomos made are
@@ -125,6 +150,10 @@ def find(dest: Path, workdir: Path | None = None, table: Path | None = None) -> 
             if key in seen or not p.is_file() or not _looks_like_sdrf(p):
                 continue
             seen.add(key)
+            if _engine_template(p):
+                notes.append(f"{p.name} in {p.parent.name}/ names no samples (the search engine's own SDRF "
+                             "template), so it is not used as the design")
+                continue
             found.append((len(rel), p.name.lower(), p))
 
     scan(Path(dest), 2)
