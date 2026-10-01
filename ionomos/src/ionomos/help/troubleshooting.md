@@ -219,11 +219,15 @@ without spaces such as `C:\ThermoRawFileParser`, and set the method's
 ## Sage settings missing or unusable {#search.hold-sage-config}
 
 The method names a Sage settings file (`sage_config:`) that isn't in the
-workflow folder, isn't valid JSON, or asks for TMT quantification, which
-Ionomos can't analyse from Sage yet. Put a working Sage JSON there (the one
-from a search that worked: `results.json` in its output folder is a complete
-copy), or remove `sage_config:` to use Ionomos' defaults: tryptic,
-high-resolution MS2, label-free quantification.
+workflow folder, isn't valid JSON, or names a TMT kit Sage doesn't have
+(`quant.tmt` must be `Tmt6`, `Tmt10`, `Tmt11`, `Tmt16`, `Tmt18` or
+`{"User": [reporter masses]}`). Put a working Sage JSON there (the one from a
+search that worked: `results.json` in its output folder is a complete copy),
+or remove `sage_config:` to use Ionomos' defaults: tryptic, high-resolution
+MS2, label-free quantification.
+
+The job is also held when the method's `sage_args` has `--parquet`: Ionomos
+reads Sage's `.tsv` tables, so take that option out.
 
 ## The method is no longer set up {#search.hold-method}
 

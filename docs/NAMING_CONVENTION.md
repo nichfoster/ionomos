@@ -371,7 +371,7 @@ allow_uneven_fractions: true   # accept reps with different fraction sets
 files:                      # per-file overrides (fraction: -1 = single-shot)
   KL6159A_1_1.raw: {experiment: plex1, bioreplicate: 1, fraction: 1}
 
-tmt:                        # TMT only; one block per plex (= experiment name)
+tmt:                        # TMT only; one block per plex (= experiment name). FragPipe and Sage TMT both use it
   tag: TMT-10
   channels:                 # channel → sample name as condition_plex_channel: the lab's
     126:  DMSO_1_126        #   annotation script (and the report's conditions) key on it

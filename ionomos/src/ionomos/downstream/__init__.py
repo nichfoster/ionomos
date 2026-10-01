@@ -149,7 +149,8 @@ def _load_quantities(method: str | None, workdir: Path, results: Path, record: d
     notes: list[str] = []
     results.mkdir(parents=True, exist_ok=True)
     if method in engines.METHODS:  # results from another engine (engines.py)
-        m, enotes = engines.load(method, Path(table) if table is not None else workdir, _sample_map(record))
+        tmt_map = (((record or {}).get("plan") or {}).get("overrides") or {}).get("tmt")  # experiment.yaml tmt:
+        m, enotes = engines.load(method, Path(table) if table is not None else workdir, _sample_map(record), tmt_map)
         return m, files, notes + enotes
     if table is not None or method == "table":
         path = Path(table) if table is not None else anytable.find_table(workdir)

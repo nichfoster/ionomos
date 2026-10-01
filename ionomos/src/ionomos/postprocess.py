@@ -62,6 +62,8 @@ def prepare(dest: Path, cfg, method: str | None = None, extra: dict | None = Non
         if isinstance(tmt, dict) and tmt.get("reference_channel") not in (None, "") and \
                 "tmt_reference" not in overrides:  # experiment.yaml tmt.reference_channel = analysis.tmt_reference
             overrides = {**overrides, "tmt_reference": tmt["reference_channel"]}
+        if current.tmt:  # the channel map as it is now names Sage's TMT channels (engines.load_sage_tmt)
+            record.setdefault("plan", {}).setdefault("overrides", {})["tmt"] = current.tmt
         from ionomos.downstream.quant import run_stem
 
         by_stem = {run_stem(name): value for name, value in current.files.items()}

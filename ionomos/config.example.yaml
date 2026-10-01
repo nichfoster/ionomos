@@ -167,4 +167,5 @@ methods:
   #   fasta: human_reviewed.fasta
   #   data_type: DDA
   #   sage_config: lab_sage.json         # optional, in workflow_dir: your Sage JSON; else tryptic, high-res MS2, LFQ
+  #                                      # with quant.tmt (Tmt6 ... Tmt18) in it the method is TMT: tmt.tsv is read (D56)
   #   sage_args: "--batch-size 2"        # optional, added to the sage command line
