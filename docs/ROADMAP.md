@@ -344,6 +344,28 @@ real data:
 7. [ ] Phospho: localisation filter and KSEA kinase activity. Only if a lab
    runs phospho; PhosphoSitePlus is non-commercial, so it is a user download.
 8. [ ] STRING / CORUM overlays: low priority.
+9. [ ] **Accuracy the lab can check, and robustness on messy tables**
+   (2026-10-01, D60, [VALIDATION.md](VALIDATION.md); built on simulated data,
+   the real-data half is open):
+   - [x] `ionomos compare`: an analysis against a reference result
+     (another Ionomos run, FragPipe-Analyst, limma, MSstats, Perseus, R),
+     with a verdict from stated thresholds
+   - [x] `ionomos benchmark` on simulated data: sensitivity, observed FDP
+     and fold-change bias per imputation / normalisation setting; a
+     calibration guard in the test suite
+   - [x] `ionomos benchmark FOLDER --expected hye.yaml`: measured against
+     expected ratios per species or protein list
+   - [x] a seeded fuzz of `analyze()` and the loaders; guards on statistics
+     that run but may not mean what they say
+   - [x] "How far to trust this" in every report and in `analysis.json`
+   - [ ] run a human / yeast / E. coli sample on the lab's instrument and
+     benchmark it (VALIDATION.md says how); decide the imputation default
+     from it
+   - [ ] compare one real experiment with the lab's FragPipe-Analyst result
+     and with a real MSstats / Perseus export
+   - [ ] the same checks for ratio data (isoDTB) and TMT: the simulated
+     grid is label-free DIA only
+   - [ ] a button for compare / benchmark in the app (command line only now)
 
 Stay deterministic. The one credible published "AI interpretation"
 (GeneAgent, Nat Methods 2025) verifies every claim against databases. Plain
@@ -535,6 +557,12 @@ Collected from the other docs; resolve before/during Phase 1.
       mass error and missed-cleavage share does the lab call a problem (built: 10 ppm and 50 %, both wide)? Should
       a run unlike the others in its experiment be flagged too, and how are TMT fractions to be judged? Is the
       isoDTB search an offset search, so that its mass errors need another reading?
+- [ ] Accuracy checks (D60): can the lab run a mixed-species (human / yeast / E. coli) sample, 3 to 4 injections
+      of each mix, so the analysis is benchmarked on the instrument? On simulated data Perseus-type imputation
+      (the default) kept the false discoveries below 5 % but found fewer planted changes than no imputation (30 %
+      against 47 % of 2-fold changes): should the default change, or wait for the real benchmark? Are the
+      `compare` verdict thresholds right (r ≥ 0.95, slope 0.9 to 1.1, offset ≤ 0.10 log2, 70 % of hits shared)?
+      Is "check" at fewer than 3 samples per group, or 2-fold uneven groups, what the lab wants to be told?
 - [ ] Phase 5: which pilot labs can we reach? Does this lab run titrations or phospho? (Orders 5C.)
 - [ ] Phase 6: is the PC's RAM in all 6 memory channels (speed of a local model)? Is a GPU present? May the assistant
       ever use a cloud model (institutional data policy), or strictly local?

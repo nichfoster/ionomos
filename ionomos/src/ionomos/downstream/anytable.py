@@ -94,9 +94,44 @@ def _xlsx(path: Path) -> list[list[str]]:
         return rows
 
 
-def read_table(path: str | Path) -> tuple[list[str], list[list[str]]]:
-    """(header, rows) from a text or .xlsx table. Header cells are stripped; rows are padded to the header."""
+_DEC_COMMA = re.compile(r"^[+-]?\d+,\d+(?:[eE][+-]?\d+)?$")           # 1234,5
+_THOUSANDS = re.compile(r"^[+-]?\d{1,3}(?:,\d{3})+(?:\.\d+)?$")        # 1,234,567.8
+_DOT_DECIMAL = re.compile(r"^[+-]?\d*\.\d+(?:[eE][+-]?\d+)?$")
+
+
+def _number_format(grid: list[list[str]], notes: list[str], name: str) -> None:
+    """Decimal commas (1234,5) or thousands separators (1,234,567.8) in a tab / comma file, in place. One
+    reading for the whole file, from the cells that can only be read one way; "1,234" alone is ambiguous
+    and is read as 1234, with a note."""
+    comma = [(i, j, c.strip()) for i, r in enumerate(grid[1:], 1) for j, c in enumerate(r) if "," in c]
+    dec = [x for x in comma if _DEC_COMMA.match(x[2])]
+    thou = [x for x in comma if _THOUSANDS.match(x[2])]
+    if not dec and not thou:
+        return
+    dec_sure = [x for x in dec if not _THOUSANDS.match(x[2])]
+    thou_sure = [x for x in thou if not _DEC_COMMA.match(x[2])]
+    dots = any(_DOT_DECIMAL.match(c.strip()) for r in grid[1:] for c in r if "." in c)
+    if dec_sure and not thou_sure and not dots:
+        for i, j, c in dec:
+            grid[i][j] = c.replace(",", ".")
+        notes.append(f"{name}: {len(dec):,} numbers use a decimal comma (e.g. {dec_sure[0][2]}); read as decimals")
+    elif thou_sure or not dec_sure:
+        for i, j, c in thou:
+            grid[i][j] = c.replace(",", "")
+        notes.append(f"{name}: {len(thou):,} numbers use commas as thousands separators (e.g. {thou[0][2]}); the "
+                     "commas were dropped" + ("" if thou_sure or dots else
+                                              ". If these are decimal commas, export the table with decimal points"))
+    else:
+        notes.append(f"{name}: numbers are written both with decimal commas (e.g. {dec_sure[0][2]}) and with decimal "
+                     "points; the ones with commas were not read. Export the table with one number format")
+
+
+def read_table(path: str | Path, notes: list[str] | None = None) -> tuple[list[str], list[list[str]]]:
+    """(header, rows) from a text or .xlsx table. Header cells are stripped; rows are padded to the header.
+    notes: a list to add to. With it, decimal commas / thousands separators are also read in tab and comma
+    files, and rows that are shorter or longer than the header are counted."""
     path = Path(path)
+    delim = ""
     if path.stat().st_size > MAX_BYTES:
         raise TableError(f"{path.name} is larger than {MAX_BYTES // 2**20} MB")
     if path.suffix.lower() == ".xlsx":
@@ -116,6 +151,16 @@ def read_table(path: str | Path) -> tuple[list[str], list[list[str]]]:
     if not grid:
         raise TableError(f"{path.name} is empty")
     header = [h.strip() for h in grid[0]]
+    if notes is not None:
+        if delim and delim != ";":
+            _number_format(grid, notes, path.name)
+        short = sum(1 for r in grid[1:] if len(r) < len(header))
+        long = sum(1 for r in grid[1:] if any(c.strip() for c in r[len(header):]))
+        if short:
+            notes.append(f"{path.name}: {short:,} row(s) have fewer cells than the header; the missing cells count "
+                         "as blank")
+        if long:
+            notes.append(f"{path.name}: {long:,} row(s) have more cells than the header; the extra cells were ignored")
     rows = [(r + [""] * (len(header) - len(r)))[: len(header)] for r in grid[1:]]
     return header, rows
 
@@ -154,6 +199,48 @@ _Q = re.compile(r"(adj[ _.-]?p|p[ _.-]?adj|padj|q[ _.-]?val(ue)?|qvalue|fdr|bh|a
 _MQ_FLAGS = ("Reverse", "Potential contaminant", "Only identified by site", "Contaminant")
 
 
+# what other programs write in a cell without a value (Spectronaut "Filtered", Excel errors, "n.d.")
+_NO_VALUE = {"filtered", "n.d.", "nd", "n.a.", "#div/0!", "#value!", "#num!", "#ref!", "#name?", "missing", "none",
+             "<lod", "bdl", "--", "?"}
+
+
+def _blank(c: str) -> bool:
+    return c in NA_STRINGS or c.lower() in _NO_VALUE
+
+
+def _number_like(c: str) -> bool:
+    """A cell that is a number, including one too large for a float or written as infinity (missing later)."""
+    if num(c) is not None:
+        return True
+    try:
+        float(c)
+    except ValueError:
+        return False
+    return True
+
+
+def _unique(header: list[str], notes: list[str]) -> list[str]:
+    """Column names made unique ("DMSO_1", "DMSO_1.2"), so two columns with one name are two columns."""
+    seen: dict[str, int] = {}
+    out, dups = [], []
+    for h in header:
+        seen[h] = seen.get(h, 0) + 1
+        if seen[h] > 1 and h:
+            new = f"{h}.{seen[h]}"
+            while new in seen:
+                new += "'"
+            seen[new] = 1
+            dups.append(h)
+            out.append(new)
+        else:
+            out.append(h)
+    if dups:
+        names = list(dict.fromkeys(dups))
+        notes.append("column name(s) used more than once: " + ", ".join(names[:6]) + ("…" if len(names) > 6 else "")
+                     + "; each later column was read as its own column (name.2, name.3)")
+    return out
+
+
 def _pick(header: list[str], names: list[str]) -> str | None:
     low = {h.lower(): h for h in header}
     return next((low[n] for n in names if n in low), None)
@@ -164,10 +251,10 @@ def _numeric_share(rows: list[list[str]], j: int, limit: int = 400) -> tuple[int
     ok = nonblank = 0
     for r in rows[:limit]:
         c = r[j].strip()
-        if c in NA_STRINGS:
+        if _blank(c):
             continue
         nonblank += 1
-        ok += num(c) is not None
+        ok += _number_like(c)
     return ok, nonblank
 
 
@@ -223,9 +310,60 @@ def _samples(header: list[str], rows, used: set[str]) -> tuple[list[str], list[s
         if len(cols) >= 2:
             names = [fam.match(h).group(1).strip() for h in cols]
             return cols, [run_stem(n) for n in names], fam.pattern
-    cols = [h for h in header if h not in used and not _NOT_SAMPLE.search(h) and _is_numeric(rows, header.index(h))
-            and _numeric_share(rows, header.index(h))[0] > 0]
+    cols = [h for h in header if h and h not in used and not _NOT_SAMPLE.search(h)
+            and _is_numeric(rows, header.index(h)) and _numeric_share(rows, header.index(h))[0] > 0]
     return cols, [run_stem(h) for h in cols], "numeric columns"
+
+
+def _left_out(header: list[str], rows, used: set[str], cols: list[str]) -> list[str]:
+    """Notes on columns that could have been samples and were not read as one."""
+    blank, unnamed, partly = [], 0, []
+    for j, h in enumerate(header):
+        if h in used or h in cols or (h and _NOT_SAMPLE.search(h)):
+            continue
+        ok, nb = _numeric_share(rows, j)
+        if not h:
+            unnamed += bool(ok) and ok >= 0.9 * nb
+        elif nb == 0:
+            blank.append(h)
+        elif 0.5 * nb <= ok < 0.9 * nb:
+            partly.append(f"{h} ({100 * ok / nb:.0f}% numbers)")
+    notes = []
+    if unnamed:
+        notes.append(f"{unnamed} numeric column(s) without a name in the header were left out; name them to use them "
+                     "as samples")
+    if blank and cols:
+        notes.append("column(s) with no values at all were left out: " + ", ".join(blank[:8]) +
+                     ("…" if len(blank) > 8 else ""))
+    if partly:
+        notes.append("column(s) left out because too many of their cells are not numbers: " + ", ".join(partly[:8]) +
+                     ("…" if len(partly) > 8 else ""))
+    return notes
+
+
+def _cell_notes(rows, cols: list[int]) -> list[str]:
+    """What the sample columns held besides numbers and blanks: text, infinities, numbers too large to hold."""
+    text: dict[str, int] = {}
+    infinite = 0
+    for r in rows:
+        for j in cols:
+            c = r[j].strip()
+            if c in NA_STRINGS:
+                infinite += c.lower().lstrip("+-") == "inf"
+            elif num(c) is None:
+                if _number_like(c):
+                    infinite += 1
+                else:
+                    text[c] = text.get(c, 0) + 1
+    notes = []
+    if text:
+        top = sorted(text, key=lambda k: -text[k])[:4]
+        notes.append(f"{sum(text.values()):,} cell(s) in the sample columns are not numbers (e.g. " +
+                     ", ".join(repr(t[:20]) for t in top) + ") and count as missing")
+    if infinite:
+        notes.append(f"{infinite:,} cell(s) in the sample columns are infinite or too large for a number and count as "
+                     "missing")
+    return notes
 
 
 def _id_column(header: list[str], rows) -> str:
@@ -241,7 +379,7 @@ def _id_column(header: list[str], rows) -> str:
 
 def describe(path: str | Path) -> dict:
     """What a table holds, without loading it all: {"kind": "differential"|"quantities"|None, ...}."""
-    header, rows = read_table(path)
+    header, rows = read_table(path, [])
     comps = [c for c in _comparisons(header, rows) if c["p"]] or (
         _comparisons(header, rows) if not _samples(header, rows, {_id_column(header, rows)})[0] else [])
     if comps:
@@ -261,14 +399,15 @@ def load(path: str | Path) -> QuantMatrix:
     """A QuantMatrix from any table. Already-analysed tables come back with no samples and
     meta["precomputed"] = [{name, fc, p, q}] (lists aligned with the features)."""
     path = Path(path)
-    header, rows = read_table(path)
+    notes: list[str] = []
+    header, rows = read_table(path, notes)
     if not rows:
         raise TableError(f"{path.name} has a header but no rows")
+    header = _unique(header, notes)
     idc = _id_column(header, rows)
     labc = _pick(header, _LABEL_NAMES) or idc
     descc = _pick(header, _DESC_NAMES)
     ix = {h: j for j, h in enumerate(header)}
-    notes: list[str] = []
 
     flags = [f for f in _MQ_FLAGS if f in ix]
     if flags:
@@ -311,15 +450,21 @@ def load(path: str | Path) -> QuantMatrix:
     if not cols:
         raise TableError(f"{path.name}: no numeric sample columns and no fold-change / p-value columns found")
     raw = [[num(r[ix[c]]) for c in cols] for r in rows]
+    notes += _left_out(header, rows, {idc, labc, descc} - {None}, cols)
+    notes += _cell_notes(rows, [ix[c] for c in cols])
     vals = [v for row in raw for v in row if v is not None]
     if not vals:
         values = raw
-    elif min(vals) < 0 or sorted(vals)[len(vals) // 2] < 100:
+    elif sorted(vals)[len(vals) // 2] < 100:  # the median decides: a few negative cells don't make intensities log2
         values = raw
         notes.append(f"values in {path.name} look like log2 already; used as they are")
     else:
         values = [[math.log2(v) if v is not None and v > 0 else None for v in row] for row in raw]
         notes.append(f"values in {path.name} look like raw intensities; log2-transformed (zeros count as missing)")
+        negative = sum(1 for v in vals if v < 0)
+        if negative:
+            notes.append(f"{negative:,} negative intensities in {path.name} count as missing (an intensity can't be "
+                         "below zero; were the values background-subtracted?)")
     from ionomos.downstream.doctor import suggest_conditions
 
     samples, cond, reps = [], {}, {}

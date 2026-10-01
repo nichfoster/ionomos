@@ -1565,3 +1565,103 @@ unasked, so the first is built to be safe to ignore (`notify.py`).
 **Not verified**: a real Teams, Slack or SMTP server. The tests use an HTTP
 server and a small SMTP server inside the test process, and a stub for
 STARTTLS + login.
+
+
+### D60 — Accuracy is something the lab can measure, and messy tables are analysed and talked about
+**2026-10-01.** The analysis was checked against R on golden files, which a
+lab member cannot repeat on their own data, and it had only met tidy tables.
+Four pieces, all in new modules ([VALIDATION.md](VALIDATION.md)):
+
+1. **`ionomos compare`** (`downstream/compare.py`) compares an analysed
+   folder with a reference: another analysed folder, or a results table read
+   by `anytable.py` (D33), plus MSstats' long format. It reads both and
+   changes neither.
+   - Features are matched by accession (any member of a protein group) or
+     by gene, whichever matches more. A reference row is used once.
+   - The slope is the major axis, not least squares: both sides carry noise,
+     and least squares would report a slope below 1 for two equally good
+     results. The offset is the median difference.
+   - The verdict's thresholds (r ≥ 0.95, slope 0.9 to 1.1, |offset| ≤ 0.10
+     log2, 70 % of the hits shared when there are at least 10; at least 20
+     and half of the features matched to judge at all) are **Ionomos' own
+     choice**. They are constants, printed on the page, and the numbers
+     stand beside the verdict.
+   - An offset is its own verdict ("agrees after an offset of …"), because a
+     normalisation difference is the commonest reason two correct analyses
+     disagree. Hit lists are not judged then.
+   - A reference the other way round is flipped only when its name says so
+     (`DMSO vs Drug`). Fold changes that merely anti-correlate are reported
+     and `--flip` is suggested: the direction is not guessed.
+   - Exit code 1 for "differs" or "not judged", so a script can use it.
+2. **`ionomos benchmark`** (`downstream/benchmark.py`).
+   - *Simulated.* It calls the pipeline's own loader, `fpa.process`,
+     `run_contrasts` and `to_diff` (`run_pipeline`; a test holds it equal to
+     `analyze()`), not `analyze()` itself: a grid of 2,250 runs must not
+     write 2,250 reports. `simulate.dia_pg_matrix` got three options (noise,
+     a per-protein spread of the noise, a missingness scale); without them
+     its output is byte-identical, so every existing fixture stands. The
+     benchmark uses a per-protein spread, because proteins that all share
+     one SD are limma's best case.
+   - FDP is reported twice: with the analysis' cut-offs, and at adjusted
+     p ≤ alpha alone. Only the second is what Benjamini-Hochberg promises,
+     so only it is compared with the nominal alpha.
+   - A scenario's FDP enters a quoted range only with 50 or more calls.
+   - *Real.* The expected ratios are a small YAML, per species or per
+     protein list. Species are read, in this order, from the protein lists,
+     a named column, UniProt entry names / `OS=` in the feature's own text
+     and in its row of the quant table, and a FASTA. A protein group with
+     two species is left out and counted. It needs an analysed folder and
+     does not analyse by itself: one command, one thing written.
+   - Real and simulated results have different file names
+     (`benchmark.*`, `benchmark_simulated.*`), so both can sit in one
+     results folder.
+3. **Messy input** (`downstream/guards.py`, `anytable.py`).
+   - The rule: `analyze()` never raises, always writes a report, and a
+     repair is always said. A stage crash (`CRASH_*`) on a plausible table
+     is a bug; the fuzz test fails on one.
+   - Values beyond 2^±100, NaN and infinities become missing right after
+     loading, for every loader, with a count. 2^100 is far beyond any
+     intensity; the limit exists so that no later step can overflow.
+   - `anytable.read_table` reads decimal commas and thousands separators in
+     tab and comma files only when asked (the `notes` argument), so the
+     engines' readers behave as before. `1,234` alone is ambiguous and is
+     read as 1234, with a note saying so.
+   - A column without a name is left out, not guessed: it has no condition,
+     and it is as likely a row number as a sample.
+   - Statistical guards only read. `NO_RESIDUAL_DF`, `ZERO_VARIANCE`,
+     `VARIANCE_PRIOR` and `IDENTICAL_SAMPLES` are warnings (no pop-up): the
+     numbers are limma's, and limma is not overruled. An infinite prior df
+     (one pooled variance) is not raised, because it is the right answer
+     for alike variances; a prior that stops at the lower edge of the
+     search (df 2) is.
+   - What the fuzz found is listed in the changelog (nine bugs: one that
+     ran the statistics on unlogged intensities, one that read a column
+     twice, the rest crashes of single stages or refused tables).
+4. **"How far to trust this"** (`downstream/trust.py`) is a list, not a
+   score: any single number would hide which check failed and invite a
+   threshold nobody can defend. Each line repeats an existing check with its
+   number, and "check" marks a line whose own threshold was crossed. Two
+   thresholds are new and are stated: fewer than 3 samples in a group, and
+   groups that differ 2-fold in size. The block is static HTML written by
+   `report.py`; `report.js` and `report.css` are untouched. A compare or
+   benchmark result in the results folder is shown with whether the
+   analysis settings are still the same (a digest of the settings); it is
+   picked up at the next `ionomos analyze`, because a command that reads
+   two results should not rewrite a report.
+
+**Measured** (simulated, standard grid, 2026-10-01): default settings
+(Perseus + median) 4.0 % observed FDP at adjusted p ≤ 0.05, 30 % of 2-fold
+and 71 % of 4-fold changes found; no imputation 4.6 %, 47 % and 86 %; no
+normalisation 14 – 21 %; `zero` imputation 8.0 % and a fold-change bias of
++0.41 log2. The test suite's guard allows 8.5 % (its fixed seeds measure
+1.7 – 6.3 %).
+
+**Not verified**: anything on real data. No mixed-species sample has been
+run; no real FragPipe-Analyst, MSstats or Perseus export has been compared
+(the layouts are the documented ones); the fuzz damages simulated tables.
+
+**For the maintainer to confirm**: the verdict thresholds of `compare`; the
+8.5 % tolerance of the guard; that Perseus-type imputation stays the default
+although it found fewer planted changes than no imputation on the simulated
+data (a real benchmark sample should decide); the two new "check"
+thresholds; that a nameless numeric column is left out.

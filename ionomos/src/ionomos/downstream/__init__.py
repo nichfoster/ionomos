@@ -23,7 +23,9 @@ Layout it reads and writes (inside the experiment folder):
       cysteine_proteins.tsv         isoDTB: proteins with a liganded cysteine, how many of their sites are
       psm_qc.tsv                    search quality per run: PSMs, mass error, missed cleavages, charge states
       sdrf.tsv                      SDRF-Proteomics sample metadata: a row per raw file (and label), for PRIDE
-      analysis.json               what was done, with which settings (reproducibility), + "quality"
+      analysis.json               what was done, with which settings (reproducibility), + "quality", "trust"
+      compare.* / benchmark.*       written by `ionomos compare` / `ionomos benchmark`, never by analyze(); when
+                                    present, their verdicts are shown under "How far to trust this"
 
 Pipeline stages, each a module:
     method prep   isodtb.py / tmt.py           (ports of the lab R scripts)
@@ -40,7 +42,10 @@ Pipeline stages, each a module:
     cysteines     cys.py                       (site ratio data: liganded calls, selectivity, a site annotation)
     search QC     psmqc.py + qcmetrics.py      (per run, from psm.tsv: mass error, missed cleavages, charge states)
     metadata      sdrf.py                      (SDRF-Proteomics, from the manifest, workflow and FASTA)
+    guards, trust guards.py + trust.py         (implausible input made safe and said; statistics that may not
+                                                mean what they say; the "How far to trust this" list; D60)
     presentation  charts.py + report.py        (SVG + HTML)
+    accuracy      compare.py + benchmark.py    (separate commands: against a reference result, against known truth)
 
 Adding a method or an output means adding one loader or one renderer; the
 stages don't know about each other's internals. Nothing here deletes or
@@ -321,7 +326,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     out.issues (doctor.py), which the worker and the app turn into pop-up windows.
     progress(text) is called between stages (the app shows it)."""
     from ionomos import __version__
-    from ionomos.downstream import doctor, export, fpa, insights
+    from ionomos.downstream import doctor, export, fpa, guards, insights, trust
 
     dest = Path(dest)
     workdir = dest / "fragpipe" if (dest / "fragpipe").is_dir() else dest
@@ -406,6 +411,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
         notes += lnotes
         if m is not None:
             notes += m.notes
+            notes += stage("input-check", guards.check_input, m) or []  # implausible values, repeated names (D60)
     tmt_info = None
     if m is not None and m.features and not m.meta.get("precomputed"):  # TMT plexes on one scale (plex.py, D48)
         bridged = stage("plex", plex.normalise, m, settings)
@@ -582,8 +588,12 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     f.diffs = diffs
     f.enrichment_notes = enr_notes
     f.insights = insight
+    if processed is not None and diffs:  # statistics that ran but may not mean what they say (guards.py, D60)
+        f.guards = stage("guards", guards.statistics, processed, diffs, settings, model) or []
+        notes += stage("guards", guards.notes, processed, diffs, settings) or []
     out.issues = doctor.check(f)
     out.warnings += notes
+    trusted = stage("trust", trust.build, m, processed, diffs, insight, qcd, settings, f.guards, results) or {}
     ctx = {"version": __version__, **(context or {})}
     ctx["engine"] = stage("provenance", engines.provenance, Path(table) if table is not None else workdir, method,
                           m.source if m is not None else "", m.meta if m is not None else {}) or {}
@@ -594,6 +604,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     ctx["issues"] = [i.as_dict() for i in out.issues]
     ctx["sdrf"] = sdrf_info
     ctx["model"], ctx["ftest"] = model, ftest
+    ctx["trust"] = trusted
     say("writing the report")
     rel = [str(p.relative_to(results)).replace("\\", "/") if p.is_relative_to(results) else p.name
            for p in out.files]
@@ -636,6 +647,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
                             "top": [f"{t['term']} ({t['direction']})" for t in b["terms"][:5] if t["q"] <= 0.05]}
                            for b in ranked],
         "quality": _quality_summary(insight),
+        "trust": trusted,
         "dose_response": dose_info,
         "time_course": time_info,
         "cysteines": cys_info,

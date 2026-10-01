@@ -61,6 +61,77 @@ experiment annotation, `results\fragpipe-analyst\experiment_annotation.tsv`.
 In R, `results\fragpipe-analyst\reproduce_in_R.R` repeats Ionomos's analysis
 with FragPipeAnalystR.
 
+## Does Ionomos give the same result as my other analysis? {#faq.compare-reference}
+
+Check it on your own experiment. `ionomos compare <experiment folder>
+<reference>` compares the Ionomos analysis with another result for the same
+experiment. The reference can be:
+
+- a results table with a fold-change and a p-value column per comparison: a
+  FragPipe-Analyst export, a limma or MSstats table, a Perseus matrix, the
+  output of the lab's R script (`.tsv`, `.csv`, `.txt`, `.xlsx`),
+- or another folder analysed by Ionomos (for example with other settings).
+
+It matches the proteins by ID or gene, then reports per comparison: how many
+matched, how well the [log2 fold changes](#glossary.log2fc) agree (correlation,
+slope, offset), which hits both call, the proteins that disagree most, and how
+the p-values compare. It ends with one line: **agrees**, **agrees after an
+offset of …** (a normalisation difference), **differs: …** with the reason, or
+**not judged** when too few proteins matched.
+
+- It writes `compare.html` (scatter plots, tables), `compare.tsv` and
+  `compare.json` into the experiment's `results\` folder. Neither result is
+  changed.
+- The limits behind the verdict are printed at the bottom of `compare.html`.
+  They are Ionomos's own choice; the numbers are what to read.
+- "differs" is not "wrong". Two tools that impute missing values differently
+  disagree on exactly those proteins; the list of largest disagreements shows
+  them.
+- After the next analysis of the folder, the verdict shows under
+  [How far to trust this](#report.trust).
+
+## How accurate is the analysis? {#faq.benchmark}
+
+Two ways to measure it, both with `ionomos benchmark`:
+
+- **On simulated data** (no data needed): `ionomos benchmark` runs the
+  analysis on made-up protein tables where the changed proteins are known. It
+  tries 2 to 6 replicates, 2 controls against 4 treated, small and large
+  changes, few and many missing values, with each imputation and normalisation
+  setting. For each it reports how many planted changes were found, what share
+  of the calls were false (against the 5% the cut-off promises), and whether
+  the fold changes are biased. `--like <experiment folder>` adds that
+  experiment's own settings and group sizes. `--grid quick` takes seconds.
+- **On a real sample with known ratios**: see
+  [a benchmark sample](#faq.benchmark-sample).
+
+The page (`benchmark_simulated.html`) says what each setting costs. A
+simulation shows how the method behaves on data like the simulation. It does
+not show how your samples behave: only a real benchmark sample does.
+
+## How do I run a benchmark sample on our instrument? {#faq.benchmark-sample}
+
+Use a mix whose ratios you know. The usual one is human, yeast and E. coli
+digests mixed in two ratios ("HYE"): for example sample A = 65% human, 30%
+yeast, 5% E. coli and sample B = 65% human, 15% yeast, 20% E. coli. Human is
+then unchanged, yeast is halved and E. coli is 4 times higher in B.
+
+1. Acquire at least 3 runs of A and 3 of B with your normal method.
+2. Search them with a FASTA that holds all three species, and let Ionomos
+   analyse the folder as usual (A is the control).
+3. Write a small text file, for example `hye.yaml`:
+   `expected: {HUMAN: 1, YEAST: 0.5, ECOLI: 4}` (the ratio B / A per species;
+   1 means unchanged). Add `comparison: B vs A` if the analysis has several.
+4. Run `ionomos benchmark <experiment folder> --expected hye.yaml --open`.
+
+The page shows, per species, the measured against the expected ratio (median,
+spread, a box plot), how many unchanged human proteins were called anyway
+(false positives) and how many changed proteins were found. Species are read
+from the UniProt names in the result table (`ACTB_HUMAN`); `fasta:` or
+`species_column:` in the file help when they are not there. A spike-in works
+the same way with `proteins:` lists instead of species. The result is also
+shown under [How far to trust this](#report.trust) after the next analysis.
+
 ## What does "low confidence" mean? {#faq.low-confidence}
 
 A group in that comparison has only one sample. The comparison is still tested
