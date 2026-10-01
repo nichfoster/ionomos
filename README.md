@@ -86,7 +86,7 @@ to put it on the PC.
 | [TESTING.md](docs/TESTING.md) | Test suite + testbed on macOS and Windows |
 | [FIRST_REAL_RUN.md](docs/FIRST_REAL_RUN.md) | Runbook for the first real FragPipe run on the PC (isoDTB, then DIA) |
 | [QC_TREND.md](docs/QC_TREND.md) | Instrument QC: how runs of the lab's QC standard (HeLa, K562) are recognised, measured, judged (Levey-Jennings, Westgard rules) and shown in `logs/qc_trend.html` |
-| [ENGINES.md](docs/ENGINES.md) | Results from other engines Ionomos can analyse (DIA-NN, MaxQuant, Spectronaut, AlphaDIA, MSstats / MSstatsTMT format, Proteome Discoverer) and what it reads from each; an SDRF as the design; TMT across plexes |
+| [ENGINES.md](docs/ENGINES.md) | Results from other engines Ionomos can analyse (DIA-NN, MaxQuant, Sage, Spectronaut, AlphaDIA, MSstats / MSstatsTMT format, Proteome Discoverer) and what it reads from each; an SDRF as the design; TMT across plexes |
 
 ## Try the analysis on any computer
 

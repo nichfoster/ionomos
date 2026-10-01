@@ -181,8 +181,8 @@ def load(path: str | Path, check_paths: bool = True) -> Config:
         if not isinstance(m, dict):
             raise ConfigError(f"'methods.{key}' must be a mapping")
         engine = str(m.get("engine") or "fragpipe").lower()
-        if engine not in ("fragpipe", "diann", "maxquant"):
-            raise ConfigError(f"'methods.{key}.engine' must be fragpipe, diann or maxquant")
+        if engine not in ("fragpipe", "diann", "maxquant", "sage"):
+            raise ConfigError(f"'methods.{key}.engine' must be fragpipe, diann, maxquant or sage")
         for req in (("workflow", "fasta", "data_type") if engine == "fragpipe" else ("fasta", "data_type")):
             if not m.get(req):
                 raise ConfigError(f"'methods.{key}.{req}' is required")
@@ -192,6 +192,8 @@ def load(path: str | Path, check_paths: bool = True) -> Config:
             raise ConfigError(f"'methods.{key}': DIA-NN (engine: diann) needs data_type DIA")
         if engine == "maxquant" and m["data_type"] != "DDA":
             raise ConfigError(f"'methods.{key}': MaxQuant (engine: maxquant) needs data_type DDA")
+        if engine == "sage" and m["data_type"] != "DDA":
+            raise ConfigError(f"'methods.{key}': Sage (engine: sage) needs data_type DDA")
         aliases = m.get("aliases") or DEFAULT_METHOD_ALIASES.get(key) or [key.lower()]
         extra = {k: v for k, v in m.items() if k not in ("workflow", "fasta", "data_type", "postprocess", "aliases")}
         methods[key] = MethodConfig(

@@ -1152,3 +1152,49 @@ The analysis of a MaxQuant job reads `proteinGroups.txt` whatever the lab
 calls the method (`postprocess.prepare`). Tested end to end with
 `ionomos fake-maxquant`; not yet against a real MaxQuant.
 
+
+
+### D51 — The watcher can run Sage; conversion and search are one job, and its telemetry is off
+**2026-09-30.** Sage (MIT) is the one search engine a lab can use with no
+licence at all, which makes it the hedge against FragPipe's academic-only
+terms (ROADMAP Risks). A DDA method can now say `engine: sage` (`sage.py`,
+through `runner.py` as for DIA-NN and MaxQuant, D39 / D50).
+
+1. **Ionomos does not bundle Sage or ThermoRawFileParser.** Sage's licence
+   would allow it, but ThermoRawFileParser carries Thermo's RawFileReader
+   licence, and a bundled engine would have to be updated with every Ionomos
+   release. The lab downloads both and points `sage_exe` / `raw_converter`
+   at them, as for the other engines. `sage` is never taken from the PATH,
+   where it is usually SageMath.
+2. **One process for two steps.** Sage reads mzML, so each `.raw` is first
+   converted. The worker starts `ionomos sage-job ionomos_run/sage_job.json`,
+   which runs the converter per file and then Sage. The shared run loop
+   therefore still sees one process tree: one console log, and cancel, stop
+   and timeout kill whichever step is running.
+3. **Converted files are Ionomos' own and are kept.** They go to
+   `<experiment>/sage_mzml/`, written to `converting/` first and moved into
+   place when complete, so a cancelled conversion is never taken for a
+   finished one. A retry reuses them. The raw files are not touched.
+4. **Settings: the lab's JSON, or defaults Ionomos writes.** Unlike
+   `mqpar.xml` (D50), Sage's JSON is documented, and every key it lacks takes
+   Sage's default, so a small default file (tryptic, high-resolution MS2,
+   carbamidomethyl C, oxidised M, label-free) is safe across versions. Only
+   the FASTA, mzML paths and output folder are replaced in a lab file;
+   label-free quantification is switched on because the analysis needs
+   `lfq.tsv`. A lab file that asks for TMT holds the job: there is no protein
+   roll-up for Sage's `tmt.tsv` yet.
+5. **Telemetry off.** Sage posts usage statistics after each search unless
+   told not to. A lab PC's activity should not leave it unasked, so the job
+   passes Sage's own switch whenever `sage --help` lists it, and logs which
+   happened. An older Sage without the switch still runs.
+6. **Protein roll-up of `lfq.tsv`** (`engines.load_sage`): peptide q ≤ 1%
+   and, with `results.sage.tsv`, the peptide's best protein q ≤ 1%; proteins
+   with the same peptides are one group and shared peptides go to the group
+   with the most peptides (razor); fractions of a sample are added; the
+   protein quantity is the Tukey median polish of its ions, as for
+   MSstats-format input. MaxLFQ would be the alternative; the median polish
+   is already in the code and checked, and the roll-up can change without
+   touching the runner.
+
+Tested end to end with stand-ins (`ionomos fake-sage`, `fake-rawparser`);
+the formats come from Sage's source (0.14 / 0.15), not yet from a real run.

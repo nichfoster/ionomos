@@ -127,3 +127,13 @@ methods:
   #   fasta: human_reviewed.fasta
   #   data_type: DDA
   #   mqpar: lab_lfq_mqpar.xml           # optional, in workflow_dir: your GUI settings; else MaxQuant's defaults + LFQ
+  # ... or by Sage, the open-source engine (docs/ENGINES.md, D51). Sage reads mzML, so .raw files are first
+  # converted with ThermoRawFileParser into <experiment>/sage_mzml/.
+  # LFQ:
+  #   engine: sage                       # fragpipe (default) | diann | maxquant | sage
+  #   sage_exe: C:/sage/sage.exe
+  #   raw_converter: C:/ThermoRawFileParser/ThermoRawFileParser.exe
+  #   fasta: human_reviewed.fasta
+  #   data_type: DDA
+  #   sage_config: lab_sage.json         # optional, in workflow_dir: your Sage JSON; else tryptic, high-res MS2, LFQ
+  #   sage_args: "--batch-size 2"        # optional, added to the sage command line

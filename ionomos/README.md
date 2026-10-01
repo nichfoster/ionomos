@@ -19,8 +19,8 @@ ionomos analyze path/to/report.pg_matrix.tsv --open
 - a FragPipe results folder (LFQ `combined_protein.tsv`, DIA `report.pg_matrix.tsv`,
   TMT `abundance_*_MD.tsv`, isoDTB `combined_modified_peptide_label_quant.tsv`)
 - DIA-NN (`pg_matrix.tsv`, `report.tsv`, or `report.parquet` with
-  `pip install "ionomos[parquet]"`), MaxQuant `proteinGroups.txt`, Spectronaut
-  reports, AlphaDIA `pg.matrix.tsv`, MSstats-format tables, Proteome Discoverer
+  `pip install "ionomos[parquet]"`), MaxQuant `proteinGroups.txt`, Sage `lfq.tsv`,
+  Spectronaut reports, AlphaDIA `pg.matrix.tsv`, MSstats-format tables, Proteome Discoverer
   protein exports ([what is read from each](https://github.com/nichfoster/ionomos/blob/master/docs/ENGINES.md))
 - any protein table (`.csv`, `.tsv`, `.txt`, `.xlsx`: Perseus exports, your own sheet)
 - a results table that already holds fold changes and p-values (plotted as given)

@@ -9,6 +9,7 @@ folder or its main table; the Analysis tab's **Table…** button works too.
 ionomos analyze path/to/combined/txt          # a MaxQuant folder
 ionomos analyze path/to/report.parquet        # a DIA-NN 2.x report (needs: pip install pyarrow)
 ionomos analyze path/to/Spectronaut_Report.tsv
+ionomos analyze path/to/sage_output           # Sage: lfq.tsv (+ results.sage.tsv, results.json)
 ```
 
 The engine is recognised from file names and column headers
@@ -18,16 +19,19 @@ folder records them. Ionomos only *reads* these files; it never writes into
 the engine's folder. Results go to `results/` next to them, or to
 `<table>_ionomos/` for a single file (D33).
 
-Ionomos never ships or runs these engines for you, and their licences stay
-between your lab and the vendor. MSFragger / FragPipe is free for academic
-use only; DIA-NN is not redistributable from 1.9 on; MaxQuant is free, but
-you install it yourself.
+Ionomos never ships these engines, and their licences stay between your lab
+and the vendor. MSFragger / FragPipe is free for academic use only; DIA-NN is
+not redistributable from 1.9 on; MaxQuant is free, but you install it
+yourself; Sage is open source (MIT), and you download it yourself. The
+watcher can run DIA-NN, MaxQuant and Sage for you once they are installed:
+see below.
 
 | Engine | What Ionomos reads | Quantity used | Filters applied by Ionomos | Version from |
 |---|---|---|---|---|
 | **FragPipe** (run by Ionomos) | isoDTB `combined_modified_peptide_label_quant.tsv`, TMT-Integrator `abundance_*_MD.tsv`, DIA-NN `*pg_matrix.tsv`, IonQuant `combined_protein.tsv` | per method (see WORKFLOWS.md) | none (FragPipe's own FDR) | `log_*.txt`, `fragpipe.workflow` (plus MSFragger / IonQuant / DIA-NN versions and the FASTA) |
 | **DIA-NN** standalone | `*pg_matrix.tsv` (preferred), else the long report `report.tsv` (1.x) or `report.parquet` (2.x) | pg_matrix values, or `PG.MaxLFQ` | long report: `Q.Value` ≤ 1% and `PG.Q.Value` ≤ 1% | `*.log.txt` |
 | **MaxQuant** | `combined/txt/proteinGroups.txt` | `LFQ intensity`, else `Intensity`; `Reporter intensity corrected` for TMT | rows marked `+` in Reverse / Potential contaminant / Only identified by site are left out; `CON__` contaminants removed | `parameters.txt`, `mqpar.xml` |
+| **Sage** | `lfq.tsv` (a row per peptide ion, a column per file); `results.sage.tsv` and `results.json` beside it when they are there | proteins summarised per sample by Tukey median polish of the ion intensities; proteins grouped by razor peptides (below) | `q_value` ≤ 1% per peptide; with `results.sage.tsv`, the peptide's best `protein_q` ≤ 1% too; decoys left out | `results.json` (also the FASTA and every search setting) |
 | **Spectronaut** | a protein pivot report (`<run>.PG.Quantity`) or the long BGS report (`R.FileName`, `R.Condition`, `R.Replicate`, `PG.ProteinGroups`, `PG.Quantity`) | `PG.Quantity` | long report: `PG.Qvalue` and `EG.Qvalue` ≤ 1% | not in the export |
 | **AlphaDIA** | `pg.matrix.tsv` | protein-group matrix | none | `frozen_config.yaml` |
 | **MSstats format** (quantms, Skyline, any MSstats converter) | `ProteinName, PeptideSequence, PrecursorCharge, FragmentIon, ProductCharge, IsotopeLabelType, Condition, BioReplicate, Run, Intensity` | proteins summarised per run by Tukey median polish (MSstats' default) | heavy / reference rows left out; intensities ≤ 1 count as missing | not in the file |
@@ -179,15 +183,93 @@ This has been tested only against a stand-in MaxQuant
 `ionomos_run/mqpar.xml` in the MaxQuant GUI: open it with File → Load
 parameters.
 
+## Running Sage directly (instead of FragPipe)
+
+[Sage](https://github.com/lazear/sage) is a fast open-source (MIT) search
+engine for DDA data. A DDA method can be searched by it (D51):
+
+```yaml
+methods:
+  LFQ:
+    engine: sage
+    sage_exe: C:/sage/sage.exe                 # your download; a folder without spaces
+    raw_converter: C:/ThermoRawFileParser/ThermoRawFileParser.exe   # .raw -> mzML
+    fasta: human_reviewed.fasta                # in fasta_dir
+    data_type: DDA
+    sage_config: lab_sage.json                 # optional: your own Sage settings, in workflow_dir
+    sage_args: "--batch-size 2"                # optional: added to the sage command line
+naming:
+  methods:
+    LFQ: {like: isoDTB}        # <sample>_<rep>[_<fraction>] names (or your own template, D37)
+```
+
+A job has two steps, both in `ionomos_run/sage_console.log`:
+
+1. **Convert.** Sage reads mzML, not Thermo `.raw`. Each raw file is
+   converted with
+   [ThermoRawFileParser](https://github.com/compomics/ThermoRawFileParser)
+   (`-f=2`, indexed mzML with Thermo's own peak picking) into
+   `<experiment>/sage_mzml/`. A file is written to `sage_mzml/converting/`
+   and moved into place only when it is complete. A retry reuses what is
+   already converted. The raw files are never touched. mzML files and Bruker
+   `.d` folders in a drop are searched as they are, and need no converter.
+2. **Search.** `sage ionomos_run/sage.json`, with results in
+   `<experiment>/sage/`: `results.sage.tsv`, `lfq.tsv`, `results.json`. A
+   second run keeps the first as `sage_previous_<time>/`.
+
+`ionomos_run/sage.json` is the job's full, reproducible settings. It is your
+`sage_config` (the `results.json` of a search that worked is a complete one),
+or else Ionomos' defaults:
+
+- trypsin (`KR`, not before `P`), 2 missed cleavages, peptides of 7–50 residues
+- carbamidomethyl C fixed, oxidised M variable (at most 2 per peptide)
+- precursor ±20 ppm, fragments ±20 ppm, charge 2–4, isotope errors 0–2
+- decoys made by Sage (`rev_`; decoys already in the FASTA are ignored)
+- label-free quantification on, charge states combined, retention times
+  predicted and aligned
+
+The defaults suit high-resolution MS2 (Orbitrap HCD). For ion-trap MS2, TMT
+or other modifications, give your own `sage_config`. Only the FASTA, the mzML
+paths and the output folder are replaced in it, and label-free quantification
+is switched on, because the analysis reads `lfq.tsv`.
+
+**The analysis** rolls `lfq.tsv` up to proteins:
+
+- Proteins identified by exactly the same peptides are one group
+  (`P1;P2`). A peptide shared between groups goes to the group with the most
+  peptides, as MaxQuant's razor peptides do; a protein left with no peptide
+  of its own disappears.
+- The files of one sample (its fractions, from the job's file names) have
+  their intensities added.
+- Each group's quantity per sample is the Tukey median polish of its ions'
+  log2 intensities, the summary MSstats uses.
+- Gene names and descriptions come from the FASTA named in `results.json`,
+  when it is still there; otherwise from the UniProt entry names.
+
+**Telemetry.** Sage sends anonymous usage statistics after a search by
+default (its version, index sizes, number of files, run time, OS, memory and
+CPU count). Ionomos switches this off with Sage's own
+`--disable-telemetry-i-dont-want-to-improve-sage` whenever the installed Sage
+has that flag (it asks `sage --help`), and the console log says which
+happened. Threads are capped at `fragpipe.threads` (`RAYON_NUM_THREADS`).
+Sage loads several files at once (half the CPU count by default); on a PC
+with little memory, set `sage_args: "--batch-size 2"`.
+
+This has been tested only against stand-ins for Sage and ThermoRawFileParser
+(`ionomos fake-sage`, `ionomos fake-rawparser`). The file formats were taken
+from Sage's source (0.14 / 0.15). Check the first real run's console log and
+compare its hits with a FragPipe LFQ search of the same files.
+
 **Not supported yet:**
+- Sage TMT (`tmt.tsv` holds reporter ions per spectrum; there is no protein
+  roll-up for it yet) and Sage's Parquet output (`--parquet`).
+- Instrument QC trending from Sage results.
 - MSstatsTMT's default summary (`method = "msstats"`) imputes censored values
   with a model (MBimpute); Ionomos summarises as `method = "MedianPolish"`
   and leaves missing values missing.
 - Spectronaut's peptide-only reports.
 - AlphaDIA's Parquet matrices: read `pg.matrix.tsv`, which holds the same
   numbers.
-- Running Sage from the watcher (ROADMAP Phase 5B). DIA-NN and MaxQuant can
-  be run: see above.
 
 The formats were built from each vendor's documentation and tested with files
 using the real column names (`tests/test_engines.py`, `tests/test_plexes.py`); the MSstatsTMT summary is checked against MSstatsTMT 2.20 itself. The Proteome Discoverer
