@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-01
+
 ### Added
 
 - **Search quality per run** (ROADMAP Phase 4, D55; `downstream/psmqc.py`).
@@ -206,6 +208,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`files: '{sample}_{rep}[_{fraction}]'`).
   `ionomos analyze --method` also takes the config's own method keys, and
   `ionomos names test` prints what a custom method is run as.
+
+### Fixed
+
+- A failed Sage search no longer gets the hint "A .raw file couldn't be read"
+  just because the console log names the converter after successful
+  conversions; the hint now needs the converter's own error or exit code.
 
 ## [0.12.0] - 2026-09-30
 
