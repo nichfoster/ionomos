@@ -44,6 +44,11 @@ VirtualConsole; tests assert the list stays empty.
   (table, class and text filters, sorting, two compounds, a clicked row or
   point drawing its curve, the report search ringing curves, CSV export).
 
+- `test/time.test.mjs` — the Time course section: hidden for the fixture, the
+  "too few time points" reason, then a synthetic `time` payload (pattern
+  tiles and filter, the table's Show choices, sorting, the profile with the
+  control series, series switch, search marks, hostile names).
+
 - `test/cys.test.mjs` — the Liganded sites section (isoDTB): hidden for the
   fixture, then a synthetic `cys` payload (tiles, rank plot, the table's Show
   choices, text filter, sorting, compound switch, protein view, annotation

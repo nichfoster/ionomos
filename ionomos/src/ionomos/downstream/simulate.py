@@ -218,6 +218,40 @@ def dose_pg_matrix(path: Path, doses_nm: list[float], seed: int = 1, n: int = 30
     return truth
 
 
+def time_course_pg_matrix(path: Path, series: dict[str, list[str]], replicates: int = 3, seed: int = 1, n: int = 300,
+                          changed_fraction: float = 0.15, missing: float = 0.02) -> dict[str, dict[str, str]]:
+    """A DIA-NN protein matrix of time courses. series: {"Drug": ["0h", "1h", "4h", "24h"], "DMSO": [...]}; runs are
+    <series>_<time>_<rep>.raw. In every series but one named like a control, a share of the proteins follow a
+    shape over the time points: "up" / "down" (monotone, reaching +-2 log2), "pulse" (up then back).
+    Returns {series: {gene: shape}}."""
+    rng = random.Random(seed)
+    runs = [(f"{name}_{t}_{r}", name, k) for name, times in series.items() for k, t in enumerate(times)
+            for r in range(1, replicates + 1)]
+    ctrl = _control(list(series)) if len(series) > 1 else None
+    truth: dict[str, dict[str, str]] = {name: {} for name in series if name != ctrl}
+    header = ["Protein.Group", "Protein.Ids", "Protein.Names", "Genes", "First.Protein.Description",
+              "N.Sequences", "N.Proteotypic.Sequences", *[f"C:\\raw\\{r}.raw" for r, _n, _k in runs]]
+    lines = []
+    for i in range(n):
+        g = _gene(i)
+        base = rng.gauss(22, 1.8)
+        shape = {}
+        for name in truth:
+            if rng.random() < changed_fraction:
+                shape[name] = rng.choice(("up", "down", "pulse"))
+                truth[name][g] = shape[name]
+        row = [f"P{30000 + i}", f"P{30000 + i}", f"{g}_HUMAN", g, f"{g} protein", "5", "5"]
+        for _run, name, k in runs:
+            last = len(series[name]) - 1
+            frac = k / last if last else 0.0
+            eff = {"up": 2.0 * frac, "down": -2.0 * frac, "pulse": 2.0 * (1 - abs(2 * frac - 1))}.get(shape.get(name), 0.0)
+            v = base + eff + rng.gauss(0, 0.25)
+            row.append("" if rng.random() < missing else f"{2 ** v:.1f}")
+        lines.append(row)
+    _write(path, header, lines)
+    return truth
+
+
 def _write(path: Path, header: list[str], lines: list[list[str]]) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)

@@ -205,9 +205,14 @@ def dump_config(d: dict) -> str:
               "block", "block_from", "covariates",  # DEqMS and the design (downstream/design.py)
               "dose_response", "dose_min_doses", "dose_alpha", "dose_fc_lim", "dose_unit",  # dose-response: D44
               "liganded", "liganded_ratio", "liganded_min_replicates", "liganded_direction",  # cys.py: D52
-              "site_annotation"):
+              "site_annotation",
+              "time_course", "time_min_points", "time_unit"):  # time courses: D53
         if an.get(k) not in (None, ""):
             a(f"  {k}: {_y(an[k])}")
+    if isinstance(an.get("times"), dict) and an["times"]:
+        a("  times:   # condition -> time (usually per experiment, in experiment.yaml)")
+        for k, v in an["times"].items():
+            a(f"    {_y(str(k))}: {_y(v)}")
     if isinstance(an.get("doses"), dict) and an["doses"]:
         a("  doses:   # condition -> dose (usually per experiment, in experiment.yaml)")
         for k, v in an["doses"].items():

@@ -235,7 +235,30 @@ features × samples matrix of log2 values and runs the same statistics:
   | LOW_SAMPLE | decide | a sample has < 40 % of the median identifications (failed injection?) |
   | ZERO_TESTED / NO_VOLCANO / CRASH_* | problem | nothing testable, plot not written, a step crashed |
   | HIGH_IMPUTATION, FEW_FEATURES, NO_HITS, ENRICHMENT | note | worth knowing |
+  | TIMES | decide / note | a time course whose time points can't all be read (a name in `analysis.times` that isn't a condition, two times in one name) |
   | LIGANDED_DIRECTION, SITE_ANNOTATION | note | isoDTB: the competition ratio looks reversed; the site annotation file can't be used |
+
+**Time courses** (`downstream/timecourse.py`, D53). When a series has three
+or more time points (`Drug_0h`, `Drug_1h`, `Drug_4h`, … or `analysis.times`),
+the report adds, per series and feature:
+
+| Question | Test (limma, on the comparisons' model) |
+|---|---|
+| Does it change over time? | moderated F on every time point against the first |
+| Is there a steady rise or fall? | moderated t on the linear contrast over the ordered time points |
+| Does it respond differently from the control series? | moderated F on the interaction contrasts (two series sharing time points, one a control such as `DMSO_0h` …) |
+
+- *Changing* = F adjusted p ≤ `alpha` and a largest |log2FC| ≥ `log2fc`
+  against the first time point; classed up / down / mixed. Changing features
+  are grouped into at most 6 patterns by profile shape.
+- The trend uses the order of the time points, not the hours, so `0 / 1 h /
+  24 h` is not dominated by the long gap.
+- Time is a factor: no curve or spline is fitted. Features not measured at
+  every time point of a series are not tested (unless imputed).
+- Settings: `times`, `time_unit`, `time_min_points` (3), `time_course`
+  (false switches it off). Intensity data with the limma test only.
+- Output: `results/time_course.tsv`, `analysis.json` → `time_course`, the
+  report's **Time course** section. The pairwise comparisons are unchanged.
 
 **isoDTB: liganded sites** (`downstream/cys.py`, D52). Besides the test
 against 0, every site gets the chemoproteomics call per compound (each

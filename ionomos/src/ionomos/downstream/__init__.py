@@ -18,6 +18,7 @@ Layout it reads and writes (inside the experiment folder):
       presence_absence.tsv          features measured in one group and never in the other
       gene_set_ranks.tsv            rank-based gene-set test on every protein (enrichment on)
       dose_response.tsv             a titration (4+ doses): a fitted curve per feature, pEC50, F, p, class
+      time_course.tsv               a time course (3+ time points): change over time (F), trend, class, pattern
       cysteine_sites.tsv            isoDTB: per site and compound the competition ratio, liganded call, selectivity
       cysteine_proteins.tsv         isoDTB: proteins with a liganded cysteine, how many of their sites are
       sdrf.tsv                      SDRF-Proteomics sample metadata: a row per raw file (and label), for PRIDE
@@ -34,6 +35,7 @@ Pipeline stages, each a module:
                   design.py + deqms.py         (blocks / covariates, the moderated F, DEqMS; D42, D43)
     QC, insights  qc.py + insights.py + enrich.py  (PCA, scorecard, batch, missingness, on/off, gene sets)
     dose-response doseresponse.py              (CurveCurator's curves, when the conditions are doses)
+    time course   timecourse.py                (limma's F over time, trend, series vs control; patterns)
     cysteines     cys.py                       (site ratio data: liganded calls, selectivity, a site annotation)
     metadata      sdrf.py                      (SDRF-Proteomics, from the manifest, workflow and FASTA)
     presentation  charts.py + report.py        (SVG + HTML)
@@ -376,6 +378,8 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     comps: list = []
     dose_info: dict = {"ran": False, "reason": "no processed quantities to fit"}
     dose_view: dict | None = None
+    time_info: dict = {"ran": False, "reason": "no processed quantities to test"}
+    time_view: dict | None = None
     cys_info: dict = {"ran": False, "reason": "not site ratio data (isoDTB)"}
     cys_view: dict | None = None
     model = analysis.Model()
@@ -539,6 +543,12 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
             else:
                 dose_info, dose_view, f.dose_problems, dnotes = dose
                 notes += dnotes
+            tc = stage("time_course", _time_course, processed, settings, results, out, model)
+            if tc is None:
+                time_info = {"ran": False, "reason": "the time-course step failed (see analysis_error.txt)"}
+            else:
+                time_info, time_view, f.time_problems, tnotes = tc
+                notes += tnotes
             if cys.applies(pm):
                 say("liganded cysteines")
                 called = stage("cysteines", _cysteines, processed, settings, results, out, dest)
@@ -579,7 +589,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
            for p in out.files]
     out.report = results / "report.html"
     html = stage("report", report.render, ctx, m, processed, diffs, out.warnings, rel, settings, qcd, enrichment,
-                 ranked, insight, dose=dose_view, cys=cys_view)
+                 ranked, insight, dose=dose_view, cys=cys_view, time=time_view)
     if html is None:  # the fallback page: issues, notes and the volcano plots themselves
         out.issues = doctor.check(f)
         ctx["issues"] = [i.as_dict() for i in out.issues]
@@ -617,6 +627,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
                            for b in ranked],
         "quality": _quality_summary(insight),
         "dose_response": dose_info,
+        "time_course": time_info,
         "cysteines": cys_info,
         "sdrf": sdrf_info,
         "design": _design_summary(m, settings),
@@ -653,6 +664,26 @@ def _dose_response(p, settings, results: Path, out: Outcome, say) -> tuple[dict,
         out.files.append(write_tsv(results / "dose_response.tsv", dr.COLUMNS, dr.table_rows(res)))
         table = f"{RESULTS}/dose_response.tsv"
     return (dr.summary(res, plan, table), dr.report_payload(res, plan), plan.problems,
+            res.notes if res is not None else plan.notes)
+
+def _time_course(p, settings, results: Path, out: Outcome, model) -> tuple[dict, dict, list, list[str]]:
+    """results/time_course.tsv when the conditions are time points (timecourse.py). Returns (analysis.json
+    summary, the report's payload, problems for the doctor, notes)."""
+    from ionomos.downstream import timecourse as tc
+
+    if not settings.time_course:
+        off = "the time-course tests are switched off (analysis.time_course)"
+        return {"ran": False, "reason": off}, {"ran": False, "found": False, "reason": off}, [], []
+    try:
+        control = analysis.find_control(p.m.conditions, settings)
+    except analysis.AnalysisError:
+        control = None
+    res, plan = tc.run(p, settings, control, model)
+    table = None
+    if res is not None:
+        out.files.append(write_tsv(results / "time_course.tsv", tc.COLUMNS, tc.table_rows(res)))
+        table = f"{RESULTS}/time_course.tsv"
+    return (tc.summary(res, plan, table), tc.report_payload(res, plan), plan.problems,
             res.notes if res is not None else plan.notes)
 
 def _cysteines(p, settings, results: Path, out: Outcome, dest: Path) -> tuple[dict, dict, list, list[str]]:

@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Time courses** (ROADMAP 5C #1, D53; `downstream/timecourse.py`). When the
+  conditions are time points (`Drug_0h`, `Drug_1h`, `Drug_4h`, `Drug_24h`,
+  or `analysis.times`) and a series has at least 3, every feature gets
+  limma's time-course tests on the comparisons' own model (block and
+  covariates included):
+  - change over time: the moderated F on every time point against the first
+  - a trend: the moderated t on the linear contrast over the ordered time
+    points
+  - with a control series (`DMSO_0h`, `DMSO_1h`, …): whether the series
+    responds differently over time (the interaction F)
+
+  Changing features (the report's alpha and |log2FC| cut-offs) are classed
+  up / down / mixed and grouped into patterns by profile shape. Output:
+  `results/time_course.tsv`, `analysis.json` → `time_course`, and a **Time
+  course** report section: pattern charts to click, a sortable table, and
+  each feature drawn over its replicates with the control series dashed.
+  New settings: `times`, `time_unit`, `time_min_points`, `time_course`; a
+  `TIMES` issue when a time point can't be read. Checked against limma
+  3.68.5 to 1e-8 (plain model, replicate block, missing values).
+
 - **Liganded cysteines for isoDTB** (ROADMAP 5C #3, D52;
   `downstream/cys.py`, [docs/WORKFLOWS.md](docs/WORKFLOWS.md)). Each site is
   called per compound by the chemoproteomics rule: liganded when the

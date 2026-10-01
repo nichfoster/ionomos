@@ -292,9 +292,11 @@ real data:
 
 ### 5C — More analysis (value × feasibility; all possible in pure Python)
 
-1. [x] **Experimental designs** (2026-09-30, D42, #58; time courses still to do): paired samples, blocks (batch / plex /
+1. [x] **Experimental designs** (2026-09-30, D42, #58; time courses D53): paired samples, blocks (batch / plex /
    patient as fixed effects, Smyth's advice), covariates, time courses, and a
    moderated F-test. Every lab needs this. Checked against limma 3.68.5.
+   Time courses treat time as a factor (F over time, trend, series vs
+   control, patterns); spline fits for long series are not built.
 2. [x] **Dose-response** (2026-09-30, D44, #59; checked against CurveCurator 0.6.0) (CurveCurator, Apache-2.0):
    - a 4-parameter log-logistic fit
    - pEC50 with a confidence interval
@@ -495,6 +497,8 @@ Collected from the other docs; resolve before/during Phase 1.
       Watch how it feels on the PC for a few weeks (`gui.review_drops`).
 - [ ] Phase 5: allow numpy as an *optional* speed-up (dose-response, limpa)? The base install stays
       dependency-free either way.
+- [ ] Time courses (D53): does the lab run them, and are 3 time points the right minimum? Should the trend use the
+      order of the time points (built) or the hours?
 - [ ] Phase 5: which pilot labs can we reach? Does this lab run titrations or phospho? (Orders 5C.)
 - [ ] Phase 6: is the PC's RAM in all 6 memory channels (speed of a local model)? Is a GPU present? May the assistant
       ever use a cloud model (institutional data policy), or strictly local?

@@ -1236,3 +1236,41 @@ adds the convention used in isoTOP-ABPP / isoDTB work.
    matching unenriched proteome per condition, and where that comes from is
    a question for the lab. The per-protein view ("most of this protein's
    cysteines are liganded") is the warning available without it.
+
+
+### D53 — Time courses are tested with time as a factor, on the comparisons' own model
+**2026-09-30.** D42 left time courses out of the design work ("a numeric
+time is already possible as a linear covariate"). A covariate answers
+nothing about which proteins change over time, so `downstream/timecourse.py`
+adds the tests.
+
+1. **Time is a factor, not a curve.** With the three to six time points and
+   three replicates a proteomics time course usually has, a spline has
+   nothing to smooth. limma's guide treats such designs as groups and asks
+   questions with contrasts (User's Guide 9.6.1); so does Ionomos. The model
+   is the one the comparisons already use (`~0 + condition`, plus block and
+   covariates, with the same variance prior), so nothing is fitted twice and
+   the pairwise results are untouched.
+2. **Three questions.** Change over time: the moderated F on every time
+   point against the first. Trend: the moderated t on the linear contrast
+   over the *order* of the time points (hours would let one long gap carry
+   the test). Against a control series: the moderated F on the interaction
+   contrasts.
+3. **Found from the names, like doses (D44).** `Drug_4h` is 4 h of series
+   `Drug`; `analysis.times` overrides. An untimed control is time 0. Three
+   time points are the minimum: two are an ordinary comparison.
+4. **"Changing" uses the report's own cut-offs** (`alpha` on the F's BH
+   q-value, `log2fc` on the largest change from the first time point), so
+   one experiment has one definition of a hit.
+5. **Patterns are descriptive and repeatable.** k-means on each changing
+   feature's profile scaled to its largest change, k growing with the number
+   of features (at most 6), started from the strongest feature and then the
+   farthest ones: no random seed, the same patterns on every run. They are
+   a way to browse, not a result to report as statistics.
+6. **Left out:** spline fits for long series, and the Welch / Student tests
+   and ratio data (they have no shared model to take contrasts from).
+
+**Checked** against limma 3.68.5 (`tests/golden/timecourse/`): the F, its
+p and adjusted p, the fold changes, the trend t and p and the interaction F,
+for the plain model, a replicate block and data with missing values, to
+1e-8.

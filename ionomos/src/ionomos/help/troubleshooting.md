@@ -410,6 +410,22 @@ number then becomes a blocking factor in the model, so each comparison is
 made within a batch ([How to re-run](#faq.rerun)). Next time, randomise the
 preparation and run order.
 
+## Time course: the time points need a look {#issue.TIMES}
+
+Ionomos found what looks like a time course but couldn't place every
+condition on it. The message names the condition. Common causes:
+- `analysis.times` names a condition that isn't in this experiment, or gives
+  a number without a unit (`4` instead of `4 h`).
+- A condition name holds two times (`Drug_1h_then_4h`).
+- Two conditions of one series are at the same time (`A_1h` and `A_60min`).
+
+List every condition's time under `analysis:` in the experiment's
+`experiment.yaml`, e.g. `times: {Drug_a: 0, Drug_b: 1 h, Drug_c: 4 h}`, and
+re-run the analysis ([How to re-run](#faq.rerun)). If the experiment isn't a
+time course, add `time_course: false`. The [Time course](#report.time)
+section and the pairwise comparisons for the other conditions are not
+affected.
+
 ## Liganded sites: the ratio may be the other way round {#issue.LIGANDED_DIRECTION}
 
 Far more sites would count as [liganded](#glossary.liganded) if the

@@ -16,6 +16,8 @@ The page carries its data as JSON and draws everything in the browser
     Heatmap        significant features, row-centred, clustered
     Enrichment     over-represented gene sets among the hits, and a rank-based test on every protein
     Dose-response  (a titration) CurveCurator's curves: a table by class, each curve over its points, potency vs effect
+    Time course    (3+ time points) change over time (limma's F), trend, patterns of the changing features, each
+                   feature's profile over its replicates
     Liganded sites (isoDTB) per compound the liganded fraction and a ratio rank plot; a site x compound table of
                    competition ratios with the call, selectivity and, with a site annotation, known / new
     QC             sample scorecard, PCA (with what explains each PC), correlation, missing values, missingness
@@ -66,7 +68,8 @@ def _level_word(m: QuantMatrix | None) -> tuple[str, str]:
 
 def payload(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: list[DiffResult], notes: list[str],
             files: list[str], s: Settings, qcd: dict, enrichment: list[dict], ranked: list[dict] | None = None,
-            insight: dict | None = None, dose: dict | None = None, cys: dict | None = None) -> dict:
+            insight: dict | None = None, dose: dict | None = None, cys: dict | None = None,
+            time: dict | None = None) -> dict:
     pm = p.m if p else m
     title, word = _level_word(pm)
     d: dict = {
@@ -86,6 +89,7 @@ def payload(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: li
         "qc": {}, "enr": [], "enrNote": "", "gsea": [], "evidence": "", "rep": [],
         "dose": dose or {"ran": False, "found": False, "reason": "No dose-response curves were fitted."},
         "cys": cys or {"ran": False, "reason": ""},
+        "time": time or {"ran": False, "found": False, "reason": "No time course was found."},
         "help": _help_payload(ctx.get("issues")),
     }
     if pm is None:
@@ -352,6 +356,23 @@ def _dose_methods(dose: dict) -> str:
             "Jacobian; q-values are Benjamini–Hochberg on the curve p-values.")
 
 
+def _time_methods(time: dict) -> str:
+    names = ", ".join(escape(x["name"] or "the experiment") + " (" + escape(", ".join(x["labels"])) + ")"
+                      for x in time.get("series") or [])
+    vs = sorted({x["vs"] for x in time.get("series") or [] if x.get("vs")})
+    return (f"Time courses: {names}. Time was a factor in the comparisons' linear model "
+            f"({escape(time.get('model', '~0 + condition'))}; limma User's Guide, time course experiments). Change "
+            "over time was tested per feature with the moderated F-statistic on the contrasts of every time point "
+            "against the first, and a trend with the moderated t-statistic of the linear contrast over the ordered "
+            "time points, both BH-adjusted."
+            + (f" Whether a series responds differently from {escape(', '.join(vs))} was tested with the moderated "
+               "F on the interaction contrasts (the change from the first time point in one series minus that in "
+               "the other)." if vs else "")
+            + f" Features with F adjusted p ≤ {time.get('alpha', 0.05):g} and a largest |log2 fold change| ≥ "
+            f"{time.get('lfc', 1):g} against the first time point were grouped into patterns by k-means on their "
+            "profiles scaled to the largest change.")
+
+
 def _cys_methods(cys: dict) -> str:
     ann = cys.get("annotation") or {}
     return (f"A cysteine was called liganded by a compound when its competition ratio reached {escape(cys['rule'])}, "
@@ -444,19 +465,20 @@ def _sdrf_note(info: dict) -> str:
 def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: list[DiffResult], notes: list[str],
            files: list[str], s: Settings | None = None, qcd: dict | None = None,
            enrichment: list[dict] | None = None, ranked: list[dict] | None = None, insight: dict | None = None,
-           dose: dict | None = None, cys: dict | None = None) -> str:
+           dose: dict | None = None, cys: dict | None = None, time: dict | None = None) -> str:
     s = s or Settings()
     enrichment = enrichment or []
     ranked = [b for b in ranked or [] if b["terms"]]
     title = ctx.get("experiment") or "Experiment"
     meta = " · ".join(x for x in (ctx.get("user"), ctx.get("method"), ctx.get("date"),
                                   f"generated {datetime.now():%Y-%m-%d %H:%M}", f"Ionomos {ctx.get('version', '')}") if x)
-    data = json.dumps(payload(ctx, m, p, diffs, notes, files, s, qcd or {}, enrichment, ranked, insight, dose, cys),
+    data = json.dumps(payload(ctx, m, p, diffs, notes, files, s, qcd or {}, enrichment, ranked, insight, dose, cys, time),
                       separators=(",", ":"), allow_nan=False).replace("</", "<\\/").replace("<!--", "<\\u0021--")
     pm = p.m if p else m
     ratio = pm is not None and pm.kind == "ratio"
     dose_shown = bool(dose and (dose.get("ran") or dose.get("found")))
     cys_shown = bool(cys and cys.get("ran"))
+    time_shown = bool(time and (time.get("ran") or time.get("found")))
     b = [f"<main><div class='top'><div><h1>{escape(title)}</h1><div class='meta'>{escape(meta)}</div></div>"
          "<div><button id='theme' title='Light / dark'>◐</button> <button id='share' title='Copy a link to this view "
          "(comparison, cut-offs, search)'>Link</button> <button onclick='window.print()'>Print</button></div></div>",
@@ -465,6 +487,7 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
          + ("" if ratio else "<a href='#onoff'>Only in one</a>")
          + "<a href='#heat'>Heatmap</a><a href='#enrichment'>Enrichment</a>"
          + "<a href='#dose' id='navdose'" + ("" if dose_shown else " hidden") + ">Dose-response</a>"
+         + "<a href='#time' id='navtime'" + ("" if time_shown else " hidden") + ">Time course</a>"
          + "<a href='#cys' id='navcys'" + ("" if cys_shown else " hidden") + ">Liganded sites</a>"
          + "<a href='#quality'>Quality control</a>"
          "<a href='#methods'>Methods</a><a href='#files'>Files</a><a href='#help'>Help</a></nav>",
@@ -545,6 +568,10 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
              "A curve per feature across the doses (CurveCurator's 4-parameter log-logistic fit, ratio to the "
              "control). Only curves classed up or down have a potency worth reading; click a row or a point to "
              "draw its curve over the measured values.</p><div id='dosebody'></div></section>")
+    b.append("<section id='time'" + ("" if time_shown else " hidden") + "><h2>Time course</h2><p class='sub'>"
+             "Which features change over time (a moderated F-test across the time points), in which direction, "
+             "and with which shape. Click a pattern to list its features; click a row to draw the feature over "
+             "its replicates.</p><div id='timebody'></div></section>")
     b.append("<section id='cys'" + ("" if cys_shown else " hidden") + "><h2>Liganded sites</h2><p class='sub'>"
              "Which cysteines each compound engages: a site is liganded when its competition ratio R reaches the "
              "threshold in enough replicates. This is the chemoproteomics convention, not a p-value; the volcano "
@@ -557,6 +584,8 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
     b.append(f"<section id='methods'><h2>Methods</h2><p class='methods'>{text}</p>")
     if dose and dose.get("ran"):
         b.append(f"<p class='methods'>{_dose_methods(dose)}</p>")
+    if time and time.get("ran"):
+        b.append(f"<p class='methods'>{_time_methods(time)}</p>")
     if cys_shown:
         b.append(f"<p class='methods'>{_cys_methods(cys)}</p>")
     b.append(_provenance_table(ctx.get("engine") or {}))

@@ -48,6 +48,14 @@ experiment.yaml `analysis:` block:
       dose_alpha: 0.05            # CurveCurator's significance asymptote
       dose_fc_lim: 0.45           # CurveCurator's |log2 curve fold change| asymptote
 
+      times:                      # a time course (timecourse.py); default: read from the condition names
+        Drug_start: 0             #   (Drug_0h, Drug_30min, Drug_4h, 2d); units s, min, h, d
+        Drug_early: 30 min
+        Drug_late: 4 h            #   ... at least time_min_points time points per series, or no time-course tests
+      time_unit: h                # unit for bare numbers in times
+      time_course: true           # false: never run the time-course tests
+      time_min_points: 3          # time points a series needs
+
       liganded: true              # site ratio data (isoDTB): call liganded cysteines (cys.py)
       liganded_ratio: 4           # the competition ratio R a replicate must reach ...
       liganded_min_replicates: 2  # ... in at least this many replicates
@@ -108,6 +116,10 @@ class Settings:
     dose_min_doses: int = 4
     dose_alpha: float = 0.05
     dose_fc_lim: float = 0.45
+    times: dict[str, str | float] = field(default_factory=dict)  # condition -> time ("4 h"); timecourse.py
+    time_unit: str = ""
+    time_course: bool = True
+    time_min_points: int = 3
     liganded: bool = True              # liganded-site calls on site ratio data (cys.py)
     liganded_ratio: float = 4.0        # competition ratio R (linear) a replicate must reach
     liganded_min_replicates: int = 2
@@ -227,9 +239,9 @@ def settings_from(*layers: dict | None) -> Settings:
                          "dose_alpha", "dose_fc_lim", "liganded_ratio"):
                     v = float(v)
                 elif k in ("min_valid", "top_labels", "seed", "pca_features", "heatmap_max", "dose_min_doses",
-                           "liganded_min_replicates"):
+                           "liganded_min_replicates", "time_min_points"):
                     v = int(v)
-                elif k in ("use_adjusted", "remove_contaminants", "enrichment", "dose_response", "liganded"):
+                elif k in ("use_adjusted", "remove_contaminants", "enrichment", "dose_response", "liganded", "time_course"):
                     v = _bool(v)
                 elif k == "test":
                     v = str(v).lower()
@@ -293,6 +305,13 @@ def settings_from(*layers: dict | None) -> Settings:
                          for a, b in v.items()}
                 elif k == "dose_unit":
                     v = _dose_unit(v)
+                elif k == "times":
+                    if not isinstance(v, dict):
+                        raise AnalysisError("times must map a condition to its time, e.g. {Drug_a: 0, Drug_b: 4 h}")
+                    v = {str(a): (b if isinstance(b, (int, float)) and not isinstance(b, bool) else str(b))
+                         for a, b in v.items()}
+                elif k == "time_unit":
+                    v = _time_unit(v)
                 elif k == "block":
                     v = _block(v)
                     s.block_from = ""  # an experiment's block replaces the lab's block_from, and vice versa
@@ -331,7 +350,10 @@ def settings_from(*layers: dict | None) -> Settings:
         raise AnalysisError("analysis.liganded_ratio must be above 1 (a competition ratio, e.g. 4)")
     if s.liganded_min_replicates < 1:
         raise AnalysisError("analysis.liganded_min_replicates must be at least 1")
+    if s.time_min_points < 3:
+        raise AnalysisError("analysis.time_min_points must be >= 3 (two time points are an ordinary comparison)")
     _check_doses(s)
+    _check_times(s)
     return s
 
 def _dose_unit(v) -> str:
@@ -341,6 +363,23 @@ def _dose_unit(v) -> str:
         return normalize_unit(str(v))
     except DoseError as exc:
         raise AnalysisError(f"analysis.dose_unit: {exc}") from exc
+
+def _time_unit(v) -> str:
+    from ionomos.downstream.timecourse import TimeError, normalize_unit
+
+    try:
+        return normalize_unit(str(v))
+    except TimeError as exc:
+        raise AnalysisError(f"analysis.time_unit: {exc}") from exc
+
+def _check_times(s: Settings) -> None:
+    from ionomos.downstream.timecourse import TimeError, parse_time
+
+    for c, v in s.times.items():
+        try:
+            parse_time(v, s.time_unit)
+        except TimeError as exc:
+            raise AnalysisError(f"analysis.times {c}: {exc}") from exc
 
 def _check_doses(s: Settings) -> None:
     """Every analysis.doses value must read as a dose (after the layers, so dose_unit can come in any order)."""
@@ -359,7 +398,7 @@ def settings_lenient(*layers: dict | None) -> tuple[Settings, list[str]]:
     notes: list[str] = []
     for layer in layers:
         good: dict = {}
-        for k, v in sorted((layer or {}).items(), key=lambda kv: kv[0] == "doses"):  # doses read dose_unit
+        for k, v in sorted((layer or {}).items(), key=lambda kv: kv[0] in ("doses", "times")):  # read dose_unit / time_unit
             try:
                 settings_from(*kept, {**good, k: v})
             except AnalysisError as exc:
