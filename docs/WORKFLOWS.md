@@ -235,7 +235,58 @@ features × samples matrix of log2 values and runs the same statistics:
   | LOW_SAMPLE | decide | a sample has < 40 % of the median identifications (failed injection?) |
   | ZERO_TESTED / NO_VOLCANO / CRASH_* | problem | nothing testable, plot not written, a step crashed |
   | HIGH_IMPUTATION, FEW_FEATURES, NO_HITS, ENRICHMENT | note | worth knowing |
+  | LIGANDED_DIRECTION, SITE_ANNOTATION | note | isoDTB: the competition ratio looks reversed; the site annotation file can't be used |
 
-Open questions for the lab: which comparisons matter for isoDTB (vs 0, or
+**isoDTB: liganded sites** (`downstream/cys.py`, D52). Besides the test
+against 0, every site gets the chemoproteomics call per compound (each
+sample prefix is a compound):
+
+| Call | Rule (defaults) |
+|---|---|
+| liganded | competition ratio R ≥ 4 in at least 2 replicates |
+| inconsistent | R ≥ 4 in some replicates, but fewer than 2 |
+| not liganded | measured in at least 2 replicates, R ≥ 4 in none |
+| too few | measured in fewer than 2 replicates (not assessed) |
+
+```yaml
+analysis:                      # config.yaml (lab) or experiment.yaml (one experiment)
+  liganded_ratio: 4            # R a replicate must reach
+  liganded_min_replicates: 2   # ... in at least this many replicates
+  liganded_direction: high     # high: R = heavy / light (treated sample = light tag) | low: R = light / heavy
+  site_annotation: cysdb.csv   # optional: a site table you downloaded (CysDB), in the experiment folder or a full path
+  liganded: true               # false: no calls
+```
+
+- The calls use the ratios as measured: no normalisation, no imputation. A
+  compound with fewer replicates than the rule asks for is judged on the
+  replicates it has, with a note.
+- **Liganded fraction** per compound = liganded / sites measured in enough
+  replicates.
+- **Selectivity** (2+ compounds): *selective* = liganded by one compound and
+  measured as not liganded by every other; *shared* = liganded by several;
+  *unresolved* = liganded by one, the others not measured well enough.
+- **Proteins**: for each protein with a liganded cysteine, how many of its
+  assessed cysteines are liganded. Three or more assessed with at least half
+  liganded is marked "most sites": suspect the protein amount, not a site.
+- **Site annotation**: Ionomos does not ship CysDB (its licence is the
+  lab's business). A table the lab downloads is matched by UniProt accession
+  and residue number: one column of keys like `P04406_C152`, or an accession
+  column plus a residue column. Its yes / no columns become flags;
+  `ligandable`, `hyperreactive` and `identified` give *known liganded*,
+  *known hyperreactive*, *seen before*; a site not in the table is *new*.
+- **Direction check**: if at least 10 sites, and more than three times as
+  many as are liganded, would be liganded with the ratio the other way
+  round, the report warns (`LIGANDED_DIRECTION`).
+- Output: `results/cysteine_sites.tsv` (every site: per compound log2 R, R,
+  engagement % = 100 × (1 − 1/R), replicates, replicates over, call; then
+  liganded_by, selectivity, annotation), `results/cysteine_proteins.tsv`,
+  `analysis.json` → `cysteines`, and the report's **Liganded sites** section.
+- Not built yet: correcting site changes for protein abundance (the
+  MSstatsPTM adjustment). It needs a matching unenriched proteome, and the
+  lab has to say where that comes from.
+
+Open questions for the lab: which tag the compound-treated sample carries
+(`liganded_direction`) and which R and replicate count the lab calls
+liganded; which comparisons matter for isoDTB (vs 0, or
 compound vs compound?); whether DIA should use FragPipe's own
 `combined_protein.tsv` or DIA-NN's matrix; which thresholds people use today.

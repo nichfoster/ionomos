@@ -380,6 +380,15 @@ channels by the loader, as MSstatsTMT does) are never scaled again. The values
 before IRS are kept in `meta["bridge_before"]`, so the report's PCA can show
 before / after and colour by plex; `analysis.json` → `tmt` says what was done.
 
+`results/cysteine_sites.tsv` (`downstream/cys.py`, D52) is made for site
+ratio data (isoDTB), after the dose-response stage and isolated like it. It
+reads the processed matrix's *measured* ratios and classifies each site per
+compound (liganded / inconsistent / not liganded / too few) by
+`liganded_ratio` in `liganded_min_replicates` replicates, then derives the
+liganded fraction, selectivity across compounds, a per-protein view and, with
+`site_annotation`, known / new sites. The report's Liganded sites section
+only displays these calls. Rules and settings: WORKFLOWS.md.
+
 `results/dose_response.tsv` (`downstream/doseresponse.py`, D44) is made when
 the conditions are a titration: names like `Cmpd_10nM` (or
 `analysis.doses`) and at least `dose_min_doses` (4) doses above the control.

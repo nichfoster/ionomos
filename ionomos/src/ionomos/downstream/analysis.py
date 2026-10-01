@@ -47,6 +47,12 @@ experiment.yaml `analysis:` block:
       dose_min_doses: 4           # doses above 0 a compound needs before curves are fitted
       dose_alpha: 0.05            # CurveCurator's significance asymptote
       dose_fc_lim: 0.45           # CurveCurator's |log2 curve fold change| asymptote
+
+      liganded: true              # site ratio data (isoDTB): call liganded cysteines (cys.py)
+      liganded_ratio: 4           # the competition ratio R a replicate must reach ...
+      liganded_min_replicates: 2  # ... in at least this many replicates
+      liganded_direction: high    # high: R = heavy / light | low: R = light / heavy
+      site_annotation: cysdb.csv  # a downloaded site table (CysDB) in the experiment folder, or a full path
 """
 from __future__ import annotations
 
@@ -102,6 +108,11 @@ class Settings:
     dose_min_doses: int = 4
     dose_alpha: float = 0.05
     dose_fc_lim: float = 0.45
+    liganded: bool = True              # liganded-site calls on site ratio data (cys.py)
+    liganded_ratio: float = 4.0        # competition ratio R (linear) a replicate must reach
+    liganded_min_replicates: int = 2
+    liganded_direction: str = "high"   # high: R = heavy / light | low: R = light / heavy
+    site_annotation: str = ""          # a site table (CysDB download): known / new sites
     block: str | dict[str, str] = ""   # "" | "replicate" | {sample: block} (design.py)
     block_from: str = ""               # regex on sample names: the block is group "block", else group 1
     covariates: dict[str, dict] = field(default_factory=dict)   # name -> {sample: value}
@@ -213,11 +224,12 @@ def settings_from(*layers: dict | None) -> Settings:
                 continue
             try:
                 if k in ("log2fc", "alpha", "impute_shift", "impute_scale", "filter_global_pct", "filter_condition_pct",
-                         "dose_alpha", "dose_fc_lim"):
+                         "dose_alpha", "dose_fc_lim", "liganded_ratio"):
                     v = float(v)
-                elif k in ("min_valid", "top_labels", "seed", "pca_features", "heatmap_max", "dose_min_doses"):
+                elif k in ("min_valid", "top_labels", "seed", "pca_features", "heatmap_max", "dose_min_doses",
+                           "liganded_min_replicates"):
                     v = int(v)
-                elif k in ("use_adjusted", "remove_contaminants", "enrichment", "dose_response"):
+                elif k in ("use_adjusted", "remove_contaminants", "enrichment", "dose_response", "liganded"):
                     v = _bool(v)
                 elif k == "test":
                     v = str(v).lower()
@@ -253,8 +265,15 @@ def settings_from(*layers: dict | None) -> Settings:
                     if not isinstance(v, dict):
                         raise AnalysisError("sample_conditions must map sample -> condition")
                     v = {str(a): str(b) for a, b in v.items()}
-                elif k in ("control", "enrichment_gmt"):
+                elif k in ("control", "enrichment_gmt", "site_annotation"):
                     v = str(v)
+                elif k == "liganded_direction":
+                    v = str(v).strip().lower()
+                    v = {"hl": "high", "h/l": "high", "heavy/light": "high", "lh": "low", "l/h": "low",
+                         "light/heavy": "low"}.get(v.replace(" ", ""), v)
+                    if v not in ("high", "low"):
+                        raise AnalysisError("liganded_direction must be high (R = heavy / light) or low "
+                                            "(R = light / heavy)")
                 elif k == "sdrf":
                     v = {**s.sdrf, **_sdrf_meta(v)}  # a later layer adds to / overrides the lab's values
                 elif k in ("sdrf_factor", "tmt_reference"):
@@ -308,6 +327,10 @@ def settings_from(*layers: dict | None) -> Settings:
         raise AnalysisError("analysis.dose_fc_lim must be >= 0")
     if s.dose_min_doses < 3:
         raise AnalysisError("analysis.dose_min_doses must be >= 3 (a curve has 4 parameters)")
+    if s.liganded_ratio <= 1:
+        raise AnalysisError("analysis.liganded_ratio must be above 1 (a competition ratio, e.g. 4)")
+    if s.liganded_min_replicates < 1:
+        raise AnalysisError("analysis.liganded_min_replicates must be at least 1")
     _check_doses(s)
     return s
 

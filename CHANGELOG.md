@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Liganded cysteines for isoDTB** (ROADMAP 5C #3, D52;
+  `downstream/cys.py`, [docs/WORKFLOWS.md](docs/WORKFLOWS.md)). Each site is
+  called per compound by the chemoproteomics rule: liganded when the
+  competition ratio R reaches 4 in at least 2 replicates, inconsistent when
+  it does in fewer, not liganded, or too few replicates to say. Every part is
+  a setting, for the lab or one experiment: `liganded_ratio`,
+  `liganded_min_replicates`, `liganded_direction` (`high`: R = heavy /
+  light; `low`: the other way round), `liganded`.
+  - Per compound: the liganded fraction. Across compounds: selective, shared
+    and unresolved sites. Per protein: how many of its cysteines are
+    liganded, with "most sites" marked.
+  - `site_annotation`: a site table the lab downloads (CysDB, or its own
+    list) marks each site known liganded / known hyperreactive / seen before
+    / new. CysDB is not shipped.
+  - Output: `results/cysteine_sites.tsv`, `results/cysteine_proteins.tsv`,
+    `analysis.json` → `cysteines`, and a **Liganded sites** report section
+    (tiles, a rank plot of R against the threshold, a site × compound table
+    shaded by R, a protein view), with help, glossary and Methods text.
+  - Two new report notes: `LIGANDED_DIRECTION` when far more sites would be
+    liganded with the ratio reversed, and `SITE_ANNOTATION` when the
+    annotation file can't be used.
+
+  The calls use measured ratios only (no normalisation, no imputation). Not
+  included: correcting site changes for protein abundance. The defaults
+  (R ≥ 4, 2 replicates, heavy / light) are the field's common ones and have
+  not been confirmed by the lab; the CysDB layout is from its paper, not a
+  real download.
+
 - **Sage as a search engine** (ROADMAP 5B #5, D51, [docs/ENGINES.md](docs/ENGINES.md)).
   - **Run:** a DDA method with `engine: sage` is searched by the lab's own
     [Sage](https://github.com/lazear/sage) (open source, MIT). Thermo `.raw`
