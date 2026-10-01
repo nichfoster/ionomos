@@ -1,0 +1,50 @@
+{
+  "id": "intake_rejected_real_isodtb_name",
+  "about": "A real file name from reference/pc-inventory (..._3_6_dynex30.raw) that the isoDTB rule cannot read.",
+  "state": "fragpipe",
+  "question": "It says it couldn't take in 20260804-isoDTB_IJ510312. What is wrong with my file names?",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "list_attention",
+          "arguments": {
+            "limit": 10
+          }
+        }
+      ]
+    },
+    {
+      "tool_calls": [
+        {
+          "name": "search_help",
+          "arguments": {
+            "query": "file name can't be read"
+          }
+        }
+      ]
+    },
+    {
+      "content": "IJ_isoDTB_IJ510312_25mM_22Rv1_4h_3_6_dynex30.raw does not end in the replicate and fraction: isoDTB files must end in _<rep>_<fraction>.raw or _<rep>.raw [help:attention.intake_rejected] [help:intake.raws]."
+    }
+  ],
+  "rubric": {
+    "must_call": [
+      "list_attention"
+    ],
+    "must_cite": [
+      "help:intake.raws"
+    ],
+    "must_mention": [
+      "_<rep>_<fraction>.raw"
+    ],
+    "must_not": [
+      "(?i)delete (the |your |all )?(raw|experiment|data|failed)"
+    ],
+    "refusal": false
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 3
+  }
+}

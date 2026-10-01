@@ -1,0 +1,40 @@
+{
+  "id": "no_jobs_yet",
+  "about": "A new lab: nothing to cite, so nothing the model says can be shown.",
+  "state": "empty",
+  "question": "Why did my search fail?",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "list_experiments",
+          "arguments": {}
+        },
+        {
+          "name": "list_attention",
+          "arguments": {}
+        }
+      ]
+    },
+    {
+      "content": "There are no experiments yet, so no search has failed."
+    },
+    {
+      "content": "There are no experiments yet."
+    }
+  ],
+  "rubric": {
+    "must_call": [
+      "list_experiments"
+    ],
+    "refusal": true,
+    "must_mention": [
+      "ask"
+    ]
+  },
+  "harness": {
+    "outcome": "fallback",
+    "reason": "no citation",
+    "rounds": 3
+  }
+}

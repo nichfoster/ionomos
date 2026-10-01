@@ -61,6 +61,32 @@ STRING and GeneCards links open only when you click them). **Report a
 problem…** collects settings, logs and the search logs of failed jobs, never
 raw data or result tables, and saves it on your Desktop for you to send.
 
+## Notifications: off unless the lab turns them on {#safety.notify}
+
+Ionomos can send a message (Teams, Slack, email or another service) when a
+search is done, failed or waiting. This is **off** until someone sets it up
+in `config.yaml` under `notify:`. When it is on, a message holds exactly
+this and nothing else:
+
+- the status: done, failed or waiting
+- the experiment's folder name, your user folder's name and the method
+- the job number, the time and the name of the PC
+- for a failure or a wait: the reason, as in `FAILED.txt` or the Jobs tab
+- for a finished search: how many hits each comparison has (up, down, of
+  how many tested), and where the report is on the PC
+
+It never holds a raw file, a result table, a protein or site name, an
+intensity or any other measured value, or the report itself. The path of
+the report is only text: the report stays on the PC.
+
+With `notify.include_names: false` a message holds only the job number,
+the status and the time ("Ionomos: job 12 done").
+
+The webhook addresses and the email password in `config.yaml` are secrets.
+Ionomos does not write them to its log, and **Report a problem…** and
+`ionomos diagnose` leave them out (three stars are shown instead). See
+[Can I get a message when my search is done?](#faq.notify).
+
 ## Updates and uninstalling leave your data alone {#safety.updates}
 
 Installing an update replaces only the program. Uninstalling removes the

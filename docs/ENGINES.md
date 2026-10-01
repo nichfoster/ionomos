@@ -9,7 +9,7 @@ folder or its main table; the Analysis tab's **Table…** button works too.
 ionomos analyze path/to/combined/txt          # a MaxQuant folder
 ionomos analyze path/to/report.parquet        # a DIA-NN 2.x report (needs: pip install pyarrow)
 ionomos analyze path/to/Spectronaut_Report.tsv
-ionomos analyze path/to/sage_output           # Sage: lfq.tsv (+ results.sage.tsv, results.json)
+ionomos analyze path/to/sage_output           # Sage: lfq.tsv, or tmt.tsv + results.sage.tsv (+ results.json)
 ```
 
 The engine is recognised from file names and column headers
@@ -32,6 +32,7 @@ see below.
 | **DIA-NN** standalone | `*pg_matrix.tsv` (preferred), else the long report `report.tsv` (1.x) or `report.parquet` (2.x) | pg_matrix values, or `PG.MaxLFQ` | long report: `Q.Value` ≤ 1% and `PG.Q.Value` ≤ 1% | `*.log.txt` |
 | **MaxQuant** | `combined/txt/proteinGroups.txt` | `LFQ intensity`, else `Intensity`; `Reporter intensity corrected` for TMT | rows marked `+` in Reverse / Potential contaminant / Only identified by site are left out; `CON__` contaminants removed | `parameters.txt`, `mqpar.xml` |
 | **Sage** | `lfq.tsv` (a row per peptide ion, a column per file); `results.sage.tsv` and `results.json` beside it when they are there | proteins summarised per sample by Tukey median polish of the ion intensities; proteins grouped by razor peptides (below) | `q_value` ≤ 1% per peptide; with `results.sage.tsv`, the peptide's best `protein_q` ≤ 1% too; decoys left out | `results.json` (also the FASTA and every search setting) |
+| **Sage TMT** | `tmt.tsv` (a row per spectrum, a column per reporter channel) with `results.sage.tsv` beside it; read instead of `lfq.tsv` when both are there | proteins summarised per plex and channel as the MSstatsTMT format is (below); several plexes joined by IRS | PSMs: targets of `rank` 1 with `spectrum_q`, `peptide_q` and `protein_q` ≤ 1%; spectra with more than one such PSM left out | `results.json` |
 | **Spectronaut** | a protein pivot report (`<run>.PG.Quantity`) or the long BGS report (`R.FileName`, `R.Condition`, `R.Replicate`, `PG.ProteinGroups`, `PG.Quantity`) | `PG.Quantity` | long report: `PG.Qvalue` and `EG.Qvalue` ≤ 1% | not in the export |
 | **AlphaDIA** | `pg.matrix.tsv` | protein-group matrix | none | `frozen_config.yaml` |
 | **MSstats format** (quantms, Skyline, any MSstats converter) | `ProteinName, PeptideSequence, PrecursorCharge, FragmentIon, ProductCharge, IsotopeLabelType, Condition, BioReplicate, Run, Intensity` | proteins summarised per run by Tukey median polish (MSstats' default) | heavy / reference rows left out; intensities ≤ 1 count as missing | not in the file |
@@ -91,7 +92,8 @@ analysis:
 - With no reference at all, `auto` uses each plex's own mean, but only when
   every plex holds the same mix of conditions; otherwise the plexes stay as
   they are and the report warns. `irs: sum` forces the plex means; `none`
-  switches IRS off.
+  switches IRS off. Plex means are not used while a channel has no
+  condition yet (Sage TMT without a channel map).
 - **Not applied twice**: FragPipe's TMT-Integrator abundances are already
   ratios to the reference channel, and MSstatsTMT input is normalised to its
   `Norm` channels as MSstatsTMT does it.
@@ -117,6 +119,13 @@ methods:
     library: human_lib.parquet            # optional; otherwise predicted from the FASTA
     diann_args: "--var-mods 1 --var-mod UniMod:35,15.994915,M"   # optional, added to the defaults
 ```
+
+The method's key is the lab's choice (D54). The engine decides what the
+method is: any `engine: diann` method is searched and analysed as DIA, and
+any `engine: maxquant` or `engine: sage` method as label-free, with a
+control and that engine's own protein table. For a FragPipe method under
+another key, `naming.methods.<key>: {like: isoDTB | TMT | DIA}` does the
+same (docs/NAMING_CONVENTION.md).
 
 Each job then writes `ionomos_run/diann.cfg` and runs
 `diann.exe --cfg ionomos_run/diann.cfg`. The cfg is the job's full,
@@ -155,7 +164,7 @@ methods:
     mqpar: lab_lfq_mqpar.xml   # optional: File -> Save parameters in the MaxQuant GUI, put in workflow_dir
 naming:
   methods:
-    LFQ: {like: isoDTB}        # <sample>_<rep>[_<fraction>] names (or your own template, D37)
+    LFQ: '{sample}_{rep}[_{fraction}]'   # <sample>_<rep>[_<fraction>] names (or your own template, D37)
 ```
 
 Ionomos never writes an `mqpar.xml` from scratch, because its layout
@@ -200,7 +209,7 @@ methods:
     sage_args: "--batch-size 2"                # optional: added to the sage command line
 naming:
   methods:
-    LFQ: {like: isoDTB}        # <sample>_<rep>[_<fraction>] names (or your own template, D37)
+    LFQ: '{sample}_{rep}[_{fraction}]'   # <sample>_<rep>[_<fraction>] names (or your own template, D37)
 ```
 
 A job has two steps, both in `ionomos_run/sage_console.log`:
@@ -231,7 +240,8 @@ or else Ionomos' defaults:
 The defaults suit high-resolution MS2 (Orbitrap HCD). For ion-trap MS2, TMT
 or other modifications, give your own `sage_config`. Only the FASTA, the mzML
 paths and the output folder are replaced in it, and label-free quantification
-is switched on, because the analysis reads `lfq.tsv`.
+is switched on, because the analysis reads `lfq.tsv`. A TMT `sage_config` is
+the exception: see below.
 
 **The analysis** rolls `lfq.tsv` up to proteins:
 
@@ -246,6 +256,66 @@ is switched on, because the analysis reads `lfq.tsv`.
 - Gene names and descriptions come from the FASTA named in `results.json`,
   when it is still there; otherwise from the UniProt entry names.
 
+### TMT with Sage
+
+A `sage_config` whose `quant.tmt` names a kit makes the method a TMT method
+(D56):
+
+```json
+{
+  "database": {"static_mods": {"^": 304.2071, "K": 304.2071, "C": 57.021464}},
+  "quant": {"tmt": "Tmt16", "tmt_settings": {"level": 3, "sn": false}}
+}
+```
+
+```yaml
+methods:
+  TMT:
+    engine: sage
+    sage_config: lab_tmt_sage.json   # in workflow_dir; the rest as above
+```
+
+- `quant.tmt` is `Tmt6`, `Tmt10`, `Tmt11`, `Tmt16`, `Tmt18`, or
+  `{"User": [reporter masses]}`. Anything else holds the job.
+- Label-free quantification is not switched on for a TMT job. Sage writes
+  `tmt.tsv`, and the job expects it.
+- Name the files `<plex>_F<fraction>.raw`, the TMT rule in
+  [NAMING_CONVENTION.md](NAMING_CONVENTION.md). The files of a plex are its
+  fractions. With another naming rule that has replicates, every sample and
+  replicate is read as its own plex, and the job says so.
+
+**The analysis** joins `tmt.tsv` to `results.sage.tsv` on file and scan:
+
+- PSMs are targets of rank 1 with spectrum, peptide and protein q-values
+  ≤ 1%. A spectrum with more than one such PSM is left out. A reporter
+  intensity of 0 is missing.
+- `tmt_1 … tmt_n` are the kit's channels in order (126, 127N, 127C, …).
+  Custom reporter masses (`user_1 …`) keep Sage's column names.
+- Proteins are grouped by razor peptides, as for `lfq.tsv`.
+- Each protein is summarised per plex and channel as MSstatsTMT's
+  `MedianPolish` does it, with the same code as the MSstatsTMT format
+  above: one PSM per peptide ion and file (the one with the largest total
+  intensity), fractions combined, global median normalisation, Tukey median
+  polish. No model-based imputation.
+- Several plexes are joined by IRS (above). Sage has no `Norm` condition, so
+  MSstatsTMT's reference normalisation is not used.
+
+**Channel names and conditions** come from experiment.yaml's `tmt:` map, the
+one a FragPipe TMT job uses:
+
+```yaml
+tmt:
+  channels: {126: Pool, 127N: DMSO_1_127N, 127C: Drug_1_127C, 131: NA}
+  reference_channel: 126
+```
+
+- The name is the sample. Its condition is the text before the first `_`.
+- A channel called `NA` or `empty` is left out.
+- A name used in several plexes gets the plex in front (`plexB_DMSO_1`).
+- Without a map, the channels are `<plex>_<channel>` with the condition
+  `unassigned`, and the analysis asks for the conditions. Give them on the
+  Analysis tab, in the `tmt:` map, or with an SDRF (above).
+
 **Telemetry.** Sage sends anonymous usage statistics after a search by
 default (its version, index sizes, number of files, run time, OS, memory and
 CPU count). Ionomos switches this off with Sage's own
@@ -256,14 +326,18 @@ Sage loads several files at once (half the CPU count by default); on a PC
 with little memory, set `sage_args: "--batch-size 2"`.
 
 This has been tested only against stand-ins for Sage and ThermoRawFileParser
-(`ionomos fake-sage`, `ionomos fake-rawparser`). The file formats were taken
-from Sage's source (0.14 / 0.15). Check the first real run's console log and
-compare its hits with a FragPipe LFQ search of the same files.
+(`ionomos fake-sage`, `ionomos fake-rawparser`). The file formats, `tmt.tsv`
+included, were taken from Sage's source (0.14 / 0.15 and master), not from a
+real run. Check the first real run's console log and compare its hits with a
+FragPipe search of the same files.
 
 **Not supported yet:**
-- Sage TMT (`tmt.tsv` holds reporter ions per spectrum; there is no protein
-  roll-up for it yet) and Sage's Parquet output (`--parquet`).
-- Instrument QC trending from Sage results.
+- Sage's Parquet output (`--parquet`): one `results.sage.parquet` with the
+  reporter ions as a list column, and a long `lfq.parquet`. These are other
+  layouts than the `.tsv` files, and Sage calls the format unstable. A
+  method with `--parquet` in `sage_args` is held; run Sage without it.
+- Filtering Sage TMT PSMs on reporter signal-to-noise or precursor purity:
+  Sage reports neither.
 - MSstatsTMT's default summary (`method = "msstats"`) imputes censored values
   with a model (MBimpute); Ionomos summarises as `method = "MedianPolish"`
   and leaves missing values missing.

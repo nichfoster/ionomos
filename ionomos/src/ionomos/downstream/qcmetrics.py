@@ -2,6 +2,7 @@
 Per-run instrument QC metrics, read from what the searches already wrote (D45).
 
     found = run_metrics(workdir, runs)      # {run stem: {"metrics": {...}, "sources": {...}, "rt": {...}}}
+    psm, diann, notes = search_tables(workdir)   # the search-quality tables alone, every run (psmqc.py, D55)
 
 runs maps each run's file stem (the manifest's raw names) to (experiment, bioreplicate). Nothing is
 re-searched or re-computed from spectra; every number comes from an engine's own table:
@@ -15,8 +16,18 @@ re-searched or re-computed from spectra; every number comes from an engine's own
     FragPipe psm.tsv         per run (the Spectrum column's run name): PSMs, peptides, proteins, summed
                              Intensity, median precursor mass error (Observed Mass vs Calculated Peptide Mass,
                              isotope-error corrected, ppm), mean missed cleavages and charge, charge-state
-                             mix, RT of the 200 most intense peptides (Retention, seconds -> minutes)
+                             mix, RT of the 200 most intense peptides (Retention, seconds -> minutes);
+                             and, for the report's Search quality tab (psmqc.py), the record's "psm":
+                             quantiles of the mass error, PSMs by missed cleavages, charge and peptide length
             combined_protein.tsv  proteins for a run that is its experiment's only run (<exp> Spectral Count > 0)
+    Sage results.sage.tsv    per run (the filename column), target PSMs of rank 1 at spectrum_q <= 1 %: PSMs,
+                             peptides (peptide_q <= 1 %), proteins (distinct `proteins` entries at protein_q
+                             <= 1 %), summed ms2_intensity, median precursor mass error (expmass vs calcmass,
+                             isotope-error corrected, ppm: computed from the masses, so its sign does not
+                             depend on how a Sage version writes precursor_ppm), mean missed cleavages and
+                             charge, RT of the 200 peptides with the most intense spectra (rt, minutes).
+                             fragment_ppm is an unsigned average, so there is no MS2 mass error from it.
+                             Columns from Sage's source, not a real run
 
 Reading is bounded: tables are streamed row by row, a file bigger than max_mb is skipped with a note, and
 at most MAX_ROWS rows are read from any one file. Every file is read in its own try: a broken table leaves a
@@ -118,6 +129,28 @@ class _Matcher:
             found = hits[0] if len(hits) == 1 else None
         self._cache[name] = found
         return found
+
+
+class _AnyRun:
+    """No manifest to match against: every run a table names, by its file stem (without FragPipe's
+    _calibrated / _uncalibrated suffix)."""
+
+    def __init__(self):
+        self._cache: dict[str, str | None] = {}
+
+    def __call__(self, name: str) -> str | None:
+        if name not in self._cache:
+            stem = run_stem(name) if name else ""
+            self._cache[name] = re.sub(r"_(?:uncalibrated|calibrated)$", "", stem, flags=re.IGNORECASE) or None
+        return self._cache[name]
+
+
+def quantile(xs: list[float], q: float) -> float:
+    """Linear-interpolated quantile of a sorted, non-empty list."""
+    pos = q * (len(xs) - 1)
+    lo = int(pos)
+    hi = min(lo + 1, len(xs) - 1)
+    return xs[lo] + (xs[hi] - xs[lo]) * (pos - lo)
 
 
 def _top_rt(best: dict[str, tuple[float, float]]) -> dict[str, float]:
@@ -237,7 +270,7 @@ def read_psm(path: Path, match, found: dict, max_mb: float) -> None:
         a = acc.get(run)
         if a is None:
             a = acc[run] = {"psms": 0, "peptides": set(), "proteins": set(), "signal": 0.0, "ppm": [], "missed": [],
-                            "charge": {}, "best": {}}
+                            "charge": {}, "best": {}, "mc": {}, "len": {}}
         a["psms"] += 1
         pep = r.get("Peptide") or ""
         a["peptides"].add(pep)
@@ -252,6 +285,10 @@ def read_psm(path: Path, match, found: dict, max_mb: float) -> None:
         mc = num(r.get("Number of Missed Cleavages"))
         if mc is not None:
             a["missed"].append(mc)
+            a["mc"][int(mc)] = a["mc"].get(int(mc), 0) + 1
+        n_aa = num(r.get("Peptide Length")) or len(pep)
+        if n_aa:
+            a["len"][int(n_aa)] = a["len"].get(int(n_aa), 0) + 1
         z = num(r.get("Charge"))
         if z is not None:
             a["charge"][int(z)] = a["charge"].get(int(z), 0) + 1
@@ -280,6 +317,10 @@ def read_psm(path: Path, match, found: dict, max_mb: float) -> None:
         if "Retention" in header:
             rec["rt"] = _top_rt(a["best"])
             s["rt"] = f"{src}: Retention (s -> min), {len(rec['rt'])} most intense peptides"
+        ppm = sorted(a["ppm"])
+        rec["psm"] = {"folder": path.parent.name, "charge": a["charge"], "missed": a["mc"], "length": a["len"],
+                      "ppm_n": len(ppm),
+                      "ppm": [round(quantile(ppm, q), 4) for q in (0.05, 0.25, 0.5, 0.75, 0.95)] if ppm else None}
 
 
 def read_combined_protein(path: Path, runs: dict[str, tuple[str, int]], found: dict, max_mb: float) -> None:
@@ -312,6 +353,79 @@ def read_combined_protein(path: Path, runs: dict[str, tuple[str, int]], found: d
         rec["sources"]["proteins"] = f"{path.name}: {col} > 0"
 
 
+# -------------------------------------------------------------------- Sage --
+
+
+def read_sage_results(path: Path, match, found: dict, max_mb: float) -> None:
+    """Sage's results.sage.tsv, per run (the filename column): target PSMs of rank 1 at spectrum_q <= 1 %."""
+    header, rows = _rows(path, max_mb)
+    for c in ("peptide", "filename", "spectrum_q"):
+        if c not in header:
+            raise MetricsError(f"{path.name} has no {c} column (not Sage's results.sage.tsv)")
+    acc: dict[str, dict] = {}
+    for r in rows:
+        if (r.get("label") or "1").strip() == "-1" or (r.get("rank") or "1").strip() != "1":
+            continue
+        q = num(r.get("spectrum_q"))
+        if q is None or q > 0.01:
+            continue
+        run = match(re.sub(r"(?i)\.gz(ip)?$", "", r.get("filename", "")))
+        if run is None:
+            continue
+        a = acc.get(run)
+        if a is None:
+            a = acc[run] = {"psms": 0, "peptides": set(), "proteins": set(), "signal": 0.0, "ppm": [], "missed": [],
+                            "charge": {}, "best": {}}
+        a["psms"] += 1
+        pep = r.get("peptide") or ""
+        pq, gq = num(r.get("peptide_q")), num(r.get("protein_q"))
+        if pq is None or pq <= 0.01:
+            a["peptides"].add(pep)
+        if r.get("proteins") and (gq is None or gq <= 0.01):
+            a["proteins"].add(r["proteins"])
+        inten = num(r.get("ms2_intensity"))
+        if inten is not None and inten > 0:
+            a["signal"] += inten
+        ppm = ppm_error(num(r.get("expmass")), num(r.get("calcmass")))
+        if ppm is None and "expmass" not in header:  # no masses in the table: Sage's own column
+            ppm = num(r.get("precursor_ppm"))
+            ppm = ppm if ppm is not None and abs(ppm) <= MAX_PPM else None
+        if ppm is not None:
+            a["ppm"].append(ppm)
+        mc = num(r.get("missed_cleavages"))
+        if mc is not None:
+            a["missed"].append(mc)
+        z = num(r.get("charge"))
+        if z is not None:
+            a["charge"][int(z)] = a["charge"].get(int(z), 0) + 1
+        rt = num(r.get("rt"))
+        if rt is not None and pep and (pep not in a["best"] or (inten or 0) > a["best"][pep][0]):
+            a["best"][pep] = (inten or 0.0, rt)
+    src = path.name
+    for run, a in acc.items():
+        rec = _new(found, run)
+        m, s = rec["metrics"], rec["sources"]
+        m["psms"], s["psms"] = a["psms"], f"{src}: target PSMs of rank 1 at spectrum_q ≤ 1 %"
+        m["peptides"], s["peptides"] = len(a["peptides"]), f"{src}: distinct peptide at peptide_q ≤ 1 %"
+        m["proteins"], s["proteins"] = len(a["proteins"]), f"{src}: distinct proteins at protein_q ≤ 1 %"
+        if a["signal"] > 0:
+            m["signal"], s["signal"] = a["signal"], f"{src}: summed ms2_intensity"
+        if a["ppm"]:
+            m["ms1_ppm"] = round(statistics.median(a["ppm"]), 4)
+            s["ms1_ppm"] = (f"{src}: median expmass vs calcmass (ppm, isotope-corrected)" if "expmass" in header
+                            else f"{src}: median precursor_ppm")
+        if a["missed"]:
+            m["missed"], s["missed"] = round(sum(a["missed"]) / len(a["missed"]), 4), f"{src}: missed_cleavages"
+        n = sum(a["charge"].values())
+        if n:
+            m["charge"] = round(sum(z * k for z, k in a["charge"].items()) / n, 4)
+            s["charge"] = f"{src}: charge"
+            rec["charges"] = {str(z): round(100 * k / n, 1) for z, k in sorted(a["charge"].items())}
+        if "rt" in header:
+            rec["rt"] = _top_rt(a["best"])
+            s["rt"] = f"{src}: rt (min), {len(rec['rt'])} peptides with the most intense spectra"
+
+
 # ------------------------------------------------------------------- entry --
 
 
@@ -342,11 +456,38 @@ def run_metrics(workdir: Path, runs: dict[str, tuple[str, int]], max_mb: float =
         attempt(read_psm, p, match, found, max_mb)
     for p in _find(workdir, "combined_protein.tsv", depth=1):
         attempt(read_combined_protein, p, runs, found, max_mb)
+    for p in _find(workdir, "results.sage.tsv"):
+        attempt(read_sage_results, p, match, found, max_mb)
     for rec in found.values():
         for k, v in list(rec["metrics"].items()):
             if isinstance(v, float) and not math.isfinite(v):
                 del rec["metrics"][k]
     if not found and not notes:
-        notes.append("no table with per-run QC numbers (DIA-NN stats.tsv / pg_matrix, FragPipe psm.tsv) "
-                     "named these runs")
+        notes.append("no table with per-run QC numbers (DIA-NN stats.tsv / pg_matrix, FragPipe psm.tsv, Sage "
+                     "results.sage.tsv) named these runs")
     return found, notes
+
+
+def search_tables(workdir: Path, max_mb: float = 4096) -> tuple[dict, dict, list[str]]:
+    """The search-quality tables alone, for every run they name (no manifest needed): ({run: record} from
+    FragPipe's psm.tsv files, {run: record} from DIA-NN's stats.tsv, notes). DIA-NN's big report.tsv is not
+    opened. A table over max_mb is left unread, with a note."""
+    workdir = Path(workdir)
+    psm: dict[str, dict] = {}
+    diann: dict[str, dict] = {}
+    notes: list[str] = []
+    if not workdir.is_dir():
+        return psm, diann, notes
+    match = _AnyRun()
+    for pattern, fn, found in (("psm.tsv", read_psm, psm), ("*stats.tsv", read_diann_stats, diann)):
+        for p in _find(workdir, pattern):
+            rel = p.relative_to(workdir).as_posix()
+            try:
+                size = p.stat().st_size / 1024 ** 2
+                if max_mb and size > max_mb:
+                    notes.append(f"{rel} is {size:,.0f} MB, over the {max_mb:,.0f} MB limit; not read")
+                    continue
+                fn(p, match, found, 0)
+            except (OSError, MetricsError, csv.Error, ValueError) as exc:
+                notes.append(f"{rel}: {exc}")
+    return psm, diann, notes

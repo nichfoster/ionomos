@@ -4,10 +4,10 @@ TMT across plexes: every plex on one scale before the statistics (D48).
     m, info, notes = normalise(m, settings)       # after loading, before fpa.process
     pca = pca_before(processed, settings)         # the report's PCA of the same data before it
 
-A TMT plex (a MaxQuant experiment, an MSstatsTMT mixture, a Proteome Discoverer file, a group of SDRF files
-sharing their channels) measures its channels in the same scans, so channels compare well within a plex. Between
-plexes the same protein jumps with the peptides that happened to be picked for that plex: a PCA of several plexes
-separates them by plex, not by condition. IRS, internal reference scaling (Plubell et al., Mol Cell Proteomics
+A TMT plex (a MaxQuant experiment, an MSstatsTMT mixture, a Proteome Discoverer file, the fraction files of a
+Sage TMT search, a group of SDRF files sharing their channels) measures its channels in the same scans, so
+channels compare well within a plex. Between plexes the same protein jumps with the peptides that happened to be
+picked for that plex: a PCA of several plexes separates them by plex, not by condition. IRS, internal reference scaling (Plubell et al., Mol Cell Proteomics
 2017, 16:873; pwilmart/IRS_normalization), fixes that with a reference channel, the same pooled sample, in every
 plex. In log2, per protein i and plex p:
 
@@ -24,7 +24,8 @@ Choices (settings `irs`, `tmt_reference`; docs/DECISIONS.md D48):
     sum         without a reference, each plex's own mean (plex-sum IRS, as in pwilmart's notebooks without a
                 pool). It is only valid when every plex holds the same mix of conditions, otherwise it would scale
                 real differences away: "auto" uses it only for such balanced designs and otherwise leaves the data
-                alone with a warning (the doctor's TMT_PLEXES_NOT_NORMALISED).
+                alone with a warning (the doctor's TMT_PLEXES_NOT_NORMALISED). Channels without a condition yet
+                (UNASSIGNED) are not a balanced design either.
     order       IRS runs on the loaded values; sample-loading normalisation (analysis.normalize) follows in
                 fpa.process. In log2 both are additive, so this equals Plubell's SL -> IRS order up to a constant
                 per sample, which the median centring removes.
@@ -57,6 +58,7 @@ TMT_ORDERS = {
 }
 REFERENCE_WORDS = re.compile(r"(?i)(?:^|[_\-\s.])(?:pool(?:ed)?|bridge|ref(?:erence)?|norm|irs)(?:$|[_\-\s.\d])")
 IRS_MODES = ("auto", "reference", "sum", "none")
+UNASSIGNED = "unassigned"  # the condition of a TMT channel nothing names yet (engines.load_sage_tmt)
 
 
 def channel_key(label) -> str:
@@ -173,7 +175,10 @@ def normalise(m: QuantMatrix, settings) -> tuple[QuantMatrix, dict | None, list[
     def balanced() -> bool:
         mix = [Counter(renamed.get(m.samples[j], m.condition[m.samples[j]]) for j in ix
                        if m.samples[j] not in excluded and m.samples[j] not in ref_set) for ix in groups.values()]
-        return all(c == mix[0] for c in mix) and bool(mix[0])
+        return all(c == mix[0] for c in mix) and bool(mix[0]) and not unassigned()
+
+    def unassigned() -> bool:  # channels without a condition yet: nothing says the plexes hold the same mix
+        return any(renamed.get(s, m.condition[s]) == UNASSIGNED for s in plex if s not in excluded)
 
     use = None
     if mode in ("auto", "reference") and refs and ref_plexes == set(groups):
@@ -184,6 +189,9 @@ def normalise(m: QuantMatrix, settings) -> tuple[QuantMatrix, dict | None, list[
         if mode == "reference" or wanted:
             why = (f"no reference channel matched {', '.join(wanted)}" if wanted and not refs else
                    "plexes without a reference channel: " + ", ".join(sorted(set(groups) - ref_plexes)))
+        elif unassigned():
+            why = ("no reference (bridge) channel was found, and some channels have no condition yet, so it can't "
+                   "be told whether each plex's own mean could stand in for one")
         else:
             why = ("no reference (bridge) channel was found, and the plexes hold different mixes of conditions, so "
                    "each plex's own mean can't stand in for one")

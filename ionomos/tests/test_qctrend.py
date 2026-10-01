@@ -104,6 +104,51 @@ def test_fragpipe_psm_tsv(tmp_path):
     assert all(10 <= rt <= 90 for rt in found["HeLa_1"]["rt"].values())  # seconds -> minutes
 
 
+SAGE_HEAD = ["peptide", "proteins", "filename", "scannr", "rank", "label", "expmass", "calcmass", "charge",
+             "missed_cleavages", "precursor_ppm", "rt", "spectrum_q", "peptide_q", "protein_q", "ms2_intensity"]
+
+
+def _sage_row(pep, prot, file, ppm, rt, inten, charge=2, missed=0, iso=0, rank=1, label=1, sq=0.001, pq=0.001,
+              gq=0.001, calc=1000.0):
+    return [pep, prot, file, "scan=1", rank, label, calc * (1 + ppm * 1e-6) + iso * qcmetrics.ISOTOPE, calc, charge,
+            missed, abs(ppm), rt, sq, pq, gq, inten]
+
+
+def test_sage_results_tsv(tmp_path):
+    """Sage's PSM table (columns from its source): targets of rank 1 at 1 % per file, a signed mass error from the
+    masses, RT in minutes as Sage writes it."""
+    f = "HeLa_1.mzML"
+    rows = [
+        _sage_row("AAAK", "sp|P1|ONE_HUMAN", f, 2.0, 20.5, 100),
+        _sage_row("AAAK", "sp|P1|ONE_HUMAN", f, 4.0, 20.7, 300, charge=3, iso=1),       # on the first isotope peak
+        _sage_row("CCCK", "sp|P2|TWO_HUMAN", f, -1.0, 30.0, 50, missed=1, calc=1500.0),
+        _sage_row("DDDK", "sp|P3|THREE_HUMAN", f, 2.0, 40.0, 10, pq=0.5, gq=0.5),       # a PSM, not a peptide / protein
+        _sage_row("DECOYK", "rev_sp|P4|FOUR_HUMAN", f, 30.0, 1.0, 1e9, label=-1),
+        _sage_row("RANKK", "sp|P5|FIVE_HUMAN", f, 30.0, 1.0, 1e9, rank=2),
+        _sage_row("HIGHQK", "sp|P5|FIVE_HUMAN", f, 30.0, 1.0, 1e9, sq=0.2),
+        _sage_row("AAAK", "sp|P1|ONE_HUMAN", "HeLa_2.mzML.gz", -3.0, 21.0, 70),
+        _sage_row("AAAK", "sp|P1|ONE_HUMAN", "Other.mzML", 9.0, 5.0, 1),                # not a run that was asked for
+    ]
+    wd = tmp_path / "sage"
+    _write(wd / "results.sage.tsv", SAGE_HEAD, rows)
+    found, notes = qcmetrics.run_metrics(wd, {"HeLa_1": ("HeLa", 1), "HeLa_2": ("HeLa", 2)})
+    assert notes == [] and set(found) == {"HeLa_1", "HeLa_2"}
+    m = found["HeLa_1"]["metrics"]
+    assert (m["psms"], m["peptides"], m["proteins"], m["signal"]) == (4, 2, 2, 460)
+    assert m["ms1_ppm"] == pytest.approx(2.0, abs=0.01) and m["missed"] == 0.25 and m["charge"] == 2.25
+    assert found["HeLa_1"]["charges"] == {"2": 75.0, "3": 25.0}
+    assert found["HeLa_1"]["rt"] == {"AAAK": 20.7, "CCCK": 30.0, "DDDK": 40.0}          # of its most intense spectrum
+    assert "expmass vs calcmass" in found["HeLa_1"]["sources"]["ms1_ppm"] and "ms2_ppm" not in m
+    assert found["HeLa_2"]["metrics"]["ms1_ppm"] == pytest.approx(-3.0, abs=0.01)       # signed
+    # without the masses, Sage's own precursor_ppm column
+    keep = [j for j, h in enumerate(SAGE_HEAD) if h not in ("expmass", "calcmass")]
+    _write(wd / "results.sage.tsv", [SAGE_HEAD[j] for j in keep], [[r[j] for j in keep] for r in rows])
+    found, _ = qcmetrics.run_metrics(wd, {"HeLa_1": ("HeLa", 1)})
+    assert found["HeLa_1"]["metrics"]["ms1_ppm"] == 2.0 and "precursor_ppm" in found["HeLa_1"]["sources"]["ms1_ppm"]
+    _write(wd / "results.sage.tsv", ["peptide", "x"], [["A", 1]])
+    assert any("not Sage's results.sage.tsv" in n for n in qcmetrics.run_metrics(wd, {"HeLa_1": ("HeLa", 1)})[1])
+
+
 def test_combined_protein_for_a_single_run_experiment(tmp_path):
     wd = tmp_path / "fragpipe"
     testbed.fake_psm(wd / "HeLa_1" / "psm.tsv", [r"C:\x\HeLa_1.raw"])

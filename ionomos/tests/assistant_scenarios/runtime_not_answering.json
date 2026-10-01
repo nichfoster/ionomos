@@ -1,0 +1,24 @@
+{
+  "id": "runtime_not_answering",
+  "about": "The runtime is not running: Ionomos's own text, and it says why.",
+  "state": "fragpipe",
+  "question": "Why did my search fail?",
+  "experiment": "1",
+  "model": [
+    {
+      "error": "no answer from the model runtime: connection refused"
+    }
+  ],
+  "rubric": {
+    "refusal": true,
+    "must_mention": [
+      "not answering",
+      "ran out of memory"
+    ]
+  },
+  "harness": {
+    "outcome": "unavailable",
+    "reason": "connection refused",
+    "requests": 1
+  }
+}

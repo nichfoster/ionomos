@@ -143,6 +143,16 @@ small anonymised real experiment as a test fixture and public example data
 
 - Log rotation, disk-space check before accepting a job (C: has 99 GB free;
   refuse if < 2× raw size), email/Slack/Teams notify on done/failed.
+  → 2026-10-01 (D58): done.
+  - notifications: a JSON webhook, Teams, Slack and SMTP email on done /
+    failed / held, off by default, under `notify:` in `config.yaml`;
+    `ionomos notify-test`. Not checked against a real Teams / Slack / SMTP
+    server yet. Open: a tab in the app; per-user recipients (each person
+    told about their own jobs)
+  - log rotation: was there (5 MB, 5 files); now also safe when Windows
+    refuses the rename
+  - disk space: was there since 0.3.0 as a hold (`fragpipe.min_free_gb` +
+    the raws), not a refusal: the job waits and starts when space is back
 - **Data presentation**: volcano plot + summary at the end of each run —
   either an HTML report (plotly, no server) or a small Shiny/Streamlit app.
   FragPipe Analyst ships R code that can be reused for the stats.
@@ -158,7 +168,9 @@ small anonymised real experiment as a test fixture and public example data
   Still open:
   - Tune the D35 warning thresholds on real lab experiments.
   - PSM-level technical QC from `psm.tsv`: mass error, missed cleavages,
-    charge states.
+    charge states. → 2026-10-01, done (D55): the Search quality QC tab,
+    `results/psm_qc.tsv`, two warnings with wide limits. Not yet checked on
+    real FragPipe output.
   - Run-order drift, once acquisition times are recorded.
   - Protein complexes (CORUM, whose licence needs checking).
   - For isoDTB: → 2026-09-30, done as Phase 5C #3 (D52): liganded calls with
@@ -243,7 +255,7 @@ installed.
 | 2 ✅ | MaxQuant | import ✅ `proteinGroups.txt`; run ✅ (`engine: maxquant`, D50, #54; tested against a stand-in MaxQuant only) | Free incl. commercial use; not redistributable. Run mode patches an `mqpar.xml` made by the installed version (`--create`), never a shipped template. |
 | 3 ✅ | MSstats long format + SDRF design | import ✅ label-free MSstats, MSstatsTMT (D48) and an SDRF as the design (D47), #60 | One importer covers quantms, Skyline and anything with an MSstats converter; protein summary by Tukey median polish (MSstats' default). |
 | 4 ✅ | Spectronaut | import ✅ pivot + long reports (the `.rs` schema still to ship) | Common in cores; ship an Ionomos report schema (`.rs`), read `PG.Quantity` pivots or the long BGS report. |
-| 5 ✅ | Sage | import ✅ `lfq.tsv`; run ✅ (`engine: sage`, D51; tested against stand-ins for Sage and ThermoRawFileParser only) | MIT and cross-platform. Not bundled: the lab downloads Sage and ThermoRawFileParser (.raw → mzML, Thermo's RawFileReader licence). Proteins are rolled up from `lfq.tsv` by razor grouping and median polish. Still to do: Sage TMT (`tmt.tsv`), Parquet output. |
+| 5 ✅ | Sage | import ✅ `lfq.tsv`, `tmt.tsv` (D56); run ✅ (`engine: sage`, D51; TMT with the lab's `sage_config`, D56; tested against stand-ins for Sage and ThermoRawFileParser only) | MIT and cross-platform. Not bundled: the lab downloads Sage and ThermoRawFileParser (.raw → mzML, Thermo's RawFileReader licence). Proteins are rolled up from `lfq.tsv` by razor grouping and median polish; `tmt.tsv` as MSstatsTMT input is, plexes joined by IRS. QC trending reads `results.sage.tsv`. Not built: Parquet output (`--parquet` has other layouts, and Sage calls it unstable). |
 | 6 ✅ | AlphaDIA | import ✅ `pg.matrix.tsv` | Apache-2.0, pip-installable; column names changed between 1.x and 2.x. |
 | 7 ✅ | Proteome Discoverer | import ✅ (column format from the docs, not yet a real export) | Protein-table text export only; no supported headless mode. |
 
@@ -255,9 +267,10 @@ not a gap.
 Found while building 5A/5B (2026-09-30), to fix:
 - ~~`…_DIA_CV-35.raw` is read as replicate 35, but CV-35 is a FAIMS
   compensation voltage.~~ Fixed 2026-09-30 (D41).
-- `naming.methods.<X>: {like: DIA}` borrows DIA's name rules only. The
+- ~~`naming.methods.<X>: {like: DIA}` borrows DIA's name rules only. The
   downstream analysis, TMT annotation and control detection still branch on
-  the method's key. Decide whether `like:` should carry through to them.
+  the method's key. Decide whether `like:` should carry through to them.~~
+  Fixed 2026-10-01 (D54): it does.
 - The demo's clean simulated data sometimes flags one sample as "warn". That
   is borderline: check the scorecard floors on real data.
 
@@ -289,6 +302,13 @@ real data:
   with a FragPipe LFQ search of the same files. Check the default tolerances
   (±20 ppm) suit the instrument, and whether the median-polish roll-up or a
   MaxLFQ would agree better with FragPipe's `combined_protein.tsv`.
+- Sage TMT (D56) is built from Sage's source, not a real `tmt.tsv`. On a
+  real TMT search check: that `scannr` in `tmt.tsv` matches
+  `results.sage.tsv` for MS3 quantification; that `tmt_1 … tmt_n` are in
+  kit order; how many spectra a chimeric search drops (more than one
+  passing PSM); and the proteins against FragPipe's TMT-Integrator on the
+  same files. Decide whether PSMs should also be filtered on reporter
+  signal or purity, which Sage does not report.
 
 ### 5C — More analysis (value × feasibility; all possible in pure Python)
 
@@ -442,6 +462,17 @@ that scorecard, not leaderboards.
   validator, audit log, not-installed state, "Ask about this" on attention items,
   `ionomos ask`, 30+ scenarios. *Exit:* ≥ 90% pass on must / must-not, 0 injection
   failures, median time to first token < 20 s on the idle PC.
+  - **Built 2026-10-01 (D57, [ASSISTANT.md](ASSISTANT.md)), against a scripted fake
+    model only:** the client (localhost only), the seven read-only tools, the citation
+    validator with one correction round, the fallback to the doctor text and the help,
+    the audit log, the not-set-up state, `ionomos ask` (`--experiment`, `--item`,
+    `--json`), an `assistant` row in `ionomos check`, help entries, and 53 scenarios
+    replayed in CI.
+  - **Remains (the box stays open):** nothing has run against a real model or runtime,
+    so none of the exit criteria is measured. Needs 6.0 first (a model to try). Then:
+    a runner that scores a real model over the corpus on the PC; the "Ask about this"
+    button on pop-ups and the attention list (the backend, `ask(item_id=…)`, exists);
+    on-demand loading, thread caps and priority while a search runs.
 - [ ] **6.2 Confirmed actions (2–3 weeks).** The proposal tools and the native
   diff-and-confirm dialog. *Exit:* no path runs an action without a click (tested), and
   3 lab members finish the tasks unaided.
@@ -499,10 +530,19 @@ Collected from the other docs; resolve before/during Phase 1.
       dependency-free either way.
 - [ ] Time courses (D53): does the lab run them, and are 3 time points the right minimum? Should the trend use the
       order of the time points (built) or the hours?
+- [ ] Search quality (D55): open a real `psm.tsv` from the PC and confirm the column names (`Spectrum`,
+      `Observed Mass`, `Calculated Peptide Mass`, `Number of Missed Cleavages`, `Charge`, `Peptide Length`). What
+      mass error and missed-cleavage share does the lab call a problem (built: 10 ppm and 50 %, both wide)? Should
+      a run unlike the others in its experiment be flagged too, and how are TMT fractions to be judged? Is the
+      isoDTB search an offset search, so that its mass errors need another reading?
 - [ ] Phase 5: which pilot labs can we reach? Does this lab run titrations or phospho? (Orders 5C.)
 - [ ] Phase 6: is the PC's RAM in all 6 memory channels (speed of a local model)? Is a GPU present? May the assistant
       ever use a cloud model (institutional data policy), or strictly local?
-- [ ] Phase 6: who is the "ask the maintainer" contact the assistant falls back to?
+- [ ] Phase 6: who is the "ask the maintainer" contact the assistant falls back to? (It goes in
+      `assistant.maintainer`; unset, the text says "the person who looks after Ionomos in your lab".)
+- [ ] Phase 6 (D57): confirm three choices made while building 6.1: `[job:ID]` as a fifth citation form; an
+      answer is shown only if *every paragraph* has a valid citation; a non-local `base_url` is refused even
+      with `assistant.allow_cloud: true` until 6.4's banner and preview exist.
 - [ ] Phase 5: publish on PyPI as `ionomos` (needs a PyPI account / trusted publisher set up by the maintainer).
 - [x] Agent auto-merge: removed 2026-09-27; a person merges (D31).
 - [x] CI Python versions: 3.11 (floor), 3.12 (exe build), 3.14 (the PC) since 2026-09-27.

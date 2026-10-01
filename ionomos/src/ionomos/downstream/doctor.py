@@ -61,6 +61,7 @@ class Findings:
     dose_problems: list = field(default_factory=list)     # [(severity, message)] from doseresponse.plan_series
     time_problems: list = field(default_factory=list)     # [(severity, message)] from timecourse.plan_series
     cys_problems: list = field(default_factory=list)      # [(severity, message)] from cys.run / the site annotation
+    psm_problems: list = field(default_factory=list)      # [(issue code, message)] from psmqc.run
     model: object = None                # analysis.Model: the design used, or why an asked-for one wasn't
 
 # the tables each method needs, and why they might be missing
@@ -86,8 +87,9 @@ EXPECTED = {
     "MaxQuant": ("combined/txt/proteinGroups.txt",
                  ["MaxQuant stopped before the protein step (see combined/proc)",
                   "Only the combined/txt folder was copied without proteinGroups.txt"]),
-    "Sage": ("Sage's lfq.tsv",
-             ["Label-free quantification was off in the Sage settings (quant.lfq), so only results.sage.tsv exists",
+    "Sage": ("Sage's lfq.tsv (label-free) or tmt.tsv (TMT)",
+             ["Quantification was off in the Sage settings (quant.lfq, quant.tmt), so only results.sage.tsv exists",
+              "Sage was run with --parquet, which Ionomos doesn't read: run it without",
               "Sage stopped before quantification (see its console output)"]),
     "Spectronaut": ("a Spectronaut report (PG.Quantity columns, or the long BGS report)",
                     ["The report was exported with a schema that has no PG.Quantity",
@@ -144,6 +146,28 @@ def check(f: Findings) -> list[Issue]:
                   ["Re-run analysis once; if it fails again, use Report a problem so it can be fixed",
                    "The rest of the analysis still ran; the report says what's missing"],
                   {"stage": stage}))
+
+    # ---- search quality per run (psmqc.py): said even when there is nothing to analyse, as it may be why
+    for code, msg in f.psm_problems:
+        if code == "PSM_MASS_ERROR":
+            add(Issue("PSM_MASS_ERROR", "warning", "Precursor masses are off in some runs", msg,
+                      ["The mass spectrometer's calibration has drifted (the lock mass was off, or it is due a "
+                       "calibration)",
+                       "The search allows a mass offset or a modification that isn't set, so the errors are not "
+                       "instrument errors"],
+                      ["Look at the Search quality tab under Quality control: is it every run, or the runs of one day?",
+                       "Tell whoever looks after the instrument; calibrate before the next runs",
+                       "The search corrects a steady offset, so the results usually stand; a run with far fewer "
+                       "PSMs than the others is worth re-acquiring"], {"message": msg}))
+        elif code == "PSM_MISSED_CLEAVAGES":
+            add(Issue("PSM_MISSED_CLEAVAGES", "warning", "Many missed cleavages in some runs", msg,
+                      ["The digestion was incomplete (too little trypsin, too short, the wrong pH, old enzyme)",
+                       "The enzyme set in the workflow is not the one used, or the peptides were not made with a "
+                       "protease"],
+                      ["Look at the Search quality tab under Quality control: is it one sample, or all of them?",
+                       "Compare a flagged sample's quantities with its replicates before trusting them; an "
+                       "incompletely digested sample measures different peptides",
+                       "Check the digestion for the next preparation"], {"message": msg}))
 
     # ---- nothing to analyse
     if m is None and f.read_problem:

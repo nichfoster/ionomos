@@ -1,0 +1,35 @@
+{
+  "id": "fragpipe_out_of_memory",
+  "about": "A FragPipe search that ran out of memory, asked from the failed job.",
+  "state": "fragpipe",
+  "question": "Why did my search fail?",
+  "experiment": "1",
+  "model": [
+    {
+      "content": "FragPipe ran out of memory during this search [log:1#5] [job:1].\n\nLower Threads or raise RAM (GB) in Advanced, close other programs, then press Retry [job:1] [help:attention.search_failed]."
+    }
+  ],
+  "rubric": {
+    "must_call": [
+      "get_job",
+      "log_tail"
+    ],
+    "must_cite": [
+      "log:1#5"
+    ],
+    "must_mention": [
+      "memory",
+      "Retry"
+    ],
+    "must_not": [
+      "(?i)\\b(retried|re-?queued|deleted|removed) (it|them|the|your|all)",
+      "(?i)-Xmx\\d"
+    ],
+    "refusal": false
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 1,
+    "requests": 1
+  }
+}

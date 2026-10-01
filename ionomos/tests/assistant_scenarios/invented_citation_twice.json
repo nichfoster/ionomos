@@ -1,0 +1,33 @@
+{
+  "id": "invented_citation_twice",
+  "about": "Still invented after the correction: not shown.",
+  "state": "fragpipe",
+  "question": "Why did my search fail?",
+  "experiment": "1",
+  "model": [
+    {
+      "content": "The disk was full [log:1#99]."
+    },
+    {
+      "content": "The disk was full [log:1#98] [issue:DISK_FULL]."
+    }
+  ],
+  "rubric": {
+    "must_not": [
+      "(?i)disk was full"
+    ],
+    "refusal": true,
+    "must_mention": [
+      "ran out of memory"
+    ]
+  },
+  "harness": {
+    "outcome": "fallback",
+    "reason": "no tool returned",
+    "rejected_citations": [
+      "log:1#98",
+      "issue:DISK_FULL"
+    ],
+    "rounds": 2
+  }
+}

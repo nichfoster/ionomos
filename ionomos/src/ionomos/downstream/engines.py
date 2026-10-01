@@ -26,7 +26,9 @@ results from any supported engine can be analysed with `ionomos analyze <folder>
                         (MedianPolish), one sample per mixture and channel, plexes on the Norm channels' scale
     Proteome Discoverer a Proteins table exported as text (Abundance / Abundances (Normalized) columns)
     Sage                lfq.tsv (peptide ions x files): proteins by Occam's razor grouping and Tukey median
-                        polish; peptide and protein q-values at 1%
+                        polish; peptide and protein q-values at 1%. TMT: tmt.tsv (reporter ions per spectrum)
+                        joined to results.sage.tsv, summarised as the MSstatsTMT format is, one sample per plex
+                        and channel
     any table           the fallback (anytable.py, D33)
 
 Ionomos never runs or ships these engines here; it only reads what they wrote. Nothing is written into the
@@ -531,8 +533,6 @@ def msstats_tmt_summary(cols: list[str], rows: list[list[str]]) -> dict:
     Returns {"abundance": {protein: {(run, channel): log2}}, "before": same before reference norm,
              "annotation": {(run, channel): (mixture, techrep, condition, bioreplicate)}, "runs_of": {run: [stems]},
              "channels": [...], "notes": [...], "normalised": bool}."""
-    import statistics
-
     ix = {c: j for j, c in enumerate(cols)}
     charge = "Charge" if "Charge" in ix else "PrecursorCharge" if "PrecursorCharge" in ix else None
 
@@ -558,6 +558,16 @@ def msstats_tmt_summary(cols: list[str], rows: list[list[str]]) -> dict:
         if v is not None and v > 0:
             cell = psms[(run, prot, feat)][psm]
             cell[ch] = max(v, cell.get(ch, 0.0))
+    return _tmt_summarise(psms, annot, run_info, channels)
+
+
+def _tmt_summarise(psms: dict, annot: dict, run_info: dict, channels: list[str], reference_norm: bool = True) -> dict:
+    """msstats_tmt_summary() from its parsed rows on, shared with Sage's tmt.tsv (load_sage_tmt):
+    psms {(run, protein, feature): {psm: {channel: linear}}}, annot {('<mixture>_<techrep>', channel): (mixture,
+    techrep, condition, bioreplicate)}, run_info {run: (mixture, techrep, fraction)}. reference_norm False leaves
+    the runs as the median polish made them ("before"), for plexes that plex.py puts on one scale (IRS)."""
+    import statistics
+
     notes: list[str] = []
     # one PSM per feature and run: the one with the largest total intensity
     feat_run: dict[tuple, dict[str, float]] = {}
@@ -631,7 +641,7 @@ def msstats_tmt_summary(cols: list[str], rows: list[list[str]]) -> dict:
     # reference normalisation between runs on the Norm channels
     is_norm = {k: (a[2].lower() == "norm") for k, a in annot.items()}
     after: dict[str, dict[tuple, float]] = {}
-    normalised = len(by_tech) > 1 and any(is_norm.values())
+    normalised = reference_norm and len(by_tech) > 1 and any(is_norm.values())
     for p, ab in before.items():
         if not normalised:
             after[p] = dict(ab)
@@ -647,7 +657,7 @@ def msstats_tmt_summary(cols: list[str], rows: list[list[str]]) -> dict:
             after[p] = {(tr, c): v + med - nab[tr] for (tr, c), v in ab.items() if tr in nab}
         else:
             after[p] = dict(ab)
-    if len(by_tech) > 1 and not any(is_norm.values()):
+    if reference_norm and len(by_tech) > 1 and not any(is_norm.values()):
         notes.append("no 'Norm' channel (Condition Norm) in the MSstatsTMT table, so MSstatsTMT's normalisation "
                      "between runs could not be applied")
     runs_of: dict[str, list[str]] = defaultdict(list)
@@ -871,6 +881,15 @@ def razor_groups(pep_prots: dict[str, tuple[str, ...]]) -> dict[str, tuple[str, 
     return {pep: min({group_of[p] for p in prots}, key=lambda g: (-size[g], g)) for pep, prots in pep_prots.items()}
 
 
+def _sage_group(g: tuple[str, ...], names: dict[str, tuple[str, str]]) -> tuple[str, str, str]:
+    """A protein group -> (id 'P1;P2', label, description): the gene name and description from the FASTA, else
+    the UniProt entry name."""
+    parsed = [_UNIPROT.match(p) for p in g]
+    acc = [m_.group(1) if m_ else p for m_, p in zip(parsed, g, strict=True)]
+    gene, desc = names.get(acc[0], ("", ""))
+    return ";".join(acc), gene or (parsed[0].group(2).split("_")[0] if parsed[0] else g[0]), desc
+
+
 def load_sage(path: Path, sample_map: dict[str, tuple[str, int]] | None = None) -> QuantMatrix:
     """Sage's lfq.tsv (a row per peptide ion, a column per file) -> protein matrix.
 
@@ -960,13 +979,9 @@ def load_sage(path: Path, sample_map: dict[str, tuple[str, int]] | None = None) 
     names = _fasta_names(fasta) if str(fasta) not in ("", ".") else {}
     feats, values = [], []
     for g in sorted(by_group):
-        parsed = [_UNIPROT.match(p) for p in g]
-        acc = [m_.group(1) if m_ else p for m_, p in zip(parsed, g, strict=True)]
-        first = parsed[0]
-        gene, desc = names.get(acc[0], ("", ""))
-        label = gene or (first.group(2).split("_")[0] if first else g[0])
+        fid, label, desc = _sage_group(g, names)
         mat = [[_log2(v) for v in vals] for _pep, vals in by_group[g]]
-        feats.append(Feature(id=";".join(acc), label=label, description=desc,
+        feats.append(Feature(id=fid, label=label, description=desc,
                              peptides=len({pep for pep, _v in by_group[g]})))
         values.append(median_polish(mat))
     version = str(settings.get("version") or "")
@@ -1001,12 +1016,296 @@ def load_sage(path: Path, sample_map: dict[str, tuple[str, int]] | None = None) 
                        replicate=reps, columns=first_file, meta=meta)
 
 
+# ---------------------------------------------------------------- Sage TMT --
+
+_SAGE_TMT_META = ("filename", "scannr", "ion_injection_time")
+_SAGE_KITS = (6, 10, 11, 16, 18)  # Sage's Tmt6 / Tmt10 / Tmt11 / Tmt16 / Tmt18: tmt_1 … tmt_n in kit order
+_UNUSED_CHANNEL = ("", "na", "n/a", "empty", "none", "blank", "unused")
+
+
+def _sage_tmt_score(path: Path) -> float:
+    h = _header(path)
+    return 0.96 if tuple(h[:3]) == _SAGE_TMT_META and len(h) > 3 else 0.0
+
+
+def _sage_channels(cols: list[str]) -> list[str]:
+    """tmt.tsv's reporter columns -> kit labels (126, 127N, …). A custom list of reporter masses (Sage's
+    `User`, columns user_1 …) keeps its column names: there is no kit to name them from."""
+    from ionomos.downstream.plex import channel_from_index
+
+    idx = [re.fullmatch(r"tmt_(\d+)", c) for c in cols]
+    if all(idx) and len(cols) in _SAGE_KITS:
+        return [channel_from_index(int(x.group(1)) - 1, len(cols)) for x in idx]
+    return list(cols)
+
+
+def _sage_psms(path: Path, decoy: str) -> tuple[dict[tuple[str, str], tuple[str, str, tuple[str, ...]]], dict]:
+    """results.sage.tsv -> {(filename, scannr): (peptide, charge, target proteins)} for the PSMs that count:
+    targets (label 1) of rank 1 with spectrum, peptide and protein q-values <= 1%. A spectrum left with more
+    than one such PSM (a chimeric search) is left out: its reporter ions belong to both peptides. Read line by
+    line. Returns the PSMs and how many rows each filter left out."""
+    out: dict[tuple[str, str], tuple[str, str, tuple[str, ...]]] = {}
+    n = {"rows": 0, "decoy": 0, "rank": 0, "q": 0, "chimeric": 0}
+    twice: set[tuple[str, str]] = set()
+    with open(path, encoding="utf-8-sig", errors="replace", newline="") as fh:
+        rd = csv.reader(fh, delimiter="\t")
+        head = next(rd, [])
+        ix = {h: j for j, h in enumerate(head)}
+        need = ("peptide", "proteins", "filename", "scannr")
+        if not all(c in ix for c in need):
+            raise anytable.TableError(f"{path.name}: not Sage's PSM table (needs {', '.join(need)})")
+        pep, prot, file, scan = (ix[c] for c in need)
+        label, rank, charge = ix.get("label"), ix.get("rank"), ix.get("charge")
+        qcols = [ix[c] for c in ("spectrum_q", "peptide_q", "protein_q") if c in ix]
+        width = max(j for j in (pep, prot, file, scan, label, rank, charge, *qcols) if j is not None)
+        for r in rd:
+            if len(r) <= width:
+                continue
+            n["rows"] += 1
+            prots = tuple(p for p in r[prot].split(";") if p and not p.startswith(decoy))
+            if (label is not None and r[label].strip() == "-1") or not prots:
+                n["decoy"] += 1
+                continue
+            if rank is not None and r[rank].strip() not in ("", "1"):
+                n["rank"] += 1
+                continue
+            qs = [num(r[j]) for j in qcols]
+            if any(q is None or q > LONG_FDR for q in qs):
+                n["q"] += 1
+                continue
+            key = (r[file].strip(), r[scan].strip())
+            if key in out:
+                twice.add(key)
+                continue
+            out[key] = (r[pep].strip(), r[charge].strip() if charge is not None else "", prots)
+    for key in twice:
+        del out[key]
+    n["chimeric"] = len(twice)
+    return out, n
+
+
+def _sage_reporters(path: Path, wanted, n_channels: int) -> dict[tuple[str, str], list[float]]:
+    """tmt.tsv -> {(filename, scannr): reporter intensities} for the wanted spectra only (the file has a row
+    for every MS2 / MS3 spectrum, identified or not). Two rows for one spectrum (two MS3 scans of one MS2):
+    the one with the larger total."""
+    out: dict[tuple[str, str], list[float]] = {}
+    with open(path, encoding="utf-8-sig", errors="replace", newline="") as fh:
+        rd = csv.reader(fh, delimiter="\t")
+        next(rd, None)
+        for r in rd:
+            if len(r) < 3 + n_channels:
+                continue
+            key = (r[0].strip(), r[1].strip())
+            if key not in wanted:
+                continue
+            vals = [max(num(x) or 0.0, 0.0) for x in r[3:3 + n_channels]]
+            if key not in out or sum(vals) > sum(out[key]):
+                out[key] = vals
+    return out
+
+
+def _tmt_plex_name(stem: str) -> str:
+    """A file's plex when no manifest names it: the lab's TMT file rule, <plex>[_TMT][_F<fraction>] (naming.py)."""
+    from ionomos.naming import NamingError, parse_raw_name
+
+    try:
+        return parse_raw_name(stem + ".raw", "TMT").sample
+    except NamingError:
+        return stem
+
+
+def _tmt_channel_names(tmt: dict | None, plex: str, labels: list[str]) -> dict[str, str]:
+    """experiment.yaml's tmt: map for one plex -> {kit label: sample name} (`channels:` for every plex, or
+    `plexes: {<plex>: {channels: ...}}`)."""
+    from ionomos.downstream.plex import same_channel
+
+    tmt = tmt if isinstance(tmt, dict) else {}
+    spec = (tmt.get("plexes") or {}).get(plex) if tmt.get("plexes") else tmt
+    chans = spec.get("channels") if isinstance(spec, dict) else None
+    out: dict[str, str] = {}
+    for k, v in (chans.items() if isinstance(chans, dict) else ()):
+        hit = next((c for c in labels if same_channel(str(k), c) or str(k).strip().lower() == c.lower()), None)
+        if hit is not None:
+            out[hit] = "" if v is None else str(v).strip()
+    return out
+
+
+def load_sage_tmt(path: Path, sample_map: dict[str, tuple[str, int]] | None = None,
+                  tmt: dict | None = None) -> QuantMatrix:
+    """Sage's tmt.tsv (reporter ion intensities per spectrum) with results.sage.tsv beside it (the PSMs) ->
+    protein matrix, one sample per plex and channel.
+
+      PSMs       _sage_psms(): targets of rank 1 at spectrum, peptide and protein q <= 1%, joined to their
+                 reporter ions on (filename, scannr); intensities of 0 (no reporter peak) are missing
+      channels   tmt_1 … tmt_n are the kit's channels in order (plex.TMT_ORDERS)
+      plexes     sample_map (file stem -> (experiment, replicate), the watcher's manifest): a file's experiment
+                 is its plex; without it, _tmt_plex_name(). The files of a plex are its fractions
+      proteins   razor_groups(), named as load_sage() names them
+      quantity   MSstatsTMT's MedianPolish summary (_tmt_summarise): one PSM per peptide ion and file, fractions
+                 combined, global median normalisation, Tukey median polish per plex. Between plexes nothing is
+                 done here: plex.py's IRS does that, on the reference channel (D48)
+      names      tmt: the experiment.yaml channel map; a channel it names is that sample, with the condition
+                 before the first '_' (the lab's rule for FragPipe TMT), and one it calls NA / empty is left
+                 out. A channel nothing names is '<plex>_<channel>' with condition 'unassigned'"""
+    from ionomos.downstream.plex import UNASSIGNED
+    from ionomos.downstream.quant import condition_of, match_run_stem
+
+    path = Path(path)
+    header = _header(path)
+    if tuple(header[:3]) != _SAGE_TMT_META or len(header) < 4:
+        raise anytable.TableError(f"{path.name}: not Sage's tmt.tsv (needs filename, scannr, ion_injection_time "
+                                  "and a column per reporter channel)")
+    labels = _sage_channels(header[3:])
+    results = path.parent / "results.sage.tsv"
+    if not results.is_file():
+        raise anytable.TableError(f"{path.name} holds reporter ions per spectrum; Sage's results.sage.tsv, which "
+                                  "says which peptide each spectrum is, must be in the same folder")
+    settings = _sage_settings(path.parent)
+    decoy = str((settings.get("database") or {}).get("decoy_tag") or "rev_")
+    psm, dropped = _sage_psms(results, decoy)
+    reporters = _sage_reporters(path, psm, len(labels))
+    quantified = {k: v for k, v in reporters.items() if any(v)}
+    if not quantified:
+        raise anytable.TableError(f"{path.name}: no PSM of {results.name} passes q ≤ {LONG_FDR:g} with reporter "
+                                  "ions in Sage's tmt.tsv")
+
+    # files -> plexes (the files of a plex are its fractions)
+    sample_map = sample_map or {}
+    order = {k: j for j, k in enumerate(sample_map)}
+    by_rep = len({rep for _e, rep in sample_map.values()}) > 1  # a naming rule with replicates: each is a plex
+    stems = {f: run_stem(re.sub(r"(?i)\.gz(ip)?$", "", f)) for f in {k[0] for k in quantified}}
+    key_of = {f: match_run_stem(stems[f], sample_map) if sample_map else None for f in stems}
+    files = sorted(stems, key=lambda f: (order.get(key_of[f], len(order)), stems[f]))
+    plex_of: dict[str, str] = {}
+    unmatched: list[str] = []
+    for f in files:
+        if key_of[f] is not None:
+            exp, rep = sample_map[key_of[f]]
+            plex_of[f] = f"{exp}_{rep}" if by_rep else exp
+        else:
+            plex_of[f] = _tmt_plex_name(stems[f])
+            if sample_map:
+                unmatched.append(stems[f])
+    plexes = list(dict.fromkeys(plex_of[f] for f in files))
+    runs = {p: [key_of[f] or stems[f] for f in files if plex_of[f] == p] for p in plexes}
+
+    # channels -> samples
+    mapped = {p: _tmt_channel_names(tmt, p, labels) for p in plexes}
+    unused = {(p, c) for p in plexes for c, nm in mapped[p].items() if nm.lower() in _UNUSED_CHANNEL}
+    keys = [(p, c) for p in plexes for c in labels if (p, c) not in unused]
+    if not keys:
+        raise anytable.TableError(f"{path.name}: experiment.yaml's tmt: map calls every channel empty")
+    given = {k: mapped[k[0]].get(k[1], "") for k in keys}
+    within: dict[tuple[str, str], int] = defaultdict(int)
+    across: dict[str, int] = defaultdict(int)
+    for k in keys:
+        within[(k[0], given[k])] += 1
+        across[given[k]] += 1
+    name: dict[tuple[str, str], str] = {}
+    for k in keys:  # the map's name, made unique: + the channel (two 'Pool' in a plex), the plex first (a shared map)
+        base = given[k] or k[1]
+        if given[k] and within[(k[0], given[k])] > 1:
+            base = f"{base}_{k[1]}"
+        if not given[k] or across[given[k]] > within[(k[0], given[k])]:
+            base = f"{k[0]}_{base}"
+        s, j = base, 2
+        while s in name.values():
+            s, j = f"{base}.{j}", j + 1
+        name[k] = s
+    samples = [name[k] for k in keys]
+    cond = {name[k]: condition_of(given[k]) if given[k] else UNASSIGNED for k in keys}
+    reps: dict[str, int] = {}
+    seen: dict[str, int] = defaultdict(int)
+    for k in keys:
+        if given[k]:
+            seen[cond[name[k]]] += 1
+            reps[name[k]] = seen[cond[name[k]]]
+
+    # PSMs -> MSstatsTMT's summary per protein group, plex and channel
+    pep_prots = {psm[k][0]: psm[k][2] for k in quantified}
+    group = razor_groups(pep_prots)
+    fasta = Path(str((settings.get("database") or {}).get("fasta") or ""))
+    names = _fasta_names(fasta) if str(fasta) not in ("", ".") else {}
+    ident = {g: _sage_group(g, names) for g in set(group.values())}
+    table: dict[tuple, dict[str, dict[str, float]]] = defaultdict(dict)
+    peps: dict[str, set[str]] = defaultdict(set)
+    for (f, scan), vals in quantified.items():
+        pep, z, _prots = psm[(f, scan)]
+        fid = ident[group[pep]][0]
+        cell = {c: v for c, v in zip(labels, vals, strict=True) if v > 0 and (plex_of[f], c) not in unused}
+        if cell:
+            table[(stems[f], fid, f"{pep}_{z}")][scan] = cell
+            peps[fid].add(pep)
+    run_info = {stems[f]: (plex_of[f], "1", "1") for f in files}
+    annot = {(f"{p}_1", c): (p, "1", cond[name[(p, c)]], "") for p, c in keys}
+    s = _tmt_summarise(table, annot, run_info, labels, reference_norm=False)
+    feats, values = [], []
+    for g in sorted(ident, key=lambda g: ident[g][0]):
+        fid, label, desc = ident[g]
+        ab = s["abundance"].get(fid)
+        if not ab:
+            continue
+        feats.append(Feature(id=fid, label=label, description=desc, peptides=len(peps[fid]) or None))
+        values.append([ab.get((f"{p}_1", c)) for p, c in keys])
+    if not feats:
+        raise anytable.TableError(f"{path.name}: Sage's tmt.tsv has no usable reporter intensity for any protein")
+
+    version = str(settings.get("version") or "")
+    shared = sum(1 for pep, prots in pep_prots.items() if any(p not in group[pep] for p in prots))
+    notes = [f"Sage{' ' + version if version else ''} {path.name}: {len(feats):,} protein groups in {len(plexes)} "
+             f"plex(es) from {len(quantified):,} PSMs (targets of rank 1 at spectrum, peptide and protein q ≤ "
+             f"{LONG_FDR:g}); proteins grouped by razor peptides and summarised as MSstatsTMT's MedianPolish "
+             "(global median normalisation, Tukey median polish per plex; no model-based imputation)"]
+    left = [f"{dropped[k]:,} {text}" for k, text in (("decoy", "decoy"), ("rank", "of lower rank"),
+                                                     ("q", "above a q-value")) if dropped[k]]
+    if left:
+        notes.append(f"of {dropped['rows']:,} PSMs in {results.name}, left out: " + ", ".join(left))
+    if dropped["chimeric"]:
+        notes.append(f"{dropped['chimeric']:,} spectra with more than one passing PSM were left out (their reporter "
+                     "ions belong to several peptides)")
+    blank = len(psm) - len(quantified)
+    if blank:
+        notes.append(f"{blank:,} passing PSM(s) had no reporter ions in {path.name} and were left out")
+    if shared:
+        notes.append(f"{shared:,} peptide(s) shared between protein groups were given to the group with the most "
+                     "peptides")
+    notes += s["notes"]
+    if labels == header[3:]:
+        notes.append(f"the reporter columns ({labels[0]} … {labels[-1]}) are not one of Sage's TMT kits, so the "
+                     "channels keep Sage's column names")
+    if unused:
+        notes.append(f"{len(unused)} channel(s) called NA / empty in experiment.yaml's tmt: map were left out")
+    unnamed = [name[k] for k in keys if not given[k]]
+    if unnamed:
+        notes.append(f"{len(unnamed)} of {len(keys)} TMT channels have no name in an experiment.yaml tmt: map, so "
+                     f"they are '<plex>_<channel>' with condition '{UNASSIGNED}': give each its condition on the "
+                     "Analysis tab, with a tmt: channels map in experiment.yaml, or with an SDRF")
+    for x in unmatched:
+        notes.append(f"Run {x} did not match the manifest; its plex was read from its name ({_tmt_plex_name(x)}).")
+    missing = sorted(set(sample_map) - {k for k in key_of.values() if k})
+    if missing:
+        notes.append("Expected runs missing from Sage's tmt.tsv: " + ", ".join(missing))
+    if names:
+        notes.append(f"gene names from {fasta.name}")
+    meta = {"engine": "Sage", "evidence": "peptides", "missing_runs": missing, "unmatched_runs": unmatched,
+            "quantity": "median polish of tmt.tsv reporter intensities (MSstatsTMT MedianPolish)",
+            "fdr": f"spectrum, peptide and protein q ≤ {LONG_FDR:g}",
+            "plex": {name[k]: k[0] for k in keys}, "runs": {name[k]: list(runs[k[0]]) for k in keys}}
+    if labels != header[3:]:
+        meta["channel"] = {name[k]: k[1] for k in keys}
+    if any(given.values()):
+        meta["conditions_from"] = "experiment.yaml tmt: channel map"
+    return QuantMatrix("intensity", "protein", feats, samples, values, cond, str(path), notes=notes, exp="TMT",
+                       replicate=reps, columns={x: x for x in samples}, meta=meta)
+
+
 # ----------------------------------------------------------------- registry --
 
 # (engine, method key, file-name filter, scorer, loader)
 ADAPTERS = [
     ("MaxQuant", "MaxQuant", lambda p: p.name == "proteinGroups.txt", _maxquant_score, load_maxquant),
     ("Sage", "Sage", lambda p: p.name == "lfq.tsv", _sage_score, load_sage),
+    ("Sage", "Sage", lambda p: p.name == "tmt.tsv", _sage_tmt_score, load_sage_tmt),  # preferred to lfq.tsv
     ("Spectronaut", "Spectronaut", lambda p: p.suffix.lower() in (".tsv", ".csv", ".txt", ".xls"),
      _spectronaut_score, load_spectronaut),
     ("AlphaDIA", "AlphaDIA", lambda p: p.name.lower() in ("pg.matrix.tsv", "protein_groups.tsv"),
@@ -1048,15 +1347,18 @@ def detect(workdir: Path) -> Detected | None:
     return found[0] if found else None
 
 
-def load(method: str, workdir: Path, sample_map: dict[str, tuple[str, int]] | None = None
+def load(method: str, workdir: Path, sample_map: dict[str, tuple[str, int]] | None = None, tmt: dict | None = None
          ) -> tuple[QuantMatrix | None, list[str]]:
     """Load the best table of this engine under workdir (or workdir itself when it is the table). sample_map:
-    the watcher's manifest (file stem -> (condition, replicate)), for engines whose table has a column per file."""
+    the watcher's manifest (file stem -> (condition, replicate)), for engines whose table has a column per file.
+    tmt: experiment.yaml's tmt: channel map, for Sage's tmt.tsv."""
     adapter = METHODS[method]
     cands = [d for d in detect_all(workdir) if d.method == method]
     if not cands:
         return None, [f"no {adapter[0]} results found in {Path(workdir).name}/"]
-    if method == "Sage":
+    if method == "Sage":  # tmt.tsv when the search quantified reporter ions (it scores above lfq.tsv), else lfq.tsv
+        if cands[0].path.name == "tmt.tsv":
+            return load_sage_tmt(cands[0].path, sample_map, tmt), []
         return load_sage(cands[0].path, sample_map), []
     return adapter[4](cands[0].path), []
 
@@ -1138,7 +1440,8 @@ def provenance(workdir: Path, method: str | None, source: str = "", meta: dict |
             out["version"] = out["version"] or _first_match(mqpar, r"<maxQuantVersion>([^<]+)<")
     elif method == "Sage":
         out["engine"] = "Sage"
-        rec = next((p for p in files if p.name == "results.json" and (p.parent / "lfq.tsv").is_file()), None)
+        rec = next((p for p in files if p.name == "results.json" and
+                    ((p.parent / "lfq.tsv").is_file() or (p.parent / "tmt.tsv").is_file())), None)
         if rec:
             out["files"].append(rel(rec))
             settings = _sage_settings(rec.parent)
@@ -1146,7 +1449,7 @@ def provenance(workdir: Path, method: str | None, source: str = "", meta: dict |
             fasta = str((settings.get("database") or {}).get("fasta") or "")
             if fasta:
                 out["fasta"] = fasta
-        out["fdr"] = f"peptide and protein q ≤ {LONG_FDR:g}"
+        out["fdr"] = meta.get("fdr") or f"peptide and protein q ≤ {LONG_FDR:g}"
     elif method == "AlphaDIA":
         cfg = next((p for p in files if p.name == "frozen_config.yaml"), None)
         if cfg:

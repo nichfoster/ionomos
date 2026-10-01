@@ -7,8 +7,126 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A failed FragPipe search on .raw files no longer gets the cause "A .raw
+  file couldn't be read" from Thermo's `RawFileReader reading tool` banner,
+  which FragPipe logs on every such search. 0.13.0 fixed this for the
+  converter's name in Sage jobs; the reader's name was still matched alone.
+  Either name now needs an error word on its line, or `ionomos sage-job`'s
+  own `converting X failed` line (also with exit code 0 and no mzML
+  written). A name inside a path does not count, so a converter that could
+  not be started is no longer reported as a bad raw file.
+
+## [0.13.0] - 2026-10-01
+
 ### Added
 
+- **Search quality per run** (ROADMAP Phase 4, D55; `downstream/psmqc.py`).
+  For FragPipe results with `psm.tsv` files, the report's Quality control
+  section gets a **Search quality** tab with, per raw file: PSMs, peptides
+  and proteins; the precursor mass error (median, quartiles, 5th to 95th
+  percentile, ppm); the share of PSMs with a missed cleavage; the charge
+  states; the peptide length. With DIA, it shows DIA-NN's own per-run
+  summary (`report.stats.tsv`). Output: `results/psm_qc.tsv` and
+  `analysis.json` → `psm_qc`. The numbers come from the reader the
+  instrument QC trend already uses (`qcmetrics.py`); files are streamed, and
+  one over 4,096 MB is left unread with a note. Two new warnings, with wide
+  limits the lab has not confirmed: `PSM_MASS_ERROR` (a run's median error
+  is 10 ppm or more from 0) and `PSM_MISSED_CLEAVAGES` (half or more of a
+  run's PSMs have a missed cleavage). New setting: `psm_qc` (false switches
+  it off). **Not tested on real FragPipe output**: the `psm.tsv` column
+  names are from the FragPipe documentation.
+
+- **Notifications when a search is done, failed or waiting** (ROADMAP
+  Phase 4, D58; `notify.py`). Off by default; set up under `notify:` in
+  `config.yaml`:
+  - channels: a generic JSON webhook, a Microsoft Teams webhook (an Adaptive
+    Card), a Slack incoming webhook, and SMTP email (STARTTLS or SSL).
+    Standard library only
+  - a message holds the experiment name, user, method, status, the reason
+    or the hit counts, and the local path of the report; never a file or a
+    quantity. `notify.include_names: false` sends the job number and status
+    only
+  - `on: [done, failed, held]` picks the events. A waiting search sends one
+    message per reason, also across a restart
+  - a message is sent after the status is recorded, in its own thread, with
+    a timeout and no retries: a dead webhook can't fail or delay a job. A
+    channel's error is logged once
+  - webhook addresses and the SMTP password can come from environment
+    variables (`url_env`, `password_env`), are never logged, and are
+    replaced by `***` in `ionomos diagnose`, the diagnostics bundle and
+    **Report a problem…**
+  - `ionomos notify-test` sends a test message to every channel and says
+    what happened; `ionomos check` shows whether notifications are on
+  - not in the app yet: edit `config.yaml` (the app keeps the block when it
+    saves)
+- **Log rotation that is safe on Windows** (`health.SafeRotatingFileHandler`).
+  `ionomos.log` already rotated at 5 MB with 5 old files kept, but a rename
+  refused by Windows (another program has the file open) made the stock
+  handler drop every log line until the file was free. Now the watcher keeps
+  writing to the same file and tries the rotation again a minute later.
+  `app.log` uses the same handler.
+
+- **Sage TMT** (ROADMAP 5B #5, D56, [docs/ENGINES.md](docs/ENGINES.md)).
+  - **Import:** `ionomos analyze <Sage output folder>` reads `tmt.tsv`
+    (reporter ions per spectrum) with `results.sage.tsv` (the PSMs) beside
+    it. PSMs are targets of rank 1 at spectrum, peptide and protein
+    q ≤ 1%, joined to their reporter ions by file and scan. Proteins are
+    grouped by razor peptides and summarised per plex and channel as the
+    MSstatsTMT format already is (one PSM per peptide ion, fractions
+    combined, global median normalisation, Tukey median polish). Several
+    plexes are then joined by IRS on the reference channel, as for the
+    other engines (D48). `tmt_1 … tmt_n` are the kit's channels in order.
+  - **Run:** a lab `sage_config` with `quant.tmt` (`Tmt6` … `Tmt18`) no
+    longer holds the job. Label-free quantification is not switched on
+    for it; the job expects `tmt.tsv`. The files of a plex are its
+    fractions (`<plex>_F<fraction>.raw`, the TMT naming rule).
+  - **Channel names:** experiment.yaml's `tmt:` map names the channels and
+    gives them their condition (the text before the first `_`, as for
+    FragPipe TMT); a channel it calls `NA` or `empty` is left out. Without
+    a map the channels are `<plex>_<channel>` with condition `unassigned`,
+    and the analysis asks for the conditions (Analysis tab, or an SDRF).
+    Plexes whose channels have no condition yet are not scaled by their
+    own means.
+  - **Instrument QC from Sage:** a QC-standard run searched by Sage is
+    trended from `results.sage.tsv`: PSMs, peptides, proteins, summed
+    fragment signal, a signed precursor mass error, missed cleavages,
+    charge and RT ([docs/QC_TREND.md](docs/QC_TREND.md)).
+  - A method whose `sage_args` has `--parquet` is held: Sage's Parquet
+    output is not read (Sage itself calls the format unstable).
+
+  Tested against the stand-in Sage only (`ionomos fake-sage` now writes
+  `tmt.tsv` and the full `results.sage.tsv` header). The `tmt.tsv` and
+  `results.sage.tsv` layouts come from Sage's source, not from a real run.
+
+- **The assistant, read-only "Explain"** (ROADMAP Phase 6.1, D49, D57;
+  `ionomos/assistant/`, [docs/ASSISTANT.md](docs/ASSISTANT.md)).
+  `ionomos ask "why did my search fail?" --experiment 12` answers from the
+  job's log, the doctor's findings and the help, through a model running on
+  the PC. **Built and tested against a scripted fake model only: no real
+  model or runtime has been tried, none is recommended, and the assistant is
+  off by default.**
+  - It speaks the OpenAI-compatible chat API to `assistant.base_url`
+    (standard library only). An address that is not this PC is refused before
+    anything is sent.
+  - Seven read-only tools with schema-checked arguments: list experiments, a
+    job, attention items, an issue code in the help's words, a numbered log
+    tail, the analysis summary, help search (BM25; SQLite FTS5 or pure
+    Python). No file paths as arguments, no changes, no shell, no network.
+  - Every paragraph of an answer must cite `[issue:CODE]`, `[log:JOB#LINE]`,
+    `[help:ID]`, `[analysis:FIELD]` or `[job:ID]`, and each citation must be
+    something a tool returned. Otherwise the answer is not shown and Ionomos
+    prints its own text: likely causes, fixes, the help entry, and who to
+    ask. The same text is the answer when the assistant is not set up.
+  - Names, logs and `experiment.yaml` are treated as untrusted: tool results
+    are passed as data, cleaned of control characters and capped.
+  - Every question is appended to `assistant-audit.jsonl` in app data.
+  - New: `assistant:` in `config.yaml`, an `assistant` row in `ionomos
+    check`, help entries `faq.assistant` and `faq.assistant-setup`, and 53
+    scenarios in `tests/assistant_scenarios/` replayed in CI.
+  - Not built: the "Ask about this" button in the pop-ups, and a runner that
+    scores real models. Phase 6.1's exit criteria are still open.
 - **Time courses** (ROADMAP 5C #1, D53; `downstream/timecourse.py`). When the
   conditions are time points (`Drug_0h`, `Drug_1h`, `Drug_4h`, `Drug_24h`,
   or `analysis.times`) and a series has at least 3, every feature gets
@@ -83,16 +201,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`ionomos fake-sage`, `ionomos fake-rawparser`), with the file formats
   taken from Sage's source. Not yet run against a real Sage.
 
+### Changed
+
+- **A method that is `like:` a built-in method is that method everywhere**
+  (D54; ROADMAP "found while building 5A/5B"). `naming.methods.<key>:
+  {like: isoDTB | TMT | DIA}` used to borrow the name rule only, and the
+  method was then analysed as generic label-free. Now a `DIA_phospho` or
+  `TMTpro` method gets the built-in method's whole behaviour: the TMT
+  `annotation.txt`, the expected FragPipe outputs, the control question in
+  the review window, the analysis, the SDRF and the doctor's messages. A
+  method run by another engine is what the engine makes (`engine: diann`:
+  DIA under any key, which used to get no analysis; `maxquant` / `sage`:
+  label-free), whatever `like:` says. One resolver decides
+  (`naming.method_kind`, `Config.kind`). Built-in keys and configs without
+  `like:` behave as before. A FragPipe method that used `like:` only for the
+  shape of its names should now write the template out
+  (`files: '{sample}_{rep}[_{fraction}]'`).
+  `ionomos analyze --method` also takes the config's own method keys, and
+  `ionomos names test` prints what a custom method is run as.
+
 ### Fixed
 
-- A failed search no longer blames the raw files just because the log names
-  the raw reader. The "A .raw file couldn't be read" cause matched any mention
-  of `RawFileReader` or `ThermoRawFileParser`, so it led the failure reason,
-  the attention item and `FAILED.txt` for an `engine: sage` job whose
-  conversions had all succeeded, and for FragPipe jobs on .raw files, whose
-  log carries Thermo's `RawFileReader reading tool` banner. The name now
-  needs an error word on its line, or `ionomos sage-job`'s own
-  `converting X failed` line; a name inside a path does not count.
+- A failed Sage search no longer gets the hint "A .raw file couldn't be read"
+  just because the console log names the converter after successful
+  conversions; the hint now needs the converter's own error or exit code.
 
 ## [0.12.0] - 2026-09-30
 

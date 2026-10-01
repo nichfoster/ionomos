@@ -22,7 +22,8 @@ The page carries its data as JSON and draws everything in the browser
                    competition ratios with the call, selectivity and, with a site annotation, known / new
     QC             sample scorecard, PCA (with what explains each PC), correlation, missing values, missingness
                    against intensity, distributions, CV, mean-variance, abundance rank, identifications,
-                   imputation, power (minimum detectable fold change against replicates)
+                   imputation, power (minimum detectable fold change against replicates), search quality per
+                   run (psm.tsv: PSMs, precursor mass error, missed cleavages, charge states, peptide length)
     Methods        a paragraph ready for a notebook, the exact settings, and FragPipe-Analyst export files
     Help           what each section shows (also behind a "?" beside each title and QC tab), a glossary, and
                    what to do about the issues found in this report (content: ionomos/help/*.md)
@@ -69,7 +70,7 @@ def _level_word(m: QuantMatrix | None) -> tuple[str, str]:
 def payload(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: list[DiffResult], notes: list[str],
             files: list[str], s: Settings, qcd: dict, enrichment: list[dict], ranked: list[dict] | None = None,
             insight: dict | None = None, dose: dict | None = None, cys: dict | None = None,
-            time: dict | None = None) -> dict:
+            time: dict | None = None, psm: dict | None = None) -> dict:
     pm = p.m if p else m
     title, word = _level_word(pm)
     d: dict = {
@@ -92,6 +93,8 @@ def payload(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: li
         "time": time or {"ran": False, "found": False, "reason": "No time course was found."},
         "help": _help_payload(ctx.get("issues")),
     }
+    if psm:  # search quality per run (psmqc.py): shown even when there are no quantities
+        d["qc"]["psm"] = psm
     if pm is None:
         return d
     d["f"] = {"id": [f.id for f in pm.features], "label": [f.label for f in pm.features],
@@ -145,6 +148,7 @@ def payload(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: li
         pca = qcd.get("pca") or {}
         corr = qcd.get("correlation") or {}
         d["qc"] = {
+            **d["qc"],
             "pca": {"scores": [[_r(x, 4) for x in row] for row in pca.get("scores", [])],
                     "percent": [_r(x, 2) for x in pca.get("percent", [])], "n": pca.get("n", 0)},
             "correlation": {"matrix": [[_r(x, 4) for x in row] for row in corr.get("matrix", [])],
@@ -465,14 +469,16 @@ def _sdrf_note(info: dict) -> str:
 def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: list[DiffResult], notes: list[str],
            files: list[str], s: Settings | None = None, qcd: dict | None = None,
            enrichment: list[dict] | None = None, ranked: list[dict] | None = None, insight: dict | None = None,
-           dose: dict | None = None, cys: dict | None = None, time: dict | None = None) -> str:
+           dose: dict | None = None, cys: dict | None = None, time: dict | None = None,
+           psm: dict | None = None) -> str:
     s = s or Settings()
     enrichment = enrichment or []
     ranked = [b for b in ranked or [] if b["terms"]]
     title = ctx.get("experiment") or "Experiment"
     meta = " · ".join(x for x in (ctx.get("user"), ctx.get("method"), ctx.get("date"),
                                   f"generated {datetime.now():%Y-%m-%d %H:%M}", f"Ionomos {ctx.get('version', '')}") if x)
-    data = json.dumps(payload(ctx, m, p, diffs, notes, files, s, qcd or {}, enrichment, ranked, insight, dose, cys, time),
+    data = json.dumps(payload(ctx, m, p, diffs, notes, files, s, qcd or {}, enrichment, ranked, insight, dose, cys, time,
+                              psm),
                       separators=(",", ":"), allow_nan=False).replace("</", "<\\/").replace("<!--", "<\\u0021--")
     pm = p.m if p else m
     ratio = pm is not None and pm.kind == "ratio"

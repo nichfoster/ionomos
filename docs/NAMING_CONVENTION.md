@@ -153,7 +153,7 @@ naming:
     DIA: '{condition}_rep{rep}'            # a template (shorthand for files:)
     LFQ:                                   # a method of your own (it also needs a methods.LFQ entry)
       files: '{sample}_R{rep}_F{fraction}'
-    SWATH: {like: DIA}                     # DIA's rule and short codes, under another name
+    SWATH: {like: DIA}                     # a DIA method under another name: DIA's rule, short codes and analysis
     PLATE:                                 # a regex, for names a template can't describe
       pattern: '(?P<sample>[A-H]\d{2})-(?P<rep>\d+)(?:_(?P<fraction>\d+))?'
 ```
@@ -190,12 +190,31 @@ Xcalibur `_YYYYMMDDhhmmss` stamp is ignored; every replicate needs the same
 fractions. A method's keywords stay in `methods.<name>.aliases` (the app's
 Methods tab edits them), and one keyword can belong to only one method.
 
-**`like:`** borrows a built-in method's rule (and, for `DIA`, its short
-condition codes; `condition_codes: false` turns those off). It only changes
-how names are read. After FragPipe, the lab's isoDTB / TMT / DIA analysis still
-follows the method's name, so a method with a new name gets the generic
-analysis (`combined_protein.tsv`). To call DIA by another word, add the word to
-`methods.DIA.aliases` instead of renaming the method.
+**`like:`** says a method *is* a built-in method under another name (D54).
+It borrows that method's rule (and, for `DIA`, its short condition codes;
+`condition_codes: false` turns those off), and the method is treated as that
+one everywhere else too:
+
+| `like:` | Search | Review window | Analysis |
+|---|---|---|---|
+| `isoDTB` | expects the label-quant table | no control (each sample is a ratio) | site tables, liganded cysteines, `ICAT light / heavy` SDRF rows |
+| `TMT` | writes `annotation.txt` from experiment.yaml `tmt:` | no control (conditions are in the channels) | `tmt-report/abundance_*_MD.tsv`, the annotation file, plexes, `TMT126…` SDRF rows |
+| `DIA` | expects the DIA-NN output | asks for the control | `…pg_matrix.tsv`, label-free SDRF rows |
+
+`files:` or `pattern:` next to `like:` changes only how the names are read.
+So `DIA_phospho: {like: DIA}` or `TMTpro: {like: TMT, files: '{sample}_F{fraction}'}`
+are full DIA / TMT methods with their own workflow, FASTA and keywords. A
+method with no `like:` is a method of its own: label-free, read from
+`combined_protein.tsv`. To borrow only a built-in rule's shape for such a
+method, write the template out (`files: '{sample}_{rep}[_{fraction}]'`).
+
+A method searched by another engine (`engine: diann | maxquant | sage`,
+docs/ENGINES.md) is what that engine makes, whatever `like:` says: DIA for
+DIA-NN, label-free for MaxQuant and Sage.
+
+`ionomos names test` prints what a method is run as (`method : SWATH
+(searched and analysed as DIA)`). To only add another word for DIA, add it
+to `methods.DIA.aliases`.
 
 Date formats: `YYYYMMDD`, `MMDDYYYY`, `DDMMYYYY` (separators `-`, `_` or
 `.` allowed), and the six-digit `MMDDYY`, `DDMMYY`, `YYMMDD` (only within the
@@ -352,7 +371,7 @@ allow_uneven_fractions: true   # accept reps with different fraction sets
 files:                      # per-file overrides (fraction: -1 = single-shot)
   KL6159A_1_1.raw: {experiment: plex1, bioreplicate: 1, fraction: 1}
 
-tmt:                        # TMT only; one block per plex (= experiment name)
+tmt:                        # TMT only; one block per plex (= experiment name). FragPipe and Sage TMT both use it
   tag: TMT-10
   channels:                 # channel → sample name as condition_plex_channel: the lab's
     126:  DMSO_1_126        #   annotation script (and the report's conditions) key on it

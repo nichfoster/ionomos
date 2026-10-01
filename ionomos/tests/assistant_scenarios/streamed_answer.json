@@ -1,0 +1,39 @@
+{
+  "id": "streamed_answer",
+  "about": "The same loop over server-sent events (tool-call arguments arrive in pieces).",
+  "state": "fragpipe",
+  "question": "How many hits did I get?",
+  "experiment": "3",
+  "stream": true,
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "analysis_summary",
+          "arguments": {
+            "job_id": 3
+          }
+        }
+      ]
+    },
+    {
+      "content": "Drug vs DMSO: 26 up and 19 down of 597 proteins tested [analysis:comparisons]."
+    }
+  ],
+  "rubric": {
+    "must_call": [
+      "analysis_summary"
+    ],
+    "must_cite": [
+      "analysis:comparisons"
+    ],
+    "must_mention": [
+      "26"
+    ],
+    "refusal": false
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 2
+  }
+}

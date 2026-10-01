@@ -18,6 +18,10 @@ fragpipe.exe --headless --workflow <wf> --manifest <mf> --workdir <out>
   to `fragpipe.exe` (GUI wrapper); ionomos uses the `.bat` and swaps a configured
   `.exe` for the `.bat` beside it. On the lab PC, FragPipe 24.0 came from its Windows installer: `C:\FragPipe\FragPipe-24.0\bin\FragPipe-24.0.exe`, `lib\fragpipe-24.0.jar`, `jre\`, `tools\` (MSFragger 4.4.1, IonQuant 1.11.20, diaTracer 2.2.1, DIA-NN 2.3.2) — from the first Ionomos report, 2026-09-23. Whether that exe prints headless output like the old .bat is confirmed by the first real search.
 - Manifest = `.fp-manifest`, tab-separated: `path \t experiment \t bioreplicate \t DDA|DIA`.
+- The isoDTB / TMT / DIA sections below apply to a method by its kind, not its
+  key: a method under another key that is `like:` one of them (or run by
+  another engine) is treated as that method throughout (D54,
+  NAMING_CONVENTION.md "Other conventions").
 - The FASTA is baked into the `.workflow` file (`database.db-path`). ionomos
   writes a per-job copy of the pinned workflow with `database.db-path` set to the
   method's FASTA from `fasta_dir`, so "FASTA file path is empty" can't happen. If
@@ -237,6 +241,36 @@ features × samples matrix of log2 values and runs the same statistics:
   | HIGH_IMPUTATION, FEW_FEATURES, NO_HITS, ENRICHMENT | note | worth knowing |
   | TIMES | decide / note | a time course whose time points can't all be read (a name in `analysis.times` that isn't a condition, two times in one name) |
   | LIGANDED_DIRECTION, SITE_ANNOTATION | note | isoDTB: the competition ratio looks reversed; the site annotation file can't be used |
+  | PSM_MASS_ERROR, PSM_MISSED_CLEAVAGES | note | a run's median precursor mass error is 10 ppm or more from 0; half or more of a run's PSMs have a missed cleavage |
+
+**Search quality per run** (`downstream/psmqc.py`, D55). When the search
+wrote `psm.tsv` files (FragPipe DDA: isoDTB, TMT, LFQ), the report's Quality
+control section has a **Search quality** tab with one row per raw file:
+
+| Shown | From `psm.tsv` |
+|---|---|
+| PSMs, peptides, proteins | rows, distinct `Peptide`, distinct `Protein` of the run (the run is read from `Spectrum`) |
+| Mass error (ppm) | `Observed Mass` against `Calculated Peptide Mass`, isotope-error corrected: median, quartiles, 5th and 95th percentile. Errors over 50 ppm are mass offsets and are left out |
+| Missed cleavage | share of PSMs with `Number of Missed Cleavages` ≥ 1; the chart splits 0 / 1 / 2 or more |
+| Charge states | share of PSMs per `Charge` |
+| Length | median `Peptide Length`; the chart shows all runs together |
+
+- A run is a raw file. For TMT that is a fraction of a plex; the folder its
+  `psm.tsv` is in is shown as the sample.
+- With DIA the tab shows DIA-NN's own summary of each run
+  (`report.stats.tsv`): precursors, proteins, MS1 / MS2 mass accuracy, mean
+  missed cleavages and charge, peak width. Nothing is flagged on it.
+- A run with at least 100 PSMs is flagged when its median mass error is
+  10 ppm or more from 0 (`PSM_MASS_ERROR`), or when half or more of its PSMs
+  have a missed cleavage (`PSM_MISSED_CLEAVAGES`). Both limits are wide and
+  are not the lab's: they are constants in `psmqc.py` until the lab has
+  looked at its own runs.
+- `psm.tsv` files are read row by row. One over 4,096 MB is not read; the
+  report notes it.
+- Setting: `psm_qc` (false switches it off).
+- Output: `results/psm_qc.tsv`, `analysis.json` → `psm_qc`.
+- Not tested on real FragPipe output: the column names are from the FragPipe
+  documentation.
 
 **Time courses** (`downstream/timecourse.py`, D53). When a series has three
 or more time points (`Drug_0h`, `Drug_1h`, `Drug_4h`, … or `analysis.times`),

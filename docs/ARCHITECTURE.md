@@ -20,7 +20,7 @@
 |---|---|---|
 | `config.py` | Load + validate `config.yaml`; resolve per-method defaults | `prior-work/config_loader.py` |
 | `watcher.py` | Poll the inbox; detect new **folders**; wait for copy to finish | `prior-work/watcher.py` (size-stability idea, generalised to a tree) |
-| `naming.py` | Pure functions: folder name → fields; raw filename → (sample, rep, fraction). Per-method file rules are templates or regexes, date formats a list, both from `config.yaml` `naming:` (D37) | — |
+| `naming.py` | Pure functions: folder name → fields; raw filename → (sample, rep, fraction). Per-method file rules are templates or regexes, date formats a list, both from `config.yaml` `naming:` (D37). `method_kind()` is the one place that says what a method key behaves as (its engine's kind, its `like:` target, else the key; D54): `Config.kind()` / `Config.analysis_method()` wrap it, and the search inputs, the review window and the analysis ask them instead of comparing keys | — |
 | `namecheck.py` | "Test your names": how the live config reads folder / `.raw` names (`ionomos names test`, app Methods tab → **Test names…**); read-only | — |
 | `manifest.py` | Read/validate `experiment.yaml`; build `.fp-manifest` + TMT `annotation.txt` | `prior-work/fragpipe_runner.build_manifest` |
 | `intake.py` | Validate a stable folder, show it for review (or hand unresolvable names to the resolver), move it to the user dir, write `ionomos.json`, insert ledger row. The watcher passes a `config.LiveConfig`, so edits to config.yaml apply to the next drop | — |
@@ -34,15 +34,16 @@
 | `worker.py` | Thread inside `ionomos run`: first runnable `queued` job → FragPipe or DIA-NN (runner.py) → done/failed; holds jobs whose setup files are missing. Sequential. | `prior-work/queue_worker.py` |
 | `fragpipe.py` | Prepare a job (launcher, workflow with `database.db-path` patched to the method's FASTA, manifest, TMT annotation), run headless with timeout/stop, kill the process tree | `prior-work/fragpipe_runner.py` |
 | `maxquant.py` | `engine: maxquant` methods: the lab's `mqpar` or MaxQuant's own `--create` template, patched with the job's raws, experiments, fractions, FASTA, threads and output folder into `ionomos_run/mqpar.xml`; output in `maxquant/` (D50) | — |
-| `sage.py` | `engine: sage` methods: `ionomos_run/sage.json` (the lab's Sage JSON or Ionomos' defaults, with the job's FASTA, mzML paths and output folder) and `sage_job.json`; the job runs as `ionomos sage-job`, one process that converts each `.raw` to `sage_mzml/*.mzML` with ThermoRawFileParser (reused on retry) and then starts Sage with its telemetry off; output in `sage/` (D51) | — |
+| `sage.py` | `engine: sage` methods: `ionomos_run/sage.json` (the lab's Sage JSON or Ionomos' defaults, with the job's FASTA, mzML paths and output folder) and `sage_job.json`; the job runs as `ionomos sage-job`, one process that converts each `.raw` to `sage_mzml/*.mzML` with ThermoRawFileParser (reused on retry) and then starts Sage with its telemetry off; output in `sage/` (D51). A lab `sage_config` with `quant.tmt` makes it a TMT job: `tmt.tsv` is expected, and the analysis rolls it up per plex and channel (D56) | — |
 | `diann.py`, `runner.py` | `engine: diann` methods: prepare a DIA-NN job (the lab's `diann_exe`, FASTA or spectral library, `ionomos_run/diann.cfg`), output in `diann/`; `runner` picks FragPipe, DIA-NN, MaxQuant or Sage per method, and all use `fragpipe.run`'s start / cancel / stop / timeout loop (D39) | — |
 | `postprocess.py` | After a done job: runs `downstream` (or only the R-port prep steps when analysis is off); `ionomos analyze` and the Analysis tab use it too (`prepare`, `inspect_folder`); then instrument QC trending for jobs with QC-standard runs | — |
-| `qctrend.py` | Instrument QC trending (D45, [QC_TREND.md](QC_TREND.md)): which runs are the QC standard (`qc_trend.match` / `methods`), the metric store `<log_dir>/qc_trend.jsonl`, per-series baselines, Levey-Jennings z-scores, Westgard rules + CUSUM, plain-English verdicts, a `qc_trend` attention item; `after_job` (postprocess hook, never raises), `scan` (read-only, `ionomos qc-trend --rebuild`), `page_for` (the app's **Jobs → Instrument QC**). Metrics from the searches' own tables (`downstream/qcmetrics.py`: DIA-NN `stats.tsv` / `pg_matrix` / `report.tsv`, FragPipe `psm.tsv` / `combined_protein.tsv`, streamed and size-bounded); the page `<log_dir>/qc_trend.html` (`downstream/qcpage.py`: static SVG, report.css, no script) | `prior-work/parsers/`, `store.py` |
+| `qctrend.py` | Instrument QC trending (D45, [QC_TREND.md](QC_TREND.md)): which runs are the QC standard (`qc_trend.match` / `methods`), the metric store `<log_dir>/qc_trend.jsonl`, per-series baselines, Levey-Jennings z-scores, Westgard rules + CUSUM, plain-English verdicts, a `qc_trend` attention item; `after_job` (postprocess hook, never raises), `scan` (read-only, `ionomos qc-trend --rebuild`), `page_for` (the app's **Jobs → Instrument QC**). Metrics from the searches' own tables (`downstream/qcmetrics.py`: DIA-NN `stats.tsv` / `pg_matrix` / `report.tsv`, FragPipe `psm.tsv` / `combined_protein.tsv`, Sage `results.sage.tsv`, streamed and size-bounded); the page `<log_dir>/qc_trend.html` (`downstream/qcpage.py`: static SVG, report.css, no script) | `prior-work/parsers/`, `store.py` |
 | `analysis_tab.py` | App tab 7: analyse one experiment (samples, conditions, comparisons → experiment.yaml, Run) and the lab defaults | — |
 | `experiment_editor.py` | One experiment's analysis choices as a Tk panel (samples, conditions, comparisons, cut-offs, Run, issues); used by tab 7 and the pop-ups | — |
 | `attention.py` | Durable "needs a person" queue (`<log_dir>/attention/*.json`): raised by intake, worker, analysis, QC trending (`qc_trend`, a warning: no pop-up unless `qc_trend.popup`); closed when fixed | — |
 | `popups.py` | Pop-up windows + the "needs attention" list, in the app or (app closed) the watcher's own Tk loop; **More help** opens the help page at the item's topic | — |
 | `help/` | The help for users (D46, HELP.md): `*.md` content (getting started, the report, glossary, troubleshooting, never-do, FAQ) parsed and rendered with the stdlib; `report_payload()` for every report, `page()` = `help.html` (`ionomos help`, the app's Help button, pop-ups), `text()` for the terminal, `topic()` / `topic_for_item()` | — |
+| `assistant/` | The read-only "Explain" assistant (D49, D57, [ASSISTANT.md](ASSISTANT.md)): `ask()` runs one question through a model on this PC and shows the answer only if its citations check out, else Ionomos's own text (`fallback`). `client.py` (the OpenAI-compatible chat API over urllib, localhost only, no proxy or redirect), `tools.py` (seven read-only tools over the ledger, attention items, help, engine logs and analysis.json, with schema-checked arguments and cleaned, capped results), `helpsearch.py` (BM25 over the help: SQLite FTS5 or pure Python), `citations.py` (what the tools returned is what may be cited), `audit.py` (append-only JSONL in app data), `fake.py` (the scripted fake model for tests). Off unless `assistant.enabled` and a model are set; nothing else depends on it | — |
 | `downstream/doctor.py` | The analysis check-up: issues with severity, likely causes, fixes; condition suggestions from file names | — |
 | `downstream/` | FragPipe tables → `QuantMatrix` → FragPipe-Analyst processing + limma → interactive `results/report.html`. `isodtb.py`/`tmt.py` (R ports), `quant.py` (loaders), `engines.py` (other engines' outputs — DIA-NN standalone incl. 2.x Parquet, MaxQuant, Spectronaut, AlphaDIA, MSstats and MSstatsTMT format, Proteome Discoverer — and the provenance of any result; ENGINES.md, D36), `fpa.py` (FragPipeAnalystR port: filter, normalise, impute, `test_limma`), `design.py` (limma designs with blocks and covariates, the moderated F; D42), `deqms.py` (R's loess and DEqMS' peptide-count prior; D43), `doseresponse.py` (CurveCurator's dose-response curves for titrations; D44), `sdrfdesign.py` (an input SDRF as the design; D47), `plex.py` (IRS across TMT plexes; D48), `rrandom.py` (R's RNG), `analysis.py` (settings, comparisons), `qc.py` (PCA, clustering, CV, missingness), `insights.py` (sample scorecard, PC ↔ condition/replicate, missingness vs intensity, p-value shape + π0, on/off features, imputation-driven hits, power; D35), `enrich.py` (local ORA and a correlation-adjusted rank test on Enrichr libraries), `export.py` (result tables, FragPipe-Analyst annotation + R script), `sdrf.py` (SDRF-Proteomics sample metadata; D38), `report.py` + `assets/report.js`, `charts.py` (static SVG volcano), `stats.py`, `simulate.py` | the lab's R scripts; FragPipeAnalystR; limma |
 | `setupcheck.py` | The setup checklist (app ✓ Setup tab, `ionomos init`) | — |
@@ -51,12 +52,13 @@
 | `updates.py` | Asks GitHub for the newest release, downloads the Setup (size + SHA-256 verified), or finds one in Downloads; stops the watcher, runs the installer, restarts the watcher after | — |
 | `loose.py` | `.raw` files dropped without a folder: grouped by shared name into folders in the inbox once stable | — |
 | `tkutil.py` | Tk variables that can be garbage-collected on any thread (plain ones abort the process on Windows) | — |
-| `health.py` | Failsafes: single-instance lock, heartbeat, thread supervisor, crash hooks/files, disk/RAM facts, log-problem extraction | — |
+| `health.py` | Failsafes: single-instance lock, heartbeat, thread supervisor, crash hooks/files, disk/RAM facts, log-problem extraction, the rotating log handler | — |
+| `notify.py` | Messages when a search is done / failed / held (D58): `notify:` settings, the message, the webhook / Teams / Slack / email senders, redaction of secrets. Off by default | — |
 | `stress.py` | `ionomos testbed stress`: messy drops + chaos against a real watcher/worker, invariant checks; name fuzzer | — |
 | `runners/isodtb.py` | Post-proc: modified-peptide → site merge — thin entry point delegating to `downstream/isodtb.py`, which holds the algorithm | port of `lab-scripts/isoDTB_…R` |
 | `runners/tmt.py` | Post-proc: experimental annotation fix | port of `lab-scripts/correct_experimental_annotation…R` |
 | `runners/dia.py` | Post-proc: (TBD — probably nothing beyond copying `report.tsv` up) | — |
-| `cli.py` | `ionomos setup / run / check / status / dry-run / names test / retry / testbed / diagnose / update / help`; no args → app; hidden `fake-fragpipe` for the testbed | — |
+| `cli.py` | `ionomos setup / run / check / status / dry-run / names test / retry / testbed / diagnose / notify-test / update / help / ask`; no args → app; hidden `fake-fragpipe` for the testbed | — |
 
 ## Data flow for one job
 
@@ -109,7 +111,8 @@ C:\Fragpipe_Auto\                    ← the app lives here (no spaces!)
     DIA.workflow
   fasta\                             ← pinned databases with decoys
   logs\
-    ionomos.log                     ← rotating
+    ionomos.log                     ← rotating: 5 MB, then ionomos.log.1 … .5
+    notify_state.json               ← which "waiting" messages were sent (only with notify: on, D58)
     qc_trend.jsonl                  ← instrument QC: one line per QC-standard run (D45)
     qc_trend.html                   ← the QC trend page (Levey-Jennings charts, Westgard rules)
     help\help.html                  ← the help page, rewritten each time it is opened (D46)
@@ -203,6 +206,12 @@ gui:
 naming:
   condition_codes: {D: DMSO, C: Compound}   # DIA X_D1 = DMSO rep 1
 
+notify:                     # off by default; see "Notifications" below
+  enabled: false
+  on: [done, failed, held]
+  include_names: true
+  slack: {url: "", url_env: ""}   # also webhook:, teams:, email:
+
 methods:                    # keyed by canonical METHOD keyword; aliases are matched in folder names
   isoDTB:
     aliases: [isodtb, iso-dtb]
@@ -226,6 +235,10 @@ methods:                    # keyed by canonical METHOD keyword; aliases are mat
 Note: the FASTA path lives **inside** the `.workflow` file, not on the command
 line. `fasta:` here is used to (a) sanity-check the workflow file references
 that database and (b) record provenance. See WORKFLOWS.md.
+
+An optional `assistant:` block (`enabled`, `base_url`, `model`, `maintainer`,
+`timeout_seconds`, `stream`, `allow_cloud`) configures `ionomos ask`. It is off
+by default and its `base_url` must be on this PC. See ASSISTANT.md.
 
 ## Failure handling principles
 
@@ -260,6 +273,89 @@ that database and (b) record provenance. See WORKFLOWS.md.
 | A search fails / is held / a folder is rejected / a raw file is 0 bytes | an attention item → pop-up with likely causes, log tail, Retry; closes itself when fixed |
 | A GUI button throws | `report_callback_exception` → dialog + crash file; the app keeps running |
 | `check`/diagnose on a wedged display | the Tk probe runs in a child process with a timeout |
+| The log grows without end | `ionomos.log` rotates at 5 MB, 5 old files kept (`names.LOG_MAX_BYTES`, `LOG_BACKUPS`) |
+| Windows refuses to rotate the log (another program has it open) | the watcher keeps writing to the same file and tries again a minute later; no line is lost |
+| A notification can't be sent (dead webhook, no network, wrong password) | sent from its own thread after the status is recorded, one try, a timeout; logged once; the job is unaffected |
+| A webhook address or the SMTP password ends up in a report | never logged; `diagnose`, the bundle and Report a problem redact `config.yaml` and scrub every included file |
+
+## Notifications (D58)
+
+Off unless `config.yaml` has `notify: enabled: true` and a channel. The
+worker calls `notify.announce` after a job's status is recorded:
+
+```
+worker: status in ledger + ionomos.json + DONE.txt / FAILED.txt
+   │
+   ▼
+notify.announce(cfg, event, job, reason, summary)        returns at once, never raises
+   │  off, or event not in notify.on            → nothing
+   │  held, same job and reason as before        → nothing (<log_dir>/notify_state.json)
+   ▼
+build(...) → Message                                     the only thing that leaves the PC
+   ▼
+daemon thread: deliver → webhook, teams, slack, email    one try each, timeout_seconds, no retries
+   ▼
+log: "notified by slack: job 12 done"  /  "could not notify by slack: …" (once per channel and error)
+```
+
+```yaml
+notify:
+  enabled: false              # nothing is sent while this is false
+  on: [done, failed, held]    # held = a search is waiting (FASTA, workflow, disk space …)
+  include_names: true         # false: job number, status and time only
+  timeout_seconds: 10         # 1–60
+  webhook: {url: "", url_env: ""}   # any service that takes a JSON POST
+  teams:   {url: "", url_env: ""}   # a Teams Workflows webhook address
+  slack:   {url: "", url_env: ""}   # a Slack incoming-webhook address
+  email:
+    host: ""                  # no host = no email
+    port: 587
+    security: starttls        # starttls | ssl | none (no password allowed with none)
+    username: ""
+    password: ""
+    password_env: ""          # the NAME of an environment variable; it wins over password
+    from: ""
+    to: []
+```
+
+**What is sent.** Exactly these fields; the generic webhook gets them as
+one JSON object, the others as a title and lines of text:
+
+| Field | Example | With `include_names: false` |
+|---|---|---|
+| `app`, `version` | `Ionomos`, `0.12.0` | sent |
+| `event` | `done`, `failed`, `held` | sent |
+| `job_id` | `12` | sent |
+| `time` | `2026-10-01T14:03:11-07:00` | sent |
+| `text` | the message as plain text (the title and the lines below) | `Ionomos: job 12 done` |
+| `experiment` | `20260902_EJQ_isoDTB_EJQ-2-027_1uM-3h` | left out |
+| `user`, `method` | `EJQ`, `isoDTB` | left out |
+| `reason` | `FragPipe ran out of memory …` (failed / held; at most 600 characters) | left out |
+| `hits` | `[{"comparison": "Compound vs DMSO", "up": 12, "down": 3, "tested": 4021}]` | left out |
+| `report` | `C:\Fragpipe_General\EJQ\…\results\report.html` (a path, not the file) | left out |
+| `pc` | the computer's name | left out |
+
+Never sent: raw files, result tables, protein or site names, intensities or
+ratios, the report, the search log, `config.yaml`. An SMTP server also sees
+what every mail server sees (the PC's address and host name).
+
+**Payloads.** Slack: `{"text": "*title*\nlabel: value\n…"}`. Teams:
+`{"type": "message", "attachments": [{"contentType":
+"application/vnd.microsoft.card.adaptive", "contentUrl": null, "content":
+{AdaptiveCard 1.2: a TextBlock title and a FactSet}}]}`. Email: the title
+as the subject, the lines as plain text.
+
+**Secrets.** A webhook address is a password: anyone who has it can post to
+the channel. `url_env` / `password_env` keep it out of the file. Addresses
+must be `https://` (`http://` only for `localhost`), and a redirect is not
+followed. `notify.scrub` and `notify.redact_config_text` keep the values
+out of the log, `ionomos diagnose`, `diagnostics-*.txt`, the bundle and
+Report a problem. `config-backups/` holds full copies of `config.yaml` and
+stays on the PC.
+
+`ionomos notify-test` sends a test message on every configured channel
+(also with `enabled: false`) and prints one line per channel. The worker
+reads `notify:` when the watcher starts: restart it after a change.
 
 ## Downstream pipeline (0.6.0: FragPipe-Analyst)
 
@@ -399,6 +495,17 @@ compound (liganded / inconsistent / not liganded / too few) by
 liganded fraction, selectivity across compounds, a per-protein view and, with
 `site_annotation`, known / new sites. The report's Liganded sites section
 only displays these calls. Rules and settings: WORKFLOWS.md.
+
+`results/psm_qc.tsv` (`downstream/psmqc.py`, D55) is made when the search
+output holds FragPipe `psm.tsv` files or a DIA-NN `stats.tsv`. The stage
+runs for every analysis, also when no quant table was found, and is isolated
+like the others. It parses nothing itself: `qcmetrics.search_tables` reads
+the tables with the same row-by-row reader the instrument QC trend uses
+(`read_psm`, `read_diann_stats`), for every run they name, and `psmqc.py`
+turns the per-run records into the TSV, the `psm_qc` entry of
+`analysis.json`, the report's Search quality QC tab (`d["qc"]["psm"]`) and
+the two warnings. A table over 4,096 MB is not read. What is shown and the
+limits: WORKFLOWS.md.
 
 `results/dose_response.tsv` (`downstream/doseresponse.py`, D44) is made when
 the conditions are a titration: names like `Cmpd_10nM` (or

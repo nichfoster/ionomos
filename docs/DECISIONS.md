@@ -546,7 +546,7 @@ Choices:
   on the method's name (isoDTB sites, TMT annotation, DIA `pg_matrix`), so a
   renamed DIA method gets the generic analysis. The documented way to use
   another word for DIA is to add it to `methods.DIA.aliases`. Carrying `like`
-  into the pipeline is left open.
+  into the pipeline is left open. (Decided in D54: it carries through.)
 - **Mistakes fail at load and name the setting** (`naming.methods.DIA:
   '{rep}_{fraction}' needs {sample} once, outside [ ]`). The watcher then
   keeps its last good config (D34) and the app won't save. Unknown keys under
@@ -1274,3 +1274,294 @@ adds the tests.
 p and adjusted p, the fold changes, the trend t and p and the interaction F,
 for the plain model, a replicate block and data with missing values, to
 1e-8.
+
+
+### D54 — `like:` makes a method that method everywhere; one resolver says what a key behaves as
+**2026-10-01.** D37 left `naming.methods.<X>: {like: DIA}` as a rule for
+names only, so a lab's `DIA_phospho` or `TMTpro` method was searched with its
+own workflow and then analysed as generic label-free: no TMT annotation, no
+site tables, a control asked for where there is none. A second DIA or TMT
+workflow under its own key is an ordinary thing to want, so `like:` now
+carries through.
+
+1. **A method has a kind.** `naming.method_kind()` returns it, and is the
+   only place that decides:
+   - the engine first: `engine: diann` is DIA, `engine: maxquant` and
+     `engine: sage` are label-free (`LFQ`)
+   - else the `like:` target (`isoDTB`, `TMT` or `DIA`)
+   - else the key itself. A key that is not a built-in method is a method of
+     the lab's own: label-free, read from `combined_protein.tsv`, as before.
+
+   `naming.analysis_method()` is the same with MaxQuant's and Sage's own
+   tables for those engines. `Config.kind()` and `Config.analysis_method()`
+   wrap them.
+2. **Everything that branched on the key asks for the kind.** FragPipe's
+   expected outputs and the TMT `annotation.txt` (`fragpipe.py`); the review
+   window's control and summary (`resolve.py`, through `Draft.kinds`); the
+   analysis, with statistics on or off (`postprocess.py`). The analysis
+   itself (`downstream/`) is unchanged: it is handed the kind, so its
+   loaders, the SDRF and the doctor's messages need no second lookup.
+3. **The lab's name stays where a person reads it.** The job, its
+   `<key>.workflow` copy, the ledger, the QC trend's series and the report's
+   header keep the key. `analysis.json` → `method` is the kind, as it already
+   was the engine's table for MaxQuant and Sage.
+4. **The engine beats `like:`.** docs/ENGINES.md used `LFQ: {like: isoDTB}`
+   to give a MaxQuant or Sage method the `<sample>_<rep>_<fraction>` names.
+   Those configs keep working as label-free: the engine decides. The docs
+   now write the template out, which says what is meant.
+5. **`ionomos.json` records `method_config.analysis_method`,** so a folder
+   analysed without its lab's config (`ionomos analyze <folder>` elsewhere)
+   is still read as it was there. Older folders have no such entry and
+   behave as before.
+6. **`ionomos analyze --method` takes the config's own keys** besides the
+   built-in names, and `ionomos names test` prints what a custom method is
+   run as.
+
+**What changes for an existing config:** nothing for the built-in keys, and
+nothing for a config without `like:`. A FragPipe method that used `like:`
+only to borrow a rule's shape for a different kind of experiment (say a
+label-free method with `like: isoDTB`) is now analysed as isoDTB; it should
+write the template out instead (docs/NAMING_CONVENTION.md). A DIA-NN method
+under a key other than `DIA` used to get no analysis and now gets DIA's.
+
+**Left as it was:** the SDRF reads fractions with the built-in rule of the
+kind, not the lab's own template; a method cannot be `like:` another custom
+method; the QC trend's `methods:` list and series names use the lab's keys.
+
+**Checked** end to end with the testbed's fake FragPipe, DIA-NN and MaxQuant
+(`tests/test_method_kinds.py`): a custom key like each built-in gives the
+same analysis, SDRF, annotation, control handling and doctor messages as the
+built-in method. The FragPipe-Analyst and R goldens pass unchanged.
+
+
+### D55 — Search quality per run comes from the QC trend's reader, with two wide warnings
+**2026-10-01.** D35 left PSM-level QC for later. The report's QC tabs judge
+samples from the quantities; none of them says how the search went for each
+raw file. `downstream/psmqc.py` adds that, as a **Search quality** QC tab,
+`results/psm_qc.tsv` and `analysis.json` → `psm_qc`.
+
+1. **One reader.** `qcmetrics.read_psm` (D45) already streamed `psm.tsv`
+   for the instrument QC trend. It now also keeps, per run, the quantiles of
+   the mass error and the PSM counts by missed cleavages, charge and peptide
+   length. `psmqc.py` only arranges those numbers. The trend's own metrics
+   are unchanged.
+2. **Every run, no manifest.** The trend matches runs against the
+   experiment's file list. The report takes every run the tables name
+   (`qcmetrics.search_tables`), so it also works for a folder analysed
+   without an `ionomos.json`. DIA-NN's big `report.tsv` is not opened.
+3. **A run is a raw file.** For TMT that is a fraction of a plex, not a
+   sample. The folder the `psm.tsv` is in (FragPipe's experiment) is shown
+   beside it as the sample.
+4. **Mass error is the uncalibrated one** (`Observed Mass` against
+   `Calculated Peptide Mass`, isotope-error corrected, as in D45), because
+   the question is the instrument's calibration, not what the search made
+   of it. Errors over 50 ppm are mass offsets and are left out.
+5. **Spread is shown as quartiles**, with the 5th and 95th percentile in the
+   chart, not as a standard deviation: a few wrong matches would dominate it.
+6. **Two warnings, both wide.** `PSM_MASS_ERROR`: a run's median error is
+   10 ppm or more from 0. `PSM_MISSED_CLEAVAGES`: half or more of a run's
+   PSMs have a missed cleavage. A run needs 100 PSMs to be judged. These are
+   not the lab's limits: they were chosen so that only a run nobody would
+   call normal is flagged, and they are constants in `psmqc.py` until the lab
+   has seen its own numbers. Both are notes (no pop-up) and are raised even
+   when there is no quant table, because they may be why.
+7. **Left out:** a warning for a run with few PSMs (TMT fractions differ by
+   design, and `LOW_SAMPLE` covers samples); a warning for a run unlike the
+   others (it needs the lab's numbers first); warnings on DIA-NN's summary,
+   which is shown as DIA-NN reports it; settings for the limits.
+8. **Size.** Files are read row by row; one over 4,096 MB (the trend's
+   default) is not read and the report says so. A simulated 90 MB file with
+   400,000 PSMs took about 2 s on the development Mac; the lab PC was not
+   timed. `psm_qc: false` switches the step off.
+
+**Not checked on real data.** The `psm.tsv` column names are from the
+FragPipe documentation, as in the testbed's fake FragPipe. The tests use
+tables with those names and planted values.
+
+
+### D56 — Sage TMT is summarised as MSstatsTMT input is; plexes are left to IRS
+**2026-10-01.** D51 held a Sage job whose settings asked for TMT, because
+`tmt.tsv` holds reporter ions per spectrum and nothing rolled them up.
+ROADMAP 5B #5 listed it as still to do.
+
+1. **The join.** `tmt.tsv` has a row per MS2 / MS3 spectrum (`filename`,
+   `scannr`, `ion_injection_time`, then a column per reporter);
+   `results.sage.tsv` has the PSMs. They are joined on (filename, scannr):
+   for MS3 quantification Sage writes the MS2 scan's id there. Both files
+   are read line by line, since both have a row per spectrum.
+2. **Which PSMs.** Targets (`label` 1) of `rank` 1 with `spectrum_q`,
+   `peptide_q` and `protein_q` ≤ 1%. A spectrum with more than one such PSM
+   (a chimeric search) is left out, since its reporter ions belong to both
+   peptides. A reporter intensity of 0 (no peak) is missing.
+3. **No new summary.** The PSMs go through the summary the MSstatsTMT
+   importer uses (`engines._tmt_summarise`, checked against MSstatsTMT 2.20
+   in D48): one PSM per peptide ion and file, fractions of a plex combined,
+   global median normalisation, Tukey median polish per plex. Proteins are
+   the razor groups of D51. A test checks that Sage input and the same PSMs
+   as MSstatsTMT rows give the same numbers.
+4. **Between plexes: IRS, not MSstatsTMT's reference normalisation.** Sage
+   records no `Norm` condition, so the loader stops after the median polish
+   and `plex.py` joins the plexes on the reference channel
+   (`tmt.reference_channel`, the SDRF, or a channel named pool), as for
+   MaxQuant and Proteome Discoverer (D48).
+5. **Channels.** Sage names the columns `tmt_1 … tmt_n` in the kit's order,
+   so they map through `plex.TMT_ORDERS`. A custom list of reporter masses
+   (`User`, columns `user_1 …`) keeps Sage's names.
+6. **Plexes.** With the watcher's manifest, a file's experiment is its
+   plex, and the files of a plex are its fractions. Without it, the lab's
+   TMT file rule (`<plex>[_TMT][_F<fraction>]`).
+7. **Names and conditions.** experiment.yaml's `tmt:` map is used as
+   FragPipe's annotation is: the name is the sample, and the condition is
+   the text before the first `_`. A channel it calls NA / empty is left
+   out before the summary. A channel nothing names is `<plex>_<channel>`
+   with condition `unassigned`: one condition for all, so the analysis asks
+   (`ONE_CONDITION`) instead of testing channels against each other.
+   `irs: auto` does not fall back to the plex means while a channel is
+   unassigned, because nothing says the plexes hold the same mix.
+8. **The runner.** A lab `sage_config` with `quant.tmt` runs. Label-free
+   quantification is not forced on for it, and the job expects `tmt.tsv`.
+   An unknown kit name still holds the job. The default settings stay
+   label-free: TMT needs the lab's own modifications and MS level, so there
+   is no TMT default to ship.
+9. **QC trending** reads `results.sage.tsv` per file. The mass error is
+   computed from `expmass` and `calcmass` (signed, isotope-corrected), not
+   taken from `precursor_ppm`. `fragment_ppm` is an unsigned average, so it
+   gives no MS2 mass error.
+10. **Left out: Parquet.** `--parquet` writes one `results.sage.parquet`
+    with the reporter ions as a list column and `lfq.parquet` in long
+    format: different layouts from the `.tsv` files, which Sage's own log
+    calls unstable. Reading them is a second loader, not a small addition
+    to the optional pyarrow reader. A method with `--parquet` in
+    `sage_args` is held with that explanation.
+
+Tested with stand-ins only. The layouts are from Sage's source
+(`sage-cli/src/runner.rs`, `sage/src/tmt.rs`, master in September 2026),
+not from a real run.
+
+
+### D57 — The assistant's first part is read-only, and is tested as a harness, not as a model
+**2026-10-01.** ROADMAP Phase 6.1 ("Explain") is built inside the rules D49
+set, in `ionomos/assistant/`. Phase 6.0 (measuring models on the PC) has not
+happened, so there is no default model, and nothing has run against a real
+model or runtime. The choices made on the way:
+
+1. **A fifth citation form, `[job:ID]`.** D49 lists issue, log, help and
+   analysis. "Is job 3 finished?" has an answer that none of them can carry,
+   so a job the tools returned can be cited too.
+2. **Every paragraph needs a valid citation, and one invalid citation sinks
+   the answer.** "Every claim cites" has to be something Ionomos can check
+   without understanding the text; a paragraph is the unit it can see. An
+   invented citation is treated as an invented claim. The model gets one
+   chance to correct an answer, then Ionomos's own text is shown.
+3. **A refusal is the silent branch.** There is no separate refusal message
+   to trust: an answer with no valid citation ("I don't know", a poem,
+   statistics advice) is never shown, and the fallback names who to ask.
+4. **What a citation proves is that the source exists, not that the sentence
+   follows from it.** The Sources lines under an answer are written by
+   Ionomos from the tools' results so a reader can compare. Whether models
+   misread their sources is for the scorecard on real models.
+5. **An answer that says "I retried / deleted / changed …" is not shown.**
+   No tool changes anything, so the claim is false whatever it cites. This
+   is a coarse pattern, not a proof, and stays until 6.2 gives actions a
+   dialog.
+6. **Non-local addresses are refused even with `assistant.allow_cloud:
+   true`.** D49 ties a cloud model to a banner and a preview of what is
+   sent. Neither exists before 6.4, so the flag is read and reported but
+   opens nothing. The request also ignores proxy settings and refuses
+   redirects, so a local address cannot become a remote one on the way.
+7. **A wrong `assistant:` address is not a config error.** Typos in the block
+   fail at load like any other section, but where `base_url` points is
+   checked when a question is asked: a bad address must not stop the watcher.
+8. **Ionomos does the obvious lookups itself.** With `--experiment` or
+   `--item` it fetches the job, its attention items and a failed search's
+   log tail before the model's first turn, in the shape of tool calls. The
+   system prompt and tool schemas stay byte-identical (about 1,000 tokens; a
+   test pins their digest) so a runtime can cache them.
+9. **Streaming is for timing only.** Nothing is shown before the citations
+   are checked, so tokens are not printed as they arrive. The stream gives
+   the time to first token for the audit log.
+10. **Help search is BM25 with a shared crude stemmer**, in SQLite FTS5 when
+    present and in plain Python otherwise, over the same tokens. No
+    embeddings (D49: only if the evaluation shows misses).
+11. **The audit log stores hashes of tool arguments and of the shown text**,
+    and the question in clear, in `assistant-audit.jsonl` (named in
+    `names.py`) in app data. It is never trimmed.
+12. **The scenario corpus is scripted, and says so.** The 53 scenarios in
+    `tests/assistant_scenarios/` carry model turns written by hand: what a
+    good or a misbehaving model would send. CI replays them through an
+    in-process fake of the chat endpoint. That tests the loop, the
+    validators, the citation check, the fallbacks and the audit log. It
+    does not measure a model. The rubrics in the same files are
+    model-independent and are what a real model will be scored on.
+
+**Left out:** the "Ask about this" button in the pop-ups (the backend,
+`ask(item_id=…)`, exists; the Tk part could not be checked without opening
+windows), a runner that scores a real model over the corpus, and runtime
+tuning (keep-alive, threads, priority). Phase 6.1's box stays unticked.
+
+**For the maintainer to confirm:** 1, 2 and 6.
+
+
+### D58 — Notifications are off by default, say little, and can never touch a job
+**2026-10-01.** ROADMAP Phase 4 asked for "email/Slack/Teams notify on
+done/failed" and log rotation. The lab's rule is that nothing leaves the PC
+unasked, so the first is built to be safe to ignore (`notify.py`).
+
+1. **Off unless configured.** No `notify:` block, or `enabled: false`, sends
+   nothing and writes nothing. `enabled: true` with no channel is a config
+   error, not a silent no-op.
+2. **Four channels, standard library only**: a generic JSON webhook, Teams,
+   Slack (`urllib`) and SMTP (`smtplib`). PyYAML stays the only dependency.
+   Teams gets one Adaptive Card in a `message` (the shape both a Workflows
+   webhook and the older incoming webhook accept); Slack gets `{"text": …}`.
+3. **A fixed, short list of what is sent**: status, job number, time,
+   experiment name, user, method, the reason (first 600 characters), the hit
+   counts per comparison, the local path of the report, the PC's name.
+   Never a file, a table, a feature name or a measured value: the log tail
+   and likely causes of a failure stay in `FAILED.txt` and the pop-up.
+   `include_names: false` cuts it to the job number, status and time. The
+   generic webhook's JSON is this list and nothing else, and the tests check
+   the keys.
+4. **Secrets.** Webhook addresses are bearer secrets, like the SMTP
+   password. They may come from an environment variable (`url_env`,
+   `password_env`; the variable wins over the file). They are never logged:
+   errors are reduced to "HTTP 404", "could not connect" and so on. The
+   diagnostics report and bundle redact the `config.yaml` they include and
+   scrub every other file in them for the same values (and for anything
+   shaped like a Slack / Teams hook address), also when the config doesn't
+   parse. `config-backups/` keeps full copies: it never leaves the PC.
+5. **https only.** `http://` is refused except for this computer
+   (`localhost`), because the address is the secret. Redirects are not
+   followed. An SMTP password with `security: none` is a config error.
+6. **A job never waits for a message.** The worker calls `announce` after the
+   ledger, `ionomos.json` and `DONE.txt` / `FAILED.txt` are written; it
+   builds the message and hands it to a daemon thread. One try per channel,
+   a timeout (`timeout_seconds`, 1 to 60, default 10), no retries, no queue
+   of unsent messages: a message lost while the network was down is lost.
+   A channel's error is logged once until it changes or the channel works
+   again.
+7. **"Held" once per job and reason.** The worker polls a held job every few
+   seconds. The reasons already sent are kept in
+   `<log_dir>/notify_state.json` (numbers removed, so "12 GB free" and
+   "11 GB free" are one reason), which also covers a restart. The entry is
+   dropped when the job finishes. A search cancelled by a person sends
+   nothing, and neither does one re-queued because Ionomos was stopped.
+8. **`on:` and YAML.** PyYAML reads a bare `on:` key as the boolean `true`
+   (YAML 1.1). The loader and the config writer accept both, so the block
+   can be written the natural way.
+9. **Settings live in `config.yaml`, not the app, for now.** A tab would
+   need GUI tests and a place to show secrets. The app's Save keeps the
+   block (`configio.py` writes it, commented). The worker reads `notify:`
+   at start: restart the watcher after a change.
+10. **Log rotation existed** (`ionomos.log`, 5 MB, 5 old files). What was
+    missing is Windows: a rename refused because another process has the
+    file open made the stock handler drop records. The handler now keeps
+    appending and retries a minute later. Size and count are constants in
+    `names.py`, not settings.
+11. **Left alone**: auto-archive to `D:` (it moves user data) and a status
+    web page (it adds a server). The disk-space hold already existed
+    (`fragpipe.check_raws`, `fragpipe.min_free_gb`).
+
+**Not verified**: a real Teams, Slack or SMTP server. The tests use an HTTP
+server and a small SMTP server inside the test process, and a stub for
+STARTTLS + login.

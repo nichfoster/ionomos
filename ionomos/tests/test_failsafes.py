@@ -460,12 +460,17 @@ def test_request_cancel_on_a_finished_job_is_a_noop(bed):
 # -------------------------------------------------- the real `ionomos run` --
 
 
-def _run_proc(cfg_path: Path, env_extra: dict) -> subprocess.Popen:
+def _run_proc(cfg_path: Path, env_extra: dict, capture: bool = False) -> subprocess.Popen:
+    """`ionomos run` as a real process. Its output goes to a file unless the caller reads it (capture): a pipe
+    nobody reads fills up (4 KB on Windows) and the watcher then blocks on its next log line."""
     import os
 
     env = {**os.environ, **env_extra}
-    return subprocess.Popen([sys.executable, "-m", "ionomos", "--config", str(cfg_path), "run", "--no-gui"],
-                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
+    cmd = [sys.executable, "-m", "ionomos", "--config", str(cfg_path), "run", "--no-gui"]
+    if capture:
+        return subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
+    with open(Path(cfg_path).parent / "run_output.txt", "ab") as sink:
+        return subprocess.Popen(cmd, stdout=sink, stderr=subprocess.STDOUT, env=env)
 
 
 def _wait(cond, timeout=30):
@@ -483,7 +488,7 @@ def test_run_process_single_instance_graceful_stop_and_recovery(bed):
     try:
         assert _wait(lambda: health.is_locked(log_dir))
         # a second watcher on the same setup refuses to start
-        p2 = _run_proc(bed["cfg_path"], {})
+        p2 = _run_proc(bed["cfg_path"], {}, capture=True)
         out2, _ = p2.communicate(timeout=30)
         assert p2.returncode == 3 and "already running" in out2
 

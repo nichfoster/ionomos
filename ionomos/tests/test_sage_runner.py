@@ -1,6 +1,8 @@
 """Sage run by the watcher (`engine: sage`, sage.py), end to end against the testbed's stand-ins for Sage and
 ThermoRawFileParser. The fake Sage checks the FASTA and every mzML it is given like the real one, so a job only
-reaches "done" if the conversion and sage.json were prepared correctly."""
+reaches "done" if the conversion and sage.json were prepared correctly. A lab sage_config with quant.tmt makes
+it a TMT job: the fake Sage then writes tmt.tsv, and the analysis reads it (D56)."""
+import csv
 import json
 from dataclasses import replace
 from pathlib import Path
@@ -18,12 +20,12 @@ from tests.conftest import make_drop
 FILES = [f"{c}_{r}_{f}.raw" for c in ("DMSO", "Drug") for r in (1, 2, 3) for f in (1, 2)]
 
 
-def _with_sage(cfg, exe, converter, **extra):
-    m = cfg.methods["isoDTB"]  # a DDA method with the <sample>_<rep>_<fraction> naming rule
+def _with_sage(cfg, exe, converter, key="isoDTB", **extra):
+    m = cfg.methods[key]  # isoDTB: a DDA method with the <sample>_<rep>_<fraction> naming rule; TMT: <plex>_F<fraction>
     more = {"engine": "sage", "sage_exe": str(exe), **({"raw_converter": str(converter)} if converter else {}), **extra}
-    new = MethodConfig(key="isoDTB", workflow="", fasta=m.fasta, data_type="DDA", postprocess=(), aliases=m.aliases,
+    new = MethodConfig(key=key, workflow="", fasta=m.fasta, data_type="DDA", postprocess=(), aliases=m.aliases,
                        extra=more)
-    return replace(cfg, methods={**cfg.methods, "isoDTB": new})
+    return replace(cfg, methods={**cfg.methods, key: new})
 
 
 @pytest.fixture
@@ -107,10 +109,12 @@ def test_missing_setup_holds_the_job_with_a_help_topic(bed, tmp_path):
          "search.hold-converter"),
         (_with_sage(bed["cfg"], bed["exe"], bed["conv"], sage_config="nope.json"), "Sage settings 'nope.json'",
          "search.hold-sage-config"),
-        (_with_sage(bed["cfg"], bed["exe"], bed["conv"], sage_config="tmt.json"), "TMT quantification",
+        (_with_sage(bed["cfg"], bed["exe"], bed["conv"], sage_config="tmt.json"), "quant.tmt is 'Tmt12'",
          "search.hold-sage-config"),
+        (_with_sage(bed["cfg"], bed["exe"], bed["conv"], sage_args="--batch-size 2 --parquet"),
+         "sage_args has --parquet", "search.hold-sage-config"),
     ]
-    lab.write_text(json.dumps({"quant": {"tmt": "Tmt16"}}), encoding="utf-8")
+    lab.write_text(json.dumps({"quant": {"tmt": "Tmt12"}}), encoding="utf-8")   # not a kit Sage has
     _queue(bed)
     for cfg, text, topic in cases:
         Worker(cfg, bed["ledger"]).run_once()
@@ -118,10 +122,112 @@ def test_missing_setup_holds_the_job_with_a_help_topic(bed, tmp_path):
         assert job.status == "queued" and text in job.reason, job.reason
         assert hold_topic(job.reason) == topic
     lab.write_text("{not json", encoding="utf-8")
-    Worker(cases[-1][0], bed["ledger"]).run_once()
+    Worker(cases[-2][0], bed["ledger"]).run_once()
     assert "can't be read as JSON" in bed["ledger"].get(1).reason
     Worker(bed["cfg"], bed["ledger"]).run_once()   # fixed: runs
     assert bed["ledger"].get(1).status == "done"
+
+
+TMT_FILES = [f"plex{p}_F{f}.raw" for p in "ABC" for f in (1, 2)]
+TMT_SETTINGS = {"database": {"static_mods": {"^": 229.162932, "K": 229.162932, "C": 57.021464}},
+                "quant": {"tmt": "Tmt10", "tmt_settings": {"level": 3, "sn": False}}}
+
+
+def _queue_tmt(bed, channels: dict | None, kit="Tmt10", **tmt) -> tuple:
+    """A TMT drop of three plexes with two fractions each, searched by Sage with the lab's TMT settings."""
+    import yaml
+
+    lab = bed["cfg"].workflow_dir / "lab_tmt.json"
+    lab.write_text(json.dumps({**TMT_SETTINGS, "quant": {**TMT_SETTINGS["quant"], "tmt": kit}}), encoding="utf-8")
+    cfg = _with_sage(bed["cfg"], bed["exe"], bed["conv"], key="TMT", sage_config="lab_tmt.json")
+    folder = make_drop(cfg.inbox, "20260930_EJQ_TMT_sage-tmt", TMT_FILES)
+    if channels or tmt:
+        (folder / "experiment.yaml").write_text(yaml.safe_dump({"tmt": {**({"channels": channels} if channels else {}),
+                                                                        **tmt}}), encoding="utf-8")
+    assert intake(folder, cfg, bed["ledger"]).value == "queued"
+    return cfg, Path(bed["ledger"].list()[-1].dest_dir)
+
+
+def test_tmt_job_writes_tmt_tsv_and_is_analysed_per_plex_and_channel(bed):
+    from ionomos.downstream.plex import TMT_ORDERS
+
+    design = testbed.fake_sage_tmt_design(10)   # Pool, 4 x DMSO, 4 x Drug, Pool
+    seen: dict[str, int] = {}
+    channels = {}
+    for ch, c in zip(TMT_ORDERS[10], design, strict=True):
+        seen[c] = seen.get(c, 0) + 1
+        channels[ch] = c if c == "Pool" else f"{c}_{seen[c]}"
+    cfg, dest = _queue_tmt(bed, channels)
+    Worker(cfg, bed["ledger"]).run_once()
+    job = bed["ledger"].get(1)
+    assert job.status == "done", job.reason
+    out = json.loads((dest / "ionomos_run" / sage.CONFIG_NAME).read_text(encoding="utf-8"))
+    assert out["quant"] == TMT_SETTINGS["quant"]                # TMT as the lab set it; label-free not switched on
+    assert out["database"]["static_mods"]["K"] == 229.162932 and len(out["mzml_paths"]) == 6
+    assert (dest / "sage" / "tmt.tsv").is_file() and not (dest / "sage" / "lfq.tsv").exists()
+    assert "label-free quantification off" not in job.reason and "channel map" not in job.reason
+    s = json.loads((dest / "results" / "analysis.json").read_text(encoding="utf-8"))
+    assert s["method"] == "Sage" and s["source"].endswith("tmt.tsv")
+    assert s["engine"]["fdr"] == "spectrum, peptide and protein q ≤ 0.01" and s["engine"]["table"] == "sage/tmt.tsv"
+    assert s["engine"]["quantity"].startswith("median polish of tmt.tsv reporter intensities")
+    # three plexes of 10 channels; the two pools of each put the plexes on one scale and then leave
+    assert s["tmt"]["applied"] and s["tmt"]["method"] == "IRS (reference channel)"
+    assert s["tmt"]["plexes"] == {"plexA": 10, "plexB": 10, "plexC": 10} and len(s["tmt"]["removed"]) == 6
+    assert len(s["samples"]) == 24 and set(s["samples"].values()) == {"DMSO", "Drug"}
+    assert "plexB_Drug_3" in s["samples"] and s["design"]["conditions_from"] == "experiment.yaml tmt: channel map"
+    assert [c["name"] for c in s["comparisons"]] == ["Drug vs DMSO"]
+    assert s["comparisons"][0]["up"] + s["comparisons"][0]["down"] > 10
+    notes = " | ".join(s["notes"])
+    assert "left out: 3 decoy, 3 of lower rank, 6 above a q-value" in notes      # per plex: 1, 1 and 2
+    assert "fractions combined within 3 mixture run(s)" in notes and "6 peptide(s) shared" in notes
+    with open(dest / "results" / "protein_matrix_log2.tsv", encoding="utf-8") as fh:
+        rows = list(csv.DictReader(fh, delimiter="\t"))
+    assert len(rows) == 300 and not any("P9999" in r["id"] for r in rows)        # nothing from the rows planted to fail
+    assert max(float(v) for r in rows for k, v in r.items() if k.startswith("plex") and v not in ("", "NA")) < 36   # nor their 1e12
+    sdrf = (dest / "results" / "sdrf.tsv").read_text(encoding="utf-8")
+    assert "TMT127N" in sdrf and "plexB_F2.raw" in sdrf
+
+
+def test_tmt_job_without_a_channel_map_asks_for_the_conditions(bed):
+    cfg, dest = _queue_tmt(bed, None, kit="Tmt16")
+    lines = sage.describe(cfg, "TMT")
+    assert (True, "Sage settings lab_tmt.json (TMT quantification, Tmt16: the analysis reads tmt.tsv)") in lines
+    Worker(cfg, bed["ledger"]).run_once()
+    job = bed["ledger"].get(1)
+    assert job.status == "done" and "TMT job without a tmt: channel map" in job.reason
+    s = json.loads((dest / "results" / "analysis.json").read_text(encoding="utf-8"))
+    assert len(s["samples"]) == 48 and set(s["samples"].values()) == {"unassigned"} and "plexA_134N" in s["samples"]
+    codes = {i["code"] for i in s["issues"]}
+    assert "ONE_CONDITION" in codes and "TMT_PLEXES_NOT_NORMALISED" in codes   # no plex means on unknown channels
+    assert not s["tmt"]["applied"] and "no condition yet" in s["tmt"]["reason"]
+    assert any("give each its condition on the Analysis tab" in n for n in s["notes"])
+
+
+def test_tmt_plexes_map_must_name_every_plex(bed):
+    cfg, _dest = _queue_tmt(bed, None, plexes={"plexA": {"channels": {126: "Pool"}}})
+    Worker(cfg, bed["ledger"]).run_once()
+    job = bed["ledger"].get(1)
+    assert job.status == "failed" and "tmt.plexes has no entry for experiment(s): plexB, plexC" in job.reason
+
+
+def test_a_qc_standard_searched_by_sage_is_trended(bed):
+    from ionomos import qctrend
+
+    folder = make_drop(bed["cfg"].inbox, "20260930_EJQ_isoDTB_HeLa-200ng-QC", ["HeLa_200ng_1.raw", "HeLa_200ng_2.raw"])
+    assert intake(folder, bed["cfg"], bed["ledger"]).value == "queued"
+    Worker(bed["cfg"], bed["ledger"]).run_once()
+    job = bed["ledger"].get(1)
+    assert job.status == "done", job.reason
+    rows = sorted(qctrend.load(bed["cfg"].log_dir), key=lambda r: r["run"])
+    assert [r["run"] for r in rows] == ["HeLa_200ng_1", "HeLa_200ng_2"]
+    assert all(r["series"] == "isoDTB · HeLa · 200ng" and r["acquisition"] == "DDA" for r in rows)
+    m = rows[0]["metrics"]
+    assert m["psms"] > 700 and m["peptides"] > 700 and 250 < m["proteins"] <= 310
+    assert m["ms1_ppm"] == pytest.approx(1.5, abs=0.05)         # the +1.5 ppm the fake plants, isotope peaks corrected
+    assert 2 < m["charge"] < 3 and 0 < m["missed"] < 0.5 and len(rows[0]["rt"]) == 200
+    assert "results.sage.tsv" in rows[0]["sources"]["psms"]
+    st = json.loads((Path(job.dest_dir) / "ionomos.json").read_text(encoding="utf-8"))
+    assert st["results"]["qc_trend"][0].startswith("HeLa_200ng_1: baseline")
 
 
 def test_a_failed_conversion_fails_the_job_and_a_retry_converts_only_what_is_missing(bed, monkeypatch):

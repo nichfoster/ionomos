@@ -511,14 +511,10 @@ FAKE_SAGE_VERSION = "0.14.7"
 def fake_sage(argv: list[str]) -> int:
     """Fake Sage (`ionomos fake-sage [options] sage.json`): --help prints the real usage (with the telemetry
     switch unless IONOMOS_FAKE_SAGE_OLD=1, an older Sage, which then refuses the flag); a run checks the FASTA
-    and every mzML like the real one, then writes lfq.tsv (three peptide ions per protein, one shared between
-    two proteins, a decoy-only and a high-q row), results.sage.tsv and results.json into output_directory.
-    IONOMOS_FAKE_FP_MODE=fail exits 1."""
+    and every mzML like the real one, then writes what the real one would into output_directory: results.sage.tsv
+    and results.json, lfq.tsv when quant.lfq is on (_fake_sage_lfq) and tmt.tsv when quant.tmt names a kit
+    (_fake_sage_tmt). IONOMOS_FAKE_FP_MODE=fail exits 1."""
     import json
-    import re as _re
-    import tempfile
-
-    from ionomos.downstream import simulate
 
     say = lambda *x: print("FAKE Sage:", *x, flush=True)  # noqa: E731
     old = os.environ.get("IONOMOS_FAKE_SAGE_OLD") == "1"
@@ -555,6 +551,78 @@ def fake_sage(argv: list[str]) -> int:
     say("telemetry", "off" if SAGE_NO_TELEMETRY in argv else "ON",
         "| threads", os.environ.get("RAYON_NUM_THREADS", "all"))
     names = [Path(f).name for f in paths]
+    quant = cfg.get("quant") or {}
+    kit = quant.get("tmt")
+    channels = SAGE_KITS.get(kit) if isinstance(kit, str) else len((kit or {}).get("User") or [])
+    if kit and not channels:
+        say(f"Error: unknown variant `{kit}`, expected one of `Tmt6`, `Tmt10`, `Tmt11`, `Tmt16`, `Tmt18`, `User`")
+        return 1
+    outdir = Path(out)
+    outdir.mkdir(parents=True, exist_ok=True)
+    psm: list[list[str]] = []
+    if kit:
+        head = "tmt" if isinstance(kit, str) else "user"
+        tmt, psm = _fake_sage_tmt(names, channels)
+        (outdir / "tmt.tsv").write_text("\n".join("\t".join(r) for r in [
+            ["filename", "scannr", "ion_injection_time", *[f"{head}_{k + 1}" for k in range(channels)]], *tmt]) + "\n",
+            encoding="utf-8")
+    if quant.get("lfq") or not kit:
+        lfq, lfq_psm = _fake_sage_lfq(names)
+        psm = psm or lfq_psm
+        (outdir / "lfq.tsv").write_text("\n".join("\t".join(r) for r in lfq) + "\n", encoding="utf-8")
+    (outdir / "results.sage.tsv").write_text("\n".join("\t".join(r) for r in [SAGE_PSM_HEADER, *psm]) + "\n",
+                                             encoding="utf-8")
+    (outdir / "results.json").write_text(json.dumps({"version": FAKE_SAGE_VERSION, **cfg}, indent=2), encoding="utf-8")
+    say("finished")
+    return 0
+
+
+SAGE_KITS = {"Tmt6": 6, "Tmt10": 10, "Tmt11": 11, "Tmt16": 16, "Tmt18": 18}
+# results.sage.tsv as Sage 0.14 / 0.15 writes it (sage-cli runner.rs, write_features)
+SAGE_PSM_HEADER = [
+    "psm_id", "peptide", "proteins", "protein_groups", "num_proteins", "num_protein_groups", "filename", "scannr",
+    "rank", "label", "expmass", "calcmass", "charge", "peptide_len", "missed_cleavages", "semi_enzymatic",
+    "isotope_error", "precursor_ppm", "fragment_ppm", "hyperscore", "delta_next", "delta_best", "rt", "aligned_rt",
+    "predicted_rt", "delta_rt_model", "ion_mobility", "predicted_mobility", "delta_mobility", "matched_peaks",
+    "longest_b", "longest_y", "longest_y_pct", "matched_intensity_pct", "scored_candidates", "poisson",
+    "sage_discriminant_score", "posterior_error", "spectrum_q", "peptide_q", "protein_q", "protein_group_q",
+    "ms2_intensity"]
+
+
+def _sage_scan(n: int) -> str:
+    return f"controllerType=0 controllerNumber=1 scan={n}"
+
+
+def _sage_psm(n: int, pep: str, prots: str, filename: str, scan: int, intensity: float = 0.0, label: int = 1,
+              rank: int = 1, spectrum_q: float = 0.001, peptide_q: float = 0.001, protein_q: float = 0.001) -> list[str]:
+    """One results.sage.tsv row. The mass error is +1.5 ppm with one PSM in seven on the first isotope peak; the
+    RT (minutes) belongs to the peptide; every seventh peptide has a missed cleavage, every third is 3+."""
+    k = sum(ord(c) for c in pep)
+    calc = 900.0 + (k % 1500)
+    iso = 1 if n % 7 == 0 else 0
+    exp = calc * (1 + 1.5e-6) + iso * 1.00335
+    rt = 5.0 + (k % 9000) / 100.0
+    row = dict.fromkeys(SAGE_PSM_HEADER, "0.0")
+    row.update({"psm_id": str(n), "peptide": pep, "proteins": prots, "protein_groups": "",
+                "num_proteins": str(prots.count(";") + 1), "num_protein_groups": "0", "filename": filename,
+                "scannr": _sage_scan(scan), "rank": str(rank), "label": str(label), "expmass": f"{exp:.5f}",
+                "calcmass": f"{calc:.5f}", "charge": "3" if k % 3 == 0 else "2", "peptide_len": str(len(pep)),
+                "missed_cleavages": "1" if k % 7 == 0 else "0", "semi_enzymatic": "0", "isotope_error": f"{iso}.0",
+                "precursor_ppm": "1.5", "fragment_ppm": "2.5", "hyperscore": "30.0", "rt": f"{rt:.3f}",
+                "aligned_rt": f"{rt / 100:.4f}", "matched_peaks": "12", "longest_b": "4", "longest_y": "8",
+                "spectrum_q": f"{spectrum_q:g}", "peptide_q": f"{min(peptide_q, 1):g}", "protein_q": f"{protein_q:g}",
+                "protein_group_q": "1.0", "ms2_intensity": f"{intensity:.1f}"})
+    return [row[h] for h in SAGE_PSM_HEADER]
+
+
+def _fake_sage_lfq(names: list[str]) -> tuple[list[list[str]], list[list[str]]]:
+    """(lfq.tsv rows with the header, results.sage.tsv rows) of a label-free search: three peptide ions per
+    protein, one shared between two proteins, a decoy-only and a high-q row; a PSM per ion and file."""
+    import re as _re
+    import tempfile
+
+    from ionomos.downstream import simulate
+
     samples: dict[str, str] = {}  # file -> its sample: fractions (a second trailing number) share one
     for n in names:
         stem = _re.sub(r"(?i)\.mzml(\.gz)?$|\.d$", "", n)
@@ -565,21 +633,24 @@ def fake_sage(argv: list[str]) -> int:
         pg = Path(td) / "pg.tsv"
         simulate.dia_pg_matrix(pg, [(x, _re.sub(r"[_-]?\d+$", "", x) or x) for x in order], seed=len(order),
                                n_proteins=300)
-        head, *rows = [ln.split("\t") for ln in pg.read_text(encoding="utf-8").splitlines()]
+        _head, *rows = [ln.split("\t") for ln in pg.read_text(encoding="utf-8").splitlines()]
     col = {x: 7 + j for j, x in enumerate(order)}
     share = {n: 1.0 / sum(1 for v in samples.values() if v == samples[n]) for n in names}  # split over fractions
-    lfq = ["\t".join(["peptide", "charge", "proteins", "q_value", "score", "spectral_angle", *names])]
-    psm = ["\t".join(["psm_id", "peptide", "proteins", "num_proteins", "filename", "scannr", "rank", "label",
-                      "spectrum_q", "peptide_q", "protein_q"])]
+    lfq = [["peptide", "charge", "proteins", "q_value", "score", "spectral_angle", *names]]
+    psm: list[list[str]] = []
+    scans = dict.fromkeys(names, 0)
 
     def ion(pep, prots, q, factor, r):
         vals = []
         for n in names:
             v = r[col[samples[n]]] if r is not None else ""
             vals.append(f"{float(v) * factor * share[n]:.1f}" if v else "0.0")
-        lfq.append("\t".join([pep, "-1", prots, f"{q:g}", "1.5", "0.9", *vals]))
-        psm.append("\t".join([str(len(psm)), pep, prots, str(prots.count(";") + 1), names[0], "scan=1", "1", "1",
-                              "0.001", f"{min(q, 1):g}", "0.001" if "FAILS" not in pep else "0.2"]))
+            if v:
+                scans[n] += 1
+                psm.append(_sage_psm(len(psm) + 1, pep, prots, n, scans[n], float(vals[-1]),
+                                     label=-1 if prots.startswith("rev_") else 1, peptide_q=q,
+                                     protein_q=0.2 if "FAILS" in pep else 0.001))
+        lfq.append([pep, "-1", prots, f"{q:g}", "1.5", "0.9", *vals])
 
     for k, r in enumerate(rows):
         prot = f"sp|{r[0]}|{r[2]}"
@@ -590,13 +661,74 @@ def fake_sage(argv: list[str]) -> int:
     ion("HIGHQPEPTIDEK", "sp|P99990|HIGHQ_HUMAN", 0.2, 1.0, rows[0])          # above the peptide q-value
     ion("PROTEINFAILSK", "sp|P99991|PROTQ_HUMAN", 0.001, 1.0, rows[0])        # its protein is above the protein q
     ion("DECOYONLYK", "rev_sp|P99992|DECOY_HUMAN", 0.001, 1.0, rows[0])
-    outdir = Path(out)
-    outdir.mkdir(parents=True, exist_ok=True)
-    (outdir / "lfq.tsv").write_text("\n".join(lfq) + "\n", encoding="utf-8")
-    (outdir / "results.sage.tsv").write_text("\n".join(psm) + "\n", encoding="utf-8")
-    (outdir / "results.json").write_text(json.dumps({"version": FAKE_SAGE_VERSION, **cfg}, indent=2), encoding="utf-8")
-    say("finished")
-    return 0
+    return lfq, psm
+
+
+def fake_sage_tmt_design(channels: int) -> list[str]:
+    """The fake TMT experiment's condition per channel, in kit order: a pool in the first and last channel,
+    DMSO in the first half of the rest and Drug in the second."""
+    inner = channels - 2
+    return ["Pool", *["DMSO"] * (inner - inner // 2), *["Drug"] * (inner // 2), "Pool"]
+
+
+def _fake_sage_tmt(names: list[str], channels: int) -> tuple[list[list[str]], list[list[str]]]:
+    """(tmt.tsv rows without the header, results.sage.tsv rows) of a TMT search. A plex is the files that share
+    a name up to _F<fraction>; its channels follow fake_sage_tmt_design(); every protein has its own level in
+    every plex (the plex effect IRS removes) and changes planted in Drug. Three PSMs per protein and plex,
+    spread over the plex's fractions; a shared peptide; and rows the analysis must leave out, each with a huge
+    reporter signal: a decoy, PSMs above the spectrum and protein q-values, a rank-2 PSM, plus a reporter row
+    for a spectrum that was not identified."""
+    import random
+    import re as _re
+    import tempfile
+
+    from ionomos.downstream import simulate
+
+    plex_of = {n: _re.sub(r"(?i)(?:_TMT)?[_-]F?\d+$", "", _re.sub(r"(?i)\.mzml(\.gz)?$|\.d$", "", n)) for n in names}
+    plexes = list(dict.fromkeys(plex_of.values()))
+    design = fake_sage_tmt_design(channels)
+    cols = [(p, j) for p in plexes for j, c in enumerate(design) if c != "Pool"]
+    with tempfile.TemporaryDirectory() as td:
+        pg = Path(td) / "pg.tsv"
+        simulate.dia_pg_matrix(pg, [(f"{p}_{j}", design[j]) for p, j in cols], seed=len(plexes), n_proteins=300)
+        _head, *rows = [ln.split("\t") for ln in pg.read_text(encoding="utf-8").splitlines()]
+    at = {pj: 7 + k for k, pj in enumerate(cols)}
+    rng = random.Random(len(plexes))
+    tmt: list[list[str]] = []
+    psm: list[list[str]] = []
+    scans = dict.fromkeys(names, 0)
+
+    def spectrum(pep, prots, filename, vals, **kw):
+        scans[filename] += 1
+        if pep:
+            psm.append(_sage_psm(len(psm) + 1, pep, prots, filename, scans[filename], sum(vals), **kw))
+        if kw.get("rank", 1) == 1:  # a second PSM of a spectrum shares its reporter row
+            tmt.append([filename, _sage_scan(scans[filename]), "50.0", *[f"{v:.2f}" for v in vals]])
+        else:
+            scans[filename] -= 1
+            psm[-1][SAGE_PSM_HEADER.index("scannr")] = _sage_scan(scans[filename])
+
+    for p in plexes:
+        files = [n for n in names if plex_of[n] == p]
+        huge = [1e12] * channels
+        for k, r in enumerate(rows):
+            shift = 2 ** rng.gauss(0, 1.2)
+            seen = [float(r[at[(p, j)]]) for j, c in enumerate(design) if c != "Pool" and r[at[(p, j)]]]
+            pool = sum(seen) / len(seen) if seen else 0.0
+            level = [(pool if c == "Pool" else float(r[at[(p, j)]] or 0)) * shift for j, c in enumerate(design)]
+            prot = f"sp|{r[0]}|{r[2]}"
+            for j, factor in enumerate((1.0, 0.5, 0.25)):
+                spectrum(f"PEPTIDE{k}K{'A' * j}R", prot, files[(k + j) % len(files)], [v * factor for v in level])
+            if k % 50 == 1:
+                spectrum(f"SHARED{k}R", f"sp|{rows[k - 1][0]}|{rows[k - 1][2]};{prot}", files[0],
+                         [v * 0.3 for v in level])
+        first = f"sp|{rows[0][0]}|{rows[0][2]}"
+        spectrum("HIGHQPEPTIDEK", first, files[0], huge, spectrum_q=0.2)
+        spectrum("PROTEINFAILSK", "sp|P99991|PROTQ_HUMAN", files[0], huge, protein_q=0.2)
+        spectrum("DECOYONLYK", "rev_sp|P99992|DECOY_HUMAN", files[0], huge, label=-1)
+        spectrum("SECONDRANKK", first, files[0], huge, rank=2)   # on the DECOYONLYK spectrum
+        spectrum("", "", files[0], huge)                          # an MS3 scan whose MS2 was not identified
+    return tmt, psm
 
 
 def fake_rawparser(argv: list[str]) -> int:
