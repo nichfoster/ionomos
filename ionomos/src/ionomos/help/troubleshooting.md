@@ -689,6 +689,50 @@ real on/off changes (see [Only in one condition](#report.onoff)). In the
 report, tick **ignore imputation-driven hits** (Options → Hits) to see the hits
 that stand on measured values.
 
+## Samples hold exactly the same values {#issue.IDENTICAL_SAMPLES}
+
+Two or more samples have the same number for every feature. Real replicates
+never do. Usually one raw file or one column was loaded under two names, or a
+column was copied in a spreadsheet. Identical samples make the spread look
+smaller than it is, so the p-values come out too small.
+
+Leave the copy out (Analysis tab, or `exclude_samples` in `experiment.yaml`)
+and run the analysis again. See
+[How do I leave a sample out?](#faq.leave-out)
+
+## Features tested without replicate spread of their own {#issue.NO_RESIDUAL_DF}
+
+These features have one value per group, so there is nothing to estimate
+their own spread from. limma still gives a p-value, using the typical spread
+of the other features. It tells you whether the fold change is unusual for a
+typical feature, not for this one.
+
+It happens when a group has one sample, or when missing values leave one value
+per group and nothing is imputed. Treat these hits as leads to confirm. More
+replicates fix it.
+
+## Features with identical replicates {#issue.ZERO_VARIANCE}
+
+For these features every replicate of a group has exactly the same value.
+Measurements always differ a little, so the values were probably rounded,
+capped, copied, or filled in with one number (imputation `min`, `zero` or
+`mindet` does that). limma then uses the spread of the other features; a Welch
+or Student test divides by zero and reports p = 0.
+
+Click one of these features in the table and look at its values. Use the
+unrounded table, or imputation `auto` or `none`, and run the analysis again.
+
+## The variance prior could not be estimated {#issue.VARIANCE_PRIOR}
+
+limma borrows information about the spread from all features (the "prior").
+Here it could not: either fewer than 3 features have replicate spread (a very
+short table), or the features' spreads differ so much that the estimate did
+not settle. The p-values are then ordinary t-tests, or close to them. They are
+valid, but with few replicates they find fewer changes.
+
+There is nothing to fix in the settings. For a short list of proteins, a Welch
+test (`test: welch`) is the plainer choice.
+
 ## Low confidence (a group has too few samples) {#issue.LOW_CONFIDENCE}
 
 The comparison was tested, but a group has only one sample (or fewer than

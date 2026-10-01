@@ -64,6 +64,7 @@ class Findings:
     psm_problems: list = field(default_factory=list)      # [(issue code, message)] from psmqc.run
     model: object = None                # analysis.Model: the design used, or why an asked-for one wasn't
     roles: object = None                # roles.Plan: the conditions' roles and the comparisons they gave
+    guards: list = field(default_factory=list)            # guards.statistics: p-values that may not mean what they say
 
 # the tables each method needs, and why they might be missing
 EXPECTED = {
@@ -424,6 +425,11 @@ def check(f: Findings) -> list[Issue]:
                       ["Put the downloaded table (e.g. CysDB) in the experiment folder, or give its full path in "
                        "analysis.site_annotation, and Run analysis", "The liganded calls themselves are not affected"],
                       {"message": msg}))
+
+    # ---- statistics that ran but may not mean what they say (guards.py)
+    from ionomos.downstream import guards
+
+    out.extend(guards.issues(f.guards))
 
     # ---- statistics and plots
     _result_checks(f, s, add)

@@ -32,6 +32,22 @@ A short summary per comparison at the current cut-offs:
 [PCA](#glossary.pca) separates the conditions or hints at a
 [batch](#glossary.batch), and how the missing values behave.
 
+## How far to trust this {#report.trust}
+
+A short list under the key findings. Each line repeats one check of this
+analysis and gives its number: samples per group, how well replicates agree,
+how much is missing or [imputed](#glossary.imputation), what was tested and
+found per comparison, the shape of the p-values, and the smallest change this
+design can find reliably ([power](#qc.power)).
+
+- There is no score. A line marked **check** crossed the limit of its own
+  check (a group under 3 samples, a sample the scorecard fails, hits resting
+  on imputed values, an unusual p-value histogram). Read it and decide.
+- If this experiment was compared with a reference (`ionomos compare`) or
+  with known ratios (`ionomos benchmark`), the verdict is shown here with a
+  link. **other settings** means it was made before the settings changed.
+- The same list is in `analysis.json` under `trust`.
+
 ## Issue boxes {#report.issues}
 
 After every analysis Ionomos checks its own work. Each problem is a box:

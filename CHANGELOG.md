@@ -197,6 +197,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (**What Ionomos will never do** → the zip for troubleshooting).
     **Not run on the lab's real folders or on Windows outside CI.**
 
+- **Accuracy checks a lab member can run, and an analysis that holds up on
+  messy tables** (D60; [docs/VALIDATION.md](docs/VALIDATION.md)).
+  - **`ionomos compare <experiment folder> <reference>`**
+    (`downstream/compare.py`): an Ionomos analysis against another result
+    for the same experiment: another Ionomos run, or a results table
+    (FragPipe-Analyst export, limma, MSstats long format, Perseus, the lab's
+    R output). Features are matched by ID or gene. Per comparison it reports
+    matched / only in one, Pearson and Spearman of log2FC, slope and offset,
+    hit calls (both / only Ionomos / only reference, at each side's own
+    cut-offs and at common ones), the largest disagreements, p-value
+    agreement, and a verdict: `agrees`, `agrees after an offset of …`,
+    `differs: …` or `not judged: …`, from thresholds the page states.
+    Writes `compare.tsv`, `compare.json` and `compare.html` (scatter plots)
+    into `results/`. Tested on references made from Ionomos' own result;
+    **not on a real export of those tools**.
+  - **`ionomos benchmark`** (`downstream/benchmark.py`). Without a folder:
+    the pipeline on simulated tables with planted changes over a grid
+    (2 to 6 replicates, 2 controls vs 4 treated, 1.5- / 2- / 4-fold, three
+    levels of missing values) for each imputation / normalisation setting;
+    it reports sensitivity, the observed false discovery proportion against
+    the nominal alpha, and the fold-change bias. `--like <folder>` adds an
+    experiment's own settings and group sizes. Measured on the standard
+    grid: the default (Perseus + median) 4.0 % observed FDP at adjusted
+    p ≤ 0.05 and 30 % / 71 % of 2- / 4-fold changes found; no imputation
+    4.6 % and 47 % / 86 %; no normalisation 14 – 21 %. With a folder and
+    `--expected hye.yaml`: an analysed mixed-species (human / yeast /
+    E. coli) or spike-in experiment against its expected ratios per species
+    or protein list: measured vs expected (median, spread, a box plot), the
+    false positive rate in the unchanged background, sensitivity among the
+    changed. Species come from UniProt entry names, FASTA `OS=`, a column
+    or a FASTA. **No real benchmark run exists yet**; VALIDATION.md says how
+    to make one.
+  - **A calibration guard in the test suite**: a small simulated grid whose
+    observed FDP must stay at or below 8.5 % (measured 1.7 – 6.3 %; the
+    tolerance is from 30 other seed blocks).
+  - **"How far to trust this"** under the key findings of every report and
+    in `analysis.json` → `trust` (`downstream/trust.py`): samples per group
+    and balance, replicate agreement, missing and imputed values, per
+    comparison what was tested, hits resting on imputed values and the
+    p-value histogram shape, and power, each with its number. No score. A
+    line is marked "check" when its own check crossed its threshold. A
+    compare or benchmark result in the results folder is shown there too.
+  - **Guards on statistics that run but may not mean what they say**
+    (`downstream/guards.py`), each a new warning: `NO_RESIDUAL_DF`
+    (features tested with one value per group), `VARIANCE_PRIOR` (limma's
+    prior could not be estimated or did not converge), `ZERO_VARIANCE`
+    (identical replicates), `IDENTICAL_SAMPLES` (two samples with the same
+    values).
+  - **Messy input**: a seeded fuzz of `analyze()` and the loaders
+    (`tests/test_robustness.py`), and notes for what a table held besides
+    numbers: duplicate or blank IDs, repeated or missing column names,
+    columns left out, text and infinite cells, negative intensities,
+    ragged rows, implausible values. Decimal commas and thousands
+    separators are now read in tab and comma files too.
+  - The default output of a well-formed analysis is unchanged apart from the
+    new list in the report and the `trust` key: the FragPipe-Analyst, limma
+    and R golden tests pass as they were.
+
 ### Fixed
 
 - **`fragpipe.bat` found no Java on the lab PC's kind of setup.** The
@@ -231,6 +289,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   own `converting X failed` line (also with exit code 0 and no mzML
   written). A name inside a path does not count, so a converter that could
   not be started is no longer reported as a bad raw file.
+- Found by fuzzing the analysis with messy tables (D60):
+  - A table of raw intensities with one negative cell was read as log2
+    values, so the statistics ran on numbers around a million and the QC
+    crashed. The median now decides; negative intensities count as missing,
+    with a note.
+  - Two columns with the same name in a table were both read from the last
+    of them (the same values twice). Each is now its own sample.
+  - A numeric column without a header became a sample of its own condition
+    (named `sample`, the next one `.2`). It is now left out, with a note.
+  - A tab-separated table with decimal commas (`1234,5`) or thousands
+    separators (`1,234,567.8`) was refused as having no numeric columns.
+  - A sample column where a few cells held a number too large for a float
+    (`1e400`) was dropped without a word; so was a column with no values.
+    Such cells now count as missing, and columns left out are named.
+  - A value beyond any measurement (an intensity of 1e300, `1e308` in a log2
+    table) crashed the QC, insight, statistics or liganded-site steps with an
+    overflow. Values beyond 2^±100 now count as missing, with a note.
+  - A FragPipe table with two columns of one sample name counted that sample
+    twice with identical values. The repeat is now dropped, with a note.
+  - An isoDTB sample name with a character no file name can hold (a NUL
+    byte, `:`, `?`) crashed the read step when its site table was written.
+  - A table with one feature said "nothing could be tested" without the
+    reason (median normalisation leaves nothing). A note now says it.
 
 ## [0.13.0] - 2026-10-01
 

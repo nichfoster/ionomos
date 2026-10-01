@@ -25,6 +25,10 @@ Three layers, all runnable on macOS and Windows:
 | Search quality per run (D55) | `psm.tsv` tables with FragPipe's documented column names and planted values (**not real FragPipe output**): mass-error quantiles, PSMs by missed cleavages, charge and length; every run read without a manifest; an earlier attempt's folder, an oversized and a broken table skipped with a note; the two warnings at, inside and beyond their limits, a run with too few PSMs not judged; mass offsets and missing columns; `psm_qc.tsv`, `analysis.json`, the report payload and the doctor end to end; the step switched off, absent, without a quant table, and crashing; the search output left untouched; the QC tab in the JS harness (table, four charts, DIA-NN's summary, many runs, help, hostile names) | `tests/test_psmqc.py`, `tests/js/test/psm.test.mjs` |
 | FragPipe-Analyst port | R's RNG and Perseus imputation exact; `test_limma` all/control/others/missing vs limma; whole pipeline vs the real FragPipeAnalystR 1.1.1; PCA/hclust vs R; hypergeometric vs `phyper` | `tests/test_fpa.py`, `tests/golden/fpa/` |
 | Designs, F-test, DEqMS (D42, D43) | against limma 3.68.5 / DEqMS 1.30.0 to 1e-8 on 200 proteins × 12 samples: a replicate block with complete data and with missing values per row (incl. a condition absent and an unestimable block), block + numeric + factor covariates, one-vs-others with a block, `topTableF` for the blocked, covariate and plain models; R's `loess` (k-d tree + vertex interpolation) and `spectraCounteBayes` on the blocked and plain fits; confounded / incomplete / no-df designs explained, never crashed; settings errors; end to end: blocking on a replicate batch finds more hits, a confounded block falls back byte-identically to the plain model, DEqMS without counts warns. The exported `reproduce_design_in_R.R` is run in R when `IONOMOS_R_LIBS` names a library with limma (dev-only; skipped otherwise). Regenerate: `cd tests/golden/design && python make_design_inputs.py && Rscript run_design_reference.R <R library>` | `tests/test_design.py`, `tests/golden/design/`, `tests/js/test/design.test.mjs` |
+| Messy input (D60) | `analyze()` on malformed but plausible tables: it must not raise, must write a report and a strictly valid `analysis.json`, must not crash a stage (`CRASH_*` fails the test), and must say what it did. 37 hand-made tables, one per kind of mess (duplicate IDs, repeated / empty / unicode sample names, all-missing rows and columns, one replicate, one condition, 1 vs 6, constant values, infinities, negative and zero intensities, text in numeric cells, decimal commas, huge values, 1 feature), each with the text its notes or issues must hold, and each again with three random settings; 160 seeded random damages to simulated DIA, TMT and isoDTB tables with random settings (the input is checked to be unchanged); 50,000 features; one regression test per bug the fuzz found; the four statistical guards (`NO_RESIDUAL_DF`, `VARIANCE_PRIOR` both ways, `ZERO_VARIANCE` for limma and Welch, `IDENTICAL_SAMPLES`) raised on planted cases and silent on clean data. 6,000 further seeds were run once by hand, not in the suite. The damage is to simulated tables, not real exports | `tests/test_robustness.py` |
+| Accuracy: compare (D60) | references made from the Ionomos result itself, so the right verdict is known: its own results table (agrees, r = 1), shifted (an offset), scaled (the slope), noisy (the correlation), other p-values (the hit lists), named the other way round (flipped) and sign-flipped without a telling name (reported, `--flip`); every verdict threshold at its edge; matching by accession inside protein groups and FASTA-style IDs, by gene, repeated keys; comparison names in several spellings; limma, MSstats long format with infinite fold changes, Perseus (`-Log p`, `+`), a gene-symbol table without adjusted p; `compare.tsv` / `.json` / `.html` (self-contained, escaped, SVGs parse); the CLI and its exit codes; neither input changed; the verdict in the next report, marked when the settings changed. **No real FragPipe-Analyst, MSstats or Perseus export**: the layouts are the documented ones | `tests/test_compare.py` |
+| Accuracy: benchmark (D60) | **the calibration guard**: a simulated grid (3 vs 3, 4 vs 4, 2 vs 4; 4-fold changes; Perseus and no imputation; 10 tables of 600 proteins) whose pooled observed FDP at adjusted p ≤ 0.05 must be ≤ 8.5 % per row (measured 1.7 – 6.3 %; over 30 other seed blocks it ranged 1.6 – 7.9 %, mean 4.9 – 5.3 % without imputation), with floors on sensitivity and a limit on bias; the grid is deterministic; `run_pipeline` gives the hits `analyze()` gives; the scoring on a hand-made case; `zero` imputation and no normalisation show their cost; the new simulation options leave the old tables byte-identical. Real path, on a **simulated** mixed-species matrix: the three ratios recovered, the false positive rate and sensitivity, expected ratios the other way round, species from entry names, a column, a FASTA (decoys ignored) and protein lists, a two-species group left out, every error of the YAML, the three files, the CLI, both results in the next report. **No real mixed-species run** | `tests/test_benchmark.py` |
+| "How far to trust this" (D60) | the statements of a clean experiment and their numbers against the summary; each "check" raised by its planted cause (2 replicates, uneven groups, a group of one, fold change only, a spoiled replicate, hits on imputed values, a cut-off below what the design can see, a copied sample); a results table; nothing analysed; escaping; the settings digest the same from the settings and from `analysis.json`; a crash in the step costs only the list; the block in the shipped page, untouched by the script, in the JS harness | `tests/test_trust.py`, `tests/js/test/trust.test.mjs` |
 | Stress | `ionomos testbed stress --n 150`: messy drops (unicode/emoji/huge names, no raws, empty raws, bad tails, duplicates, slow copies, failing searches) + chaos (worker killed mid-run, ledger locked, corrupt status file, pause/resume, cancel), then invariant checks; plus a 5000-name parser fuzz | any machine; a smaller run is in pytest |
 | GitHub Actions | the pytest suite and the JS report-harness on Linux **and Windows** on every push; on a version tag also the frozen exe (pipeline + stress) and the **installer**: install, retire a fake LabWatch, upgrade, uninstall, data kept | Actions tab |
 | Migration | an install from the LabWatch era (old status files, run folders, logs, lock, config pointer, env var) keeps working | `tests/test_migration.py` |
@@ -306,6 +310,28 @@ per comparison, the scorecard, the imputation flags and the low-confidence
 wording. The numbers quoted in D61 come from larger runs of the same
 simulators (8 to 40 seeds), not from the test suite. Not covered: a real
 experiment; R's limma with unequal groups.
+
+### The calibration guard and the fuzz (`tests/test_benchmark.py`, `tests/test_robustness.py`)
+
+Both are seeded, so a run is repeatable. The guard's tolerances are written
+at the top of `test_benchmark.py` with the measurement they come from. To
+measure them again with other seeds (about 20 s):
+
+```python
+from ionomos.downstream import benchmark
+for block in range(30):
+    benchmark.BASE_SEED = 5000 + 7919 * block
+    for r in benchmark.simulated("guard", seeds=10)["rows"]:
+        print(r["setting"], r["controls"], r["treated"], r["fdp_alpha_only"], r["sensitivity_alpha_only"])
+```
+
+To look at one fuzz case, or to run more seeds than the 160 in the suite:
+
+```python
+import sys; sys.path.insert(0, "tests")
+import test_robustness as T
+method, ops, settings, out = T.fuzz_once(115, some_new_folder)   # what was damaged, and the Outcome
+```
 
 **Windows during tests.** Tests that drive real Tk windows (the app, the naming
 / review window) skip on a dev machine so they don't cover the screen while you

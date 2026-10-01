@@ -149,6 +149,11 @@ labelled as low confidence, never refused, and p-values are never invented
 - What a chart, a word or a warning means: the **?** beside each part of the
   report and its Help section, or `ionomos help --open` for the whole help
   ([HELP.md](HELP.md)).
+- Does it agree with the analysis you already have? `ionomos compare <the
+  analysed folder> <your other result table>` compares the two and says where
+  they differ. How accurate is it? `ionomos benchmark` measures it on simulated
+  data, or on a mixed-species run with known ratios
+  ([VALIDATION.md](VALIDATION.md)).
 - A problem, or a table it doesn't read:
   <https://github.com/nichfoster/ionomos/issues> (attach the header row, not
   your data).

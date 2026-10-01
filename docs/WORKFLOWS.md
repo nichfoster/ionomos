@@ -372,6 +372,30 @@ features × samples matrix of log2 values and runs the same statistics:
   | TIMES | decide / note | a time course whose time points can't all be read (a name in `analysis.times` that isn't a condition, two times in one name) |
   | LIGANDED_DIRECTION, SITE_ANNOTATION | note | isoDTB: the competition ratio looks reversed; the site annotation file can't be used |
   | PSM_MASS_ERROR, PSM_MISSED_CLEAVAGES | note | a run's median precursor mass error is 10 ppm or more from 0; half or more of a run's PSMs have a missed cleavage |
+  | NO_RESIDUAL_DF | note | features tested with one value per group: their p-values come from limma's variance prior alone (D60) |
+  | VARIANCE_PRIOR | note | limma's variance prior could not be estimated (fewer than 3 features with replicate spread), or its fit did not converge |
+  | ZERO_VARIANCE | note | 5 % or more of the tested features, or any hit, have identical replicates in every group (rounded, copied or constant-imputed values) |
+  | IDENTICAL_SAMPLES | note | two samples hold exactly the same values (a file or column loaded twice) |
+
+- **Messy tables** (D60, `downstream/guards.py`). A table is read as far as
+  it can be, and every repair is a note in the report: duplicate or blank
+  IDs (each row stays a feature), a sample column named twice (any table:
+  `name`, `name.2`; FragPipe tables: the repeat is dropped), a column without
+  a name or without values (left out), text or infinite cells and negative
+  intensities (missing), values beyond 2^±100 (missing). In a table given to
+  `ionomos analyze`, decimal commas (`1234,5`) and thousands separators
+  (`1,234,567.8`) are read in tab and comma files too; `1,234` alone is read
+  as 1234 and the note says so. The full list: [VALIDATION.md](VALIDATION.md).
+
+- **How far to trust this** (D60, `downstream/trust.py`). Under the key
+  findings of every report, and in `analysis.json` → `trust`: samples per
+  group, replicate agreement, missing and imputed values, what each
+  comparison tested and found, the p-value histogram shape, power, and any
+  guard finding, each with its number. No score. `ionomos compare` (this
+  analysis against a reference result) and `ionomos benchmark` (simulated
+  data with planted changes, or a mixed-species run with known ratios)
+  measure accuracy; their verdicts show in the same list. See
+  [VALIDATION.md](VALIDATION.md).
 
 **Search quality per run** (`downstream/psmqc.py`, D55). When the search
 wrote `psm.tsv` files (FragPipe DDA: isoDTB, TMT, LFQ), the report's Quality

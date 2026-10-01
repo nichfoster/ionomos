@@ -86,12 +86,15 @@ def isodtb_label_quant(path: Path, experiments: dict[str, list[int]], seed: int 
 def dia_pg_matrix(path: Path, runs: list[tuple[str, str]], seed: int = 1, n_proteins: int = 600,
                   changed_fraction: float = 0.1, effect: float = 2.0, genes: list[str] | None = None,
                   planted: dict[str, dict[str, float]] | None = None,
-                  absent: dict[str, list[str]] | None = None) -> dict[str, dict[str, int]]:
+                  absent: dict[str, list[str]] | None = None, noise: float = 0.3, noise_spread: float = 0.0,
+                  missing: float = 1.0) -> dict[str, dict[str, int]]:
     """runs = [(run file path as FragPipe gives it, condition)]. Returns {condition: {gene: +1/-1}} vs control.
 
     genes: names for the first proteins (the rest are GENE<i>); planted: {condition: {gene: log2 effect}} on top
     of the random changes (and winning over them); absent: {condition: [gene]} never measured in that condition
-    (on/off proteins, not in the returned truth). Without these three the output is unchanged for a seed."""
+    (on/off proteins, not in the returned truth). noise: the replicate SD in log2; noise_spread > 0 gives every
+    protein its own SD (log-normal around noise, as real proteins differ); missing scales how often a value goes
+    missing (0 = never). Without these six the output is unchanged for a seed (benchmark.py uses the last three)."""
     rng = random.Random(seed)
     planted = planted or {}
     absent_in: dict[str, set[str]] = {}
@@ -122,10 +125,45 @@ def dia_pg_matrix(path: Path, runs: list[tuple[str, str]], seed: int = 1, n_prot
                     truth[c].pop(g, None)
         peptides = max(1, round((base - 17) * 1.5) + i % 3)  # more abundant, more peptides (no rng draw)
         row = [f"P{20000 + i}", f"P{20000 + i}", f"{g}_HUMAN", g, f"{g} protein", str(peptides), str(peptides)]
+        sd = noise * math.exp(rng.gauss(0, noise_spread)) if noise_spread > 0 else noise
         for r, c in runs:
-            v = base + eff.get(c, 0.0) + shift[r] + rng.gauss(0, 0.3)
-            p_missing = 0.02 + max(0.0, (19 - v)) * 0.15  # low abundance goes missing more often
+            v = base + eff.get(c, 0.0) + shift[r] + rng.gauss(0, sd)
+            p_missing = (0.02 + max(0.0, (19 - v)) * 0.15) * missing  # low abundance goes missing more often
             gone = rng.random() < p_missing or c in absent_in.get(g, ())
+            row.append("" if gone else f"{2 ** v:.1f}")
+        lines.append(row)
+    _write(path, header, lines)
+    return truth
+
+
+def mixed_species_pg_matrix(path: Path, runs: list[tuple[str, str]], ratios: dict[str, float] | None = None,
+                            shares: dict[str, float] | None = None, seed: int = 1, n_proteins: int = 1200,
+                            noise: float = 0.25, missing: float = 1.0) -> dict[str, str]:
+    """A DIA-NN protein matrix of a mixed-species benchmark (the "HYE" design): every protein belongs to one
+    species (Protein.Names ends in _HUMAN / _YEAST / _ECOLI) and every protein of a species changes by the same
+    log2 ratio between the second condition and the first. ratios: {species: log2 ratio}; shares: {species:
+    share of the proteins}. Returns {protein group id: species}. Used by tests/test_benchmark.py and
+    docs/VALIDATION.md; a real benchmark comes from the instrument, not from here."""
+    rng = random.Random(seed)
+    ratios = ratios or {"HUMAN": 0.0, "YEAST": 1.0, "ECOLI": -2.0}
+    shares = shares or {"HUMAN": 0.65, "YEAST": 0.22, "ECOLI": 0.13}
+    conds = list(dict.fromkeys(c for _, c in runs))
+    treated = conds[1] if len(conds) > 1 else None
+    names = list(ratios)
+    weights = [shares.get(s, 0.0) for s in names]
+    shift = {r: rng.gauss(0, 0.2) for r, _ in runs}
+    header = ["Protein.Group", "Protein.Ids", "Protein.Names", "Genes", "First.Protein.Description",
+              "N.Sequences", "N.Proteotypic.Sequences", *[r for r, _ in runs]]
+    lines, truth = [], {}
+    for i in range(n_proteins):
+        sp = rng.choices(names, weights)[0]
+        pid, g = f"Q{50000 + i}", f"{sp[:2]}GENE{i}"
+        truth[pid] = sp
+        base = rng.gauss(22, 2.0)
+        row = [pid, pid, f"{g}_{sp}", g, f"{g} protein", "4", "4"]
+        for r, c in runs:
+            v = base + (ratios[sp] if c == treated else 0.0) + shift[r] + rng.gauss(0, noise)
+            gone = rng.random() < (0.02 + max(0.0, (19 - v)) * 0.15) * missing
             row.append("" if gone else f"{2 ** v:.1f}")
         lines.append(row)
     _write(path, header, lines)

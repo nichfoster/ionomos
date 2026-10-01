@@ -51,6 +51,8 @@
 | `assistant/` | The read-only "Explain" assistant (D49, D57, [ASSISTANT.md](ASSISTANT.md)): `ask()` runs one question through a model on this PC and shows the answer only if its citations check out, else Ionomos's own text (`fallback`). `client.py` (the OpenAI-compatible chat API over urllib, localhost only, no proxy or redirect), `tools.py` (seven read-only tools over the ledger, attention items, help, engine logs and analysis.json, with schema-checked arguments and cleaned, capped results), `helpsearch.py` (BM25 over the help: SQLite FTS5 or pure Python), `citations.py` (what the tools returned is what may be cited), `audit.py` (append-only JSONL in app data), `fake.py` (the scripted fake model for tests). Off unless `assistant.enabled` and a model are set; nothing else depends on it | — |
 | `downstream/doctor.py` | The analysis check-up: issues with severity, likely causes, fixes; condition suggestions from file names | — |
 | `downstream/` | FragPipe tables → `QuantMatrix` → FragPipe-Analyst processing + limma → interactive `results/report.html`. `isodtb.py`/`tmt.py` (R ports), `quant.py` (loaders), `engines.py` (other engines' outputs — DIA-NN standalone incl. 2.x Parquet, MaxQuant, Spectronaut, AlphaDIA, MSstats and MSstatsTMT format, Proteome Discoverer — and the provenance of any result; ENGINES.md, D36), `fpa.py` (FragPipeAnalystR port: filter, normalise, impute, `test_limma`), `design.py` (limma designs with blocks and covariates, the moderated F; D42), `deqms.py` (R's loess and DEqMS' peptide-count prior; D43), `doseresponse.py` (CurveCurator's dose-response curves for titrations; D44), `sdrfdesign.py` (an input SDRF as the design; D47), `plex.py` (IRS across TMT plexes; D48), `rrandom.py` (R's RNG), `analysis.py` (settings, comparisons), `qc.py` (PCA, clustering, CV, missingness), `insights.py` (sample scorecard, PC ↔ condition/replicate, missingness vs intensity, p-value shape + π0, on/off features, imputation-driven hits, power; D35), `enrich.py` (local ORA and a correlation-adjusted rank test on Enrichr libraries), `export.py` (result tables, FragPipe-Analyst annotation + R script), `sdrf.py` (SDRF-Proteomics sample metadata; D38), `report.py` + `assets/report.js`, `charts.py` (static SVG volcano), `stats.py`, `simulate.py` | the lab's R scripts; FragPipeAnalystR; limma |
+| `downstream/guards.py`, `trust.py` | D60. `guards.check_input` makes a loaded matrix safe (implausible values to missing, repeated sample columns dropped) and says so; `guards.statistics` reports p-values that may not mean what they say (`NO_RESIDUAL_DF`, `VARIANCE_PRIOR`, `ZERO_VARIANCE`, `IDENTICAL_SAMPLES`); `trust.build` turns the analysis' own checks into the "How far to trust this" list (`analysis.json` → `trust`, static HTML at the top of the report) | — |
+| `downstream/compare.py`, `benchmark.py`, `plots.py` | D60, [VALIDATION.md](VALIDATION.md). `ionomos compare`: an analysed folder against a reference result (another folder, or a results table read by `anytable.py`), per comparison matching, fold-change / hit / p-value agreement and a verdict. `ionomos benchmark`: the pipeline on `simulate.py` data over a grid of designs and settings, or an analysed mixed-species / spike-in experiment against expected ratios. `plots.py`: their static SVG charts and page shell, on `charts.py`'s helpers and `report.css`. Nothing in the analysis depends on them | — |
 | `setupcheck.py` | The setup checklist (app ✓ Setup tab, `ionomos init`) | — |
 | `names.py` | Every on-disk / system name, with its LabWatch-era twin; readers accept both, writers use the new one | — |
 | `buildinfo.py` | `Ionomos 0.5.0 (build 3f2a9c1, date, installed)` — `--version`, app footer, every report | — |
@@ -63,7 +65,7 @@
 | `runners/isodtb.py` | Post-proc: modified-peptide → site merge — thin entry point delegating to `downstream/isodtb.py`, which holds the algorithm | port of `lab-scripts/isoDTB_…R` |
 | `runners/tmt.py` | Post-proc: experimental annotation fix | port of `lab-scripts/correct_experimental_annotation…R` |
 | `runners/dia.py` | Post-proc: (TBD — probably nothing beyond copying `report.tsv` up) | — |
-| `cli.py` | `ionomos setup / run / check / preflight / status / dry-run / names test / retry / testbed / diagnose / bundle / notify-test / update / help / ask`; no args → app; hidden `fake-fragpipe` for the testbed | — |
+| `cli.py` | `ionomos setup / run / check / preflight / status / dry-run / names test / retry / testbed / diagnose / bundle / notify-test / update / help / ask / analyze / demo / compare / benchmark`; no args → app; hidden `fake-fragpipe` for the testbed | — |
 
 ## Data flow for one job
 
@@ -144,6 +146,8 @@ C:\Fragpipe_General\<user>\<experiment>\    ← where jobs land
     <experiment>_sites.tsv           (isoDTB)
     experimental_annotation.tsv      (TMT)
     report.html, analysis.json, …    (the analysis; see "Downstream pipeline")
+    compare.html / .tsv / .json      `ionomos compare`: this analysis against a reference result (D60)
+    benchmark.html / .tsv / .json    `ionomos benchmark --expected`: measured against known ratios
     sdrf.tsv                         SDRF-Proteomics sample metadata, one row per raw file (and label)
   DONE.txt | FAILED.txt              ← human-facing one-line status
 ```
@@ -283,6 +287,8 @@ by default and its `base_url` must be on this PC. See ASSISTANT.md.
 | A search behaves in a way the parsers don't know | `ionomos_run\run_fingerprint.json` records what ran and what was read, for every search |
 | An analysis stage crashes (QC, enrichment, export, report) | isolated: recorded in `analysis_error.txt` + an issue; the rest (volcanos, tables, report or its fallback page) is still made |
 | Instrument QC trending crashes, or a QC table can't be read | isolated after the analysis: a note on the run's row, a log line; the job is done regardless |
+| A result table that is malformed but plausible (repeated or empty column names, text, infinities, negative or absurd numbers, decimal commas) | read as far as it can be; values no instrument produces count as missing; each repair is a note in the report (`guards.check_input`, `anytable.py`; D60). A seeded fuzz in the tests fails on any stage crash |
+| Statistics that run but may not mean what they say (no residual df, no variance prior, identical replicates, two identical samples) | computed as limma computes them, and reported as a warning each (`guards.statistics`); never repaired silently |
 | The analysis can't decide (one condition, no control, a group of 1, unmatched runs) | runs on the best guess, then a pop-up with the experiment editor asks; the answer goes to experiment.yaml |
 | A search fails / is held / a folder is rejected / a raw file is 0 bytes | an attention item → pop-up with likely causes, log tail, Retry; closes itself when fixed |
 | A GUI button throws | `report_callback_exception` → dialog + crash file; the app keeps running |
@@ -445,6 +451,27 @@ and the report (an "Any change (F)" tile and a table column). `analysis.json`
 paragraph describes the same. FragPipeAnalystR's `test_limma` can't fit a
 blocked model, so with a design `reproduce_in_R.R` says it repeats the plain
 model, and `reproduce_design_in_R.R` repeats Ionomos's model in limma.
+
+**Guards, the trust list and the accuracy commands** (D60,
+[VALIDATION.md](VALIDATION.md)). Two small stages were added to `analyze()`,
+isolated like the others:
+
+```
+read ─▶ input-check ─▶ plex ─▶ process ─▶ statistics ─▶ … ─▶ guards ─▶ doctor ─▶ trust ─▶ report
+        guards.check_input                                  guards.statistics      trust.build
+        |log2| > 100, NaN, inf → missing                    per comparison:        statements with numbers
+        repeated sample column dropped                      zero residual df,      + compare.json / benchmark.json
+        notes: duplicate / blank IDs,                       no prior, zero         found in results/
+        a sample without values                             variance, identical    → analysis.json "trust",
+                                                            samples → warnings       a static block in report.html
+```
+
+Nothing in these changes a number of a well-formed analysis. `ionomos
+compare` and `ionomos benchmark` are separate commands that read
+`results/analysis.json` and the `*_differential.tsv` files and write their
+own `compare.*` / `benchmark.*` / `benchmark_simulated.*` files beside them;
+the next `analyze()` shows their verdicts in the trust list, with whether the
+settings are still the ones they were made on (`trust.settings_digest`).
 
 Every report also carries its help (D46): `report.py` embeds
 `help.report_payload(issues)`, the report / QC / glossary entries of

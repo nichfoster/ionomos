@@ -46,7 +46,7 @@ from datetime import datetime
 from html import escape
 from importlib import resources
 
-from ionomos.downstream import fpa, qc
+from ionomos.downstream import fpa, qc, trust
 from ionomos.downstream.analysis import TESTS, DiffResult, Settings
 from ionomos.downstream.quant import QuantMatrix
 
@@ -584,6 +584,7 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
          "<noscript><div class='notes'>This report draws its charts with JavaScript. The volcano_*.svg and *.tsv "
          "files in this folder hold the same results.</div></noscript>",
          "<section id='overview'><div class='tiles' id='tiles'></div><div id='findings'></div>"]
+    b.append(trust.html(ctx.get("trust")))  # "How far to trust this": static, from the analysis' own checks (D60)
     b.append(issues_html(ctx.get("issues") or []))
     if notes:
         b.append("<details class='notes'><summary><b>Notes</b> (" + str(len(notes)) + ")</summary><ul>" +
@@ -757,7 +758,7 @@ def fallback(ctx: dict, diffs: list[DiffResult], notes: list[str], files: list[s
     title = ctx.get("experiment") or "Experiment"
     body = [f"<main><h1>{escape(title)}</h1><div class='meta'>Ionomos {escape(str(ctx.get('version', '')))} — "
             "simplified report (the full interactive report could not be made; see the issues below)</div>",
-            issues_html(ctx.get("issues") or [])]
+            trust.html(ctx.get("trust")), issues_html(ctx.get("issues") or [])]
     if notes:
         body.append("<div class='notes'><ul>" + "".join(f"<li>{escape(n)}</li>" for n in notes) + "</ul></div>")
     for d in diffs:

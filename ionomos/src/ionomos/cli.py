@@ -22,6 +22,14 @@ Command line.
                                                    figures for slides as SVG, from the finished report, in the
                                                    lab's export style (analysis.export); PNG: the report's Export
     ionomos demo     [FOLDER] [--open]            a simulated experiment + its report (offline, no lab setup)
+    ionomos compare  FOLDER REFERENCE [--by id|gene] [--open]
+                                                   an Ionomos analysis against a reference result of the same experiment
+                                                   (another Ionomos run, FragPipe-Analyst, limma, MSstats, Perseus, R):
+                                                   agreement of fold changes, hit calls and p-values, with a verdict
+    ionomos benchmark [--grid quick|standard] [--like FOLDER]
+                                                   accuracy on simulated data with planted changes: sensitivity and
+                                                   observed false discoveries for each imputation / normalisation
+    ionomos benchmark FOLDER --expected hye.yaml  a mixed-species / spike-in run: measured against expected ratios
     ionomos help     [TOPIC] [--open]             plain-language help: prints TOPIC (NO_TABLE, pca, ...) and
                                                    writes help.html (--open: in the browser, at TOPIC)
     ionomos ask      "QUESTION" [--experiment JOB_ID|NAME] [--item ID] [--json]
@@ -794,6 +802,101 @@ def cmd_demo(args) -> int:
     return 0
 
 
+def cmd_compare(args) -> int:
+    """Compare an Ionomos analysis with a reference result for the same experiment (downstream/compare.py).
+    Reads both, changes neither; writes compare.tsv / .json / .html. Exit 0: every comparison agrees, 1: one
+    differs or could not be judged, 2: nothing to compare."""
+    from ionomos.downstream import compare
+
+    try:
+        a = compare.load_side(Path(args.analysis))
+        b = compare.load_side(Path(args.reference))
+        if a.kind != "ionomos" and not args.out:
+            print(f"{args.analysis} is a table, not an Ionomos analysis: say where the result goes with --out DIR "
+                  "(or give the analysed folder first)", file=sys.stderr)
+            return 2
+        res = compare.compare(a, b, by=args.by, comparison=args.comparison, ref_comparison=args.ref_comparison,
+                              flip=args.flip, alpha=args.alpha, log2fc=args.log2fc,
+                              use_adjusted=False if args.raw_p else None, ref_alpha=args.ref_alpha,
+                              ref_log2fc=args.ref_log2fc)
+        out = Path(args.out) if args.out else a.results_dir
+        files = compare.write(res, out)
+    except compare.CompareError as exc:
+        print(f"cannot compare: {exc}", file=sys.stderr)
+        return 2
+    except OSError as exc:
+        print(f"cannot write the comparison: {exc}", file=sys.stderr)
+        return 2
+    print(f"Ionomos: {a.name}   reference: {b.name} ({res['reference_kind']})")
+    for line in compare.summary_lines(res):
+        print(line)
+    for n in res["notes"]:
+        print(f"note: {n}")
+    print(f"page: {files[-1]}")
+    if a.kind == "ionomos" and not args.out:
+        print("the verdict shows at the top of report.html after the next `ionomos analyze` of this folder")
+    if args.open:
+        _open_report(files[-1])
+    return 0 if all(p["verdict"].startswith("agrees") for p in res["pairs"]) else 1
+
+
+def cmd_benchmark(args) -> int:
+    """Accuracy against known truth (downstream/benchmark.py): simulated data over a grid of designs and
+    settings, or an analysed mixed-species / spike-in experiment against the expected ratios in a YAML."""
+    from ionomos.downstream import benchmark
+
+    if args.folder or args.expected:
+        if not (args.folder and args.expected):
+            print("a real benchmark needs both: ionomos benchmark FOLDER --expected hye.yaml (see `ionomos help "
+                  "benchmark`). Without a folder, the simulated benchmark runs", file=sys.stderr)
+            return 2
+        try:
+            exp = benchmark.load_expected(args.expected)
+            res = benchmark.real(Path(args.folder), exp)
+            from ionomos.downstream.compare import find_analysis
+
+            files = benchmark.write_real(res, Path(args.out) if args.out else find_analysis(Path(args.folder)))
+        except benchmark.BenchmarkError as exc:
+            print(f"cannot benchmark: {exc}", file=sys.stderr)
+            return 2
+        except OSError as exc:
+            print(f"cannot write the benchmark: {exc}", file=sys.stderr)
+            return 2
+        print(f"{res['experiment']}, {res['comparison']}, against {res['expected_file']}")
+        for line in res["verdicts"]:
+            print(f"  {line}")
+        for n in res["notes"]:
+            print(f"  note: {n}")
+    else:
+        extra, designs, alpha, log2fc, out, analysis_info = None, None, 0.05, 1.0, Path.cwd() / "ionomos_benchmark", {}
+        if args.like:
+            try:
+                lk = benchmark.like(Path(args.like))
+            except (benchmark.BenchmarkError, OSError, ValueError) as exc:
+                print(f"cannot read the analysis of {args.like}: {exc}", file=sys.stderr)
+                return 2
+            extra, alpha, log2fc, out = [(lk["label"], lk["settings"])], lk["alpha"], lk["log2fc"], lk["results"]
+            designs = [lk["design"]] if lk["design"] else None
+            analysis_info = lk["analysis"]
+        print(f"simulated benchmark, grid {args.grid}" + (f", with the settings of {args.like}" if args.like else ""))
+        try:
+            res = benchmark.simulated(args.grid, extra, designs, args.seeds, alpha, log2fc,
+                                      progress=None if args.quiet else (lambda m: print(f"  … {m}", flush=True)))
+            if args.like:
+                res["analysis"] = analysis_info
+                res["headline"] = [v for v in res["verdicts"] if v.startswith(extra[0][0] + ":")]
+            files = benchmark.write_simulated(res, Path(args.out) if args.out else out)
+        except OSError as exc:
+            print(f"cannot write the benchmark: {exc}", file=sys.stderr)
+            return 2
+        for line in res["verdicts"]:
+            print(f"  {line}")
+    print(f"page: {files[-1]}")
+    if args.open:
+        _open_report(files[-1])
+    return 0
+
+
 def cmd_help(args) -> int:
     """Print one help topic and write the full help page (help.html) where the lab's logs are, or in the
     app-data folder; --open shows it in the browser at that topic. Needs no config and no Tk."""
@@ -1112,6 +1215,54 @@ def main(argv: list[str] | None = None) -> int:
     dm.add_argument("--quiet", action="store_true", help="no progress lines")
     dm.add_argument("--open", action="store_true", help="open the report when done")
     dm.set_defaults(fn=cmd_demo)
+    cp = sub.add_parser("compare", help="compare an Ionomos analysis with a reference result for the same experiment",
+                        description="Compare an Ionomos analysis with another result for the same experiment: "
+                                    "features matched by ID or gene, agreement of log2 fold changes (Pearson, "
+                                    "Spearman, slope, offset), of hit calls and of p-values, the largest "
+                                    "disagreements, and a verdict (agrees / agrees after an offset / differs). "
+                                    "Writes compare.tsv, compare.json and compare.html into the analysis' results "
+                                    "folder. Reads both results and changes neither.")
+    cp.add_argument("analysis", help="the Ionomos analysis: an experiment folder (with results/analysis.json), its "
+                                     "results folder, or a <table>_ionomos folder")
+    cp.add_argument("reference", help="the reference: another analysed folder, or a results table with a fold-change "
+                                      "and a p-value column per comparison (FragPipe-Analyst export, limma topTable, "
+                                      "MSstats, Perseus, R output; .tsv .csv .txt .xlsx)")
+    cp.add_argument("--comparison", metavar="'A vs B'", help="compare only this comparison of the analysis")
+    cp.add_argument("--ref-comparison", dest="ref_comparison", metavar="NAME",
+                    help="the reference's comparison to use (default: matched by name)")
+    cp.add_argument("--by", choices=["auto", "id", "gene"], default="auto",
+                    help="match features by protein ID or by gene (default: whichever matches more)")
+    cp.add_argument("--flip", action="store_true", help="the reference is the comparison the other way round")
+    cp.add_argument("--alpha", type=float, help="common significance cut-off (default: the analysis' own)")
+    cp.add_argument("--log2fc", type=float, help="common fold-change cut-off (default: the analysis' own)")
+    cp.add_argument("--raw-p", action="store_true", help="apply the common alpha to raw p instead of adjusted p")
+    cp.add_argument("--ref-alpha", dest="ref_alpha", type=float,
+                    help="the reference's own alpha, when its table has no significance column")
+    cp.add_argument("--ref-log2fc", dest="ref_log2fc", type=float, help="the reference's own fold-change cut-off")
+    cp.add_argument("--out", metavar="DIR", help="where to write (default: the analysis' results folder)")
+    cp.add_argument("--open", action="store_true", help="open compare.html when done")
+    cp.set_defaults(fn=cmd_compare)
+    bm = sub.add_parser("benchmark", help="accuracy against known truth: simulated data, or a mixed-species run",
+                        description="Without a folder: run the analysis on simulated data with planted changes over "
+                                    "a grid (replicates 2 to 6, 2 controls vs 4 treated, effect sizes, missing "
+                                    "values) and report sensitivity, the observed false discovery proportion "
+                                    "against the nominal alpha and the fold-change bias for each imputation / "
+                                    "normalisation setting. With FOLDER and --expected: compare an analysed "
+                                    "mixed-species (human / yeast / E. coli) or spike-in experiment with the "
+                                    "expected ratio per species or protein list.")
+    bm.add_argument("folder", nargs="?", help="an analysed benchmark experiment (with --expected)")
+    bm.add_argument("--expected", metavar="YAML", help="expected ratios per species or protein list, e.g. "
+                                                       "expected: {HUMAN: 1, YEAST: 2, ECOLI: 0.25}")
+    bm.add_argument("--grid", choices=["quick", "standard"], default="standard",
+                    help="simulated: quick (seconds) or standard (about a minute; default)")
+    bm.add_argument("--like", metavar="FOLDER", help="simulated: add the settings and group sizes of this analysed "
+                                                     "experiment, and write into its results folder")
+    bm.add_argument("--seeds", type=int, help="simulated: tables per scenario (default 5; quick 2)")
+    bm.add_argument("--out", metavar="DIR", help="where to write (default: ./ionomos_benchmark, or the experiment's "
+                                                 "results folder)")
+    bm.add_argument("--quiet", action="store_true", help="no progress lines")
+    bm.add_argument("--open", action="store_true", help="open the page when done")
+    bm.set_defaults(fn=cmd_benchmark)
     hp = sub.add_parser("help", help="plain-language help: a topic here, the full help page in the browser")
     hp.add_argument("topic", nargs="?", help="an issue code (NO_TABLE), a word (volcano, imputation), a section "
                                              "(start, report, glossary, trouble, safety, faq) or a topic id")
