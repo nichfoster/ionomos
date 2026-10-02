@@ -2,11 +2,12 @@
 // nothing they contain may reach a parsing context. The sinks that matter:
 // table rows, tiles, the detail panel, every showTip() caller (tip.innerHTML
 // is assigned directly — report.js's central XSS invariant), and the CSV
-// export. The last test guards finding F-01 (a `<!--` in the data used to break the data script).
+// export. Then finding F-01 (a `<!--` in the data used to break the data script), and the figure export
+// (D62): file names, the SVG's title and <desc>, the zip's README and tables, and a loaded style file.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { loadReport, baseData, withData, loadReportRaw, blobText, readFixture, embedData } from "../lib/harness.mjs";
+import { loadReport, baseData, withData, loadReportRaw, blobText, blobBytes, unzip, until, readFixture, embedData } from "../lib/harness.mjs";
 
 const BASE = baseData();
 const SCRIPT = "<script>window.__xss=1</script>";
@@ -151,4 +152,114 @@ test("F-01: a data string containing <!-- can't break script-data tokenization",
   assert.ok(document.querySelector("#differential-body svg"), "the report still renders");
   const embedded = JSON.parse(document.querySelector("#ionomos-data").textContent);
   assert.equal(embedded.f.label[0], "<!--<script>window.__xss=1</script>", "the label survives as data");
+});
+
+// ---- figure export: names from the data reach file names, SVG text, a text file and CSV cells
+
+function hostileExport() {
+  const d = hostileData();
+  d.title = `..\\..\\CON<script>window.__xss=1</script>\r\nExported: never`;
+  d.comps[0].name = `<<"&">> vs <script>window.__xss=1</script>\r\n  figures/00_forged.svg  a forged line`;
+  d.comps[0].slug = `..\\../evil<script>:*?"|\u0000name.exe.svg`;
+  d.f.label[1] = `=HYPERLINK("http://evil.example","x")`;
+  d.f.label[2] = "bell\u0007 and null\u0000 in a name";
+  d.cond = d.cond.map((c) => (c === d.conditions[0] ? `</text><script>window.__xss=1</script>` : c));
+  d.conditions = [`</text><script>window.__xss=1</script>`, d.conditions[1]];
+  return d;
+}
+const SAFE_FILE = /^[A-Za-z0-9][A-Za-z0-9_+-]*(\.[A-Za-z0-9_+-]+)*$/;
+
+test("export: a hostile comparison, experiment and gene name stay text in the SVG and never shape a file name", async () => {
+  const { window, document, errors } = await loadReport({ data: hostileExport() });
+  assert.deepEqual(errors, []);
+  document.querySelector("#volcano .tools button").click();
+  const dl = window.__downloads.at(-1);
+  assert.match(dl.name, SAFE_FILE, `a safe file name: ${dl.name}`);
+  assert.ok(!/\.\.|[\\/:*?"<>|\u0000]/.test(dl.name) && dl.name.endsWith(".svg") && dl.name.length <= 120);
+  const text = await blobText(window, dl.blob);
+  assert.ok(!/<script|<img|<\/text><script/i.test(text), "no markup from the data: every < of a name is written &lt;");
+  assert.ok(!/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(text), "no control characters: the file stays valid XML");
+  const doc = new window.DOMParser().parseFromString(text, "image/svg+xml");
+  assert.equal(doc.querySelector("parsererror"), null, "well-formed");
+  assert.equal(doc.querySelector("script, img, foreignObject"), null);
+  const all = [...doc.documentElement.querySelectorAll("*")];
+  assert.ok(all.every((e) => [...e.attributes].every((a) => !/^on/i.test(a.name) && !/javascript:/i.test(a.value))), "no handler or script URL in any attribute");
+  assert.ok(doc.querySelector("title").textContent.includes(`<<"&">> vs <script>window.__xss=1</script>`), "the name is there, as text");
+  assert.match(doc.querySelector("desc").textContent, /Comparison: <<"&">> vs <script>window\.__xss=1<\/script> {1,3}figures\/00_forged\.svg/);
+  assert.equal(doc.querySelector("desc").textContent.split("\n").filter((l) => /^Exported: never|^ *figures\/00_forged/.test(l)).length, 0, "a name cannot add a line of its own");
+  // the dialog lists the figure by name, as text
+  document.querySelector("#volcano .tools button:nth-child(3)").click();
+  const dlg = document.querySelector("#xdlg");
+  assert.equal(dlg.querySelector("script, img[src='x']"), null);
+  assert.ok([...dlg.querySelectorAll("#xfig option")].some((o) => o.textContent.includes("<script>window.__xss=1</script>")));
+  assert.ok(document.querySelector("#xtitletext").placeholder.includes("<script>"), "the automatic title is shown as text");
+  assert.equal(window.__xss, undefined);
+});
+
+test("export: the zip's names are safe, its README cannot be forged by a name, its CSV cells cannot be formulas", async () => {
+  const { window, document, errors } = await loadReport({ data: hostileExport(), storage: { "ionomos.export.v1": { zip_format: "svg" } } });
+  document.querySelector("#slides").click();
+  await until(() => window.__downloads.length === 1);
+  assert.deepEqual(errors, []);
+  const zipName = window.__downloads[0].name;
+  assert.match(zipName, SAFE_FILE);
+  assert.ok(zipName.endsWith("_figures.zip") && !/\.\.|<|>/.test(zipName));
+  const files = unzip(await blobBytes(window, window.__downloads[0].blob));
+  assert.ok(files.every((f) => f.crcOk));
+  for (const f of files) {
+    const parts = f.name.split("/");
+    assert.ok(parts.length === 2 || parts.length === 3, `no deeper folder: ${f.name}`);
+    for (const part of parts) {
+      assert.match(part, SAFE_FILE, `a safe name: ${f.name}`);
+      assert.ok(!/^(con|prn|aux|nul|com\d|lpt\d)(\.|$)/i.test(part), `not a Windows device name: ${part}`);
+    }
+    assert.ok(!f.name.includes("..") && f.name.length < 180);
+  }
+  assert.ok(files[0].name.startsWith("CON_script_window"), "the folder is named after the experiment, made safe");
+  const text = (n) => new TextDecoder().decode(files.find((f) => f.name.endsWith(n)).data);
+  const readme = text("README.txt").split("\r\n");
+  assert.ok(readme.some((l) => l.includes("<script>window.__xss=1</script>")), "names are plain text there");
+  assert.equal(readme.filter((l) => /^Exported: never/.test(l) || /^ {2}figures\/00_forged\.svg/.test(l)).length, 0, "a name with a line break cannot add a line");
+  assert.equal(readme.filter((l) => /^Exported: {4}\d{4}-\d\d-\d\d \d\d:\d\d$/.test(l)).length, 1, "the real date line");
+  assert.ok(!/[\u0000-\u0009\u000b\u000c\u000e-\u001f]/.test(readme.join("\n")), "no control characters");
+  const csvName = files.find((f) => /tables\/results_/.test(f.name)).name;
+  const csv = text(csvName.split("/").slice(1).join("/")).split("\n");
+  const formula = csv.find((l) => l.includes("HYPERLINK"));
+  assert.ok(formula.split(",")[1].startsWith(`"'=HYPERLINK(""http://evil.example""`), "a leading = is defused with an apostrophe");
+  assert.ok(csv.every((l) => !/^[=+@-]/.test(l)));
+  const samples = text("tables/samples.csv").split("\n");
+  assert.ok(samples.some((l) => l.startsWith(`"<script>alert(""s"")</script>",`)), "sample names quoted");
+  for (const f of files.filter((x) => x.name.endsWith(".svg"))) {
+    const doc = new window.DOMParser().parseFromString(new TextDecoder().decode(f.data), "image/svg+xml");
+    assert.equal(doc.querySelector("parsererror"), null, `${f.name} is well-formed`);
+    assert.equal(doc.querySelector("script, img, foreignObject"), null, `${f.name} holds no markup from the data`);
+  }
+  assert.equal(window.__xss, undefined);
+});
+
+test("export: a loaded style file is untrusted input; only checked values are used", async () => {
+  const { window, document, errors } = await loadReport({ storage: {} });
+  document.querySelector("#xopen").click();
+  const input = document.querySelector("#xload");
+  const hostile = '{"ionomos_export_style":1,"font_family":"Arial\\" onload=\\"window.__xss=1","up":"url(javascript:window.__xss=1)","down":"#12345","background":"<script>window.__xss=1</script>",' +
+    '"size":"custom","width":"1e9","unit":"em","palette":"colorblind","__proto__":{"polluted":1},"constructor":{"prototype":{"polluted":1}},"<img src=x onerror=window.__xss=1>":true}';
+  Object.defineProperty(input, "files", { configurable: true, value: [new window.File([hostile], `"><img src=x onerror=window.__xss=1>.json`)] });
+  input.dispatchEvent(new window.Event("change", { bubbles: true }));
+  await until(() => /Style loaded/.test(document.querySelector("#xmsg").textContent));
+  const msg = document.querySelector("#xmsg");
+  assert.equal(msg.children.length, 0, "the report of what was left out is text");
+  assert.match(msg.textContent, /left out: .*font_family.*up.*down.*background/);
+  assert.equal(document.querySelector("#xdlg img[src='x']"), null);
+  const kept = JSON.parse(window.localStorage.getItem("ionomos.export.v1"));
+  assert.equal(kept.palette, "colorblind", "the one valid choice is taken");
+  assert.equal(kept.size, "custom");
+  assert.deepEqual([kept.font_family, kept.up, kept.down, kept.background, kept.width, kept.unit], ["Arial", "#e34948", "#2a78d6", "light", 1280, "px"], "bad values keep the defaults");
+  assert.deepEqual(Object.keys(kept).filter((k) => /proto|constructor|img/.test(k)), []);
+  assert.equal(window.Object.prototype.polluted, undefined);
+  document.querySelector("#xsvg").click();
+  const text = await blobText(window, window.__downloads.at(-1).blob);
+  assert.ok(!/onload|javascript:|<script/i.test(text));
+  assert.equal(new window.DOMParser().parseFromString(text, "image/svg+xml").documentElement.getAttribute("font-family"), "Arial, Helvetica, sans-serif");
+  assert.equal(window.__xss, undefined);
+  assert.deepEqual(errors, []);
 });

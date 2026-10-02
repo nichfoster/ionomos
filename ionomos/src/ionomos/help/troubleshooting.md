@@ -18,6 +18,27 @@ watcher**, and send **Report a problem…** so it can be fixed. **"another
 ionomos watcher is already running"**: the startup task already runs one.
 That is fine; use the app to see it.
 
+## Report a problem: the zip was not saved, or files were left out {#trouble.bundle}
+
+**Report a problem…** saves a zip on the Desktop
+([how](#faq.bundle), [what is in it](#safety.bundle)).
+
+- **"LEAK CHECK FAILED"**: after replacing the names, Ionomos searched the
+  zip and still found one, so it saved nothing. The message names the file
+  and the text. Your data is fine; this is a fault in Ionomos. Report the
+  message. Until it is fixed, a zip of fewer jobs or without the result
+  tables may pass the check.
+- **Files were left out**: the window and `README.txt` in the zip list them
+  with the reason. A zip has a size limit (2,000 MB before compression;
+  `ionomos bundle --max-mb` raises it). A PSM table above 25 MB is cut down
+  to every n-th row. A picture or another file that is not text is left out
+  when names are replaced, because the names in it can't be.
+- **It was saved in the log folder, not on the Desktop**: there was no
+  Desktop folder to write to. The message gives the place.
+- **A name is still readable in the zip**: see the list of what the replacing
+  cannot do in [The zip for troubleshooting](#safety.bundle), and delete the
+  zip if it should not be sent.
+
 ## An analysis needs your decision {#attention.analysis_input}
 
 The analysis ran, but on a guess that a person should confirm: which samples
@@ -57,7 +78,8 @@ free disk space. Nothing is lost and nothing needs retrying: fix what the
 message names and the search starts by itself. The app's ✓ Setup tab shows
 the same gap. The messages are explained below:
 [launcher](#search.hold-launcher), [workflow](#search.hold-workflow),
-[FASTA](#search.hold-fasta), [disk space](#search.hold-disk),
+[the wrong launcher](#search.hold-launcher-window),
+[FASTA](#search.hold-fasta), [decoys](#search.hold-decoys), [disk space](#search.hold-disk),
 [DIA-NN](#search.hold-diann), [spectral library](#search.hold-library),
 [MaxQuant](#search.hold-maxquant), [MaxQuant parameters](#search.hold-mqpar),
 [Sage](#search.hold-sage), [raw file converter](#search.hold-converter),
@@ -156,6 +178,15 @@ fixed. See [A search is waiting](#attention.search_waiting).
 Ionomos can't find FragPipe. App → tab 1 Folders → **Find FragPipe**, or set
 `fragpipe_exe` in the settings. FragPipe must not be under a path with spaces.
 
+## The launcher is FragPipe's window program {#search.hold-launcher-window}
+
+The launcher set on tab 1 is FragPipe's `.exe` (for example
+`bin\FragPipe-24.0.exe`), and there is no `fragpipe.bat` next to it. The
+`.exe` opens FragPipe's window and returns at once, so Ionomos could not
+follow a search started with it. FragPipe 23 and 24 install `fragpipe.bat`
+in the same `bin` folder; Ionomos uses it by itself when it is there. If it
+is missing, reinstall FragPipe, then tab 1 → **Find FragPipe**.
+
 ## Workflow file missing {#search.hold-workflow}
 
 The method's FragPipe workflow isn't in the workflows folder. App → tab 3
@@ -166,7 +197,17 @@ Methods → **Import workflow…** and pick a `.workflow` file (for example the
 
 The method's protein database isn't set or was moved. App → tab 3 Methods: pick
 the FASTA. It must contain decoys (`rev_` entries); **Check FragPipe install**
-on the Jobs tab checks that.
+on the Jobs tab checks that (see [decoys](#search.hold-decoys)).
+
+## The FASTA has no usable decoys {#search.hold-decoys}
+
+FragPipe run without its window stops at once when the protein database has
+no decoys, or when decoys are not about half of its entries (40-60 %). A
+decoy is an entry whose name starts with the workflow's decoy tag, usually
+`rev_`. In FragPipe's window: Database tab → **Add decoys** (once, on a
+FASTA without any), copy the new file into the FASTA folder and pick it for
+the method on tab 3. The search then starts by itself. The usual mistakes
+are a FASTA straight from UniProt (no decoys) and decoys added twice.
 
 ## Low disk space {#search.hold-disk}
 
@@ -278,6 +319,16 @@ pop-up. After fixing the cause, press **Retry**; the earlier output is kept.
 - **experiment.yaml asks for a workflow or FASTA that isn't there**: fix the
   name in the experiment's `experiment.yaml`, or put the file in the
   workflows / FASTA folder.
+- **FragPipe step X failed (exit code N)**: one of FragPipe's tools stopped.
+  The reason quotes the last lines that tool printed, which usually name the
+  cause; the list below explains the common ones.
+- **FragPipe stopped early, or only did a dry run**: FragPipe ended without
+  finishing its steps. Open the log from the pop-up and send **Report a
+  problem…** if the cause isn't in the list below.
+- **experiment.yaml tmt: ...** (TMT): the channel list doesn't fit what
+  FragPipe accepts. List every channel of the label type once, with one
+  sample name without spaces per channel, `NA` for an unused channel, and
+  no name twice.
 - **A path has a space in it** (DIA-NN): DIA-NN can't take spaces in paths.
   Rename the folder or file.
 - **The experiment folder is gone**: it was moved or renamed after filing.
@@ -394,6 +445,40 @@ best guess. Every volcano plot is "condition vs control", so please confirm:
 pick the control in the window and **Run analysis**. The choice is remembered
 for the experiment. A control name the lab always uses can be added to the
 control keywords (tab 7 Analysis → Lab defaults).
+
+## Check the roles of the conditions {#issue.ROLES_UNSURE}
+
+Ionomos gives each condition a [role](#glossary.role) from its name, and
+here it is not sure. The message says which condition and why:
+
+- a name has a word that often, but not always, means "plus a competitor"
+  (`pre`, `block`, `10x`): it was read as a
+  [competition](#glossary.competition) and the comparisons were made that
+  way;
+- or a competition can't be linked to one compound, because there are
+  several and its name doesn't say which. It was then only compared with the
+  control.
+
+Say what each condition is under `analysis:` in the experiment's
+`experiment.yaml`, then re-run the analysis ([How to re-run](#faq.rerun)):
+`roles: {DMSO: control, Probe: compound, Probe_Comp: competition of Probe}`.
+A condition that is not a competition gets `compound`. Listing
+`comparisons:` yourself also settles it.
+
+## Read as a competition experiment {#issue.COMPETITION_DESIGN}
+
+A note, not a problem. One condition's name says it is the compound plus a
+competitor, so the comparisons follow the design instead of "everything
+against the control": each compound vs the control (what it enriches), each
+[competition](#glossary.competition) vs its compound (what the competitor
+takes off) and vs the control (what is left). Nothing else is compared by
+default: not two controls, not a pool or a QC standard, not one compound's
+competition with another compound. The report gets a
+[Specific targets](#report.specific) section.
+
+If a role is wrong, set `roles:` under `analysis:` in `experiment.yaml`
+(see [Check the roles](#issue.ROLES_UNSURE)). For the old behaviour, every
+condition against the control, set `role_comparisons: false`.
 
 ## A sample has far fewer identifications {#issue.LOW_SAMPLE}
 
@@ -604,10 +689,55 @@ real on/off changes (see [Only in one condition](#report.onoff)). In the
 report, tick **ignore imputation-driven hits** (Options → Hits) to see the hits
 that stand on measured values.
 
-## Low confidence (a group has one sample) {#issue.LOW_CONFIDENCE}
+## Samples hold exactly the same values {#issue.IDENTICAL_SAMPLES}
 
-The comparison was tested, but a group has only one sample, so the noise
-estimate comes from the other groups. If replicates exist, fix the conditions
+Two or more samples have the same number for every feature. Real replicates
+never do. Usually one raw file or one column was loaded under two names, or a
+column was copied in a spreadsheet. Identical samples make the spread look
+smaller than it is, so the p-values come out too small.
+
+Leave the copy out (Analysis tab, or `exclude_samples` in `experiment.yaml`)
+and run the analysis again. See
+[How do I leave a sample out?](#faq.leave-out)
+
+## Features tested without replicate spread of their own {#issue.NO_RESIDUAL_DF}
+
+These features have one value per group, so there is nothing to estimate
+their own spread from. limma still gives a p-value, using the typical spread
+of the other features. It tells you whether the fold change is unusual for a
+typical feature, not for this one.
+
+It happens when a group has one sample, or when missing values leave one value
+per group and nothing is imputed. Treat these hits as leads to confirm. More
+replicates fix it.
+
+## Features with identical replicates {#issue.ZERO_VARIANCE}
+
+For these features every replicate of a group has exactly the same value.
+Measurements always differ a little, so the values were probably rounded,
+capped, copied, or filled in with one number (imputation `min`, `zero` or
+`mindet` does that). limma then uses the spread of the other features; a Welch
+or Student test divides by zero and reports p = 0.
+
+Click one of these features in the table and look at its values. Use the
+unrounded table, or imputation `auto` or `none`, and run the analysis again.
+
+## The variance prior could not be estimated {#issue.VARIANCE_PRIOR}
+
+limma borrows information about the spread from all features (the "prior").
+Here it could not: either fewer than 3 features have replicate spread (a very
+short table), or the features' spreads differ so much that the estimate did
+not settle. The p-values are then ordinary t-tests, or close to them. They are
+valid, but with few replicates they find fewer changes.
+
+There is nothing to fix in the settings. For a short list of proteins, a Welch
+test (`test: welch`) is the plainer choice.
+
+## Low confidence (a group has too few samples) {#issue.LOW_CONFIDENCE}
+
+The comparison was tested, but a group has only one sample (or fewer than
+the `min_valid` setting asks for), so the noise estimate comes from the
+other groups. If replicates exist, fix the conditions
 and **Run analysis**; otherwise confirm the hits in another experiment. See
 [Low confidence and fold change only](#report.confidence).
 

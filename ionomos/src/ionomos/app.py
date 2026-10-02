@@ -99,10 +99,13 @@ UPDATING A DEVELOPMENT INSTALL (git checkout)
   ledger and lab data are never touched by an update.
 
 REPORTING A PROBLEM
-  Run & Test tab -> "Save diagnostics bundle (.zip)" — one file with the
-  report, config, logs, crash reports and the FragPipe logs of failed or
-  running jobs (never raw data). Or "Copy diagnostics" for the text only.
-  Send it with a sentence about what you expected.
+  "Report a problem…" (bottom right) -> a sentence, the jobs, Save the zip.
+  One file on the Desktop with the report, config, logs, crash reports and
+  the search logs of the chosen jobs (never raw data); tick the result
+  tables when the numbers are to be checked. Names are replaced by
+  pseudonyms; the KEY file saved next to the zip stays in the lab. Nothing
+  is sent: copy the zip yourself. "Copy diagnostics" (Run & Test tab) is the
+  text only, with real names.
 
 FRAGPIPE SEARCHES
   Each filed experiment is searched with its method's workflow + FASTA.
@@ -173,8 +176,10 @@ JOBS TAB (6)
   Pause searches: no new FragPipe runs start (the running one finishes) —
   e.g. while someone needs the PC. Resume to continue.
   Check FragPipe install: finds FragPipe's version, bundled Java, MSFragger,
-  IonQuant, diaTracer, DIA-NN, and checks each method's workflow + FASTA
-  (including whether the FASTA has decoys).
+  IonQuant, diaTracer, DIA-NN and Python, then starts FragPipe itself (no
+  window, no search) for its version and a dry run of each method: FragPipe
+  checks the workflow, the FASTA (decoys) and its tools and says what it
+  would run. Takes up to a few minutes. Same as: ionomos-cli.exe preflight
 
 METHODS TAB: IMPORT WORKFLOW
   Select a method -> Import workflow… -> pick a .workflow file (e.g. the
@@ -420,6 +425,7 @@ class App:
         d["fragpipe"]["auto_run"] = self.bv("fragpipe.auto_run", True).get()
         d["fragpipe"]["config_tools_folder"] = self.v("fragpipe.config_tools_folder").get().strip()
         d["fragpipe"]["config_diann"] = self.v("fragpipe.config_diann").get().strip()
+        d["fragpipe"]["config_python"] = self.v("fragpipe.config_python").get().strip()
         d["watcher"]["group_loose_files"] = self.bv("watcher.group_loose_files", True).get()
         d["gui"]["enabled"] = self.bv("gui.enabled").get()
         d["gui"]["popups"] = self.bv("gui.popups", True).get()
@@ -468,7 +474,7 @@ class App:
             ("paths.fasta_dir", "FASTA folder", "dir", "Protein databases (with decoys) the workflows use."),
             ("paths.log_dir", "Logs folder", "dir", ""),
             ("paths.database", "Job ledger (SQLite file)", "save", "Created automatically; its folder must exist."),
-            ("paths.fragpipe_exe", "FragPipe launcher", "file", "fragpipe.bat in FragPipe's bin folder, e.g. C:/FragPipe/FragPipe-24.0/fragpipe/bin/fragpipe.bat — 'Find FragPipe' looks for it."),
+            ("paths.fragpipe_exe", "FragPipe launcher", "file", "fragpipe.bat in FragPipe's bin folder, e.g. C:/FragPipe/FragPipe-24.0/bin/fragpipe.bat — 'Find FragPipe' looks for it."),
         ]
         self.path_rows: dict[str, PathRow] = {}
         for key, label, kind, hint in rows:
@@ -490,7 +496,7 @@ class App:
             self.set_status(f"found FragPipe: {found} (press Save)")
         else:
             messagebox.showinfo("Find FragPipe", "No fragpipe.bat found under C:/FragPipe or your Downloads.\n"
-                                "Use Browse… and pick <FragPipe folder>/fragpipe/bin/fragpipe.bat.")
+                                "Use Browse… and pick <FragPipe folder>/bin/fragpipe.bat.")
 
     def apply_quick(self):
         d = configio.defaults(self.v("quick.root").get().strip(), self.v("quick.users").get().strip())
@@ -890,9 +896,13 @@ class App:
         ttk.Entry(fp, textvariable=self.v("fragpipe.config_tools_folder"), width=34).grid(row=5, column=1, columnspan=2, sticky="ew", **PAD)
         ttk.Label(fp, text="DIA-NN exe").grid(row=6, column=0, sticky="e", **PAD)
         ttk.Entry(fp, textvariable=self.v("fragpipe.config_diann"), width=34).grid(row=6, column=1, columnspan=2, sticky="ew", **PAD)
-        ttk.Label(fp, text="Off = experiments are only filed and queued. Tools folder / DIA-NN exe are optional: "
-                           "only if the first headless run can't find MSFragger / DIA-NN. Restart the watcher after changes.",
-                  foreground="#666", wraplength=380).grid(row=7, column=0, columnspan=3, sticky="w", padx=6)
+        ttk.Label(fp, text="Python folder").grid(row=7, column=0, sticky="e", **PAD)
+        ttk.Entry(fp, textvariable=self.v("fragpipe.config_python"), width=34).grid(row=7, column=1, columnspan=2, sticky="ew", **PAD)
+        ttk.Label(fp, text="Off = experiments are only filed and queued. Tools folder / DIA-NN exe / Python folder are "
+                           "optional: only if a search can't find MSFragger / DIA-NN / Python (Jobs → Check "
+                           "FragPipe install tells; FragPipe 24 on Windows always uses its own Python). Restart "
+                           "the watcher after changes.",
+                  foreground="#666", wraplength=380).grid(row=8, column=0, columnspan=3, sticky="w", padx=6)
 
         g = group("Resolver window", 0, 1)
         ttk.Checkbutton(g, text="Open a window when a folder can't be interpreted", variable=self.bv("gui.enabled")).grid(row=0, column=0, columnspan=3, sticky="w", **PAD)
@@ -1359,7 +1369,7 @@ class App:
             open_path=lambda p: self._open(p),
             lab_settings=lambda: dict((self.data or {}).get("analysis") or {}),
             popups_enabled=lambda: bool((self.data.get("gui") or {}).get("popups", True)),
-            report_problem=lambda note: self.report_problem(note), open_setup=lambda: self.nb.select(self.tab_setup),
+            report_problem=lambda note, job_id=None: self.report_problem(note, job_id), open_setup=lambda: self.nb.select(self.tab_setup),
             on_change=self._attention_badge, database=lambda: self._active_paths().get("database"))
         self.popups = Popups(self.root, host, is_app=True)
         self.popups.start()
@@ -1387,71 +1397,14 @@ class App:
         except Exception:  # noqa: BLE001
             log.exception("attention refresh failed")
 
-    def report_problem(self, note: str = ""):
-        """One dialog -> one zip on the Desktop, selected in Explorer, ready to drag into a chat."""
-        from ionomos import health
+    def report_problem(self, note: str = "", job_id: int | None = None):
+        """One window -> one zip (bundle.py, D63) on the Desktop, selected in Explorer, and its key file."""
+        from ionomos.bundle_dialog import BundleDialog
 
-        win = tk.Toplevel(self.root)
-        win.title("Report a problem")
-        win.transient(self.root)
-        f = ttk.Frame(win, padding=14)
-        f.pack(fill="both", expand=True)
-        ttk.Label(f, text="What happened, and what did you expect?", font=("", 11, "bold")).pack(anchor="w")
-        ttk.Label(f, text="A sentence is enough — e.g. \"dropped EJQ_isoDTB_x at 3pm, nothing moved\".",
-                  foreground="#666").pack(anchor="w", pady=(0, 6))
-        txt = tk.Text(f, width=64, height=6, wrap="word")
-        txt.pack(fill="both", expand=True)
-        if note:
-            txt.insert("1.0", note)
-        dbg = tkutil.BooleanVar(master=win, value=False)
-        ttk.Checkbutton(f, text="Also turn on detailed logging for the next 24 hours (for problems that come and go; "
-                                "send another report after it happens again)", variable=dbg).pack(anchor="w", pady=(8, 0))
-        ttk.Label(f, text="The report has the settings, logs and the FragPipe logs of failed/running jobs — "
-                          "never raw data.", foreground="#666", wraplength=520).pack(anchor="w", pady=(6, 10))
-        bb = ttk.Frame(f)
-        bb.pack(fill="x")
-        cfg = self.config_path
-
-        def create():
-            note = txt.get("1.0", "end").strip()
-            if dbg.get():
-                try:
-                    until = health.set_debug(self._active_log_dir(), 24)
-                    note += f"\n\n[detailed logging turned on until {until:%Y-%m-%d %H:%M}]"
-                except OSError:
-                    pass
-            win.destroy()
-            self.set_status("building the report…")
-            log.info("problem report requested: %s", note[:200])
-
-            def go():
-                try:
-                    z = service.save_problem_report(cfg, note)
-                    msg = None
-                except Exception as exc:  # noqa: BLE001
-                    z, msg = None, f"could not build the report: {exc}"
-
-                def done():
-                    if z is None:
-                        messagebox.showerror("Report a problem", msg)
-                        return
-                    self.root.clipboard_clear()
-                    self.root.clipboard_append(str(z))
-                    service.reveal(z)
-                    self.set_status(f"report saved: {z.name}")
-                    messagebox.showinfo("Report a problem", f"Saved on your Desktop:\n\n{z.name}\n\n"
-                                        "It's selected in the window that just opened — drag it into the chat. "
-                                        "(Its location is also on the clipboard.)")
-
-                self.post(done)
-
-            threading.Thread(target=go, daemon=True).start()
-
-        ttk.Button(bb, text="Create report", command=create).pack(side="right")
-        self.report_win, self.report_text, self.report_debug, self.report_create = win, txt, dbg, create  # tests
-        ttk.Button(bb, text="Cancel", command=win.destroy).pack(side="right", padx=6)
-        txt.focus_set()
-        win.bind("<Escape>", lambda e: win.destroy())
+        d = BundleDialog(self.root, self.config_path, self.post, note=note, job_id=job_id,
+                         log_dir=self._active_log_dir, on_status=self.set_status)
+        self.report_dialog = d
+        self.report_win, self.report_text, self.report_debug, self.report_create = d.win, d.text, d.debug, d.save  # tests
 
     def check_downloaded_update(self, auto: bool = True):
         """Ask GitHub for a newer release (and look in Downloads). auto=False: also say "you're up to date"."""
@@ -1584,7 +1537,8 @@ class App:
                 self.out.write(msg)
                 if z:
                     messagebox.showinfo("Diagnostics bundle", f"Saved:\n{z}\n\nIt contains the report, config, logs and the "
-                                        "FragPipe logs of failed/running jobs — no raw data. Send this file.")
+                                        "FragPipe logs of failed/running jobs — no raw data, names replaced by "
+                                        "pseudonyms. Send this file; the KEY file next to it stays in the lab.")
                     self._open(str(Path(z).parent))
 
             self.post(show)
@@ -1881,7 +1835,7 @@ class App:
         for text, action in (("Open report", "report"), ("Open folder", "folder"), ("FragPipe log", "log"),
                              ("Re-run analysis", "analyze"), ("Analysis options…", "studio"), ("Retry", "retry"),
                              ("Cancel", "cancel"),
-                             ("Copy details", "copy")):
+                             ("Copy details", "copy"), ("Zip for troubleshooting…", "bundle")):
             ttk.Button(b, text=text, command=lambda a=action: self.job_action(a)).pack(side="left", padx=4)
         ttk.Label(b, text="double-click = open the report", foreground="#666").pack(side="left", padx=12)
         self.jdetail = OutputPane(f, height=10)
@@ -2004,6 +1958,8 @@ class App:
                 messagebox.showinfo("Re-run analysis", "Only finished (done) jobs have FragPipe output to analyse.")
                 return
             self._rerun_analysis(j)
+        elif action == "bundle":
+            self.report_problem(job_id=j.id)
         elif action == "folder":
             self._open(j.dest_dir)
         elif action == "log":
@@ -2094,20 +2050,15 @@ class App:
 
     def check_fragpipe(self):
         cfg_path = self.config_path
-        self.jdetail.write("checking the FragPipe installation and each method's workflow + FASTA…", clear=True)
+        self.jdetail.write("checking FragPipe: the installation, then FragPipe itself is started for its version "
+                           "and a dry run of each method (no search; up to a few minutes)…", clear=True)
 
         def go():
-            from ionomos import fragpipe
+            from ionomos import preflight
 
             try:
                 cfg = load(cfg_path, check_paths=False)
-                mark = {True: "✓", None: "!", False: "✗"}
-                lines = [f"{mark[ok]} {label:<16} {detail}" for ok, label, detail in fragpipe.install_report(cfg)]
-                for k in cfg.methods:
-                    lines.append("")
-                    lines.append(f"{k}:")
-                    lines += [f"  {mark[ok]} {t}" for ok, t in fragpipe.describe_method(cfg, k)]
-                text = "\n".join(lines)
+                text = preflight.text(preflight.run(cfg))  # same as `ionomos preflight` (D59)
             except Exception as exc:  # noqa: BLE001
                 text = f"could not check: {exc} (save the config first?)"
             self.post(lambda: self.jdetail.write(text, clear=True))

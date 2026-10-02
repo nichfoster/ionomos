@@ -48,7 +48,11 @@ missingness, p-value shape) and adds views beyond the volcano:
 - comparison against comparison
 - rank-based pathways
 - a power curve
-- search by gene lists, wildcards or pathway terms The app's Analysis tab re-runs any experiment with
+- search by gene lists, wildcards or pathway terms
+- figures for slides: every chart as SVG or PNG in one export style, or all of them in one .zip
+  (`ionomos export` writes the main ones without a browser)
+
+The app's Analysis tab re-runs any experiment with
 other conditions, samples or comparisons. See
 [docs/ROADMAP.md](docs/ROADMAP.md), and [docs/DEPLOY_WINDOWS.md](docs/DEPLOY_WINDOWS.md)
 to put it on the PC.
@@ -82,10 +86,11 @@ to put it on the PC.
 | [PROTEOMICS_PC.md](docs/PROTEOMICS_PC.md) | Facts about the target machine from the inventory, and what's still unknown |
 | [DECISIONS.md](docs/DECISIONS.md) | Decision log (why polling, why folder-level, why Python not R, …) |
 | [ROADMAP.md](docs/ROADMAP.md) | Phased build plan and open questions to resolve with the lab |
-| [DEV_LOOP.md](docs/DEV_LOOP.md) | **Start here for prototyping:** Mac ↔ GitHub ↔ PC loop, updates and diagnostics |
+| [DEV_LOOP.md](docs/DEV_LOOP.md) | **Start here for prototyping:** Mac ↔ GitHub ↔ PC loop, updates and diagnostics; the anonymised **bundle** the lab saves for troubleshooting and validation, and how to inspect, unpack and re-analyse it |
 | [DEPLOY_WINDOWS.md](docs/DEPLOY_WINDOWS.md) | Step-by-step install of the finished tool on the proteomics PC |
 | [TESTING.md](docs/TESTING.md) | Test suite + testbed on macOS and Windows |
-| [FIRST_REAL_RUN.md](docs/FIRST_REAL_RUN.md) | Runbook for the first real FragPipe run on the PC (isoDTB, then DIA) |
+| [VALIDATION.md](docs/VALIDATION.md) | How accurate the analysis is and how to check it: what it is verified against, `ionomos compare` (against a FragPipe-Analyst, limma, MSstats, Perseus or R result), `ionomos benchmark` (simulated data, or a mixed-species run on the instrument), messy tables, and the "How far to trust this" list |
+| [FIRST_REAL_RUN.md](docs/FIRST_REAL_RUN.md) | The checklist for the first real FragPipe runs on the PC: `ionomos preflight`, a small isoDTB search, what to send back |
 | [QC_TREND.md](docs/QC_TREND.md) | Instrument QC: how runs of the lab's QC standard (HeLa, K562) are recognised, measured, judged (Levey-Jennings, Westgard rules) and shown in `logs/qc_trend.html` |
 | [ENGINES.md](docs/ENGINES.md) | Results from other engines Ionomos can analyse (DIA-NN, MaxQuant, Sage, Spectronaut, AlphaDIA, MSstats / MSstatsTMT format, Proteome Discoverer) and what it reads from each; an SDRF as the design; TMT across plexes |
 
@@ -95,6 +100,8 @@ to put it on the PC.
 pip install ionomos        # until it is on PyPI: pip install "git+https://github.com/nichfoster/ionomos#subdirectory=ionomos"
 ionomos demo --open        # a simulated experiment and its report, offline
 ionomos analyze path/to/your/table.tsv --open
+ionomos compare path/to/experiment old_result.tsv   # does it agree with your other analysis?
+ionomos benchmark --grid quick     # sensitivity and false discoveries on simulated data
 ```
 
 Windows, macOS or Linux; no lab setup, no Tk. See [docs/QUICKSTART.md](docs/QUICKSTART.md).

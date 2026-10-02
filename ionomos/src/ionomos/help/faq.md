@@ -37,13 +37,25 @@ with the control picked in the box beside it, "all pairs", "each condition vs
 all others", or "just these" (for example `Drug vs DMSO; Drug2 vs DMSO`). Then **Run analysis**. On the command
 line: `--control DMSO`, `--compare "Drug vs DMSO"`, `--de-type all`.
 
-## How do I get a plot into my slides? {#faq.slides}
+## How do I get a figure into a slide? {#faq.slides}
 
-Every chart in the report has **SVG** and **PNG** buttons at its top right.
-SVG stays sharp and can be edited in PowerPoint, Illustrator or Inkscape; PNG
-is a high-resolution picture. Set up the view first (cut-offs, labels, search
-matches); the download shows what you see. `results\volcano_<comparison>.svg`
-has each volcano plot at the saved cut-offs.
+- **One figure**: set up the view (comparison, cut-offs, search), then use
+  **SVG** or **PNG** at the chart's top right, or **Export…** and **Copy
+  image**, and paste it into the slide.
+- **All of them**: **Export for slides** in the report's top bar saves a .zip
+  with every figure, the tables as CSV and a README that lists the files and
+  the cut-offs.
+- **The look**: **Export…** sets the size (16:9, 4:3, half a slide, a journal
+  column), text size, font, colours and what is drawn. **Save style** gives a
+  file the whole lab can load; `analysis.export` in `config.yaml` sets the
+  lab's defaults.
+- **Without opening the report**: `ionomos export <experiment folder>` writes
+  the volcano, PCA, heatmap and correlation plots as SVG to
+  `results\figures\`, at the saved cut-offs.
+
+SVG stays sharp and its text can be edited in PowerPoint, Illustrator or
+Inkscape; PNG is a picture. Each file records the cut-offs it was made with,
+so a figure on a slide can be traced back to its report.
 
 ## How do I share the report? {#faq.share}
 
@@ -53,6 +65,29 @@ current view (comparison, cut-offs, search, open protein). Send the link to
 someone who has the same file (for example on the lab drive), or paste the
 part after `#` into the address of their copy.
 
+## How do I send a problem, or my results, to be checked? {#faq.bundle}
+
+Press **Report a problem…** (bottom right in the app, in a failed-search or
+failed-analysis window, or **Zip for troubleshooting…** on the Jobs tab for
+the selected job). Type a sentence, choose the jobs, and press **Save the
+zip**. The window lists what will go in and how large it will be.
+
+- Leave the boxes as they are to send a problem: settings, logs and the
+  search logs.
+- Tick **Include the search's result tables…** when the numbers are to be
+  checked: the analysis can then be run again from the zip.
+- Names are replaced by pseudonyms unless you untick that box.
+
+The zip is saved on the Desktop and shown in a folder window. Ionomos sends
+nothing: copy the zip to where it should go (a shared Dropbox folder, an
+email). The file next to it with `KEY` in its name stays in the lab. See
+[The zip for troubleshooting](#safety.bundle) for what is in it and what the
+replacing of names cannot do.
+
+From a terminal: `ionomos bundle 12 --level validate` (job 12), and
+`ionomos bundle translate <key file> answer.txt` puts the real names back
+into an answer you received.
+
 ## How do I open the data in FragPipe-Analyst? {#faq.fpa}
 
 In FragPipe-Analyst, upload the quantification table from `fragpipe\` (for
@@ -60,6 +95,77 @@ DIA the `pg_matrix.tsv`, for label-free `combined_protein.tsv`) and, as the
 experiment annotation, `results\fragpipe-analyst\experiment_annotation.tsv`.
 In R, `results\fragpipe-analyst\reproduce_in_R.R` repeats Ionomos's analysis
 with FragPipeAnalystR.
+
+## Does Ionomos give the same result as my other analysis? {#faq.compare-reference}
+
+Check it on your own experiment. `ionomos compare <experiment folder>
+<reference>` compares the Ionomos analysis with another result for the same
+experiment. The reference can be:
+
+- a results table with a fold-change and a p-value column per comparison: a
+  FragPipe-Analyst export, a limma or MSstats table, a Perseus matrix, the
+  output of the lab's R script (`.tsv`, `.csv`, `.txt`, `.xlsx`),
+- or another folder analysed by Ionomos (for example with other settings).
+
+It matches the proteins by ID or gene, then reports per comparison: how many
+matched, how well the [log2 fold changes](#glossary.log2fc) agree (correlation,
+slope, offset), which hits both call, the proteins that disagree most, and how
+the p-values compare. It ends with one line: **agrees**, **agrees after an
+offset of …** (a normalisation difference), **differs: …** with the reason, or
+**not judged** when too few proteins matched.
+
+- It writes `compare.html` (scatter plots, tables), `compare.tsv` and
+  `compare.json` into the experiment's `results\` folder. Neither result is
+  changed.
+- The limits behind the verdict are printed at the bottom of `compare.html`.
+  They are Ionomos's own choice; the numbers are what to read.
+- "differs" is not "wrong". Two tools that impute missing values differently
+  disagree on exactly those proteins; the list of largest disagreements shows
+  them.
+- After the next analysis of the folder, the verdict shows under
+  [How far to trust this](#report.trust).
+
+## How accurate is the analysis? {#faq.benchmark}
+
+Two ways to measure it, both with `ionomos benchmark`:
+
+- **On simulated data** (no data needed): `ionomos benchmark` runs the
+  analysis on made-up protein tables where the changed proteins are known. It
+  tries 2 to 6 replicates, 2 controls against 4 treated, small and large
+  changes, few and many missing values, with each imputation and normalisation
+  setting. For each it reports how many planted changes were found, what share
+  of the calls were false (against the 5% the cut-off promises), and whether
+  the fold changes are biased. `--like <experiment folder>` adds that
+  experiment's own settings and group sizes. `--grid quick` takes seconds.
+- **On a real sample with known ratios**: see
+  [a benchmark sample](#faq.benchmark-sample).
+
+The page (`benchmark_simulated.html`) says what each setting costs. A
+simulation shows how the method behaves on data like the simulation. It does
+not show how your samples behave: only a real benchmark sample does.
+
+## How do I run a benchmark sample on our instrument? {#faq.benchmark-sample}
+
+Use a mix whose ratios you know. The usual one is human, yeast and E. coli
+digests mixed in two ratios ("HYE"): for example sample A = 65% human, 30%
+yeast, 5% E. coli and sample B = 65% human, 15% yeast, 20% E. coli. Human is
+then unchanged, yeast is halved and E. coli is 4 times higher in B.
+
+1. Acquire at least 3 runs of A and 3 of B with your normal method.
+2. Search them with a FASTA that holds all three species, and let Ionomos
+   analyse the folder as usual (A is the control).
+3. Write a small text file, for example `hye.yaml`:
+   `expected: {HUMAN: 1, YEAST: 0.5, ECOLI: 4}` (the ratio B / A per species;
+   1 means unchanged). Add `comparison: B vs A` if the analysis has several.
+4. Run `ionomos benchmark <experiment folder> --expected hye.yaml --open`.
+
+The page shows, per species, the measured against the expected ratio (median,
+spread, a box plot), how many unchanged human proteins were called anyway
+(false positives) and how many changed proteins were found. Species are read
+from the UniProt names in the result table (`ACTB_HUMAN`); `fasta:` or
+`species_column:` in the file help when they are not there. A spike-in works
+the same way with `proteins:` lists instead of species. The result is also
+shown under [How far to trust this](#report.trust) after the next analysis.
 
 ## What does "low confidence" mean? {#faq.low-confidence}
 

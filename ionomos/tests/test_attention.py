@@ -88,7 +88,7 @@ def test_failed_search_raises_an_item_that_retry_closes(bed):
     w = Worker(bed["cfg"], bed["ledger"])
     w.run_once()
     it = _open(bed, "search_failed")[0]
-    assert it.severity == "error" and it.job_id == 1 and "IonQuant crashed" in it.message
+    assert it.severity == "error" and it.job_id == 1 and "DIA-NN crashed" in it.message
     assert it.details  # the log tail is in the window
     bed["ledger"].requeue(1, "retry requested", reset_attempts=True)
     from ionomos import worker as worker_mod

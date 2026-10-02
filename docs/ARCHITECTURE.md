@@ -25,14 +25,19 @@
 | `manifest.py` | Read/validate `experiment.yaml`; build `.fp-manifest` + TMT `annotation.txt` | `prior-work/fragpipe_runner.build_manifest` |
 | `intake.py` | Validate a stable folder, show it for review (or hand unresolvable names to the resolver), move it to the user dir, write `ionomos.json`, insert ledger row. The watcher passes a `config.LiveConfig`, so edits to config.yaml apply to the next drop | — |
 | `resolve.py` | tkinter window for fixing user/method/file tails; writes `experiment.yaml` + learned aliases | — |
-| `testbed.py` | Fake lab + sample drops + fake FragPipe for testing on any OS | — |
+| `testbed.py` | Fake lab + sample drops + the fake engines for testing on any OS | — |
+| `fake_fragpipe.py` | The testbed's FragPipe (`ionomos fake-fragpipe`): FragPipe 24's options, checks, messages, console layout, exit codes and output files, each copied from a named source; no search (D59) | FragPipe's source |
 | `demo.py` | `ionomos demo`: a simulated DIA experiment (`downstream/simulate.py`, planted hits, on/off proteins and gene-set shifts; bundled `assets/demo_gene_sets.gmt`) written to a new folder, then analysed. Offline, no lab config, no Tk (the pip install; docs/QUICKSTART.md) | — |
 | `app.py` | tkinter setup wizard / control panel: folders, users, methods, every parameter, start/stop, startup task, testbed | — |
 | `configio.py` | config.yaml as a dict; writes a commented file | — |
-| `service.py` | child processes, PID file, Task Scheduler, remembered config path, exe routing; dev install: git update, diagnostics bundle | — |
+| `service.py` | child processes, PID file, Task Scheduler, remembered config path, exe routing, the Desktop folder (also when OneDrive moved it); dev install: git update, the diagnostics text; `save_problem_report` / `save_diagnostics_zip` are the old names for a `diagnose` bundle | — |
+| `bundle.py` | The troubleshooting / validation bundle (D63, see "The bundle" below): `collect` (what would go in; sizes only), `learn` + `Anonymiser` (the pseudonyms), `create` (streams the zip, then `verify` searches it for every original; the key file next to it), `inspect` / `unpack` / `translate` for the reader, the `ionomos bundle` command, and what the window says (`Choice`, `summary_lines`) | — |
+| `bundle_dialog.py` | The **Report a problem** window (Tk only; every decision is in `bundle.py`) | — |
 | `ledger.py` | SQLite job table + status transitions; source of truth for "what's queued" | `prior-work/store.py` |
 | `worker.py` | Thread inside `ionomos run`: first runnable `queued` job → FragPipe or DIA-NN (runner.py) → done/failed; holds jobs whose setup files are missing. Sequential. | `prior-work/queue_worker.py` |
-| `fragpipe.py` | Prepare a job (launcher, workflow with `database.db-path` patched to the method's FASTA, manifest, TMT annotation), run headless with timeout/stop, kill the process tree | `prior-work/fragpipe_runner.py` |
+| `fragpipe.py` | Prepare a job (launcher `fragpipe.bat` with FragPipe's own Java, workflow with `database.db-path` patched to the method's FASTA, manifest, TMT annotation; a FASTA FragPipe would refuse holds the job), run headless with timeout/stop, kill the process tree, read the console (steps, exit codes, `ALL JOBS DONE`), explain failures (`EXPLANATIONS`), the install report | `prior-work/fragpipe_runner.py` |
+| `preflight.py` | `ionomos preflight` / the app's Check FragPipe install: the install report, FragPipe started for `--help` and a `--dry-run` per method, PC checks (spaces, disk, RAM, long paths, permissions), each workflow's tools against the installation (D59) | — |
+| `fingerprint.py` | After every search: `ionomos_run/run_fingerprint.json`, a small text record of what ran and what the parsers read, for checking them against a real FragPipe (D59) | — |
 | `maxquant.py` | `engine: maxquant` methods: the lab's `mqpar` or MaxQuant's own `--create` template, patched with the job's raws, experiments, fractions, FASTA, threads and output folder into `ionomos_run/mqpar.xml`; output in `maxquant/` (D50) | — |
 | `sage.py` | `engine: sage` methods: `ionomos_run/sage.json` (the lab's Sage JSON or Ionomos' defaults, with the job's FASTA, mzML paths and output folder) and `sage_job.json`; the job runs as `ionomos sage-job`, one process that converts each `.raw` to `sage_mzml/*.mzML` with ThermoRawFileParser (reused on retry) and then starts Sage with its telemetry off; output in `sage/` (D51). A lab `sage_config` with `quant.tmt` makes it a TMT job: `tmt.tsv` is expected, and the analysis rolls it up per plex and channel (D56) | — |
 | `diann.py`, `runner.py` | `engine: diann` methods: prepare a DIA-NN job (the lab's `diann_exe`, FASTA or spectral library, `ionomos_run/diann.cfg`), output in `diann/`; `runner` picks FragPipe, DIA-NN, MaxQuant or Sage per method, and all use `fragpipe.run`'s start / cancel / stop / timeout loop (D39) | — |
@@ -46,6 +51,8 @@
 | `assistant/` | The read-only "Explain" assistant (D49, D57, [ASSISTANT.md](ASSISTANT.md)): `ask()` runs one question through a model on this PC and shows the answer only if its citations check out, else Ionomos's own text (`fallback`). `client.py` (the OpenAI-compatible chat API over urllib, localhost only, no proxy or redirect), `tools.py` (seven read-only tools over the ledger, attention items, help, engine logs and analysis.json, with schema-checked arguments and cleaned, capped results), `helpsearch.py` (BM25 over the help: SQLite FTS5 or pure Python), `citations.py` (what the tools returned is what may be cited), `audit.py` (append-only JSONL in app data), `fake.py` (the scripted fake model for tests). Off unless `assistant.enabled` and a model are set; nothing else depends on it | — |
 | `downstream/doctor.py` | The analysis check-up: issues with severity, likely causes, fixes; condition suggestions from file names | — |
 | `downstream/` | FragPipe tables → `QuantMatrix` → FragPipe-Analyst processing + limma → interactive `results/report.html`. `isodtb.py`/`tmt.py` (R ports), `quant.py` (loaders), `engines.py` (other engines' outputs — DIA-NN standalone incl. 2.x Parquet, MaxQuant, Spectronaut, AlphaDIA, MSstats and MSstatsTMT format, Proteome Discoverer — and the provenance of any result; ENGINES.md, D36), `fpa.py` (FragPipeAnalystR port: filter, normalise, impute, `test_limma`), `design.py` (limma designs with blocks and covariates, the moderated F; D42), `deqms.py` (R's loess and DEqMS' peptide-count prior; D43), `doseresponse.py` (CurveCurator's dose-response curves for titrations; D44), `sdrfdesign.py` (an input SDRF as the design; D47), `plex.py` (IRS across TMT plexes; D48), `rrandom.py` (R's RNG), `analysis.py` (settings, comparisons), `qc.py` (PCA, clustering, CV, missingness), `insights.py` (sample scorecard, PC ↔ condition/replicate, missingness vs intensity, p-value shape + π0, on/off features, imputation-driven hits, power; D35), `enrich.py` (local ORA and a correlation-adjusted rank test on Enrichr libraries), `export.py` (result tables, FragPipe-Analyst annotation + R script), `sdrf.py` (SDRF-Proteomics sample metadata; D38), `report.py` + `assets/report.js`, `charts.py` (static SVG volcano), `stats.py`, `simulate.py` | the lab's R scripts; FragPipeAnalystR; limma |
+| `downstream/guards.py`, `trust.py` | D60. `guards.check_input` makes a loaded matrix safe (implausible values to missing, repeated sample columns dropped) and says so; `guards.statistics` reports p-values that may not mean what they say (`NO_RESIDUAL_DF`, `VARIANCE_PRIOR`, `ZERO_VARIANCE`, `IDENTICAL_SAMPLES`); `trust.build` turns the analysis' own checks into the "How far to trust this" list (`analysis.json` → `trust`, static HTML at the top of the report) | — |
+| `downstream/compare.py`, `benchmark.py`, `plots.py` | D60, [VALIDATION.md](VALIDATION.md). `ionomos compare`: an analysed folder against a reference result (another folder, or a results table read by `anytable.py`), per comparison matching, fold-change / hit / p-value agreement and a verdict. `ionomos benchmark`: the pipeline on `simulate.py` data over a grid of designs and settings, or an analysed mixed-species / spike-in experiment against expected ratios. `plots.py`: their static SVG charts and page shell, on `charts.py`'s helpers and `report.css`. Nothing in the analysis depends on them | — |
 | `setupcheck.py` | The setup checklist (app ✓ Setup tab, `ionomos init`) | — |
 | `names.py` | Every on-disk / system name, with its LabWatch-era twin; readers accept both, writers use the new one | — |
 | `buildinfo.py` | `Ionomos 0.5.0 (build 3f2a9c1, date, installed)` — `--version`, app footer, every report | — |
@@ -58,7 +65,7 @@
 | `runners/isodtb.py` | Post-proc: modified-peptide → site merge — thin entry point delegating to `downstream/isodtb.py`, which holds the algorithm | port of `lab-scripts/isoDTB_…R` |
 | `runners/tmt.py` | Post-proc: experimental annotation fix | port of `lab-scripts/correct_experimental_annotation…R` |
 | `runners/dia.py` | Post-proc: (TBD — probably nothing beyond copying `report.tsv` up) | — |
-| `cli.py` | `ionomos setup / run / check / status / dry-run / names test / retry / testbed / diagnose / notify-test / update / help / ask`; no args → app; hidden `fake-fragpipe` for the testbed | — |
+| `cli.py` | `ionomos setup / run / check / preflight / status / dry-run / names test / retry / testbed / diagnose / bundle / notify-test / update / help / ask / analyze / demo / compare / benchmark`; no args → app; hidden `fake-fragpipe` for the testbed | — |
 
 ## Data flow for one job
 
@@ -89,9 +96,10 @@
                   write dest\ionomos_run\<method>.workflow  (database.db-path = method FASTA)
                   (TMT) write annotation.txt next to the raws (never over a user's own)
                   run fragpipe.bat --headless --workflow <wf> --manifest <mf>
-                      --workdir dest\fragpipe --threads N --ram G
+                      --workdir dest\fragpipe --threads N --ram G      (JAVA_HOME = FragPipe's jre)
                   tee → dest\ionomos_run\fragpipe_console.log
-                  exit 0 + output → postproc(method) → status=done, DONE.txt
+                  write dest\ionomos_run\run_fingerprint.json        (whatever the outcome)
+                  exit 0 + output + no failed step → postproc(method) → status=done, DONE.txt
                   else / timeout  → status=failed, FAILED.txt, reason in ionomos.json + ledger
                   ionomos stopped → FragPipe tree killed, job back to queued
 
@@ -116,6 +124,7 @@ C:\Fragpipe_Auto\                    ← the app lives here (no spaces!)
     qc_trend.jsonl                  ← instrument QC: one line per QC-standard run (D45)
     qc_trend.html                   ← the QC trend page (Levey-Jennings charts, Westgard rules)
     help\help.html                  ← the help page, rewritten each time it is opened (D46)
+    preflight\<time>\               ← one FragPipe preflight's files: --help output, each method's dry run (D59)
   ionomos.db                        ← SQLite ledger
 
 C:\Fragpipe_General\<user>\<experiment>\    ← where jobs land
@@ -126,16 +135,19 @@ C:\Fragpipe_General\<user>\<experiment>\    ← where jobs land
     fragpipe-files.fp-manifest
     <method>.workflow                ← pinned workflow, database.db-path set
     fragpipe_console.log             ← FragPipe's console output (all attempts)
+    run_fingerprint.json             ← what the latest search did (D59); earlier: run_fingerprint_<time>.json
   fragpipe\                          ← --workdir; all FragPipe output
     fragpipe.workflow                ← FragPipe copies the workflow used here
   fragpipe_previous_<ts>\            ← an earlier attempt's output (never deleted)
     combined_modified_peptide_label_quant.tsv   (isoDTB)
     tmt-report\abundance_gene_MD.tsv            (TMT)
-    report.tsv / diann-output\                   (DIA)
+    dia-quant-output\report.tsv                  (DIA; diann-output\ before FragPipe 24)
   results\                           ← post-processing output
     <experiment>_sites.tsv           (isoDTB)
     experimental_annotation.tsv      (TMT)
     report.html, analysis.json, …    (the analysis; see "Downstream pipeline")
+    compare.html / .tsv / .json      `ionomos compare`: this analysis against a reference result (D60)
+    benchmark.html / .tsv / .json    `ionomos benchmark --expected`: measured against known ratios
     sdrf.tsv                         SDRF-Proteomics sample metadata, one row per raw file (and label)
   DONE.txt | FAILED.txt              ← human-facing one-line status
 ```
@@ -174,7 +186,7 @@ a job that takes the PC down can't loop. `ionomos retry` resets the count.
 paths:
   inbox:        C:/Fragpipe_Auto/inbox
   users_root:   C:/Fragpipe_General          # dest = users_root/<user>/<experiment>
-  fragpipe_exe: C:/FragPipe/FragPipe-24.0/fragpipe/bin/fragpipe.exe   # CONFIRM on install
+  fragpipe_exe: C:/FragPipe/FragPipe-24.0/bin/fragpipe.bat   # the headless launcher, not FragPipe-24.0.exe
   workflow_dir: C:/Fragpipe_Auto/workflows
   fasta_dir:    C:/Fragpipe_Auto/fasta
   database:     C:/Fragpipe_Auto/ionomos.db
@@ -190,6 +202,8 @@ fragpipe:
   ram_gb: 48                # of 64
   timeout_minutes: 240      # 3×7 isoDTB takes 30–60 min; TMT phospho can be longer
   config_diann: C:/DIA-NN/2.3.2/DiaNN.exe   # only if FragPipe can't find its bundled one
+  config_tools_folder: ""   # only if FragPipe's window was never used with this installation
+  config_python: ""         # FragPipe 24 on Windows uses its own python folder whatever this says
 
 users:
   aliases:                  # initials / alternate spellings -> folder under users_root
@@ -266,9 +280,15 @@ by default and its `base_url` must be on this PC. See ASSISTANT.md.
 | Disk nearly full | a search is held ("waiting: low disk space") until `min_free_gb` + its raws are free |
 | Inbox share disappears | logged once, watched until it's back |
 | Invalid config saved from the app | validated as a candidate file first; the good file is never replaced; every save backed up to `config-backups/` |
-| FragPipe says exit 0 but a step failed / wrote nothing | parsed from the console (`Process 'X' finished, exit code: N`) → failed |
+| FragPipe says exit 0 but a step failed / cancelled its tasks / only did a dry run / wrote nothing | parsed from the latest attempt's part of the console (`Process 'X' finished, exit code: N`, `Cancelling N remaining tasks`) → failed |
+| The launcher is FragPipe's window `.exe` (returns at once, FragPipe runs on unseen) | never run: swapped for `fragpipe.bat`, else the job is held |
+| `fragpipe.bat` finds no Java (none on PATH) | `JAVA_HOME` set to the installation's `jre` for the launcher |
+| The FASTA has no decoys, or not about half | the job is held with the rule; FragPipe is not started |
+| A search behaves in a way the parsers don't know | `ionomos_run\run_fingerprint.json` records what ran and what was read, for every search |
 | An analysis stage crashes (QC, enrichment, export, report) | isolated: recorded in `analysis_error.txt` + an issue; the rest (volcanos, tables, report or its fallback page) is still made |
 | Instrument QC trending crashes, or a QC table can't be read | isolated after the analysis: a note on the run's row, a log line; the job is done regardless |
+| A result table that is malformed but plausible (repeated or empty column names, text, infinities, negative or absurd numbers, decimal commas) | read as far as it can be; values no instrument produces count as missing; each repair is a note in the report (`guards.check_input`, `anytable.py`; D60). A seeded fuzz in the tests fails on any stage crash |
+| Statistics that run but may not mean what they say (no residual df, no variance prior, identical replicates, two identical samples) | computed as limma computes them, and reported as a warning each (`guards.statistics`); never repaired silently |
 | The analysis can't decide (one condition, no control, a group of 1, unmatched runs) | runs on the best guess, then a pop-up with the experiment editor asks; the answer goes to experiment.yaml |
 | A search fails / is held / a folder is rejected / a raw file is 0 bytes | an attention item → pop-up with likely causes, log tail, Retry; closes itself when fixed |
 | A GUI button throws | `report_callback_exception` → dialog + crash file; the app keeps running |
@@ -277,6 +297,9 @@ by default and its `base_url` must be on this PC. See ASSISTANT.md.
 | Windows refuses to rotate the log (another program has it open) | the watcher keeps writing to the same file and tries again a minute later; no line is lost |
 | A notification can't be sent (dead webhook, no network, wrong password) | sent from its own thread after the status is recorded, one try, a timeout; logged once; the job is unaffected |
 | A webhook address or the SMTP password ends up in a report | never logged; `diagnose`, the bundle and Report a problem redact `config.yaml` and scrub every included file |
+| A lab member's or an experiment's name leaves the PC in a bundle | names are replaced by default; the finished zip is searched for every original and is not saved if one is found (`BundleLeak`); the key file is never inside the zip |
+| A bundle overwrites a file, or changes an experiment | it only reads experiment folders; the zip is written as `.part`, renamed when it passed the check, and an existing name gets `-2`, `-3` … |
+| A multi-GB table is bundled | streamed line by line (a few MB of memory); a size limit per bundle and a row-sampled PSM table, both said in `BUNDLE.json`, `README.txt`, `inspect` and the window |
 
 ## Notifications (D58)
 
@@ -364,13 +387,29 @@ fragpipe/ ─▶ method prep ─▶ QuantMatrix ─▶ fpa.process ────�
              isodtb.py      features ×     samples chosen / renamed      one ~0+condition  PCA, correlation,   report.html (JSON +
              tmt.py         samples, log2  contaminants, % filters       model, eBayes,    missingness, CV,    report.js), TSVs,
              quant.py       + condition    median / GN normalisation     CIs, BH           heatmap, ORA        volcano_*.svg,
-                                           Perseus / MinProb / … impute  add_rejections                        fragpipe-analyst/
+                                           Perseus / MinProb / … impute  add_rejections                        fragpipe-analyst/,
+                                                                                                               figures/ (if asked)
                                                                                    insights (D35):
                                                                                    scorecard, batch,
                                                                                    missingness, π0,
                                                                                    on/off, power;
                                                                                    rank-based sets
 ```
+
+**Figures for slides** (D62). One export style (size, text, colours, title,
+legend; `charts.STYLE_DEFAULTS`, the same keys in `report.js`) is used in
+three places:
+
+| Where | What | How |
+|---|---|---|
+| The report | **SVG** / **PNG** / **Export…** on every chart, **Export for slides** (a .zip of every figure, the tables as CSV, the style, a README) | `report.js` "figure export": the chart's part of the report is drawn again with the style answering `css()`, `widthOf()` and `heightOf()`; `svgTools()` hands the SVG over; a title, a legend and the cut-offs are put around it. PNG through a canvas; the zip by a store-only writer. The style is kept in `localStorage` and starts from the payload's `exportDefaults` |
+| `ionomos export <folder>` | volcano, PCA, heatmap, correlation as SVG in `results/figures/` + `README.txt` | `downstream/slides.py` reads the JSON inside `report.html` and `charts.figures()` draws from it: no browser, nothing analysed again. SVG only |
+| After each analysis | the same files, when `analysis.export.figures` lists any (default: none) | the `figures` stage of `downstream.analyze`, isolated like the others; listed in `analysis.json` → `figures` and in the report's Files |
+
+The exported SVG has no CSS: text is `<text>`, colours are written out, and
+`<desc>` holds the experiment, comparison, cut-offs and test. `volcano_*.svg`
+(below) is older and different: it follows the browser's light / dark setting
+through CSS and is what the fallback page embeds.
 
 The insights stage writes `sample_qc.tsv`, `presence_absence.tsv` and
 `gene_set_ranks.tsv`, adds a `quality` block to `analysis.json`, and feeds
@@ -412,6 +451,27 @@ and the report (an "Any change (F)" tile and a table column). `analysis.json`
 paragraph describes the same. FragPipeAnalystR's `test_limma` can't fit a
 blocked model, so with a design `reproduce_in_R.R` says it repeats the plain
 model, and `reproduce_design_in_R.R` repeats Ionomos's model in limma.
+
+**Guards, the trust list and the accuracy commands** (D60,
+[VALIDATION.md](VALIDATION.md)). Two small stages were added to `analyze()`,
+isolated like the others:
+
+```
+read ─▶ input-check ─▶ plex ─▶ process ─▶ statistics ─▶ … ─▶ guards ─▶ doctor ─▶ trust ─▶ report
+        guards.check_input                                  guards.statistics      trust.build
+        |log2| > 100, NaN, inf → missing                    per comparison:        statements with numbers
+        repeated sample column dropped                      zero residual df,      + compare.json / benchmark.json
+        notes: duplicate / blank IDs,                       no prior, zero         found in results/
+        a sample without values                             variance, identical    → analysis.json "trust",
+                                                            samples → warnings       a static block in report.html
+```
+
+Nothing in these changes a number of a well-formed analysis. `ionomos
+compare` and `ionomos benchmark` are separate commands that read
+`results/analysis.json` and the `*_differential.tsv` files and write their
+own `compare.*` / `benchmark.*` / `benchmark_simulated.*` files beside them;
+the next `analyze()` shows their verdicts in the trust list, with whether the
+settings are still the ones they were made on (`trust.settings_digest`).
 
 Every report also carries its help (D46): `report.py` embeds
 `help.report_payload(issues)`, the report / QC / glossary entries of
@@ -507,6 +567,32 @@ turns the per-run records into the TSV, the `psm_qc` entry of
 the two warnings. A table over 4,096 MB is not read. What is shown and the
 limits: WORKFLOWS.md.
 
+**Roles** (`downstream/roles.py`, D61). `roles.plan(matrix, settings)` gives
+every condition a role and, when one is a competition, the default
+comparisons. `analysis.choose_comparisons` asks it (a thin hook; explicit
+`comparisons:` and `de_type: all | others` never reach it), and `analyze()`
+keeps the plan for the doctor, `analysis.json` (`roles`) and the report:
+
+```
+conditions ─▶ roles.infer ─▶ roles.plan ─────────▶ comparisons ─▶ limma (unchanged)
+ names,        control /      compound vs control                      │
+ analysis.     compound /     competition vs compound                  ▼
+ roles, SDRF   competition    competition vs control        roles.specific_targets
+ role column   (of X) / ...   (nothing else by default)     up in the first AND down in the second
+                                                            ─▶ specific_targets.tsv, analysis.json,
+                                                               the report's Specific targets section
+```
+
+An SDRF's `characteristics[role]` column is read by `sdrfdesign.py` into
+`meta["roles"]` and merged into the settings (which win) before anything
+else looks at them. Unequal groups touch three places:
+`analysis.group_needs` (what `min_valid` asks of the smaller group, passed
+to `fpa.limma_contrasts` / `design.limma_design`), `insights.power`
+(`pairs=`: each comparison with its own n) and `insights.sample_scorecard`
+(the spread is scaled to the usual group size before it is compared). The
+report recomputes the specific-targets calls from the comparisons with its
+live cut-offs; the TSV has them at the saved ones.
+
 `results/dose_response.tsv` (`downstream/doseresponse.py`, D44) is made when
 the conditions are a titration: names like `Cmpd_10nM` (or
 `analysis.doses`) and at least `dose_min_doses` (4) doses above the control.
@@ -544,8 +630,77 @@ PC: C:\Ionomos\          program only (replaced by updates, removed by uninstall
 
 Update: app finds a newer release on GitHub (or a Setup in Downloads) → verified download → `request_stop` (graceful; running
 search re-queued) → `RESTART_WATCHER` note → silent Setup → app reopens →
-watcher restarted. Report: **Report a problem…** → `save_problem_report` →
-`Ionomos-report-<ts>-v<ver>.zip` on the Desktop (note, build.json, report.txt,
-config, watcher + app logs, crash files, problem jobs' FragPipe logs; never
-raw data) → selected in Explorer. Detailed logging: `logs/DEBUG_UNTIL`,
+watcher restarted. Report: **Report a problem…** → the bundle window →
+`Ionomos-bundle-<ts>-<level>-v<ver>.zip` and its key file on the Desktop →
+selected in Explorer (next section). Detailed logging: `logs/DEBUG_UNTIL`,
 honoured by the running watcher within 30 s, expires by itself.
+
+## The bundle (D63)
+
+One zip a person copies off the PC, for a developer who has never seen it:
+to find why a search or analysis failed (`diagnose`) or to repeat the
+analysis on the lab's tables (`validate`). Ionomos uploads nothing. The
+round trip and the list of what each level holds are in
+[DEV_LOOP.md](DEV_LOOP.md).
+
+```
+collect(config, jobs, Options)        file sizes only; the window's list and `--dry-run`
+   │   system files, then each job's small files, then (validate) tables and results/,
+   │   then the size limit: what does not fit is left out, never a log
+   ▼
+learn(plan) → Anonymiser              names from config.yaml (users, aliases, methods), users_root,
+   │                                  the whole job list, the inbox, the bundled jobs' ionomos.json,
+   │                                  experiment.yaml, annotation.txt, analysis.json, table headers,
+   │                                  the OS account and host name
+   ▼
+_write → <name>.zip.part              per file: structured rewrite (ionomos.json: folder tokens;
+   │                                  experiment.yaml: notes removed; config.yaml: secrets), then every
+   │                                  line through notify.scrub + Anonymiser.text; tables keep their
+   │                                  identifier columns; file names in the zip are rewritten too
+   ▼
+verify(zip, anonymiser)               every file and file name searched for every original
+   │  hit → write once more (a name first met half-way), still a hit → BundleLeak, .part removed
+   ▼
+rename to <name>.zip (never over a file) + <name>-KEY-keep-in-the-lab-DO-NOT-SHARE.json beside it
+```
+
+**In the zip**: `BUNDLE.json` (format, version and build, level, whether and
+how names were replaced, the kept words, per job: status, method, FASTA
+facts, `reproducible`, `order_preserved`; every file with size and SHA-256;
+what was capped, left out or not found), `README.txt` (the same for a
+person), `note.txt`, `build.json`, `report.txt`, `config.yaml`, `logs/`,
+`crashes/`, `attention/`, and `jobs/<id>-<folder>/…` laid out as the
+experiment folder is. `unpack` turns `jobs/<id>-<folder>/` into
+`<dir>/<folder>/` and writes `<dir>/config.yaml` from the bundled one with
+every path under `<dir>/_lab/` and without `notify:` / `assistant:`.
+
+**Pseudonyms** (`Anonymiser`). A name is split into words at `_`, `-` and
+any other non-alphanumeric character. A word is *kept* when the analysis or
+a file format reads meaning from it: numbers with a unit (`10uM`, `3h`,
+`127N`, `9plex`), replicate / fraction marks (`F3`, `rep2`), control and
+reference words (`analysis.DEFAULT_CONTROL_KEYWORDS`, the lab's
+`control_keywords`, pool / bridge / norm …), the config's method keys and
+aliases, the analysis' setting names, and a short list of Ionomos' own
+words (results, sample, enrichment …). Every other word gets a pseudonym:
+
+| What | Pseudonym | Replaced where |
+|---|---|---|
+| user folders, aliases, the OS account, any `C:\Users\<name>` | `user01`, aliases `user01a` … | everywhere it stands as a word |
+| the PC name | `pc01` | everywhere |
+| experiment / inbox folder names | `exp001` (the whole name) | everywhere |
+| a folder path outside the lab's tree (raw paths in a foreign table) | `folder01` (the whole path) | everywhere |
+| words of raw-file, sample and condition names | `condA` … (letters, no `_`, so `condition_of` and the dose / time readers see the same shape) | inside any registered name, its `_`-prefixes and re-joined forms; alone only if the word is itself a sample / condition name or has letters and digits (`KL6159A`) |
+| words of other names (dropped files, inbox items, folder words) | `name01` … | as above |
+| e-mail, IPv4 (first number ≥ 10, so `1.4.3.0` stays a version), IPv6 / MAC | `email01@example.invalid`, `ip01` | by pattern |
+
+The `cond` pseudonyms are assigned in the byte order of the originals and
+given a first letter (`condA`, `CondA`, `FcondA` …) that keeps their order
+against the kept words too, because `fpa.impute` draws Perseus' random
+numbers per sample in byte order of the sample names. `order_kept` checks
+each job's names and `BUNDLE.json` says when the order changed. Matching is
+case-insensitive and on whole words; a run of name characters that holds one
+of the lab's names is treated as a name, so its short words are replaced
+too. In tab-separated tables the protein / gene / peptide columns
+(`bundle._ID_COLUMNS`, and `id`, `label`, `description` of Ionomos' own
+tables) are never rewritten; an original found there is listed in the key
+file as kept, not failed.

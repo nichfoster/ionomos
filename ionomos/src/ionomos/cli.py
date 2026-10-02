@@ -11,10 +11,25 @@ Command line.
     ionomos retry    JOB_ID [--config PATH]       failed -> queued
     ionomos testbed  ...                          build/drive a fake lab for testing (see testbed.py)
     ionomos diagnose [--zip [PATH]]               everything needed to report a problem (text, or a .zip bundle)
+    ionomos bundle   [JOB|FOLDER ...] [--level diagnose|validate] [--out DIR] [--no-anonymise]
+                                                   an anonymised zip on the Desktop for troubleshooting / validation;
+                                                   bundle inspect ZIP | unpack ZIP DIR | translate KEY [FILE] (bundle.py)
     ionomos analyze  JOB_ID|FOLDER [--control C] [--compare 'A vs B'] [--de-type all] [--imputation none]
                      [--exclude SAMPLE] [--log2fc F] [--open]
                                                    statistics + volcano plots + results/report.html
+    ionomos export   JOB_ID|FOLDER [--preset slide169|slide43|half|col1|col2] [--palette colorblind]
+                     [--font-pt N] [--figures volcano,pca] [--style FILE] [--out DIR]
+                                                   figures for slides as SVG, from the finished report, in the
+                                                   lab's export style (analysis.export); PNG: the report's Export
     ionomos demo     [FOLDER] [--open]            a simulated experiment + its report (offline, no lab setup)
+    ionomos compare  FOLDER REFERENCE [--by id|gene] [--open]
+                                                   an Ionomos analysis against a reference result of the same experiment
+                                                   (another Ionomos run, FragPipe-Analyst, limma, MSstats, Perseus, R):
+                                                   agreement of fold changes, hit calls and p-values, with a verdict
+    ionomos benchmark [--grid quick|standard] [--like FOLDER]
+                                                   accuracy on simulated data with planted changes: sensitivity and
+                                                   observed false discoveries for each imputation / normalisation
+    ionomos benchmark FOLDER --expected hye.yaml  a mixed-species / spike-in run: measured against expected ratios
     ionomos help     [TOPIC] [--open]             plain-language help: prints TOPIC (NO_TABLE, pca, ...) and
                                                    writes help.html (--open: in the browser, at TOPIC)
     ionomos ask      "QUESTION" [--experiment JOB_ID|NAME] [--item ID] [--json]
@@ -381,6 +396,25 @@ def cmd_check(args) -> int:
     return 0 if ok_all else 1
 
 
+def cmd_preflight(args) -> int:
+    """Everything about FragPipe that can be checked without a search (preflight.py, D59)."""
+    from ionomos import preflight
+
+    print(f"ionomos {__version__}  FragPipe preflight  config: {args.config}")
+    try:
+        cfg = load(args.config, check_paths=False)
+    except ConfigError as exc:
+        print(f" ✗ config  {exc}")
+        return 1
+    if not args.static:
+        print("starting FragPipe for --help" + ("" if args.no_dry_run else " and one dry run per method")
+              + " (no search; this can take a few minutes)…", flush=True)
+    checks = preflight.run(cfg, dry=not args.no_dry_run, methods=args.method or None,
+                           raw=Path(args.raw) if args.raw else None, start=not args.static)
+    print(preflight.text(checks))
+    return 1 if any(c.status == "fail" for c in checks) else 0
+
+
 def cmd_status(args) -> int:
     from ionomos import fragpipe, health
     from ionomos.worker import paused
@@ -500,6 +534,12 @@ def cmd_diagnose(args) -> int:
     if where:
         print(f"(saved to {where})")
     return 0
+
+
+def cmd_bundle(args) -> int:
+    from ionomos import bundle
+
+    return bundle.run_cli(args)
 
 
 def cmd_stop(args) -> int:
@@ -628,6 +668,80 @@ def cmd_analyze(args) -> int:
     return 0 if out.report else 1
 
 
+_EXPORT_SIZES = ("slide169", "slide43", "half", "col1", "col2")  # charts.SIZES without "custom" (a test compares them)
+
+
+def cmd_export(args) -> int:
+    """Figures for slides from a finished analysis: static SVG in the export style (downstream/slides.py)."""
+    import json
+
+    from ionomos.downstream import charts, slides
+
+    if args.format != "svg":
+        print("ionomos export writes SVG only: making a PNG needs a renderer, and Ionomos adds no dependency for "
+              "it. Open report.html and use Export (PNG, copy as an image, a .zip of everything), or open the "
+              "SVG in PowerPoint or Inkscape.", file=sys.stderr)
+        return 2
+    cfg = None
+    try:
+        cfg = load(args.config, check_paths=False)
+    except ConfigError:
+        pass  # exporting works without a lab config: the report carries the style it was made with
+    target = args.target
+    if target.isdigit():
+        if cfg is None or not cfg.database.is_file():
+            print("no job ledger here; give a folder path instead", file=sys.stderr)
+            return 2
+        job = Ledger(cfg.database).get(int(target))
+        if job is None:
+            print(f"no job {target}", file=sys.stderr)
+            return 2
+        target = job.dest_dir
+    flags = {"size": args.preset, "width": args.width, "height": args.height, "unit": args.unit,
+             "font_pt": args.font_pt, "font_family": args.font_family, "palette": args.palette, "up": args.up,
+             "down": args.down, "neutral": args.neutral, "background": args.background, "line_scale": args.line_scale,
+             "point_scale": args.point_scale, "label_count": args.labels}
+    flags = {k: v for k, v in flags.items() if v is not None}
+    if (args.width is not None or args.height is not None) and args.preset is None:
+        flags["size"] = "custom"
+    if args.labels == 0:
+        flags["labels"] = "none"
+    for off in ("title", "subtitle", "legend", "note"):
+        if getattr(args, f"no_{off}"):
+            flags[off] = False
+    try:
+        report = slides.find_report(Path(target))
+        d = slides.read_payload(report)
+        saved = {}
+        if args.style:
+            try:
+                saved = json.loads(Path(args.style).read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                raise slides.SlidesError(f"cannot read the style file {args.style}: {exc}") from exc
+        # the style the report was made with, the lab's style now, a saved style file, the command line
+        style = charts.style_from(charts.style_layer(d.get("exportDefaults"), lenient=True),
+                                  ((cfg.analysis or {}).get("export") if cfg is not None else None), saved, flags)
+        which = charts.style_layer({"figures": args.figures})["figures"] if args.figures else None
+    except (slides.SlidesError, charts.StyleError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    folder = Path(args.out) if args.out else report.parent / slides.FOLDER
+    try:
+        written = slides.write(folder, d, style, which, f"ionomos export (Ionomos {__version__})")
+    except OSError as exc:
+        print(f"cannot write to {folder}: {exc}", file=sys.stderr)
+        return 1
+    if not written:
+        print(f"nothing to draw: {report} has no comparison, PCA, heatmap or correlation", file=sys.stderr)
+        return 1
+    print(f"style: {charts.style_text(style)}")
+    for p in written:
+        print(f"  {p}")
+    print(f"{len(written) - 1} figure(s) and {slides.README} in {folder}. PNG, the other charts, other cut-offs: "
+          "open report.html and use Export.")
+    return 0
+
+
 def _open_report(report) -> None:
     """--open: the report in the default browser. A machine without one (a server, no xdg-open) gets a note."""
     from ionomos.service import open_path
@@ -685,6 +799,101 @@ def cmd_demo(args) -> int:
         _open_report(out.report)
     else:
         print("open it in a browser, or run again with --open")
+    return 0
+
+
+def cmd_compare(args) -> int:
+    """Compare an Ionomos analysis with a reference result for the same experiment (downstream/compare.py).
+    Reads both, changes neither; writes compare.tsv / .json / .html. Exit 0: every comparison agrees, 1: one
+    differs or could not be judged, 2: nothing to compare."""
+    from ionomos.downstream import compare
+
+    try:
+        a = compare.load_side(Path(args.analysis))
+        b = compare.load_side(Path(args.reference))
+        if a.kind != "ionomos" and not args.out:
+            print(f"{args.analysis} is a table, not an Ionomos analysis: say where the result goes with --out DIR "
+                  "(or give the analysed folder first)", file=sys.stderr)
+            return 2
+        res = compare.compare(a, b, by=args.by, comparison=args.comparison, ref_comparison=args.ref_comparison,
+                              flip=args.flip, alpha=args.alpha, log2fc=args.log2fc,
+                              use_adjusted=False if args.raw_p else None, ref_alpha=args.ref_alpha,
+                              ref_log2fc=args.ref_log2fc)
+        out = Path(args.out) if args.out else a.results_dir
+        files = compare.write(res, out)
+    except compare.CompareError as exc:
+        print(f"cannot compare: {exc}", file=sys.stderr)
+        return 2
+    except OSError as exc:
+        print(f"cannot write the comparison: {exc}", file=sys.stderr)
+        return 2
+    print(f"Ionomos: {a.name}   reference: {b.name} ({res['reference_kind']})")
+    for line in compare.summary_lines(res):
+        print(line)
+    for n in res["notes"]:
+        print(f"note: {n}")
+    print(f"page: {files[-1]}")
+    if a.kind == "ionomos" and not args.out:
+        print("the verdict shows at the top of report.html after the next `ionomos analyze` of this folder")
+    if args.open:
+        _open_report(files[-1])
+    return 0 if all(p["verdict"].startswith("agrees") for p in res["pairs"]) else 1
+
+
+def cmd_benchmark(args) -> int:
+    """Accuracy against known truth (downstream/benchmark.py): simulated data over a grid of designs and
+    settings, or an analysed mixed-species / spike-in experiment against the expected ratios in a YAML."""
+    from ionomos.downstream import benchmark
+
+    if args.folder or args.expected:
+        if not (args.folder and args.expected):
+            print("a real benchmark needs both: ionomos benchmark FOLDER --expected hye.yaml (see `ionomos help "
+                  "benchmark`). Without a folder, the simulated benchmark runs", file=sys.stderr)
+            return 2
+        try:
+            exp = benchmark.load_expected(args.expected)
+            res = benchmark.real(Path(args.folder), exp)
+            from ionomos.downstream.compare import find_analysis
+
+            files = benchmark.write_real(res, Path(args.out) if args.out else find_analysis(Path(args.folder)))
+        except benchmark.BenchmarkError as exc:
+            print(f"cannot benchmark: {exc}", file=sys.stderr)
+            return 2
+        except OSError as exc:
+            print(f"cannot write the benchmark: {exc}", file=sys.stderr)
+            return 2
+        print(f"{res['experiment']}, {res['comparison']}, against {res['expected_file']}")
+        for line in res["verdicts"]:
+            print(f"  {line}")
+        for n in res["notes"]:
+            print(f"  note: {n}")
+    else:
+        extra, designs, alpha, log2fc, out, analysis_info = None, None, 0.05, 1.0, Path.cwd() / "ionomos_benchmark", {}
+        if args.like:
+            try:
+                lk = benchmark.like(Path(args.like))
+            except (benchmark.BenchmarkError, OSError, ValueError) as exc:
+                print(f"cannot read the analysis of {args.like}: {exc}", file=sys.stderr)
+                return 2
+            extra, alpha, log2fc, out = [(lk["label"], lk["settings"])], lk["alpha"], lk["log2fc"], lk["results"]
+            designs = [lk["design"]] if lk["design"] else None
+            analysis_info = lk["analysis"]
+        print(f"simulated benchmark, grid {args.grid}" + (f", with the settings of {args.like}" if args.like else ""))
+        try:
+            res = benchmark.simulated(args.grid, extra, designs, args.seeds, alpha, log2fc,
+                                      progress=None if args.quiet else (lambda m: print(f"  … {m}", flush=True)))
+            if args.like:
+                res["analysis"] = analysis_info
+                res["headline"] = [v for v in res["verdicts"] if v.startswith(extra[0][0] + ":")]
+            files = benchmark.write_simulated(res, Path(args.out) if args.out else out)
+        except OSError as exc:
+            print(f"cannot write the benchmark: {exc}", file=sys.stderr)
+            return 2
+        for line in res["verdicts"]:
+            print(f"  {line}")
+    print(f"page: {files[-1]}")
+    if args.open:
+        _open_report(files[-1])
     return 0
 
 
@@ -905,6 +1114,14 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--no-gui", action="store_true", help="never open the resolver window")
     r.set_defaults(fn=cmd_run)
     sub.add_parser("check", help="verify config, folders, users, GUI").set_defaults(fn=cmd_check)
+    pf = sub.add_parser("preflight", help="check FragPipe without a search: starts it for --help and a dry run "
+                                          "of each method")
+    pf.add_argument("--method", action="append", help="only this method (repeatable)")
+    pf.add_argument("--raw", metavar="PATH", help="a real .raw file or folder for the dry run's file list "
+                                                  "(default: a placeholder file)")
+    pf.add_argument("--no-dry-run", action="store_true", help="start FragPipe for --help only")
+    pf.add_argument("--static", action="store_true", help="read the disk only; start nothing")
+    pf.set_defaults(fn=cmd_preflight)
     s = sub.add_parser("status", help="list jobs")
     s.add_argument("--all", action="store_true", help="include done jobs")
     s.set_defaults(fn=cmd_status)
@@ -926,6 +1143,9 @@ def main(argv: list[str] | None = None) -> int:
     dg.add_argument("--zip", nargs="?", const="auto", metavar="PATH",
                     help="write a .zip bundle (report, logs, failed jobs' FragPipe logs) instead")
     dg.set_defaults(fn=cmd_diagnose)
+    from ionomos import bundle
+
+    bundle.add_parser(sub).set_defaults(fn=cmd_bundle)
     sp = sub.add_parser("stop", help="gracefully stop the running watcher (re-queues a running search)")
     sp.add_argument("--wait", type=float, default=60, help="seconds to wait before forcing it (default 60)")
     sp.add_argument("--remember", action="store_true", help="start it again when the app next opens (updates)")
@@ -962,12 +1182,87 @@ def main(argv: list[str] | None = None) -> int:
     az.add_argument("--quiet", action="store_true", help="no progress lines")
     az.add_argument("--open", action="store_true", help="open the report when done")
     az.set_defaults(fn=cmd_analyze)
+    ex = sub.add_parser("export", help="figures for slides (SVG) from a finished analysis, in the export style")
+    ex.add_argument("target", help="job id, experiment folder, its results folder, or a report.html")
+    ex.add_argument("--preset", choices=list(_EXPORT_SIZES),
+                    help="size: 16:9 slide (1280x720 px), 4:3 slide, half a slide, journal column (85 mm), "
+                         "two columns (180 mm). Default: the lab's analysis.export, else slide169")
+    ex.add_argument("--width", type=float, help="a custom width (with --height; --unit px or mm)")
+    ex.add_argument("--height", type=float)
+    ex.add_argument("--unit", choices=["px", "mm"])
+    ex.add_argument("--font-pt", dest="font_pt", type=float, help="text size in points in the finished figure")
+    ex.add_argument("--font-family", dest="font_family", help="font name, e.g. Arial or 'Times New Roman'")
+    ex.add_argument("--palette", choices=["default", "colorblind", "grey", "custom"])
+    ex.add_argument("--up", help="colour of up hits with --palette custom, e.g. '#d55e00'")
+    ex.add_argument("--down")
+    ex.add_argument("--neutral")
+    ex.add_argument("--background", choices=["light", "dark", "transparent"])
+    ex.add_argument("--line-scale", dest="line_scale", type=float, help="line width as a multiple (default 1)")
+    ex.add_argument("--point-scale", dest="point_scale", type=float, help="point size as a multiple (default 1)")
+    ex.add_argument("--labels", type=int, metavar="N", help="name the N most significant hits (0: none)")
+    for off in ("title", "subtitle", "legend", "note"):
+        ex.add_argument(f"--no-{off}", dest=f"no_{off}", action="store_true",
+                        help=f"leave the {'cut-offs line' if off == 'note' else off} out")
+    ex.add_argument("--figures", help="which, comma-separated: volcano,pca,heatmap,correlation (default: all)")
+    ex.add_argument("--format", default="svg", choices=["svg", "png"],
+                    help="svg (png is not available here: it needs a browser; use the report's Export)")
+    ex.add_argument("--style", metavar="FILE", help="an export style saved from the report (export_style.json)")
+    ex.add_argument("--out", metavar="DIR", help="where to write (default: <results>/figures)")
+    ex.set_defaults(fn=cmd_export)
     dm = sub.add_parser("demo", help="write a small simulated experiment and its report (offline; try this first)")
     dm.add_argument("folder", nargs="?", help="a new or empty folder (default: ./ionomos_demo, or ionomos_demo_2, "
                                               "... if taken; nothing existing is touched)")
     dm.add_argument("--quiet", action="store_true", help="no progress lines")
     dm.add_argument("--open", action="store_true", help="open the report when done")
     dm.set_defaults(fn=cmd_demo)
+    cp = sub.add_parser("compare", help="compare an Ionomos analysis with a reference result for the same experiment",
+                        description="Compare an Ionomos analysis with another result for the same experiment: "
+                                    "features matched by ID or gene, agreement of log2 fold changes (Pearson, "
+                                    "Spearman, slope, offset), of hit calls and of p-values, the largest "
+                                    "disagreements, and a verdict (agrees / agrees after an offset / differs). "
+                                    "Writes compare.tsv, compare.json and compare.html into the analysis' results "
+                                    "folder. Reads both results and changes neither.")
+    cp.add_argument("analysis", help="the Ionomos analysis: an experiment folder (with results/analysis.json), its "
+                                     "results folder, or a <table>_ionomos folder")
+    cp.add_argument("reference", help="the reference: another analysed folder, or a results table with a fold-change "
+                                      "and a p-value column per comparison (FragPipe-Analyst export, limma topTable, "
+                                      "MSstats, Perseus, R output; .tsv .csv .txt .xlsx)")
+    cp.add_argument("--comparison", metavar="'A vs B'", help="compare only this comparison of the analysis")
+    cp.add_argument("--ref-comparison", dest="ref_comparison", metavar="NAME",
+                    help="the reference's comparison to use (default: matched by name)")
+    cp.add_argument("--by", choices=["auto", "id", "gene"], default="auto",
+                    help="match features by protein ID or by gene (default: whichever matches more)")
+    cp.add_argument("--flip", action="store_true", help="the reference is the comparison the other way round")
+    cp.add_argument("--alpha", type=float, help="common significance cut-off (default: the analysis' own)")
+    cp.add_argument("--log2fc", type=float, help="common fold-change cut-off (default: the analysis' own)")
+    cp.add_argument("--raw-p", action="store_true", help="apply the common alpha to raw p instead of adjusted p")
+    cp.add_argument("--ref-alpha", dest="ref_alpha", type=float,
+                    help="the reference's own alpha, when its table has no significance column")
+    cp.add_argument("--ref-log2fc", dest="ref_log2fc", type=float, help="the reference's own fold-change cut-off")
+    cp.add_argument("--out", metavar="DIR", help="where to write (default: the analysis' results folder)")
+    cp.add_argument("--open", action="store_true", help="open compare.html when done")
+    cp.set_defaults(fn=cmd_compare)
+    bm = sub.add_parser("benchmark", help="accuracy against known truth: simulated data, or a mixed-species run",
+                        description="Without a folder: run the analysis on simulated data with planted changes over "
+                                    "a grid (replicates 2 to 6, 2 controls vs 4 treated, effect sizes, missing "
+                                    "values) and report sensitivity, the observed false discovery proportion "
+                                    "against the nominal alpha and the fold-change bias for each imputation / "
+                                    "normalisation setting. With FOLDER and --expected: compare an analysed "
+                                    "mixed-species (human / yeast / E. coli) or spike-in experiment with the "
+                                    "expected ratio per species or protein list.")
+    bm.add_argument("folder", nargs="?", help="an analysed benchmark experiment (with --expected)")
+    bm.add_argument("--expected", metavar="YAML", help="expected ratios per species or protein list, e.g. "
+                                                       "expected: {HUMAN: 1, YEAST: 2, ECOLI: 0.25}")
+    bm.add_argument("--grid", choices=["quick", "standard"], default="standard",
+                    help="simulated: quick (seconds) or standard (about a minute; default)")
+    bm.add_argument("--like", metavar="FOLDER", help="simulated: add the settings and group sizes of this analysed "
+                                                     "experiment, and write into its results folder")
+    bm.add_argument("--seeds", type=int, help="simulated: tables per scenario (default 5; quick 2)")
+    bm.add_argument("--out", metavar="DIR", help="where to write (default: ./ionomos_benchmark, or the experiment's "
+                                                 "results folder)")
+    bm.add_argument("--quiet", action="store_true", help="no progress lines")
+    bm.add_argument("--open", action="store_true", help="open the page when done")
+    bm.set_defaults(fn=cmd_benchmark)
     hp = sub.add_parser("help", help="plain-language help: a topic here, the full help page in the browser")
     hp.add_argument("topic", nargs="?", help="an issue code (NO_TABLE), a word (volcano, imputation), a section "
                                              "(start, report, glossary, trouble, safety, faq) or a topic id")

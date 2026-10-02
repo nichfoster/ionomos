@@ -6,7 +6,7 @@ Every state is made the way the PC makes it (a drop, intake, the worker running 
 and its doctor), so the tools read real ledgers, status files, console logs and analysis.json files. The
 assistant only reads, so one build of a state serves every scenario that names it.
 
-    fragpipe    1 failed (out of memory), 2 failed (IonQuant crashed), 3 done (DIA, with a report),
+    fragpipe    1 failed (out of memory), 2 failed (the DIA-NN step crashed), 3 done (DIA, with a report),
                 4 failed (MSFragger not installed), 5 failed before FragPipe (an empty raw file),
                 6 waiting (workflow file missing); two folders that could not be taken in
     diann / maxquant / sage    job 1 failed in that engine

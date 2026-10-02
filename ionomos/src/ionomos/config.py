@@ -94,6 +94,7 @@ class Config:
     qc_trend: dict = field(default_factory=dict)  # instrument QC trending (qctrend.py, D45); {} = defaults
     notify: dict = field(default_factory=dict)  # messages on done / failed / held (notify.py, D58); {} = off
     assistant: dict = field(default_factory=dict)  # the local assistant (assistant/, D49 / D57); {} = off
+    config_python: str = ""  # FragPipe's --config-python (the Python folder); "" = what FragPipe remembers (D59)
 
     @property
     def method_aliases(self) -> dict[str, list[str]]:
@@ -267,6 +268,7 @@ def load(path: str | Path, check_paths: bool = True) -> Config:
         min_free_gb=float(_get(raw, "fragpipe", "min_free_gb", 20) or 0),
         config_tools_folder=str(_get(raw, "fragpipe", "config_tools_folder", "") or ""),
         config_diann=str(_get(raw, "fragpipe", "config_diann", "") or ""),
+        config_python=str(_get(raw, "fragpipe", "config_python", "") or ""),
         methods=methods,
         user_aliases=user_aliases,
         default_user=str(users.get("default") or ""),

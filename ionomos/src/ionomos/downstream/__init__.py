@@ -14,6 +14,8 @@ Layout it reads and writes (inside the experiment folder):
       <level>_matrix_log2.tsv       the quantities that went into the statistics
       <comparison>_differential.tsv every feature: log2FC, p, q, significance
       volcano_<comparison>.svg      standalone plot (opens in any browser, pastes into slides)
+      figures/*.svg + README.txt    (analysis.export.figures, or `ionomos export`) the figures for slides in the
+                                    lab's export style: volcano, PCA, heatmap, correlation (slides.py, D62)
       sample_qc.tsv                 the per-sample scorecard (insights.py)
       presence_absence.tsv          features measured in one group and never in the other
       gene_set_ranks.tsv            rank-based gene-set test on every protein (enrichment on)
@@ -21,9 +23,12 @@ Layout it reads and writes (inside the experiment folder):
       time_course.tsv               a time course (3+ time points): change over time (F), trend, class, pattern
       cysteine_sites.tsv            isoDTB: per site and compound the competition ratio, liganded call, selectivity
       cysteine_proteins.tsv         isoDTB: proteins with a liganded cysteine, how many of their sites are
+      specific_targets.tsv          a competition experiment: per compound, enriched against the control and competed off
       psm_qc.tsv                    search quality per run: PSMs, mass error, missed cleavages, charge states
       sdrf.tsv                      SDRF-Proteomics sample metadata: a row per raw file (and label), for PRIDE
-      analysis.json               what was done, with which settings (reproducibility), + "quality"
+      analysis.json               what was done, with which settings (reproducibility), + "quality", "trust"
+      compare.* / benchmark.*       written by `ionomos compare` / `ionomos benchmark`, never by analyze(); when
+                                    present, their verdicts are shown under "How far to trust this"
 
 Pipeline stages, each a module:
     method prep   isodtb.py / tmt.py           (ports of the lab R scripts)
@@ -33,6 +38,7 @@ Pipeline stages, each a module:
     SDRF design   sdrfdesign.py                (an SDRF in the folder sets conditions / replicates / plexes)
     TMT plexes    plex.py                      (IRS: several plexes on one scale, before the processing)
     statistics    analysis.py + stats.py       (comparisons, Welch / one-sample t, BH)
+                  roles.py                     (control / compound / competition: the default comparisons, specific targets)
                   design.py + deqms.py         (blocks / covariates, the moderated F, DEqMS; D42, D43)
     QC, insights  qc.py + insights.py + enrich.py  (PCA, scorecard, batch, missingness, on/off, gene sets)
     dose-response doseresponse.py              (CurveCurator's curves, when the conditions are doses)
@@ -40,7 +46,10 @@ Pipeline stages, each a module:
     cysteines     cys.py                       (site ratio data: liganded calls, selectivity, a site annotation)
     search QC     psmqc.py + qcmetrics.py      (per run, from psm.tsv: mass error, missed cleavages, charge states)
     metadata      sdrf.py                      (SDRF-Proteomics, from the manifest, workflow and FASTA)
+    guards, trust guards.py + trust.py         (implausible input made safe and said; statistics that may not
+                                                mean what they say; the "How far to trust this" list; D60)
     presentation  charts.py + report.py        (SVG + HTML)
+    accuracy      compare.py + benchmark.py    (separate commands: against a reference result, against known truth)
 
 Adding a method or an output means adding one loader or one renderer; the
 stages don't know about each other's internals. Nothing here deletes or
@@ -300,7 +309,9 @@ def _insights(p, diffs, qcd) -> dict:
     out["pcs"] = insights.pc_association(qcd.get("pca") or {}, m.samples, m.condition, m.replicate)
     out["missingness"] = insights.missingness(p.measured)
     prior = next((d.prior for d in diffs if d.prior and all(x == x for x in d.prior)), None)
-    out["power"] = insights.power(p.measured, m.samples, m.condition, prior, m.kind)
+    pairs = [(d.name, *d.groups) for d in diffs if len(d.groups) == 2 and d.control != "others"]
+    pooled = bool(diffs) and diffs[0].test_used == "limma"
+    out["power"] = insights.power(p.measured, m.samples, m.condition, prior, m.kind, pairs=pairs, pooled=pooled)
     out["phist"], out["onoff"], out["imputation_driven"] = {}, {}, {}
     for d in diffs:
         out["phist"][d.name] = insights.p_histogram([r["pvalue"] for r in d.rows])
@@ -321,7 +332,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     out.issues (doctor.py), which the worker and the app turn into pop-up windows.
     progress(text) is called between stages (the app shows it)."""
     from ionomos import __version__
-    from ionomos.downstream import doctor, export, fpa, insights
+    from ionomos.downstream import doctor, export, fpa, guards, insights, roles, trust
 
     dest = Path(dest)
     workdir = dest / "fragpipe" if (dest / "fragpipe").is_dir() else dest
@@ -388,6 +399,9 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     psm_view: dict | None = None
     model = analysis.Model()
     ftest = None
+    design_plan = None            # roles.Plan: the conditions' roles and the comparisons they give (D61)
+    specific: list = []           # roles.Specific per compound with a competition
+    spec_info: list[dict] = []
 
     def read():
         try:
@@ -406,12 +420,16 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
         notes += lnotes
         if m is not None:
             notes += m.notes
+            notes += stage("input-check", guards.check_input, m) or []  # implausible values, repeated names (D60)
     tmt_info = None
     if m is not None and m.features and not m.meta.get("precomputed"):  # TMT plexes on one scale (plex.py, D48)
         bridged = stage("plex", plex.normalise, m, settings)
         if bridged is not None:
             m, tmt_info, pnotes = bridged
             notes += pnotes
+    if m is not None and m.meta.get("roles"):  # roles from an SDRF column; analysis.roles wins (roles.py)
+        settings = stage("roles", _sdrf_roles, m, settings, notes) or settings
+        f.settings = settings
     f.loaded = m
     f.tmt = tmt_info
     precomputed = (m.meta.get("precomputed") or []) if m is not None and m.features else []
@@ -470,8 +488,12 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
             except analysis.AnalysisError as exc2:
                 comps, cnotes = [], [str(exc2)]
         notes += cnotes
+        design_plan = stage("roles", roles.plan, pm, settings if not f.comparison_error else fallback)
+        f.roles = design_plan
+        by_roles = design_plan is not None and design_plan.active
         if (pm.kind == "intensity" and len(pm.conditions) >= 2 and not settings.comparisons and not settings.control
-                and settings.de_type == "control" and analysis.find_control(pm.conditions, settings) is None):
+                and settings.de_type == "control" and not by_roles
+                and analysis.find_control(pm.conditions, settings) is None):
             ctrls = {c for _, c in comps if c not in (None, "others")}
             f.control_guessed = next(iter(ctrls), None)
         f.comparisons = comps
@@ -501,6 +523,8 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
                 d = stage("statistics", analysis.to_diff, processed, r, c, settings) if r is not None else None
                 if d is None:
                     continue
+                if by_roles:
+                    d.role = design_plan.kinds.get(comps[k], "")
                 if comps[k] in low:
                     few = _few_text(small_of[comps[k]])
                     if d.tested:
@@ -514,6 +538,11 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
                 if d.tested == 0 and not d.confidence and comps[k] not in low:
                     notes.append(f"{d.name}: zero features could be tested. No valid volcano can be drawn; "
                                  "check replicate grouping and missing quantities.")
+                if d.relaxed and len(set(d.groups)) > 1:
+                    small = d.treatment if d.groups[0] < d.groups[1] else d.control
+                    notes.append(f"{d.name}: {d.relaxed:,} features were tested with fewer than {settings.min_valid} "
+                                 f"measured values in {small} ({min(d.groups)} samples against {max(d.groups)}); "
+                                 "their n is in the table. small_group_min_valid: same leaves them untested.")
                 diffs.append(d)
                 tsv = results / f"{d.slug()}_differential.tsv"
                 if stage("tables", write_tsv, tsv, analysis.DIFF_COLUMNS, d.rows):
@@ -521,6 +550,10 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
                 f.volcanos[d.name] = _write_volcano(results, d, stage)
                 if f.volcanos[d.name]:
                     out.files.append(f.volcanos[d.name])
+        if by_roles and diffs:
+            got = stage("specific_targets", _specific_targets, design_plan, diffs, results, out)
+            if got is not None:
+                specific, spec_info = got
         if pm.features:
             pmx = stage("tables", export.processed_matrix, results / f"{m.level}_matrix_processed.tsv", processed)
             if pmx:
@@ -582,8 +615,12 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     f.diffs = diffs
     f.enrichment_notes = enr_notes
     f.insights = insight
+    if processed is not None and diffs:  # statistics that ran but may not mean what they say (guards.py, D60)
+        f.guards = stage("guards", guards.statistics, processed, diffs, settings, model) or []
+        notes += stage("guards", guards.notes, processed, diffs, settings) or []
     out.issues = doctor.check(f)
     out.warnings += notes
+    trusted = stage("trust", trust.build, m, processed, diffs, insight, qcd, settings, f.guards, results) or {}
     ctx = {"version": __version__, **(context or {})}
     ctx["engine"] = stage("provenance", engines.provenance, Path(table) if table is not None else workdir, method,
                           m.source if m is not None else "", m.meta if m is not None else {}) or {}
@@ -594,6 +631,14 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     ctx["issues"] = [i.as_dict() for i in out.issues]
     ctx["sdrf"] = sdrf_info
     ctx["model"], ctx["ftest"] = model, ftest
+    ctx["roles"], ctx["specific"] = design_plan, specific
+    figure_files: list[Path] = []
+    if settings.export.get("figures") and (processed is not None or diffs):
+        say("figures for slides")
+        figure_files = stage("figures", _static_figures, results, ctx, m, processed, diffs, settings, qcd, enrichment,
+                             ranked, insight) or []
+        out.files += figure_files
+    ctx["trust"] = trusted
     say("writing the report")
     rel = [str(p.relative_to(results)).replace("\\", "/") if p.is_relative_to(results) else p.name
            for p in out.files]
@@ -618,6 +663,9 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
         "level": m.level if m else None,
         "samples": {x: pm.condition[x] for x in pm.samples} if pm else {},
         "comparisons": [{"name": d.name, "up": d.up, "down": d.down, "tested": d.tested,
+                         "samples": dict(zip(("treatment", "control"), d.groups, strict=False)),
+                         **({"kind": d.role} if d.role else {}),
+                         **({"tested_below_min_valid": d.relaxed} if d.relaxed else {}),
                          "confidence": d.confidence or "normal", "confidence_note": d.confidence_note,
                          "table": f"{RESULTS}/{d.slug()}_differential.tsv",
                          "volcano": (f"{RESULTS}/{Path(f.volcanos[d.name]).name}" if f.volcanos.get(d.name) else None)}
@@ -636,11 +684,15 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
                             "top": [f"{t['term']} ({t['direction']})" for t in b["terms"][:5] if t["q"] <= 0.05]}
                            for b in ranked],
         "quality": _quality_summary(insight),
+        "trust": trusted,
         "dose_response": dose_info,
         "time_course": time_info,
         "cysteines": cys_info,
+        "roles": design_plan.as_dict() if design_plan is not None else {},
+        "specific_targets": spec_info,
         "psm_qc": psm_info,
         "sdrf": sdrf_info,
+        "figures": [f"{RESULTS}/{p.relative_to(results).as_posix()}" for p in figure_files],
         "design": _design_summary(m, settings),
         "tmt": tmt_info,
         "source": m.source if m else None,
@@ -724,6 +776,41 @@ def _cysteines(p, settings, results: Path, out: Outcome, dest: Path) -> tuple[di
     return (cys.summary(res, table=f"{RESULTS}/cysteine_sites.tsv", proteins=prot), cys.report_payload(res),
             problems + res.problems, res.notes)
 
+def _sdrf_roles(m, settings, notes: list[str]):
+    """Roles an input SDRF gave its conditions (sdrfdesign.apply -> m.meta["roles"]) become analysis.roles for
+    the conditions the settings don't name. Returns the new settings."""
+    from dataclasses import replace
+
+    from ionomos.downstream import roles
+
+    given = {k.lower() for k in settings.roles}
+    add = {}
+    for cond, text in m.meta["roles"].items():
+        if cond.lower() in given:
+            continue
+        try:
+            add[cond] = roles.format_role(*roles.parse_role(text))
+        except roles.RoleError as exc:
+            notes.append(f"SDRF role of {cond} ignored: {exc}")
+    if not add:
+        return settings
+    src = (m.meta.get("sdrf") or {}).get("file") or "the SDRF"
+    m.meta["role_sources"] = {c: f"SDRF {src}" for c in add}
+    notes.append(f"roles from the SDRF {src}: " + ", ".join(f"{c} = {r}" for c, r in add.items()))
+    return replace(settings, roles={**add, **settings.roles})
+
+def _specific_targets(plan, diffs, results: Path, out: Outcome) -> tuple[list, list[dict]]:
+    """results/specific_targets.tsv for a competition experiment (roles.py): per compound, the features enriched
+    against the control and competed off. Returns (roles.Specific list, the analysis.json summary)."""
+    from ionomos.downstream import roles
+
+    found = roles.specific_targets(plan, diffs)
+    if not found:
+        return [], []
+    out.files.append(write_tsv(results / "specific_targets.tsv", roles.SPECIFIC_COLUMNS,
+                               roles.specific_table_rows(found)))
+    return found, roles.specific_summary(found, f"{RESULTS}/specific_targets.tsv")
+
 def _psm_qc(workdir: Path, settings, results: Path, out: Outcome, say) -> tuple[dict, dict | None, list, list[str]]:
     """results/psm_qc.tsv when the search wrote psm.tsv files or a DIA-NN stats.tsv (psmqc.py). Returns
     (analysis.json summary, the report's payload or None, problems for the doctor, notes)."""
@@ -792,6 +879,10 @@ def _quality_summary(insight: dict) -> dict:
         "p_value_shape": {k: v.get("shape") for k, v in (insight.get("phist") or {}).items()},
         "only_in_one_condition": {k: len(v) for k, v in (insight.get("onoff") or {}).items()},
         "imputation_driven_hits": {k: len(v) for k, v in (insight.get("imputation_driven") or {}).items()},
+        # the smallest |log2FC| a typical feature shows with 80 % power, with the samples each comparison has
+        "detectable_log2fc": {c["name"]: {"samples": c["n"], **{f"p{a}": (r or {}).get("q50")
+                                                                for a, r in c["mdfc"].items()}}
+                              for c in (insight.get("power") or {}).get("comparisons") or []},
     }
 
 def _f_summary(ftest, settings) -> dict | None:
@@ -806,6 +897,17 @@ def _f_summary(ftest, settings) -> dict | None:
 def _state(issues) -> str:
     sev = {i.severity for i in issues}
     return "failed" if "error" in sev else "needs_input" if "input" in sev else "ok"
+
+def _static_figures(results: Path, ctx: dict, m, processed, diffs, settings, qcd, enrichment, ranked,
+                    insight) -> list[Path]:
+    """results/figures/: the figures for slides the lab asks for after every analysis (analysis.export.figures),
+    drawn from the report's own data in the lab's export style (slides.py, D62)."""
+    from ionomos.downstream import slides
+
+    d = report.payload({**ctx, "issues": []}, m, processed, diffs, [], [], settings, qcd, enrichment, ranked, insight)
+    style = charts.style_from(settings.export, lenient=True)
+    return slides.write(results / slides.FOLDER, d, style, style["figures"],
+                        f"Ionomos {ctx.get('version', '')}".strip())
 
 def _write_volcano(results: Path, d, stage) -> Path | None:
     """Every comparison gets a volcano file, checked after writing; an empty comparison gets an empty plot."""

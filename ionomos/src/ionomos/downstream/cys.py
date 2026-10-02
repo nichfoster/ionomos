@@ -1,8 +1,9 @@
 """
 Cysteine chemoproteomics: which sites a compound engages (D52, ROADMAP 5C #3).
 
-For site-level ratio data (isoDTB: log2 heavy/light per replicate), each condition is a compound competed
-against the probe. A site is **liganded** when its competition ratio R (control / treated) reaches a
+For site-level ratio data (isoDTB: log2 heavy/light per replicate), each condition is a compound competing
+with the probe: a competition experiment by construction (roles.py gives every condition that role; the vehicle
+is the other isotopic tag of the same run, so there is no control condition). A site is **liganded** when its competition ratio R (control / treated) reaches a
 threshold in enough replicates; the usual rule is R >= 4 in at least 2 replicates.
 
     analysis:

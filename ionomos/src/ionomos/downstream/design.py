@@ -454,9 +454,9 @@ def _contrast(design: Design, a: str, b: str) -> list[float]:
 
 
 def limma_design(values: Matrix, design: Design, contrasts: list[tuple[str, str]], min_valid: int = 0,
-                 counts: list[int | None] | None = None, variance_prior: str = "limma"):
+                 counts: list[int | None] | None = None, variance_prior: str = "limma", needs: dict | None = None):
     """Each (treatment, control) contrast from one fit of the design and one variance prior (limma's
-    lmFit → contrasts.fit → eBayes → topTable(confint = TRUE)). min_valid as fpa.limma_contrasts.
+    lmFit → contrasts.fit → eBayes → topTable(confint = TRUE)). min_valid and needs as fpa.limma_contrasts.
     Returns ([fpa.ContrastResult], info about the variance prior)."""
     fit = lm_fit(values, design.x)
     v = cov_unscaled(design.x)
@@ -466,9 +466,10 @@ def limma_design(values: Matrix, design: Design, contrasts: list[tuple[str, str]
     for k, (a, b) in enumerate(contrasts):
         na, ma = _group_stats(values, _members(design, design.conditions.index(a)))
         nb, mb = _group_stats(values, _members(design, design.conditions.index(b)))
+        va, vb = (needs or {}).get((a, b), (min_valid, min_valid))
         coef, su = [], []
         for i in range(len(values)):
-            ok = not min_valid or (na[i] >= min_valid and nb[i] >= min_valid)
+            ok = not min_valid or (na[i] >= va and nb[i] >= vb)
             coef.append(est[i][k] if ok else math.nan)
             su.append(sus[i][k] if ok else math.nan)
         t, pv, lo, hi, q = fpa._toptable(coef, su, mod.post, mod.dft)

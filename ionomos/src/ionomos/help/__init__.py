@@ -50,6 +50,8 @@ _ITEM = re.compile(r"^( ?)(-|\d+\.) (.*)$")
 # a held search's reason (Hold in fragpipe.py, diann.py, maxquant.py, sage.py) -> the entry that explains it
 HOLD_TOPICS = (
     (r"launcher not found", "search.hold-launcher"),
+    (r"is FragPipe's window program", "search.hold-launcher-window"),
+    (r"FASTA for .* can't be searched", "search.hold-decoys"),
     (r"workflow file for .* missing", "search.hold-workflow"),
     (r"FASTA for .* missing", "search.hold-fasta"),
     (r"low disk space", "search.hold-disk"),

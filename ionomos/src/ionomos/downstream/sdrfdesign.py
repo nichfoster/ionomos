@@ -20,6 +20,10 @@ joined with " | " unless the `sdrf_factor` setting names the one(s) to use. Samp
 their conditions and replicate numbers change, so sample_conditions written for a table stay valid. Runs the SDRF
 doesn't describe keep their earlier condition and become a doctor issue (SDRF_UNMATCHED_RUNS).
 
+A column `characteristics[role]` (or `[sample role]`, `[experimental role]`, `comment[role]`) gives each
+condition its role for the comparisons (roles.py, D61): control, compound, competition or "competition of
+Probe", reference, qc. It is not part of the SDRF specification. analysis.roles wins over it.
+
 Ionomos writes its own SDRF to results/sdrf.tsv (sdrf.py); results/ is output and is never read back here.
 """
 from __future__ import annotations
@@ -57,6 +61,7 @@ class Row:
     pooled: bool
     techrep: int = 1
     fraction: int = 1
+    role: str = ""       # characteristics[role]: control, compound, competition of X ... (roles.py)
 
 
 @dataclass
@@ -90,6 +95,31 @@ def _looks_like_sdrf(path: Path) -> bool:
     return "source name" in h and "comment[data file]" in h
 
 
+def _engine_template(path: Path, rows: int = 200) -> bool:
+    """An SDRF that describes no samples: no factor value column and every source name "not available". FragPipe
+    24's stock workflows write one into their output folder (workflow.misc.save-sdrf); it is FragPipe's
+    template for the user to fill in, not this experiment's design."""
+    try:
+        with open(path, encoding="utf-8-sig", errors="replace", newline="") as fh:
+            head = [h.strip().lower() for h in fh.readline().rstrip("\r\n").split("\t")]
+            if any(h.startswith("factor value") for h in head) or "source name" not in head:
+                return False
+            col = head.index("source name")
+            seen = 0
+            for line in fh:
+                cells = line.rstrip("\r\n").split("\t")
+                if not any(c.strip() for c in cells):
+                    continue
+                if (cells[col].strip().lower() if col < len(cells) else "") not in ("", "not available", "na"):
+                    return False
+                seen += 1
+                if seen >= rows:
+                    break
+            return seen > 0
+    except OSError:
+        return False
+
+
 def find(dest: Path, workdir: Path | None = None, table: Path | None = None) -> tuple[Path | None, list[str]]:
     """The SDRF describing this experiment: in the experiment folder (two levels deep, so fragpipe/ and raw/ are
     included) or next to the table given to `ionomos analyze`. results/, old runs and folders Ionomos made are
@@ -120,6 +150,10 @@ def find(dest: Path, workdir: Path | None = None, table: Path | None = None) -> 
             if key in seen or not p.is_file() or not _looks_like_sdrf(p):
                 continue
             seen.add(key)
+            if _engine_template(p):
+                notes.append(f"{p.name} in {p.parent.name}/ names no samples (the search engine's own SDRF "
+                             "template), so it is not used as the design")
+                continue
             found.append((len(rel), p.name.lower(), p))
 
     scan(Path(dest), 2)
@@ -182,7 +216,9 @@ def read(path: Path, factor: list[str] | str | None = None) -> Design:
           "label": col("comment[label]"),
           "biorep": col("characteristics[biological replicate]", "comment[biological replicate]"),
           "techrep": col("comment[technical replicate]"), "fraction": col("comment[fraction identifier]"),
-          "pooled": col("characteristics[pooled sample]")}
+          "pooled": col("characteristics[pooled sample]"),
+          "role": col("characteristics[role]", "characteristics[sample role]", "characteristics[experimental role]",
+                      "comment[role]", "comment[sample role]")}
 
     def cell(r: list[str], k: str) -> str:
         j = ix[k]
@@ -206,8 +242,10 @@ def read(path: Path, factor: list[str] | str | None = None) -> Design:
         pooled_col = cell(r, "pooled").lower()
         pooled = (bio.lower() == "pooled" or pooled_col.startswith(("pooled", "sn=")) or
                   (cond or "").lower() in POOLED_WORDS)
+        role = cell(r, "role")
         rows.append(Row(cell(r, "source"), cell(r, "assay"), file, run_stem(file), label, channel, cond,
-                        _int(bio), pooled, _int(cell(r, "techrep")) or 1, _int(cell(r, "fraction")) or 1))
+                        _int(bio), pooled, _int(cell(r, "techrep")) or 1, _int(cell(r, "fraction")) or 1,
+                        "" if role.lower() in RESERVED else role))
     if not rows:
         raise DesignError(f"{path.name} has no rows with a data file")
     d = Design(path, rows, list(dict.fromkeys(n for _j, n in fcols)), notes)
@@ -289,6 +327,16 @@ def apply(m: QuantMatrix, d: Design) -> tuple[QuantMatrix, dict]:
     if refs:
         m.meta["reference_samples"] = refs
         m.meta.setdefault("reference_from", f"SDRF {rel} (pooled)")
+    said: dict[str, set[str]] = defaultdict(set)   # condition -> the role(s) its rows give it
+    for s, r in hits.items():
+        if r.role:
+            said[m.condition[s]].add(r.role)
+    for c, rs in said.items():
+        if len(rs) > 1:
+            info["notes"].append(f"the SDRF gives {c} more than one role ({', '.join(sorted(rs))}); not used")
+    given = {c: next(iter(rs)) for c, rs in said.items() if len(rs) == 1}
+    if given:
+        m.meta["roles"] = given
     if not plex:
         m.meta.pop("plex", None)
     # technical replicates / fractions of one sample kept as separate columns: say so

@@ -6,7 +6,7 @@
   "experiment": "1",
   "model": [
     {
-      "content": "FragPipe ran out of memory during this search [log:1#5] [job:1].\n\nLower Threads or raise RAM (GB) in Advanced, close other programs, then press Retry [job:1] [help:attention.search_failed]."
+      "content": "FragPipe ran out of memory during this search [log:1#257] [job:1].\n\nLower Threads or raise RAM (GB) in Advanced, close other programs, then press Retry [job:1] [help:attention.search_failed]."
     }
   ],
   "rubric": {
@@ -15,7 +15,7 @@
       "log_tail"
     ],
     "must_cite": [
-      "log:1#5"
+      "log:1#257"
     ],
     "must_mention": [
       "memory",

@@ -7,7 +7,281 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-01
+
+### Added
+
+- **The analysis knows the experiment's design** (D61; `downstream/roles.py`).
+  Each condition gets a role: control, compound, competition (the probe plus
+  a competitor), pooled reference or QC standard. Roles are read from the
+  condition names, from `analysis.roles` in `experiment.yaml` /
+  `config.yaml`, or from a `characteristics[role]` column of an SDRF, and
+  are shown in the report (Methods → Settings used) and in `analysis.json`
+  → `roles`.
+  - With a competition condition (`Probe_Comp`, `Probe+Comp`, `ProbeComp`,
+    `Comp`, `…_competition`, `…_excess`) the default comparisons follow the
+    design: compound vs control, competition vs its compound, competition vs
+    control. A second control, a pool and a QC standard are not compared.
+    `comparisons:`, `de_type: all | others` and `role_comparisons: false`
+    work as before; with `control:` set, every condition is still compared
+    with it. Without a competition condition nothing changes.
+  - **Specific targets**: per compound, the features enriched against the
+    control and competed off by the competitor, each at the report's
+    cut-offs. `results/specific_targets.tsv` (both fold changes, both
+    adjusted p-values), `analysis.json` → `specific_targets`, and a report
+    section with enrichment against competition and the quadrant of
+    specific binders marked.
+  - **Unequal groups** (DMSO n=2 against a compound n=4) are handled
+    knowingly. The report says how many samples each side of each
+    comparison had, and the Power tab gives the minimum detectable fold
+    change per comparison with those numbers. Without imputation (TMT), the
+    smaller group of an unequal comparison needs half its samples measured
+    instead of `min_valid` (`small_group_min_valid: half`; `same` is the
+    earlier rule): on simulated TMT data with two DMSO channels, 6.1 % of
+    the features were untested against DMSO before and 0.1 % are now, with
+    no false hit among them. The sample scorecard no longer scores a sample
+    of a small group as scattering more than the others. A low-confidence
+    label names the real group size.
+  - Two new notes: `COMPETITION_DESIGN` (what was read, how to change it)
+    and `ROLES_UNSURE` (asks, when a name is ambiguous: `Probe_pre`,
+    `Probe_10x`, or a competition that can't be linked to one compound).
+    Glossary entries for role, control, compound and competition.
+  - New settings: `roles`, `competition_keywords`,
+    `competition_keywords_weak`, `role_comparisons`,
+    `small_group_min_valid`. Competition keywords are also on the Analysis
+    tab (Lab defaults).
+  - **Not confirmed by the lab**: the competition keywords (`Comp` is the
+    one form seen on the lab PC) and the specific-targets rule. **Not
+    tested on a real experiment**: simulated data only.
+
+- **Export for slides, and one export style** (D62). Every chart in the
+  report has **SVG**, **PNG** and **Export…**; the top bar has **Export for
+  slides**.
+  - **Export…** opens one dialog with a preview: the size (16:9 slide, 4:3
+    slide, half a slide, one or two journal columns, or a custom width and
+    height in px or mm), text size (pt) and font, line and point size, the
+    palette (the default, colour-blind safe, greyscale, or your own up / down
+    / neutral colours), a white, dark or transparent background, title and
+    subtitle (on / off, editable), legend, the cut-offs line, which names are
+    drawn, and the PNG resolution (1× to 4×, or 150 / 300 / 600 dpi). The
+    figure can be downloaded as SVG or PNG, or copied to the clipboard as an
+    image where the browser allows it.
+  - The SVG keeps text as text, writes colours out (no CSS), names the font
+    with fallbacks and uses no `foreignObject`. Every file records the
+    experiment, comparison, cut-offs, hit filters and test (SVG `<title>` and
+    `<desc>`; PNG a `Description` text chunk and its print size), so a figure
+    on a slide can be traced back.
+  - **Export for slides** saves one .zip, built in the browser: every figure
+    (a volcano and p-value histogram per comparison, compare, heatmap,
+    enrichment with a result, each QC tab, and what else the report shows) as
+    SVG and / or PNG, the tables as CSV, the style, and a README that lists
+    each file with its cut-offs. File names are safe on Windows.
+  - The style is kept in the browser and used by every report opened in it.
+    **Save style** / **Load style** share it as a small JSON file; **Reset to
+    lab defaults** goes back to the lab's style. A loaded file is checked key
+    by key.
+  - **`ionomos export <experiment or results folder>`** writes the volcano,
+    PCA, heatmap and correlation figures as SVG to `results/figures/` from
+    the finished report's own data, with the same style options (`--preset`,
+    `--palette`, `--font-pt`, `--style FILE` …). SVG only: PNG needs a
+    renderer, and no dependency was added for it; the command says so.
+  - **`analysis.export:`** in `config.yaml` (or `experiment.yaml`) holds the
+    lab's style and `figures:`, the static figures written after every
+    analysis (default: none). The config writer keeps the block, commented.
+  - The heatmap, a canvas on screen, exports as SVG. The CV charts got export
+    buttons.
+  - **Options are easier to read**: plain labels with units, a tooltip on
+    every control and QC tab, a **?** on the Plot and export groups, the
+    cut-offs in force written under the options, and **Reset to lab
+    defaults** (cut-offs, plot options, hit filters). **Reset** is now called
+    **Reset cut-offs**. No option was removed and no default changed.
+  - Changed with it: the SVG and PNG buttons now use the export style (before:
+    the chart at its on-screen size, PNG at 3×). Text cells in every CSV
+    export that start with `=`, `+`, `-` or `@` get a leading apostrophe.
+  - **Not checked**: opening the SVG files in PowerPoint, Illustrator or
+    Inkscape; any browser but Chromium; the real clipboard; Windows.
+    docs/DECISIONS.md D62 lists what was verified and how.
+
+- **FragPipe preflight** (D59; `preflight.py`): `ionomos preflight`, and the
+  app's **Check FragPipe install** now runs it. Besides reading the
+  installation from disk it starts FragPipe twice over, without a window and
+  without a search: `fragpipe.bat --help` (version, Java, .NET) and one
+  `--headless --dry-run` per FragPipe method, in which FragPipe itself
+  checks its tools, the FASTA, the workflow and the TMT annotation and lists
+  the commands it would run. It also checks: the launcher is `fragpipe.bat`,
+  FragPipe's own Java, MSFragger / IonQuant / diaTracer and the Thermo
+  reader folder, Philosopher, Python, DIA-NN, FragPipe's settings cache,
+  each workflow's tools against what is installed, decoys, paths without
+  spaces, free disk, RAM and threads against the settings, room for long
+  paths, write permission. Each line says what to do. `--static` starts
+  nothing; `--raw PATH` uses a real file for the dry run; `--method M`
+  limits it. Its files go to a new folder under `<log_dir>\preflight\`.
+- **Run fingerprint** (D59; `fingerprint.py`): every search, whatever its
+  outcome, leaves `ionomos_run\run_fingerprint.json` next to the job: the
+  launcher and command line, FragPipe's version block, the workflow's key
+  settings, the names and sizes of the output files, the first and last
+  lines of the console log, what Ionomos' parsers read out of it, and the
+  timings. Text only, a few tens of kB; an earlier one is kept as
+  `run_fingerprint_<time>.json`. It is for checking the parsers against the
+  first real runs.
+- **More failed searches get a plain cause** (`fragpipe.EXPLANATIONS`, from
+  FragPipe's source and issue tracker): no Java for `fragpipe.bat`, an
+  option FragPipe doesn't know, decoys missing or not about half, a path
+  with a space, a licence that expired, MSFragger's `ext` folder missing, a
+  missing .NET runtime, "Not enough memory allocated to MSFragger", the page
+  file running out, a path or command line too long for Windows, DIA-NN that
+  can't be started, a failed DIA-NN step, Python / FragPipe-SpecLib not set
+  up, a TMT annotation FragPipe refuses, two raw files with one name,
+  contradicting workflow settings, antivirus or a sync tool holding a file,
+  odd characters in the FASTA.
+- `fragpipe.config_python` (FragPipe's `--config-python`), in `config.yaml`
+  and the app's Advanced tab. FragPipe 24 on Windows uses the Python inside
+  its installation whatever this says; it is for other setups.
+
+- **A bundle for troubleshooting and validation** (D63; `bundle.py`,
+  docs/DEV_LOOP.md). **Report a problem…** is now a window with the note,
+  the jobs, three boxes and a list of what will go into the zip with its
+  size; it is also in the failed-search and failed-analysis pop-ups and on
+  the Jobs tab (**Zip for troubleshooting…**). The zip is saved on the
+  Desktop (also a OneDrive Desktop; else the log folder). Ionomos sends
+  nothing. `ionomos bundle [JOB | FOLDER …] [--level diagnose|validate]
+  [--out DIR] [--no-anonymise] [--keep-conditions] [--max-mb N] [--dry-run]`
+  does the same from a terminal.
+  - `diagnose`: settings, logs, crash files, needs-attention items, each
+    job's status, run folder (workflow, manifest, console logs, a
+    `run_fingerprint.json` when present) and `analysis.json`.
+  - `validate`: also the search's result tables and `results/`, so that
+    `ionomos bundle unpack ZIP DIR` and `ionomos --config DIR/config.yaml
+    analyze DIR/<experiment>` repeat the analysis. `ionomos bundle inspect
+    ZIP` says what a bundle holds.
+  - Never raw / mzML / `.d` files, FASTA files (name, size, entry count and
+    SHA-256 are recorded) or spectral libraries. A size limit (2,000 MB) and
+    row-sampling of PSM tables over 25 MB, both listed in the zip.
+  - Names are replaced by default: users, the PC, experiments, raw files,
+    samples and conditions, e-mail and IP addresses, the same pseudonym for
+    the same name in every file, table header and file name. Protein and
+    gene identifiers and all numbers are kept. The key file is saved next to
+    the zip, not in it (`ionomos bundle translate KEY FILE` turns an answer
+    back). The finished zip is searched for every original; if one is found,
+    no zip is saved.
+  - `BUNDLE.json` and `README.txt` in the zip: version and build, level,
+    what was included, capped or left out and why, file hashes.
+  - `ionomos diagnose --zip` and the app's **Save diagnostics bundle** now
+    make a `diagnose` bundle (anonymised, with a key file), and no longer
+    replace a file of the same name.
+  - Limits of the replacing (free text, names inside longer words, plain
+    words of a name standing alone, pictures) are listed in the help
+    (**What Ionomos will never do** → the zip for troubleshooting).
+    **Not run on the lab's real folders or on Windows outside CI.**
+
+- **Accuracy checks a lab member can run, and an analysis that holds up on
+  messy tables** (D60; [docs/VALIDATION.md](docs/VALIDATION.md)).
+  - **`ionomos compare <experiment folder> <reference>`**
+    (`downstream/compare.py`): an Ionomos analysis against another result
+    for the same experiment: another Ionomos run, or a results table
+    (FragPipe-Analyst export, limma, MSstats long format, Perseus, the lab's
+    R output). Features are matched by ID or gene. Per comparison it reports
+    matched / only in one, Pearson and Spearman of log2FC, slope and offset,
+    hit calls (both / only Ionomos / only reference, at each side's own
+    cut-offs and at common ones), the largest disagreements, p-value
+    agreement, and a verdict: `agrees`, `agrees after an offset of …`,
+    `differs: …` or `not judged: …`, from thresholds the page states.
+    Writes `compare.tsv`, `compare.json` and `compare.html` (scatter plots)
+    into `results/`. Tested on references made from Ionomos' own result;
+    **not on a real export of those tools**.
+  - **`ionomos benchmark`** (`downstream/benchmark.py`). Without a folder:
+    the pipeline on simulated tables with planted changes over a grid
+    (2 to 6 replicates, 2 controls vs 4 treated, 1.5- / 2- / 4-fold, three
+    levels of missing values) for each imputation / normalisation setting;
+    it reports sensitivity, the observed false discovery proportion against
+    the nominal alpha, and the fold-change bias. `--like <folder>` adds an
+    experiment's own settings and group sizes. Measured on the standard
+    grid: the default (Perseus + median) 4.0 % observed FDP at adjusted
+    p ≤ 0.05 and 30 % / 71 % of 2- / 4-fold changes found; no imputation
+    4.6 % and 47 % / 86 %; no normalisation 14 – 21 %. With a folder and
+    `--expected hye.yaml`: an analysed mixed-species (human / yeast /
+    E. coli) or spike-in experiment against its expected ratios per species
+    or protein list: measured vs expected (median, spread, a box plot), the
+    false positive rate in the unchanged background, sensitivity among the
+    changed. Species come from UniProt entry names, FASTA `OS=`, a column
+    or a FASTA. **No real benchmark run exists yet**; VALIDATION.md says how
+    to make one.
+  - **A calibration guard in the test suite**: a small simulated grid whose
+    observed FDP must stay at or below 8.5 % (measured 1.7 – 6.3 %; the
+    tolerance is from 30 other seed blocks).
+  - **"How far to trust this"** under the key findings of every report and
+    in `analysis.json` → `trust` (`downstream/trust.py`): samples per group
+    and balance, replicate agreement, missing and imputed values, per
+    comparison what was tested, hits resting on imputed values and the
+    p-value histogram shape, and power, each with its number. No score. A
+    line is marked "check" when its own check crossed its threshold. A
+    compare or benchmark result in the results folder is shown there too.
+  - **Guards on statistics that run but may not mean what they say**
+    (`downstream/guards.py`), each a new warning: `NO_RESIDUAL_DF`
+    (features tested with one value per group), `VARIANCE_PRIOR` (limma's
+    prior could not be estimated or did not converge), `ZERO_VARIANCE`
+    (identical replicates), `IDENTICAL_SAMPLES` (two samples with the same
+    values).
+  - **Messy input**: a seeded fuzz of `analyze()` and the loaders
+    (`tests/test_robustness.py`), and notes for what a table held besides
+    numbers: duplicate or blank IDs, repeated or missing column names,
+    columns left out, text and infinite cells, negative intensities,
+    ragged rows, implausible values. Decimal commas and thousands
+    separators are now read in tab and comma files too.
+  - The default output of a well-formed analysis is unchanged apart from the
+    new list in the report and the `trust` key: the FragPipe-Analyst, limma
+    and R golden tests pass as they were.
+
+### Changed
+
+- **A failed search's reason names the step and what it said**: "FragPipe
+  step MSFragger failed (exit code 1); it said: …" with that step's last
+  lines, instead of FragPipe's closing "Cancelling N remaining tasks".
+- **The progress line** counts steps ("MSFragger (4 of 31 step(s) done)")
+  and knows step names with brackets or a colon.
+- **TMT**: a channel map FragPipe would stop on fails the job before the
+  search, with the rule (every channel of the label type listed, `NA` for
+  unused ones, one name without spaces per channel, no name twice). Plexes
+  that share a folder get no annotation file and a warning; plexes each in
+  their own folder get one `annotation.txt` each.
+- **A FASTA without usable decoys holds the job** ("waiting: FASTA … can't
+  be searched") instead of letting FragPipe fail on it, and is a ✗ on the
+  setup checklist.
+- **The testbed's fake FragPipe copies the real one** (`fake_fragpipe.py`):
+  its options, checks, messages, console layout, exit codes and output
+  files, with the source of each named. New failure modes for testing:
+  `IONOMOS_FAKE_FP_MODE=speclib | no-java | locked | diann | cancel-exit0 |
+  no-done-line | child`. The sample TMT drop lists all ten channels; the
+  failing sample (`fp_fail`, a DIA drop) now fails in the DIA-NN step, as a
+  DIA search has no IonQuant step.
+- The default launcher path is `C:/FragPipe/FragPipe-24.0/bin/fragpipe.bat`
+  (the 23 / 24 installer's layout).
+
 ### Fixed
+
+- **`fragpipe.bat` found no Java on the lab PC's kind of setup.** The
+  launcher is Gradle's start script and needs `JAVA_HOME` or `java` on PATH;
+  the PC has neither. Ionomos now sets `JAVA_HOME` for it to the `jre`
+  folder in the FragPipe installation.
+- **`FragPipe-24.0.exe` without a `fragpipe.bat` beside it is no longer
+  run.** It is a window program that returns at once; the job is held with
+  that explanation.
+- **Every failed real search would have been blamed on the FASTA.** The hint
+  "No protein database" matched the bare setting name `database.db-path`,
+  which FragPipe prints on every run with all its other settings. It now
+  needs FragPipe's own messages. A test runs every hint against a healthy
+  FragPipe log.
+- **A successful retry could be marked failed** because of the failed step
+  of an earlier attempt still in the console log. Only the latest attempt's
+  part of the log is judged, also for the progress line.
+- **The progress line named the last step from the start.** FragPipe lists
+  every command before running any; that list was read as steps starting.
+- **Two TMT plexes in one folder got two annotation files**, which makes
+  FragPipe use neither. See Changed.
+- A run in which FragPipe cancelled its remaining tasks, or only did a dry
+  run, but exited 0 is now a failed search.
+- FragPipe 24 writes DIA-NN's tables to `dia-quant-output\`; the fake and
+  the docs said `diann-output\` (the analysis already read both).
 
 - A failed FragPipe search on .raw files no longer gets the cause "A .raw
   file couldn't be read" from Thermo's `RawFileReader reading tool` banner,
@@ -17,6 +291,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   own `converting X failed` line (also with exit code 0 and no mzML
   written). A name inside a path does not count, so a converter that could
   not be started is no longer reported as a bad raw file.
+- Found by fuzzing the analysis with messy tables (D60):
+  - A table of raw intensities with one negative cell was read as log2
+    values, so the statistics ran on numbers around a million and the QC
+    crashed. The median now decides; negative intensities count as missing,
+    with a note.
+  - Two columns with the same name in a table were both read from the last
+    of them (the same values twice). Each is now its own sample.
+  - A numeric column without a header became a sample of its own condition
+    (named `sample`, the next one `.2`). It is now left out, with a note.
+  - A tab-separated table with decimal commas (`1234,5`) or thousands
+    separators (`1,234,567.8`) was refused as having no numeric columns.
+  - A sample column where a few cells held a number too large for a float
+    (`1e400`) was dropped without a word; so was a column with no values.
+    Such cells now count as missing, and columns left out are named.
+  - A value beyond any measurement (an intensity of 1e300, `1e308` in a log2
+    table) crashed the QC, insight, statistics or liganded-site steps with an
+    overflow. Values beyond 2^±100 now count as missing, with a note.
+  - A FragPipe table with two columns of one sample name counted that sample
+    twice with identical values. The repeat is now dropped, with a note.
+  - An isoDTB sample name with a character no file name can hold (a NUL
+    byte, `:`, `?`) crashed the read step when its site table was written.
+  - A table with one feature said "nothing could be tested" without the
+    reason (median normalisation leaves nothing). A note now says it.
+- **FragPipe's own `sdrf.tsv` is no longer taken for the experiment's design.**
+  FragPipe 24's stock workflows write one into the output folder with no
+  sample names and no conditions; the analysis read it as the user's SDRF and
+  raised "needs your input" (`SDRF_UNMATCHED_RUNS`) on every search. It is now
+  skipped with a note.
 
 ## [0.13.0] - 2026-10-01
 

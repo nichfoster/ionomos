@@ -63,6 +63,8 @@ class Findings:
     cys_problems: list = field(default_factory=list)      # [(severity, message)] from cys.run / the site annotation
     psm_problems: list = field(default_factory=list)      # [(issue code, message)] from psmqc.run
     model: object = None                # analysis.Model: the design used, or why an asked-for one wasn't
+    roles: object = None                # roles.Plan: the conditions' roles and the comparisons they gave
+    guards: list = field(default_factory=list)            # guards.statistics: p-values that may not mean what they say
 
 # the tables each method needs, and why they might be missing
 EXPECTED = {
@@ -344,6 +346,7 @@ def check(f: Findings) -> list[Issue]:
                       ["The control has a name Ionomos doesn't know (add it to Control keywords, Analysis tab)"],
                       ["Pick the control here and Run analysis (the choice is remembered for this experiment)"],
                       {"conditions": conds, "guessed": f.control_guessed}))
+        _role_checks(f, add)
         # ---- sample quality
         counts = [sum(1 for r in (p.measured if p else pm.values) if r[j] is not None) for j in range(len(samples))]
         if len(counts) >= 3:
@@ -423,9 +426,48 @@ def check(f: Findings) -> list[Issue]:
                        "analysis.site_annotation, and Run analysis", "The liganded calls themselves are not affected"],
                       {"message": msg}))
 
+    # ---- statistics that ran but may not mean what they say (guards.py)
+    from ionomos.downstream import guards
+
+    out.extend(guards.issues(f.guards))
+
     # ---- statistics and plots
     _result_checks(f, s, add)
     return out
+
+def _role_checks(f: Findings, add) -> None:
+    """The conditions' roles (roles.py): what a competition experiment was read as, and a question when a role
+    can't be told from the names. Nothing is said for an experiment without a competition condition."""
+    plan = f.roles
+    if plan is None or plan.by_construction or not plan.roles:
+        return
+    listed = plan.describe()
+    how = ["Set the roles under analysis: in the experiment's experiment.yaml, e.g. roles: {DMSO: control, "
+           "Probe: compound, Probe_Comp: competition of Probe}, then Run analysis",
+           "Or list the comparisons yourself (comparisons: [\"Probe vs DMSO\"]); role_comparisons: false gives "
+           "every condition against the control, as for any other experiment"]
+    if plan.questions:
+        add(Issue("ROLES_UNSURE", "input", "Check the roles of the conditions",
+                  " ".join(q.rstrip(".") + "." for q in plan.questions) + f" Read so far: {listed}.",
+                  ["A condition's name has a word that often, but not always, means 'plus a competitor' "
+                   "(pre, block, 10x)",
+                   "There are several compounds, and the competition's name doesn't say which one it competes"],
+                  how, {"roles": {c: r.text() for c, r in plan.roles.items()}, "questions": list(plan.questions),
+                        "conditions": list(plan.roles)}))
+    if plan.active:
+        kinds = {"enrichment": "what the compound enriches", "competition": "what the competitor takes off",
+                 "remaining": "what is left with the competitor"}
+        add(Issue("COMPETITION_DESIGN", "warning", "Read as a competition experiment",
+                  f"Roles: {listed}. Compared: "
+                  + "; ".join(f"{t} vs {c} ({kinds.get(plan.kinds.get((t, c)), 'comparison')})"
+                              for t, c in plan.comparisons)
+                  + ("" if not plan.skipped else ". Not compared: " + "; ".join(f"{w} ({y})" for w, y in plan.skipped))
+                  + ". Specific targets (enriched and competed off) are in the report and specific_targets.tsv.",
+                  ["A condition's name says it is the compound plus a competitor (Comp, competition, excess ...), "
+                   "or analysis.roles says so"],
+                  ["Nothing to do if the roles are right"] + how,
+                  {"roles": {c: r.text() for c, r in plan.roles.items()},
+                   "comparisons": [f"{t} vs {c}" for t, c in plan.comparisons]}))
 
 LEFT_CENSORED = ("perseus", "mindet", "minprob", "min", "zero")
 
@@ -483,7 +525,8 @@ def _insight_checks(f: Findings, p, add) -> None:
                       "adjusted ones) may not mean what they say.",
                       ["Many tied values from imputation (identical imputed numbers in both groups)"
                        if h["shape"] == "conservative" else "An outlier sample or a hidden batch inflating the variance",
-                       "Groups of very different sizes, or a condition mislabelled"],
+                       "A group that is much noisier than the others (the model assumes one variance per feature), "
+                       "or a condition mislabelled"],
                       ["Check the Sample scorecard and PCA; try a stricter missing-value filter"],
                       {"comparison": name, "shape": h["shape"]}))
     for name, idx in (ins.get("imputation_driven") or {}).items():
@@ -529,12 +572,16 @@ def _design_checks(f: Findings, s, add) -> None:
 def _result_checks(f: Findings, s, add) -> None:
     """Per-comparison checks: confidence labels, nothing tested, no hits, missing plots, enrichment."""
     small = {(t, c) for t, c, _ in f.small_groups}
+    sizes = {(t, c): min((n for _g, n in few), default=1) for t, c, few in f.small_groups}
     for d in f.diffs:
         conf = getattr(d, "confidence", "")
         if conf == "low":
-            add(Issue("LOW_CONFIDENCE", "warning", f"{d.name}: low confidence (a group has one sample)",
+            n = sizes.get((d.treatment, d.control), 1)  # 1 unless min_valid asks for more than two
+            add(Issue("LOW_CONFIDENCE", "warning",
+                      f"{d.name}: low confidence (a group has {'one sample' if n == 1 else f'{n} samples'})",
                       d.confidence_note,
-                      ["The experiment has a single replicate of a condition",
+                      ["The experiment has a single replicate of a condition" if n == 1 else
+                       f"A condition has {n} replicates, fewer than the {getattr(s, 'min_valid', 2)} the settings ask for",
                        "A replicate's condition was mistyped, so it formed its own group", "Runs are missing or left out"],
                       ["If replicates exist, fix the samples' conditions on the Analysis tab and Run analysis",
                        "Otherwise confirm hits by another experiment before relying on them"],

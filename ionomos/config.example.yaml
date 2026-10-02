@@ -4,7 +4,7 @@
 paths:
   inbox:        C:/Fragpipe_Auto/inbox
   users_root:   C:/Fragpipe_General          # jobs land in users_root/<USER>/<experiment>
-  fragpipe_exe: C:/FragPipe/FragPipe-24.0/fragpipe/bin/fragpipe.bat   # headless launcher; CONFIRM on the PC
+  fragpipe_exe: C:/FragPipe/FragPipe-24.0/bin/fragpipe.bat   # the headless launcher (not FragPipe-24.0.exe)
   workflow_dir: C:/Fragpipe_Auto/workflows
   fasta_dir:    C:/Fragpipe_Auto/fasta
   database:     C:/Fragpipe_Auto/ionomos.db
@@ -23,6 +23,7 @@ fragpipe:
   min_free_gb: 20             # a search waits while the data drive has less free space than this + its raws
   config_tools_folder: ""     # leave blank unless the first headless run can't find tools
   config_diann: ""            # e.g. C:/DIA-NN/2.3.2/DiaNN.exe — DIA only, if needed
+  config_python: ""           # e.g. C:/FragPipe/FragPipe-24.0/python — only if FragPipe can't find its Python
 
 # What happens after FragPipe: statistics, volcano plots and results/report.html.
 # An experiment can override any of these in its experiment.yaml under analysis:
@@ -37,8 +38,32 @@ analysis:
   normalize: median          # median | none (intensities only)
   top_labels: 15             # hit names written on each volcano
   control_keywords: [DMSO, vehicle, veh, ctrl, control, mock, untreated, NT, WT, EV, scr, scramble, siNT, PBS]
+  # Roles (D61): each condition is a control, a compound, a competition (probe + competitor), a pooled reference
+  # or a QC standard, read from its name. A competition changes the default comparisons to compound vs control,
+  # competition vs its compound, competition vs control, and adds results/specific_targets.tsv.
+  competition_keywords: [comp, competition, competitor, competed, compete, competing, excess]   # NOT confirmed by the lab
+  # competition_keywords_weak: [pre, pretreat, pretreated, pretreatment, block, blocked, blocking, cold]
+  #                            # count only next to the compound's own condition (Probe_pre + Probe); asked about
+  # roles: {DMSO: control, Probe: compound, Probe_Comp: competition of Probe}   # usually in experiment.yaml
+  # role_comparisons: false  # roles are shown, but every condition is compared with the control (as before 0.14)
+  # small_group_min_valid: same   # half (default): the smaller group of an unequal comparison (DMSO n=2 vs n=4)
+  #                               # needs half its samples measured instead of min_valid, when nothing is imputed
   # block: replicate         # the replicate number as a block (batch / pair) in the limma model (D42)
   # variance_prior: deqms    # limma (default) | deqms: prior variance by peptide count (D43)
+  # Exported figures (D62): the lab's style. The report's Export dialog starts from it ("Reset to lab
+  # defaults" goes back to it), and `ionomos export <experiment>` writes static SVG figures with it.
+  export:
+    size: slide169           # slide169 (16:9, 1280 x 720 px) | slide43 | half | col1 (85 mm) | col2 (180 mm)
+                             # | custom, with width: 900, height: 600, unit: px (or mm)
+    font_pt: 14              # text size in points in the finished figure (14 suits a slide, 7 a journal column)
+    font_family: Arial       # the font's name; it must be installed where the figure is opened
+    palette: default         # default | colorblind (Okabe-Ito) | grey | custom, with up: "#d55e00",
+                             # down: "#0072b2", neutral: "#b3b3b3"
+    background: light        # light | dark | transparent
+    figures: []              # static SVG written to results/figures/ after each analysis: any of
+                             # volcano, pca, heatmap, correlation (or all). [] = none; the report exports all
+    # also: line_scale: 1, point_scale: 1, title / subtitle / legend / note: true, labels: screen | top | none,
+    # label_count: 15, png_scale: 2, png_dpi: 0 (the report's PNG), zip_format: both | svg | png
 
 # Instrument QC (docs/QC_TREND.md): runs of the lab's QC standard (a HeLa / K562 digest) are trended
 # in logs/qc_trend.html, with Levey-Jennings charts and Westgard rules. Does nothing until one is searched.

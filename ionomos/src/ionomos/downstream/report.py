@@ -12,6 +12,8 @@ The page carries its data as JSON and draws everything in the browser
                    per condition, its statistics in every comparison and the proteins that behave like it;
                    sortable, paginated table (sites or proteins) with CSV export; p-value histogram with pi0
     Compare        (2+ comparisons) fold change against fold change, four quadrants; UpSet of the hit sets
+    Specific targets (a competition experiment, roles.py) per compound: enrichment against the control on one
+                   axis, how much the competitor takes off on the other, the quadrant of specific binders marked
     Only in one    features measured in one group and never in the other (the hits a t-test can't see)
     Heatmap        significant features, row-centred, clustered
     Enrichment     over-represented gene sets among the hits, and a rank-based test on every protein
@@ -28,6 +30,11 @@ The page carries its data as JSON and draws everything in the browser
     Help           what each section shows (also behind a "?" beside each title and QC tab), a glossary, and
                    what to do about the issues found in this report (content: ionomos/help/*.md)
 
+Every chart has SVG / PNG / Export… buttons, and the top bar has "Export for slides": one export style (size,
+text, colours, title, legend; kept in the browser, saved and loaded as a JSON file, starting from the lab's
+analysis.export in the payload's exportDefaults) for single figures, the clipboard, and a .zip of every
+figure with the tables and a README (report.js "figure export"; D62).
+
 The page state (comparison, cut-offs, search) is kept in the address (#...), so a link or a bookmark
 reopens the same view. The static volcano_*.svg files next to it are for slides and for viewing without scripts.
 """
@@ -39,7 +46,7 @@ from datetime import datetime
 from html import escape
 from importlib import resources
 
-from ionomos.downstream import fpa, qc
+from ionomos.downstream import fpa, qc, trust
 from ionomos.downstream.analysis import TESTS, DiffResult, Settings
 from ionomos.downstream.quant import QuantMatrix
 
@@ -92,6 +99,8 @@ def payload(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: li
         "cys": cys or {"ran": False, "reason": ""},
         "time": time or {"ran": False, "found": False, "reason": "No time course was found."},
         "help": _help_payload(ctx.get("issues")),
+        "roles": _roles_payload(ctx, diffs),
+        "exportDefaults": _export_defaults(s),
     }
     if psm:  # search quality per run (psmqc.py): shown even when there are no quantities
         d["qc"]["psm"] = psm
@@ -137,6 +146,7 @@ def payload(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: li
                  for x in (insight.get("onoff") or {}).get(dr.name, [])]
         d["comps"].append({"name": dr.name, "slug": dr.slug(), "t1": dr.treatment, "t2": dr.control,
                            "conf": dr.confidence, "confNote": dr.confidence_note, "aRank": rank, **cols,
+                           "size": list(dr.groups), "kind": dr.role,
                            "pi0": _r(ph.get("pi0"), 3), "pshape": ph.get("shape", ""), "onoff": onoff})
     ft = ctx.get("ftest")
     if ft is not None and len(ft.q) == n:  # the moderated F (3+ conditions): "any change" tile + table column
@@ -188,6 +198,26 @@ def payload(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: li
     return d
 
 
+def _roles_payload(ctx: dict, diffs: list[DiffResult]) -> dict:
+    """The conditions' roles and the specific-targets views (roles.py). Never costs a report."""
+    try:
+        from ionomos.downstream import roles
+
+        return roles.report_payload(ctx.get("roles"), ctx.get("specific") or [], diffs)
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _export_defaults(s: Settings) -> dict:
+    """The lab's export style (analysis.export), complete, for the report's Export dialog to start from."""
+    try:
+        from ionomos.downstream import charts
+
+        return charts.style_from(s.export, lenient=True)
+    except Exception:  # noqa: BLE001 - a style must never cost a report: the page has its own defaults
+        return {}
+
+
 def _help_payload(issues) -> dict:
     """The plain-language help the page shows (ionomos/help: its sections, QC tabs, the glossary and this
     report's issues). Help must never cost a report, so any problem leaves it out."""
@@ -220,6 +250,12 @@ def _insight_payload(ins: dict) -> dict:
                         "current": pw["current_n"], "beta": pw["beta"],
                         "curves": {a: [None if r is None else {k: _r(v, 4) for k, v in r.items()} for r in rows]
                                    for a, rows in pw["curves"].items()}}
+        if pw.get("comparisons"):  # each comparison with the samples it has (unequal groups, D61)
+            out["power"]["comparisons"] = [
+                {"name": c["name"], "n": c["n"], "df": _r(c["df"], 1), "balanced": _r(c["balanced_n"], 2),
+                 "mdfc": {a: None if r is None else {k: _r(v, 4) for k, v in r.items()} for a, r in c["mdfc"].items()}}
+                for c in pw["comparisons"]]
+            out["power"]["unbalanced"] = bool(pw.get("unbalanced"))
     return out
 
 
@@ -246,8 +282,9 @@ def _source_sentence(method: str, fragpipe_note: str, engine: dict) -> str:
 
 def methods_text(m: QuantMatrix | None, p: fpa.Processed | None, diffs: list[DiffResult], s: Settings, method: str,
                  fragpipe_note: str, enrichment: list[dict], ranked: list[dict] | None = None,
-                 engine: dict | None = None, model=None, ftest=None) -> str:
-    """model: analysis.Model (the design and variance prior used); ftest: design.FTest (3+ conditions)."""
+                 engine: dict | None = None, model=None, ftest=None, roles=None, specific=None) -> str:
+    """model: analysis.Model (the design and variance prior used); ftest: design.FTest (3+ conditions);
+    roles: roles.Plan and specific: [roles.Specific] (a competition experiment, D61)."""
     parts = [_source_sentence(method, fragpipe_note, engine or {})]
     if m is None:
         return " ".join(parts)
@@ -255,7 +292,9 @@ def methods_text(m: QuantMatrix | None, p: fpa.Processed | None, diffs: list[Dif
         parts.append(f"Labelled peptides were merged to {m.level}s (mean log2 heavy/light ratio per replicate, as in "
                      "the lab's isoDTB site script). For each site, the replicate ratios were tested against 0 with "
                      + ("a moderated one-sample t-test (limma: lmFit, eBayes)." if s.test == "limma"
-                        else "a two-sided one-sample t-test."))
+                        else "a two-sided one-sample t-test.")
+                     + " This is a competition experiment by construction: each condition is a compound competing "
+                     "with the probe, and its ratio compares it with the vehicle in the same run.")
     else:
         steps = [f"{m.level.capitalize()} intensities were log2-transformed"]
         if s.remove_contaminants:
@@ -303,6 +342,7 @@ def methods_text(m: QuantMatrix | None, p: fpa.Processed | None, diffs: list[Dif
                          f"{escape(ftest.reference)} (topTableF, {ftest.df1} numerator df), BH-adjusted.")
         if s.test != "limma":
             parts.append(f"Conditions were compared with a two-sided {TESTS[s.test]}.")
+        parts += _roles_sentences(m, p, diffs, s, roles, specific)
     parts.append(f"P-values were adjusted with the Benjamini–Hochberg procedure; features were called significant at "
                  f"{escape(s.describe())}.")
     if m.kind == "intensity" and diffs:
@@ -325,6 +365,40 @@ def methods_text(m: QuantMatrix | None, p: fpa.Processed | None, diffs: list[Dif
     parts.append("Processing and statistics port FragPipeAnalystR / FragPipe-Analyst (Hsiao et al., J. Proteome Res. "
                  "2024, doi:10.1021/acs.jproteome.4c00294) and limma (Ritchie et al., Nucleic Acids Res. 2015).")
     return " ".join(parts)
+
+
+def _roles_sentences(m: QuantMatrix, p, diffs: list[DiffResult], s: Settings, plan, specific) -> list[str]:
+    """Methods: the conditions' roles and the comparisons they gave (roles.py), how many samples each side of
+    each comparison had, what unequal groups mean for the test, and the specific-targets rule."""
+    out = []
+    if plan is not None and getattr(plan, "active", False):
+        out.append("Each condition was given a role (" + escape(plan.describe()) + "), and the comparisons follow "
+                   "that design: each compound against the control (enrichment), each competition against the "
+                   "compound it competes (what the competitor displaces) and against the control (what is left).")
+        if plan.skipped:
+            out.append("Not compared: " + escape("; ".join(f"{w} ({y})" for w, y in plan.skipped)) + ".")
+    sized = [d for d in diffs if len(d.groups) == 2]
+    if sized:
+        out.append("Samples in each comparison: " + escape("; ".join(
+            f"{d.name}, {d.groups[0]} against {d.groups[1]}" for d in sized)) + ".")
+        if any(d.groups[0] != d.groups[1] for d in sized) and s.test == "limma":
+            n, k = len(m.samples), len(m.conditions)
+            out.append(f"The groups are not the same size. limma estimates each feature's residual variance from "
+                       f"all {n} samples of the {k} conditions ({n - k} residual degrees of freedom, plus the "
+                       "prior's), so a comparison with a small group uses the variance of the larger groups too; "
+                       "its fold change has the standard error of the two groups it compares, "
+                       "s·√(1/n₁ + 1/n₂).")
+        if any(d.relaxed for d in sized):
+            out.append(f"Without imputation a group needs {s.min_valid} measured values for a feature to be tested; "
+                       "the smaller group of an unequal comparison needed half of its samples "
+                       "(small_group_min_valid: half), and the number measured is in each table.")
+    for sp in specific or []:
+        which = "adjusted p" if s.use_adjusted else "p"
+        out.append(f"A feature was called a specific target of {escape(sp.compound)} when it was enriched against "
+                   f"{escape(sp.control)} (log2FC ≥ {s.log2fc:g}, {which} ≤ {s.alpha:g} in {escape(sp.enrichment)}) "
+                   f"and competed off by the competitor (log2FC ≤ −{s.log2fc:g}, {which} ≤ {s.alpha:g} in "
+                   f"{escape(sp.displaced)}): {sp.counts['specific']:,} of {sp.counts['tested']:,} tested.")
+    return out
 
 
 def _design_sentences(m: QuantMatrix) -> list[str]:
@@ -426,7 +500,7 @@ def _provenance_table(engine: dict) -> str:
         f"<div>{escape(k)}</div><div>{escape(str(v))}</div>" for k, v in rows) + "</div>"
 
 
-def _settings_table(s: Settings, p: fpa.Processed | None, model=None) -> str:
+def _settings_table(s: Settings, p: fpa.Processed | None, model=None, plan=None) -> str:
     rows = [("Test", TESTS[s.test])]
     if model is not None and (model.design is not None or model.problem):
         rows.append(("Model", model.design.formula if model.design is not None
@@ -436,8 +510,13 @@ def _settings_table(s: Settings, p: fpa.Processed | None, model=None) -> str:
         rows.append(("Variance prior", "DEqMS (by peptide count)" if used else
                      "limma (DEqMS asked for, but " + ((getattr(model, "prior", None) or {}).get("reason") or
                                                        "not applicable") + ")"))
-    rows += [("Comparisons", {"control": "each condition vs the control", "all": "all pairs",
-                              "others": "each condition vs all others"}[s.de_type]
+    by_roles = plan is not None and getattr(plan, "active", False)
+    if plan is not None and plan.roles:
+        rows.append(("Roles", plan.describe()))
+    rows += [("Comparisons", ("by role: compound vs control, competition vs its compound and vs the control"
+                              if by_roles else
+                              {"control": "each condition vs the control", "all": "all pairs",
+                               "others": "each condition vs all others"}[s.de_type])
              + (f" (control: {s.control})" if s.control else "")),
             ("Cut-offs", s.describe()),
             ("Contaminants", "removed" if s.remove_contaminants else "kept"),
@@ -485,11 +564,16 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
     dose_shown = bool(dose and (dose.get("ran") or dose.get("found")))
     cys_shown = bool(cys and cys.get("ran"))
     time_shown = bool(time and (time.get("ran") or time.get("found")))
+    spec_shown = bool(ctx.get("specific"))
     b = [f"<main><div class='top'><div><h1>{escape(title)}</h1><div class='meta'>{escape(meta)}</div></div>"
-         "<div><button id='theme' title='Light / dark'>◐</button> <button id='share' title='Copy a link to this view "
-         "(comparison, cut-offs, search)'>Link</button> <button onclick='window.print()'>Print</button></div></div>",
+         "<div><span id='slidesmsg' class='muted' role='status'></span> <button id='theme' title='Light / dark'>◐</button> "
+         "<button id='share' title='Copy a link to this view (comparison, cut-offs, search)'>Link</button> "
+         "<button id='slides' title='Every figure of this report at the export settings, the tables as CSV and a "
+         "README, in one .zip. Set the size, text and colours under Options, Figure export'>Export for slides</button> "
+         "<button onclick='window.print()'>Print</button></div></div>",
          "<nav class='toc'><a href='#overview'>Overview</a><a href='#differential'>Differential</a>"
          + "<a href='#compare' id='navcompare'" + ("" if len(diffs) >= 2 else " hidden") + ">Compare</a>"
+         + "<a href='#specific' id='navspecific'" + ("" if spec_shown else " hidden") + ">Specific targets</a>"
          + ("" if ratio else "<a href='#onoff'>Only in one</a>")
          + "<a href='#heat'>Heatmap</a><a href='#enrichment'>Enrichment</a>"
          + "<a href='#dose' id='navdose'" + ("" if dose_shown else " hidden") + ">Dose-response</a>"
@@ -500,6 +584,7 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
          "<noscript><div class='notes'>This report draws its charts with JavaScript. The volcano_*.svg and *.tsv "
          "files in this folder hold the same results.</div></noscript>",
          "<section id='overview'><div class='tiles' id='tiles'></div><div id='findings'></div>"]
+    b.append(trust.html(ctx.get("trust")))  # "How far to trust this": static, from the analysis' own checks (D60)
     b.append(issues_html(ctx.get("issues") or []))
     if notes:
         b.append("<details class='notes'><summary><b>Notes</b> (" + str(len(notes)) + ")</summary><ul>" +
@@ -510,30 +595,45 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
              "row for details. Search takes a gene, a pasted list, <code>KRT*</code>, <code>/^RPL\\d/</code>, "
              "<code>desc:kinase</code> or <code>term:apoptosis</code>; press <kbd>/</kbd> to jump to it.</p>"
              "<div id='differential-body'>"
-             "<div class='bar'><label class='ctl'>Comparison <select id='comp'></select></label>"
-             "<label class='ctl'>|log2FC| ≥ <input type='number' id='lfc' step='0.1' min='0'></label>"
-             "<label class='ctl'>p ≤ <input type='number' id='alpha' step='0.01' min='0' max='1'></label>"
-             "<label class='ctl'><input type='checkbox' id='adj'> adjusted</label>"
+             "<div class='bar'><label class='ctl' title='Which two groups are compared'>Comparison "
+             "<select id='comp'></select></label>"
+             "<label class='ctl' title='How large a change must be to count as a hit, in log2 units: 1 = 2-fold, "
+             "2 = 4-fold, 0.58 = 1.5-fold'>Fold change |log2FC| ≥ <input type='number' id='lfc' step='0.1' min='0'>"
+             "<span id='foldhint' class='muted'></span></label>"
+             "<label class='ctl' title='How small the p-value must be to count as a hit (0.05 = 5%)'>p-value ≤ "
+             "<input type='number' id='alpha' step='0.01' min='0' max='1'></label>"
+             "<label class='ctl' title='Apply the p-value cut-off to the adjusted p (Benjamini-Hochberg, corrected for "
+             "testing many features). Leave it ticked unless you know why not'><input type='checkbox' id='adj'> "
+             "adjusted</label>"
              "<div class='searchbox'><input type='search' id='search' autocomplete='off' spellcheck='false' "
              "placeholder='Find genes, proteins, a list, KRT*, term:…' aria-label='Search' aria-autocomplete='list'>"
              "<div id='suggest' class='suggest' role='listbox' hidden></div></div>"
              "<span class='seg'><button id='volc' class='on'>Volcano</button><button id='ma'>MA</button></span>"
              "<span class='seg' title='What dragging on the plot does'><button id='dzoom' class='on'>Zoom</button>"
              "<button id='dsel'>Select</button></span>"
-             "<button id='opts' aria-expanded='false'>Options</button>"
-             "<button id='reset' title='Back to the saved cut-offs'>Reset</button><span id='hl'></span></div>"
+             "<button id='opts' aria-expanded='false' title='Plot options, hit filters, highlight groups, figure "
+             "export'>Options</button>"
+             "<button id='reset' title='The fold-change and p-value cut-offs back to the ones saved with the report'>"
+             "Reset cut-offs</button><span id='hl'></span></div>"
              "<div id='optpanel' class='card optpanel' hidden>"
              "<div><h4>Plot</h4>"
-             "<label class='ctl'>labels <input type='number' id='labels' min='0' max='200' value='" + str(s.top_labels) + "'></label>"
-             "<label class='ctl'>point size <input type='range' id='ptsize' min='0.5' max='2.5' step='0.1' value='1'></label>"
-             "<label class='ctl'>label size <input type='range' id='labsize' min='8' max='18' step='0.5' value='11.5'></label>"
-             "<label class='ctl'><input type='checkbox' id='labmatch' checked> label search matches</label>"
-             "<label class='ctl'><input type='checkbox' id='lines' checked> cut-off lines</label>"
-             "<label class='ctl'><input type='checkbox' id='markonoff' checked> mark on/off features (▲)</label></div>"
+             "<label class='ctl' title='How many of the most significant hits have their name written on the plot'>"
+             "Names on the plot <input type='number' id='labels' min='0' max='200' value='" + str(s.top_labels) + "'> top hits</label>"
+             "<label class='ctl' title='Size of the points, as a multiple of the normal size'>Point size "
+             "<input type='range' id='ptsize' min='0.5' max='2.5' step='0.1' value='1'><span id='ptsizev' class='muted'></span></label>"
+             "<label class='ctl' title='Size of the names on the plot, in pixels'>Name size "
+             "<input type='range' id='labsize' min='8' max='18' step='0.5' value='11.5'><span id='labsizev' class='muted'></span></label>"
+             "<label class='ctl' title='Also name what the search found or a selection marked (the 40 most significant)'>"
+             "<input type='checkbox' id='labmatch' checked> Name search matches</label>"
+             "<label class='ctl' title='Dashed lines at the fold-change and p-value cut-offs'>"
+             "<input type='checkbox' id='lines' checked> Cut-off lines</label>"
+             "<label class='ctl' title='A triangle on features measured in one group and never in the other'>"
+             "<input type='checkbox' id='markonoff' checked> Mark features only in one condition (△)</label></div>"
              "<div><h4>Hits</h4>"
              "<label class='ctl' title='A hit whose group has at least half of its values imputed is not counted'>"
-             "<input type='checkbox' id='hideimp'> ignore imputation-driven hits</label>"
-             "<label class='ctl' id='minpepwrap'>at least <input type='number' id='minpep' min='0' max='20' value='0'> "
+             "<input type='checkbox' id='hideimp'> Ignore imputation-driven hits</label>"
+             "<label class='ctl' id='minpepwrap' title='A hit identified by fewer than this is not counted (0 = no filter)'>"
+             "A hit needs at least <input type='number' id='minpep' min='0' max='20' value='0'> "
              "<span id='evword'>peptides</span></label>"
              "<p class='muted'>Filtered hits are drawn grey with a coloured ring, so you can see what the filter removed.</p></div>"
              "<div><h4>Highlight groups</h4><div id='groups'></div>"
@@ -541,7 +641,16 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
              "<textarea id='ggenes' rows='3' placeholder='Genes or proteins (any separator)'></textarea>"
              "<div class='chips'><button id='gadd'>Add group</button><button id='gexport'>Export .gmt</button>"
              "<label class='filebtn'>Import .gmt / .txt<input type='file' id='gimport' accept='.gmt,.txt,.tsv,.csv'></label></div>"
-             "<p class='muted'>Groups are kept in this browser and show in every Ionomos report.</p></div></div>"
+             "<p class='muted'>Groups are kept in this browser and show in every Ionomos report.</p></div>"
+             "<div><h4>Figures for slides</h4>"
+             "<p class='muted'>One style for every exported figure: size, text, colours, title, legend.</p>"
+             "<div class='chips'><button id='xopen' title='Choose the size, text and colours, see the figure, download "
+             "or copy it'>Figure export…</button><button id='xzipnow' title='Every figure and table of this report "
+             "in one .zip, at the export settings'>Export for slides (.zip)</button></div></div>"
+             "<div class='optfoot'><button id='optreset' title='The cut-offs, the plot options and the hit filters back "
+             "to how this report was made. Highlight groups and the export style are kept'>Reset to lab defaults</button> "
+             "<span id='optmsg' class='muted' role='status'></span></div></div>"
+             "<div class='muted' id='viewnote'></div>"
              "<div class='muted' id='searchinfo'></div>"
              "<div class='muted' id='cutnote'></div>"
              "<div class='split'><div><div class='card chart' id='volcano'></div><div id='vcount' class='meta'></div>"
@@ -561,6 +670,11 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
              "<p class='sub'>Which changes are shared, which are specific. Fold change in one comparison against "
              "another (each quadrant tells a story), and the overlap of the hit lists at the current cut-offs.</p>"
              "<div id='comparebody'></div></section>")
+    b.append("<section id='specific'" + ("" if spec_shown else " hidden") + "><h2>Specific targets</h2><p class='sub'>"
+             "A competition experiment: what the compound enriches against the control (across), and how much of "
+             "that the competitor takes off (up). Specific targets are both, at the cut-offs above: the marked "
+             "quadrant. Enriched but not competed points at unspecific binding. Click a point or a row.</p>"
+             "<div id='specificbody'></div></section>")
     if not ratio:
         b.append("<section id='onoff'><h2>Only in one condition</h2><p class='sub'>Measured in at least 75% (and at "
                  "least two) of one group's samples and in none of the other: often the strongest biology, and "
@@ -586,7 +700,7 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
     b.append("<section id='quality'><h2>Quality control</h2><div id='qc'></div></section>")
     method = ctx.get("method", "")
     text = methods_text(pm, p, diffs, s, method, ctx.get("fragpipe", ""), enrichment, ranked, ctx.get("engine"),
-                        ctx.get("model"), ctx.get("ftest"))
+                        ctx.get("model"), ctx.get("ftest"), ctx.get("roles"), ctx.get("specific"))
     b.append(f"<section id='methods'><h2>Methods</h2><p class='methods'>{text}</p>")
     if dose and dose.get("ran"):
         b.append(f"<p class='methods'>{_dose_methods(dose)}</p>")
@@ -595,7 +709,7 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
     if cys_shown:
         b.append(f"<p class='methods'>{_cys_methods(cys)}</p>")
     b.append(_provenance_table(ctx.get("engine") or {}))
-    b.append("<h3>Settings used</h3>" + _settings_table(s, p, ctx.get("model")))
+    b.append("<h3>Settings used</h3>" + _settings_table(s, p, ctx.get("model"), ctx.get("roles")))
     if any(f.startswith("fragpipe-analyst/") for f in files):
         b.append("<h3>Cross-check in FragPipe-Analyst</h3><p class='sub'>The folder <a href='fragpipe-analyst/'>"
                  "fragpipe-analyst/</a> holds an experiment_annotation.tsv for the quant table, so the same data can be "
@@ -644,7 +758,7 @@ def fallback(ctx: dict, diffs: list[DiffResult], notes: list[str], files: list[s
     title = ctx.get("experiment") or "Experiment"
     body = [f"<main><h1>{escape(title)}</h1><div class='meta'>Ionomos {escape(str(ctx.get('version', '')))} — "
             "simplified report (the full interactive report could not be made; see the issues below)</div>",
-            issues_html(ctx.get("issues") or [])]
+            trust.html(ctx.get("trust")), issues_html(ctx.get("issues") or [])]
     if notes:
         body.append("<div class='notes'><ul>" + "".join(f"<li>{escape(n)}</li>" for n in notes) + "</ul></div>")
     for d in diffs:

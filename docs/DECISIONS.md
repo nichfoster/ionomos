@@ -1565,3 +1565,516 @@ unasked, so the first is built to be safe to ignore (`notify.py`).
 **Not verified**: a real Teams, Slack or SMTP server. The tests use an HTTP
 server and a small SMTP server inside the test process, and a stub for
 STARTTLS + login.
+
+### D59 — FragPipe is run the way its source says, checked before a search, and recorded after one
+**2026-10-01.** Every search so far ran against the testbed's fake FragPipe,
+which was written from guesses. Before the first real runs, the runner was
+checked line by line against FragPipe's headless tutorial and the source of
+FragPipe 24.0 (and 23.1 where it could differ). What follows is what was
+decided; the mismatches found are in CHANGELOG (Unreleased) and the sources are
+named in `fake_fragpipe.py` and WORKFLOWS.md.
+
+1. **The launcher is `bin\fragpipe.bat`, with FragPipe's own Java.**
+   `fragpipe.bat` is the start script FragPipe's build makes for every
+   release (Gradle's): it runs `%JAVA_HOME%\bin\java.exe`, else `java` from
+   PATH, else stops. The lab PC has no Java on PATH, so Ionomos sets
+   `JAVA_HOME` for the launcher to the `jre` folder in the installation (the
+   one FragPipe's `.exe` uses). It does this whenever that folder exists,
+   also when the PC has another Java: FragPipe is built and tested with its
+   own.
+2. **`FragPipe-24.0.exe` is never run.** It is a launch4j wrapper with the
+   window ("gui") header: by launch4j's documentation it starts `javaw` and
+   returns without waiting or passing output on. Run by Ionomos it would end
+   at once with exit code 0 while the search went on unseen. A configured
+   `.exe` is swapped for the `fragpipe.bat` beside it, as before; without
+   one the job is **held** with that explanation instead of started.
+   *To confirm on the PC:* `C:\FragPipe\FragPipe-24.0\bin\fragpipe.bat`
+   exists (the build says it does; the first Ionomos report only named the
+   `.exe`).
+3. **A FASTA FragPipe would refuse holds the job.** Headless FragPipe stops
+   at once unless 40-60 % of the FASTA's entries start with the decoy tag
+   (`FragpipeRun.checkDbConfig`; in the window it is a question one can
+   click through). Ionomos applies the same rule before starting, when the
+   workflow says Percolator, PeptideProphet or the report runs: the job
+   waits ("waiting: FASTA … can't be searched") and starts when the file is
+   fixed. A FASTA of 1 GB or more is not counted, as in FragPipe.
+4. **TMT channel maps are checked with FragPipe's rules, and plexes sharing
+   a folder get no annotation file.** FragPipe takes a plex's annotation
+   from the folder that holds its files, and only when exactly one file
+   ending in `annotation.txt` is there. So: one plex → `annotation.txt`
+   (not written beside a user's own `*annotation.txt`); plexes each in their
+   own folder → one `annotation.txt` per folder; plexes sharing a folder →
+   none is written, a warning says FragPipe will name the channels
+   `<plex>_<channel>`. A map FragPipe would stop on (not every channel of
+   the label type listed, a name with a space, a name used twice) fails the
+   job before the search, with the rule.
+5. **Exit code 0 is not enough, and one line is not yet required.** A run
+   fails when its log has a step with a non-zero exit code, or "Cancelling N
+   remaining tasks", or the dry-run notice, or when nothing was written. A
+   finished run also prints `ALL JOBS DONE IN x MINUTES`; a log without it
+   is a **warning** on a done job, not a failure, until a real headless run
+   has shown that line in the console Ionomos captures.
+6. **Only the latest attempt's part of the console log is judged.** The log
+   keeps every attempt. An earlier attempt's failed step used to fail a
+   successful retry whose output fitted in the 400 kB read back.
+7. **A failure's reason quotes the step that failed.** After a failing step
+   FragPipe prints only "Process returned non-zero exit code, stopping" and
+   "Cancelling N remaining tasks", so "last lines" said nothing. The reason
+   is now "FragPipe step X failed (exit code N); it said: …" with the
+   step's own last lines.
+8. **The preflight starts FragPipe, and says so.** `ionomos preflight` (and
+   the app's Check FragPipe install) runs `fragpipe.bat --help` and one
+   `--headless --dry-run` per FragPipe method, each with a time limit, its
+   output in a file, no window, and its files in a new folder under
+   `<log_dir>\preflight\`. A dry run makes all of FragPipe's own checks
+   (tools, FASTA, workflow, annotation) and lists the commands it would run.
+   Its file list names a 64-byte placeholder `.raw` unless `--raw` gives a
+   real file; `--static` starts nothing. FragPipe saves its settings cache
+   on every run, dry or not, as it does for any headless run.
+9. **Every search leaves a fingerprint**:
+   `ionomos_run\run_fingerprint.json` (`names.FINGERPRINT_FILE`), written by
+   the worker whatever the outcome, never in the job's way. Text only, tens
+   of kB: launcher, command line, FragPipe's version block, the workflow's
+   key settings, output file names and sizes, the first 80 and last 120
+   console lines, what the parsers read (steps, exit codes, end marker),
+   timings. An earlier one is kept as `run_fingerprint_<time>.json`. It
+   holds names and paths, as the console log does; the diagnostics bundle
+   is what strips them before anything leaves the PC.
+10. **The fake FragPipe copies the real one, with its sources named**
+    (`fake_fragpipe.py`): options and exit codes, the checks and their
+    messages, the console layout, experiment names (`-` becomes `_`), group
+    folders, `dia-quant-output`, `experiment_annotation.tsv`, `sdrf.tsv`.
+    The tools' own chatter and every number are invented and the file says
+    so. The testbed's workflows are small real-looking ones (39 settings).
+11. **Not changed here, and open** (ROADMAP "Open questions"): FragPipe 24's
+    stock workflows write `fragpipe\sdrf.tsv`, which the analysis reads as
+    the experiment's own design (`downstream/sdrfdesign.py`) and then
+    reports that it describes none of the runs. The testbed's workflows
+    switch it off; `test_fragpipes_own_sdrf_is_not_taken_for_the_users_design`
+    is the expected-failure test for it.
+
+**Verified**: against FragPipe's source and documentation, and by the test
+suite on the fake. **Not verified**: anything against a running FragPipe.
+The launch4j behaviour of the `.exe` (2), that `fragpipe.bat` honours
+`JAVA_HOME` on the PC (1), that a dry run accepts a placeholder `.raw` (8)
+and the exact text of the tools' own error lines are from documentation and
+issue reports, not from the lab PC.
+
+
+### D60 — Accuracy is something the lab can measure, and messy tables are analysed and talked about
+**2026-10-01.** The analysis was checked against R on golden files, which a
+lab member cannot repeat on their own data, and it had only met tidy tables.
+Four pieces, all in new modules ([VALIDATION.md](VALIDATION.md)):
+
+1. **`ionomos compare`** (`downstream/compare.py`) compares an analysed
+   folder with a reference: another analysed folder, or a results table read
+   by `anytable.py` (D33), plus MSstats' long format. It reads both and
+   changes neither.
+   - Features are matched by accession (any member of a protein group) or
+     by gene, whichever matches more. A reference row is used once.
+   - The slope is the major axis, not least squares: both sides carry noise,
+     and least squares would report a slope below 1 for two equally good
+     results. The offset is the median difference.
+   - The verdict's thresholds (r ≥ 0.95, slope 0.9 to 1.1, |offset| ≤ 0.10
+     log2, 70 % of the hits shared when there are at least 10; at least 20
+     and half of the features matched to judge at all) are **Ionomos' own
+     choice**. They are constants, printed on the page, and the numbers
+     stand beside the verdict.
+   - An offset is its own verdict ("agrees after an offset of …"), because a
+     normalisation difference is the commonest reason two correct analyses
+     disagree. Hit lists are not judged then.
+   - A reference the other way round is flipped only when its name says so
+     (`DMSO vs Drug`). Fold changes that merely anti-correlate are reported
+     and `--flip` is suggested: the direction is not guessed.
+   - Exit code 1 for "differs" or "not judged", so a script can use it.
+2. **`ionomos benchmark`** (`downstream/benchmark.py`).
+   - *Simulated.* It calls the pipeline's own loader, `fpa.process`,
+     `run_contrasts` and `to_diff` (`run_pipeline`; a test holds it equal to
+     `analyze()`), not `analyze()` itself: a grid of 2,250 runs must not
+     write 2,250 reports. `simulate.dia_pg_matrix` got three options (noise,
+     a per-protein spread of the noise, a missingness scale); without them
+     its output is byte-identical, so every existing fixture stands. The
+     benchmark uses a per-protein spread, because proteins that all share
+     one SD are limma's best case.
+   - FDP is reported twice: with the analysis' cut-offs, and at adjusted
+     p ≤ alpha alone. Only the second is what Benjamini-Hochberg promises,
+     so only it is compared with the nominal alpha.
+   - A scenario's FDP enters a quoted range only with 50 or more calls.
+   - *Real.* The expected ratios are a small YAML, per species or per
+     protein list. Species are read, in this order, from the protein lists,
+     a named column, UniProt entry names / `OS=` in the feature's own text
+     and in its row of the quant table, and a FASTA. A protein group with
+     two species is left out and counted. It needs an analysed folder and
+     does not analyse by itself: one command, one thing written.
+   - Real and simulated results have different file names
+     (`benchmark.*`, `benchmark_simulated.*`), so both can sit in one
+     results folder.
+3. **Messy input** (`downstream/guards.py`, `anytable.py`).
+   - The rule: `analyze()` never raises, always writes a report, and a
+     repair is always said. A stage crash (`CRASH_*`) on a plausible table
+     is a bug; the fuzz test fails on one.
+   - Values beyond 2^±100, NaN and infinities become missing right after
+     loading, for every loader, with a count. 2^100 is far beyond any
+     intensity; the limit exists so that no later step can overflow.
+   - `anytable.read_table` reads decimal commas and thousands separators in
+     tab and comma files only when asked (the `notes` argument), so the
+     engines' readers behave as before. `1,234` alone is ambiguous and is
+     read as 1234, with a note saying so.
+   - A column without a name is left out, not guessed: it has no condition,
+     and it is as likely a row number as a sample.
+   - Statistical guards only read. `NO_RESIDUAL_DF`, `ZERO_VARIANCE`,
+     `VARIANCE_PRIOR` and `IDENTICAL_SAMPLES` are warnings (no pop-up): the
+     numbers are limma's, and limma is not overruled. An infinite prior df
+     (one pooled variance) is not raised, because it is the right answer
+     for alike variances; a prior that stops at the lower edge of the
+     search (df 2) is.
+   - What the fuzz found is listed in the changelog (nine bugs: one that
+     ran the statistics on unlogged intensities, one that read a column
+     twice, the rest crashes of single stages or refused tables).
+4. **"How far to trust this"** (`downstream/trust.py`) is a list, not a
+   score: any single number would hide which check failed and invite a
+   threshold nobody can defend. Each line repeats an existing check with its
+   number, and "check" marks a line whose own threshold was crossed. Two
+   thresholds are new and are stated: fewer than 3 samples in a group, and
+   groups that differ 2-fold in size. The block is static HTML written by
+   `report.py`; `report.js` and `report.css` are untouched. A compare or
+   benchmark result in the results folder is shown with whether the
+   analysis settings are still the same (a digest of the settings); it is
+   picked up at the next `ionomos analyze`, because a command that reads
+   two results should not rewrite a report.
+
+**Measured** (simulated, standard grid, 2026-10-01): default settings
+(Perseus + median) 4.0 % observed FDP at adjusted p ≤ 0.05, 30 % of 2-fold
+and 71 % of 4-fold changes found; no imputation 4.6 %, 47 % and 86 %; no
+normalisation 14 – 21 %; `zero` imputation 8.0 % and a fold-change bias of
++0.41 log2. The test suite's guard allows 8.5 % (its fixed seeds measure
+1.7 – 6.3 %).
+
+**Not verified**: anything on real data. No mixed-species sample has been
+run; no real FragPipe-Analyst, MSstats or Perseus export has been compared
+(the layouts are the documented ones); the fuzz damages simulated tables.
+
+**For the maintainer to confirm**: the verdict thresholds of `compare`; the
+8.5 % tolerance of the guard; that Perseus-type imputation stays the default
+although it found fewer planted changes than no imputation on the simulated
+data (a real benchmark sample should decide); the two new "check"
+thresholds; that a nameless numeric column is left out.
+
+
+### D61 — Conditions have roles; a competition experiment gets its own comparisons and a specific-targets call
+**2026-10-01.** The maintainer's priority: the analysis should know that
+"DMSO vs competitive vs compound will have DMSO have less samples". Until now
+a control was recognised by keyword and every other condition was compared
+with it. `downstream/roles.py` adds the design.
+
+1. **Five roles**: control, compound, competition, reference (pool /
+   bridge), qc. Every condition that is nothing else is a compound. A
+   competition is linked to the compound it competes.
+2. **Where a role comes from**, highest first: `analysis.roles`
+   (`{Probe_Comp: competition of Probe}`), `analysis.control`, an SDRF
+   column `characteristics[role]` (not part of the SDRF specification; a
+   convenience), then the name. `find_control` honours `analysis.roles`, so
+   the dose-response, time-course and F-test code see the same control.
+3. **Competition keywords**, matched as a whole word of the name (split at
+   `_ - . + space` and at a lower-to-upper step, so `ProbeComp` works for
+   TMT, where the lab's names allow one word): `comp`, `competition`,
+   `competitor`, `competed`, `compete`, `competing`, `excess`. Only `Comp`
+   is from the lab (the folder `KL6283A_TMTPD_Comp_KL6159A` in
+   `reference/pc-inventory/`); the SOPs name none. The rest are the usual
+   words. **Unconfirmed.**
+4. **Weak keywords** (`pre`, `pretreat…`, `block…`, `cold`, and a number
+   followed by `x`) also mean other things (pre / post, a dose). They make a
+   competition only when the rest of the name is another condition
+   (`Probe_pre` next to `Probe`), the guess is used, and the doctor asks
+   (`ROLES_UNSURE`, input). Without that condition they change nothing.
+5. **Linking**: the compound whose name the competition's name contains
+   (the longest such), else the only compound. With several compounds and no
+   match the competition is compared with the control only, and the doctor
+   asks.
+6. **Default comparisons** (only for `de_type: control` without explicit
+   `comparisons:`, and only when a competition condition exists): compound
+   vs control, competition vs its compound, competition vs control. Not
+   compared: a second control with the control, a pool or QC standard, a
+   competition with another compound. Probe and probe + competitor without
+   a vehicle give one comparison and no "which is the control?" question.
+7. **Explicit settings win.** `comparisons:` and `de_type: all | others`
+   are untouched. `control:` names the control and the role comparisons are
+   still made, because the Analysis tab writes `control:` on every run; with
+   it set, every condition is still compared with that control, so the set
+   of comparisons is the earlier one plus competition vs compound.
+   `role_comparisons: false` gives the earlier behaviour. The statistics of
+   a comparison do not depend on how it was chosen (one limma model, BH per
+   comparison), which a test checks.
+8. **Specific targets**: significant up in compound vs control and
+   significant down in competition vs compound, each by that comparison's
+   own call (so the cut-offs, adjusted or raw p, and fold change only where
+   there are no replicates). This is the common reading of a competition
+   pulldown; the lab has not confirmed it. Alternatives not built: a
+   threshold on the share competed off, an interaction test.
+9. **Unequal groups.** What was checked on simulated 2 / 4 / 4 data, and
+   what changed:
+   - *Missing-value filter*: unchanged. It asks for values in 50 % of one
+     condition, whichever, so a small control cannot remove a feature. One
+     of two values is 50 %, so a feature can pass on one DMSO value alone:
+     6 of 12,000 features in 8 simulated DIA experiments, left as it is.
+   - *`min_valid` without imputation*: changed, with a setting. With DMSO
+     n=2 one missing DMSO value left the feature untested against DMSO:
+     6.1 % of features (20 simulated TMT experiments × 1,000 genes, 3 %
+     missing) against 0.03 % with four DMSO channels. Now the smaller group
+     of an unequal comparison needs half its samples
+     (`small_group_min_valid: half`): 0.1 % untested, 1,205 features tested
+     on one DMSO value, 49 hits among them, all true, no false hit among
+     the 1,156 unchanged ones; specific targets found 400 of 400 instead of
+     375. The justification: limma's residual variance comes from every
+     group, and D32 already tests a group of one this way. Equal groups are
+     not touched. limma only; Welch and Student keep `min_valid`.
+   - *Imputation-driven flags*: unchanged. The rule is a share (half of a
+     group), so one imputed value of two flags the hit and one of four
+     does not. With two controls more hits rest on imputed values (57
+     against 11 in 8 simulated DIA experiments), and they are flagged.
+   - *limma*: unchanged. The pooled variance and the `sqrt(1/n1 + 1/n2)`
+     standard error are checked against the formula for 2 / 4 / 4. R's
+     limma was not available for an unequal-groups golden file.
+   - *Power*: per comparison with its own n; the single "per group" number
+     used the median group size (4 for 2 / 4 / 4).
+   - *Scorecard*: changed. A sample with one mate scatters √2 σ around it,
+     one with five mates √1.2 σ around their mean. In clean 2 / 6 / 6 data
+     the DMSO samples' z-score was 3.25 (median of 40 simulations, max
+     4.42; the flag starts at 3.5) and is now 0.01 (max 0.92). No sample
+     was flagged before either, because the flag also needs 1.5× the
+     typical spread, but the margin was thin. Equal groups: the factor is
+     1.
+   - *Low confidence*: unchanged for one control. Two controls are tested
+     normally. The title said "a group has one sample" also when
+     `min_valid: 3` made a group of two low confidence; it now says the
+     number.
+10. **Found on the way, not fixed**: median normalisation assumes most
+    features don't change. In the simulated pulldown 8 % were enriched in
+    one direction, which shifted the unchanged features by about 0.26 log2
+    between DMSO and probe; with two controls that produced false hits just
+    over |log2FC| = 1 (without imputation 17 in 8 experiments against 0 with
+    four controls; with it 14 against 2). On the roadmap.
+11. **isoDTB** is a competition experiment by construction: every
+    condition has the role competition (of the probe), nothing is asked, and
+    the comparisons and `cys.py` are unchanged.
+
+**Not verified**: any real lab experiment; the report section in a browser
+other than the one check made while building; R's limma on unequal groups.
+
+
+### D62 — One export style; a figure is exported by drawing it again; every file says where it came from
+**2026-10-01.** The maintainer asked for figures that are easy to export for
+slides, customisable, and friendlier options. Before this, each chart had an
+SVG and a PNG button that copied the chart as it stood on screen (page
+colours, page size, no legend, no cut-offs), and the static `volcano_*.svg`
+used CSS variables, which PowerPoint does not read.
+
+1. **One style, the same keys everywhere.** `size`, `width`, `height`,
+   `unit`, `font_pt`, `font_family`, `line_scale`, `point_scale`, `palette`,
+   `up`, `down`, `neutral`, `background`, `title`, `subtitle`, `legend`,
+   `note`, `labels`, `label_count`, `png_scale`, `png_dpi`, `zip_format`,
+   `figures`. The report (`report.js` STYLE_DEFAULTS), the saved style file
+   (`export_style.json`), `config.yaml` → `analysis.export`, and
+   `ionomos export` (`charts.py` STYLE_DEFAULTS) all read them. A test
+   compares the two copies of the defaults, sizes, palettes, ranges.
+2. **A figure is drawn again, not restyled.** While a figure is exported, a
+   module variable (`EX`) makes `css()` answer from the style's colours and
+   `widthOf()` / `heightOf()` from its size; the chart's own renderer runs
+   and hands its SVG to `svgTools()`, which is where the export copies it.
+   The renderers changed by one call each (`H = heightOf(300)`), so a section
+   another change adds is exported too: its chart calls `svgTools`, and the
+   export draws the report (`redraw()`) again to capture it. The page is then
+   drawn back as it was. The heatmap is a canvas on screen and has an SVG
+   twin for export.
+3. **Sizes.** Slides are 1280 × 720 px (16:9) and 960 × 720 px (4:3), which
+   is a PowerPoint slide at 96 px per inch; half a slide is 640 × 600; journal
+   columns are 85 mm and 180 mm. Text size is in points in the finished
+   figure: the chart is drawn in units where the axis text is 12, and the
+   SVG's `viewBox` scales it (14 pt → × 14 / 9). A size named without a text
+   size takes 14 pt (slides), 12 pt (half) or 7 pt (journal). A chart that
+   can take any height (volcano, PCA, the bar and line charts) fills the size
+   exactly. A chart with a shape of its own (heatmap, correlation, UpSet,
+   enrichment bars) is never stretched: the figure is made smaller, and when
+   it had to be scaled down to fit, the dialog and the README say by how much.
+4. **SVG for editing.** Text is `<text>`, colours are attribute values, the
+   font is a family name with fallbacks (`'Segoe UI', Arial, Helvetica,
+   sans-serif`), no `<style>`, `class`, `foreignObject` or CSS variable. A
+   font name may hold letters, digits, spaces, `-` and `_` only.
+5. **Every figure can be traced back.** The cut-offs in force, the hit
+   filters and the test are written under the plot options on the page
+   (`#viewnote`), under each figure (the "cut-offs" line, which can be
+   switched off), and always inside the file: SVG `<title>` and `<desc>`; PNG
+   an `iTXt` `Description` chunk, and a `pHYs` chunk so that 300 dpi means
+   300 dpi in a layout program. A figure that rests on the report's saved
+   cut-offs (heatmap, over-representation) says so. A low-confidence or
+   fold-change-only comparison says so in its figure whatever is switched off.
+6. **Palettes.** The default, Okabe and Ito's colour-blind-safe set, greyscale
+   (every colour, the inks too; the heatmap becomes one light-to-dark ramp),
+   and custom up / down / neutral. Backgrounds: white, dark, transparent
+   (dark text, for a light slide).
+7. **PNG is the browser's job.** The report draws the SVG onto a canvas.
+   `ionomos export` writes SVG only: the standard library cannot rasterise,
+   and no dependency was added. `--format png` explains this and exits 2.
+8. **The zip is written by hand**: a store-only writer (local headers, data,
+   central directory, CRC-32), about 40 lines, no library. The JS tests read
+   it back with their own reader and CRC.
+9. **The style lives in the browser** (`localStorage`, `ionomos.export.v1`,
+   like the highlight groups) and starts from the lab's `analysis.export`
+   (sent with each report as `exportDefaults`). Nothing is stored until
+   something is changed. **A loaded style file is untrusted**: at most 20 kB,
+   must be JSON with `"ionomos_export_style": 1`, and each key is taken only
+   if its value passes its check (a list of allowed words, a number range, a
+   `#rrggbb` colour, a font-name pattern); the rest is named in a text
+   message and dropped. The same checks run on what storage and the report's
+   payload hold. In `config.yaml` an unknown key or a bad value is an error,
+   as for every other analysis setting.
+10. **File names** go through one function (`safeName` / `charts.safe_name`):
+    ASCII letters, digits and `. _ + -`, no `..`, no dot or underscore at
+    either end, not a Windows device name, at most 120 characters. A name with
+    a line break cannot add a line to the README or to a `<desc>`: control
+    characters are replaced by spaces. Text cells in CSV exports that start
+    with `=`, `+`, `-` or `@` get a leading apostrophe.
+11. **`ionomos export` reads the report, and writes only what is its own.**
+    The figures are drawn from the JSON inside `results/report.html`, so they
+    show the report's numbers and nothing is analysed again. Style order: the
+    defaults, the style the report was made with, the lab's `analysis.export`
+    now, `--style FILE`, the flags. A file of the same name is replaced only
+    when Ionomos wrote it (its figures and README say so inside); otherwise
+    the new file gets `_2`. Nothing is deleted.
+12. **The watcher writes no extra figures unless asked**
+    (`analysis.export.figures`, default `[]`). `volcano_<comparison>.svg` is
+    unchanged: it follows the browser's light / dark setting and is what the
+    fallback page embeds.
+13. **Options.** Labels became plain words with units; every control has a
+    tooltip; the cut-off bar says what a log2 fold change is in fold; **Reset**
+    became **Reset cut-offs**, and **Reset to lab defaults** puts the
+    cut-offs, plot options and hit filters back. Plot options and hit filters
+    are still not kept between reports: a hit filter left on would change the
+    hit counts of the next report without a word.
+
+**Verified**: 86 JS tests (jsdom) and the Python suite. In Chromium (the
+desktop app's browser pane, a report from `ionomos demo` served from a local
+web server): the dialog and its preview in light and dark page themes; the
+volcano at 16:9, half a slide with the colour-blind palette on a dark
+background, and the heatmap at one journal column in greyscale on a
+transparent background; "Export for slides" (25 figures as SVG and PNG, the
+tables, the style, the README; every CRC right; PNG at 2560 × 1440 with the
+`pHYs` and `iTXt` chunks; the PNGs shown back in the page); the four
+`ionomos export` SVG files opened as pictures. The zip a jsdom run wrote was
+also listed and tested by Python's `zipfile` and by `unzip -t`.
+
+**Not verified**: the SVG files in PowerPoint, Illustrator or Inkscape (text
+editable, fonts, `viewBox` scaling, mm sizes); Firefox, Safari, Edge; a real
+clipboard write (the test and the browser check replaced
+`navigator.clipboard.write`); a report opened from `file://` on Windows;
+Windows at all. Text widths are estimated (0.56 × the text size per
+character), so a legend can wrap earlier than needed, and a long title is cut
+with "…".
+
+**For the maintainer to confirm**: the default size and text (16:9, 14 pt,
+Arial); that the SVG / PNG buttons now use the export style instead of the
+on-screen size; `figures: []` as the default; the apostrophe before formula
+cells in CSV exports; SVG and PNG both in the zip by default; the lab's
+current `analysis.export` winning over the style a report was made with in
+`ionomos export`.
+
+
+### D63 — A bundle is saved, never sent; names are replaced word by word and the zip is checked before it exists
+
+2026-10-01. The maintainer needs the lab's files to troubleshoot and to
+validate the analysis, and will carry them by hand (Desktop → Dropbox).
+"Report a problem" already wrote a diagnostics zip; it is generalised
+(`bundle.py`) instead of adding a second mechanism. `save_problem_report`,
+`save_diagnostics_zip` and `ionomos diagnose --zip` now make a `diagnose`
+bundle.
+
+1. **Ionomos sends nothing.** It writes a zip to the Desktop (the registry's
+   shell folder first, so a OneDrive-redirected Desktop works; else
+   `%OneDrive*%\Desktop`, `%USERPROFILE%\Desktop`), else the log folder,
+   else the home folder. No upload code exists. The bundle only reads
+   experiment folders; it writes the zip (as `.part`, renamed after the
+   check) and the key file, and numbers a name that is taken.
+2. **Two levels.** `diagnose` is what the old zip had plus the whole run
+   folder (so a `run_fingerprint.json` comes along; the name is
+   `names.RUN_FINGERPRINT`), needs-attention items and `analysis.json`.
+   `validate` adds the tables the analysis reads and `results/`. With no job
+   named: the running, waiting and last five failed jobs; `validate` also
+   takes the last finished job, so that a plain `ionomos bundle --level
+   validate` has something to validate.
+3. **Never raw data, FASTA or libraries**, by extension and name, also inside
+   `results/`. A FASTA is described (name, size, entries, decoys, SHA-256).
+   DIA-NN's main report is not taken: the analysis starts from the protein
+   matrix.
+4. **Limits said out loud.** 2,000 MB per bundle before compression, small
+   files first so a log is never the thing dropped. A PSM-level table over
+   25 MB is row-sampled (header + every n-th row) under its own name, so the
+   analysis still runs; the job is then marked not fully reproducible. A
+   quant table is never cut: it is in or out.
+5. **Anonymised by default.** Replaced: users and aliases, the OS account and
+   any home folder in a path, the PC name, experiment / inbox folder names,
+   raw-file, sample and condition names, e-mail and IP addresses. Secrets go
+   through `notify.scrub` / `redact_config_text` whether or not names are
+   replaced.
+6. **Word by word, not name by name.** `Drug_10uM_3h_2` becomes
+   `condA_10uM_3h_2`: the analysis reads conditions (text before the first
+   `_`), doses, times, TMT channels and replicates from the shape of a name,
+   so the shape must survive. Kept words: numbers with units, replicate
+   marks, control / reference words, the config's method names, the
+   analysis' setting names and a short list of Ionomos' own words. The
+   maintainer's examples (`user_01`, `exp_003`, `sample_A1`) have an
+   underscore; the pseudonyms have none (`user01`, `exp001`, `condA_1`),
+   because an added `_` changes what `condition_of` returns.
+7. **Generic role words are kept by default** (DMSO, vehicle, WT, pool, but
+   also drug, compound, treated): they say what a group is and name nobody.
+   `--keep-conditions` keeps every condition word. There is no option to
+   replace the control words: the analysis would lose its control.
+8. **Order is part of the numbers.** Perseus imputation (`fpa.impute`) draws
+   per sample in byte order of the names. `cond` pseudonyms are assigned in
+   the originals' order and get a leading letter that keeps them on the same
+   side of the kept words (`CondA` < `DMSO` < `condB`). Each job's names are
+   checked afterwards and the bundle says when the order changed. Users are
+   numbered, not ordered.
+9. **A plain word is only replaced inside its name.** Folder and file names
+   are made of ordinary words (`pulldown`, `enrichment`); replacing those
+   everywhere would rewrite `enrichment.tsv`, a setting name or a JSON key
+   and break the unpacked experiment. So: whole names, their `_`-prefixes
+   and re-joined forms (`A-B_c` = `A_B_c`) are replaced; a word alone only
+   when it is itself a user, sample or condition name, or has letters and
+   digits (a compound or notebook number). A run of name characters that
+   holds a known name is treated as a name. Experiment folders are replaced
+   as a whole (`exp001`); a folder path outside the lab's tree as a whole
+   (`folder01`).
+10. **Identifiers are never rewritten.** Protein / gene / peptide columns of
+    tab-separated tables are left as they are, even when a user's initials
+    are a gene symbol (`AR`). Such hits are counted by the check and listed
+    in the key file, not failed. In files that are not tables (the report's
+    embedded JSON) the same word is replaced; the re-run report has it
+    right.
+11. **Structured first, then text.** `ionomos.json` and `experiment.yaml` are
+    parsed: `notes` is removed (free text), the folder's `tokens` list is
+    rewritten as names. Everything, also those, then goes line by line
+    through the same scrub. Files that are not text cannot be scrubbed and
+    are left out with a reason (UTF-16 text is read).
+12. **Verify the product, not the process.** The finished zip is reopened and
+    every file and file name searched for every original. A hit triggers one
+    rewrite (a home-folder name first met in a late file), then
+    `BundleLeak`: no zip. The tests add a search of their own (plain
+    substring / word search over every file, the HTML report included) that
+    does not use `bundle.py`; it found a real miss during development
+    (multi-word user folders).
+13. **The key stays in the lab**: `<zip>-KEY-keep-in-the-lab-DO-NOT-SHARE.json`
+    next to the zip, never in it. `ionomos bundle translate` applies it.
+14. **The reader gets the lab's settings.** `unpack` writes a `config.yaml`
+    from the bundled one (methods, `analysis:` defaults) with every path
+    under `_lab/` and no `notify:` / `assistant:`, so `ionomos --config …
+    analyze` repeats the lab's analysis and cannot send or touch anything.
+15. **"Copy diagnostics" is unchanged**: a text block with real names,
+    secrets redacted. The bundle is the anonymised route.
+
+**Verified**: the round trip on the testbed (fake FragPipe DIA job with
+conditions on both sides of `DMSO`, isoDTB and TMT by hand): every result
+table of the re-run is byte-identical to the bundled one, and translating it
+back with the key gives the lab's own file. **Not verified**: real lab data
+and real FragPipe / DIA-NN / MaxQuant / Sage tables (their column names are
+from the engines' documentation and Ionomos' loaders); Windows (CI only);
+the window on screen; a bundle over a few hundred MB.

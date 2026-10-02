@@ -6,6 +6,7 @@ reaches "done" if ionomos prepared the inputs correctly.
 """
 import json
 import logging
+import re
 import shutil
 import threading
 import time
@@ -60,7 +61,8 @@ def test_isodtb_job_runs_to_done(bed):
     fasta = bed["cfg"].fasta_dir / "human_reviewed_decoys.fas"
     assert fragpipe.workflow_db_path(wf) == str(fasta).replace("\\", "/")
     assert (dest / "fragpipe" / "combined_modified_peptide_label_quant.tsv").is_file()
-    assert "FAKE FragPipe: done" in (run / fragpipe.CONSOLE_LOG).read_text(encoding="utf-8")
+    console = (run / fragpipe.CONSOLE_LOG).read_text(encoding="utf-8")
+    assert "ALL JOBS DONE IN" in console and "FAKE FragPipe" in console
 
     st = _status(dest)
     assert st["status"] == "done" and st["run"]["exit_code"] == 0 and st["run"]["attempt"] == 1
@@ -70,7 +72,11 @@ def test_isodtb_job_runs_to_done(bed):
 
     # downstream analysis ran: report + sites table (R port) + a volcano, recorded in ionomos.json and DONE.txt
     assert (dest / "results" / "report.html").is_file()
-    assert (dest / "results" / "EJQ_PK_EJQ-2-027_isoDTB_1uM_3h_sites.tsv").is_file()
+    # FragPipe turns the - of an experiment name into _ (InputLcmsFile), so its tables and ours say _
+    assert (dest / "results" / "EJQ_PK_EJQ_2_027_isoDTB_1uM_3h_sites.tsv").is_file()
+    assert any("FragPipe keeps only letters, digits and _" in n for n in st["run"]["notes"])
+    # a note, not a warning on every job with a - in its sample name
+    assert not any("FragPipe keeps" in w for w in st["run"]["warnings"])
     assert st["results"]["report"] == "results/report.html"
     assert st["results"]["comparisons"][0]["up"] > 0  # the fake FragPipe plants engaged sites
     assert "Report:" in (dest / "DONE.txt").read_text(encoding="utf-8")
@@ -86,7 +92,7 @@ def test_dia_job_uses_dia_type_and_diann_flag(bed):
                (dest / fragpipe.RUN_DIR / fragpipe.MANIFEST_NAME).read_text(encoding="utf-8").splitlines())
     cmd = _status(dest)["run"]["command"]
     assert cmd[cmd.index("--config-diann") + 1] == "C:/DIA-NN/DiaNN.exe"
-    assert (dest / "fragpipe" / "diann-output" / "report.tsv").is_file()
+    assert (dest / "fragpipe" / "dia-quant-output" / "report.tsv").is_file()  # FragPipe 24's folder name
 
 
 def test_tmt_job_writes_annotation_from_experiment_yaml(bed):
@@ -98,43 +104,73 @@ def test_tmt_job_writes_annotation_from_experiment_yaml(bed):
     assert (dest / "fragpipe" / "tmt-report" / "abundance_gene_MD.tsv").is_file()
 
 
-def test_tmt_multiplex_prepares_one_annotation_per_plex_and_warns(bed):
-    """Several plexes in one folder: prepare names each file <experiment>_annotation.txt and attaches
-    the explicit 'unconfirmed FragPipe behaviour' warning (fragpipe.py TMT branch); write_inputs
-    writes exactly those files, never a generic annotation.txt. Behavior pin, not a bug pin."""
+TMT10 = ("126", "127N", "127C", "128N", "128C", "129N", "129C", "130N", "130C", "131N")
+
+
+def _tmt_job(dest: Path, manifest: list[dict], tmt: dict) -> Job:
+    for m in manifest:
+        (dest / m["file"]).parent.mkdir(parents=True, exist_ok=True)
+        (dest / m["file"]).write_bytes(b"\0" * 64)
+    plan = {"manifest": manifest, "overrides": {"tmt": tmt}}
+    return Job(inbox_name=dest.name, user="EJQ", method="TMT", dest_dir=str(dest), parsed={"plan": plan})
+
+
+def test_tmt_plexes_in_one_folder_get_no_annotation_file_and_a_warning(bed):
+    """FragPipe takes a plex's annotation from the folder that holds its files, and only when exactly one file
+    ending in annotation.txt is there (TmtiPanel, 23.1 and 24.0). Two plexes in one folder can't each have
+    one: Ionomos used to write <plex>_annotation.txt for both, which made FragPipe use neither."""
     dest = bed["root"] / "plex_job"
-    dest.mkdir()
     manifest = [{"file": "PLEXA_F1.raw", "experiment": "PLEXA", "bioreplicate": 1, "data_type": "DDA"},
                 {"file": "PLEXB_F1.raw", "experiment": "PLEXB", "bioreplicate": 1, "data_type": "DDA"}]
-    for m in manifest:
-        (dest / m["file"]).write_bytes(b"\0" * 64)
-    plexes = {exp: {"channels": {"126": f"{exp}_126", "127N": f"{exp}_127N"}} for exp in ("PLEXA", "PLEXB")}
-    plan = {"manifest": manifest, "overrides": {"tmt": {"plexes": plexes}}}
-    job = Job(inbox_name=dest.name, user="EJQ", method="TMT", dest_dir=str(dest), parsed={"plan": plan})
-
-    spec = fragpipe.prepare(job, bed["cfg"])
-    assert spec.annotations == {
-        "PLEXA_annotation.txt": "126\tPLEXA_126\n127N\tPLEXA_127N\n",
-        "PLEXB_annotation.txt": "126\tPLEXB_126\n127N\tPLEXB_127N\n",
-    }
-    assert spec.warnings == ["several TMT plexes share one folder; how FragPipe 24 headless picks each "
-                             "plex's annotation file is unconfirmed (docs/WORKFLOWS.md)"]
-
+    plexes = {exp: {"channels": {ch: f"{exp}_{ch}" for ch in TMT10}} for exp in ("PLEXA", "PLEXB")}
+    spec = fragpipe.prepare(_tmt_job(dest, manifest, {"plexes": plexes}), bed["cfg"])
+    assert spec.annotations == {}
+    assert len(spec.warnings) == 1 and "2 TMT plexes share one folder" in spec.warnings[0]
     assert fragpipe.write_inputs(spec) is None
-    for exp in ("PLEXA", "PLEXB"):
-        assert f"126\t{exp}_126" in (dest / f"{exp}_annotation.txt").read_text(encoding="utf-8")
+    assert not list(dest.glob("*annotation.txt"))
+
+
+def test_tmt_plexes_in_their_own_folders_each_get_annotation_txt(bed):
+    dest = bed["root"] / "plex_job"
+    manifest = [{"file": "plexA/PLEXA_F1.raw", "experiment": "PLEXA", "bioreplicate": 1, "data_type": "DDA"},
+                {"file": "plexB/PLEXB_F1.raw", "experiment": "PLEXB", "bioreplicate": 1, "data_type": "DDA"}]
+    plexes = {exp: {"channels": {ch: f"{exp}_{ch}" for ch in TMT10}} for exp in ("PLEXA", "PLEXB")}
+    spec = fragpipe.prepare(_tmt_job(dest, manifest, {"plexes": plexes}), bed["cfg"])
+    assert spec.warnings == []
+    fragpipe.write_inputs(spec)
+    for exp, sub in (("PLEXA", "plexA"), ("PLEXB", "plexB")):
+        assert f"126\t{exp}_126" in (dest / sub / "annotation.txt").read_text(encoding="utf-8")
     assert not (dest / "annotation.txt").exists()
+
+
+@pytest.mark.parametrize(("channels", "expect"), [
+    ({"126": "DMSO_1", "127N": "Drug_1"}, "lists 2 channel(s) but the workflow's label type is TMT-10"),
+    ({ch: "DMSO" for ch in TMT10}, "sample name DMSO is used twice"),
+    ({**{ch: f"S_{ch}" for ch in TMT10}, "126": "DMSO rep 1"}, "one sample name without spaces"),
+    ({**{ch: f"S_{ch}" for ch in TMT10}, "131N": ""}, "one sample name without spaces"),
+])
+def test_tmt_channel_map_that_fragpipe_would_refuse_fails_the_job_before_the_search(bed, channels, expect):
+    """CmdTmtIntegrator stops a headless run on each of these; Ionomos says so before FragPipe is started."""
+    dest = bed["root"] / "tmt_bad_map"
+    manifest = [{"file": "PLEX_F1.raw", "experiment": "PLEX", "bioreplicate": 1, "data_type": "DDA"}]
+    with pytest.raises(fragpipe.JobError, match=re.escape(expect)):
+        fragpipe.prepare(_tmt_job(dest, manifest, {"tag": "TMT-10", "channels": channels}), bed["cfg"])
+
+
+def test_tmt_unused_channels_are_na_and_names_only_need_to_be_unique_otherwise(bed):
+    dest = bed["root"] / "tmt_na"
+    manifest = [{"file": "PLEX_F1.raw", "experiment": "PLEX", "bioreplicate": 1, "data_type": "DDA"}]
+    channels = {ch: ("NA" if i > 5 else f"S_{ch}") for i, ch in enumerate(TMT10)}
+    spec = fragpipe.prepare(_tmt_job(dest, manifest, {"tag": "TMT-10", "channels": channels}), bed["cfg"])
+    assert spec.annotations["annotation.txt"].count("\tNA\n") == 4
 
 
 def test_existing_user_annotation_txt_is_kept_with_a_warning(bed):
     """write_inputs never overwrites a differing annotation.txt — it may be the user's own file — and
     records why the experiment.yaml map was not applied (fragpipe.py TMT annotation writing)."""
     dest = bed["root"] / "tmt_user_edit"
-    dest.mkdir()
-    (dest / "PLEX_F1.raw").write_bytes(b"\0" * 64)
-    plan = {"manifest": [{"file": "PLEX_F1.raw", "experiment": "PLEX", "bioreplicate": 1, "data_type": "DDA"}],
-            "overrides": {"tmt": {"tag": "TMT-10", "channels": {"126": "DMSO_126", "127N": "DMSO_127N"}}}}
-    job = Job(inbox_name=dest.name, user="EJQ", method="TMT", dest_dir=str(dest), parsed={"plan": plan})
+    manifest = [{"file": "PLEX_F1.raw", "experiment": "PLEX", "bioreplicate": 1, "data_type": "DDA"}]
+    job = _tmt_job(dest, manifest, {"tag": "TMT-10", "channels": {ch: f"DMSO_{ch}" for ch in TMT10}})
 
     users_own = "126\tuser edit\n"
     (dest / "annotation.txt").write_text(users_own, encoding="utf-8")
@@ -142,6 +178,19 @@ def test_existing_user_annotation_txt_is_kept_with_a_warning(bed):
     fragpipe.write_inputs(spec)
     assert (dest / "annotation.txt").read_text(encoding="utf-8") == users_own
     assert spec.warnings == ["kept the existing annotation.txt (differs from experiment.yaml's tmt: map)"]
+
+
+def test_a_users_own_named_annotation_file_is_not_joined_by_a_second_one(bed):
+    """One file ending in annotation.txt per folder: beside the user's plex1_annotation.txt Ionomos writes none,
+    or FragPipe would use neither."""
+    dest = bed["root"] / "tmt_user_named"
+    manifest = [{"file": "PLEX_F1.raw", "experiment": "PLEX", "bioreplicate": 1, "data_type": "DDA"}]
+    job = _tmt_job(dest, manifest, {"tag": "TMT-10", "channels": {ch: f"DMSO_{ch}" for ch in TMT10}})
+    (dest / "plex1_annotation.txt").write_text("126 mine\n", encoding="utf-8")
+    spec = fragpipe.prepare(job, bed["cfg"])
+    fragpipe.write_inputs(spec)
+    assert not (dest / "annotation.txt").exists()
+    assert len(spec.warnings) == 1 and spec.warnings[0].startswith("kept plex1_annotation.txt and wrote no annotation.txt")
 
 
 def test_write_inputs_keeps_a_pre_existing_cancel_file(bed):
@@ -170,9 +219,10 @@ def test_fragpipe_failure_fails_job_and_retry_reruns(bed):
     w = Worker(bed["cfg"], bed["ledger"])
     w.run_once()
     job = bed["ledger"].get(1)
-    assert job.status == "failed" and "exit" in job.reason and "IonQuant crashed" in job.reason
+    assert job.status == "failed" and "step DIA-Quant run DIA-NN failed (exit code 1)" in job.reason
+    assert "DIA-NN crashed" in job.reason  # the step's own last words, not FragPipe's "Cancelling ..." lines
     note = (dest / "FAILED.txt").read_text(encoding="utf-8")
-    assert "IonQuant crashed" in note and "ionomos retry 1" in note
+    assert "DIA-NN crashed" in note and "ionomos retry 1" in note
     assert _status(dest)["status"] == "failed"
 
     bed["ledger"].requeue(1, "retry requested", reset_attempts=True)

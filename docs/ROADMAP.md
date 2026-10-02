@@ -131,6 +131,16 @@ any differences from the GUI / R / FragPipe-Analyst path here, and keep one
 small anonymised real experiment as a test fixture and public example data
 (Phase 5A).
 
+2026-10-01 (D59): the FragPipe runner checked against FragPipe's headless
+tutorial and its 24.0 / 23.1 source, before the first real runs. Fixed:
+`JAVA_HOME` for `fragpipe.bat`, the window `.exe` never run, the hint that
+matched `database.db-path` in every log, a retry judged by an earlier
+attempt's log, the progress line, TMT annotation files, decoy rules. New:
+`ionomos preflight` (starts FragPipe for `--help` and a dry run per method),
+`run_fingerprint.json` after every search, a fake FragPipe that copies the
+real one's output. **Still not run against a real FragPipe**: FIRST_REAL_RUN.md
+is the checklist for that day, and the fingerprints are what to send back.
+
 ## Phase 3 — DIA, then TMT
 
 - DIA: pin workflow, `data_type: DIA`, sort out DIA-NN version/`--config-diann`.
@@ -165,7 +175,22 @@ small anonymised real experiment as a test fixture and public example data
   - power
   - list / wildcard / term search, highlight groups, and the view in the link
 
+  → 2026-10-01 (D62): figures for slides. One export style (size presets,
+  text, colours, title, legend) for every chart, as SVG, PNG or on the
+  clipboard; "Export for slides" (a .zip of every figure, the tables and a
+  README); `ionomos export`; `analysis.export` for the lab's style. The plot
+  options got plain labels, tooltips and a reset.
+
   Still open:
+  - Open the exported SVG files in PowerPoint, Illustrator and Inkscape on
+    the lab PC (text editable? fonts? mm sizes?), and try the export in the
+    browser the lab uses. None of this has been checked (D62).
+  - PNG from `ionomos export` (needs a renderer; SVG only for now).
+  - The Analysis tab has no fields for `analysis.export`; it is edited in
+    `config.yaml` (the app keeps the block).
+  - Static figures for dose-response, time courses and liganded sites
+    (`ionomos export` draws volcano, PCA, heatmap, correlation; the report
+    exports them all).
   - Tune the D35 warning thresholds on real lab experiments.
   - PSM-level technical QC from `psm.tsv`: mass error, missed cleavages,
     charge states. → 2026-10-01, done (D55): the Search quality QC tab,
@@ -177,6 +202,17 @@ small anonymised real experiment as a test fixture and public example data
     configurable thresholds, a site-annotation (CysDB) overlay, selectivity
     across compounds. The lab still has to confirm the ratio direction and
     thresholds.
+- **A bundle the maintainer can carry off the PC** (anonymised zip on the
+  Desktop for troubleshooting and for re-running the analysis; nothing is
+  uploaded). → 2026-10-01 (D63): built. `ionomos bundle`, the **Report a
+  problem** window, `bundle inspect / unpack / translate`. Still open:
+  - run it on the lab's real folders and read the zip by eye before the
+    first one is shared (the leak check only knows the names Ionomos knows)
+  - the window has not been seen on screen (GUI tests run in CI only)
+  - "Copy diagnostics" still copies real names; decide whether it should be
+    anonymised too
+  - DIA-NN's main report and peptide-level tables are not bundled; add them
+    behind an option if a validation needs them
 - `ionomos status` as a tiny local web page if people ask.
 - Auto-archive finished experiments to `D:\<user>\` after N days.
 - Optional: auto-pull from `C:\Proteomics_File_Sharing` (reversing D3) once
@@ -341,9 +377,39 @@ real data:
    - Levey-Jennings charts with run rules
 
    Intake already sees every run.
-7. [ ] Phospho: localisation filter and KSEA kinase activity. Only if a lab
+7. [x] **Roles and competition experiments** (2026-10-01, D61: `downstream/roles.py`): control / compound /
+   competition, comparisons that follow the design, a specific-targets call,
+   unequal groups handled knowingly. Simulated data only. Still to do:
+   - [ ] roles in the experiment editor and the review window (a GUI change)
+   - [ ] a normalisation that holds when many features are enriched in one
+     direction (a pulldown): median centring shifts the unchanged ones (D61
+     point 10)
+   - [ ] an R (limma) golden file for unequal groups
+8. [ ] Phospho: localisation filter and KSEA kinase activity. Only if a lab
    runs phospho; PhosphoSitePlus is non-commercial, so it is a user download.
-8. [ ] STRING / CORUM overlays: low priority.
+9. [ ] STRING / CORUM overlays: low priority.
+10. [ ] **Accuracy the lab can check, and robustness on messy tables**
+   (2026-10-01, D60, [VALIDATION.md](VALIDATION.md); built on simulated data,
+   the real-data half is open):
+   - [x] `ionomos compare`: an analysis against a reference result
+     (another Ionomos run, FragPipe-Analyst, limma, MSstats, Perseus, R),
+     with a verdict from stated thresholds
+   - [x] `ionomos benchmark` on simulated data: sensitivity, observed FDP
+     and fold-change bias per imputation / normalisation setting; a
+     calibration guard in the test suite
+   - [x] `ionomos benchmark FOLDER --expected hye.yaml`: measured against
+     expected ratios per species or protein list
+   - [x] a seeded fuzz of `analyze()` and the loaders; guards on statistics
+     that run but may not mean what they say
+   - [x] "How far to trust this" in every report and in `analysis.json`
+   - [ ] run a human / yeast / E. coli sample on the lab's instrument and
+     benchmark it (VALIDATION.md says how); decide the imputation default
+     from it
+   - [ ] compare one real experiment with the lab's FragPipe-Analyst result
+     and with a real MSstats / Perseus export
+   - [ ] the same checks for ratio data (isoDTB) and TMT: the simulated
+     grid is label-free DIA only
+   - [ ] a button for compare / benchmark in the app (command line only now)
 
 Stay deterministic. The one credible published "AI interpretation"
 (GeneAgent, Nat Methods 2025) verifies every claim against databases. Plain
@@ -505,7 +571,13 @@ Collected from the other docs; resolve before/during Phase 1.
 - [ ] Where are FASTA files kept, which ones, how often updated?
 
 **Machine**
-- [ ] Exact FragPipe 24.0 launcher path and whether `--headless` works on it as installed.
+- [ ] FragPipe 24.0 launcher: from FragPipe's build it is `C:\FragPipe\FragPipe-24.0\bin\fragpipe.bat`, next to
+      `FragPipe-24.0.exe` (D59). Confirm on the PC that the `.bat` is there and that `ionomos preflight` shows
+      "FragPipe starts" (that also proves `JAVA_HOME` → FragPipe's `jre` works).
+- [ ] D59: does a real headless run print to the console Ionomos captures, ending in `ALL JOBS DONE IN x MINUTES`?
+      (Without the line a done job only gets a warning. Once confirmed it could become a failure.)
+- [ ] D59: does FragPipe's `--dry-run` accept the preflight's 64-byte placeholder `.raw`? (From the source it
+      doesn't open the file. If it complains: `ionomos preflight --raw <a real file>`.)
 - [ ] Direction/type of the `Proteomics_File_Sharing` share.
 - [ ] Sleep/power policy and whether Task Scheduler can run at logon for the shared account.
 - [ ] Should results go to C: (fast, 99 GB free) or D: (slow USB, 14 TB free)? Proposal:
@@ -513,8 +585,27 @@ Collected from the other docs; resolve before/during Phase 1.
 - [ ] Install git on the PC, or deploy via zip/wheel?
 
 **Software**
-- [ ] How does FragPipe 24.0 headless locate the TMT `annotation.txt`?
-- [ ] Does bundled DIA-NN suffice or is `--config-diann` needed for 2.3.2?
+- [x] How does FragPipe 24.0 headless locate the TMT `annotation.txt`? → 2026-10-01 (D59), from `TmtiPanel`
+      (same in 23.1): the one file whose name ends in `annotation.txt` in the folder holding all of the plex's
+      LC-MS files; with none or several it writes its own `<workdir>\<plex>\<plex>_annotation.txt` naming the
+      channels `<plex>_<channel>`. Not yet seen on the PC.
+- [ ] D59: several TMT plexes in one experiment need a folder each for FragPipe to find their annotations. Intake
+      files raws at the top level or in `raw\`: should a multi-plex drop be laid out as `<plex>\*.raw`?
+- [x] D59: FragPipe 24's stock workflows write `fragpipe\sdrf.tsv` (`workflow.misc.save-sdrf=true`), which the
+      analysis took for the experiment's own design. Fixed in 0.14.0: an SDRF with no factor value column and no
+      sample names is skipped with a note (`sdrfdesign._engine_template`). Confirm on the first real run that the
+      real file looks like that.
+- [ ] D59: FragPipe replaces everything but letters, digits and `_` in experiment names (`EJQ-2-027` →
+      `EJQ_2_027`), so its tables and Ionomos' `_sites.tsv` carry the `_` form. Ionomos warns per job. Should
+      intake write the `_` form into the manifest from the start?
+- [ ] D59: FragPipe's DIA workflow notes say "For quantification using DIA-NN, Thermo/Sciex DIA files should be in
+      mzML format". Does the lab's DIA route (bundled DIA-NN 1.8.2 beta 8, or 2.3.2 via `fragpipe.config_diann`)
+      read `.raw` directly on the PC? The first DIA run answers it.
+- [ ] D59: is .NET needed by FragPipe 24 on Windows for `.raw` files? Its documentation only asks for Mono on Linux;
+      its log prints ".NET Core Info". The PC has .NET 10 only. If a search stops on a .NET message, the hint
+      names the runtime to install.
+- [ ] Does bundled DIA-NN suffice or is `--config-diann` needed for 2.3.2? (FragPipe 24 falls back to its own
+      `tools\diann\1.8.2_beta_8\windows\DiaNN.exe`; the file to name is `DiaNN.exe`, not `DIA-NN.exe`.)
 - [ ] Confirm the DIA condition codes with the lab: is `C` always "Compound" (not "Control")? Other codes
       in use (`V` vehicle, `T` treated …)? Set `naming.condition_codes` accordingly (D34).
 - [ ] D35 warnings: are the sample-outlier / batch / imputation-mismatch thresholds right on real experiments?
@@ -524,6 +615,17 @@ Collected from the other docs; resolve before/during Phase 1.
       lab confirms. Also: check the site annotation reader against a real CysDB download.
 - [ ] isoDTB: for the protein-abundance correction of site ratios, where does the matching proteome come from
       (a paired unenriched run per condition)?
+- [ ] Roles (D61): which words does the lab put in a condition name for "probe plus competitor"? Built: `comp`,
+      `competition`, `competitor`, `competed`, `compete`, `competing`, `excess` (only `Comp` was seen on the PC), and,
+      asked about each time, `pre`, `pretreat…`, `block…`, `cold`, `10x`. Set `analysis.competition_keywords`.
+- [ ] Roles (D61): is "enriched against the control and competed off, each at the report's cut-offs" the lab's
+      rule for a specific target, or is it a share competed off (e.g. ≥ 75 %), or a ratio to DMSO after competition?
+- [ ] Roles (D61): with `control:` set, every condition is still compared with it and competition vs compound is
+      added. Is that right, or should a set control switch the role comparisons off?
+- [ ] Roles (D61): should a pool or a QC standard also be left out of the comparisons when there is no competition
+      condition? (Now: only in a competition experiment, so nothing changed for other experiments.)
+- [ ] Unequal groups (D61): is `small_group_min_valid: half` right as the default (a feature with one of two DMSO
+      values is tested), and should the filter ask for at least two values in the condition that keeps a feature?
 - [ ] Is a review window on every drop right long-term, or only for new users / methods / code patterns?
       Watch how it feels on the PC for a few weeks (`gui.review_drops`).
 - [ ] Phase 5: allow numpy as an *optional* speed-up (dose-response, limpa)? The base install stays
@@ -535,6 +637,20 @@ Collected from the other docs; resolve before/during Phase 1.
       mass error and missed-cleavage share does the lab call a problem (built: 10 ppm and 50 %, both wide)? Should
       a run unlike the others in its experiment be flagged too, and how are TMT fractions to be judged? Is the
       isoDTB search an offset search, so that its mass errors need another reading?
+- [ ] Figure export (D62): confirm the defaults (16:9 slide, 14 pt Arial, SVG and PNG in the .zip), that the SVG / PNG
+      buttons use the export style rather than the on-screen size, and whether the watcher should write
+      `results/figures/` after every job (built: off, `analysis.export.figures: []`). Does the lab have a house
+      style (font, colours) to put in `analysis.export`? Which program do the figures go into?
+- [ ] Bundle (D63): confirm the defaults: generic role words (DMSO, drug, compound, pool) stay readable and
+      other condition words are replaced; pseudonyms without an underscore (`user01`, `exp001`, `condA`); the
+      2,000 MB and 25 MB limits; with no job named, `validate` takes the last finished job. Is a date in a raw
+      file name (kept, as every number is) acceptable?
+- [ ] Accuracy checks (D60): can the lab run a mixed-species (human / yeast / E. coli) sample, 3 to 4 injections
+      of each mix, so the analysis is benchmarked on the instrument? On simulated data Perseus-type imputation
+      (the default) kept the false discoveries below 5 % but found fewer planted changes than no imputation (30 %
+      against 47 % of 2-fold changes): should the default change, or wait for the real benchmark? Are the
+      `compare` verdict thresholds right (r ≥ 0.95, slope 0.9 to 1.1, offset ≤ 0.10 log2, 70 % of hits shared)?
+      Is "check" at fewer than 3 samples per group, or 2-fold uneven groups, what the lab wants to be told?
 - [ ] Phase 5: which pilot labs can we reach? Does this lab run titrations or phospho? (Orders 5C.)
 - [ ] Phase 6: is the PC's RAM in all 6 memory channels (speed of a local model)? Is a GPU present? May the assistant
       ever use a cloud model (institutional data policy), or strictly local?

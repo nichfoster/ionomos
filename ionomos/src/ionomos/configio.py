@@ -33,7 +33,7 @@ def defaults(root: str | None = None, users_root: str | None = None) -> dict:
         "paths": {
             "inbox": f"{root}/inbox",
             "users_root": users_root,
-            "fragpipe_exe": "C:/FragPipe/FragPipe-24.0/fragpipe/bin/fragpipe.bat",
+            "fragpipe_exe": "C:/FragPipe/FragPipe-24.0/bin/fragpipe.bat",
             "workflow_dir": f"{root}/workflows",
             "fasta_dir": f"{root}/fasta",
             "database": f"{root}/ionomos.db",
@@ -41,7 +41,7 @@ def defaults(root: str | None = None, users_root: str | None = None) -> dict:
         },
         "watcher": {"poll_seconds": 10, "stable_seconds": 60, "min_raw_files": 1, "group_loose_files": True},
         "fragpipe": {"auto_run": True, "threads": 28, "ram_gb": 48, "timeout_minutes": 240, "min_free_gb": 20, "config_tools_folder": "",
-                     "config_diann": ""},
+                     "config_diann": "", "config_python": ""},
         "gui": {"enabled": True, "review_drops": True, "timeout_minutes": 0, "popups": True},
         "naming": {"condition_codes": {"D": "DMSO", "C": "Compound"}},
         "analysis": {"enabled": True, "test": "limma", "de_type": "control", "log2fc": 1.0, "alpha": 0.05,
@@ -49,8 +49,12 @@ def defaults(root: str | None = None, users_root: str | None = None) -> dict:
                      "filter_condition_pct": 50, "normalize": "median", "imputation": "auto", "min_valid": 2,
                      "enrichment": True, "enrichment_libraries": ["Hallmark", "GO Biological Process", "Reactome"],
                      "enrichment_gmt": "", "top_labels": 15,
+                     "export": {"size": "slide169", "font_pt": 14, "font_family": "Arial", "palette": "default",
+                                "background": "light", "figures": []},
                      "control_keywords": ["DMSO", "vehicle", "veh", "ctrl", "control", "mock", "untreated", "NT",
-                                          "WT", "EV", "scr", "scramble", "siNT", "PBS"]},
+                                          "WT", "EV", "scr", "scramble", "siNT", "PBS"],
+                     "competition_keywords": ["comp", "competition", "competitor", "competed", "compete",
+                                              "competing", "excess"]},
         "qc_trend": {"enabled": True, "match": ["hela", "k562", "qc_std", "qcstd", "_qc_"], "exclude": [],
                      "methods": [], "instrument": "", "baseline_runs": 10, "baseline_from": "", "baseline_to": "",
                      "popup": False},
@@ -169,6 +173,7 @@ def dump_config(d: dict) -> str:
     a(f"  min_free_gb: {_y(f.get('min_free_gb', 20))}   # jobs wait while the data drive has less free than this + the raws")
     a(f"  config_tools_folder: {_y(f.get('config_tools_folder', '') or '')}   # only if FragPipe can't find its tools")
     a(f"  config_diann: {_y(f.get('config_diann', '') or '')}   # DIA only, path to DiaNN.exe if needed")
+    a(f"  config_python: {_y(f.get('config_python', '') or '')}   # only if FragPipe can't find its Python (spectral library)")
     a("")
     a("gui:")
     a(f"  enabled: {_y(bool(g.get('enabled', True)))}   # the naming window (problems, and reviews below)")
@@ -216,6 +221,16 @@ def dump_config(d: dict) -> str:
     a(f"  enrichment_gmt: {_y(an.get('enrichment_gmt', '') or '')}   # optional extra gene sets (.gmt file)")
     a(f"  top_labels: {_y(an.get('top_labels', 15))}   # hit names written on each volcano")
     a(f"  control_keywords: {_y(list(an.get('control_keywords') or []))}   # how the control condition is recognised")
+    a(f"  competition_keywords: {_y(list(an.get('competition_keywords') or []))}   # a word of a condition name that "
+      "means 'plus a competitor' (Probe_Comp): its comparisons follow the design")
+    for k in ("competition_keywords_weak", "role_comparisons", "small_group_min_valid"):  # roles: D61
+        if an.get(k) not in (None, ""):
+            a(f"  {k}: {_y(list(an[k]) if isinstance(an[k], (list, tuple)) else an[k])}")
+    if isinstance(an.get("roles"), dict) and an["roles"]:
+        a("  roles:   # condition -> control | compound | competition of <compound> | reference | qc (usually per "
+          "experiment, in experiment.yaml)")
+        for k, v in an["roles"].items():
+            a(f"    {_y(str(k))}: {_y(v)}")
     for k in ("impute_shift", "impute_scale", "seed", "pca_features", "heatmap_max", "control", "variance_prior",
               "block", "block_from", "covariates",  # DEqMS and the design (downstream/design.py)
               "dose_response", "dose_min_doses", "dose_alpha", "dose_fc_lim", "dose_unit",  # dose-response: D44
@@ -238,6 +253,15 @@ def dump_config(d: dict) -> str:
       "cell_type, disease, cleavage_agent (default: from the workflow)")
     for k, v in meta.items():
         a(f"    {_y(str(k))}: {_y(str(v))}")
+    ex = an.get("export") if isinstance(an.get("export"), dict) else {}
+    a("  export:   # exported figures: the lab's style. The report's Export starts from it, `ionomos export` uses it")
+    for k, dflt, what in _EXPORT_KEYS:
+        if k == "font_pt":  # not set: the text size that suits the size (7 pt for a journal column)
+            dflt = _EXPORT_FONT.get(str(ex.get("size", "slide169")), dflt)
+        a(f"    {k}: {_y(ex.get(k, dflt))}   # {what}")
+    for k, v in ex.items():  # the rest of the style (width, height, unit, up, down, neutral, line_scale, title ...)
+        if k not in [x[0] for x in _EXPORT_KEYS]:
+            a(f"    {_y(str(k))}: {_y(v)}")
     a("")
     q = d.get("qc_trend") if isinstance(d.get("qc_trend"), dict) else {}
     a("qc_trend:   # instrument QC: runs of the lab's QC standard (HeLa, K562 ...) trended in logs/qc_trend.html")
@@ -318,6 +342,19 @@ def dump_config(d: dict) -> str:
     a("")
     return "\n".join(L)
 
+
+# analysis.export keys the writer always shows, with their default and what they take (downstream/charts.py)
+_EXPORT_KEYS = (
+    ("size", "slide169", "slide169 (16:9, 1280 x 720 px) | slide43 | half | col1 (85 mm) | col2 (180 mm) | custom "
+                         "(+ width, height, unit: px | mm)"),
+    ("font_pt", 14, "text size in points in the finished figure (14 suits a slide, 7 a journal column)"),
+    ("font_family", "Arial", "the font's name; it must be installed where the figure is opened"),
+    ("palette", "default", "default | colorblind | grey | custom (+ up, down, neutral: \"#rrggbb\")"),
+    ("background", "light", "light | dark | transparent"),
+    ("figures", [], "static SVG written to results/figures after each analysis: any of volcano, pca, heatmap, "
+                    "correlation ([] = none)"),
+)
+_EXPORT_FONT = {"slide169": 14, "slide43": 14, "half": 12, "col1": 7, "col2": 7}  # charts.SIZES (a test compares)
 
 BACKUP_DIR = "config-backups"
 

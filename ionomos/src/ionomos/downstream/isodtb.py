@@ -134,5 +134,11 @@ def write_site_tables(label_quant: Path, results_dir: Path, mod_mass: str = "561
     written = []
     for prefix in prefixes:
         h, out = site_table(header, rows, prefix, mod_mass)
-        written.append(write_tsv(Path(results_dir) / f"{prefix}_sites.tsv", h, out))
+        # the file is named after the sample; characters no file name can hold (a damaged header) become "_"
+        name = re.sub(r'[\x00-\x1f<>:"/\\|?*]', "_", prefix).strip(" .") or "sample"
+        path = Path(results_dir) / f"{name}_sites.tsv"
+        k = 2
+        while path in written:
+            path, k = Path(results_dir) / f"{name}.{k}_sites.tsv", k + 1
+        written.append(write_tsv(path, h, out))
     return written

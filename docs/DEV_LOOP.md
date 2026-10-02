@@ -49,7 +49,111 @@ From a terminal the same thing is `C:\ionomos-src\UPDATE.ps1`.
 `check`, `status --all`, the config, the last 150 log lines, what's in the
 inbox and any `.REJECTED.txt` notes. Also saved as
 `C:\Fragpipe_Auto\logs\diagnostics-<date>.txt`. Paste the whole thing — that's
-everything needed to reproduce a problem on the Mac.
+everything needed to reproduce a problem on the Mac. The copied text holds
+the lab's real names (secrets are replaced by `***`); the bundle below
+replaces them.
+
+## Bundles: the lab's files on the developer's side (D63)
+
+For a failure the text block does not explain, or to check the analysis on
+the lab's real tables, the lab makes a **bundle**: one zip, saved on the
+Desktop. Ionomos uploads nothing. A person copies the zip to Dropbox (or
+anywhere) and shares it.
+
+```
+ Proteomics PC                           Dropbox            developer (or an assistant)
+ ┌─────────────────────────────────┐  a person  ┌──────┐   ┌────────────────────────────────────────────┐
+ │ Report a problem… / ionomos     │  copies    │ .zip │   │ ionomos bundle inspect  X.zip              │
+ │ bundle  →  Desktop\             │ ─────────▶ │      │──▶│ ionomos bundle unpack   X.zip work\        │
+ │   Ionomos-bundle-…-validate.zip │            └──────┘   │ ionomos --config work\config.yaml \        │
+ │   Ionomos-bundle-…-KEY-keep-in- │                       │         analyze work\exp001                │
+ │     the-lab-DO-NOT-SHARE.json   │ ◀── answer about ──── │ compare work\exp001\results with the copy  │
+ │ ionomos bundle translate KEY f  │     exp001 / condA    │ of the lab's results in the zip            │
+ └─────────────────────────────────┘                       └────────────────────────────────────────────┘
+```
+
+**On the PC.** In the app: **Report a problem…** (bottom bar), the same
+button in a failed-search or failed-analysis pop-up, or Jobs → select a job
+→ **Zip for troubleshooting…**. The window has a note, the job list, three
+boxes and a list of what will go in with its size. From a terminal:
+
+```powershell
+ionomos bundle                       # diagnose: settings, logs, the running / waiting / last failed jobs
+ionomos bundle 12 --level validate   # job 12 with the search's result tables and results\
+ionomos bundle C:\Fragpipe_General\EJQ\20260902_EJQ_isoDTB_x --level validate --out D:\tmp
+ionomos bundle 12 --level validate --dry-run     # list what would go in; write nothing
+```
+
+| Level | Holds | Does not hold |
+|---|---|---|
+| `diagnose` (default) | `report.txt` (version, checks, job list, log tail), `config.yaml` (secrets as `***`), watcher and app logs (last 3 MB each), crash files, needs-attention items; per job: `ionomos.json`, `DONE.txt` / `FAILED.txt`, `experiment.yaml`, TMT `annotation.txt`, everything in `ionomos_run\` (workflow, manifest, console logs, engine settings, `run_fingerprint.json` when present), `results\analysis.json` and `analysis_error.txt` | result tables |
+| `validate` | all of the above, plus the tables the analysis reads (FragPipe `combined_*.tsv`, `tmt-report\abundance_*.tsv`, `psm.tsv`; DIA-NN `*pg_matrix.tsv`, `*stats.tsv`; MaxQuant `proteinGroups.txt`, `summary.txt`; Sage `lfq.tsv`, `tmt.tsv`, `results.json`, `results.sage.tsv`), FragPipe's own copy of the workflow and manifest, an SDRF in the experiment folder, and all of `results\` | DIA-NN's main `report.tsv` / `report.parquet`, peptide-level FragPipe files other than `combined_*`, earlier attempts (`*_previous_*`) |
+
+Never, at either level: raw / mzML / `.d` files, FASTA files (`BUNDLE.json`
+records name, size, entry and decoy count, SHA-256), spectral libraries.
+Limits: 2,000 MB per bundle before compression (`--max-mb`); what does not
+fit is left out and listed. A `psm.tsv` / `results.sage.tsv` over 25 MB
+(`--psm-mb`) is cut to every n-th row, and the job is marked "not fully
+reproducible" because PSM-level numbers then differ. Tables are streamed
+(about 10 MB/s, a few MB of memory), and the leak check reads the zip once
+more, so a 1 GB bundle takes a few minutes.
+
+**Names.** On by default: user names and aliases, the PC name, the Windows
+account and home folders, experiment / inbox folder names, raw file, sample
+and condition names, e-mail and IP addresses are replaced; the same original
+gets the same pseudonym in every file, file name and table header
+(`--no-anonymise` keeps the names; secrets are removed either way). A name is
+rewritten word by word, so the analysis reads it as before:
+
+```
+20260914_Isaac_DIA_FLAG-AR-pulldown        ->  exp002            (a folder: as a whole)
+Isaac / IJ                                 ->  user01 / user01a
+Zanubrutinib_10uM_3h_2.raw                 ->  condB_10uM_3h_2.raw
+DMSO_1, pool_126, 9plex, isoDTB, F3        ->  unchanged (control / role words, numbers, doses, method names)
+```
+
+`--keep-conditions` keeps every condition word. Protein, gene and peptide
+columns of tables are never rewritten. The key (pseudonym → original) is the
+`…-KEY-keep-in-the-lab-DO-NOT-SHARE.json` next to the zip; it is not in the
+zip. `ionomos bundle translate KEY answer.txt` turns an answer back.
+
+After writing, the zip is searched for every original (file names too). A hit
+means no zip: the command fails with `LEAK CHECK FAILED` and the file names.
+
+Not covered, and said in the zip's `README.txt`: free text (the note typed
+for the bundle; `notes:` fields are removed), a name inside a longer word, a
+plain word of a name standing alone elsewhere (`pulldown`; words with
+letters and digits such as `KL6159A` are replaced everywhere), names that
+are also gene names (kept in identifier columns, listed in the key file),
+folder names above the users folder, pictures and other non-text files (left
+out). **Nothing here has been run on the lab's real folders yet.**
+
+**On the developer's side.**
+
+```bash
+ionomos bundle inspect Ionomos-bundle-20261001-1203-validate-v0.13.0.zip
+#   level, version and build, each job (status, method, FASTA facts, "analysis can be repeated: yes"),
+#   what was capped or left out
+ionomos bundle unpack Ionomos-bundle-….zip work
+#   work/exp001/            the experiment folder: ionomos.json, ionomos_run/, fragpipe/, results/
+#   work/config.yaml        the lab's methods and analysis defaults; every folder points into work/_lab/
+#   work/_bundle/           BUNDLE.json, README.txt, report.txt, logs/, crashes/, the lab's config.yaml
+cp -r work/exp001/results lab_results
+ionomos --config work/config.yaml analyze work/exp001
+diff -r lab_results work/exp001/results     # the .tsv files should be identical
+```
+
+`unpack` checks every file against the SHA-256 in `BUNDLE.json` and never
+writes over anything. With the bundled config the lab's `analysis:` defaults
+and method definitions apply; without `--config`, Ionomos' defaults do. The
+re-run matches the lab's tables byte for byte when the same Ionomos version
+is used and the bundle says "analysis can be repeated: yes". It can differ
+when: a PSM table was row-sampled; the lab used a gene-set file or site
+annotation that is not in the bundle; enrichment libraries differ between
+the two computers; or `inspect` says the pseudonyms changed the order of
+the sample names (Perseus imputation draws its random numbers sample by
+sample in name order; pseudonyms are chosen to keep that order and the
+bundle says when they could not).
 
 ## Rules that keep it painless
 
