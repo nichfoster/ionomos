@@ -35,7 +35,8 @@ analysis:
   alpha: 0.05                # significance cut-off
   use_adjusted: true         # alpha applies to Benjamini-Hochberg q-values
   min_valid: 2               # values needed per group to test a protein/site
-  normalize: median          # median | none (intensities only)
+  normalize: auto            # auto: median centring, or the ratio method when many features change one way (D64)
+                             # | median | gn | ratio | none (intensities only)
   top_labels: 15             # hit names written on each volcano
   control_keywords: [DMSO, vehicle, veh, ctrl, control, mock, untreated, NT, WT, EV, scr, scramble, siNT, PBS]
   # Roles (D61): each condition is a control, a compound, a competition (probe + competitor), a pooled reference

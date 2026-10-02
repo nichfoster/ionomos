@@ -381,9 +381,8 @@ real data:
    competition, comparisons that follow the design, a specific-targets call,
    unequal groups handled knowingly. Simulated data only. Still to do:
    - [ ] roles in the experiment editor and the review window (a GUI change)
-   - [ ] a normalisation that holds when many features are enriched in one
-     direction (a pulldown): median centring shifts the unchanged ones (D61
-     point 10)
+   - [x] a normalisation that holds when many features are enriched in one
+     direction (2026-10-01, D64: `normalize: auto` / `ratio`; simulated pulldowns only)
    - [ ] an R (limma) golden file for unequal groups
 8. [ ] Phospho: localisation filter and KSEA kinase activity. Only if a lab
    runs phospho; PhosphoSitePlus is non-commercial, so it is a user download.
@@ -651,6 +650,9 @@ Collected from the other docs; resolve before/during Phase 1.
       against 47 % of 2-fold changes): should the default change, or wait for the real benchmark? Are the
       `compare` verdict thresholds right (r ≥ 0.95, slope 0.9 to 1.1, offset ≤ 0.10 log2, 70 % of hits shared)?
       Is "check" at fewer than 3 samples per group, or 2-fold uneven groups, what the lab wants to be told?
+- [ ] Normalisation (D64): the lab PC's config.yaml says `normalize: median` (written by the app before 0.14.1);
+      set it to `auto` on the Analysis tab. Are the check's limits right on real pulldowns (0.1 log2, 3 times
+      the replicate scatter)? Is a pulldown against empty beads normalised at all in the lab's practice?
 - [ ] Phase 5: which pilot labs can we reach? Does this lab run titrations or phospho? (Orders 5C.)
 - [ ] Phase 6: is the PC's RAM in all 6 memory channels (speed of a local model)? Is a GPU present? May the assistant
       ever use a cloud model (institutional data policy), or strictly local?

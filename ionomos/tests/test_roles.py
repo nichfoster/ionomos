@@ -602,7 +602,9 @@ def test_imputation_driven_flags_follow_the_group_size():
 def test_imputation_driven_hits_in_an_unequal_experiment(tmp_path):
     dest = tmp_path / "exp"
     _dia(dest, seed=5, n=900)
-    out = downstream.analyze(dest, "DIA", analysis_cfg=CFG)
+    # median centring on purpose: it shifts this pulldown (D64), which is what makes hits out of features with
+    # one DMSO value; the default (auto -> ratio) leaves none of that kind for this seed
+    out = downstream.analyze(dest, "DIA", analysis_cfg={**CFG, "normalize": "median"})
     s = _json(out)
     hits = [r for r in _rows(out, "Probe_vs_DMSO_differential.tsv") if r["significant"]]
     want = [r for r in hits if (2 - int(r["n_control"])) / 2 >= 0.5 or (4 - int(r["n_treatment"])) / 4 >= 0.5]

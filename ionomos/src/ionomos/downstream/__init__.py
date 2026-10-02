@@ -672,6 +672,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
                         for d in diffs],
         "processing": processed.steps if processed else [],
         "imputation": processed.imputation if processed else None,
+        "normalisation": processed.normalization if processed else {},
         "model": model.as_dict(settings) if processed is not None and comps else {},
         "f_test": _f_summary(ftest, settings),
         "settings": analysis.as_dict(settings),

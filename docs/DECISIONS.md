@@ -2078,3 +2078,47 @@ back with the key gives the lab's own file. **Not verified**: real lab data
 and real FragPipe / DIA-NN / MaxQuant / Sage tables (their column names are
 from the engines' documentation and Ionomos' loaders); Windows (CI only);
 the window on screen; a bundle over a few hundred MB.
+
+
+### D64 — Normalisation: `auto` keeps median centring until it would shift the conditions, then uses feature ratios
+**2026-10-01.** D61 found that median centring shifted the unchanged features
+of a simulated pulldown by about 0.2 log2 between DMSO and probe, which made
+false hits near the cut-off when DMSO had two samples. The cause is general:
+the middle of a sample's abundance distribution, which spans several log2
+units, moves whenever a share of the features is enriched in one direction.
+
+1. **A second method, `ratio`.** Each sample is shifted by the median, over
+   stable features, of the feature's value minus its mean across samples. A
+   feature's ratio to its own mean has only the replicate noise, so 8 %
+   enriched features move its median by about 0.01 log2 instead of 0.2. Only
+   features measured in every sample are used, and of those the three
+   quarters with the steadiest profile (three passes), the idea of edgeR's
+   TMM trimming. Fewer than 20 such features: median centring, with a note.
+2. **`auto` is the default, and is median centring unless a check fails.**
+   FragPipe-Analyst's median centring stays the reference (D24), so where it
+   is safe the numbers are identical to before; the goldens are unchanged.
+   The check compares the two methods' sample shifts per condition. `auto`
+   switches when they disagree by more than 0.1 log2 between two conditions
+   and by more than 3 times the scatter among replicates.
+3. **An explicit `median` or `gn` is respected, and asks.** The same finding
+   then raises `NORMALISATION_COMPOSITION` as "needs your decision": the
+   results are shifted, and the lab PC's config, written by earlier
+   versions, says `median`. With `auto` it is a note.
+4. **Numbers** (simulated, `competition_pg_matrix`, 8 experiments each,
+   DMSO 2 / Probe 4 / Competition 4; unchanged features' median log2FC,
+   false hits, true hits):
+   - median, no imputation: -0.198, 11, 320 / 320; ratio or auto: -0.002, 2, 320 / 320
+   - median, Perseus imputation: -0.209, 6, 276 / 320; ratio or auto: -0.013, 4, 276 / 320
+   - with four DMSO samples the shift is the same size (-0.15) and is removed
+     the same way.
+
+   The check itself, on a two-condition table with random loading: with no
+   enrichment it never fired on 1,500 or 4,000 features (100 tables each);
+   on 100 features with 20 % missing values it fired in 14 of 187, where
+   median centring really is unsteady. With 8 % enriched among 1,500 it
+   fired in 99 of 100; with 3 % (a shift of 0.08) in 10 of 100.
+5. **Limits.** Both methods assume most features don't change. A pulldown
+   against empty beads breaks that for both; `none` is then the honest
+   setting, and the help says so. The limits (0.1 log2, 3 times the scatter,
+   three quarters kept) are choices, not measurements on real data. The
+   reproduce-in-R script notes that FragPipeAnalystR has no ratio step.

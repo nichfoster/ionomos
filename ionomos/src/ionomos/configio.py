@@ -46,7 +46,7 @@ def defaults(root: str | None = None, users_root: str | None = None) -> dict:
         "naming": {"condition_codes": {"D": "DMSO", "C": "Compound"}},
         "analysis": {"enabled": True, "test": "limma", "de_type": "control", "log2fc": 1.0, "alpha": 0.05,
                      "use_adjusted": True, "remove_contaminants": True, "filter_global_pct": 0,
-                     "filter_condition_pct": 50, "normalize": "median", "imputation": "auto", "min_valid": 2,
+                     "filter_condition_pct": 50, "normalize": "auto", "imputation": "auto", "min_valid": 2,
                      "enrichment": True, "enrichment_libraries": ["Hallmark", "GO Biological Process", "Reactome"],
                      "enrichment_gmt": "", "top_labels": 15,
                      "export": {"size": "slide169", "font_pt": 14, "font_family": "Arial", "palette": "default",
@@ -213,7 +213,8 @@ def dump_config(d: dict) -> str:
     a(f"  remove_contaminants: {_y(bool(an.get('remove_contaminants', True)))}")
     a(f"  filter_global_pct: {_y(an.get('filter_global_pct', 0))}   # keep features measured in >= this % of samples")
     a(f"  filter_condition_pct: {_y(an.get('filter_condition_pct', 50))}   # ... and in >= this % of one condition")
-    a(f"  normalize: {_y(an.get('normalize', 'median'))}   # median | gn (median + MAD) | none")
+    a(f"  normalize: {_y(an.get('normalize', 'auto'))}   # auto (median; ratio when many features change one way) | "
+      "median | gn (median + MAD) | ratio | none")
     a(f"  imputation: {_y(an.get('imputation', 'auto'))}   # auto | none | perseus | min | zero | mindet | minprob | knn")
     a(f"  min_valid: {_y(an.get('min_valid', 2))}   # measured values per group needed when nothing is imputed")
     a(f"  enrichment: {_y(bool(an.get('enrichment', True)))}   # gene-set enrichment of the hits (downloads libraries once)")

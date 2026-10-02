@@ -92,7 +92,8 @@ def payload(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: li
         "f": {"id": [], "label": [], "desc": []},
         "v": [], "imp": None, "comps": [], "notes": notes, "files": files,
         "settings": {"log2fc": s.log2fc, "alpha": s.alpha, "use_adjusted": s.use_adjusted, "top_labels": s.top_labels,
-                     "normalize": s.normalize, "test": s.test},
+                     "normalize": (p.normalization.get("used") if p and p.normalization else None) or s.normalize,
+                     "test": s.test},
         "imputationLabel": fpa.IMPUTATION_LABELS.get(p.imputation, "") if p else "",
         "qc": {}, "enr": [], "enrNote": "", "gsea": [], "evidence": "", "rep": [],
         "dose": dose or {"ran": False, "found": False, "reason": "No dose-response curves were fitted."},
@@ -306,8 +307,16 @@ def methods_text(m: QuantMatrix | None, p: fpa.Processed | None, diffs: list[Dif
             if s.filter_condition_pct:
                 rule.append(f"in at least {s.filter_condition_pct:g}% of the samples of at least one condition")
             steps.append("features kept when quantified " + " and ".join(rule))
-        if s.normalize != "none":
-            steps.append({"median": "samples median-centred", "gn": "samples median-centred and MAD-scaled"}[s.normalize])
+        used = (p.normalization.get("used") if p and p.normalization else None) or s.normalize
+        if used in ("median", "gn"):
+            steps.append({"median": "samples median-centred", "gn": "samples median-centred and MAD-scaled"}[used])
+        elif used == "ratio":
+            comp = (p.normalization.get("composition") or {}) if p else {}
+            steps.append("samples normalised on feature ratios (each sample shifted by the median, over the "
+                         f"{comp.get('features', 0):,} features with the most stable profile among those measured in "
+                         "every sample, of the feature's value minus its mean across samples)"
+                         + (", because median centring would have shifted the conditions against each other by "
+                            f"{comp['shift']:.2f} log2" if s.normalize == "auto" and comp.get("shift") else ""))
         imp = p.imputation if p else "none"
         if imp == "perseus":
             steps.append(f"missing values imputed from a normal distribution down-shifted by {s.impute_shift:g} SD "
@@ -521,7 +530,8 @@ def _settings_table(s: Settings, p: fpa.Processed | None, model=None, plan=None)
             ("Cut-offs", s.describe()),
             ("Contaminants", "removed" if s.remove_contaminants else "kept"),
             ("Missing-value filter", f"≥{s.filter_global_pct:g}% of all samples, ≥{s.filter_condition_pct:g}% in one condition"),
-            ("Normalisation", s.normalize),
+            ("Normalisation", s.normalize + (f" → {p.normalization['used']}" if p and p.normalization.get("used")
+                                             not in (None, s.normalize) else "")),
             ("Imputation", f"{s.imputation}" + (f" → {fpa.IMPUTATION_LABELS[p.imputation]}" if p else "")),
             ("Enrichment", ", ".join(s.enrichment_libraries) if s.enrichment else "off")]
     if s.exclude_samples:

@@ -202,7 +202,10 @@ MNAR. The QC tab "Missing vs intensity" tells which you have.
 
 Making samples comparable when they had slightly different amounts of material
 loaded. The default shifts each sample so that all samples have the same
-median. It removes a loading difference, not biology.
+median. It removes a loading difference, not biology. When many features
+change in one direction (a pulldown), the median itself moves; Ionomos then
+normalises on the features that stay stable instead
+([why](#issue.NORMALISATION_COMPOSITION)).
 
 ## Contaminants {#glossary.contaminants}
 

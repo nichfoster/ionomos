@@ -241,10 +241,16 @@ def fragpipe_analyst(folder: Path, m_loaded, p: fpa.Processed, diffs: list[DiffR
             "}",
             "se <- se[keep, ]",
         ]
-    if s.normalize == "median":
+    used = (p.normalization or {}).get("used") or s.normalize
+    if used == "median":
         lines.append("se <- MD_normalization(se)")
-    elif s.normalize == "gn":
+    elif used == "gn":
         lines.append("se <- GN_normalization(se)")
+    elif used == "ratio":
+        lines += ["# Ionomos normalised these samples on feature ratios (many features change in one direction, so median",
+                  "# centring would shift the conditions against each other). FragPipeAnalystR has no such step:",
+                  "# MD_normalization below is the nearest, and its fold changes will differ by that shift.",
+                  "se <- MD_normalization(se)"]
     imp = {"perseus": "man", "min": "min", "zero": "zero", "mindet": "MinDet", "minprob": "MinProb", "knn": "knn"}
     if p.imputation in imp:
         lines.append(f"se <- impute(se, fun = \"{imp[p.imputation]}\")")

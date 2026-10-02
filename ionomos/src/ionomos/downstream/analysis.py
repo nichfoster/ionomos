@@ -24,7 +24,7 @@ experiment.yaml `analysis:` block:
       remove_contaminants: true
       filter_global_pct: 0        # min % of all samples with a value
       filter_condition_pct: 50    # min % with a value in at least one condition
-      normalize: median           # median (default) | gn | none
+      normalize: auto             # auto (default: median, or ratio when many features change one way) | median | gn | ratio | none
       imputation: auto            # auto | none | perseus | min | zero | mindet | minprob | knn
       min_valid: 2                # measured values per group needed when nothing is imputed
       small_group_min_valid: half # half: the smaller group of an unbalanced comparison (DMSO n=2 vs n=4) needs
@@ -118,7 +118,7 @@ class Settings:
     remove_contaminants: bool = True
     filter_global_pct: float = 0.0
     filter_condition_pct: float = 50.0
-    normalize: str = "median"
+    normalize: str = "auto"
     imputation: str = "auto"
     impute_shift: float = 1.8
     impute_scale: float = 0.3
@@ -295,7 +295,7 @@ def settings_from(*layers: dict | None) -> Settings:
                     v = str(v).lower()
                     v = "median" if v in ("md", "median") else v
                     if v not in fpa.NORMALIZATION_METHODS:
-                        raise AnalysisError("normalize must be none, median or gn")
+                        raise AnalysisError("normalize must be auto, median, gn, ratio or none")
                 elif k == "imputation":
                     v = str(v).lower()
                     v = {"man": "perseus", "perseus-type": "perseus"}.get(v, v)
