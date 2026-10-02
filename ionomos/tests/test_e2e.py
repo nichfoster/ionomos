@@ -56,11 +56,13 @@ def _wait(pred, timeout=10.0):
 
 
 def test_slow_drop_is_queued_once_stable(bed):
-    w, _ = _run_watcher(bed)
+    # The settle time is 40x the pause between files. At 0.3s a Windows CI runner at half speed
+    # paused longer than that between two files and the watcher filed the drop with 2 of 9 raws.
+    w, _ = _run_watcher(bed, stable=2.0)
     try:
         # slow copy: 9 raws + 1 note, 0.05s apart -> the watcher must not grab it early
         testbed.drop(bed["root"], "iso_good", slow=True, delay=0.05)
-        assert _wait(lambda: bed["ledger"].next_queued() is not None)
+        assert _wait(lambda: bed["ledger"].next_queued() is not None, timeout=30)
         job = bed["ledger"].next_queued()
         assert job.user == "EJQ" and job.method == "isoDTB"
         dest = Path(job.dest_dir)
