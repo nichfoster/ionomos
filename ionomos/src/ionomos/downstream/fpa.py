@@ -9,6 +9,8 @@ table in this order; so does this module, with their defaults:
     global_filter         min % of samples with a value                    filter_missing(global_pct)
     filter_by_condition   min % with a value in at least one condition     filter_missing(condition_pct)
     MD / GN normalization median centring (+ MAD scaling)                  normalize("median" | "gn")
+    (not FragPipe-Analyst) ratio normalisation on stable features, and     normalize("ratio" | "auto")
+                           auto: median unless the composition check fails
     impute(fun = "man")   Perseus-type draws, set.seed(123)                impute("perseus")   (exact, R's RNG)
       "min" "zero" "MinDet" "MinProb" "knn"                                impute(...)          (see each)
     test_limma            ~0 + condition, per-contrast refit when values   limma_contrasts / limma_others
@@ -38,7 +40,13 @@ from ionomos.downstream.rrandom import RRandom
 Matrix = list[list[float | None]]
 
 IMPUTATION_METHODS = ("auto", "none", "perseus", "min", "zero", "mindet", "minprob", "knn")
-NORMALIZATION_METHODS = ("none", "median", "gn")
+NORMALIZATION_METHODS = ("none", "median", "gn", "ratio", "auto")
+NORMALIZATION_LABELS = {"median": "median centring", "gn": "median centring + MAD scaling",
+                        "ratio": "ratio normalisation (stable features)"}
+# auto: median centring unless it and the ratio method disagree by more than this between conditions (log2)
+COMPOSITION_LIMIT = 0.1
+RATIO_MIN_FEATURES = 20   # complete features the ratio method needs
+RATIO_KEEP = 0.75         # the share of them kept as "stable" (lowest spread across samples)
 
 
 @dataclass
@@ -52,6 +60,7 @@ class Processed:
     before_filter: QuantMatrix | None = None   # after contaminant removal + sample choice, before filtering
     normalized_from: Matrix | None = None      # values before normalisation (distribution plot)
     imputation: str = "none"
+    normalization: dict = field(default_factory=dict)   # normalize_info: method asked / used, the composition check
 
     @property
     def n_imputed(self) -> int:
@@ -133,29 +142,102 @@ def filter_missing(m: QuantMatrix, global_pct: float = 0, condition_pct: float =
 # ------------------------------------------------------------ normalisation --
 
 
-def normalize(m: QuantMatrix, method: str) -> QuantMatrix:
-    """none | median (FragPipeAnalystR MD_normalization) | gn (GN_normalization: median + MAD).
+def ratio_shifts(cols: list[list[float | None]]) -> tuple[list[float] | None, int]:
+    """Per-sample loading (log2) from the features, not from the abundance distribution: the median, over
+    stable features, of each value minus that feature's mean across the samples. (shifts centred on 0, number of
+    features used); (None, n) when fewer than RATIO_MIN_FEATURES features are measured in every sample.
 
-    FragPipeAnalystR centres every sample on 0; here samples are centred on the median of the sample
-    medians instead, so values stay on the familiar log2-intensity scale. Fold changes, tests, PCA and
-    imputation are unaffected by that shift."""
+    Median centring compares the middle of each sample's abundance distribution, which is several log2 units
+    wide: when a share of the features is enriched in some samples (a pulldown, a depletion), that middle moves
+    and every unchanged feature is shifted the other way. A feature's own ratio to its mean is narrow (the
+    replicate noise), so the median of the ratios hardly moves; features that vary most across the samples (the
+    changed ones) are left out before it is taken, as edgeR's TMM trims them."""
+    n = len(cols)
+    rows = [i for i in range(len(cols[0]) if cols else 0) if all(c[i] is not None for c in cols)]
+    if n < 2 or len(rows) < RATIO_MIN_FEATURES:
+        return None, len(rows)
+    diff = {i: [cols[j][i] - sum(cols[k][i] for k in range(n)) / n for j in range(n)] for i in rows}
+    use = rows
+    shifts = [0.0] * n
+    for _ in range(3):  # shifts -> spread of what they leave -> the stable three quarters -> shifts again
+        shifts = [stats.median([diff[i][j] for i in use]) for j in range(n)]
+        spread = {i: sum((diff[i][j] - shifts[j]) ** 2 for j in range(n)) for i in rows}
+        keep = max(RATIO_MIN_FEATURES, int(len(rows) * RATIO_KEEP))
+        use = sorted(rows, key=lambda i: (spread[i], i))[:keep]
+    shifts = [stats.median([diff[i][j] for i in use]) for j in range(n)]
+    mean = sum(shifts) / n
+    return [s - mean for s in shifts], len(use)
+
+
+def normalize_info(m: QuantMatrix, method: str) -> tuple[QuantMatrix, dict]:
+    """(normalised matrix, what was done). Methods:
+
+      none     nothing
+      median   FragPipeAnalystR MD_normalization: every sample's median moved to the median of the sample medians
+               (FragPipeAnalystR centres on 0; the shift keeps the familiar log2-intensity scale and changes no
+               fold change, test, PCA or imputation)
+      gn       GN_normalization: median centring, then scaled to one MAD
+      ratio    ratio_shifts(): robust when many features change in one direction
+      auto     median, unless the composition check fails: the two methods' sample shifts, averaged per condition,
+               disagree by more than COMPOSITION_LIMIT log2 between two conditions, and by more than 3 times
+               the scatter of that disagreement among replicates. Then ratio is used.
+
+    The info always carries the composition check when it could be made ("composition": the largest
+    disagreement between two conditions, and which), so median / gn can be warned about."""
+    info: dict = {"asked": method, "used": method}
     if method == "none" or m.kind != "intensity" or not m.samples:
-        return m
+        info["used"] = "none"
+        return m, info
     cols = [[row[j] for row in m.values] for j in range(len(m.samples))]
     meds = [stats.median([v for v in c if v is not None]) for c in cols]
     good = [x for x in meds if not math.isnan(x)]
     if not good:
-        return m
+        info["used"] = "none"
+        return m, info
     target = stats.median(good)
+    rshift, n_used = ratio_shifts(cols) if all(not math.isnan(x) for x in meds) else (None, 0)
+    if rshift is not None:
+        mshift = [x - sum(meds) / len(meds) for x in meds]
+        by: dict[str, list[float]] = {}
+        for s, a, b in zip(m.samples, mshift, rshift, strict=True):
+            by.setdefault(m.condition[s], []).append(a - b)
+        mean = {c: sum(v) / len(v) for c, v in by.items()}
+        hi, lo = max(mean, key=mean.get), min(mean, key=mean.get)
+        shift = mean[hi] - mean[lo]
+        # replicates of a condition share its composition, so their scatter is the check's own noise (a short
+        # table with many missing values makes sample medians jump): the shift must also stand out from it
+        df = sum(len(v) - 1 for v in by.values())
+        var = sum((x - mean[c]) ** 2 for c, v in by.items() for x in v) / df if df > 0 else 0.0
+        se = math.sqrt(var * (1 / len(by[hi]) + 1 / len(by[lo])))
+        info["composition"] = {"shift": shift, "between": [hi, lo], "limit": COMPOSITION_LIMIT, "se": se,
+                               "features": n_used, "exceeded": shift > COMPOSITION_LIMIT and shift > 3 * se}
+    else:
+        info["composition"] = {"shift": None, "features": n_used, "exceeded": False,
+                               "reason": f"fewer than {RATIO_MIN_FEATURES} features are measured in every sample"}
+    used = method
+    if method == "auto":
+        used = "ratio" if info["composition"]["exceeded"] else "median"
+    elif method == "ratio" and rshift is None:
+        used = "median"
+        info["fallback"] = info["composition"]["reason"]
+    info["used"] = used
+    if used == "ratio":
+        centered = [[None if v is None else v - s for v in c] for c, s in zip(cols, rshift, strict=True)]
+        return _copy(m, values=[[centered[j][i] for j in range(len(m.samples))] for i in range(len(m.values))]), info
     centered = [[None if v is None else v - md for v in c] if not math.isnan(md) else c for c, md in zip(cols, meds, strict=True)]
-    if method == "gn":
+    if used == "gn":
         mads = [stats.mad([v for v in c if v is not None]) for c in centered]
         okm = [x for x in mads if x and not math.isnan(x)]
         mad0 = stats.median(okm) if okm else 1.0
         centered = [[None if v is None else v / md * mad0 for v in c] if md and not math.isnan(md) else c
                     for c, md in zip(centered, mads, strict=True)]
     shifted = [[None if v is None else v + target for v in c] for c in centered]
-    return _copy(m, values=[[shifted[j][i] for j in range(len(m.samples))] for i in range(len(m.values))])
+    return _copy(m, values=[[shifted[j][i] for j in range(len(m.samples))] for i in range(len(m.values))]), info
+
+
+def normalize(m: QuantMatrix, method: str) -> QuantMatrix:
+    """normalize_info() without the info."""
+    return normalize_info(m, method)[0]
 
 
 # --------------------------------------------------------------- imputation --
@@ -296,10 +378,16 @@ def process(m: QuantMatrix, *, exclude: list[str] | None = None, conditions: dic
         steps.append({"step": "missing-value filter", "rule": "values in " + " and ".join(what),
                       "removed": removed, "features": len(m.features)})
     pre_norm = [list(r) for r in m.values]
-    m = normalize(m, normalization)
-    if normalization != "none" and m.kind == "intensity":
-        steps.append({"step": "normalisation", "method": {"median": "median centring", "gn": "median centring + MAD scaling"}[normalization],
-                      "features": len(m.features)})
+    m, norm = normalize_info(m, normalization)
+    if norm["used"] != "none":
+        steps.append({"step": "normalisation", "method": NORMALIZATION_LABELS[norm["used"]], "features": len(m.features)})
+    comp = norm.get("composition") or {}
+    if norm["asked"] == "auto" and norm["used"] == "ratio":
+        notes.append(f"normalisation: median centring would have shifted {comp['between'][0]} against "
+                     f"{comp['between'][1]} by {comp['shift']:.2f} log2 (many features change in one direction), so "
+                     f"the samples were normalised on the ratios of {comp['features']:,} stable features instead")
+    if norm.get("fallback"):
+        notes.append(f"normalisation: ratio was asked for, but {norm['fallback']}; median centring was used")
     method = resolve_imputation(imputation, m)
     # the "measured" matrix keeps the same rows as the imputed one (all-missing rows go in both)
     keep = [i for i, r in enumerate(m.values) if any(v is not None for v in r)]
@@ -314,7 +402,7 @@ def process(m: QuantMatrix, *, exclude: list[str] | None = None, conditions: dic
         k = sum(sum(r) for r in mask)
         steps.append({"step": "imputation", "method": IMPUTATION_LABELS[method], "values": k,
                       "percent": round(100 * k / total, 1), "features": len(im.features)})
-    return Processed(im, measured, mask, steps, before, pre_norm, method), notes
+    return Processed(im, measured, mask, steps, before, pre_norm, method, norm), notes
 
 
 IMPUTATION_LABELS = {"none": "none", "perseus": "Perseus-type (down-shift 1.8 SD, width 0.3 SD)",

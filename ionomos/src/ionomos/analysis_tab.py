@@ -31,7 +31,7 @@ FRAGPIPE_ANALYST_DEFAULTS = {"test": "limma", "de_type": "all", "log2fc": "1", "
                              "normalize": "none", "imputation": "auto"}
 IONOMOS_DEFAULTS = {"test": "limma", "de_type": "control", "log2fc": "1", "alpha": "0.05", "use_adjusted": True,
                     "remove_contaminants": True, "filter_global_pct": "0", "filter_condition_pct": "50",
-                    "normalize": "median", "imputation": "auto"}
+                    "normalize": "auto", "imputation": "auto"}
 DE_LABELS = {"control": "each condition vs the control", "all": "all pairs", "others": "each condition vs all others"}
 
 
@@ -208,7 +208,8 @@ class AnalysisTab:
         row(pr, 2, "… and ≥ % of one condition", ttk.Entry(pr, textvariable=self.v("analysis.filter_condition_pct"), width=6),
             "50 = 2 of 3 replicates (FragPipe-Analyst: 0)")
         row(pr, 3, "Normalisation", ttk.Combobox(pr, textvariable=self.v("analysis.normalize"), state="readonly", width=10,
-                                                 values=["median", "gn", "none"]), "median centring; gn adds MAD scaling")
+                                                 values=["auto", "median", "gn", "ratio", "none"]),
+            "auto = median centring, or ratio when many features change one way")
         row(pr, 4, "Imputation", ttk.Combobox(pr, textvariable=self.v("analysis.imputation"), state="readonly", width=10,
                                               values=["auto", "perseus", "none", "min", "zero", "mindet", "minprob", "knn"]),
             "auto = Perseus-type for LFQ/DIA, none for TMT")
@@ -272,7 +273,7 @@ class AnalysisTab:
         test = str(an.get("test") or "limma")
         self.v("analysis.test").set("limma" if test == "moderated" else test)
         self.v("analysis.de_type").set(str(an.get("de_type") or "control"))
-        self.v("analysis.normalize").set(str(an.get("normalize") or "median"))
+        self.v("analysis.normalize").set(str(an.get("normalize") or "auto"))
         self.v("analysis.imputation").set(str(an.get("imputation") or "auto"))
         for k, dflt in (("enabled", True), ("use_adjusted", True), ("remove_contaminants", True), ("enrichment", True)):
             self.bv(f"analysis.{k}", dflt).set(bool(an.get(k, dflt)))
@@ -301,7 +302,7 @@ class AnalysisTab:
                 raise ConfigError(f"analysis.{k} must be a number, got {raw!r}") from None
         an["test"] = self.v("analysis.test").get().strip() or "limma"
         an["de_type"] = self.v("analysis.de_type").get().strip() or "control"
-        an["normalize"] = self.v("analysis.normalize").get().strip() or "median"
+        an["normalize"] = self.v("analysis.normalize").get().strip() or "auto"
         an["imputation"] = self.v("analysis.imputation").get().strip() or "auto"
         an["enrichment_libraries"] = [n for n in LIBRARIES if self.bv(f"analysis.lib.{n}").get()]
         an["enrichment_gmt"] = self.v("analysis.enrichment_gmt").get().strip()

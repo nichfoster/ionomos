@@ -147,7 +147,8 @@ def test_every_static_figure_is_plain_editable_svg(payload, experiment):
         assert len(_texts(root)) > 5  # text stays text
         desc = root.find(f"{SVG}desc").text
         assert "Experiment: Export test" in desc and "Export style: 16:9 slide (1280.0 × 720.0 px), text 14 pt Arial" in desc
-        assert "Made by a test" in desc and "Analysis: limma moderated t-test; normalisation: median" in desc
+        used = experiment[1].summary["normalisation"]["used"]   # what `auto` chose for this table
+        assert "Made by a test" in desc and f"Analysis: limma moderated t-test; normalisation: {used}" in desc
         assert what
     for name in ("volcano_DrugA_vs_DMSO.svg", "pca.svg"):  # plots that fill the size give exactly the size
         root = ET.fromstring(dict((n, s) for n, _w, s in figs)[name].encode("utf-8"))

@@ -72,7 +72,7 @@ test("SVG of the volcano: the slide size, text as text, colours written out, the
   assert.equal(root.querySelector("title").textContent, "Volcano plot: Drug vs DMSO");
   const desc = root.querySelector("desc").textContent;
   for (const want of ["Figure: Volcano plot", "Experiment: Fixture_Exp", "Comparison: Drug vs DMSO", "Cut-offs: |log2FC| ≥ 1 and adjusted p ≤ 0.05",
-    "Analysis: limma moderated t-test; normalisation: median", "Export style: 16:9 slide (1280 × 720 px), text 14 pt Arial, palette default", "Made by the Ionomos report, 20"]) {
+    "Analysis: limma moderated t-test; normalisation: " + BASE.settings.normalize, "Export style: 16:9 slide (1280 × 720 px), text 14 pt Arial, palette default", "Made by the Ionomos report, 20"]) {
     assert.ok(desc.includes(want), `<desc> says: ${want}`);
   }
   assert.ok(root.querySelectorAll("circle").length > 80, "the points");

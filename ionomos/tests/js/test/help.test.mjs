@@ -77,8 +77,12 @@ test("every QC tab has its own ?", async () => {
 
 test("an issue box gets a ? with that issue's help, and the Help section lists it", async () => {
   const { window, document, errors } = await loadReport();
-  const box = document.querySelector(".issues > .issue");
-  assert.ok(box, "the fixture has an issue");
+  // the fixture's small table raises more than one issue: take the "few features" one
+  const box = [...document.querySelectorAll(".issues > .issue")].find((x) => {
+    const q = x.querySelector(".sev > button.qhelp");
+    return q && q.dataset.help === "issue.FEW_FEATURES";
+  });
+  assert.ok(box, "the fixture has the issue");
   const b = box.querySelector(".sev > button.qhelp");
   assert.ok(b);
   assert.equal(b.dataset.help, "issue.FEW_FEATURES");

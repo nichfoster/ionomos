@@ -307,10 +307,10 @@ def test_real_benchmark_files_cli_and_the_report(hye, tmp_path, capsys):
     assert all(p.read_bytes() == b for p, b in before.items())
     # the settings of this experiment on simulated data, written beside it
     assert cli.main(["benchmark", "--grid", "quick", "--like", str(hye["dir"]), "--quiet"]) == 0
-    assert "20260930_QC_DIA_HYE: perseus + median: observed FDP" in capsys.readouterr().out
+    assert "20260930_QC_DIA_HYE: perseus + auto: observed FDP" in capsys.readouterr().out
     sim = json.loads((results / "benchmark_simulated.json").read_text(encoding="utf-8"))
     assert {(r["controls"], r["treated"]) for r in sim["rows"]} == {(3, 3), (2, 4), (4, 4)}
-    assert len(sim["headline"]) == 1 and sim["settings"][-1] == "20260930_QC_DIA_HYE: perseus + median"
+    assert len(sim["headline"]) == 1 and sim["settings"][-1] == "20260930_QC_DIA_HYE: perseus + auto"
     # the next analysis shows both under "How far to trust this"
     out = downstream.analyze(hye["dir"], "DIA", analysis_cfg={**CFG, "control": "A"})
     t = out.summary["trust"]

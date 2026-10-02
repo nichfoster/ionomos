@@ -188,7 +188,7 @@ def like(folder: str | Path) -> dict:
             design = (sizes[ctrl], sizes[t])
             break
     exp = results.parent.name if results.name == "results" else results.name
-    label = f"{exp}: {over.get('imputation', 'auto')} + {over.get('normalize', 'median')}"
+    label = f"{exp}: {over.get('imputation', 'auto')} + {over.get('normalize', 'auto')}"
     return {"label": label, "settings": over, "design": design, "alpha": float(st.get("alpha", 0.05)),
             "log2fc": float(st.get("log2fc", 1.0)), "results": results,
             "analysis": {"generated_at": info.get("generated_at"), "ionomos_version": info.get("ionomos_version"),
@@ -202,7 +202,7 @@ def _ratio(a: float, b: float) -> float | None:
 def _pool(name: str, over: dict, c: int, t: int, e: float, miss: str, runs: list[dict]) -> dict:
     tot = {k: sum(r[k] for r in runs) for k in (runs[0] if runs else {})}
     per_seed = [r["false_q"] / r["hits_q"] for r in runs if r["hits_q"]]
-    return {"setting": name, "imputation": over.get("imputation", "auto"), "normalize": over.get("normalize", "median"),
+    return {"setting": name, "imputation": over.get("imputation", "auto"), "normalize": over.get("normalize", "auto"),
             "controls": c, "treated": t, "effect_log2": e, "missing": miss, "seeds": len(runs),
             "planted": tot.get("planted", 0), "tested_share": _ratio(tot.get("tested", 0), tot.get("features", 0)),
             "hits": tot.get("hits", 0), "false_hits": tot.get("false", 0),

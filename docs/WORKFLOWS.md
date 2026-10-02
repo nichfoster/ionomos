@@ -245,7 +245,7 @@ features × samples matrix of log2 values and runs the same statistics:
 - **Pipeline:** FragPipe-Analyst's, ported from FragPipeAnalystR (D24) and
   checked against the real package: contaminants removed → features kept when
   measured in ≥ 50 % of at least one condition (`filter_condition_pct`;
-  FragPipe-Analyst: 0) → median centring (`normalize`: median | gn | none) →
+  FragPipe-Analyst: 0) → normalisation (`normalize`: auto | median | gn | ratio | none; see below) →
   imputation (`imputation: auto` = Perseus-type down-shifted draws for DIA and
   label-free, none for TMT; also none | min | zero | mindet | minprob | knn) →
   limma (`~0 + condition`, eBayes, 95 % CIs) → Benjamini–Hochberg. Hits need
@@ -369,6 +369,7 @@ features × samples matrix of log2 values and runs the same statistics:
   | LOW_SAMPLE | decide | a sample has < 40 % of the median identifications (failed injection?) |
   | ZERO_TESTED / NO_VOLCANO / CRASH_* | problem | nothing testable, plot not written, a step crashed |
   | HIGH_IMPUTATION, FEW_FEATURES, NO_HITS, ENRICHMENT | note | worth knowing |
+  | NORMALISATION_COMPOSITION | decide / note | median centring would shift the conditions against each other (many features change one way): asks when `median` / `gn` is chosen, a note when `auto` switched to the ratio method |
   | TIMES | decide / note | a time course whose time points can't all be read (a name in `analysis.times` that isn't a condition, two times in one name) |
   | LIGANDED_DIRECTION, SITE_ANNOTATION | note | isoDTB: the competition ratio looks reversed; the site annotation file can't be used |
   | PSM_MASS_ERROR, PSM_MISSED_CLEAVAGES | note | a run's median precursor mass error is 10 ppm or more from 0; half or more of a run's PSMs have a missed cleavage |
@@ -466,6 +467,29 @@ analysis:                      # experiment.yaml (one experiment) or config.yaml
   quadrant of specific binders marked; the calls follow the live cut-offs).
 - Not confirmed by the lab: the keywords and the rule. Not tested on a real
   experiment.
+
+**Normalisation** (`fpa.normalize_info`, D64). `auto`, the default for new
+set-ups, is FragPipe-Analyst's median centring unless that would shift the
+conditions against each other:
+
+- Median centring lines up the middle of each sample's abundance
+  distribution. When a share of the features is enriched in one direction (a
+  pulldown, a depletion), that middle moves and every unchanged feature is
+  pushed the other way: about 0.2 log2 with 8 % enriched in simulation.
+- The **ratio** method shifts each sample by the median, over the stable
+  three quarters of the features measured in every sample, of the feature's
+  value minus its mean across samples. A feature's own ratio is narrow, so
+  enrichment barely moves it; the features that vary most are left out first.
+  It needs 20 features measured in every sample, else median centring is used.
+- **The check**: the two methods' sample shifts are averaged per condition.
+  If they disagree by more than 0.1 log2 between two conditions, and by more
+  than 3 times the scatter among replicates, `auto` uses the ratio method and
+  says so (`NORMALISATION_COMPOSITION`, a note). With `median` or `gn` chosen
+  explicitly, the same finding asks the user to switch.
+- When nothing changes in one direction, `auto` is median centring, with
+  identical numbers.
+- `analysis.json` → `normalisation` records the method asked, the method
+  used and the check.
 
 **Time courses** (`downstream/timecourse.py`, D53). When a series has three
 or more time points (`Drug_0h`, `Drug_1h`, `Drug_4h`, … or `analysis.times`),

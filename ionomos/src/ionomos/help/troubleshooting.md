@@ -772,3 +772,31 @@ written, then **Re-run analysis**.
 Some gene-set libraries could not be loaded, usually because there was no
 internet the first time a library was needed. **Re-run analysis** when the PC
 is online; after that it works offline.
+
+## The normalisation shifts the conditions against each other {#issue.NORMALISATION_COMPOSITION}
+
+Normalisation puts the samples on one scale so that a difference in how much
+was loaded doesn't look like biology. Median centring does it by lining up
+the middle of each sample's values. That works when most features are the
+same in every sample. In a pulldown, a depletion or a strong treatment a
+large share of the features is enriched or depleted in one direction, the
+middle moves, and every unchanged feature is pushed the other way. A few of
+them then pass the fold-change cut-off, mostly when a group has only two
+samples.
+
+Ionomos checks for this by also normalising on the features themselves: each
+sample is shifted by the median ratio of its stable features to their mean
+across samples. When the two methods disagree by more than 0.1 log2 between
+two conditions, median centring is not safe.
+
+- With **Normalisation: auto** (the default for new set-ups) Ionomos uses the
+  ratio method by itself whenever that happens, and this entry only tells
+  you. Nothing to do.
+- With **median** or **gn** chosen, the results are shifted by the amount in
+  the message. Set Normalisation to **auto** on the Analysis tab (or
+  `normalize: auto` under `analysis:`), and run the analysis again
+  ([How to re-run](#faq.rerun)). **ratio** uses the ratio method always.
+
+Neither method is right when nearly everything changes, for example a
+pulldown against empty beads. Then no normalisation (`none`), equal loading
+and more replicates are the honest choices.

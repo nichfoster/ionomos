@@ -360,6 +360,33 @@ def check(f: Findings) -> list[Issue]:
                            "The sample was lost or degraded in prep"],
                           ["Leave the sample out here and Run analysis (you can always add it back)"],
                           {"samples": [x for x, _ in low], "counts": dict(low), "median": med}))
+        if p is not None:
+            comp = (getattr(p, "normalization", None) or {}).get("composition") or {}
+            asked, used = (p.normalization or {}).get("asked"), (p.normalization or {}).get("used")
+            if comp.get("exceeded") and used in ("median", "gn"):
+                a, b = comp["between"]
+                add(Issue("NORMALISATION_COMPOSITION", "input", "The normalisation shifts the conditions against each other",
+                          f"Median centring moves {a} against {b} by {comp['shift']:.2f} log2 compared with a "
+                          f"normalisation on {comp['features']:,} stable features. Unchanged features then look "
+                          "changed by that much, and some pass the fold-change cut-off.",
+                          ["Many features are enriched or depleted in one direction (a pulldown, a depletion, a "
+                           "strong treatment), so the middle of the abundance distribution moves",
+                           "A sample with far fewer identifications than the others",
+                           "A short table with many missing values: each sample's median then rests on different features"],
+                          ["Set Normalisation to auto (Analysis tab, or normalize: auto under analysis:) and Run "
+                           "analysis: it uses the ratio method whenever this happens",
+                           "Or choose ratio to use it always, or none if the samples should not be put on one scale"],
+                          {"shift": round(comp["shift"], 3), "between": [a, b], "asked": asked}))
+            elif comp.get("exceeded") and asked == "auto" and used == "ratio":
+                a, b = comp["between"]
+                add(Issue("NORMALISATION_COMPOSITION", "warning", "Normalised on stable features, not on the median",
+                          f"Median centring would have moved {a} against {b} by {comp['shift']:.2f} log2, because "
+                          "many features change in one direction. The samples were normalised on the ratios of "
+                          f"{comp['features']:,} stable features instead, so unchanged features stay unchanged.",
+                          ["A pulldown, a depletion or a strong treatment: a large share of the features is "
+                           "enriched or depleted"],
+                          ["Nothing to do. To force one method, set Normalisation to median or ratio"],
+                          {"shift": round(comp["shift"], 3), "between": [a, b], "asked": asked}))
         if p is not None and p.n_imputed:
             total = len(p.m.values) * len(p.m.samples) or 1
             pct = 100 * p.n_imputed / total

@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-10-01
+
+### Changed
+
+- **Normalisation: `auto` is the new default** (D64, [docs/WORKFLOWS.md](docs/WORKFLOWS.md)).
+  It is median centring, with identical numbers, unless that would shift
+  the conditions against each other; then the samples are normalised on the
+  ratios of their stable features (`ratio`, also selectable). An existing
+  `config.yaml` that says `normalize: median` keeps median centring; set it
+  to `auto` on the Analysis tab.
+
+### Fixed
+
+- **A pulldown's unchanged proteins were shifted by the normalisation.** When
+  many features are enriched in one direction, median centring moved every
+  unchanged feature the other way (about 0.2 log2 with 8 % enriched in
+  simulation), and with two controls some passed the fold-change cut-off.
+  `auto` now detects this and normalises on stable features: the shift
+  falls to about 0.01 log2 and the false hits from 11 to 2 over 8 simulated
+  experiments without imputation (6 to 4 with it). With `median` or `gn`
+  chosen, the report now asks (`NORMALISATION_COMPOSITION`). `analysis.json`
+  → `normalisation` records what was used. Checked on simulated pulldowns
+  only.
+
 ## [0.14.0] - 2026-10-01
 
 ### Added
