@@ -26,9 +26,10 @@ Command line.
                                                    an Ionomos analysis against a reference result of the same experiment
                                                    (another Ionomos run, FragPipe-Analyst, limma, MSstats, Perseus, R):
                                                    agreement of fold changes, hit calls and p-values, with a verdict
-    ionomos benchmark [--grid quick|standard] [--like FOLDER]
+    ionomos benchmark [--grid quick|standard] [--kind dia|isodtb|tmt] [--like FOLDER]
                                                    accuracy on simulated data with planted changes: sensitivity and
                                                    observed false discoveries for each imputation / normalisation
+                                                   (isoDTB: test, mixing error; TMT: IRS, a pulldown)
     ionomos benchmark FOLDER --expected hye.yaml  a mixed-species / spike-in run: measured against expected ratios
     ionomos help     [TOPIC] [--open]             plain-language help: prints TOPIC (NO_TABLE, pca, ...) and
                                                    writes help.html (--open: in the browser, at TOPIC)
@@ -835,7 +836,7 @@ def cmd_benchmark(args) -> int:
         out = accuracy.run_benchmark_real(args.folder, args.expected, print, out=args.out)
     else:
         out = accuracy.run_benchmark_simulated(
-            args.grid, print, like=args.like, seeds=args.seeds, out=args.out,
+            args.grid, print, like=args.like, seeds=args.seeds, out=args.out, kind=args.kind,
             progress=None if args.quiet else (lambda m: print(f"  … {m}", flush=True)))
     if out.error:
         print(out.error, file=sys.stderr)
@@ -1181,14 +1182,19 @@ def main(argv: list[str] | None = None) -> int:
                                     "a grid (replicates 2 to 6, 2 controls vs 4 treated, effect sizes, missing "
                                     "values) and report sensitivity, the observed false discovery proportion "
                                     "against the nominal alpha and the fold-change bias for each imputation / "
-                                    "normalisation setting. With FOLDER and --expected: compare an analysed "
-                                    "mixed-species (human / yeast / E. coli) or spike-in experiment with the "
-                                    "expected ratio per species or protein list.")
+                                    "normalisation setting. --kind isodtb: site ratios (replicates, sites changed "
+                                    "one way, a heavy / light mixing error); --kind tmt: several TMT plexes with a "
+                                    "pooled reference (IRS settings, a pulldown). With FOLDER and --expected: "
+                                    "compare an analysed mixed-species (human / yeast / E. coli) or spike-in "
+                                    "experiment with the expected ratio per species or protein list.")
     bm.add_argument("folder", nargs="?", help="an analysed benchmark experiment (with --expected)")
     bm.add_argument("--expected", metavar="YAML", help="expected ratios per species or protein list, e.g. "
                                                        "expected: {HUMAN: 1, YEAST: 2, ECOLI: 0.25}")
     bm.add_argument("--grid", choices=["quick", "standard"], default="standard",
                     help="simulated: quick (seconds) or standard (about a minute; default)")
+    bm.add_argument("--kind", choices=["dia", "isodtb", "tmt"],
+                    help="simulated: the kind of data (default dia: label-free protein intensities; with --like the "
+                         "experiment's own kind)")
     bm.add_argument("--like", metavar="FOLDER", help="simulated: add the settings and group sizes of this analysed "
                                                      "experiment, and write into its results folder")
     bm.add_argument("--seeds", type=int, help="simulated: tables per scenario (default 5; quick 2)")

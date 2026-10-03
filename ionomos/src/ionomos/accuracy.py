@@ -189,9 +189,10 @@ def run_benchmark_real(folder, expected, say: Say = _quiet, out=None) -> Outcome
 
 
 def run_benchmark_simulated(grid: str = "standard", say: Say = _quiet, *, like=None, seeds: int | None = None,
-                            out=None, progress: Say | None = None) -> Outcome:
-    """`ionomos benchmark [--grid G] [--like FOLDER]`: the analysis on simulated data; benchmark_simulated.* into
-    `out`, else the --like experiment's results folder, else ./ionomos_benchmark."""
+                            out=None, progress: Say | None = None, kind: str | None = None) -> Outcome:
+    """`ionomos benchmark [--grid G] [--kind K] [--like FOLDER]`: the analysis on simulated data;
+    benchmark_simulated[_<kind>].* into `out`, else the --like experiment's results folder, else
+    ./ionomos_benchmark. `kind` is dia / isodtb / tmt (D66); with `like` it comes from the experiment."""
     from ionomos.downstream import benchmark
 
     extra, designs, alpha, log2fc, dest, analysis_info = None, None, 0.05, 1.0, default_benchmark_dir(), {}
@@ -203,9 +204,15 @@ def run_benchmark_simulated(grid: str = "standard", say: Say = _quiet, *, like=N
         extra, alpha, log2fc, dest = [(lk["label"], lk["settings"])], lk["alpha"], lk["log2fc"], lk["results"]
         designs = [lk["design"]] if lk["design"] else None
         analysis_info = lk["analysis"]
-    say(f"simulated benchmark, grid {grid}" + (f", with the settings of {like}" if like else ""))
+        if kind and kind != lk["kind"]:
+            return Outcome(2, error=f"{like} holds {lk['kind']} data ({benchmark.KINDS[lk['kind']]}); its settings "
+                                    f"can't be benchmarked as {kind}. Leave out --kind")
+        kind = lk["kind"]
+    kind = kind or "dia"
+    say(f"simulated benchmark, grid {grid}" + ("" if kind == "dia" else f", {kind} data") +
+        (f", with the settings of {like}" if like else ""))
     try:
-        res = benchmark.simulated(grid, extra, designs, seeds, alpha, log2fc, progress=progress)
+        res = benchmark.simulated(grid, extra, designs, seeds, alpha, log2fc, progress=progress, kind=kind)
         if like:
             res["analysis"] = analysis_info
             res["headline"] = [v for v in res["verdicts"] if v.startswith(extra[0][0] + ":")]

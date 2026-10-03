@@ -187,6 +187,9 @@ Two ways to measure it, both with `ionomos benchmark` or, in the app,
   of the calls were false (against the 5% the cut-off promises), and whether
   the fold changes are biased. `--like <experiment folder>` adds that
   experiment's own settings and group sizes. `--grid quick` takes seconds.
+  `--kind isodtb` does the same for isoDTB site ratios (and shows what a
+  heavy / light mixing error does), `--kind tmt` for several TMT plexes with
+  a pooled reference (and what IRS and the normalisation do in a pulldown).
 - **On a real sample with known ratios**: see
   [a benchmark sample](#faq.benchmark-sample).
 

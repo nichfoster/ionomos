@@ -387,7 +387,8 @@ real data:
      uneven groups in words; not yet looked at on screen)
    - [x] a normalisation that holds when many features are enriched in one
      direction (2026-10-01, D64: `normalize: auto` / `ratio`; simulated pulldowns only)
-   - [ ] an R (limma) golden file for unequal groups
+   - [x] an R (limma) golden file for unequal groups (2026-10-02, D66: `tests/golden/unequal/`, DMSO 2 /
+     Probe 4 / Probe_Comp 4 with missing values and the small-group rule, limma 3.68.5 to 1e-8)
 8. [ ] Phospho: localisation filter and KSEA kinase activity. Only if a lab
    runs phospho; PhosphoSitePlus is non-commercial, so it is a user download.
 9. [ ] STRING / CORUM overlays: low priority.
@@ -410,8 +411,9 @@ real data:
      from it
    - [ ] compare one real experiment with the lab's FragPipe-Analyst result
      and with a real MSstats / Perseus export
-   - [ ] the same checks for ratio data (isoDTB) and TMT: the simulated
-     grid is label-free DIA only
+   - [x] the same checks for ratio data (isoDTB) and TMT (2026-10-02, D66:
+     `ionomos benchmark --kind isodtb | tmt`, a calibration guard per kind;
+     what they found is under Open questions)
    - [x] a button for compare / benchmark in the app (2026-10-02, D67:
      Analysis tab → **Check accuracy**, the same code as the command line,
      run off the Tk thread; not yet seen on screen)
@@ -665,6 +667,28 @@ Collected from the other docs; resolve before/during Phase 1.
 - [ ] Normalisation (D64): the lab PC's config.yaml says `normalize: median` (written by the app before 0.14.1);
       set it to `auto` on the Analysis tab. Are the check's limits right on real pulldowns (0.1 log2, 3 times
       the replicate scatter)? Is a pulldown against empty beads normalised at all in the lab's practice?
+      (D66: in simulated TMT the same holds after IRS: median centring shifts a pulldown's unchanged proteins by
+      -0.2 to -0.4 log2, 67 % of the calls at adjusted p alone are false, 8.4 % of the hits in the worst case;
+      `auto` keeps them within 0.04.)
+- [ ] isoDTB normalisation (D66): site ratios are never normalised. A heavy / light mixing error moves every ratio
+      of a replicate; in simulation (SD 0.2 log2, i.e. about 15 %) the unchanged sites of an experiment sat 0.07 –
+      0.13 log2 off 0 and the FDP at adjusted p ≤ 0.05 reached 10.6 % in a scenario (3 replicates, 5 % of sites
+      up 4-fold, 20 seeds: 7.4 %). Centring each replicate on its median brings that to 5.1 %, but when 20 % of
+      the sites go one way it shifts every unchanged site by -0.09 log2 instead. How does the lab mix heavy and
+      light (protein assay, by volume), and how far off 1:1 is it? Should the ratios be centred, with a
+      composition-robust centre, and should the liganded calls (R ≥ 4) use the centred ratios too?
+- [ ] TMT without IRS (D66): with the plex effect still in the data, the composition check and the ratio method
+      compare a protein across plexes and cannot see a pulldown: with the plex as a block, 59 % of the calls at
+      adjusted p alone were false in a simulated pulldown (offset -0.19 to -0.26 log2). Worth doing the check
+      within plexes when plexes are known and IRS is off? (With IRS on a pool, the default, it is fine.)
+- [ ] TMT `irs: sum` (D66): IRS on each plex's own mean, used when no reference channel is found and the plexes
+      are balanced, is slightly liberal in simulation: FDP 6.6 % with changes both ways (4.5 % aimed at), up to
+      9.3 % in one scenario, because the plex mean is estimated from the channels then tested. Accept, or
+      correct limma's residual df by the plexes?
+- [ ] isoDTB with two replicates (D66): limma's FDP was 5.8 % (no mixing error) to 9.8 % (with one) in
+      simulation, because with 1 df per site the test rests on the variance prior and the simulated sites differ
+      in variance (with equal SDs it is calibrated). "How far to trust this" already marks two replicates
+      "check"; is that enough, or should isoDTB ask for three?
 - [ ] App settings (D67): open the Figure style, Check accuracy and Notifications pages on the PC (display scaling,
       the colour picker, the masked fields) and have a lab member set a figure style and send a test message without
       help. Should "Show addresses and password" exist at all, or should a stored secret only ever be replaced?

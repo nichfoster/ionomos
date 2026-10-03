@@ -10,6 +10,11 @@ Column names and layouts follow the real files:
                                                          log-logistic curves with known pEC50s, flat and noisy features)
     roles   competition_pg_matrix / competition_tmt     (a competition experiment with unequal groups: DMSO n=2,
                                                          Probe n=4, Probe_Comp n=4; specific and unspecific binders)
+    benchmark (benchmark.py, D66):
+            isodtb_ratios                               (label quant with per-site truth, changes one way or both,
+                                                         a mixing error per replicate)
+            tmt_plexes                                  (MaxQuant proteinGroups.txt of several TMT 10-plexes with a
+                                                         pooled reference, a plex effect per protein)
 
 Each writer returns the planted truth so a test can measure recall and false
 discoveries of the whole downstream pipeline.
@@ -168,6 +173,118 @@ def mixed_species_pg_matrix(path: Path, runs: list[tuple[str, str]], ratios: dic
         lines.append(row)
     _write(path, header, lines)
     return truth
+
+
+def isodtb_ratios(path: Path, experiments: dict[str, int], seed: int = 1, n_sites: int = 600,
+                  changed_fraction: float = 0.1, effect: float = 2.0, direction: str = "up", mixing_sd: float = 0.0,
+                  noise: float = 0.35, noise_spread: float = 0.5, missing: float = 1.0) -> dict[str, dict[str, int]]:
+    """A combined_modified_peptide_label_quant.tsv for the accuracy benchmark (benchmark.py, D66): heavy / light
+    ratios of probe-labelled cysteines with known truth. experiments: {sample prefix: replicates}. Returns
+    {prefix: {site id: +1 / -1}} for the changed sites, the ids as quant.from_isodtb_sites names them
+    ('sp|P10000|GENE0_HUMAN|C123').
+
+    Every site has a true log2 ratio of 0 or +-effect (direction "up": every changed site goes up, as in a
+    competition where the compound engages its sites; "both": half up, half down), its own replicate SD
+    (log-normal around noise), one or two peptides (a missed cleavage, as FragPipe reports them; the site table
+    averages them), values missing more often for weak peptides, and a mixing error per replicate: heavy and light
+    are mixed 1:1 by protein amount, and an error of the mixing moves every ratio of that replicate by the same
+    log2 amount (mixing_sd: its SD)."""
+    rng = random.Random(seed)
+    tag, heavy = "[561.3387]", "[567.3462]"
+    cols = [f"{e}_{r} Log2 Ratio HL" for e, n in experiments.items() for r in range(1, n + 1)]
+    offset = {c: rng.gauss(0, mixing_sd) if mixing_sd > 0 else 0.0 for c in cols}
+    header = ["Peptide Sequence", "Modified Sequence", "Light Modified Peptide", "Heavy Modified Peptide",
+              "Start", "End", "Protein", "Protein ID", "Entry Name", "Gene", "Protein Description", *cols]
+    truth: dict[str, dict[str, int]] = {e: {} for e in experiments}
+    lines = []
+    for i in range(n_sites):
+        g, pid = _gene(i // 3), f"P{10000 + i // 3}"
+        prot, entry = f"sp|{pid}|{g}_HUMAN", f"{g}_HUMAN"
+        left, right = _pep(rng, rng.randint(2, 8)), _pep(rng, rng.randint(2, 8)) + "K"
+        start = 40 * (i % 3) + rng.randint(3, 20)  # three sites per protein, never at one position
+        site = f"{prot}|C{start + len(left)}"
+        mu = {}
+        for e in experiments:
+            sign = (1 if direction == "up" else rng.choice((1, -1))) if rng.random() < changed_fraction else 0
+            mu[e] = sign * effect
+            if sign:
+                truth[e][site] = sign
+        sd = noise * math.exp(rng.gauss(0, noise_spread)) if noise_spread > 0 else noise
+        for k in range(2 if rng.random() < 0.25 else 1):
+            lft, st = (_pep(rng, 2) + left, start - 2) if k else (left, start)
+            seq = lft + "C" + right
+            signal = rng.gauss(22, 2)  # how strong the peptide is: weak ones go missing
+            vals = []
+            for c in cols:
+                e = c.rsplit("_", 1)[0]
+                if rng.random() < (0.03 + max(0.0, 20 - signal) * 0.12) * missing:
+                    vals.append("")
+                else:
+                    vals.append(f"{mu[e] + offset[c] + rng.gauss(0, sd):.4f}")
+            light = lft + "C" + tag + right
+            lines.append([seq, seq, light, light.replace(tag, heavy), str(st), str(st + len(seq) - 1), prot, pid,
+                          entry, g, f"{g} protein", *vals])
+    rng.shuffle(lines)
+    _write(path, header, lines)
+    return truth
+
+
+def tmt_plexes(path: Path, plexes: int = 3, controls: int = 4, treated: int = 4, seed: int = 1,
+               n_proteins: int = 600, changed_fraction: float = 0.1, effect: float = 2.0, direction: str = "both",
+               plex_sd: float = 1.0, noise: float = 0.25, noise_spread: float = 0.5, missing: float = 1.0
+               ) -> tuple[dict[str, str], dict[str, int]]:
+    """MaxQuant's combined/txt/proteinGroups.txt of a multi-plex TMT 10-plex experiment for the accuracy benchmark
+    (benchmark.py, D66), with summary.txt beside it. Every plex holds the same layout: a pooled reference at 126,
+    `controls` DMSO channels, `treated` Drug channels, and the pool again in every channel left (131 for 4 + 4).
+    Returns ({sample as the loader names it ('3 Exp2'): condition (DMSO / Drug / Pool)}, {protein id: +1 / -1}).
+
+    Per protein: a base abundance, its own replicate SD (log-normal around noise), a plex effect (plex_sd: the
+    peptides picked differ between plexes, so the same protein jumps from plex to plex), a loading difference per
+    channel; the pool is the mix of every sample, so it carries the mean of the conditions. Changed proteins move
+    by +-effect in Drug (direction "up": all up, a pulldown). A protein can be missing from a whole plex (more often
+    at low abundance), and single channels go missing rarely (missing scales both; 0 = never)."""
+    from ionomos.downstream.plex import TMT_ORDERS
+
+    if controls + treated > 9:
+        raise ValueError("a TMT 10-plex holds at most 9 samples next to the pool")
+    rng = random.Random(seed)
+    order = TMT_ORDERS[10]
+    layout = ["Pool"] + ["DMSO"] * controls + ["Drug"] * treated
+    layout += ["Pool"] * (len(order) - len(layout))
+    exps = [f"Exp{x}" for x in range(1, plexes + 1)]
+    conditions = {f"{k + 1} {e}": c for e in exps for k, c in enumerate(layout)}
+    head = ["Protein IDs", "Majority protein IDs", "Gene names", "Peptides", "Reverse", "Potential contaminant"]
+    head += [f"Reporter intensity corrected {k + 1} {e}" for e in exps for k in range(len(order))]
+    load = {(e, k): rng.gauss(0, 0.3) for e in exps for k in range(len(order))}
+    truth: dict[str, int] = {}
+    lines = []
+    share = {"DMSO": controls / (controls + treated), "Drug": treated / (controls + treated)}
+    for i in range(n_proteins):
+        pid, g = f"P{60000 + i}", _gene(i)
+        base = rng.gauss(22, 2.2)
+        eff = 0.0
+        if rng.random() < changed_fraction:
+            sign = 1 if direction == "up" else rng.choice((1, -1))
+            eff = sign * effect
+            truth[pid] = sign
+        sd = noise * math.exp(rng.gauss(0, noise_spread)) if noise_spread > 0 else noise
+        pool = base + math.log2(share["DMSO"] + share["Drug"] * 2 ** eff)
+        row = [pid, pid, g, str(max(1, round((base - 17) * 1.5))), "", ""]
+        for e in exps:
+            shift = rng.gauss(0, plex_sd)
+            gone = rng.random() < (0.02 + max(0.0, 19.5 - base) * 0.12) * missing
+            for k, c in enumerate(layout):
+                v =(pool + rng.gauss(0, 0.1) if c == "Pool" else base + (eff if c == "Drug" else 0.0)
+                     + rng.gauss(0, sd)) + shift + load[(e, k)]
+                lost = gone or rng.random() < 0.01 * missing
+                row.append("0" if lost else f"{2 ** v:.1f}")
+        lines.append(row)
+    path = Path(path)
+    _write(path, head, lines)
+    (path.parent / "summary.txt").write_text(
+        "Raw file\tExperiment\tMS/MS\n" + "".join(f"{e}_F{f}\t{e}\t1000\n" for e in exps for f in (1, 2)) +
+        "Total\t\t8000\n", encoding="utf-8")
+    return conditions, truth
 
 
 def tmt_abundance(path: Path, samples: list[str], seed: int = 1, n_genes: int = 500,
