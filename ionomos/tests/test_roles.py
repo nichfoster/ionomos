@@ -478,8 +478,8 @@ def test_equal_groups_are_not_touched_by_the_small_group_rule(tmp_path):
 
 def test_limma_pools_the_variance_over_every_group_with_unequal_sizes():
     """~0 + condition on 2 / 4 / 4 samples: the residual variance has 1 + 3 + 3 = 7 df whichever two groups are
-    compared, and the standard error is s * sqrt(1/n1 + 1/n2). Checked against the formula (R's limma is not on
-    this machine; tests/golden/fpa holds the R-checked equal-group cases)."""
+    compared, and the standard error is s * sqrt(1/n1 + 1/n2). Checked against the formula here; against R's
+    limma itself, with missing values and the small-group rule, in test_unequal_groups_match_r_limma."""
     rng = random.Random(5)
     sizes = {"D": 2, "P": 4, "K": 4}
     samples = [f"{c}{r}" for c, n in sizes.items() for r in range(n)]
@@ -507,6 +507,80 @@ def test_limma_pools_the_variance_over_every_group_with_unequal_sizes():
     wide, narrow = res[("P", "D")], res[("K", "P")]
     for i in (3, 42):
         assert (wide.ci_high[i] - wide.diff[i]) / (narrow.ci_high[i] - narrow.diff[i]) == pytest.approx(math.sqrt(1.5))
+
+
+# ------------------------------------------------- unequal groups against R's limma (D66) --
+
+GOLD_UNEQUAL = Path(__file__).parent / "golden" / "unequal"
+
+
+def _gold_matrix(name: str) -> tuple[list[str], dict[str, list[float | None]]]:
+    with open(GOLD_UNEQUAL / name, encoding="utf-8") as fh:
+        rows = list(csv.reader(fh, delimiter="\t"))
+    return rows[0][1:], {r[0].strip(): [None if v.strip() == "NA" else float(v) for v in r[1:]] for r in rows[1:]}
+
+
+def _gold_limma(name: str) -> dict[tuple[str, str], dict[str, float]]:
+    with open(GOLD_UNEQUAL / name, encoding="utf-8") as fh:
+        return {(r["comparison"].strip(), r["ID"].strip()): {k: math.nan if v.strip() == "NA" else float(v)
+                                                             for k, v in r.items() if k not in ("comparison", "ID")}
+                for r in csv.DictReader(fh, delimiter="\t")}
+
+
+def _unequal_matrix() -> QuantMatrix:
+    samples, rows = _gold_matrix("unequal_matrix.tsv")
+    m = QuantMatrix("intensity", "protein", [Feature(k, k) for k in rows], samples, [list(v) for v in rows.values()],
+                    {s: s.rsplit("_", 1)[0] for s in samples}, "unequal_matrix.tsv", exp="DIA")
+    return m
+
+
+@pytest.mark.parametrize("case, over", [
+    ("half", {"imputation": "none", "small_group_min_valid": "half"}),
+    ("same", {"imputation": "none", "small_group_min_valid": "same"}),
+    ("imputed", {"imputation": "perseus"}),
+])
+def test_unequal_groups_match_r_limma(case, over):
+    """DMSO n=2, Probe n=4, Probe_Comp n=4 with missing values, through the pipeline analyze() runs
+    (benchmark.run_pipeline: the filter, median normalisation, imputation, the role comparisons, the
+    small-group rule, limma, BH), against limma 3.68.5 on the same steps in R (tests/golden/unequal/,
+    run_unequal_reference.R) to 1e-8: fold change, interval, t, p and adjusted p of every feature."""
+    from ionomos.downstream import benchmark
+
+    st = settings_from({**CFG, "normalize": "median", **over})
+    p, diffs = benchmark.run_pipeline(_unequal_matrix(), st)
+    _cols, want = _gold_matrix("unequal_imputed.tsv" if case == "imputed" else "unequal_processed.tsv")
+    assert [f.id for f in p.m.features] == list(want) and len(want) == 320 - 16  # the same rows pass the filter
+    worst = max(abs(a - b) for f, row in zip(p.m.features, p.m.values, strict=True)
+                for a, b in zip(row, want[f.id], strict=True) if a is not None or b is not None)
+    assert worst < 1e-9  # R writes 15 significant digits
+    assert [d.name for d in diffs] == ["Probe vs DMSO", "Probe_Comp vs Probe", "Probe_Comp vs DMSO"]  # the roles'
+    gold = _gold_limma(f"unequal_limma_{case}.tsv")
+    with open(GOLD_UNEQUAL / "unequal_priors.tsv", encoding="utf-8") as fh:
+        prior = next(r for r in csv.DictReader(fh, delimiter="\t") if r["case"] == case)
+    tested = {}
+    for d in diffs:
+        assert d.prior == pytest.approx((float(prior["df.prior"]), float(prior["s2.prior"])), rel=1e-9)
+        assert len(d.rows) == len(want)
+        for r in d.rows:
+            g = gold[(d.name, r["id"])]
+            for ours, key in ((r["log2fc"], "diff"), (r["ci_low"], "CI.L"), (r["ci_high"], "CI.R"), (r["t"], "t"),
+                              (r["pvalue"], "p.val"), (r["qvalue"], "p.adj")):
+                ours = math.nan if ours is None else ours
+                assert (math.isnan(ours) and math.isnan(g[key])) or ours == pytest.approx(g[key], rel=1e-8, abs=1e-12), \
+                    (case, d.name, r["id"], key, ours, g[key])
+        tested[d.name] = d.tested
+    if case == "imputed":
+        assert set(tested.values()) == {len(want)}
+    else:  # the edges of the small-group rule: one DMSO value of two is tested with half, not with same
+        n_vs_dmso = sum(1 for k, g in gold.items() if k[0] == "Probe vs DMSO" and not math.isnan(g["p.val"]))
+        assert tested["Probe vs DMSO"] == n_vs_dmso
+        if case == "half":
+            same = _gold_limma("unequal_limma_same.tsv")
+            more = sum(1 for k, g in gold.items() if not math.isnan(g["p.val"]) and math.isnan(same[k]["p.val"]))
+            assert more > 20 and all(not math.isnan(g["p.val"]) or math.isnan(same[k]["p.val"])
+                                     for k, g in gold.items())
+            assert tested["Probe_Comp vs Probe"] == sum(1 for k, g in same.items() if k[0] == "Probe_Comp vs Probe"
+                                                       and not math.isnan(g["p.val"]))  # 4 vs 4: untouched
 
 
 def test_power_is_given_per_comparison_with_its_own_samples():

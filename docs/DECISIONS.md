@@ -2122,3 +2122,87 @@ units, moves whenever a share of the features is enriched in one direction.
    setting, and the help says so. The limits (0.1 log2, 3 times the scatter,
    three quarters kept) are choices, not measurements on real data. The
    reproduce-in-R script notes that FragPipeAnalystR has no ratio step.
+
+
+### D66 — Accuracy checks for unequal groups, isoDTB and TMT: an R golden file and two more simulated grids
+**2026-10-02.** The maintainer's priority: the downstream analysis should be
+robust, and how accurate it is should be checkable. Two gaps were left: R's
+limma had never seen unequal groups (D61), and the simulated benchmark (D60)
+was label-free DIA only.
+
+1. **Unequal groups against R** (`tests/golden/unequal/`). DMSO 2 / Probe 4 /
+   Probe_Comp 4, 320 proteins with missing values and rows on each edge of
+   the filters, through `benchmark.run_pipeline` (the calls `analyze()`
+   makes) with median normalisation, no imputation (`small_group_min_valid`
+   `half` and `same`) or Perseus-type imputation. The R script repeats each
+   step in base R + limma 3.68.5. The small-group rule is expressed in R as
+   the coefficient set to NA before `eBayes`, which is what Ionomos does: the
+   variance prior is fitted on every feature, and BH counts the tested ones.
+   Fold changes, intervals, t, p, adjusted p, the processed matrix and the
+   prior agree to 1e-8 in all three cases. Normalisation is `median`, not
+   `auto`: the ratio method is Ionomos' own and R has nothing to check it
+   against.
+2. **`ionomos benchmark --kind isodtb | tmt`** (`benchmark.py`, two new
+   simulators in `simulate.py`). Each kind goes through the loader the lab's
+   data would take, so the loader is part of what is measured:
+   - *isoDTB*: FragPipe's label quant, the port of the lab's site script,
+     `from_isodtb_sites`. The scenarios change sites **one way** (a compound
+     engages its sites) and add a per-replicate **mixing error** (heavy and
+     light not mixed exactly 1:1), the error the lab's protocol can make and
+     the pipeline does not see. Settings: limma or the t-test, since ratio
+     data is neither imputed nor normalised.
+   - *TMT*: MaxQuant's `proteinGroups.txt`, because its reporter intensities
+     are raw and Ionomos' own IRS (D48) then runs; TMT-Integrator's
+     abundances are already ratios to the reference and are not scaled again.
+     A pooled reference in every plex, a plex effect per protein, changes
+     both ways or a pulldown one way. Settings: IRS on the pool (auto or
+     median normalisation), IRS on the plex means, no IRS, no IRS with the
+     plex as a block.
+   - `run_pipeline` now calls `plex.normalise` first, as `analyze()` does;
+     for anything that is not several TMT plexes it changes nothing, so the
+     DIA grid and its guard give the same numbers as before.
+   - Files are named by kind (`benchmark_simulated_isodtb.*`, `_tmt.*`), so
+     the three sit side by side; `--like` takes the kind from the experiment
+     (site ratios, or a TMT analysis with plexes) and "How far to trust this"
+     shows whichever the folder holds.
+   - A new number per scenario: the unchanged features' |mean log2 fold
+     change| per table (`fc_offset_unchanged_abs`). The signed offset pooled
+     over tables averages a random mixing error away; per table it does not.
+   - A guard per kind in the test suite, with limits from 30 other blocks of
+     10 seeds (worst mean + about 3.5 SD): isoDTB 9 %, TMT 8.5 %.
+3. **What the grids found** (numbers in [VALIDATION.md](VALIDATION.md)):
+   - The defaults are calibrated: isoDTB with limma and 3 – 4 replicates
+     4.9 % (BH aims at 4 – 4.75 % here), TMT with IRS on the pool and `auto`
+     3.8 – 4.4 %, unequal channels included.
+   - D64 holds for TMT: after IRS, median centring shifts a pulldown's
+     unchanged proteins by -0.2 to -0.4 log2 and most calls at adjusted p
+     alone are false (67 %); `auto` keeps them within 0.04. The fold-change
+     cut-off hides most of this, not all (8.4 % false hits with 2 DMSO
+     channels per plex, 2-fold).
+   - **Not fixed, on the roadmap with numbers**: (a) isoDTB ratios are never
+     normalised, so a mixing error moves every unchanged site of an
+     experiment (0.07 – 0.13 log2 at an SD of 0.2) and the test against 0
+     calls more of them (up to 10.6 % per scenario). Centring each replicate
+     on its median removes it but brings back the composition shift when
+     many sites go one way (-0.09 log2 with 20 % up); which is right depends
+     on how the lab mixes and how promiscuous its compounds are, and the
+     liganded calls (D52) use the ratios as measured. (b) Without IRS the
+     composition check and the ratio method compare a protein across plexes,
+     where the plex effect hides the composition: a plex block recovers the
+     power but not the normalisation (59 % false at alpha in a pulldown).
+     (c) IRS on the plex means is slightly liberal (6.6 %; up to 9.3 %): the
+     plex mean is estimated from the channels that are then tested. (d) Two
+     isoDTB replicates give 5.8 – 9.8 % with limma: with 1 df per site the
+     test rests on a variance prior whose shape the sites do not follow (with
+     equal SDs it is calibrated).
+   None of these is a small, clearly right change, so none was made.
+
+**Not verified**: real data of any kind. The simulated tables have the
+layouts of FragPipe's label quant and MaxQuant's protein groups, not their
+noise; there is no ratio compression (MS2 TMT) and no outlier channel. No
+TMT-Integrator multi-plex table was simulated: its abundances are already on
+the reference, so IRS is not part of that path.
+
+**For the maintainer to confirm**: the two guards' limits; that a mixing
+error of 15 % (SD 0.2 log2) is a fair stress for the lab's isoDTB protocol;
+the open questions (a) to (d) on the roadmap.

@@ -38,6 +38,7 @@ from ionomos.downstream import guards, stats
 COMPARE_JSON = "compare.json"
 BENCHMARK_JSON = "benchmark.json"
 SIMULATED_JSON = "benchmark_simulated.json"
+SIMULATED_JSONS = (SIMULATED_JSON, "benchmark_simulated_isodtb.json", "benchmark_simulated_tmt.json")  # D66
 LEFT_CENSORED = ("perseus", "mindet", "minprob", "min", "zero")
 
 
@@ -207,7 +208,8 @@ def build(m, p, diffs: list, insight: dict | None, qcd: dict | None, settings, g
     return {"statements": out, "settings_digest": digest,
             "compare": _external(results_dir, COMPARE_JSON, digest),
             "benchmark": _external(results_dir, BENCHMARK_JSON, digest),
-            "benchmark_simulated": _external(results_dir, SIMULATED_JSON, digest),
+            "benchmark_simulated": next((x for x in (_external(results_dir, n, digest) for n in SIMULATED_JSONS) if x),
+                                        None),
             "basis": "Each statement repeats a check of this analysis with its number. There is no overall score."}
 
 

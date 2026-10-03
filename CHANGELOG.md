@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Unequal groups checked against R's limma** (D66, [docs/VALIDATION.md](docs/VALIDATION.md)).
+  A competition experiment with DMSO 2, Probe 4 and Probe_Comp 4, missing
+  values and rows on each edge of the filters, goes through the analysis'
+  own steps (filter, median normalisation, no imputation or Perseus-type,
+  the role comparisons, `small_group_min_valid: half` and `same`, limma, BH)
+  and agrees with limma 3.68.5 to 1e-8 for every feature
+  (`tests/golden/unequal/`, with the R script that made it).
+- **`ionomos benchmark --kind isodtb` and `--kind tmt`** (D66). The simulated
+  benchmark now covers isoDTB site ratios (FragPipe's label quant through the
+  lab's site table; replicates, sites changed one way, a heavy / light
+  mixing error) and several TMT plexes with a pooled reference (MaxQuant's
+  reporter intensities; IRS on the pool or on the plex means or none, `auto`
+  or `median` normalisation, a pulldown). Each kind writes its own
+  `benchmark_simulated_<kind>.*`; `--like` picks the experiment's kind. The
+  test suite has a calibration guard for each. Measured: both defaults are
+  calibrated (isoDTB 4.9 % false discoveries with 3 – 4 replicates, TMT 3.8 –
+  4.4 % where 4 – 4.75 % is aimed at); in a TMT pulldown, median centring
+  after IRS makes 67 % of the calls at adjusted p alone false and `auto`
+  holds. What the grids found and was not changed (a heavy / light mixing
+  error is not corrected; TMT without IRS; IRS on plex means slightly
+  liberal; two isoDTB replicates) is in the roadmap's open questions with
+  the numbers.
+
 ### Fixed
 
 - **A test of the slow-copy wait failed now and then on Windows CI.** Its
