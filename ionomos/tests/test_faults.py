@@ -68,10 +68,16 @@ def _job(bed, dest: Path) -> Job:
 def _then_a_good_job_runs(bed) -> None:
     """The worker is not stuck after a fault: the next experiment is searched to the end."""
     dest = _queue(bed, "dia_good", name=f"20260914_Isaac_DIA_after-{len(bed['ledger'].list())}")
-    w = Worker(bed["cfg"], bed["ledger"])
-    while w.run_once():
-        pass
+    _drain(Worker(bed["cfg"], bed["ledger"]))
     assert _job(bed, dest).status == "done", _job(bed, dest).reason
+
+
+def _drain(w: Worker, most: int = 20) -> None:
+    """run_once until the queue is empty; a job that keeps coming back fails the test instead of looping (D73)."""
+    for _ in range(most):
+        if not w.run_once():
+            return
+    raise AssertionError(f"the worker still had work after {most} jobs")
 
 
 def _wait(cond, seconds: float = 60, step: float = 0.05) -> bool:
@@ -289,7 +295,39 @@ def test_a_leftover_fragpipe_is_stopped_only_when_it_is_really_ours(tmp_path):
     finally:
         if proc.poll() is None:
             proc.kill()
-            proc.wait()
+            proc.wait(timeout=15)
+
+
+def test_a_taskkill_that_never_returns_does_not_hold_the_worker(monkeypatch):
+    """Windows: every stop goes through `taskkill /T`. One that hangs (a wedged process table, an antivirus hook)
+    is given up after a time limit, so the worker, `ionomos run`'s shutdown and the app's Stop go on (D73)."""
+    from ionomos import service
+
+    calls = []
+
+    def hung_run(cmd, **kw):
+        calls.append((cmd, kw.get("timeout")))
+        raise subprocess.TimeoutExpired(cmd, kw.get("timeout") or 0)
+
+    class Proc:
+        pid = 4242
+
+        def poll(self):
+            return None
+
+        def wait(self, timeout=None):
+            raise subprocess.TimeoutExpired("fragpipe", timeout)
+
+    monkeypatch.setattr(fragpipe, "os", _FakeOs(os, name="nt"))
+    monkeypatch.setattr(service, "os", _FakeOs(os, name="nt"))
+    monkeypatch.setattr(service, "_creationflags", lambda: 0)  # Windows-only constants
+    monkeypatch.setattr(fragpipe.subprocess, "run", hung_run)
+    fragpipe.kill_tree(Proc())
+    fragpipe.kill_pid_tree(4242, group=False)
+    service.kill_pid(4242)
+    assert service._alive(4242) is False  # can't tell: never reported as running
+    assert len(calls) == 4 and all(timeout and timeout <= 60 for _cmd, timeout in calls)
+    assert [c[0][0] for c in calls] == ["taskkill", "taskkill", "taskkill", "tasklist"]
 
 
 def _run_proc(cfg_path: Path, env_extra: dict) -> subprocess.Popen:
@@ -499,9 +537,7 @@ def test_two_jobs_for_one_experiment_folder_search_it_once(bed):
     dest = _queue(bed)
     bed["ledger"].insert(Job(inbox_name="copy-of-the-same", user="EJQ", method="isoDTB", dest_dir=str(dest),
                              parsed=_status(dest)))
-    w = Worker(bed["cfg"], bed["ledger"])
-    while w.run_once():
-        pass
+    _drain(Worker(bed["cfg"], bed["ledger"]))
     first, second = bed["ledger"].get(1), bed["ledger"].get(2)
     assert first.status == "done" and first.attempts == 1
     assert second.status == "failed" and "duplicate of job 1" in second.reason and second.attempts == 0
@@ -513,9 +549,7 @@ def test_two_jobs_for_one_experiment_folder_search_it_once(bed):
 def test_the_same_raw_files_dropped_twice_are_two_experiments(bed):
     a = _queue(bed, name="20260902-isoDTB_EJQ-2-027")
     b = _queue(bed, name="20260902-isoDTB_EJQ-2-027_redo")
-    w = Worker(bed["cfg"], bed["ledger"])
-    while w.run_once():
-        pass
+    _drain(Worker(bed["cfg"], bed["ledger"]))
     assert _job(bed, a).status == "done" and _job(bed, b).status == "done" and a != b
 
 

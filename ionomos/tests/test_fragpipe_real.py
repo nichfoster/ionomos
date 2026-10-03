@@ -765,7 +765,8 @@ def test_every_rerun_keeps_the_output_before_it(bed):
 
 def _alive(pid: int) -> bool:
     if os.name == "nt":
-        out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True).stdout
+        out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True,
+                             timeout=30).stdout
         return str(pid) in out
     try:
         os.kill(pid, 0)
@@ -775,7 +776,8 @@ def _alive(pid: int) -> bool:
         done, _status_ = os.waitpid(pid, os.WNOHANG)
         return done == 0
     except ChildProcessError:
-        state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+        state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True,
+                               timeout=30).stdout.strip()
         return bool(state) and not state.startswith("Z")
 
 

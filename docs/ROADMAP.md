@@ -615,6 +615,9 @@ Collected from the other docs; resolve before/during Phase 1.
 - [ ] Install git on the PC, or deploy via zip/wheel?
 
 **Software**
+- [ ] D73 (2026-10-03): the test suite hung three times on macOS with nothing on screen, and did not hang again in
+      14 full runs and ~3,300 targeted tests. If it hangs again it now prints `Timeout (0:05:00)!` (or, after the last test, `Timeout
+      (0:02:00)!`) and every thread's stack, then ends: keep that output and add the cause to D73.
 - [x] How does FragPipe 24.0 headless locate the TMT `annotation.txt`? → 2026-10-01 (D59), from `TmtiPanel`
       (same in 23.1): the one file whose name ends in `annotation.txt` in the folder holding all of the plex's
       LC-MS files; with none or several it writes its own `<workdir>\<plex>\<plex>_annotation.txt` naming the

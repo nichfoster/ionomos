@@ -1,6 +1,8 @@
 """Shared fixture: a fake C:\\Fragpipe_Auto + C:\\Fragpipe_General layout in a temp dir."""
+import faulthandler
 import gc
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -9,6 +11,26 @@ os.environ.setdefault("IONOMOS_OFFLINE", "1")  # the app must not git-fetch duri
 import yaml
 
 from ionomos.config import load
+
+# D73: the process must end soon after the last test. Something left waiting (a non-daemon thread, an atexit
+# handler, a child it joins) would otherwise keep pytest alive after "N passed" with nothing more on screen until an
+# outer time limit. A test that hangs is caught by faulthandler_timeout (pyproject.toml); this covers the exit.
+EXIT_SECONDS = float(os.environ.get("IONOMOS_TEST_EXIT_SECONDS") or 120)
+_stderr_fd: int | None = None
+
+
+def pytest_configure(config):
+    global _stderr_fd
+    try:  # the real stderr (output capture is off here), kept open for the dump at exit
+        _stderr_fd = os.dup(sys.__stderr__.fileno())
+    except (AttributeError, OSError, ValueError):
+        _stderr_fd = None
+
+
+@pytest.hookimpl(trylast=True)
+def pytest_unconfigure(config):
+    if _stderr_fd is not None and EXIT_SECONDS > 0:
+        faulthandler.dump_traceback_later(EXIT_SECONDS, exit=True, file=_stderr_fd)
 
 
 @pytest.fixture

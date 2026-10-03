@@ -42,7 +42,7 @@ parquet = [  # DIA-NN 2.x report.parquet (downstream/engines.py); everything els
     "pyarrow>=14",
 ]
 dev = [
-    "pytest>=8",
+    "pytest>=9",  # faulthandler_exit_on_timeout (below, D73)
     "pyarrow>=14",
     "ruff>=0.5",
     "pyinstaller>=6.10",
@@ -62,6 +62,11 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# D73: a test still running after this many seconds is a hang. Every thread's stack is printed and the run ends
+# (exit 1) instead of waiting for an outer time limit with nothing on screen. The slowest test takes ~2 min on a
+# loaded Mac. A hang after the last test (interpreter exit) is caught in tests/conftest.py.
+faulthandler_timeout = 300
+faulthandler_exit_on_timeout = true
 
 [tool.ruff]
 line-length = 120

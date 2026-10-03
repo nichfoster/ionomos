@@ -328,7 +328,7 @@ def test_exported_design_script_reproduces_the_model_in_r(tmp_path):
     lib = os.environ.get("IONOMOS_R_LIBS", "")
     if not shutil.which("Rscript") or subprocess.run(
             ["Rscript", "-e", f".libPaths(c('{lib}', .libPaths())); library(limma)"] if lib else
-            ["Rscript", "-e", "library(limma)"], capture_output=True).returncode:
+            ["Rscript", "-e", "library(limma)"], capture_output=True, timeout=120).returncode:
         pytest.skip("R with limma not available (set IONOMOS_R_LIBS to its library)")
     conds = ("DMSO", "Drug", "Drug2")
     cov = {"age": {f"{c}_{r}": 30 + (7 * k + 3 * r) % 23 for k, c in enumerate(conds) for r in range(1, 5)},
@@ -341,7 +341,7 @@ def test_exported_design_script_reproduces_the_model_in_r(tmp_path):
     if lib:
         script.write_text(f".libPaths(c('{lib}', .libPaths()))\n" + script.read_text(encoding="utf-8"),
                           encoding="utf-8")
-    subprocess.run(["Rscript", script.name], cwd=fa, check=True, capture_output=True)
+    subprocess.run(["Rscript", script.name], cwd=fa, check=True, capture_output=True, timeout=600)
     _, rows = read_tsv(fa / "limma_design_results.tsv")
     theirs = {(r["comparison"], r["id"]): r for r in rows}
     n = 0

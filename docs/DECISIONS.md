@@ -2527,3 +2527,69 @@ file unreadable; which code page FragPipe's tools really write (ROADMAP
 the name check find raws through `intake.raw_paths`, so a `<plex>\` drop's
 files are listed and can be removed (moved aside, as every inbox removal is);
 added while combining the 0.15.0 PRs.
+
+### D73 — A hung test run reports itself and ends; no wait in the tests is without a time limit
+**2026-10-03.** The full suite hung on macOS (Python 3.14) at least three
+times in a day, on different branches, with nothing on screen until a
+30-minute limit killed it; re-runs passed and CI (Ubuntu, Windows) never hung.
+
+**Reproduction.** 14 full runs on macOS / Python 3.14.6 (10 of master's code,
+4 with these changes), up to three at once next to other agents' suites and
+simulations (load average up to 80), and about 3,300 more tests from the
+thread- and process-heavy files (`test_faults`, `test_failsafes`,
+`test_fragpipe_real`, `test_worker`, `test_watcher`, `test_e2e`,
+`test_notify`, `test_service`, `test_stress`, the engine runners) in
+forward, reversed and shuffled file orders, each with
+`-o faulthandler_timeout=240` so a stuck test would have printed every
+thread's stack. **It did not hang**: no stack was printed, no test took more
+than ~30 s, and no process was left behind. A full run took 6–8 minutes
+with three at once and 13.5 under the heaviest load. `tail` (as in `pytest |
+tail`) shows nothing until the end, so a run slowed past an outer limit and
+one that hangs look the same. The code was then read
+for every wait without a time limit (below). The cause of the three hangs is
+**not known**. These changes make the next one say where it is:
+
+1. **A test that runs too long ends the run with every stack.**
+   `pyproject.toml`: `faulthandler_timeout = 300` and
+   `faulthandler_exit_on_timeout = true` (pytest ≥ 9, now the `[dev]`
+   floor). The dump comes from a C thread, so it works even when the hang
+   holds the GIL; the run exits 1 rather than waiting for the outer limit.
+   300 s is 10× the slowest test on a loaded Mac and fits inside CI's
+   15-minute job.
+2. **A run that can't exit after its last test is ended too.** A thread or
+   a child something waits on at interpreter exit (a non-daemon thread, an
+   atexit handler) is past every test hook. `tests/conftest.py` arms
+   `faulthandler.dump_traceback_later(120, exit=True)` in
+   `pytest_unconfigure`, on a copy of the real stderr taken while output
+   capture is off (`IONOMOS_TEST_EXIT_SECONDS` changes it).
+3. **Waits without a limit, given one.** In the tests: `proc.wait()` after
+   a kill in `test_faults.py`, the thread `join()` in `test_failsafes.py`,
+   the `ps` / `tasklist` probes in `test_fragpipe_real.py`, the `python -m
+   ionomos` runs in `test_main_entry.py`, `git` in `test_service.py`, the R
+   probe and script in `test_design.py`. A second `ionomos run` whose output
+   is read (`test_failsafes.py`) is killed and drained if it doesn't answer
+   in 30 s. `while w.run_once(): pass` (three in `test_faults.py`) became
+   `_drain`, which fails after 20 jobs instead of looping. The fake SMTP
+   server's DATA loop span on an empty read when the client went away; it
+   now returns.
+4. **Product: `taskkill` / `tasklist` get 60 s** (Windows only). Every
+   way a search is stopped (stop, cancel, the time limit, a console log too
+   large, an error in Ionomos, a leftover FragPipe) and the app's Stop ran
+   `taskkill /T /F` with no limit, as did the `tasklist` behind the
+   watcher's pid. One that never returned would have held the worker (and
+   `ionomos run`'s shutdown) for ever. Now `fragpipe._taskkill` gives up after
+   `TASKKILL_SECONDS` (also on `OSError`, which used to escape `kill_tree`),
+   and a `tasklist` that doesn't answer counts as "not running", so no
+   process is named that can't be seen. Not seen on the PC; found by
+   reading.
+
+**Checked and left alone**: `fragpipe._watch` waits with `poll`, `kill_tree`
+and `request_stop` already had limits, `health.process_started` gives `ps`
+10 s and never raises, every thread the product starts is a daemon,
+`notify.flush` and the test HTTP / SMTP servers are bounded, the resolver's
+`done.wait()` (GUI only; `ionomos run` joins its threads with a limit and they
+are daemons). Not done: pytest-timeout (a dependency for what pytest and the
+standard library already do); killing a hung run's children. An `ionomos
+run` or fake FragPipe that a test started is left running when the run is
+ended this way (their output goes to files, so they hold no pipe of the
+run); `ps` shows them by the test's temporary folder.

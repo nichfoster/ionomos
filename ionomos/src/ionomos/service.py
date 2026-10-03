@@ -274,8 +274,11 @@ def running_pid(log_dir: Path) -> int | None:
 
 def _alive(pid: int) -> bool:
     if os.name == "nt":
-        r = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True,
-                           creationflags=_creationflags())
+        try:
+            r = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True,
+                               creationflags=_creationflags(), timeout=60)
+        except (OSError, subprocess.TimeoutExpired):  # can't tell: never name a process we can't see (D73)
+            return False
         return str(pid) in (r.stdout or "")
     try:
         os.kill(pid, 0)
@@ -286,7 +289,9 @@ def _alive(pid: int) -> bool:
 
 def kill_pid(pid: int) -> None:
     if os.name == "nt":
-        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, creationflags=_creationflags())
+        from ionomos.fragpipe import _taskkill
+
+        _taskkill(pid)
     else:
         import signal
 

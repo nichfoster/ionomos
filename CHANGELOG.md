@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A hung test run now says where it hung and ends** (D73). The suite had
+  hung on macOS three times with nothing on screen until a 30-minute limit
+  killed it. It did not hang again in 14 full runs and about 3,300 more
+  tests from the process- and thread-heavy files on macOS / Python 3.14,
+  with up to three suites running at once, so its cause is not known.
+  Instead:
+  a test still running after 5 minutes prints every thread's stack and ends
+  the run (`faulthandler_timeout` + `faulthandler_exit_on_timeout` in
+  `pyproject.toml`; pytest ≥ 9 in `[dev]`); a process that can't exit after
+  its last test is dumped and ended after 120 s (`tests/conftest.py`,
+  `IONOMOS_TEST_EXIT_SECONDS`); every wait in the tests that had no time
+  limit has one now (a `proc.wait()`, a `join()`, the `ps` / `tasklist`
+  probes, `python -m ionomos` and `git` runs, the R probe), a second
+  `ionomos run` whose output is read is killed and drained if it doesn't
+  answer, `while worker.run_once()` loops are capped, and the fake SMTP
+  server stops when its client goes away in the middle of a message instead of
+  spinning. `tests/test_hang_guards.py` checks the guards themselves.
+- **Windows: a `taskkill` or `tasklist` that never returns can't hold the
+  worker** (D73). Stopping a search, the time limit, a cancel, stopping a
+  leftover FragPipe and the app's Stop gave `taskkill /T` no time limit; it
+  now gets 60 s, then Ionomos goes on as if it had failed (a stuck
+  `tasklist` counts as "not running").
+
 ## [0.15.0] - 2026-10-02
 
 ### Added
