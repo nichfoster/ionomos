@@ -129,6 +129,9 @@ zip**. The window lists what will go in and how large it will be.
   search logs.
 - Tick **Include the search's result tables…** when the numbers are to be
   checked: the analysis can then be run again from the zip.
+- Tick **Also DIA-NN's main report and the peptide / ion tables** when the
+  search itself is to be checked. The zip gets much larger; a very large
+  table goes in as every n-th row.
 - Names are replaced by pseudonyms unless you untick that box.
 
 The zip is saved on the Desktop and shown in a folder window. Ionomos sends
@@ -137,9 +140,31 @@ email). The file next to it with `KEY` in its name stays in the lab. See
 [The zip for troubleshooting](#safety.bundle) for what is in it and what the
 replacing of names cannot do.
 
-From a terminal: `ionomos bundle 12 --level validate` (job 12), and
-`ionomos bundle translate <key file> answer.txt` puts the real names back
-into an answer you received.
+For a quick question, **Copy diagnostics** (Run & Test tab) puts one text
+block on the clipboard with the names replaced in the same way; **Copy with
+real names** is the same text as it is, for use inside the lab.
+
+From a terminal: `ionomos bundle 12 --level validate` (job 12),
+`ionomos bundle 12 --include diann-report,peptides` (with the main report and
+peptide tables), `ionomos bundle inspect <zip>` (what is in it, and every file
+searched for your lab's names), and `ionomos bundle translate <key file>
+answer.txt` puts the real names back into an answer you received.
+
+## How do I export a Spectronaut report for Ionomos? {#faq.spectronaut}
+
+Run `ionomos spectronaut-columns`. It lists the columns Ionomos reads from a
+Spectronaut report and how to make a report schema with exactly those: in
+Spectronaut's Report perspective, start from one of its Normal Report
+schemas, tick the listed columns, save the schema under your own name and
+press **Export Report…**. Then `ionomos analyze <the report>`, or the
+Analysis tab's **Table…** button.
+
+Three columns are needed: `R.FileName`, `PG.ProteinGroups` and
+`PG.Quantity`. With `R.Condition` and `R.Replicate` the conditions come from
+Spectronaut; with the q-value columns Ionomos leaves out rows above 1%.
+Ionomos does not ship a Spectronaut schema file (`.rs`), because that format
+is Spectronaut's own; once your schema is made, Spectronaut can save it as
+one for the rest of the lab.
 
 ## How do I open the data in FragPipe-Analyst? {#faq.fpa}
 
@@ -310,12 +335,19 @@ search ([A notification did not arrive](#trouble.notify)).
 
 ## Can I ask Ionomos a question in plain words? {#faq.assistant}
 
-Yes, if your lab has set up the assistant: `ionomos ask "why did my search
-fail?" --experiment 12` (the job number is in the Jobs tab; an experiment's
-name works too). It answers from that job's log, what the analysis found and
-this help, and each statement ends with its source in square brackets, such as
+Yes, if your lab has set up the assistant. In a window that says something
+needs attention, or in the **needs attention** list, press **Ask about this**.
+A window opens with a question already written for that problem; change it if
+you like and press **Ask**. A model on this computer can take a minute or two;
+the rest of Ionomos keeps working meanwhile. In a terminal: `ionomos ask "why
+did my search fail?" --experiment 12` (the job number is in the Jobs tab; an
+experiment's name works too).
+
+It answers from that job's log, what the analysis found and this help, and
+each statement ends with its source in square brackets, such as
 `[log:12#41]` (line 41 of job 12's search log) or `[help:faq.rerun]`
-(`ionomos help faq.rerun` shows it).
+(`ionomos help faq.rerun` shows it). Under the answer, **Sources** shows what
+each of those says, as Ionomos read it.
 
 - It only reads. It cannot retry, change, move or delete anything, whatever
   you type. Use the buttons in the windows for that.
@@ -335,6 +367,12 @@ on this computer and named under `assistant:` in `config.yaml`. `ionomos
 check` has a row named assistant that shows its state. "Not this PC" means the
 address in `config.yaml` points at another computer; Ionomos refuses that and
 sends nothing.
+
+While a search runs, the lab may have set the assistant to use a smaller
+model, or to pause so the search keeps the computer to itself
+(`assistant.while_searching`). A paused assistant says so, and you get
+Ionomos's own explanation, as above. Before choosing a model, the person who
+looks after Ionomos measures it on this computer with `ionomos ask-eval`.
 
 ## Where is this help, and can I change it? {#faq.help}
 

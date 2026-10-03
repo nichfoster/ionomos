@@ -395,6 +395,13 @@ written above the table.
   `site_annotation` under `analysis:`), each site is marked *known liganded*,
   *known hyperreactive*, *seen before* or *new*.
 
+The rule above the table also says which ratios the calls used: as measured,
+or centred per replicate when the lab set `ratio_centre` (see
+[A replicate's site ratios sit off 0](#issue.RATIO_OFFSET)). With
+`protein_correction` set, `cysteine_sites.tsv` lists each site's protein ratio
+from the proteome beside the call (`protein_log2_R`, `log2_R_corrected`); the
+call itself stays on the site ratio.
+
 These calls are a convention, not a statistical test: the volcano plot tests
 whether a ratio differs from 1. If the ratio is the other way round in your
 experiment (the treated sample carries the heavy tag), set

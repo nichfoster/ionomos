@@ -22,7 +22,8 @@ How an answer is made:
   5. Every question is written to the audit log (audit.py).
 
 Settings (config.yaml `assistant:`; off by default):
-    enabled, base_url, model, allow_cloud, maintainer, timeout_seconds, stream
+    enabled, base_url, model, allow_cloud, maintainer, timeout_seconds, stream, keep_alive, while_searching
+    (keep_alive and while_searching: sharing the PC with a search, runtime.py)
 """
 from __future__ import annotations
 
@@ -33,7 +34,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from ionomos.assistant import audit, citations, client, tools
+from ionomos.assistant import audit, citations, client, runtime, tools
 from ionomos.assistant.client import ChatError, NotLocal
 
 log = logging.getLogger("ionomos.assistant")
@@ -46,7 +47,9 @@ DEFAULTS = {
     "maintainer": "",                           # who "ask the maintainer" names, e.g. "Nick (nick@lab.example)"
     "timeout_seconds": 120,
     "stream": True,
-}
+    "keep_alive": "",                           # how long the runtime keeps the model loaded (Ollama); "" = its own
+    "while_searching": {},                      # model / base_url / keep_alive / timeout_seconds / pause while a
+}                                               # search runs (runtime.py)
 MAX_ROUNDS = 6            # requests to the model per question
 MAX_CALLS_PER_ROUND = 4
 MAX_CALLS = 12
@@ -104,6 +107,11 @@ def settings_from(raw) -> dict:
         raise AssistantError("timeout_seconds must be a number") from None
     if not 1 <= s["timeout_seconds"] <= 3600:
         raise AssistantError("timeout_seconds must be between 1 and 3600")
+    try:
+        s["keep_alive"] = runtime.keep_alive_value(s["keep_alive"])
+        s["while_searching"] = runtime.while_searching_from(s["while_searching"])
+    except ValueError as exc:
+        raise AssistantError(str(exc)) from None
     return s
 
 
@@ -145,6 +153,7 @@ class Answer:
     rounds: int = 0
     ttft: float | None = None
     seconds: float = 0.0
+    mode: str = "idle"              # idle | searching: whether a search was running (runtime.py)
 
     @property
     def grounded(self) -> bool:
@@ -237,12 +246,16 @@ def fallback(ctx: tools.Context, question: str, job_id: int | None, item, lead: 
 
 
 def ask(cfg, question: str, *, experiment=None, item_id: str | None = None, transport=None,
-        audit_path=None) -> Answer:
-    """One question, one answer. Never raises for a missing, broken or misbehaving model."""
+        audit_path=None, searching: bool | None = None) -> Answer:
+    """One question, one answer. Never raises for a missing, broken or misbehaving model.
+    searching: whether a search is running (None: read it from the worker's heartbeat in cfg.log_dir); while
+    one is, assistant.while_searching applies (runtime.py)."""
     from ionomos import attention
 
     started = time.monotonic()
-    s = settings_of(cfg)
+    if searching is None:
+        searching = runtime.search_running(getattr(cfg, "log_dir", None))[0]
+    s = runtime.effective(settings_of(cfg), bool(searching))
     question = tools.clean(question, MAX_QUESTION)
     ledger = _open_ledger(cfg)
     try:
@@ -255,10 +268,11 @@ def ask(cfg, question: str, *, experiment=None, item_id: str | None = None, tran
         if note:
             ans.text = f"Note: {note}.\n\n{ans.text}"
         ans.job_id = job_id
+        ans.mode = s["mode"]
         ans.seconds = round(time.monotonic() - started, 3)
         audit.append({
             "question": question, "job": job_id, "item": item.id if item else None,
-            "model": ans.model or s.get("model", ""), "base_url": s.get("base_url", ""),
+            "model": ans.model or s.get("model", ""), "base_url": s.get("base_url", ""), "mode": s["mode"],
             "prompt_digest": prompt_digest(), "outcome": ans.outcome, "reason": ans.reason, "rounds": ans.rounds,
             "tool_calls": [{"name": c["name"], "args_sha256": audit.digest(c["arguments"]), "ok": c["ok"],
                             "by": c["by"]} for c in ans.tool_calls],
@@ -277,6 +291,9 @@ def _answer(ctx: tools.Context, s: dict, question: str, job_id, item, transport)
     if not question:
         return Answer(fallback(ctx, "", job_id, item, "No question was asked.", who), "fallback", "empty question")
     st, why = state(s)
+    if st == "ready" and s.get("pause"):
+        st, why = "unavailable", ("The assistant is paused while a search runs (assistant.while_searching.pause), "
+                                  "so the search keeps the computer to itself.")
     if st != "ready":
         lead = why + (" Here is what Ionomos itself can tell you." if st == "not_set_up" else
                       " Here is what Ionomos itself can tell you instead.")
@@ -285,7 +302,7 @@ def _answer(ctx: tools.Context, s: dict, question: str, job_id, item, transport)
     calls: list[dict] = []
     messages = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": question + (
         f"\n\n(This question is about job {job_id}.)" if job_id is not None else
-        f"\n\n(This question is about the attention item {item.id}.)" if item is not None else "")}]
+        f"\n\n({about_item(item)})" if item is not None else "")}]
     pre = _lookups(ctx, job_id, item)
     if pre:  # what Ionomos looked up itself, in the shape of tool calls the model already made
         messages.append({"role": "assistant", "content": "", "tool_calls": [
@@ -346,6 +363,18 @@ def _answer(ctx: tools.Context, s: dict, question: str, job_id, item, transport)
     ans.citations = []
     ans.text = fallback(ctx, question, job_id, item, f"{lead} Here is what Ionomos itself can tell you.", who)
     return ans
+
+
+def about_item(item) -> str:
+    """How the user's message names an attention item without a job: by its kind and when Ionomos raised it,
+    both written by Ionomos. Its id, title and message carry folder and sample names (untrusted), so they reach
+    the model only inside tool results, as data."""
+    from ionomos import attention
+
+    kind = item.kind if item.kind in attention.KINDS else "other"
+    when = re.sub(r"[^0-9T:-]", "", str(item.created or ""))[:19]
+    return (f"This question is about an attention item of kind {kind}" + (f", raised {when}" if when else "")
+            + "; list_attention returns it.")
 
 
 def _json_or_empty(text: str) -> str:

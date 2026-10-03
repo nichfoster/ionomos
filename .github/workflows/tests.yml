@@ -20,7 +20,7 @@ jobs:
           - {os: ubuntu-latest, python: "3.11"}
     name: test (${{ matrix.os }}, py${{ matrix.python }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 25  # Windows took up to 14m46s at 0.16.0 (D73)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

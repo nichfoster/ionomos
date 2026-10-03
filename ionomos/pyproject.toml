@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ionomos"
-version = "0.15.0"
+version = "0.16.0"
 description = "Proteomics results to an interactive report (statistics, volcano plots, QC, enrichment) from FragPipe, DIA-NN or any protein table, plus a drop-folder watcher that runs FragPipe headlessly"
 readme = "README.md"
 license = "GPL-3.0-or-later"
@@ -42,7 +42,7 @@ parquet = [  # DIA-NN 2.x report.parquet (downstream/engines.py); everything els
     "pyarrow>=14",
 ]
 dev = [
-    "pytest>=8",
+    "pytest>=9",  # faulthandler_exit_on_timeout (below, D73)
     "pyarrow>=14",
     "ruff>=0.5",
     "pyinstaller>=6.10",
@@ -59,9 +59,15 @@ where = ["src"]
 [tool.setuptools.package-data]
 "ionomos.downstream" = ["assets/*"]  # report.js, report.css, demo_gene_sets.gmt (tests/test_packaging.py)
 "ionomos.help" = ["*.md"]  # the help content: reports, help.html, `ionomos help` (tests/test_help.py)
+"ionomos.assistant.scenarios" = ["*.json"]  # the assistant's scenario corpus, for `ionomos ask-eval` (D72)
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# D73: a test still running after this many seconds is a hang. Every thread's stack is printed and the run ends
+# (exit 1) instead of waiting for an outer time limit with nothing on screen. The slowest test takes ~2 min on a
+# loaded Mac. A hang after the last test (interpreter exit) is caught in tests/conftest.py.
+faulthandler_timeout = 300
+faulthandler_exit_on_timeout = true
 
 [tool.ruff]
 line-length = 120

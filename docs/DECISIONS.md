@@ -1223,7 +1223,8 @@ adds the convention used in isoTOP-ABPP / isoDTB work.
    When far more sites would be liganded the other way round, the doctor
    warns (`LIGANDED_DIRECTION`) rather than switching by itself.
 4. **Measured ratios only.** No normalisation and no imputation: a liganded
-   call must never rest on a made-up value.
+   call must never rest on a made-up value. (D70: the lab may opt into centring the ratios per
+   replicate; the calls then use the centred ratios and say so.)
 5. **Selectivity needs evidence on both sides.** A site is *selective* only
    when every other compound was measured as not liganding it; if they
    weren't measured well enough it is *unresolved*.
@@ -1235,7 +1236,8 @@ adds the convention used in isoTOP-ABPP / isoDTB work.
 7. **Left out: the protein-abundance correction** (MSstatsPTM). It needs a
    matching unenriched proteome per condition, and where that comes from is
    a question for the lab. The per-protein view ("most of this protein's
-   cysteines are liganded") is the warning available without it.
+   cysteines are liganded") is the warning available without it. (Built in D70,
+   with the proteome named explicitly.)
 
 
 ### D53 — Time courses are tested with time as a factor, on the comparisons' own model
@@ -2263,7 +2265,8 @@ was label-free DIA only.
      isoDTB replicates give 5.8 – 9.8 % with limma: with 1 df per site the
      test rests on a variance prior whose shape the sites do not follow (with
      equal SDs it is calibrated).
-   None of these is a small, clearly right change, so none was made.
+   None of these is a small, clearly right change, so none was made. ((b)
+   and (c) were fixed in D71.)
 
 **Not verified**: real data of any kind. The simulated tables have the
 layouts of FragPipe's label quant and MaxQuant's protein groups, not their
@@ -2527,3 +2530,434 @@ file unreadable; which code page FragPipe's tools really write (ROADMAP
 the name check find raws through `intake.raw_paths`, so a `<plex>\` drop's
 files are listed and can be removed (moved aside, as every inbox removal is);
 added while combining the 0.15.0 PRs.
+
+
+### D70 — isoDTB: site changes corrected for protein abundance, and opt-in centring of the ratios
+**2026-10-03.** Two open items for isoDTB results the lab can trust: the
+protein-abundance correction left out of D52 (ROADMAP 5C #3), and the mixing
+error D66 found and did not fix. Both are built **off by default**: where the
+proteome comes from, and whether to centre, are the lab's decisions.
+
+1. **The proteome is named, never guessed.** `analysis.protein_correction:
+   {proteome, match, conditions}` (usually in `experiment.yaml`). `proteome`
+   is an analysed Ionomos experiment (its folder or `results/`), or a protein
+   table: MSstats groupComparison output (Protein, Label, log2FC, SE, DF), the
+   format MSstatsPTM itself takes, or an Ionomos `*_differential.tsv`. A
+   relative path is read from the experiment folder; the proteome is only
+   read. `match: gene | protein` (accessions with isoforms joined, as the site
+   annotation does). A site condition (an isoDTB prefix such as `EJQ_2_027`)
+   takes the comparison `conditions` names, else the one whose first
+   condition has its name; none or several is `PROTEIN_CORRECTION_CONDITIONS`
+   (decide) and that condition is not corrected. Alternatives weighed: taking
+   a proteome's only comparison when there is one (a guess, ruled out by the
+   task), and matching by roles (the proteome's roles are not the site
+   data's).
+2. **The scale comes from `liganded_direction`.** Site ratios are log2
+   heavy / light; a proteome "Cmpd vs DMSO" is log2(Cmpd / DMSO), so on the
+   site's scale it is −log2FC when the treated sample is light (`high`) and
+   +log2FC when it is heavy (`low`). A proteome analysed as ratios (a
+   comparison "X (log2 H/L vs 0)") is taken as it is. The orientation is
+   written in `analysis.json` → `protein_correction.orientation`.
+3. **MSstatsPTM's adjustment, exactly.** `proteincorr.adjust` is
+   `.adjustProteinLevel`: log2FC = site − protein, SE = √(SE_site² +
+   SE_protein²), Satterthwaite df, two-sided p; BH per condition over the
+   sites tested (`.applyPtmAdjustment`). The site's SE and df are the
+   moderated one-sample test's posterior SE and residual + prior df; nothing
+   is moderated again, as in MSstatsPTM. To have them, `ContrastResult`
+   carries `se` and `df` for every test (limma, the designs, the t-tests) and
+   **every `*_differential.tsv` gains `se` and `df` columns** (additive; a
+   proteome table without them is read from `t` and the 95 % interval).
+   Infinite df (limma's pooled prior) drops out of the Satterthwaite sum; both
+   infinite gives a normal p.
+4. **Both results, flagged.** The site comparison stays as it was; a second
+   comparison `<condition> (log2 H/L vs 0, protein-corrected)` is added like
+   any comparison (volcano, table, report, results table, `analysis.json`),
+   with the protein's key, status, log2 H/L, SE and df and the site's own
+   numbers in its table. Sites whose protein is missing or ambiguous keep the
+   uncorrected result and are flagged (MSstatsPTM drops them). Fewer than
+   half the sites finding their protein, or a proteome that can't be read, is
+   `PROTEIN_CORRECTION`. The liganded calls stay on the site ratio (R ≥ 4 is
+   a rule about the measured competition); `cysteine_sites.tsv` shows the
+   protein's ratio and the corrected R beside each call.
+5. **`analysis.ratio_centre: none | median | auto`, default `none`.**
+   - `median`: each replicate's median site to 0.
+   - `auto` reuses D64's idea: centre on the sites that don't change, and only
+     when it matters. Each replicate's offset is the median of its ratios over
+     the half of the sites whose mean deviation from the replicates' centres
+     is smallest (five passes): engaged sites all move one way and leave that
+     half, so they stop pulling the centre. A condition is centred, all its
+     replicates, when one of them is more than 0.05 log2 **and** 3 standard
+     errors (1.2533 × robust SD / √sites) off 0. A condition is the unit
+     because its replicates share the compound's composition.
+   - The offsets are measured whatever the setting (`analysis.json` →
+     `normalisation.ratio_centre`); with `none` a clear one is the note
+     `RATIO_OFFSET`, which says what to set.
+   - The liganded calls use the ratios the analysis used and say which in
+     their rule ("on the ratios as measured" / "centred per replicate on the
+     stable sites …"), in `analysis.json` (`cysteines.centred`) and Methods.
+6. **What it measured** (`benchmark.simulated("centring", kind="isodtb")`: 3
+   replicates, 900 sites, limma, 20 tables per scenario; FDP / planted changes
+   found at adjusted p ≤ 0.05 / |mean log2 ratio of the unchanged sites| per
+   table; BH aims at 4.75 % with 5 % changed, 4 % with 20 %):
+
+   | mixing error, sites up, fold | none (default) | median | auto |
+   |---|---|---|---|
+   | 0, 5 %, 2× | 3.4 % / 38 % / 0.005 | 3.4 % / 31 % / 0.021 | = none |
+   | 0, 5 %, 4× | 4.1 % / 94 % / 0.007 | 4.1 % / 94 % / 0.018 | = none |
+   | 0, 20 %, 2× | 4.6 % / 79 % / 0.006 | 5.3 % / 74 % / 0.087 | = none |
+   | 0, 20 %, 4× | 4.9 % / 97 % / 0.007 | 6.1 % / 97 % / 0.097 | = none |
+   | 15 % (SD 0.2), 5 %, 2× | **8.4 %** / 18 % / 0.109 | 4.1 % / 24 % / 0.016 | 4.2 % / 28 % / 0.014 |
+   | 15 %, 5 %, 4× | 4.8 % / 95 % / 0.113 | 4.9 % / 93 % / 0.017 | 4.9 % / 93 % / 0.010 |
+   | 15 %, 20 %, 2× | 5.1 % / 61 % / 0.088 | 6.3 % / 74 % / 0.091 | 5.5 % / 80 % / 0.012 |
+   | 15 %, 20 %, 4× | 3.8 % / 98 % / 0.080 | 5.2 % / 97 % / 0.093 | 4.4 % / 97 % / 0.012 |
+
+   `auto` left all 240 tables without a mixing error untouched (identical
+   numbers to `none`) and centred all 240 with one; on the stable sites its
+   offsets had a bias of 0.003 and an SD of 0.017 log2 with 20 % of the sites
+   up (reported SE 0.020 – 0.027). `median` removes the mixing error too but
+   moves the unchanged sites by −0.09 whenever 20 % go one way. The mixing
+   error does not always raise the FDP (it also widens the replicate spread,
+   making the test conservative), but it always moves the unchanged sites.
+7. **Default `none`, on purpose.** `auto` is better than `none` and `median`
+   in every simulated scenario, but the simulation's mixing error is a guess
+   (D66), a real compound may move more than half the sites, and centring
+   changes the liganded calls. ROADMAP asks the lab.
+
+**Verified**: the adjustment against MSstatsPTM 2.14.0 and limma 3.68.5 on
+the same sites and protein table, to 1e-9 (`tests/golden/ptm/`, R script
+committed; the test needs no R); the readers, the condition matching, the
+issues and the scale on simulated isoDTB + DIA experiments end to end; the
+centring on simulated tables and the benchmark grid above. **Not verified**:
+real data of any kind; a real MSstats or MSstatsTMT protein table (built from
+their documented columns); a proteome searched separately from the sites
+(gene names that differ between the two searches); 2 or 4 replicates with
+centring (the standard isoDTB grid now runs them); the report's new
+comparison in a real browser (the JS is unchanged; the comparison is one more
+entry in the existing list).
+
+### D71 — TMT plexes: the composition check looks within plexes; IRS on the plex means pays its degrees of freedom
+**2026-10-03.** D66's simulated TMT grid left two open questions: (b) without
+IRS the composition check (D64) could not see a pulldown, and (c) IRS on each
+plex's own mean (`irs: sum`) was slightly liberal. Both are fixed; the
+default (IRS on a pool + `auto`) gives the same numbers on the same tables.
+
+1. **The composition check within plexes** (`fpa.plex_groups`,
+   `fpa._composition`, `fpa._plex_ratio_shifts`). When the samples belong to
+   two or more TMT plexes that are **not** on one scale (IRS off or refused),
+   the ratio method's shifts are taken within each plex (a feature's ratio
+   to its mean over that plex's own channels, which a per-protein plex effect
+   does not touch), and the check compares two conditions within each plex
+   and combines the plexes holding both, weighted 1 / (1/n_a + 1/n_b), with
+   its standard error from the replicate scatter within plex and condition.
+   The plexes' levels come from the ratio method over all samples (else the
+   sample medians). Each plex needs two channels and 20 complete features,
+   else the samples are compared all together as before.
+   - **Not after IRS.** Plexes already on one scale (IRS, MSstatsTMT's Norm
+     channels, TMT-Integrator's ratios) are compared all together, as in
+     D64. Tried first within plexes there too: the shift it measured was a
+     little smaller (10 tables of a 2-fold, 20 % pulldown with 2 DMSO
+     channels per plex: 0.153 against 0.157 on average), and in one table it
+     fell to 0.100, at the 0.1 limit, kept median centring and put that
+     scenario at 8.4 % false; across all channels there are three times as
+     many values per feature.
+   - With one plex (or none known) the check is D64's to the last digit (a
+     test recomputes it), so earlier analyses do not change.
+2. **IRS on the plex means spends a df per plex** (`plex.df_spent`,
+   `fpa.spend_df`; `limma_contrasts`, `limma_others`, `design.limma_design`,
+   `limma_design_others`, `f_test` take `df_spent`). Each plex a protein was
+   scaled in (every channel of it measured) had its level estimated from the
+   channels then tested, and the common target gives one back: limma's
+   residual df are reduced by (plexes - 1), the residual variance rescaled to
+   the same sum of squares, before the variance prior. That is what fitting
+   the plex as a fixed effect costs, without the fit. Not applied when the
+   design already holds the plexes (a block per plex or finer:
+   `plex.holds_plexes`, by rank), nor to the t-tests.
+   - **Why not a plex block instead?** Measured: after sum-IRS a block gave
+     6.5 % (both ways) / 5.2 % (pulldown), no better than nothing. limma's
+     `contrasts.fit` approximates the standard error of a protein with a
+     missing value when the design is not orthogonal, and such proteins came
+     out liberal (unchanged p < 0.05: 9.9 % after sum-IRS, 7 % for the block
+     without IRS, 5.4 – 5.6 % for complete proteins). The df reduction keeps
+     the plain, orthogonal model.
+   - **Against R** (`tests/golden/tmt_sum/`, `run_tmt_sum_reference.R`):
+     three plexes of 3 + 3 channels without a pool, with proteins in one, two
+     or three plexes, a channel missing in one plex or in all; IRS, the
+     filter, median normalisation and limma 3.68.5 given the reduced
+     `df.residual` and `sigma` agree to 1e-8 (fold change, interval, t, p,
+     adjusted p, the prior); without the reduction most p-values differ.
+   - `analysis.json` → `model.plex_df` says so; a model note too.
+3. **What a person is told.** "How far to trust this" gets a **TMT plexes**
+   line: reference channels, plex means with the df reduced, or a plex
+   block (ok); neither on one scale nor in the model, or a t-test after IRS
+   on the plex means ("check"). New doctor warning
+   `TMT_PLEXES_NOT_IN_MODEL` (`irs: none` and no plex block; help entry).
+   `NORMALISATION_COMPOSITION` names the plexes when the check was made
+   within them, and now fires without IRS, where it should.
+4. **Numbers** (`ionomos benchmark --kind tmt`, the standard grid; D66's in
+   brackets): IRS on plex means + auto 5.1 % (6.6 %) with changes both ways,
+   4.0 % (5.3 %) in a pulldown, range 3.0 – 7.7 % (3.7 – 9.3 %), the same
+   sensitivity (93 / 98 %). No IRS with a plex block, pulldown: 4.7 % (59 %),
+   unchanged proteins within -0.04 (-0.19 to -0.26). No IRS without a block,
+   pulldown: 0.3 % (5.1 %), 40 % of 2-fold changes found (31 %). Default and
+   IRS + median: unchanged. On 20 seeds of the four "both ways" cells (1,000
+   proteins, 2-fold): plex means 6.89 % → 5.11 %, where the exact plex-block
+   model without IRS gives 5.54 % and IRS on a pool 4.16 %.
+5. **Guards** (`tests/test_benchmark.py`, `TMT_GRIDS["guard_sum"]`,
+   `["guard_pulldown"]`; limits from 30 other blocks of 10 seeds, worst mean
+   + about 3.5 SD): plex means FDP at most 10 % (blocks: mean 4.7 – 5.0 %,
+   SD 0.8 – 1.4 %; without the reduction 6.2 – 7.4 %, and the same seeds
+   without it must come out worse); a pulldown without IRS within 0.06 log2,
+   with the plex block at most 10 % false (mean 5.0 – 6.0 %). About 15 s.
+
+**Not verified**: real TMT data; whether real plex effects are additive per
+protein, as simulated. **Open** (ROADMAP): limma's block approximation with
+missing values; proteins `irs: sum` leaves unscaled or drops a plex for; the
+t-tests after plex means; the 0.1 log2 limit at a 2-fold pulldown.
+
+### D72 — "Ask about this", a scorecard runner, and the settings for sharing the PC with a search
+**2026-10-03.** What Phase 6.1 could still do without a real model (D57 left
+it out), inside D49's rules. No model has been tried; Phase 6.1's box stays
+open.
+
+1. **"Ask about this" asks with a fixed question per kind of item.** The
+   pop-ups and the attention list get the button; it opens a window that asks
+   at once with, for example, "Why did this search fail, and what should I
+   do?", which the user can edit. Nothing from the item (title, folder or
+   sample names) goes into the question. An item without a job used to be
+   named to the model by its id, which carries the folder's name; it is now
+   named by its kind and the time Ionomos raised it, and its names reach the
+   model only inside tool results, as data.
+2. **The logic is outside Tk; the thread holds no widget.** `assistant/askui.py`
+   makes the question, asks (never raising: a config that won't load is shown
+   as such) and renders each outcome as plain text with a heading and a help
+   topic. `popups.AskWindow` only draws. The answer comes back through the
+   pop-ups' existing queue (`PopupHost.post`, pumped with `root.after`); the
+   worker thread is handed the long-lived `Popups`, a token and plain values,
+   never the window, and the window uses no Tk variable (tkutil.py: a Tk
+   object freed off the Tk thread aborts the process). A window closed before
+   its answer comes drops it. The window has no button that changes anything.
+3. **The scenario corpus ships with Ionomos.** `ionomos ask-eval` must run on
+   the PC, where Ionomos is a frozen exe without `tests/`, so the JSON files
+   and the fixture states moved to `ionomos/assistant/scenarios/` (package
+   data, and in the PyInstaller spec). `tests/assistant_scenarios` re-exports
+   them. The CI replay and the runner use the same files and the same
+   `score()`.
+4. **15 scenarios are "harness_only".** Their rubric holds only for their
+   script (a runtime that is down, a reply that is not JSON, a model that obeys
+   an injected line, invents a citation or never answers): a good model would
+   fail them. The runner scores the other 38; each question a harness-only
+   scenario asks is scored once, in the scenario with the well-behaved script,
+   and a test checks that none is left unscored.
+5. **The runner builds its own fake lab and writes two new files.** Each
+   fixture state is built once, in a new folder (`C:/ionomos-ask-eval/<time>`
+   on Windows: no spaces), and the questions are audited there, not in the
+   lab's audit log. The scorecard is JSON plus a table, in app data by
+   default, created exclusively: never written over. It keeps each answer and
+   its Sources, because a pass proves only that the rubric found nothing wrong
+   (D57 4), and a person has to read them before choosing a model.
+6. **Only this PC, checked first.** The address (and `while_searching`'s) is
+   checked with the client's own `local_problem()` before anything is built,
+   and every request goes through `client.chat()`. The tests use a scripted
+   HTTP server on 127.0.0.1 and a port the OS picks, with proxy variables set
+   to show they are ignored; `--scripted` runs the same server on the PC to
+   check the runner and the fixture states there without a model.
+7. **Time to first token is the first generated token.** The client counted
+   the opening `role: assistant` event, which a runtime sends before reading
+   the prompt. It now waits for text, reasoning or a tool call.
+8. **Only `keep_alive` is added to the request.** Ollama's
+   `/v1/chat/completions` reads `keep_alive` (checked in its source,
+   2026-10-03); llama-server ignores it. Neither endpoint takes a thread count:
+   Ollama's OpenAI-compatible request has no `num_thread`, and a request with
+   other runner options reloads the model, so preloading with fewer threads
+   does not stick; llama-server's threads are fixed at start (`-t`, `-tb`).
+   So "while a search runs" switches what can be switched per request:
+   `while_searching` may name another `model` (a smaller one, or an Ollama
+   variant made with `PARAMETER num_thread 4`), another `base_url` (a second
+   llama-server started with fewer threads), a shorter `keep_alive`, a longer
+   `timeout_seconds`, or `pause: true` (no model at all; Ionomos's own text).
+   Empty `keep_alive` (the default) sends nothing.
+9. **"A search is running" is read from the worker's heartbeat.** The worker
+   beats "running job N: step" every few seconds during a search; a heartbeat
+   older than `health.STALE_AFTER` means no watcher, so no search. It is read
+   per question, in the app and in `ask-eval` (`--mode auto`). The audit log
+   and the scorecard record the mode.
+10. **Ionomos does not lower another program's priority.** It only reads and
+    asks; starting the runtime at "below normal" is documented as the lab's
+    choice, to be decided by the Phase 6.0 measurements.
+
+**Verified:** by the suite on macOS (the window tests are written in the
+existing style and run in CI only). **Not verified:** any real model or
+runtime; that Ollama on the PC honours `keep_alive` on this endpoint; the
+right `keep_alive` / `while_searching` for the PC; the window on the PC's
+display scaling.
+
+**For the maintainer to confirm:** 1 (naming an item without a job by kind
+and time), 4 (which scenarios are harness-only; `refuse_delete_request`
+expects no grounded answer, which a good model citing the help's "Ionomos
+never deletes" would fail), and 8 (no thread setting in Ionomos).
+
+### D73 — A hung test run reports itself and ends; no wait in the tests is without a time limit
+**2026-10-03.** The full suite hung on macOS (Python 3.14) at least three
+times in a day, on different branches, with nothing on screen until a
+30-minute limit killed it; re-runs passed and CI (Ubuntu, Windows) never hung.
+
+**Reproduction.** 14 full runs on macOS / Python 3.14.6 (10 of master's code,
+4 with these changes), up to three at once next to other agents' suites and
+simulations (load average up to 80), and about 3,300 more tests from the
+thread- and process-heavy files (`test_faults`, `test_failsafes`,
+`test_fragpipe_real`, `test_worker`, `test_watcher`, `test_e2e`,
+`test_notify`, `test_service`, `test_stress`, the engine runners) in
+forward, reversed and shuffled file orders, each with
+`-o faulthandler_timeout=240` so a stuck test would have printed every
+thread's stack. **It did not hang**: no stack was printed, no test took more
+than ~30 s, and no process was left behind. A full run took 6–8 minutes
+with three at once and 13.5 under the heaviest load. `tail` (as in `pytest |
+tail`) shows nothing until the end, so a run slowed past an outer limit and
+one that hangs look the same. The code was then read
+for every wait without a time limit (below). The cause of the three hangs is
+**not known**. These changes make the next one say where it is:
+
+1. **A test that runs too long ends the run with every stack.**
+   `pyproject.toml`: `faulthandler_timeout = 300` and
+   `faulthandler_exit_on_timeout = true` (pytest ≥ 9, now the `[dev]`
+   floor). The dump comes from a C thread, so it works even when the hang
+   holds the GIL; the run exits 1 rather than waiting for the outer limit.
+   300 s is 10× the slowest test on a loaded Mac and fits inside CI's
+   15-minute job.
+2. **A run that can't exit after its last test is ended too.** A thread or
+   a child something waits on at interpreter exit (a non-daemon thread, an
+   atexit handler) is past every test hook. `tests/conftest.py` arms
+   `faulthandler.dump_traceback_later(120, exit=True)` in
+   `pytest_unconfigure`, on a copy of the real stderr taken while output
+   capture is off (`IONOMOS_TEST_EXIT_SECONDS` changes it).
+3. **Waits without a limit, given one.** In the tests: `proc.wait()` after
+   a kill in `test_faults.py`, the thread `join()` in `test_failsafes.py`,
+   the `ps` / `tasklist` probes in `test_fragpipe_real.py`, the `python -m
+   ionomos` runs in `test_main_entry.py`, `git` in `test_service.py`, the R
+   probe and script in `test_design.py`. A second `ionomos run` whose output
+   is read (`test_failsafes.py`) is killed and drained if it doesn't answer
+   in 30 s. `while w.run_once(): pass` (three in `test_faults.py`) became
+   `_drain`, which fails after 20 jobs instead of looping. The fake SMTP
+   server's DATA loop span on an empty read when the client went away; it
+   now returns.
+4. **Product: `taskkill` / `tasklist` get 60 s** (Windows only). Every
+   way a search is stopped (stop, cancel, the time limit, a console log too
+   large, an error in Ionomos, a leftover FragPipe) and the app's Stop ran
+   `taskkill /T /F` with no limit, as did the `tasklist` behind the
+   watcher's pid. One that never returned would have held the worker (and
+   `ionomos run`'s shutdown) for ever. Now `fragpipe._taskkill` gives up after
+   `TASKKILL_SECONDS` (also on `OSError`, which used to escape `kill_tree`),
+   and a `tasklist` that doesn't answer counts as "not running", so no
+   process is named that can't be seen. Not seen on the PC; found by
+   reading.
+
+**Checked and left alone**: `fragpipe._watch` waits with `poll`, `kill_tree`
+and `request_stop` already had limits, `health.process_started` gives `ps`
+10 s and never raises, every thread the product starts is a daemon,
+`notify.flush` and the test HTTP / SMTP servers are bounded, the resolver's
+`done.wait()` (GUI only; `ionomos run` joins its threads with a limit and they
+are daemons). Not done: pytest-timeout (a dependency for what pytest and the
+standard library already do); killing a hung run's children. An `ionomos
+run` or fake FragPipe that a test started is left running when the run is
+ended this way (their output goes to files, so they hold no pipe of the
+run); `ps` shows them by the test's temporary folder.
+
+### D74 — Diagnostics are anonymised as a bundle is; more tables on request; a name check in `inspect`; Spectronaut gets a column list, not an `.rs` file
+
+**2026-10-03.** The maintainer wants anonymous zips (and text) from the
+lab's PC, saved on the Desktop, to carry to Dropbox for troubleshooting and
+validation. D63 left four things open. This entry replaces D63 point 15
+("Copy diagnostics is unchanged") and extends point 3.
+
+1. **"Copy diagnostics" is anonymised by default; the real text is one
+   button away.** The app's **Copy diagnostics** now copies the text with
+   the lab's names replaced; **Copy with real names** (next to it) copies it
+   as before. `ionomos diagnose` keeps printing real names (a terminal on
+   the PC) and takes `--anonymise`. One code path: `bundle.anonymise_text`
+   learns the names with the same `collect` + `learn` a `diagnose` bundle
+   uses (same settings, job list, inbox, problem jobs), rewrites the text
+   with the same `_Scrub`, and runs the same leak check (`check_text`, the
+   search behind `verify`, now one class `_Check`). A name still in the text
+   raises `BundleLeak`: nothing is copied or printed, and the message says
+   so. The pseudonyms are the ones a `diagnose` bundle made at the same time
+   gives (tested). A checkbox was the alternative; two buttons make the
+   choice visible each time and need no state.
+2. **The key of the text stays in the lab.** The saved copy
+   (`logs/diagnostics-<time>-anonymised.txt`) is the anonymised text, with
+   `<name>-KEY-keep-in-the-lab-DO-NOT-SHARE.json` next to it
+   (`bundle.write_key`, the bundle's key format), so `ionomos bundle
+   translate` reads a pasted copy back. Daily housekeeping keeps the newest
+   50 diagnostics keys (they are tiny, and needed long after the text was
+   pasted); the texts stay at 20, as before.
+3. **More tables only when asked: `--include diann-report,peptides`.**
+   `diann-report` is DIA-NN's main report (`report.tsv`, `report.parquet`,
+   or `<out>.tsv` / `.parquet` beside `<out>.pg_matrix.tsv`); `peptides` is
+   FragPipe's `peptide.tsv` / `ion.tsv`, DIA-NN's `*pr_matrix.tsv` and
+   MaxQuant's `peptides.txt` / `modificationSpecificPeptides.txt`.
+   FragPipe's `combined_peptide.tsv`, `combined_ion.tsv` and
+   `combined_modified_peptide.tsv` were already in every `validate` bundle
+   (`combined_*.tsv`). A spectral library (`lib` in the name, `.speclib`) and
+   DIA-NN's first-pass report never go in. `--include` implies `--level
+   validate` (`--level diagnose --include …` is refused); the Report a
+   problem window has a box for both kinds, which also implies the result
+   tables. The tables are added after every other table of every job, so
+   the bundle's size limit drops them first, and each one over `--extra-mb`
+   (default 200 MB) is row-sampled as a PSM table is (header + every n-th
+   row), said in `capped`, `BUNDLE.json` (`one_row_in`) and README. They
+   make a job "not fully reproducible" only when the analysis reads them (a
+   DIA-NN job without its matrices).
+4. **A Parquet report goes in as text.** A binary file's names cannot be
+   replaced or its rows sampled, so `report.parquet` is written as
+   tab-separated text (`report.tsv`, or `report.parquet.tsv` when a
+   `report.tsv` is beside it), batch by batch with pyarrow, each value as
+   `str()` as Ionomos' own Parquet reader turns it into a cell
+   (`engines._read_long`); `BUNDLE.json` says `converted_from`, and
+   `inspect` / `unpack` / README say it. The DIA-NN loader reads the
+   converted file to the same matrix as the original (tested). Without
+   pyarrow (it is in the `[dev]` and `[parquet]` extras, so in the lab's dev
+   install, but not in the exe) the file is left out with that reason.
+5. **Run names in cells are learnt.** A long report names its run in every
+   row (`Run`, `File.Name`, Spectronaut's `R.FileName`), not in its header,
+   so those columns are read whole (Parquet: only those columns) and each
+   value registered as a sample (a path: its stem, and its folder when it
+   is outside the lab's tree). MaxQuant's header prefixes (`LFQ intensity
+   <sample>`, `Intensity <sample>`, `Experiment <sample>`) are now learnt
+   too. `unpack` needs nothing new; `translate` reads a file line by line, so
+   a translated main report is not read into memory.
+6. **`ionomos bundle inspect` checks every file for real names.** It
+   searches each file of the zip, and each file name, for the names this
+   computer knows: the lab's (`learn` with no job named: settings, aliases,
+   the users folder, the OS account and PC, every job in the job list with
+   its sample names, the inbox) and the originals in the bundle's key file
+   (next to the zip, or `--key`). It lists every file with "no real name",
+   or what it found and how often; identifier columns are listed as kept,
+   as in the key file. On the developer's computer (no settings, no key) it
+   says there is nothing to check against. A bundle made without
+   anonymising is expected to be full of names, and `inspect` says so. A
+   home-folder path holding a pseudonym (`C:\Users\user01`) is not a name.
+7. **Spectronaut: a column list and instructions, not an `.rs` file.**
+   Spectronaut's report-schema file (`.rs`) is its own format: the manual
+   (Spectronaut 19, "Report Perspective" and the command line's `-rs`)
+   describes building, saving and passing a schema but not the file, and a
+   public `.rs` (SpectroPipeR's) is an opaque binary file. Writing one would
+   be inventing a format. Instead `engines.SPECTRONAUT_COLUMNS` is the one
+   list the loader reads (`load_spectronaut` takes its `want` from it) and
+   `ionomos spectronaut-columns [--out DIR]` prints it with what each column
+   is for, which three are needed (`R.FileName`, `PG.ProteinGroups`,
+   `PG.Quantity` or `PG.MS2Quantity`) and how to tick them in the Report
+   perspective, save the schema and export a Normal Report. The lab can then
+   save its own `.rs` from Spectronaut and share that. The PG and EG column
+   names are in the manual's Appendix 8; the R columns are those Ionomos
+   already read (also MSstats' Spectronaut converter's).
+
+**Verified**: by the suite on macOS (the window's code by GUI tests that run
+in CI only): the anonymised text has none of the testbed's names (plain
+search), its pseudonyms are a bundle's, a leak stops it; `--include` bundles
+of the fake FragPipe DIA job with a written `report.tsv`, `report.parquet`,
+library, precursor matrix, `peptide.tsv` and `ion.tsv` (real column names)
+pass the plain search, unpack, load and translate back byte for byte; the
+name check finds a name added to a zip. **Not verified**: real DIA-NN 2.x
+Parquet reports (their size, types and how long the conversion takes on the
+PC); real MaxQuant peptide tables; Spectronaut itself (the instructions
+follow the manual, not a session with the program); the buttons and the new
+box on screen.

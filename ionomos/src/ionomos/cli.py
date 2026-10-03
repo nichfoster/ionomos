@@ -10,10 +10,13 @@ Command line.
     ionomos names test NAME... [--method M]       how folder / .raw names are read with this config (naming:)
     ionomos retry    JOB_ID [--config PATH]       failed -> queued
     ionomos testbed  ...                          build/drive a fake lab for testing (see testbed.py)
-    ionomos diagnose [--zip [PATH]]               everything needed to report a problem (text, or a .zip bundle)
+    ionomos diagnose [--zip [PATH]] [--anonymise] everything needed to report a problem (text, or a .zip bundle)
     ionomos bundle   [JOB|FOLDER ...] [--level diagnose|validate] [--out DIR] [--no-anonymise]
+                     [--include diann-report,peptides]
                                                    an anonymised zip on the Desktop for troubleshooting / validation;
-                                                   bundle inspect ZIP | unpack ZIP DIR | translate KEY [FILE] (bundle.py)
+                                                   bundle inspect ZIP [--key KEY] | unpack ZIP DIR | translate KEY [FILE]
+                                                   (bundle.py)
+    ionomos spectronaut-columns [--out DIR]       the columns to tick in a Spectronaut report schema for Ionomos
     ionomos analyze  JOB_ID|FOLDER [--control C] [--compare 'A vs B'] [--de-type all] [--imputation none]
                      [--exclude SAMPLE] [--log2fc F] [--open]
                                                    statistics + volcano plots + results/report.html
@@ -38,7 +41,10 @@ Command line.
     ionomos ask      "QUESTION" [--experiment JOB_ID|NAME] [--item ID] [--json]
                                                    the local assistant: an answer grounded in the job's log, the
                                                    doctor's findings and the help; changes nothing (docs/ASSISTANT.md)
-    ionomos init     [--root DIR] [--users DIR]   create folders + a config without the app (headless setup)
+    ionomos ask-eval [--base-url URL] [--model NAME] [--out FILE] [--only IDS] [--scripted]
+                                                   score a model on this PC over the scenario corpus: rubric
+                                                   pass rate, injection failures, time to first token
+    ionomos init    [--root DIR] [--users DIR]   create folders + a config without the app (headless setup)
     ionomos qc-trend [--rebuild] [--open]         instrument QC: the QC-standard runs trended (logs/qc_trend.html)
     ionomos cancel   JOB_ID                       stop a running search / drop a queued job
     ionomos pause | resume                        hold / release the FragPipe queue
@@ -144,6 +150,10 @@ def _maintenance(cfg: Config) -> None:
     except Exception:  # noqa: BLE001
         log.exception("attention purge failed")
     health.prune(cfg.log_dir, "diagnostics-*.zip", keep=10)
+    # the keys of anonymised diagnostics (D74): tiny, and needed to read back a text pasted long ago
+    from ionomos.names import BUNDLE_KEY_SUFFIX
+
+    health.prune(cfg.log_dir, "diagnostics-*" + BUNDLE_KEY_SUFFIX, keep=50)
 
 
 def cmd_run(args) -> int:
@@ -534,10 +544,38 @@ def cmd_diagnose(args) -> int:
         z = save_diagnostics_zip(Path(args.config), Path(args.zip) if args.zip != "auto" else None)
         print(f"diagnostics bundle: {z}")
         return 0
-    text, where = save_diagnostics(Path(args.config))
+    from ionomos.bundle import BundleLeak, key_path_for
+
+    try:
+        text, where = save_diagnostics(Path(args.config), anonymise=args.anonymise)
+    except BundleLeak as exc:
+        print(f"{exc}\nNothing was printed. `ionomos diagnose` without --anonymise prints the text with real names.",
+              file=sys.stderr)
+        return 1
     print(text)
     if where:
         print(f"(saved to {where})")
+        if args.anonymise:
+            print(f"(names replaced by pseudonyms; the key, which stays in the lab: {key_path_for(where)})")
+    return 0
+
+
+def cmd_spectronaut_columns(args) -> int:
+    from ionomos.bundle import unique
+    from ionomos.downstream.engines import SPECTRONAUT_COLUMNS_FILE, spectronaut_columns_text
+
+    text = spectronaut_columns_text()
+    print(text)
+    if args.out:
+        out = unique(Path(args.out) / SPECTRONAUT_COLUMNS_FILE)
+        try:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            with open(out, "x", encoding="utf-8") as f:
+                f.write(text)
+        except OSError as exc:
+            print(f"could not save it: {exc}", file=sys.stderr)
+            return 1
+        print(f"(saved to {out})")
     return 0
 
 
@@ -923,6 +961,49 @@ def cmd_ask(args) -> int:
     return 0
 
 
+def cmd_ask_eval(args) -> int:
+    """Score a model over the assistant's scenario corpus (assistant/evaluate.py, D72). 0: every exit criterion
+    that was measured is met; 1: not (or the runtime stopped answering); 2: nothing was asked (refused)."""
+    from datetime import datetime
+
+    from ionomos.assistant import evaluate, fake, runtime
+
+    cfg = _load(args, check_paths=False)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    server = fake.ScriptedServer(delay=0.01) if args.scripted else None
+    try:
+        settings = evaluate.settings_for_eval(
+            cfg.assistant, base_url=server.base_url if server else args.base_url,
+            model=fake.MODEL if server else args.model, stream=args.stream)
+        selected = evaluate.select(args.only)
+        json_path, txt_path = evaluate.out_paths(args.out, stamp)
+        workdir = Path(args.workdir) if args.workdir else evaluate.default_workdir(stamp)
+    except evaluate.EvalError as exc:
+        print(f"ask-eval: {exc}", file=sys.stderr)
+        return 2
+    if args.mode == "auto":
+        searching = lambda: runtime.search_running(cfg.log_dir)[0]  # noqa: E731
+    else:
+        searching = args.mode == "searching"
+    print(f"Scoring model {settings['model']} at {settings['base_url']} on {len(selected)} scenarios; "
+          f"fixture states in {workdir}")
+    try:
+        if server:
+            with server:
+                card = evaluate.run(settings, workdir=workdir, only=args.only, searching=searching, progress=print,
+                                    before=lambda s: server.use(s["model"]))
+        else:
+            card = evaluate.run(settings, workdir=workdir, only=args.only, searching=searching, progress=print)
+        evaluate.write(card, json_path, txt_path)
+    except evaluate.EvalError as exc:
+        print(f"ask-eval: {exc}", file=sys.stderr)
+        return 2
+    print()
+    print(evaluate.table(card), end="")
+    print(f"\nscorecard: {json_path}\n           {txt_path}")
+    return 0 if evaluate.meets_exit_criteria(card) else 1
+
+
 def cmd_attention(args) -> int:
     """What needs a person: list, show one, dismiss."""
     from ionomos import attention
@@ -1104,7 +1185,14 @@ def main(argv: list[str] | None = None) -> int:
     dg = sub.add_parser("diagnose", help="print + save a diagnostics report")
     dg.add_argument("--zip", nargs="?", const="auto", metavar="PATH",
                     help="write a .zip bundle (report, logs, failed jobs' FragPipe logs) instead")
+    dg.add_argument("--anonymise", "--anonymize", action="store_true",
+                    help="replace names by pseudonyms, as a bundle does (the app's Copy diagnostics does this); "
+                         "the key is saved next to the saved copy and stays in the lab")
     dg.set_defaults(fn=cmd_diagnose)
+    sc = sub.add_parser("spectronaut-columns", help="the columns a Spectronaut report needs for Ionomos, and how to "
+                                                    "make Spectronaut export them (D74)")
+    sc.add_argument("--out", metavar="DIR", help="also save it as a text file in DIR (never over an existing file)")
+    sc.set_defaults(fn=cmd_spectronaut_columns)
     from ionomos import bundle
 
     bundle.add_parser(sub).set_defaults(fn=cmd_bundle)
@@ -1257,6 +1345,22 @@ def main(argv: list[str] | None = None) -> int:
     ak.add_argument("--item", metavar="ID", help="an attention item (ionomos attention lists them)")
     ak.add_argument("--json", action="store_true", help="print the answer with its tool calls and citations as JSON")
     ak.set_defaults(fn=cmd_ask)
+    ae = sub.add_parser("ask-eval", help="score a model on this PC over the assistant's scenario corpus (scorecard)")
+    ae.add_argument("--base-url", metavar="URL", help="the runtime's OpenAI-compatible address (default: "
+                                                      "assistant.base_url); only this PC is accepted")
+    ae.add_argument("--model", metavar="NAME", help="the model's name in the runtime (default: assistant.model)")
+    ae.add_argument("--out", metavar="FILE", help="the scorecard's JSON file (the table goes beside it as .txt; "
+                                                  "default: app data, assistant-scorecard-<time>.json); never replaced")
+    ae.add_argument("--only", metavar="IDS", help="only these scenarios and/or states, comma-separated")
+    ae.add_argument("--workdir", metavar="DIR", help="a new folder for the fixture states (default: "
+                                                     "C:/ionomos-ask-eval/<time> on Windows, the temp folder elsewhere)")
+    ae.add_argument("--mode", choices=["auto", "idle", "searching"], default="auto",
+                    help="auto: use assistant.while_searching whenever this lab's worker is running a search")
+    ae.add_argument("--stream", action=argparse.BooleanOptionalAction, default=None,
+                    help="stream replies (needed for time to first token; default: assistant.stream)")
+    ae.add_argument("--scripted", action="store_true",
+                    help="no model: a scripted one on 127.0.0.1 checks the runner and the fixture states here")
+    ae.set_defaults(fn=cmd_ask_eval)
     at = sub.add_parser("attention", help="what needs a person (analysis decisions, failed searches, ...)")
     at.add_argument("action", nargs="?", choices=["list", "show", "dismiss"], default="list")
     at.add_argument("item", nargs="?", help="item id (from the list)")

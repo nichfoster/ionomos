@@ -61,6 +61,7 @@ class Findings:
     dose_problems: list = field(default_factory=list)     # [(severity, message)] from doseresponse.plan_series
     time_problems: list = field(default_factory=list)     # [(severity, message)] from timecourse.plan_series
     cys_problems: list = field(default_factory=list)      # [(severity, message)] from cys.run / the site annotation
+    protein_problems: list = field(default_factory=list)  # [(code, severity, message)] from proteincorr (D70)
     psm_problems: list = field(default_factory=list)      # [(issue code, message)] from psmqc.run
     model: object = None                # analysis.Model: the design used, or why an asked-for one wasn't
     roles: object = None                # roles.Plan: the conditions' roles and the comparisons they gave
@@ -94,7 +95,8 @@ EXPECTED = {
               "Sage was run with --parquet, which Ionomos doesn't read: run it without",
               "Sage stopped before quantification (see its console output)"]),
     "Spectronaut": ("a Spectronaut report (PG.Quantity columns, or the long BGS report)",
-                    ["The report was exported with a schema that has no PG.Quantity",
+                    ["The report was exported with a schema that has no PG.Quantity (`ionomos spectronaut-columns` "
+                     "lists the columns to tick)",
                      "The export is a peptide / precursor-only report"]),
     "AlphaDIA": ("AlphaDIA's pg.matrix.tsv", ["AlphaDIA stopped before the protein step (see its log)"]),
     "MSstats": ("an MSstats-format table (ProteinName, Run, Condition, BioReplicate, Intensity)",
@@ -114,6 +116,46 @@ def _tables_present(workdir: Path | None, limit: int = 12) -> list[str]:
         return []
     return found[:limit]
 
+def _ratio_checks(f: Findings, p, s, add) -> None:
+    """isoDTB site ratios (D70): RATIO_OFFSET when a replicate sits clearly off 0 and nothing centred it;
+    PROTEIN_CORRECTION / PROTEIN_CORRECTION_CONDITIONS from the protein-abundance correction."""
+    centring = ((getattr(p, "normalization", None) or {}).get("ratio_centre") or {}) if p is not None else {}
+    off = [(c, v) for c, v in (centring.get("conditions") or {}).items() if v["clear"] and not v["centred"]]
+    if off:
+        reps = [(x, r["offset"]) for c, v in off for x, r in v["replicates"].items() if x in v["clear"]]
+        add(Issue("RATIO_OFFSET", "warning", "A replicate's site ratios sit off 0",
+                  "Measured on the sites that do not change, " + ", ".join(f"{x} is {o:+.2f} log2" for x, o in reps[:6])
+                  + (" …" if len(reps) > 6 else "") + " away from 0 (heavy / light "
+                  + ", ".join(f"{2 ** o:.2f}" for _x, o in reps[:3]) + " instead of 1). Every ratio of that replicate is "
+                  "moved by as much, so unchanged sites look changed and some are called. The ratios were used as "
+                  "measured (analysis.ratio_centre: " + (centring.get("asked") or "none") + ").",
+                  ["Heavy and light were not mixed exactly 1:1 (protein assay or pipetting)",
+                   "A compound that changes most sites in one direction (then centring would be wrong)"],
+                  ["If the mixing is the likely cause, set ratio_centre: auto under analysis: (experiment.yaml, or "
+                   "config.yaml for the lab) and Run analysis: each replicate is then centred on its stable sites",
+                   "Leave it if the compound really moves most sites; the liganded calls use the ratios as measured"],
+                  {"replicates": {x: round(o, 3) for x, o in reps}}))
+    for code, sev, msg in getattr(f, "protein_problems", None) or []:
+        if code == "PROTEIN_CORRECTION_CONDITIONS":
+            add(Issue("PROTEIN_CORRECTION_CONDITIONS", sev,
+                      "Protein correction: the proteome's comparisons don't match the sites' conditions",
+                      msg,
+                      ["The isoDTB sample is named after the experiment (EJQ_2_027), the proteome after the compound",
+                       "The proteome compares other conditions, or the same compound twice (against two controls)"],
+                      ["Name the proteome comparison for each site condition under analysis: protein_correction: "
+                       "conditions: {EJQ_2_027: Cmpd vs DMSO} in experiment.yaml (the compound first) and Run analysis",
+                       "The uncorrected results are not affected"], {"message": msg}))
+        else:
+            add(Issue("PROTEIN_CORRECTION", sev, "The protein correction needs a look", msg,
+                      ["The proteome folder or table was moved, renamed or not analysed yet",
+                       "match: gene with a table that has accessions only (or the other way round)",
+                       "The proteome was searched against another database, so few proteins are in both"],
+                      ["Give the analysed proteome's folder (or its protein table) as a full path in "
+                       "analysis.protein_correction.proteome and Run analysis",
+                       "Try match: protein when gene names differ between the two searches",
+                       "The uncorrected results are not affected"], {"message": msg}))
+
+
 def suggest_conditions(samples: list[str]) -> dict[str, str]:
     """Best guess at each sample's condition from its name: drop the part every name shares,
     trailing replicate numbers and Xcalibur timestamps. 'CS_22rv1_MA25_DMSO_1' -> 'DMSO'."""
@@ -129,6 +171,19 @@ def suggest_conditions(samples: list[str]) -> dict[str, str]:
             n += 1
         toks = {s: t[n:] for s, t in toks.items()}
     return {s: ("_".join(t) or cleaned[s] or s) for s, t in toks.items()}
+
+def _within(comp: dict) -> str:
+    """The composition check was made within TMT plexes (fpa.normalize_info, D71)."""
+    return f" (compared within each of the {comp['plexes']} TMT plexes)" if comp.get("plexes") else ""
+
+
+def _model_holds_plexes(model, m) -> bool:
+    """Does the model the comparisons used fit a level per TMT plex (plex.holds_plexes)?"""
+    from ionomos.downstream import plex
+
+    design = getattr(model, "design", None)
+    return design is not None and plex.holds_plexes(design, m)
+
 
 def check(f: Findings) -> list[Issue]:
     out: list[Issue] = []
@@ -293,6 +348,19 @@ def check(f: Findings) -> list[Issue]:
                   ["Set analysis.tmt_reference to the pooled channel (e.g. 126) in experiment.yaml, or mark it "
                    "'pooled' in the SDRF, then Run analysis"],
                   {"plexes": tmt_.get("plexes")}))
+    elif tmt_ and not tmt_.get("applied") and len(tmt_.get("plexes") or {}) > 1 and p is not None and \
+            not _model_holds_plexes(f.model, p.m):
+        add(Issue("TMT_PLEXES_NOT_IN_MODEL", "warning", "The TMT plexes are neither on one scale nor in the model",
+                  f"This experiment has {len(tmt_['plexes'])} TMT plexes, IRS is switched off (irs: none), and the "
+                  "model has no block for the plex. The plex effect then counts as replicate spread: the tests stay "
+                  "conservative but miss many changes (in simulated plexes 40 % of 2-fold changes were found, "
+                  "against 95 % with IRS or a plex block).",
+                  ["irs: none was set for this experiment or the lab", "A block was asked for, but not by plex"],
+                  ["Put the plexes on one scale: name the pooled channel (analysis.tmt_reference) and set irs to "
+                   "auto, then Run analysis",
+                   "Or keep irs: none and block on the plex (analysis.block: {sample: plex}, or block_from on the "
+                   "sample names), so every comparison is made within the plexes"],
+                  {"plexes": tmt_.get("plexes")}))
 
     # ---- duplicates (two runs of one sample)
     dups = sorted(x for x in samples if re.search(r"\.\d+$", x))
@@ -367,8 +435,8 @@ def check(f: Findings) -> list[Issue]:
                 a, b = comp["between"]
                 add(Issue("NORMALISATION_COMPOSITION", "input", "The normalisation shifts the conditions against each other",
                           f"Median centring moves {a} against {b} by {comp['shift']:.2f} log2 compared with a "
-                          f"normalisation on {comp['features']:,} stable features. Unchanged features then look "
-                          "changed by that much, and some pass the fold-change cut-off.",
+                          f"normalisation on {comp['features']:,} stable features{_within(comp)}. Unchanged features "
+                          "then look changed by that much, and some pass the fold-change cut-off.",
                           ["Many features are enriched or depleted in one direction (a pulldown, a depletion, a "
                            "strong treatment), so the middle of the abundance distribution moves",
                            "A sample with far fewer identifications than the others",
@@ -382,7 +450,8 @@ def check(f: Findings) -> list[Issue]:
                 add(Issue("NORMALISATION_COMPOSITION", "warning", "Normalised on stable features, not on the median",
                           f"Median centring would have moved {a} against {b} by {comp['shift']:.2f} log2, because "
                           "many features change in one direction. The samples were normalised on the ratios of "
-                          f"{comp['features']:,} stable features instead, so unchanged features stay unchanged.",
+                          f"{comp['features']:,} stable features{_within(comp)} instead, so unchanged features stay "
+                          "unchanged.",
                           ["A pulldown, a depletion or a strong treatment: a large share of the features is "
                            "enriched or depleted"],
                           ["Nothing to do. To force one method, set Normalisation to median or ratio"],
@@ -452,6 +521,9 @@ def check(f: Findings) -> list[Issue]:
                       ["Put the downloaded table (e.g. CysDB) in the experiment folder, or give its full path in "
                        "analysis.site_annotation, and Run analysis", "The liganded calls themselves are not affected"],
                       {"message": msg}))
+
+    # ---- site ratios (D70): a replicate clearly off 0 that was not centred; the protein correction
+    _ratio_checks(f, p, s, add)
 
     # ---- statistics that ran but may not mean what they say (guards.py)
     from ionomos.downstream import guards

@@ -274,8 +274,11 @@ def running_pid(log_dir: Path) -> int | None:
 
 def _alive(pid: int) -> bool:
     if os.name == "nt":
-        r = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True,
-                           creationflags=_creationflags())
+        try:
+            r = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], capture_output=True, text=True,
+                               creationflags=_creationflags(), timeout=60)
+        except (OSError, subprocess.TimeoutExpired):  # can't tell: never name a process we can't see (D73)
+            return False
         return str(pid) in (r.stdout or "")
     try:
         os.kill(pid, 0)
@@ -286,7 +289,9 @@ def _alive(pid: int) -> bool:
 
 def kill_pid(pid: int) -> None:
     if os.name == "nt":
-        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, creationflags=_creationflags())
+        from ionomos.fragpipe import _taskkill
+
+        _taskkill(pid)
     else:
         import signal
 
@@ -685,20 +690,46 @@ def diagnostics(config_path: Path, log_lines: int = 150) -> str:
     return notify.scrub("\n".join(out) + "\n", hide)
 
 
-def save_diagnostics(config_path: Path) -> tuple[str, Path | None]:
-    """Build the diagnostics text and also save it next to the log (if a log_dir exists)."""
+def save_diagnostics(config_path: Path, anonymise: bool = False) -> tuple[str, Path | None]:
+    """Build the diagnostics text and also save it next to the log (if a log_dir exists).
+
+    anonymise=True (the app's "Copy diagnostics", D74): names replaced as a bundle replaces them (bundle.py,
+    the same pseudonymiser and leak check; raises bundle.BundleLeak if a name is left). The saved copy is the
+    anonymised text, with its key file next to it (bundle.key_path_for), so `ionomos bundle translate` turns a
+    pasted copy back into names in the lab."""
     import datetime
 
-    text = diagnostics(config_path)
+    from ionomos import bundle
+
+    text, anon = bundle.diagnostics_text(config_path, anonymise=anonymise)
     where: Path | None = None
     log_dir = _raw_paths(config_path).get("log_dir")
+    now = datetime.datetime.now()
     try:
         if log_dir and log_dir.is_dir():
-            where = log_dir / f"diagnostics-{datetime.datetime.now():%Y%m%d-%H%M%S}.txt"
-            where.write_text(text, encoding="utf-8")
+            where = bundle.unique(log_dir / f"diagnostics-{now:%Y%m%d-%H%M%S}{'-anonymised' if anon else ''}.txt")
+            with open(where, "x", encoding="utf-8") as f:
+                f.write(text)
+            if anon is not None:
+                bundle.write_key(where, anon, now.astimezone().isoformat(timespec="seconds"))
     except OSError:
         where = None
     return text, where
+
+
+def diagnostics_copied_message(where: Path | None, anonymise: bool) -> str:
+    """What the app says after Copy diagnostics / Copy with real names."""
+    from ionomos import bundle
+
+    saved = f" and saved to\n{where}" if where else ""
+    if not anonymise:
+        return (f"Copied to the clipboard{saved}.\nIt holds the lab's real names (user, experiment and sample names): "
+                "keep it inside the lab, or use Copy diagnostics for a copy you can send.")
+    key = (f"\n\nThe key that turns the pseudonyms back into names stays in the lab:\n{bundle.key_path_for(where)}"
+           if where else "")
+    return (f"Copied to the clipboard{saved}.\nNames are replaced by pseudonyms (user01, exp001 …), as in a bundle, "
+            f"and the text was checked for every name Ionomos knows.\nPaste it into the chat / issue describing the "
+            f"problem.{key}")
 
 
 def _windows_desktop() -> Path | None:

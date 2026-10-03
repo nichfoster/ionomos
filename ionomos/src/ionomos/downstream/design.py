@@ -454,14 +454,15 @@ def _contrast(design: Design, a: str, b: str) -> list[float]:
 
 
 def limma_design(values: Matrix, design: Design, contrasts: list[tuple[str, str]], min_valid: int = 0,
-                 counts: list[int | None] | None = None, variance_prior: str = "limma", needs: dict | None = None):
+                 counts: list[int | None] | None = None, variance_prior: str = "limma", needs: dict | None = None,
+                 df_spent: list[int] | None = None):
     """Each (treatment, control) contrast from one fit of the design and one variance prior (limma's
-    lmFit → contrasts.fit → eBayes → topTable(confint = TRUE)). min_valid and needs as fpa.limma_contrasts.
-    Returns ([fpa.ContrastResult], info about the variance prior)."""
+    lmFit → contrasts.fit → eBayes → topTable(confint = TRUE)). min_valid, needs and df_spent as
+    fpa.limma_contrasts. Returns ([fpa.ContrastResult], info about the variance prior)."""
     fit = lm_fit(values, design.x)
     v = cov_unscaled(design.x)
     est, sus = contrasts_fit(fit, v, [_contrast(design, a, b) for a, b in contrasts])
-    mod = squeeze(fit.s2, fit.df, counts, variance_prior)
+    mod = squeeze(*fpa.spend_df(fit.s2, fit.df, df_spent), counts, variance_prior)
     out = []
     for k, (a, b) in enumerate(contrasts):
         na, ma = _group_stats(values, _members(design, design.conditions.index(a)))
@@ -473,11 +474,13 @@ def limma_design(values: Matrix, design: Design, contrasts: list[tuple[str, str]
             coef.append(est[i][k] if ok else math.nan)
             su.append(sus[i][k] if ok else math.nan)
         t, pv, lo, hi, q = fpa._toptable(coef, su, mod.post, mod.dft)
-        out.append(fpa.ContrastResult(a, b, coef, lo, hi, t, pv, q, na, nb, ma, mb, (mod.d0, mod.s0)))
+        out.append(fpa.ContrastResult(a, b, coef, lo, hi, t, pv, q, na, nb, ma, mb, (mod.d0, mod.s0),
+                                      *fpa.se_df(coef, su, mod.post, mod.dft)))
     return out, mod.info
 
 
-def limma_design_others(values: Matrix, design: Design, counts=None, variance_prior: str = "limma"):
+def limma_design_others(values: Matrix, design: Design, counts=None, variance_prior: str = "limma",
+                        df_spent: list[int] | None = None):
     """test_limma(type = "others") with the design's nuisance terms: per condition, [condition, the rest,
     blocks, covariates] with its own variance prior. Returns ([ContrastResult], info)."""
     k = len(design.conditions)
@@ -490,7 +493,7 @@ def limma_design_others(values: Matrix, design: Design, counts=None, variance_pr
             raise DesignError(f"{c} vs others: the blocks or covariates are confounded with {c}") from None
         sub = Design(design.samples, [c, "others"], [c, "others", *design.columns[k:]], x, design.formula,
                      design.terms)
-        res, info = limma_design(values, sub, [(c, "others")], 0, counts, variance_prior)
+        res, info = limma_design(values, sub, [(c, "others")], 0, counts, variance_prior, df_spent=df_spent)
         out.append(res[0])
     return out, info
 
@@ -510,13 +513,14 @@ class FTest:
 
 
 def f_test(values: Matrix, design: Design, reference: str, min_valid: int = 0,
-           counts: list[int | None] | None = None, variance_prior: str = "limma") -> FTest:
+           counts: list[int | None] | None = None, variance_prior: str = "limma",
+           df_spent: list[int] | None = None) -> FTest:
     conds = design.conditions
     cmat = [_contrast(design, a, reference) for a in conds if a != reference]
     fit = lm_fit(values, design.x)
     v = cov_unscaled(design.x)
     est, sus = contrasts_fit(fit, v, cmat)
-    mod = squeeze(fit.s2, fit.df, counts, variance_prior)
+    mod = squeeze(*fpa.spend_df(fit.s2, fit.df, df_spent), counts, variance_prior)
     ns = [_group_stats(values, _members(design, k))[0] for k in range(len(conds))]
     t_rows = []
     for i in range(len(values)):

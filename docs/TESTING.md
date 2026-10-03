@@ -11,7 +11,7 @@ Three layers, all runnable on macOS and Windows:
 | JS harness (report front end) | dev-only jsdom tests of `report.js`: every section against the payload shapes that have bitten before (zero comparisons, one sample, ratio/isoDTB, 10k features × 50 samples, all p-values missing, dark/light) and hostile `<`/`&`/quote names through every dynamic-HTML sink incl. tooltips and the CSV export; the search grammar (lists, wildcards, regex, `desc:`, `term:`), suggestions, box selection, highlight groups, the address state, hit filters and every discovery / QC section (`discovery.test.mjs`); the help: the nav entry, a **?** on each section, QC tab and issue box, panels that open and close, every help link resolving in the page, escaped issue titles, a report without help (`help.test.mjs`); figure export (D62, `export.test.mjs`): the buttons of each chart, every control of the Export dialog changing the SVG (size presets in px and mm, font, palettes, background, title, legend, names, line and point size), text kept as text and no CSS in the file, the cut-offs in `<desc>`, the style kept in the browser, lab defaults and reset, a hostile style file, PNG with its print size and description (a stand-in canvas: jsdom draws nothing), copy as an image (a stand-in clipboard), the store-only .zip unzipped by the harness' own reader with every CRC-32 checked, its README and tables, 10,000 features, and the friendlier options (tooltips, the cut-offs in words, reset to lab defaults); hostile names through the export's file names, SVG, README and CSV (`escaping.test.mjs`); a pytest check fails when `tests/js/fixture.html` drifts from the shipped assets | `cd ionomos/tests/js && npm ci && npm test`; sync check runs with pytest |
 | Figures for slides (D62) | the export style (defaults, layers, a bad value refused with what the key takes, `report.js` and `charts.py` holding the same defaults / sizes / palettes); the static SVG figures from a real analysis (well-formed XML, no CSS, text as text, the legend's hit counts equal to the analysis', the cut-offs in `<desc>`, sizes in px and mm, palettes, backgrounds, names); hostile names in the data; file names safe on Windows; `ionomos export` (targets, flags, a style file from the report, the lab's style, PNG refused with the reason, a file it did not write never replaced); `analysis.export.figures` after an analysis; the config writer round-tripping the block. **Not tested**: the files in PowerPoint / Illustrator / Inkscape, any real browser in CI | `tests/test_export_figures.py`; the report side in `tests/js/test/export.test.mjs` |
 | Help (D46) | the help content parses and every link resolves; every doctor issue code, attention kind, intake rejection kind and held-search reason found in the code has an entry; the Markdown renderer escapes everything and links only `#id` / `https://`; `help.html` is self-contained and every anchor on it resolves; `ionomos help` prints a topic and writes the page (log folder, else app data); the report embeds every entry its help links to, under 60 KB; the files ship in the wheel and the exe spec | `tests/test_help.py`; the report side in `tests/js/test/help.test.mjs` |
-| Assistant (D57) | the harness of `ionomos ask`, against a **scripted fake model** (no socket is opened; no real model is involved): settings and the localhost gate, the chat client (whole and streamed replies, malformed replies, no proxy, no redirect), each read-only tool on testbed states, the argument validators, cleaning and size caps, help search with FTS5 and with the pure-Python BM25, the citation check, the audit log, the CLI, the pinned prompt digest; and 53 scenarios replayed end to end (below) | `tests/test_assistant.py`, `tests/test_assistant_scenarios.py`, `tests/assistant_scenarios/` |
+| Assistant (D57) | the harness of `ionomos ask`, against a **scripted fake model** (no socket is opened; no real model is involved): settings and the localhost gate, the chat client (whole and streamed replies, malformed replies, no proxy, no redirect), each read-only tool on testbed states, the argument validators, cleaning and size caps, help search with FTS5 and with the pure-Python BM25, the citation check, the audit log, the CLI, the pinned prompt digest; and 53 scenarios replayed end to end (below). D72: `ionomos ask-eval` over real HTTP to a scripted server on 127.0.0.1 (the scores, the timings, the localhost refusal, never writing over a scorecard); keep_alive and `while_searching` (which settings reach the request, the worker's state from its heartbeat); "Ask about this" (the question, what reaches the model about an item, each outcome as shown, the worker thread; its real-window tests run in CI only) | `tests/test_assistant.py`, `tests/test_assistant_scenarios.py`, `tests/test_assistant_eval.py`, `tests/test_assistant_runtime.py`, `tests/test_assistant_ask_button.py`, `ionomos/assistant/scenarios/` |
 | Sage runner (D51) | `engine: sage` end to end against stand-ins for Sage and ThermoRawFileParser (`ionomos fake-sage`, `fake-rawparser`): conversion into `sage_mzml/` and reuse on retry, a failed or empty conversion, the lab's own settings kept, telemetry switched off (and an older Sage without the switch), held jobs with their help topics (an unknown TMT kit, `--parquet`), fractions added in the analysis; a TMT `sage_config` (D56): three plexes of two fractions, `tmt.tsv` expected and label-free left off, channels named by the `tmt:` map, IRS on the pools, the rows planted to fail left out, `sdrf.tsv`; no channel map → `unassigned` and the analysis asks; a `plexes:` map that misses a plex fails the job; a QC standard searched by Sage reaches the QC store | `tests/test_sage_runner.py` |
 | SDRF export | `results/sdrf.tsv` for DIA (manifest, exclusions, renamed conditions, no manifest), isoDTB (light/heavy rows), TMT (annotation.txt, `tmt:` plexes, channels from sample names), a table alone (none written), a failing stage; checked against the spec's structure rules every run, and with the official validator `sdrf-pipelines` when it is installed (dev-only; CI installs it on Linux) | `tests/test_sdrf.py`; `pip install sdrf-pipelines` to add the validator |
 | SDRF import (design) | SDRFs in the spec's real layout (quantms examples: mixed-case headers, repeated columns, `NT=label free sample`, `TMT126`…, fractions): factor columns joined or picked (`sdrf_factor`), TMT plexes from file groups, pooled rows; `results/` and `*_ionomos/` never searched; precedence `sample_conditions` > SDRF > manifest > engine; FragPipe's `_uncalibrated.mzML` matched to `.raw`; unmatched runs and a foreign SDRF raise `SDRF_UNMATCHED_RUNS` | `tests/test_sdrf_design.py` |
@@ -21,6 +21,7 @@ Three layers, all runnable on macOS and Windows:
 | Notifications, log rotation (D58) | no real network: webhooks go to an HTTP server inside the test process, email to a small SMTP server there (STARTTLS + login through a stub of `smtplib.SMTP`). Off by default; every `notify:` validation error; the Slack / Teams / generic payload shapes; `include_names: false` sends no name, reason, path or count; address and password from an environment variable; done / failed / held from the real worker against the fake FragPipe, held once per reason across polls and a restart, `on:` respected, a cancel silent; a webhook that never answers leaves the job done and the worker not waiting, logged once; no redirect followed; secrets absent from `diagnose`, the saved report, the bundle (config, logs, crash files) and Report a problem, also with a config that doesn't parse; `ionomos notify-test`; the config writer round-trips the block (bare `on:` too). Rotation: size and count, and a rename refused as on Windows loses no line and rotates later | `tests/test_notify.py` |
 | Normalisation (D64) | the ratio method recovering planted loading with 0, 10 and 30 % of the features enriched; median centring shifted and ratio not; `auto` identical to median centring when nothing changes one way (byte-identical result tables end to end); the fallback below 20 complete features; simulated pulldowns end to end (the shift of unchanged features, false hits, the issue's two severities, Methods text, the R script's note) | `tests/test_normalisation.py` |
 | Time courses (D53) | the F over time, the trend t and the interaction F against **limma 3.68.5** to 1e-8 on 150 features × 24 samples: the plain model, a replicate block, and missing values (golden made by `tests/golden/timecourse/run_timecourse_reference.R`); times read from names and `analysis.times`, series planning (a shared control as time 0, too few points, two conditions at one time), deterministic patterns, a simulated experiment end to end (planted shapes recovered, classes, peak time, TSV, report payload, the `TIMES` issue); the report section in the JS harness. Regenerate: `cd tests/golden/timecourse && python make_timecourse_inputs.py && Rscript run_timecourse_reference.R <R library>` | `tests/test_timecourse.py`, `tests/golden/timecourse/`, `tests/js/test/time.test.mjs` |
+| isoDTB ratio centring and the protein-abundance correction (D70) | the stable centre against a mixing error and 20 % of the sites engaged, `none` / `median` / `auto` and auto's check, `RATIO_OFFSET`, the liganded calls on centred ratios, a small centring benchmark; MSstatsPTM's adjustment against MSstatsPTM (golden), the readers (Ionomos folder, MSstats table, a differential table without se / df), condition matching that never guesses, both issues, and a simulated isoDTB + DIA proteome end to end | `tests/test_ratio_centre.py`, `tests/test_protein_correction.py` |
 | Liganded cysteines (D52) | the call rule at and around the threshold, both ratio directions and the reversed-ratio warning, fewer replicates than the rule, selectivity (selective / shared / unresolved), the protein view, a CysDB-style annotation (key column, accession + residue columns, unusable files), and a simulated isoDTB experiment end to end (planted sites recovered, TSVs, report payload, issues); the report section in the JS harness | `tests/test_cys.py`, `tests/js/test/cys.test.mjs` |
 | Instrument QC trending (D45) | per-run metrics from small tables with the real column names (DIA-NN `report.stats.tsv` / `pg_matrix` / `report.tsv`, FragPipe `psm.tsv` / `combined_protein.tsv`, Sage `results.sage.tsv`, Windows paths, stamped / calibrated run names, isotope-error ppm, oversized and broken tables); which runs are QC standards (words, separators, experiments left out, `exclude`, dedicated method, series by standard and amount); acquisition time from the stamp or the file; the store (a re-run updates its row, damaged lines skipped, compaction); every Westgard rule, the CUSUM drift flag, direction (better ≠ bad), log-scale signal, pinned baselines, RT shift; the page (self-contained, escaped, no network); config validation and the app's config writer; the CLI (`qc-trend`, `--rebuild` read-only, `--open`); the app button's helper; the attention item raised and closed, `popup`; a broken QC read never fails the job; end to end through the worker with the testbed's fake FragPipe (which now writes DIA-NN's `report.stats.tsv` and a `psm.tsv` per experiment) | `tests/test_qctrend.py` |
 | Search quality per run (D55) | `psm.tsv` tables with FragPipe's documented column names and planted values (**not real FragPipe output**): mass-error quantiles, PSMs by missed cleavages, charge and length; every run read without a manifest; an earlier attempt's folder, an oversized and a broken table skipped with a note; the two warnings at, inside and beyond their limits, a run with too few PSMs not judged; mass offsets and missing columns; `psm_qc.tsv`, `analysis.json`, the report payload and the doctor end to end; the step switched off, absent, without a quant table, and crashing; the search output left untouched; the QC tab in the JS harness (table, four charts, DIA-NN's summary, many runs, help, hostile names) | `tests/test_psmqc.py`, `tests/js/test/psm.test.mjs` |
@@ -214,6 +215,36 @@ limits run on a fake clock (`fragpipe._clock`) and every "while it runs" step
 waits for what the console log says, so nothing depends on how fast the
 machine is.
 
+## A run that hangs (D73)
+
+A hang ends the run with every thread's stack, instead of eating an outer
+time limit with nothing on screen:
+
+- **A test** still running after 5 minutes (`faulthandler_timeout = 300`,
+  `faulthandler_exit_on_timeout` in `pyproject.toml`; the slowest test takes
+  ~30 s on a loaded Mac) prints `Timeout (0:05:00)!` and the stack of every
+  thread, then the run exits 1. The test's own frames are in the main
+  thread's stack. `-o faulthandler_timeout=0` switches it off for a debugger
+  session.
+- **The exit**: after the last test the process has 120 s to end
+  (`IONOMOS_TEST_EXIT_SECONDS`, `tests/conftest.py`); a thread or child
+  something waits on at exit is dumped the same way.
+- `tests/test_hang_guards.py` runs pytest on a test that waits for ever and
+  on one that leaves a thread behind, and checks that both end with a stack.
+
+Rules for tests that start threads or processes: every `join()`, `wait()`,
+`communicate()` and `subprocess.run()` has a timeout; a child's output goes to
+a file, or is read with `communicate()` (a pipe nobody reads blocks the child
+at 4 KB on Windows); a real `ionomos run` is ended with
+`service.request_stop(..., proc=p)` in a `finally`; a `while
+worker.run_once()` loop is capped (`_drain` in `test_faults.py`).
+
+Running the suite from a script or an agent: send the output to a file
+(`.venv/bin/pytest > run.log 2>&1`) and read it, rather than piping it to
+`tail`, which shows nothing until the end, so a slow run looks like a hung
+one. With several suites and simulations at once on one Mac a full run took
+up to 13.5 minutes instead of 6.
+
 ## FragPipe as it really behaves
 
 `tests/test_fragpipe_real.py` (D59) holds what Ionomos expects of the real
@@ -248,9 +279,11 @@ FragPipe's own `sdrf.tsv` being read as the user's design (ROADMAP).
 
 ## The assistant's scenario corpus
 
-`ionomos/tests/assistant_scenarios/` holds one JSON file per scenario (53):
-a fixture state, a question, the turns a scripted model sends, a rubric, and
-what the harness must do with those turns. `fixtures.py` builds the states
+`ionomos/src/ionomos/assistant/scenarios/` holds one JSON file per scenario
+(53): a fixture state, a question, the turns a scripted model sends, a rubric,
+and what the harness must do with those turns. It ships with Ionomos (D72) so
+that `ionomos ask-eval` scores a real model on the PC with the same files and
+the same `score()`. `states.py` builds the states
 with the testbed and its fake engines, the way the PC makes them: FragPipe
 failures (out of memory, MSFragger missing, a crashed step, an empty raw
 file), a held search, DIA-NN / MaxQuant / Sage failures, doctor issues, two
@@ -273,12 +306,20 @@ and one audit record is written with hashed arguments.
 a real model. The corpus tests the harness (loop, validators, citation check,
 fallbacks, audit log). It does not measure any model's answer quality.
 Phase 6.1's exit criteria (≥ 90% on the rubrics with real models, no
-injection failure, time to first token on the PC) are still open; see
-[ASSISTANT.md](ASSISTANT.md) for how a real model is scored.
+injection failure, time to first token on the PC) are still open: `ionomos
+ask-eval` measures them on the PC ([ASSISTANT.md](ASSISTANT.md#scoring-a-real-model)).
+`tests/test_assistant_eval.py` runs that runner over real HTTP against
+`assistant.fake.ScriptedServer` (127.0.0.1, a port the OS picks): every
+scenario a real model is scored on passes with its well-behaved script, a
+misbehaving script fails the rubric and the exit criteria, and an address off
+this PC is refused before anything is built or sent.
 
 To add a scenario: add a JSON file (the keys are documented in
-`assistant_scenarios/__init__.py`), using a state from `fixtures.py`. A new
-kind of failure needs a new state there.
+`ionomos/assistant/scenarios/__init__.py`), using a state from `states.py`. A
+new kind of failure needs a new state there. A scenario whose rubric only
+holds for its script (a runtime that is down, a model that obeys an injected
+line) gets `"harness_only": "why"`; the scorecard leaves it out, and its
+question must be scored in another scenario (a test checks).
 
 ## Downstream golden files
 
@@ -359,10 +400,47 @@ cd ionomos/tests/golden/unequal
 python3 make_unequal_inputs.py && Rscript run_unequal_reference.R <R library with limma>
 ```
 
+**TMT plexes (D71, `tests/test_tmt_plex_stats.py`, `tests/golden/tmt_sum/`)**:
+three TMT plexes of 3 DMSO + 3 Drug channels without a reference, 300
+proteins with a plex effect, proteins in one, two or three plexes, a channel
+missing in one plex or in every plex. IRS on the plex means, the filter,
+median normalisation and limma with each protein's residual df reduced by
+its plexes - 1 agree with base R + limma 3.68.5 to 1e-8 (the R script also
+writes the result without the reduction, which differs). The same file
+checks the composition check within plexes on simulated pulldowns (it sees a
+pulldown through a plex effect of SD 1 log2 that the check across plexes
+misses; it stays quiet when changes go both ways; one plex gives D64's check
+to the last digit), when the df are not reduced (a design that holds the
+plexes, a t-test, no plex means), and end to end what the doctor and "How
+far to trust this" say. Regenerate:
+
+```bash
+cd ionomos/tests/golden/tmt_sum
+python3 make_tmt_sum_inputs.py && Rscript run_tmt_sum_reference.R <R library with limma>
+```
+
+**Against MSstatsPTM (D70, `tests/golden/ptm/`)**: 240 isoDTB sites × 3
+replicates (FragPipe's simulated label quant through the site script) and a
+proteome comparison from an Ionomos DIA analysis written as MSstats
+groupComparison output, every ninth protein left out and two with DF = Inf.
+`test_the_adjustment_matches_msstatsptm` runs the sites through
+`fpa.process`, the moderated one-sample test and `proteincorr.run`, and
+compares the site SE and df (limma 3.68.5) and the corrected log2FC, SE, df,
+t, p and BH (MSstatsPTM 2.14.0's `.applyPtmAdjustment`) to 1e-9 for the 213
+sites MSstatsPTM keeps; the sites it drops are flagged "protein not found".
+The test needs no R. Regenerate (the R library needs limma, data.table and
+MSstatsPTM; `BiocManager::install("MSstatsPTM")`):
+
+```bash
+cd ionomos && .venv/bin/python tests/golden/ptm/make_ptm_inputs.py
+cd tests/golden/ptm && Rscript run_msstatsptm.R <R library>
+```
+
 ### The calibration guards and the fuzz (`tests/test_benchmark.py`, `tests/test_robustness.py`)
 
 Both are seeded, so a run is repeatable. There is a guard per kind of data
-(DIA, isoDTB, TMT; D60, D66); their tolerances are written at the top of
+(DIA, isoDTB, TMT; D60, D66), and two more for TMT (`guard_sum`: IRS on the
+plex means; `guard_pulldown`: a pulldown without IRS; D71); their tolerances are written at the top of
 `test_benchmark.py` with the measurement they come from. To measure them
 again with other seeds (about 20 s for DIA, 1 s for isoDTB, 2 minutes for TMT):
 

@@ -7,6 +7,159 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-03
+
+### Added
+
+- **Anonymised "Copy diagnostics"** (D74). The app's **Copy diagnostics**
+  now replaces the lab's names with the same pseudonyms a bundle uses, and
+  the text is searched for every name Ionomos knows before it reaches the
+  clipboard (a name left: nothing is copied, and the message says so).
+  **Copy with real names** copies the text as before. The saved copy in the
+  log folder has its key file next to it, so `ionomos bundle translate`
+  reads a pasted copy back. `ionomos diagnose --anonymise` does the same in
+  a terminal.
+- **DIA-NN's main report and peptide / ion tables in a bundle, on request**
+  (D74): `ionomos bundle --include diann-report,peptides` (implies
+  `--level validate`) and a box in the **Report a problem** window. Main
+  report: `report.tsv`, or `report.parquet` written as text so its names can
+  be replaced (needs pyarrow). Peptide level: FragPipe `peptide.tsv` /
+  `ion.tsv`, DIA-NN's precursor matrix, MaxQuant `peptides.txt` /
+  `modificationSpecificPeptides.txt`. Each is anonymised like the other
+  tables, row-sampled above `--extra-mb` (200 MB), and the first thing the
+  size limit leaves out. Spectral libraries never go in.
+- **`ionomos bundle inspect` checks every file for real names** (D74): each
+  file of the zip, and its name, is searched for the lab's user,
+  experiment and sample names (on the lab's PC) and for the originals in the
+  key file (next to the zip, or `--key`), and listed as clean or with what
+  was found.
+- **`ionomos spectronaut-columns [--out DIR]`** (D74): the columns a
+  Spectronaut report needs for Ionomos and how to make a report schema with
+  exactly those in Spectronaut. Ionomos does not ship an `.rs` schema file:
+  its format is Spectronaut's own and not published.
+
+- **Ask about this** (D72, [docs/ASSISTANT.md](docs/ASSISTANT.md#ask-about-this)):
+  a button in every pop-up and in the needs-attention list. It asks the local
+  assistant a question written for that kind of item (editable) and shows the
+  answer with its sources, as plain text, in a window of its own; the answer
+  is made off the Tk thread. Not set up, not answering or paused: Ionomos's own
+  explanation and the help, as a normal state. Nothing from the item's names
+  goes into the question, and an item without a job is named to the model by
+  its kind and time.
+- **`ionomos ask-eval`** (D72): scores a model on this PC over the assistant's
+  scenario corpus with the same rubric as CI, timing the first token and each
+  answer, idle and while a search runs, and writes a scorecard (JSON and a
+  table) that is never written over. `--scripted` checks the runner without a
+  model. Only an address on this PC is accepted, checked before anything is
+  built. The corpus (`ionomos/assistant/scenarios/`) now ships with Ionomos;
+  15 scenarios that only make sense with their script are marked
+  `harness_only` and left out of the scorecard.
+- **`assistant.keep_alive` and `assistant.while_searching`** (D72): how long
+  the runtime keeps the model loaded (sent only when set; Ollama reads it),
+  and what changes while the worker runs a search (another model or address,
+  a shorter keep-alive, a longer timeout, or a pause), read from the worker's
+  heartbeat. The table of what Ollama and llama-server honour is in
+  docs/ASSISTANT.md.
+
+- **isoDTB site changes corrected for protein abundance** (D70, ROADMAP 5C #3):
+  `analysis.protein_correction: {proteome, match, conditions}` names an
+  unenriched proteome (an analysed Ionomos experiment, an MSstats
+  groupComparison table or an Ionomos `*_differential.tsv`; only read). Each
+  site's log2 heavy / light minus its protein's change on the same scale
+  (from `liganded_direction`), with MSstatsPTM's SE, Satterthwaite df and BH
+  per condition, checked against MSstatsPTM 2.14.0 to 1e-9
+  (`tests/golden/ptm/`). Reported beside the uncorrected comparison as
+  `<condition> (log2 H/L vs 0, protein-corrected)` with its own volcano and
+  table; sites whose protein is not found are flagged. Off by default.
+  New issues `PROTEIN_CORRECTION_CONDITIONS` (a site condition without its
+  proteome comparison; never guessed) and `PROTEIN_CORRECTION`.
+- **Opt-in centring of isoDTB ratios** (D70): `analysis.ratio_centre: none |
+  median | auto` (default `none`). `auto` centres a condition's replicates on
+  their stable sites only when one is clearly off 0 (a heavy / light mixing
+  error), without the median's shift when many sites go one way. The
+  offsets are always measured; with `none` a clear one is the note
+  `RATIO_OFFSET`. Liganded calls say which ratios they used. `ionomos
+  benchmark --kind isodtb` runs the centring settings too; a `centring` grid
+  holds the D70 numbers.
+- Every `*_differential.tsv` has `se` and `df` columns (the standard error
+  and degrees of freedom behind `t`).
+- `cysteine_sites.tsv` gets `<compound> protein_log2_R` and
+  `log2_R_corrected` when the protein correction ran.
+
+### Changed
+
+- CI's test jobs may run 25 minutes instead of 15: the Windows jobs took
+  up to 14 min 46 s with the 0.16.0 suite (D73).
+
+- `ionomos bundle translate KEY FILE` reads the file line by line (a main
+  report can be gigabytes).
+- The Spectronaut loader reads its columns from the same list
+  (`engines.SPECTRONAUT_COLUMNS`) that `spectronaut-columns` prints.
+
+- The assistant's time to first token waits for the first generated token
+  (text, reasoning or a tool call), not the opening event. Answers and audit
+  records say whether a search was running (`mode`).
+
+- **TMT across plexes: the normalisation looks within each plex, and IRS on
+  the plex means is no longer liberal** (D71, from the D66 benchmark's open
+  questions):
+  - With several TMT plexes that are not on one scale (IRS off, or not
+    possible), `normalize: auto`'s composition check and the `ratio` method
+    are worked out within each plex and combined. Across such plexes a
+    protein jumps with the plex, which hid a pulldown: with the plex as a
+    block, 59 % of the calls at adjusted p alone were false (unchanged
+    proteins -0.19 to -0.26 log2 off); now 4.7 % (within 0.04). The doctor's
+    `NORMALISATION_COMPOSITION` now also fires there, and says the check was
+    made within plexes. Plexes joined by IRS are compared all together as
+    before, so the default's numbers are unchanged (4.4 % / 3.8 %); without
+    plexes the check is the D64 one to the last digit.
+  - IRS on each plex's own mean (`irs: sum`, used when no reference channel
+    is found) estimates the plex level from the channels it then tests;
+    limma's residual df are now reduced by the plexes - 1 for each protein
+    (`plex.df_spent`), unless the design already has a block per plex. FDP
+    on the simulated grid 6.6 % → 5.1 % with changes both ways, 5.3 % → 4.0 %
+    in a pulldown (worst scenario 9.3 % → 7.7 %), sensitivity unchanged; checked against limma 3.68.5 in R
+    (`tests/golden/tmt_sum/`). `analysis.json`'s `model` says so
+    (`plex_df`).
+  - "How far to trust this" has a **TMT plexes** line: how the plexes were
+    put on one scale (reference, plex means with the df reduced, a plex
+    block), marked "check" when they are neither on one scale nor in the
+    model, or when a t-test follows IRS on the plex means.
+  - New doctor warning `TMT_PLEXES_NOT_IN_MODEL` (with help): `irs: none`
+    and no block for the plex, which keeps the tests valid but finds 40 %
+    instead of 95 % of 2-fold changes.
+  - Two more calibration guards in the test suite (IRS on the plex means;
+    a pulldown without IRS).
+
+- The liganded-site rule text ends with the ratios it used ("on the ratios as
+  measured (not centred)").
+
+### Fixed
+
+- **A hung test run now says where it hung and ends** (D73). The suite had
+  hung on macOS three times with nothing on screen until a 30-minute limit
+  killed it. It did not hang again in 14 full runs and about 3,300 more
+  tests from the process- and thread-heavy files on macOS / Python 3.14,
+  with up to three suites running at once, so its cause is not known.
+  Instead:
+  a test still running after 5 minutes prints every thread's stack and ends
+  the run (`faulthandler_timeout` + `faulthandler_exit_on_timeout` in
+  `pyproject.toml`; pytest ≥ 9 in `[dev]`); a process that can't exit after
+  its last test is dumped and ended after 120 s (`tests/conftest.py`,
+  `IONOMOS_TEST_EXIT_SECONDS`); every wait in the tests that had no time
+  limit has one now (a `proc.wait()`, a `join()`, the `ps` / `tasklist`
+  probes, `python -m ionomos` and `git` runs, the R probe), a second
+  `ionomos run` whose output is read is killed and drained if it doesn't
+  answer, `while worker.run_once()` loops are capped, and the fake SMTP
+  server stops when its client goes away in the middle of a message instead of
+  spinning. `tests/test_hang_guards.py` checks the guards themselves.
+- **Windows: a `taskkill` or `tasklist` that never returns can't hold the
+  worker** (D73). Stopping a search, the time limit, a cancel, stopping a
+  leftover FragPipe and the app's Stop gave `taskkill /T` no time limit; it
+  now gets 60 s, then Ionomos goes on as if it had failed (a stuck
+  `tasklist` counts as "not running").
+
+
 ## [0.15.0] - 2026-10-02
 
 ### Added

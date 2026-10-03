@@ -31,7 +31,7 @@
 | `app.py` | tkinter setup wizard / control panel: folders, users, methods, every parameter, start/stop, startup task, testbed | — |
 | `configio.py` | config.yaml as a dict; writes a commented file | — |
 | `service.py` | child processes, PID file, Task Scheduler, remembered config path, exe routing, the Desktop folder (also when OneDrive moved it); dev install: git update, the diagnostics text; `save_problem_report` / `save_diagnostics_zip` are the old names for a `diagnose` bundle | — |
-| `bundle.py` | The troubleshooting / validation bundle (D63, see "The bundle" below): `collect` (what would go in; sizes only), `learn` + `Anonymiser` (the pseudonyms), `create` (streams the zip, then `verify` searches it for every original; the key file next to it), `inspect` / `unpack` / `translate` for the reader, the `ionomos bundle` command, and what the window says (`Choice`, `summary_lines`) | — |
+| `bundle.py` | The troubleshooting / validation bundle (D63, see "The bundle" below): `collect` (what would go in; sizes only), `learn` + `Anonymiser` (the pseudonyms), `create` (streams the zip, then `verify` searches it for every original; the key file next to it), `inspect` (with `self_check`: every file searched for the real names this computer knows, D74) / `unpack` / `translate` for the reader, `anonymise_text` (the anonymised Copy diagnostics, the same Anonymiser and leak check, D74), the `ionomos bundle` command, and what the window says (`Choice`, `summary_lines`) | — |
 | `bundle_dialog.py` | The **Report a problem** window (Tk only; every decision is in `bundle.py`) | — |
 | `ledger.py` | SQLite job table + status transitions; source of truth for "what's queued" | `prior-work/store.py` |
 | `worker.py` | Thread inside `ionomos run`: first runnable `queued` job → FragPipe or DIA-NN (runner.py) → done/failed; holds jobs whose setup files are missing. Sequential. | `prior-work/queue_worker.py` |
@@ -70,7 +70,7 @@
 | `runners/isodtb.py` | Post-proc: modified-peptide → site merge — thin entry point delegating to `downstream/isodtb.py`, which holds the algorithm | port of `lab-scripts/isoDTB_…R` |
 | `runners/tmt.py` | Post-proc: experimental annotation fix | port of `lab-scripts/correct_experimental_annotation…R` |
 | `runners/dia.py` | Post-proc: (TBD — probably nothing beyond copying `report.tsv` up) | — |
-| `cli.py` | `ionomos setup / run / check / preflight / status / dry-run / names test / retry / testbed / diagnose / bundle / notify-test / update / help / ask / analyze / demo / compare / benchmark`; no args → app; hidden `fake-fragpipe` for the testbed | — |
+| `cli.py` | `ionomos setup / run / check / preflight / status / dry-run / names test / retry / testbed / diagnose / bundle / spectronaut-columns / notify-test / update / help / ask / analyze / demo / compare / benchmark`; no args → app; hidden `fake-fragpipe` for the testbed | — |
 
 ## Data flow for one job
 
@@ -582,6 +582,18 @@ liganded fraction, selectivity across compounds, a per-protein view and, with
 `site_annotation`, known / new sites. The report's Liganded sites section
 only displays these calls. Rules and settings: WORKFLOWS.md.
 
+Site ratios can be centred per replicate in `fpa.process` (`centre_ratios`,
+`analysis.ratio_centre`, D70; off by default); the info, with every replicate's
+offset on its stable sites, is `Processed.normalization["ratio_centre"]`, so the
+doctor's `RATIO_OFFSET` can say when an uncentred replicate is off. With
+`analysis.protein_correction`, `downstream/proteincorr.py` reads an analysed
+proteome (an Ionomos results folder, an MSstats table or a differential table;
+read only) after the site comparisons and adds one *protein-corrected*
+`DiffResult` per matched condition (MSstatsPTM's adjustment, using the `se` and
+`df` that every differential table now carries), so the report, the results
+table and `analysis.json` show it like any comparison; the liganded calls get
+the protein's ratio beside them.
+
 `results/psm_qc.tsv` (`downstream/psmqc.py`, D55) is made when the search
 output holds FragPipe `psm.tsv` files or a DIA-NN `stats.tsv`. The stage
 runs for every analysis, also when no quant table was found, and is isolated
@@ -698,6 +710,13 @@ verify(zip, anonymiser)               every file and file name searched for ever
    ▼
 rename to <name>.zip (never over a file) + <name>-KEY-keep-in-the-lab-DO-NOT-SHARE.json beside it
 ```
+
+With `Options.include` (`--include diann-report,peptides`, D74) the plan also takes DIA-NN's main report
+and the peptide / ion tables, after every other table (the size limit drops them first), row-sampled above
+`extra_mb`; a Parquet report is written as text (`_parquet_lines`), and `learn` reads the run columns of
+a long report (`RUN_COLUMNS`). The same `learn` + `_Scrub` + leak check (`_Check`) anonymise the Copy
+diagnostics text (`anonymise_text`), and `self_check` runs `_Check` over a finished zip with the lab's
+names and the key's originals (`ionomos bundle inspect`).
 
 **In the zip**: `BUNDLE.json` (format, version and build, level, whether and
 how names were replaced, the kept words, per job: status, method, FASTA

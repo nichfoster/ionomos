@@ -87,7 +87,10 @@ class _SMTP(socketserver.StreamRequestHandler):
                 say("354 go on")
                 data = b""
                 while not data.endswith(b"\r\n.\r\n"):
-                    data += self.rfile.readline()
+                    more = self.rfile.readline()
+                    if not more:  # the client went away mid-message
+                        return
+                    data += more
                 mail["data"] = data.decode("utf-8", "replace")
                 self.server.got.append(mail)
                 say("250 queued")

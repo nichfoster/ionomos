@@ -138,6 +138,10 @@ QC_TREND_PAGE = "qc_trend.html"
 
 # The assistant's audit log (ROADMAP Phase 6, D49 / D57): append-only JSONL in the app-data folder.
 ASSISTANT_AUDIT_FILE = "assistant-audit.jsonl"
+# `ionomos ask-eval` (D72): its scorecards (<prefix>-<time>.json + .txt, app data) and the new folder its fixture
+# states are built in (C:/ionomos-ask-eval/<time> on Windows: no spaces; elsewhere the temp folder).
+ASSISTANT_SCORECARD_PREFIX = "assistant-scorecard"
+ASSISTANT_EVAL_DIR = "ionomos-ask-eval"
 
 # FragPipe hardening (D59). The run fingerprint: one small text file per finished search, in the job's run
 # folder, for checking Ionomos' parsers against a real FragPipe. The preflight's own scratch folder, in log_dir.

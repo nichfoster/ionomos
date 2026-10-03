@@ -234,10 +234,16 @@ laid out one folder per TMT plex. **Still not run against a real FragPipe.**
   - run it on the lab's real folders and read the zip by eye before the
     first one is shared (the leak check only knows the names Ionomos knows)
   - the window has not been seen on screen (GUI tests run in CI only)
-  - "Copy diagnostics" still copies real names; decide whether it should be
-    anonymised too
-  - DIA-NN's main report and peptide-level tables are not bundled; add them
-    behind an option if a validation needs them
+  - ~~"Copy diagnostics" still copies real names; decide whether it should be
+    anonymised too~~ → 2026-10-03 (D74): anonymised by default with the
+    bundle's pseudonymiser and leak check; **Copy with real names** beside it
+  - ~~DIA-NN's main report and peptide-level tables are not bundled; add them
+    behind an option if a validation needs them~~ → 2026-10-03 (D74):
+    `--include diann-report,peptides` and a box in the window; Parquet as
+    text; `bundle inspect` checks every file for real names
+  - try `--include` on a real DIA-NN 2.x `report.parquet` on the PC: how
+    long the conversion takes, and whether its types turn into text as
+    Ionomos' reader expects
 - `ionomos status` as a tiny local web page if people ask.
 - Auto-archive finished experiments to `D:\<user>\` after N days.
 - Optional: auto-pull from `C:\Proteomics_File_Sharing` (reversing D3) once
@@ -315,7 +321,7 @@ installed.
 | 1 ✅ | DIA-NN standalone (1.9 / 2.x) | import ✅, run ✅ (`engine: diann`, D39) | `pg_matrix` parser exists; 2.x `report.parquet` needs an optional Parquet reader. DIA-NN can't be redistributed from 1.9 on (Academia / Enterprise editions): the lab supplies the binary. |
 | 2 ✅ | MaxQuant | import ✅ `proteinGroups.txt`; run ✅ (`engine: maxquant`, D50, #54; tested against a stand-in MaxQuant only) | Free incl. commercial use; not redistributable. Run mode patches an `mqpar.xml` made by the installed version (`--create`), never a shipped template. |
 | 3 ✅ | MSstats long format + SDRF design | import ✅ label-free MSstats, MSstatsTMT (D48) and an SDRF as the design (D47), #60 | One importer covers quantms, Skyline and anything with an MSstats converter; protein summary by Tukey median polish (MSstats' default). |
-| 4 ✅ | Spectronaut | import ✅ pivot + long reports (the `.rs` schema still to ship) | Common in cores; ship an Ionomos report schema (`.rs`), read `PG.Quantity` pivots or the long BGS report. |
+| 4 ✅ | Spectronaut | import ✅ pivot + long reports; column list ✅ (`ionomos spectronaut-columns`, 2026-10-03, D74) instead of an `.rs` schema, whose format is not published | Common in cores; read `PG.Quantity` pivots or the long BGS report. A lab makes its schema from the column list once and can share Spectronaut's own `.rs` of it. |
 | 5 ✅ | Sage | import ✅ `lfq.tsv`, `tmt.tsv` (D56); run ✅ (`engine: sage`, D51; TMT with the lab's `sage_config`, D56; tested against stand-ins for Sage and ThermoRawFileParser only) | MIT and cross-platform. Not bundled: the lab downloads Sage and ThermoRawFileParser (.raw → mzML, Thermo's RawFileReader licence). Proteins are rolled up from `lfq.tsv` by razor grouping and median polish; `tmt.tsv` as MSstatsTMT input is, plexes joined by IRS. QC trending reads `results.sage.tsv`. Not built: Parquet output (`--parquet` has other layouts, and Sage calls it unstable). |
 | 6 ✅ | AlphaDIA | import ✅ `pg.matrix.tsv` | Apache-2.0, pip-installable; column names changed between 1.x and 2.x. |
 | 7 ✅ | Proteome Discoverer | import ✅ (column format from the docs, not yet a real export) | Protein-table text export only; no supported headless mode. |
@@ -384,12 +390,14 @@ real data:
    - the recalibrated F statistic and relevance score
 
    Compound titrations are central to chemoproteomics.
-3. [ ] **Cysteine chemoproteomics** (2026-09-30, D52: `downstream/cys.py`; the abundance correction still to do):
+3. [x] **Cysteine chemoproteomics** (2026-09-30, D52: `downstream/cys.py`; the abundance correction 2026-10-03, D70):
    - [x] liganded-site calls with configurable thresholds (R ≥ 4 in ≥ 2 of 3
      replicates)
-   - [ ] site changes corrected for protein abundance (MSstatsPTM formulas):
-     needs a matching unenriched proteome; the lab has to say where it
-     comes from
+   - [x] site changes corrected for protein abundance (MSstatsPTM formulas)
+     (2026-10-03, D70: `downstream/proteincorr.py`, `analysis.protein_correction`; off until the lab names
+     a proteome; checked against MSstatsPTM 2.14.0; where the proteome comes from is still the lab's question)
+   - [x] opt-in centring of the site ratios (2026-10-03, D70: `ratio_centre: none | median | auto`, default
+     none until the lab decides)
    - [x] a site × compound selectivity map and a liganded fraction per compound
    - [x] an optional CysDB annotation the user downloads (AGPL: not bundled)
 4. [x] **DEqMS** (2026-09-30, D43, #58; checked against DEqMS 1.30.0; limpa still to do) (variance tied to peptide count, which is now read). Later, a
@@ -437,6 +445,10 @@ real data:
    - [x] the same checks for ratio data (isoDTB) and TMT (2026-10-02, D66:
      `ionomos benchmark --kind isodtb | tmt`, a calibration guard per kind;
      what they found is under Open questions)
+   - [x] TMT where the D66 grid found problems (2026-10-03, D71): the
+     composition check within plexes (a pulldown without IRS), limma's df
+     after IRS on the plex means, two more guards, a "TMT plexes" line in
+     "How far to trust this" and `TMT_PLEXES_NOT_IN_MODEL`
    - [x] a button for compare / benchmark in the app (2026-10-02, D67:
      Analysis tab → **Check accuracy**, the same code as the command line,
      run off the Tk thread; not yet seen on screen)
@@ -537,7 +549,7 @@ assistant runs on the PC, and no data leaves it.
   per-session banner, sends tool results only (never data files or quant tables),
   optionally hashes sample names, and shows exactly what would be sent.
 
-**Evaluation:** a scenario corpus in `tests/assistant_scenarios/`. Each scenario is a
+**Evaluation:** a scenario corpus in `ionomos/assistant/scenarios/` (shipped, D72). Each scenario is a
 fixture state (the testbed's fake FragPipe / DIA-NN / MaxQuant failures, doctor issues,
 real naming cases from `reference/pc-inventory`) plus a question and a rubric:
 - tools it must call and IDs it must cite
@@ -546,8 +558,8 @@ real naming cases from `reference/pc-inventory`) plus a question and a rubric:
 - whether a refusal is expected
 
 CI replays recorded transcripts through a scripted fake model, testing the harness,
-validators, citation checker and confirm gate. Real models are scored by hand on the
-PC, including time to first token idle and while a search runs. Choose the model by
+validators, citation checker and confirm gate. Real models are scored on the PC with
+`ionomos ask-eval` (D72), including time to first token idle and while a search runs. Choose the model by
 that scorecard, not leaderboards.
 
 **Phases:**
@@ -564,11 +576,16 @@ that scorecard, not leaderboards.
     the audit log, the not-set-up state, `ionomos ask` (`--experiment`, `--item`,
     `--json`), an `assistant` row in `ionomos check`, help entries, and 53 scenarios
     replayed in CI.
+  - **Built 2026-10-03 (D72):** the "Ask about this" button on the pop-ups and the
+    attention list (worker thread + `root.after`; "not set up" shows Ionomos's own text
+    and the help); `ionomos ask-eval`, which scores a model over the corpus on the PC with
+    the CI's rubric and writes a scorecard (pass rate, injection failures, time to first
+    token idle and while searching); `assistant.keep_alive` and
+    `assistant.while_searching` (another model or address, a shorter keep-alive, or a
+    pause while the worker runs a search). The corpus now ships with Ionomos.
   - **Remains (the box stays open):** nothing has run against a real model or runtime,
-    so none of the exit criteria is measured. Needs 6.0 first (a model to try). Then:
-    a runner that scores a real model over the corpus on the PC; the "Ask about this"
-    button on pop-ups and the attention list (the backend, `ask(item_id=…)`, exists);
-    on-demand loading, thread caps and priority while a search runs.
+    so none of the exit criteria is measured. Needs 6.0 first (a model to try), then
+    `ionomos ask-eval` on the PC, idle and during a search, and the settings it suggests.
 - [ ] **6.2 Confirmed actions (2–3 weeks).** The proposal tools and the native
   diff-and-confirm dialog. *Exit:* no path runs an action without a click (tested), and
   3 lab members finish the tasks unaided.
@@ -615,6 +632,9 @@ Collected from the other docs; resolve before/during Phase 1.
 - [ ] Install git on the PC, or deploy via zip/wheel?
 
 **Software**
+- [ ] D73 (2026-10-03): the test suite hung three times on macOS with nothing on screen, and did not hang again in
+      14 full runs and ~3,300 targeted tests. If it hangs again it now prints `Timeout (0:05:00)!` (or, after the last test, `Timeout
+      (0:02:00)!`) and every thread's stack, then ends: keep that output and add the cause to D73.
 - [x] How does FragPipe 24.0 headless locate the TMT `annotation.txt`? → 2026-10-01 (D59), from `TmtiPanel`
       (same in 23.1): the one file whose name ends in `annotation.txt` in the folder holding all of the plex's
       LC-MS files; with none or several it writes its own `<workdir>\<plex>\<plex>_annotation.txt` naming the
@@ -654,7 +674,13 @@ Collected from the other docs; resolve before/during Phase 1.
       heavy / light in 2 replicates); set `liganded_direction`, `liganded_ratio`, `liganded_min_replicates` once the
       lab confirms. Also: check the site annotation reader against a real CysDB download.
 - [ ] isoDTB: for the protein-abundance correction of site ratios, where does the matching proteome come from
-      (a paired unenriched run per condition)?
+      (a paired unenriched run per condition)? → 2026-10-03 (D70), built configurable: `protein_correction:
+      {proteome, match, conditions}` takes an analysed Ionomos experiment, an MSstats groupComparison table or an
+      Ionomos differential table, off by default. **Still for the lab**: which proteome (a DIA / TMT run of the same
+      lysates, or an unenriched isoDTB-labelled run), searched against the same FASTA so gene names / accessions
+      match; is gene or accession matching right; should Ionomos ever take it from the drop itself (e.g. a
+      `proteome/` folder)? Is the treated sample always the light tag (the correction's sign follows
+      `liganded_direction`)?
 - [ ] Roles (D61): which words does the lab put in a condition name for "probe plus competitor"? Built: `comp`,
       `competition`, `competitor`, `competed`, `compete`, `competing`, `excess` (only `Comp` was seen on the PC), and,
       asked about each time, `pre`, `pretreat…`, `block…`, `cold`, `10x`. Set `analysis.competition_keywords`.
@@ -712,15 +738,31 @@ Collected from the other docs; resolve before/during Phase 1.
       up 4-fold, 20 seeds: 7.4 %). Centring each replicate on its median brings that to 5.1 %, but when 20 % of
       the sites go one way it shifts every unchanged site by -0.09 log2 instead. How does the lab mix heavy and
       light (protein assay, by volume), and how far off 1:1 is it? Should the ratios be centred, with a
-      composition-robust centre, and should the liganded calls (R ≥ 4) use the centred ratios too?
-- [ ] TMT without IRS (D66): with the plex effect still in the data, the composition check and the ratio method
-      compare a protein across plexes and cannot see a pulldown: with the plex as a block, 59 % of the calls at
-      adjusted p alone were false in a simulated pulldown (offset -0.19 to -0.26 log2). Worth doing the check
-      within plexes when plexes are known and IRS is off? (With IRS on a pool, the default, it is fine.)
-- [ ] TMT `irs: sum` (D66): IRS on each plex's own mean, used when no reference channel is found and the plexes
-      are balanced, is slightly liberal in simulation: FDP 6.6 % with changes both ways (4.5 % aimed at), up to
-      9.3 % in one scenario, because the plex mean is estimated from the channels then tested. Accept, or
-      correct limma's residual df by the plexes?
+      composition-robust centre, and should the liganded calls (R ≥ 4) use the centred ratios too? → 2026-10-03
+      (D70): built opt-in, `ratio_centre: none | median | auto`, **default none: the lab must decide**. In
+      simulation (3 replicates, 900 sites, 20 seeds) `auto` (stable sites, only when a replicate is > 0.05 log2 and
+      3 SE off) left every table without a mixing error untouched and brought the worst case (15 % mixing error,
+      5 % of sites up 2-fold) from FDP 8.4 % to 4.2 %, unchanged sites within 0.014 log2; `median` did as well
+      there but shifted unchanged sites by -0.09 when 20 % went one way. The liganded calls use whatever ratios
+      the analysis used and say so. **For the lab**: switch the lab default to `auto`? Is a compound that moves
+      more than half the sites possible (then no centring works)? The doctor now says when a replicate is off
+      (`RATIO_OFFSET`); how often does that happen on real runs?
+- [x] TMT without IRS (D66): the composition check and the ratio method compared a protein across plexes and
+      could not see a pulldown (plex block: 59 % false at adjusted p alone). 2026-10-03 (D71): with plexes known
+      both are worked out within each plex and combined; the plex block now gives 4.7 % (offset within 0.04).
+- [x] TMT `irs: sum` (D66): IRS on each plex's own mean was slightly liberal (FDP 6.6 %, up to 9.3 %).
+      2026-10-03 (D71): limma's residual df are reduced by the plexes - 1 per protein (the plex mean is estimated
+      from the channels then tested); 5.1 % with changes both ways, 4.0 % in a pulldown, checked against R.
+- [ ] TMT, what D71 left (2026-10-03): (1) limma's block model with missing values is a little liberal: with the
+      plex as a block, proteins missing a channel had 7 % of their unchanged p-values below 0.05 (complete ones
+      5.4 %), the FDP 5.3 – 5.8 %. That is limma's own `contrasts.fit` approximation for a non-orthogonal design,
+      ported as it is; IRS on a pool with the plain model (the default) does not have it. (2) `irs: sum` drops a
+      plex for a protein when one channel of it is missing, and leaves a protein with no complete plex unscaled
+      (D48); should such proteins be scaled on the channels they have? (3) After IRS on the plex means the
+      Welch / Student t-tests do not allow for the plex means; "How far to trust this" marks it "check". (4) A
+      2-fold pulldown of 20 % of the proteins sits right at the composition check's 0.1 log2 limit (D64): a table
+      whose shift comes out at 0.098 keeps median centring and its unchanged proteins sit -0.11 log2 off. Should
+      the limit be lower for TMT, whose replicate scatter is small?
 - [ ] isoDTB with two replicates (D66): limma's FDP was 5.8 % (no mixing error) to 9.8 % (with one) in
       simulation, because with 1 df per site the test rests on the variance prior and the simulated sites differ
       in variance (with equal SDs it is calibrated). "How far to trust this" already marks two replicates
@@ -736,6 +778,12 @@ Collected from the other docs; resolve before/during Phase 1.
 - [ ] Phase 6 (D57): confirm three choices made while building 6.1: `[job:ID]` as a fifth citation form; an
       answer is shown only if *every paragraph* has a valid citation; a non-local `base_url` is refused even
       with `assistant.allow_cloud: true` until 6.4's banner and preview exist.
+- [ ] Phase 6 (D72, 2026-10-03): confirm that an attention item without a job is named to the model by
+      its kind and time, not its id; which scenarios are harness-only (`refuse_delete_request` expects no
+      grounded answer: should a cited "Ionomos never deletes" count as a pass?); and that Ionomos sets no
+      thread count or priority (only `keep_alive`, and a `while_searching` model / address / pause). On the
+      PC: does Ollama honour `keep_alive` on `/v1/chat/completions`, and what `keep_alive` and
+      `while_searching` does `ionomos ask-eval` during a search suggest?
 - [ ] Phase 5: publish on PyPI as `ionomos` (needs a PyPI account / trusted publisher set up by the maintainer).
 - [x] Agent auto-merge: removed 2026-09-27; a person merges (D31).
 - [x] CI Python versions: 3.11 (floor), 3.12 (exe build), 3.14 (the PC) since 2026-09-27.

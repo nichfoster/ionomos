@@ -26,7 +26,10 @@ whether it is selective (liganded by one compound and measured as not liganded b
 many of its quantified cysteines are liganded, since most of a protein's sites moving together points at the
 protein amount rather than one site.
 
-The calls are made on the ratios as measured (never normalised, never imputed). Nothing here is a p-value:
+The calls are made on the ratios the analysis used: as measured unless the lab opted into centring them
+(analysis.ratio_centre, D70), never imputed; the rule says which. With analysis.protein_correction (D70) the
+protein's own ratio from the proteome is shown beside each call (protein_log2_R, log2_R_corrected), but the
+call itself stays on the site ratio: R ≥ 4 is a rule about the measured competition. Nothing here is a p-value:
 the moderated one-sample test in the Differential section answers "is the ratio different from 1"; this
 answers the chemoproteomics convention "is the site engaged by at least 1 - 1/R".
 """
@@ -81,6 +84,8 @@ class Result:
     annotation: dict
     notes: list[str] = field(default_factory=list)
     problems: list[tuple[str, str]] = field(default_factory=list)   # (severity, message) for the doctor
+    ratios: str = "as measured (not centred)"  # how the ratios were centred (fpa.centre_label, D70)
+    protein: bool = False                       # the proteome's ratio per site is in rows[...]["per"] (D70)
 
 
 def site_key(feature_id: str) -> tuple[str, str, int | None]:
@@ -109,8 +114,11 @@ def classify(values: list[float | None], log2_threshold: float, min_replicates: 
     return ("inconsistent" if over else "not liganded"), len(obs), over
 
 
-def run(p, settings, annotation: dict | None = None) -> Result:
-    """Liganded-site calls on a processed site-ratio matrix (fpa.Processed). annotation: load_annotation()."""
+def run(p, settings, annotation: dict | None = None, protein_hl: dict | None = None) -> Result:
+    """Liganded-site calls on a processed site-ratio matrix (fpa.Processed). annotation: load_annotation().
+    protein_hl: {condition: {site index: the protein's log2 H/L}} from proteincorr.run (shown, not used)."""
+    from ionomos.downstream import fpa
+
     m = p.m
     sign = 1.0 if settings.liganded_direction == "high" else -1.0
     thr = math.log2(settings.liganded_ratio)
@@ -143,6 +151,11 @@ def run(p, settings, annotation: dict | None = None) -> Result:
                 comp.other_side += 1
             row["per"][comp.name] = {"log2": med, "n": n, "over": over, "class": cls,
                                      "engagement": None if med is None else max(0.0, 1.0 - 2.0 ** -med)}
+            if protein_hl is not None:
+                hl = (protein_hl.get(comp.name) or {}).get(i)
+                prot = None if hl is None else sign * hl
+                row["per"][comp.name]["protein"] = prot
+                row["per"][comp.name]["corrected"] = None if prot is None or med is None else med - prot
         by = [c.name for c in compounds if row["per"][c.name]["class"] == "liganded"]
         clear = [c.name for c in compounds if row["per"][c.name]["class"] == "not liganded"]
         row["liganded_by"] = by
@@ -176,8 +189,10 @@ def run(p, settings, annotation: dict | None = None) -> Result:
                "liganded_known": sum(1 for r in lig_rows if r.get("annotation") is not None),
                "liganded_new": sum(1 for r in lig_rows if r.get("annotation") is None)}
         notes += annotation.get("notes", [])
+    centring = (getattr(p, "normalization", None) or {}).get("ratio_centre") or {}
     return Result(settings.liganded_ratio, settings.liganded_min_replicates, settings.liganded_direction, compounds,
-                  rows, _proteins(rows, compounds), sel, ann, notes, problems)
+                  rows, _proteins(rows, compounds), sel, ann, notes, problems, fpa.centre_label(centring),
+                  protein_hl is not None)
 
 
 def _status(hit: dict | None) -> str:
@@ -322,6 +337,8 @@ def columns(res: Result) -> list[str]:
     for c in res.compounds:
         out += [f"{c.name} log2_R", f"{c.name} R", f"{c.name} engagement_pct", f"{c.name} replicates",
                 f"{c.name} replicates_over", f"{c.name} class"]
+        if res.protein:
+            out += [f"{c.name} protein_log2_R", f"{c.name} log2_R_corrected"]
     out += ["liganded_by", "n_liganded", "selectivity"]
     if res.annotation:
         out += ["annotation", *res.annotation["flags"]]
@@ -342,6 +359,9 @@ def table_rows(res: Result) -> list[dict]:
             row[f"{c.name} replicates"] = x["n"]
             row[f"{c.name} replicates_over"] = x["over"]
             row[f"{c.name} class"] = x["class"]
+            if res.protein:
+                row[f"{c.name} protein_log2_R"] = _num(x.get("protein"))
+                row[f"{c.name} log2_R_corrected"] = _num(x.get("corrected"))
         row["liganded_by"] = "; ".join(r["liganded_by"])
         row["n_liganded"] = len(r["liganded_by"])
         row["selectivity"] = r["selectivity"]
@@ -378,7 +398,7 @@ def protein_rows(res: Result) -> list[dict]:
 
 def rule_text(res: Result) -> str:
     return (f"R ≥ {res.ratio:g} ({'heavy / light' if res.direction == 'high' else 'light / heavy'}) in at least "
-            f"{res.min_replicates} replicate{'s' if res.min_replicates != 1 else ''}")
+            f"{res.min_replicates} replicate{'s' if res.min_replicates != 1 else ''}, on the ratios {res.ratios}")
 
 
 def summary(res: Result | None, reason: str = "", table: str | None = None, proteins: str | None = None) -> dict:
@@ -386,7 +406,8 @@ def summary(res: Result | None, reason: str = "", table: str | None = None, prot
     if res is None:
         return {"ran": False, "reason": reason}
     return {"ran": True, "rule": rule_text(res), "ratio": res.ratio, "min_replicates": res.min_replicates,
-            "direction": res.direction, "table": table, "proteins_table": proteins,
+            "direction": res.direction, "ratios": res.ratios, "centred": not res.ratios.startswith("as measured"),
+            "protein_shown": res.protein, "table": table, "proteins_table": proteins,
             "compounds": [{"name": c.name, "replicates": len(c.samples), "min_replicates": c.min_replicates,
                            "assessed": c.assessed, **c.counts,
                            "liganded_fraction": None if c.fraction is None else round(c.fraction, 4)}
@@ -417,7 +438,7 @@ def report_payload(res: Result | None, reason: str = "") -> dict:
                          "per": [[e["per"][c.name]["assessed"], e["per"][c.name]["liganded"],
                                   1 if e["per"][c.name]["most"] else 0] for c in res.compounds]}
                         for e in res.proteins[:2000]],
-           "notes": res.notes}
+           "notes": res.notes, "ratios": res.ratios, "proteinShown": res.protein}
     if res.annotation:
         out["annotation"] = {**res.annotation, "status": [r["status"] for r in res.rows]}
     return out

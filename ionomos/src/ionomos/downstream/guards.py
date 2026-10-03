@@ -141,8 +141,8 @@ def statistics(p, diffs: list, settings, model=None) -> list[dict]:
     fits: dict[int, tuple] = {}
     designed = model is not None and getattr(model, "design", None) is not None
     for d in diffs:
-        if d.confidence == "none" or d.test_used == "as given":
-            continue
+        if d.confidence == "none" or d.test_used in ("as given", "protein-corrected"):
+            continue  # a protein-corrected site comparison (D70) rests on the site comparison checked here already
         groups = groups_of[d.name]
         if id(groups) not in fits:
             _ns, _means, s2, df = fpa._group_fit(m.values, groups)

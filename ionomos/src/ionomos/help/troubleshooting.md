@@ -31,8 +31,14 @@ That is fine; use the app to see it.
 - **Files were left out**: the window and `README.txt` in the zip list them
   with the reason. A zip has a size limit (2,000 MB before compression;
   `ionomos bundle --max-mb` raises it). A PSM table above 25 MB is cut down
-  to every n-th row. A picture or another file that is not text is left out
-  when names are replaced, because the names in it can't be.
+  to every n-th row, and so is a main report or peptide table above 200 MB
+  (`--extra-mb`). A picture or another file that is not text is left out
+  when names are replaced, because the names in it can't be. A DIA-NN
+  `report.parquet` is written as text, which needs the Python package
+  pyarrow; without it the file is left out with that reason.
+- **Copy diagnostics says "LEAK CHECK FAILED"**: as for the zip, a name was
+  still in the text, so nothing was copied. Report the message; **Copy with
+  real names** still works for use inside the lab.
 - **It was saved in the log folder, not on the Desktop**: there was no
   Desktop folder to write to. The message gives the place.
 - **A name is still readable in the zip**: see the list of what the replacing
@@ -652,6 +658,60 @@ number column; yes / no columns such as `ligandable` and `hyperreactive`
 become the known / new marks. The liganded calls themselves don't depend on
 it.
 
+## A replicate's site ratios sit off 0 {#issue.RATIO_OFFSET}
+
+In an isoDTB experiment most cysteines are not engaged by the compound, so
+their heavy / light ratio should be 1 (log2 0) in every replicate. Ionomos
+measures each replicate's offset on those stable sites, and in the replicates
+named it is clearly away from 0. The usual cause is the mixing: heavy and
+light were not combined exactly 1:1, which moves every ratio of that
+replicate by the same amount. Unchanged sites then look changed, and the test
+against 0 calls some of them.
+
+The ratios were used as measured, because centring is the lab's decision. If
+the mixing is the likely cause, add `ratio_centre: auto` under `analysis:` in
+the experiment's `experiment.yaml` (or in the lab's settings) and re-run the
+analysis ([How to re-run](#faq.rerun)). `auto` centres each replicate on its
+stable sites, and only when one is clearly off; `median` centres every
+replicate on its median site, which goes wrong when a compound moves many
+sites one way. If the compound really does move most sites, leave the ratios
+as they are. The [liganded calls](#report.cys) say which ratios they used.
+
+## The protein correction needs a look {#issue.PROTEIN_CORRECTION}
+
+`protein_correction` asks Ionomos to subtract each site's protein change, from
+an unenriched proteome of the same treatment, from the site's ratio (the
+MSstatsPTM adjustment). It couldn't do that as asked:
+- The proteome wasn't found or isn't usable. `proteome:` takes the folder of
+  an analysed Ionomos experiment (or its `results` folder), or a protein table:
+  MSstats groupComparison output (Protein, Label, log2FC, SE, DF) or an
+  Ionomos `*_differential.tsv`. A relative path is read from the experiment
+  folder.
+- Few sites found their protein. With `match: gene` both sides need the same
+  gene names; with `match: protein` the same UniProt accessions (isoforms are
+  joined). A table with accessions only needs `match: protein`.
+
+The uncorrected results are not affected: the site comparison without the
+correction is always reported. Fix the setting under `analysis:` in
+`experiment.yaml` and re-run the analysis ([How to re-run](#faq.rerun)).
+
+## Protein correction: the proteome's comparisons don't match the sites' conditions {#issue.PROTEIN_CORRECTION_CONDITIONS}
+
+Each site condition (an isoDTB sample, often named after the experiment, like
+`EJQ_2_027`) needs the proteome comparison of the same compound against its
+control, and Ionomos never guesses it. By default it looks for a comparison
+whose first condition has the site condition's name. Name it instead:
+
+```yaml
+analysis:
+  protein_correction:
+    proteome: D:/Fragpipe_General/EJQ/20261001-DIA_EJQ-2-030
+    conditions: {EJQ_2_027: Cmpd vs DMSO}   # the compound first
+```
+
+and re-run the analysis ([How to re-run](#faq.rerun)). The message lists the
+proteome's comparisons. Site conditions without one are reported uncorrected.
+
 ## Dose-response: the doses need a look {#issue.DOSES}
 
 Ionomos found what looks like a titration but couldn't read every dose, so
@@ -699,6 +759,29 @@ it. IRS needs one of these:
 Then re-run the analysis ([How?](#faq.rerun)). If the plexes can't be joined,
 compare conditions within a plex, or block on the plex
 (`analysis.block: {sample: plex}`).
+
+When each plex's own mean serves as the reference, that mean was worked out
+from the same channels that are then tested. limma allows for it: each
+protein loses one degree of freedom per plex beyond the first, which keeps
+the false discoveries where they should be (a t-test does not allow for it).
+
+## The TMT plexes are neither on one scale nor in the model {#issue.TMT_PLEXES_NOT_IN_MODEL}
+
+The experiment has several TMT plexes, IRS was switched off (`irs: none`),
+and the model has no block for the plex. Each plex then measures the same
+protein a little higher or lower, and that jump counts as replicate spread.
+The tests stay honest but find far fewer changes: in simulated plexes 40 %
+of the 2-fold changes were found, against 95 % with IRS or a plex block.
+
+- Put the plexes on one scale: name the pooled (bridge) channel with
+  `analysis.tmt_reference: [126]` and set `irs: auto`; or
+- keep `irs: none` and block on the plex (`analysis.block: {sample: plex}`,
+  or `block_from` with a pattern that picks the plex out of the sample
+  names), so every comparison is made within the plexes.
+
+Then re-run the analysis ([How?](#faq.rerun)). Normalisation is not the
+problem here: without IRS its composition check already compares the
+samples within each plex.
 
 ## The experimental design couldn't be used {#issue.DESIGN_NOT_USED}
 
@@ -847,7 +930,10 @@ samples.
 Ionomos checks for this by also normalising on the features themselves: each
 sample is shifted by the median ratio of its stable features to their mean
 across samples. When the two methods disagree by more than 0.1 log2 between
-two conditions, median centring is not safe.
+two conditions, median centring is not safe. With several TMT plexes that
+were not put on one scale (IRS off or not possible) both are worked out
+within each plex and then combined, because across such plexes the same
+protein jumps with the plex and hides the shift.
 
 - With **Normalisation: auto** (the default for new set-ups) Ionomos uses the
   ratio method by itself whenever that happens, and this entry only tells

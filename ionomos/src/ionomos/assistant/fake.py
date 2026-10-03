@@ -21,10 +21,19 @@ stream=True it answers in server-sent events, content and tool-call arguments in
 
 This tests the harness (the loop, the validators, the citation check, the audit log). It says nothing
 about how well any real model answers.
+
+ScriptedServer serves the same scripts over real HTTP, on 127.0.0.1 and a port the OS picks, for the tests of
+`ionomos ask-eval` and for `ionomos ask-eval --scripted` (the runner checked on the PC without a model):
+
+    with ScriptedServer(delay=0.05) as srv:      # srv.base_url == "http://127.0.0.1:<port>/v1"
+        srv.use(turns)                           # the script for the next question
 """
 from __future__ import annotations
 
+import http.server
 import json
+import threading
+import time
 from collections.abc import Iterator
 
 from ionomos.assistant.client import ChatError
@@ -90,3 +99,62 @@ class ScriptedModel:
             out += [event({"tool_calls": [{"index": n, "function": {"arguments": args[i:i + 5]}}]})
                     for i in range(0, len(args), 5)]
         return out + [b"data: [DONE]\n\n"]
+
+
+class ScriptedServer:
+    """A chat-completions endpoint on 127.0.0.1 that answers with a ScriptedModel: whole JSON or server-sent
+    events, as each request's "stream" asks, after `delay` seconds (a model reading its prompt). Every request
+    body is kept (requests); one the script rejects is answered HTTP 500 and noted (errors)."""
+
+    def __init__(self, turns: list[dict] | None = None, delay: float = 0.0):
+        self.delay = delay
+        self.model = ScriptedModel(list(turns or []))
+        self.requests: list[dict] = []
+        self.errors: list[str] = []
+        self._lock = threading.Lock()
+        server = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):  # noqa: N802 - http.server's name
+                body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                url = f"http://{self.headers.get('Host', '')}{self.path}"
+                try:
+                    with server._lock:
+                        server.requests.append(json.loads(body.decode("utf-8")))
+                        server.model.stream = bool(server.requests[-1].get("stream"))
+                        chunks = list(server.model(url, body, dict(self.headers), 0))
+                except (AssertionError, ValueError, ChatError) as exc:
+                    server.errors.append(f"{self.path}: {exc}")
+                    self.send_response(500)
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"error": {"message": str(exc)}}).encode("utf-8"))
+                    return
+                time.sleep(server.delay)
+                self.send_response(200)
+                streamed = bool(chunks) and chunks[0].startswith(b"data:")
+                self.send_header("Content-Type", "text/event-stream" if streamed else "application/json")
+                self.end_headers()
+                for c in chunks:
+                    self.wfile.write(c)
+                    self.wfile.flush()
+
+            def log_message(self, *_a):  # quiet
+                pass
+
+        self.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.httpd.daemon_threads = True
+        self.base_url = f"http://127.0.0.1:{self.httpd.server_address[1]}/v1"
+        self._thread = threading.Thread(target=self.httpd.serve_forever, name="scripted-model", daemon=True)
+
+    def use(self, turns: list[dict]) -> None:
+        """The script for the next question (its turns are answered in order, one per request)."""
+        with self._lock:
+            self.model = ScriptedModel(list(turns))
+
+    def __enter__(self) -> ScriptedServer:
+        self._thread.start()
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        self.httpd.shutdown()
+        self.httpd.server_close()

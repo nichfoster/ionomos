@@ -1,6 +1,7 @@
 {
   "id": "streamed_answer",
   "about": "The same loop over server-sent events (tool-call arguments arrive in pieces).",
+  "harness_only": "the same question over server-sent events; scored in hit_counts (assistant.stream decides)",
   "state": "fragpipe",
   "question": "How many hits did I get?",
   "experiment": "3",

@@ -106,7 +106,8 @@ REPORTING A PROBLEM
   tables when the numbers are to be checked. Names are replaced by
   pseudonyms; the KEY file saved next to the zip stays in the lab. Nothing
   is sent: copy the zip yourself. "Copy diagnostics" (Run & Test tab) is the
-  text only, with real names.
+  text only, with the names replaced the same way ("Copy with real names"
+  keeps them, for use inside the lab).
 
 FRAGPIPE SEARCHES
   Each filed experiment is searched with its method's workflow + FASTA.
@@ -988,12 +989,15 @@ class App:
         ttk.Button(w, text="Save diagnostics bundle (.zip)", command=self.save_bundle).grid(row=2, column=3, **PAD)
         ttk.Button(w, text="Retry a failed job…", command=self.retry_job).grid(row=2, column=1, **PAD)
         ttk.Button(w, text="Open job folder…", command=self.open_job).grid(row=2, column=2, **PAD)
+        ttk.Button(w, text="Copy with real names", command=lambda: self.copy_diagnostics(anonymise=False)).grid(
+            row=3, column=0, **PAD)
         self.fp_status = ttk.Label(w, text="", wraplength=440)
-        self.fp_status.grid(row=4, column=0, columnspan=4, sticky="w", **PAD)
+        self.fp_status.grid(row=5, column=0, columnspan=4, sticky="w", **PAD)
         ttk.Label(w, text="Start = runs in the background until you Stop or log out. Use the startup task to make it "
                           "permanent. Copy diagnostics = one text block (check, status, config, log tail) on the "
-                          "clipboard — paste it to whoever is fixing things.",
-                  foreground="#666", wraplength=420).grid(row=3, column=0, columnspan=4, sticky="w", padx=6)
+                          "clipboard, names replaced by pseudonyms as in a bundle — paste it to whoever is fixing "
+                          "things. Copy with real names = the same text as it is, for use inside the lab.",
+                  foreground="#666", wraplength=420).grid(row=4, column=0, columnspan=4, sticky="w", padx=6)
 
         s = ttk.LabelFrame(f, text="Start automatically at logon" + ("" if IS_WIN else " (Windows only)"), padding=6)
         s.grid(row=0, column=1, sticky="nsew", **PAD)
@@ -1561,19 +1565,25 @@ class App:
 
         threading.Thread(target=go, daemon=True).start()
 
-    def copy_diagnostics(self):
+    def copy_diagnostics(self, anonymise: bool = True):
+        """The diagnostics text on the clipboard: anonymised as a bundle is (D74), or with the real names."""
         cfg = self.config_path
         self.out.write("collecting diagnostics…", clear=True)
 
         def go():
-            text, where = service.save_diagnostics(cfg)
+            try:
+                text, where = service.save_diagnostics(cfg, anonymise=anonymise)
+            except Exception as exc:  # noqa: BLE001 - BundleLeak: a name was left, so nothing is copied
+                err = str(exc)
+                self.post(lambda: (self.out.write(err, clear=True),
+                                   messagebox.showerror("Diagnostics", f"Nothing was copied.\n\n{err}")))
+                return
 
             def show():
                 self.root.clipboard_clear()
                 self.root.clipboard_append(text)
                 self.out.write(text + ("\n(saved to " + str(where) + ")" if where else ""), clear=True)
-                messagebox.showinfo("Diagnostics", "Copied to the clipboard" + (f" and saved to\n{where}" if where else "") +
-                                    ".\nPaste it into the chat / issue describing the problem.")
+                messagebox.showinfo("Diagnostics", service.diagnostics_copied_message(where, anonymise))
 
             self.post(show)
 

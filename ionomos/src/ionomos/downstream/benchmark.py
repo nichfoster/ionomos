@@ -11,7 +11,8 @@ Simulated (no data needed; `ionomos benchmark [--kind dia|isodtb|tmt]`):
               treated, planted effects of 1.5-, 2- and 4-fold, three levels of missing values; every imputation /
               normalisation setting (SETTINGS)
     isodtb    FragPipe's isoDTB label quant, through the lab's site table (D66): 2 to 4 replicates, a few or many
-              sites changed one way, with and without a heavy / light mixing error; limma or a t-test against 0
+              sites changed one way, with and without a heavy / light mixing error; limma or a t-test against 0;
+              the "centring" grid compares ratio_centre none / median / auto (D70)
     tmt       MaxQuant reporter intensities of 2 or 3 TMT plexes with a pooled reference (D66): balanced and
               unbalanced channels, changes both ways or a pulldown one way; IRS on the pool, on the plex means, or
               none, with auto or median normalisation, or the plex as a block
@@ -81,6 +82,8 @@ MIN_CALLS = 50   # a scenario's FDP is only quoted in a range when it rests on a
 ISODTB_SETTINGS = [
     ("limma (default)", {"test": "limma"}),
     ("t-test", {"test": "welch"}),
+    ("limma, ratios centred: median", {"test": "limma", "ratio_centre": "median"}),   # D70
+    ("limma, ratios centred: auto", {"test": "limma", "ratio_centre": "auto"}),
 ]
 ISODTB_NOISE = 0.35
 ISODTB_GRIDS = {
@@ -90,9 +93,14 @@ ISODTB_GRIDS = {
                  "mixing": [0.0, 0.2], "missing": ["typical"], "settings": [s[0] for s in ISODTB_SETTINGS],
                  "seeds": 5, "proteins": 900},
     "quick": {"designs": [(0, 3)], "effects": [2.0], "changed": [(0.05, "up"), (0.2, "up")], "mixing": [0.0, 0.2],
-              "missing": ["typical"], "settings": [s[0] for s in ISODTB_SETTINGS], "seeds": 2, "proteins": 600},
+              "missing": ["typical"], "settings": ["limma (default)", "t-test"], "seeds": 2, "proteins": 600},
     "guard": {"designs": [(0, 3), (0, 4)], "effects": [2.0], "changed": [(0.1, "up")], "mixing": [0.0],
               "missing": ["typical"], "settings": ["limma (default)"], "seeds": 4, "proteins": 600},
+    # D70: ratio_centre none / median / auto, with and without a mixing error, few or many sites one way
+    "centring": {"designs": [(0, 3)], "effects": [1.0, 2.0], "changed": [(0.05, "up"), (0.2, "up")],
+                 "mixing": [0.0, 0.2], "missing": ["typical"],
+                 "settings": ["limma (default)", "limma, ratios centred: median", "limma, ratios centred: auto"],
+                 "seeds": 20, "proteins": 900},
 }
 
 # TMT (simulate.tmt_plexes, MaxQuant's proteinGroups.txt): POOL_CHANNELS / POOL_SAMPLES stand for the pooled
@@ -116,6 +124,13 @@ TMT_GRIDS = {
               "missing": ["typical"], "settings": [s[0] for s in TMT_SETTINGS], "seeds": 2, "proteins": 600},
     "guard": {"designs": [(4, 4), (2, 6)], "plexes": [2, 3], "effects": [1.0], "changed": [(0.1, "both")],
               "missing": ["typical"], "settings": ["IRS on the pool + auto (default)"], "seeds": 4, "proteins": 600},
+    # the D71 guards: IRS on the plex means (its residual df), and a pulldown without IRS (the composition check
+    # within plexes)
+    "guard_sum": {"designs": [(4, 4), (2, 6)], "plexes": [2, 3], "effects": [1.0], "changed": [(0.1, "both")],
+                  "missing": ["typical"], "settings": ["IRS on plex means + auto"], "seeds": 4, "proteins": 600},
+    "guard_pulldown": {"designs": [(4, 4), (2, 6)], "plexes": [3], "effects": [1.0], "changed": [(0.2, "up")],
+                       "missing": ["typical"], "settings": ["no IRS, plex as a block", "no IRS + auto"], "seeds": 4,
+                       "proteins": 600},
 }
 KINDS = {
     "dia": "label-free DIA protein matrices (DIA-NN's report.pg_matrix.tsv)",
@@ -127,7 +142,8 @@ FILE_STEM = {"dia": "benchmark_simulated", "isodtb": "benchmark_simulated_isodtb
 SIM_COLUMNS = ["setting", "imputation", "normalize", "controls", "treated", "effect_log2", "missing", "seeds",
                "planted", "tested_share", "hits", "false_hits", "sensitivity", "fdp", "sensitivity_alpha_only",
                "fdp_alpha_only", "fdp_alpha_only_max_seed", "fc_bias_changed", "fc_offset_unchanged",
-               "fc_offset_unchanged_abs", "kind", "test", "irs", "plexes", "changed_share", "direction", "mixing_sd"]
+               "fc_offset_unchanged_abs", "kind", "test", "irs", "plexes", "changed_share", "direction", "mixing_sd",
+               "ratio_centre"]
 
 
 def run_pipeline(m, settings: analysis.Settings):
@@ -142,7 +158,7 @@ def run_pipeline(m, settings: analysis.Settings):
                             contaminants=settings.remove_contaminants, global_pct=settings.filter_global_pct,
                             condition_pct=settings.filter_condition_pct, normalization=settings.normalize,
                             imputation=settings.imputation, shift=settings.impute_shift, scale=settings.impute_scale,
-                            seed=settings.seed)
+                            seed=settings.seed, ratio_centre=settings.ratio_centre)
     if not p.m.features:
         return p, []
     comps, _ = analysis.choose_comparisons(p.m, settings)
@@ -346,10 +362,12 @@ def like(folder: str | Path) -> dict:
     kind = "isodtb" if info.get("level") == "site" else "tmt" if tmt and tmt.get("plexes") else "dia"
     keys = {"dia": ("imputation", "normalize", "test", "filter_condition_pct", "filter_global_pct", "min_valid",
                     "small_group_min_valid", "impute_shift", "impute_scale"),
-            "isodtb": ("test", "min_valid"),
+            "isodtb": ("test", "min_valid", "ratio_centre"),
             "tmt": ("normalize", "test", "filter_condition_pct", "filter_global_pct", "min_valid",
                     "small_group_min_valid", "irs")}[kind]
     over = {k: st[k] for k in keys if k in st}
+    if over.get("ratio_centre") == "none":  # the default: the setting's label stays as it was before D70
+        del over["ratio_centre"]
     if kind == "dia" and info.get("imputation") in fpa.IMPUTATION_METHODS:
         over["imputation"] = info["imputation"]  # what "auto" resolved to for this data
     if kind == "tmt":  # the simulated plexes' own pooled channels stand in for the experiment's reference
@@ -378,7 +396,9 @@ def like(folder: str | Path) -> dict:
             break
     exp = results.parent.name if results.name == "results" else results.name
     label = {"dia": f"{exp}: {over.get('imputation', 'auto')} + {over.get('normalize', 'auto')}",
-             "isodtb": f"{exp}: {over.get('test', 'limma')}",
+             "isodtb": f"{exp}: {over.get('test', 'limma')}"
+                       + (f", ratios centred: {over['ratio_centre']}" if over.get("ratio_centre", "none") != "none"
+                          else ""),
              "tmt": f"{exp}: IRS {over.get('irs', 'auto')} + {over.get('normalize', 'auto')}"}[kind]
     return {"label": label, "settings": over, "design": design, "kind": kind, "alpha": float(st.get("alpha", 0.05)),
             "log2fc": float(st.get("log2fc", 1.0)), "results": results,
@@ -397,6 +417,7 @@ def _pool(name: str, over: dict, cell: dict, runs: list[dict], kind: str = "dia"
     return {"setting": name, "kind": kind, "imputation": "none" if ratio else over.get("imputation", "auto"),
             "normalize": "none" if ratio else over.get("normalize", "auto"), "test": over.get("test", "limma"),
             "irs": over.get("irs", "auto") if kind == "tmt" else "", "controls": cell["controls"],
+            "ratio_centre": over.get("ratio_centre", "none") if ratio else "",
             "treated": cell["treated"], "plexes": cell["plexes"] or "", "effect_log2": cell["effect_log2"],
             "changed_share": cell["changed_share"], "direction": cell["direction"], "mixing_sd": cell["mixing_sd"],
             "missing": cell["missing"], "seeds": len(runs),

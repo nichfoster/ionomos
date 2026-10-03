@@ -1,6 +1,7 @@
 {
   "id": "tool_loop_capped",
   "about": "A model that never answers is stopped after a fixed number of rounds.",
+  "harness_only": "acts out a model that never answers; the question is scored in fragpipe_out_of_memory",
   "state": "fragpipe",
   "question": "Why did my search fail?",
   "experiment": "1",
