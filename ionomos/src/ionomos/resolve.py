@@ -494,11 +494,13 @@ class TkResolver:
 
         def delete_file(filename):
             from ionomos.inbox import remove
-            from ionomos.intake import _find_raws
+            from ionomos.intake import raw_paths
 
             try:
-                raw_dir, _, _ = _find_raws(source)
-                remove(source.parent, source / raw_dir / filename)
+                target = next((p for p in raw_paths(source) if p.name == filename), None)
+                if target is None:
+                    raise ValueError(f"{filename} is no longer in {source.name}")
+                remove(source.parent, target)
                 refresh_files()
             except (OSError, ValueError) as exc:
                 messagebox.showerror("Could not remove file", str(exc), parent=win)

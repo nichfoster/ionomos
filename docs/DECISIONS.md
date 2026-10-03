@@ -2523,6 +2523,7 @@ with the next job.
 verified**: anything against a running FragPipe; that `taskkill /T` and the
 creation-time check behave on the PC as in CI; that Xcalibur's lock makes a
 file unreadable; which code page FragPipe's tools really write (ROADMAP
-"Open questions"). The app's inbox list and the review window's **Delete**
-button still look for raws at the top level or in `raw\` only, so in a
-`<plex>\` drop they list the files but can't delete one.
+"Open questions"). The app's inbox list, the review window's **Delete** and
+the name check find raws through `intake.raw_paths`, so a `<plex>\` drop's
+files are listed and can be removed (moved aside, as every inbox removal is);
+added while combining the 0.15.0 PRs.

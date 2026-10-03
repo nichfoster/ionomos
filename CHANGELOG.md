@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-02
+
 ### Added
 
 - **Settings and checks in the app instead of `config.yaml` or a terminal**
@@ -132,6 +134,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   choices into the saved `analysis:` block, so a sample used again, a role
   back to automatic or cleared comparisons stayed in `experiment.yaml`. The
   editor now writes the whole block (D65).
+
+- **A raw file in a drop laid out one folder per plex could not be removed
+  from the app** (D69). The inbox list, the review window's **Delete** and
+  the name check now find raws there too (`intake.raw_paths`).
 
 - **The experiment editor's Normalisation list lacked `auto` and `ratio`**
   (D64). It now offers the same choices as the Analysis tab.

@@ -226,6 +226,13 @@ def _raw_places(folder: Path) -> tuple[str, list[str], list[str], dict[str, str]
     return raw_dir, sorted(raws), others, subdirs
 
 
+def raw_paths(folder: Path) -> list[Path]:
+    """Every .raw file of a drop, where it is: top level, raw/, or one folder per plex (D69). For the app's
+    inbox list and the review window's Delete. Raises IntakeError for a layout intake would refuse."""
+    raw_dir, raws, _others, subdirs = _raw_places(folder)
+    return [folder / (subdirs.get(n) or raw_dir) / n for n in raws]
+
+
 def _users(cfg: Config) -> dict[str, str]:
     return build_user_lookup(cfg.known_users(), cfg.user_aliases)
 

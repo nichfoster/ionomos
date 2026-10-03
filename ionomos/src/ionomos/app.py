@@ -1786,12 +1786,11 @@ class App:
             key = str(path)
             self.inbox_tree.insert("", "end", iid=key, text=path.name, open=key in expanded)
             if path.is_dir() and not path.is_symlink():
-                from ionomos.intake import _find_raws
+                from ionomos.intake import raw_paths
 
                 try:
-                    raw_dir, files, _ = _find_raws(path)
-                    for name in files:
-                        self.inbox_tree.insert(key, "end", iid=str(path / raw_dir / name), text=name)
+                    for raw in raw_paths(path):  # top level, raw/ or <plex>/ (D69)
+                        self.inbox_tree.insert(key, "end", iid=str(raw), text=raw.name)
                 except (OSError, ValueError) as exc:
                     # IntakeError (a ValueError) means an unusable drop layout, e.g. raws
                     # in both places (issue #14): show the reason on the drop, never a
