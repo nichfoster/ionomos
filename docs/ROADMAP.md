@@ -390,12 +390,14 @@ real data:
    - the recalibrated F statistic and relevance score
 
    Compound titrations are central to chemoproteomics.
-3. [ ] **Cysteine chemoproteomics** (2026-09-30, D52: `downstream/cys.py`; the abundance correction still to do):
+3. [x] **Cysteine chemoproteomics** (2026-09-30, D52: `downstream/cys.py`; the abundance correction 2026-10-03, D70):
    - [x] liganded-site calls with configurable thresholds (R ≥ 4 in ≥ 2 of 3
      replicates)
-   - [ ] site changes corrected for protein abundance (MSstatsPTM formulas):
-     needs a matching unenriched proteome; the lab has to say where it
-     comes from
+   - [x] site changes corrected for protein abundance (MSstatsPTM formulas)
+     (2026-10-03, D70: `downstream/proteincorr.py`, `analysis.protein_correction`; off until the lab names
+     a proteome; checked against MSstatsPTM 2.14.0; where the proteome comes from is still the lab's question)
+   - [x] opt-in centring of the site ratios (2026-10-03, D70: `ratio_centre: none | median | auto`, default
+     none until the lab decides)
    - [x] a site × compound selectivity map and a liganded fraction per compound
    - [x] an optional CysDB annotation the user downloads (AGPL: not bundled)
 4. [x] **DEqMS** (2026-09-30, D43, #58; checked against DEqMS 1.30.0; limpa still to do) (variance tied to peptide count, which is now read). Later, a
@@ -669,7 +671,13 @@ Collected from the other docs; resolve before/during Phase 1.
       heavy / light in 2 replicates); set `liganded_direction`, `liganded_ratio`, `liganded_min_replicates` once the
       lab confirms. Also: check the site annotation reader against a real CysDB download.
 - [ ] isoDTB: for the protein-abundance correction of site ratios, where does the matching proteome come from
-      (a paired unenriched run per condition)?
+      (a paired unenriched run per condition)? → 2026-10-03 (D70), built configurable: `protein_correction:
+      {proteome, match, conditions}` takes an analysed Ionomos experiment, an MSstats groupComparison table or an
+      Ionomos differential table, off by default. **Still for the lab**: which proteome (a DIA / TMT run of the same
+      lysates, or an unenriched isoDTB-labelled run), searched against the same FASTA so gene names / accessions
+      match; is gene or accession matching right; should Ionomos ever take it from the drop itself (e.g. a
+      `proteome/` folder)? Is the treated sample always the light tag (the correction's sign follows
+      `liganded_direction`)?
 - [ ] Roles (D61): which words does the lab put in a condition name for "probe plus competitor"? Built: `comp`,
       `competition`, `competitor`, `competed`, `compete`, `competing`, `excess` (only `Comp` was seen on the PC), and,
       asked about each time, `pre`, `pretreat…`, `block…`, `cold`, `10x`. Set `analysis.competition_keywords`.
@@ -727,7 +735,15 @@ Collected from the other docs; resolve before/during Phase 1.
       up 4-fold, 20 seeds: 7.4 %). Centring each replicate on its median brings that to 5.1 %, but when 20 % of
       the sites go one way it shifts every unchanged site by -0.09 log2 instead. How does the lab mix heavy and
       light (protein assay, by volume), and how far off 1:1 is it? Should the ratios be centred, with a
-      composition-robust centre, and should the liganded calls (R ≥ 4) use the centred ratios too?
+      composition-robust centre, and should the liganded calls (R ≥ 4) use the centred ratios too? → 2026-10-03
+      (D70): built opt-in, `ratio_centre: none | median | auto`, **default none: the lab must decide**. In
+      simulation (3 replicates, 900 sites, 20 seeds) `auto` (stable sites, only when a replicate is > 0.05 log2 and
+      3 SE off) left every table without a mixing error untouched and brought the worst case (15 % mixing error,
+      5 % of sites up 2-fold) from FDP 8.4 % to 4.2 %, unchanged sites within 0.014 log2; `median` did as well
+      there but shifted unchanged sites by -0.09 when 20 % went one way. The liganded calls use whatever ratios
+      the analysis used and say so. **For the lab**: switch the lab default to `auto`? Is a compound that moves
+      more than half the sites possible (then no centring works)? The doctor now says when a replicate is off
+      (`RATIO_OFFSET`); how often does that happen on real runs?
 - [x] TMT without IRS (D66): the composition check and the ratio method compared a protein across plexes and
       could not see a pulldown (plex block: 59 % false at adjusted p alone). 2026-10-03 (D71): with plexes known
       both are worked out within each plex and combined; the plex block now gives 4.7 % (offset within 0.04).

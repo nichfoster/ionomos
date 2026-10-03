@@ -24,6 +24,9 @@ Layout it reads and writes (inside the experiment folder):
       time_course.tsv               a time course (3+ time points): change over time (F), trend, class, pattern
       cysteine_sites.tsv            isoDTB: per site and compound the competition ratio, liganded call, selectivity
       cysteine_proteins.tsv         isoDTB: proteins with a liganded cysteine, how many of their sites are
+      <condition>_log2_H_L_vs_0_protein-corrected_differential.tsv
+                                    isoDTB with analysis.protein_correction: each site's ratio minus its protein's
+                                    from an unenriched proteome, MSstatsPTM's adjustment (proteincorr.py, D70)
       specific_targets.tsv          a competition experiment: per compound, enriched against the control and competed off
       psm_qc.tsv                    search quality per run: PSMs, mass error, missed cleavages, charge states
       sdrf.tsv                      SDRF-Proteomics sample metadata: a row per raw file (and label), for PRIDE
@@ -45,6 +48,7 @@ Pipeline stages, each a module:
     dose-response doseresponse.py              (CurveCurator's curves, when the conditions are doses)
     time course   timecourse.py                (limma's F over time, trend, series vs control; patterns)
     cysteines     cys.py                       (site ratio data: liganded calls, selectivity, a site annotation)
+                  proteincorr.py               (site ratios corrected for protein abundance, MSstatsPTM; D70)
     search QC     psmqc.py + qcmetrics.py      (per run, from psm.tsv: mass error, missed cleavages, charge states)
     metadata      sdrf.py                      (SDRF-Proteomics, from the manifest, workflow and FASTA)
     guards, trust guards.py + trust.py         (implausible input made safe and said; statistics that may not
@@ -397,6 +401,8 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     time_view: dict | None = None
     cys_info: dict = {"ran": False, "reason": "not site ratio data (isoDTB)"}
     cys_view: dict | None = None
+    prot_info: dict = {"ran": False, "reason": "not asked for (analysis.protein_correction)"}
+    protein_hl: dict | None = None
     psm_view: dict | None = None
     model = analysis.Model()
     ftest = None
@@ -463,7 +469,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
                     contaminants=settings.remove_contaminants, global_pct=settings.filter_global_pct,
                     condition_pct=settings.filter_condition_pct, normalization=settings.normalize,
                     imputation=settings.imputation, shift=settings.impute_shift, scale=settings.impute_scale,
-                    seed=settings.seed)
+                    seed=settings.seed, ratio_centre=settings.ratio_centre)
         if res is None:  # fall back to the data as loaded, so there are still statistics and a volcano
             notes.append("processing failed; statistics use the values as loaded (no filtering or imputation)")
             res = stage("process-fallback", fpa.process, m, exclude=settings.exclude_samples,
@@ -555,6 +561,21 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
             got = stage("specific_targets", _specific_targets, design_plan, diffs, results, out)
             if got is not None:
                 specific, spec_info = got
+        if settings.protein_correction.get("proteome") and pm.kind != "ratio":
+            prot_info = {"ran": False, "reason": "protein_correction applies to site ratio data (isoDTB) only"}
+        elif settings.protein_correction.get("proteome") and diffs:
+            say("site ratios corrected for protein abundance")
+            got = stage("protein_correction", _protein_correction, processed, diffs, settings, results, out, dest)
+            if got is None:
+                prot_info = {"ran": False, "reason": "the protein-correction step failed (see analysis_error.txt)"}
+            else:
+                prot_info, corrected, f.protein_problems, pnotes, protein_hl = got
+                notes += pnotes
+                for d in corrected:
+                    diffs.append(d)
+                    f.volcanos[d.name] = _write_volcano(results, d, stage)
+                    if f.volcanos[d.name]:
+                        out.files.append(f.volcanos[d.name])
         if pm.features:
             pmx = stage("tables", export.processed_matrix, results / f"{m.level}_matrix_processed.tsv", processed)
             if pmx:
@@ -589,7 +610,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
                 notes += tnotes
             if cys.applies(pm):
                 say("liganded cysteines")
-                called = stage("cysteines", _cysteines, processed, settings, results, out, dest)
+                called = stage("cysteines", _cysteines, processed, settings, results, out, dest, protein_hl)
                 if called is None:
                     cys_info = {"ran": False, "reason": "the liganded-site step failed (see analysis_error.txt)"}
                 else:
@@ -690,6 +711,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
         "dose_response": dose_info,
         "time_course": time_info,
         "cysteines": cys_info,
+        "protein_correction": prot_info,
         "roles": design_plan.as_dict() if design_plan is not None else {},
         "specific_targets": spec_info,
         "psm_qc": psm_info,
@@ -751,9 +773,37 @@ def _time_course(p, settings, results: Path, out: Outcome, model) -> tuple[dict,
     return (tc.summary(res, plan, table), tc.report_payload(res, plan), plan.problems,
             res.notes if res is not None else plan.notes)
 
-def _cysteines(p, settings, results: Path, out: Outcome, dest: Path) -> tuple[dict, dict, list, list[str]]:
+def _protein_correction(p, diffs, settings, results: Path, out: Outcome, dest: Path):
+    """Site comparisons corrected for protein abundance (proteincorr.py, D70): one differential table each. Returns
+    (analysis.json summary, the corrected DiffResults, problems for the doctor, notes, {condition: {site index:
+    protein log2 H/L}} for the liganded table)."""
+    from ionomos.downstream import proteincorr
+
+    pc = settings.protein_correction
+    path = proteincorr.find(pc["proteome"], dest)
+    if path is None:
+        msg = (f"protein_correction: the proteome {pc['proteome']!r} was not found (give the folder of an analysed "
+               f"Ionomos experiment or a protein table, as a full path or inside {dest.name}/)")
+        return proteincorr.off(msg), [], [("PROTEIN_CORRECTION", "input", msg)], [], None
+    try:
+        proteome = proteincorr.load(path, pc.get("match", "gene"))
+    except proteincorr.ProteomeError as exc:
+        msg = f"protein_correction: {exc}"
+        return proteincorr.off(msg), [], [("PROTEIN_CORRECTION", "input", msg)], [], None
+    res = proteincorr.run(p, diffs, settings, proteome)
+    cols = analysis.DIFF_COLUMNS + proteincorr.CORRECTION_COLUMNS
+    for d, c in zip(res.diffs, [x for x in res.summary["conditions"] if x.get("proteome_comparison")], strict=True):
+        tsv = write_tsv(results / f"{d.slug()}_differential.tsv", cols, d.rows)
+        out.files.append(tsv)
+        c["table"] = f"{RESULTS}/{tsv.name}"
+    return res.summary, res.diffs, res.problems, res.notes, res.protein_hl
+
+
+def _cysteines(p, settings, results: Path, out: Outcome, dest: Path,
+               protein_hl: dict | None = None) -> tuple[dict, dict, list, list[str]]:
     """results/cysteine_sites.tsv and cysteine_proteins.tsv for site ratio data (cys.py). Returns (analysis.json
-    summary, the report's payload, problems for the doctor, notes)."""
+    summary, the report's payload, problems for the doctor, notes). protein_hl: the proteome's ratio per site
+    (proteincorr.py), shown beside the calls."""
     if not settings.liganded:
         off = "liganded-site calls are switched off (analysis.liganded)"
         return cys.summary(None, off), cys.report_payload(None, off), [], []
@@ -769,7 +819,7 @@ def _cysteines(p, settings, results: Path, out: Outcome, dest: Path) -> tuple[di
                 annotation = cys.load_annotation(path)
             except cys.AnnotationError as exc:
                 problems.append(("warning", str(exc)))
-    res = cys.run(p, settings, annotation)
+    res = cys.run(p, settings, annotation, protein_hl)
     out.files.append(write_tsv(results / "cysteine_sites.tsv", cys.columns(res), cys.table_rows(res)))
     prot = None
     if res.proteins:

@@ -12,6 +12,7 @@ table in this order; so does this module, with their defaults:
     (not FragPipe-Analyst) ratio normalisation on stable features, and     normalize("ratio" | "auto")
                            auto: median unless the composition check fails (within plexes for TMT
                            plexes not joined by IRS)
+    (not FragPipe-Analyst) site ratios (isoDTB) centred per replicate      centre_ratios("median" | "auto"), D70
     impute(fun = "man")   Perseus-type draws, set.seed(123)                impute("perseus")   (exact, R's RNG)
       "min" "zero" "MinDet" "MinProb" "knn"                                impute(...)          (see each)
     test_limma            ~0 + condition, per-contrast refit when values   limma_contrasts / limma_others
@@ -48,6 +49,12 @@ NORMALIZATION_LABELS = {"median": "median centring", "gn": "median centring + MA
 COMPOSITION_LIMIT = 0.1
 RATIO_MIN_FEATURES = 20   # complete features the ratio method needs
 RATIO_KEEP = 0.75         # the share of them kept as "stable" (lowest spread across samples)
+# site ratios (isoDTB, D70): ratio_centre none | median | auto
+RATIO_CENTRE_METHODS = ("none", "median", "auto")
+CENTRE_KEEP = 0.5         # the share of the sites, nearest the centre, that the stable centre is taken on
+CENTRE_LIMIT = 0.05       # auto: a replicate's offset (log2) must exceed this ...
+CENTRE_SE = 3.0           # ... and this many times its standard error before the condition is centred
+CENTRE_MIN_SITES = 20     # sites a replicate needs before it is centred
 
 
 @dataclass
@@ -61,7 +68,8 @@ class Processed:
     before_filter: QuantMatrix | None = None   # after contaminant removal + sample choice, before filtering
     normalized_from: Matrix | None = None      # values before normalisation (distribution plot)
     imputation: str = "none"
-    normalization: dict = field(default_factory=dict)   # normalize_info: method asked / used, the composition check
+    normalization: dict = field(default_factory=dict)   # normalize_info: method asked / used, the composition check;
+                                                        # for site ratios also "ratio_centre" (centre_ratios, D70)
 
     @property
     def n_imputed(self) -> int:
@@ -320,6 +328,122 @@ def normalize(m: QuantMatrix, method: str) -> QuantMatrix:
     return normalize_info(m, method)[0]
 
 
+def stable_centre(cols: list[list[float | None]]) -> list[dict]:
+    """Each replicate's offset from 0 on the sites that do not change (D70): per replicate {"offset", "se",
+    "sites"}. cols: the replicates of one condition (site ratios, log2).
+
+    A site's deviation is the mean, over the replicates that measured it, of its ratio minus that replicate's
+    current centre. The CENTRE_KEEP of the sites with the smallest |deviation| are kept and each replicate's centre
+    is the median of its ratios over them; five passes. Sites a compound engages all move one way and together, so
+    they leave the kept half and stop pulling the centre (a plain median moves towards them). The standard error
+    is that of a median of the kept sites (1.2533 * robust SD / sqrt(n)) where the robust SD is taken over every
+    site of the replicate, so it is on the safe side."""
+    n = len(cols)
+    rows = len(cols[0]) if cols else 0
+    centre = []
+    for c in cols:
+        obs = [v for v in c if v is not None]
+        centre.append(stats.median(obs) if obs else math.nan)
+    keep: list[int] = []
+    for _ in range(5):
+        dev = {}
+        for i in range(rows):
+            d = [cols[j][i] - centre[j] for j in range(n) if cols[j][i] is not None and not math.isnan(centre[j])]
+            if d:
+                dev[i] = abs(sum(d) / len(d))
+        if not dev:
+            break
+        cut = stats.quantile(list(dev.values()), CENTRE_KEEP)
+        keep = [i for i, a in dev.items() if a <= cut]
+        new = []
+        for j in range(n):
+            vals = [cols[j][i] for i in keep if cols[j][i] is not None]
+            new.append(stats.median(vals) if vals else centre[j])
+        if all(abs(a - b) < 1e-12 for a, b in zip(new, centre, strict=True) if not math.isnan(a)):
+            centre = new
+            break
+        centre = new
+    out = []
+    for j in range(n):
+        obs = [v for v in cols[j] if v is not None]
+        kept = sum(1 for i in keep if cols[j][i] is not None)
+        sd = stats.mad([v - centre[j] for v in obs]) if len(obs) > 1 else math.nan
+        se = 1.2533 * sd / math.sqrt(kept) if kept and sd == sd else math.nan
+        out.append({"offset": centre[j], "se": se, "sites": kept})
+    return out
+
+
+def centre_ratios(m: QuantMatrix, method: str) -> tuple[QuantMatrix, dict]:
+    """Site ratios (isoDTB log2 H/L) centred per replicate, opt-in (analysis.ratio_centre, D70). A heavy / light
+    mixing error moves every ratio of a replicate by the same amount; nothing else does that.
+
+      none     nothing (the default: the lab decides). The offsets are still measured and reported.
+      median   each replicate shifted so the median of its sites is 0. When many sites go one way (a promiscuous
+               compound) the median moves with them and every unchanged site is shifted the other way.
+      auto     each replicate's offset measured on the stable sites (stable_centre); a condition is centred, all
+               its replicates, only when one of them is off by more than CENTRE_LIMIT log2 and more than CENTRE_SE
+               times its standard error. Otherwise nothing changes.
+
+    (matrix, info): info {"asked", "used" (none | median | stable), "conditions": {condition: {"centred",
+    "largest", "replicates": {sample: {"offset", "se", "sites", "median"}}}}, "centred": [samples shifted]}."""
+    info: dict = {"asked": method, "used": "none", "conditions": {}, "centred": []}
+    if m.kind != "ratio" or not m.samples or not m.values:
+        return m, info
+    cols = [[row[j] for row in m.values] for j in range(len(m.samples))]
+    shift = [0.0] * len(m.samples)
+    for c in m.conditions:
+        idx = [j for j, s in enumerate(m.samples) if m.condition[s] == c]
+        stable = stable_centre([cols[j] for j in idx])
+        reps = {}
+        for j, st in zip(idx, stable, strict=True):
+            obs = [v for v in cols[j] if v is not None]
+            reps[m.samples[j]] = {"offset": st["offset"], "se": st["se"], "sites": st["sites"],
+                                  "median": stats.median(obs) if obs else math.nan}
+        clear = [s for s, r in reps.items() if r["sites"] >= CENTRE_MIN_SITES and r["offset"] == r["offset"]
+                 and abs(r["offset"]) > CENTRE_LIMIT and abs(r["offset"]) > CENTRE_SE * (r["se"] or 0.0)]
+        largest = max((abs(r["offset"]) for r in reps.values() if r["offset"] == r["offset"]), default=math.nan)
+        centred = False
+        if method == "median":
+            for j in idx:
+                med = reps[m.samples[j]]["median"]
+                if med == med:
+                    shift[j] = med
+            centred = True
+        elif method == "auto" and clear:
+            for j in idx:
+                off = reps[m.samples[j]]["offset"]
+                if off == off and reps[m.samples[j]]["sites"] >= CENTRE_MIN_SITES:
+                    shift[j] = off
+            centred = True
+        for r in reps.values():  # analysis.json is strict JSON: no NaN
+            for k in ("offset", "se", "median"):
+                if r[k] != r[k]:
+                    r[k] = None
+        info["conditions"][c] = {"centred": centred, "largest": None if largest != largest else largest,
+                                 "clear": clear, "replicates": reps}
+    if method == "median":
+        info["used"] = "median"
+    elif method == "auto" and any(v["centred"] for v in info["conditions"].values()):
+        info["used"] = "stable"
+    info["centred"] = [s for s, x in zip(m.samples, shift, strict=True) if x]
+    if not info["centred"]:
+        return m, info
+    values = [[None if v is None else v - shift[j] for j, v in enumerate(row)] for row in m.values]
+    return _copy(m, values=values), info
+
+
+def centre_label(info: dict) -> str:
+    """How the site ratios were centred, in words (the report, analysis.json, the liganded calls)."""
+    used = (info or {}).get("used", "none")
+    if used == "median":
+        return "centred per replicate on the median site (ratio_centre: median)"
+    if used == "stable":
+        conds = [c for c, v in info["conditions"].items() if v["centred"]]
+        return ("centred per replicate on the stable sites (ratio_centre: auto, "
+                + ("every condition" if len(conds) == len(info["conditions"]) else ", ".join(conds)) + ")")
+    return "as measured (not centred)"
+
+
 # --------------------------------------------------------------- imputation --
 
 
@@ -435,8 +559,9 @@ def _impute_knn(vals: Matrix, k: int = 10, rowmax: float = 0.5) -> None:
 def process(m: QuantMatrix, *, exclude: list[str] | None = None, conditions: dict[str, str] | None = None,
             contaminants: bool = True, global_pct: float = 0, condition_pct: float = 0,
             normalization: str = "none", imputation: str = "auto", shift: float = 1.8, scale: float = 0.3,
-            seed: int = 123) -> tuple[Processed, list[str]]:
-    """Every processing step in FragPipe-Analyst's order. Returns (Processed, notes)."""
+            seed: int = 123, ratio_centre: str = "none") -> tuple[Processed, list[str]]:
+    """Every processing step in FragPipe-Analyst's order. Returns (Processed, notes). ratio_centre: site ratio
+    data only (centre_ratios, D70); intensities are normalised by `normalization`."""
     notes: list[str] = []
     steps = [{"step": "loaded", "features": len(m.features), "samples": len(m.samples)}]
     m, n = choose_samples(m, exclude, conditions)
@@ -469,6 +594,16 @@ def process(m: QuantMatrix, *, exclude: list[str] | None = None, conditions: dic
                      (f", compared within each of the {comp['plexes']} TMT plexes" if comp.get("plexes") else ""))
     if norm.get("fallback"):
         notes.append(f"normalisation: ratio was asked for, but {norm['fallback']}; median centring was used")
+    if m.kind == "ratio":
+        m, centring = centre_ratios(m, ratio_centre)
+        norm["ratio_centre"] = centring
+        if centring["centred"]:
+            steps.append({"step": "normalisation", "method": "ratios " + centre_label(centring).split(" (")[0],
+                          "features": len(m.features)})
+            key = "offset" if centring["used"] == "stable" else "median"
+            offs = ", ".join(f"{s} {r[key]:+.2f}" for c in centring["conditions"].values() if c["centred"]
+                             for s, r in c["replicates"].items() if r[key] is not None)
+            notes.append(f"site ratios {centre_label(centring)}; offsets removed (log2): {offs}")
     method = resolve_imputation(imputation, m)
     # the "measured" matrix keeps the same rows as the imputed one (all-missing rows go in both)
     keep = [i for i, r in enumerate(m.values) if any(v is not None for v in r)]
@@ -509,6 +644,8 @@ class ContrastResult:
     mean_treatment: list[float]
     mean_control: list[float]
     prior: tuple[float, float] = (math.nan, math.nan)
+    se: list[float] | None = None      # standard error of diff (limma: sqrt(posterior variance) * unscaled SD)
+    df: list[float] | None = None      # the t-statistic's degrees of freedom (limma: residual + prior df)
 
 
 def _group_fit(values: Matrix, groups: list[list[int]]):
@@ -593,6 +730,17 @@ def _toptable(coef, su, post, dft, level: float = 0.95):
     return t, p, lo, hi, stats.bh_adjust(p)
 
 
+def se_df(coef, su, post, dft) -> tuple[list[float], list[float]]:
+    """The standard error and df behind _toptable's t, per feature (nan where it gave none): MSstats-style
+    columns, which the protein correction (proteincorr.py, D70) combines."""
+    se, df = [], []
+    for c, u, v, d in zip(coef, su, post, dft, strict=True):
+        ok = not (math.isnan(c) or math.isnan(u) or math.isnan(v) or v <= 0 or math.isnan(d) or d <= 0)
+        se.append(math.sqrt(v) * u if ok else math.nan)
+        df.append(d if ok else math.nan)
+    return se, df
+
+
 def limma_contrasts(values: Matrix, samples: list[str], condition: dict[str, str],
                     contrasts: list[tuple[str, str]], min_valid: int = 0, squeeze=None,
                     needs: dict | None = None, df_spent: list[int] | None = None) -> list[ContrastResult]:
@@ -620,7 +768,7 @@ def limma_contrasts(values: Matrix, samples: list[str], condition: dict[str, str
             su.append(math.sqrt(1 / n_r[ia] + 1 / n_r[ib]) if ok else math.nan)
         t, p, lo, hi, q = _toptable(coef, su, post, dft)
         out.append(ContrastResult(a, b, coef, lo, hi, t, p, q, [n[ia] for n in ns], [n[ib] for n in ns],
-                                  [m[ia] for m in means], [m[ib] for m in means], (d0, s0)))
+                                  [m[ia] for m in means], [m[ib] for m in means], (d0, s0), *se_df(coef, su, post, dft)))
     return out
 
 
@@ -640,7 +788,7 @@ def limma_others(values: Matrix, samples: list[str], condition: dict[str, str], 
         su = [math.sqrt(1 / n[0] + 1 / n[1]) if n[0] and n[1] else math.nan for n in ns]
         t, p, lo, hi, q = _toptable(coef, su, post, dft)
         out.append(ContrastResult(c, "others", coef, lo, hi, t, p, q, [n[0] for n in ns], [n[1] for n in ns],
-                                  [m[0] for m in means], [m[1] for m in means], (d0, s0)))
+                                  [m[0] for m in means], [m[1] for m in means], (d0, s0), *se_df(coef, su, post, dft)))
     return out
 
 
@@ -673,7 +821,7 @@ def limma_one_sample(values: Matrix, cols: list[int], name: str, min_valid: int 
     su = [1 / math.sqrt(n[0]) if o else math.nan for n, o in zip(ns, ok, strict=True)]
     t, p, lo, hi, q = _toptable(coef, su, post, dft)
     return ContrastResult(name, "", coef, lo, hi, t, p, q, [n[0] for n in ns], [0] * len(ns),
-                          [m[0] for m in means], [math.nan] * len(ns), (d0, s0))
+                          [m[0] for m in means], [math.nan] * len(ns), (d0, s0), *se_df(coef, su, post, dft))
 
 
 def all_pairs(conditions: list[str], control: str | None = None) -> list[tuple[str, str]]:

@@ -582,6 +582,18 @@ liganded fraction, selectivity across compounds, a per-protein view and, with
 `site_annotation`, known / new sites. The report's Liganded sites section
 only displays these calls. Rules and settings: WORKFLOWS.md.
 
+Site ratios can be centred per replicate in `fpa.process` (`centre_ratios`,
+`analysis.ratio_centre`, D70; off by default); the info, with every replicate's
+offset on its stable sites, is `Processed.normalization["ratio_centre"]`, so the
+doctor's `RATIO_OFFSET` can say when an uncentred replicate is off. With
+`analysis.protein_correction`, `downstream/proteincorr.py` reads an analysed
+proteome (an Ionomos results folder, an MSstats table or a differential table;
+read only) after the site comparisons and adds one *protein-corrected*
+`DiffResult` per matched condition (MSstatsPTM's adjustment, using the `se` and
+`df` that every differential table now carries), so the report, the results
+table and `analysis.json` show it like any comparison; the liganded calls get
+the protein's ratio beside them.
+
 `results/psm_qc.tsv` (`downstream/psmqc.py`, D55) is made when the search
 output holds FragPipe `psm.tsv` files or a DIA-NN `stats.tsv`. The stage
 runs for every analysis, also when no quant table was found, and is isolated

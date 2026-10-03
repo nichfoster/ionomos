@@ -45,6 +45,7 @@ import math
 from datetime import datetime
 from html import escape
 from importlib import resources
+from pathlib import Path
 
 from ionomos.downstream import fpa, qc, trust
 from ionomos.downstream.analysis import TESTS, DiffResult, Settings
@@ -296,6 +297,7 @@ def methods_text(m: QuantMatrix | None, p: fpa.Processed | None, diffs: list[Dif
                         else "a two-sided one-sample t-test.")
                      + " This is a competition experiment by construction: each condition is a compound competing "
                      "with the probe, and its ratio compares it with the vehicle in the same run.")
+        parts += _ratio_sentences(p, diffs)
     else:
         steps = [f"{m.level.capitalize()} intensities were log2-transformed"]
         if s.remove_contaminants:
@@ -374,6 +376,32 @@ def methods_text(m: QuantMatrix | None, p: fpa.Processed | None, diffs: list[Dif
     parts.append("Processing and statistics port FragPipeAnalystR / FragPipe-Analyst (Hsiao et al., J. Proteome Res. "
                  "2024, doi:10.1021/acs.jproteome.4c00294) and limma (Ritchie et al., Nucleic Acids Res. 2015).")
     return " ".join(parts)
+
+
+def _ratio_sentences(p: fpa.Processed | None, diffs: list[DiffResult]) -> list[str]:
+    """Methods for site ratios (D70): how they were centred, and the protein-abundance correction."""
+    out = []
+    centring = ((p.normalization or {}).get("ratio_centre") or {}) if p is not None else {}
+    used = centring.get("used", "none")
+    if used == "median":
+        out.append("Each replicate's site ratios were centred on their median (ratio_centre: median), to remove a "
+                   "heavy / light mixing error.")
+    elif used == "stable":
+        out.append("Replicates whose ratios sat off 0 were centred on their stable sites (ratio_centre: auto): each "
+                   "replicate's median over the half of the sites nearest its centre, iterated, applied to a "
+                   "condition when a replicate was more than 0.05 log2 and 3 standard errors away from 0.")
+    else:
+        out.append("The site ratios were not centred (ratio_centre: none).")
+    corr = [d for d in diffs if d.correction]
+    if corr:
+        c = corr[0].correction
+        src = escape(Path(c["proteome"]).name or c["proteome"])
+        out.append(f"Site changes were also corrected for protein abundance with an unenriched proteome ({src}; "
+                   f"proteins matched by {escape(c['match'])}): the protein's log2 fold change, on the heavy / light "
+                   "scale, was subtracted from the site's, with SE = √(SE_site² + SE_protein²), Satterthwaite degrees "
+                   "of freedom and Benjamini–Hochberg per condition, as MSstatsPTM's adjustment (Kohler et al., Mol. "
+                   "Cell. Proteomics 2023). Sites whose protein was not found keep only the uncorrected result.")
+    return out
 
 
 def _roles_sentences(m: QuantMatrix, p, diffs: list[DiffResult], s: Settings, plan, specific) -> list[str]:
@@ -462,12 +490,14 @@ def _time_methods(time: dict) -> str:
 
 def _cys_methods(cys: dict) -> str:
     ann = cys.get("annotation") or {}
-    return (f"A cysteine was called liganded by a compound when its competition ratio reached {escape(cys['rule'])}, "
-            "on the measured site ratios (no normalisation or imputation); sites reaching it in fewer replicates "
+    return (f"A cysteine was called liganded by a compound when its competition ratio reached {escape(cys['rule'])} "
+            "(never imputed); sites reaching it in fewer replicates "
             "were called inconsistent, and sites measured in fewer replicates than that were not assessed. A site "
             "was called selective when one compound liganded it and every other compound was measured as not "
             "liganding it." + (f" Sites were compared with the lab's site annotation {escape(ann['file'])} "
-                               f"({ann['sites_in_file']:,} sites)." if ann else ""))
+                               f"({ann['sites_in_file']:,} sites)." if ann else "")
+            + (" The protein's own ratio from the proteome is listed beside each call in cysteine_sites.tsv; the "
+               "call itself uses the site ratio." if cys.get("proteinShown") else ""))
 
 
 def _pipeline(p: fpa.Processed | None, diffs: list[DiffResult]) -> str:
@@ -534,6 +564,12 @@ def _settings_table(s: Settings, p: fpa.Processed | None, model=None, plan=None)
                                              not in (None, s.normalize) else "")),
             ("Imputation", f"{s.imputation}" + (f" → {fpa.IMPUTATION_LABELS[p.imputation]}" if p else "")),
             ("Enrichment", ", ".join(s.enrichment_libraries) if s.enrichment else "off")]
+    if p is not None and p.m.kind == "ratio":
+        rows.append(("Site ratios", s.ratio_centre + " → " + fpa.centre_label((p.normalization or {}).get("ratio_centre")
+                                                                               or {})))
+        if s.protein_correction.get("proteome"):
+            rows.append(("Protein correction", f"{s.protein_correction['proteome']} (match: "
+                                               f"{s.protein_correction.get('match', 'gene')})"))
     if s.exclude_samples:
         rows.append(("Samples left out", ", ".join(s.exclude_samples)))
     if s.sample_conditions:

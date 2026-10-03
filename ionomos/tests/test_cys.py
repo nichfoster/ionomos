@@ -80,7 +80,8 @@ def test_calls_selectivity_and_fractions():
     assert (first["n"], first["over"]) == (3, 3)
     assert not res.problems and not res.notes
     s = cys.summary(res, table="results/cysteine_sites.tsv")
-    assert s["rule"] == "R ≥ 4 (heavy / light) in at least 2 replicates" and s["sites_liganded"] == 4
+    assert s["rule"] == "R ≥ 4 (heavy / light) in at least 2 replicates, on the ratios as measured (not centred)"
+    assert s["sites_liganded"] == 4 and s["centred"] is False
     assert s["compounds"][0]["liganded_fraction"] == 0.6 and s["selectivity"]["selective"] == 2
 
 
@@ -213,7 +214,8 @@ def test_isodtb_analysis_calls_liganded_sites(tmp_path):
 
 def test_settings_reach_the_analysis_and_it_can_be_switched_off(tmp_path):
     _d, _hits, _out, s = _experiment(tmp_path, liganded_ratio=8, liganded_min_replicates=3)
-    assert s["cysteines"]["rule"] == "R ≥ 8 (heavy / light) in at least 3 replicates"
+    assert s["cysteines"]["rule"] == ("R ≥ 8 (heavy / light) in at least 3 replicates, on the ratios as measured "
+                                      "(not centred)")
     assert s["cysteines"]["compounds"][0]["liganded"] <= 2
     d, _hits, out, s = _experiment(tmp_path / "off", liganded=False)
     assert s["cysteines"] == {"ran": False, "reason": "liganded-site calls are switched off (analysis.liganded)"}

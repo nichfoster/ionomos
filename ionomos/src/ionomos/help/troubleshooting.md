@@ -658,6 +658,60 @@ number column; yes / no columns such as `ligandable` and `hyperreactive`
 become the known / new marks. The liganded calls themselves don't depend on
 it.
 
+## A replicate's site ratios sit off 0 {#issue.RATIO_OFFSET}
+
+In an isoDTB experiment most cysteines are not engaged by the compound, so
+their heavy / light ratio should be 1 (log2 0) in every replicate. Ionomos
+measures each replicate's offset on those stable sites, and in the replicates
+named it is clearly away from 0. The usual cause is the mixing: heavy and
+light were not combined exactly 1:1, which moves every ratio of that
+replicate by the same amount. Unchanged sites then look changed, and the test
+against 0 calls some of them.
+
+The ratios were used as measured, because centring is the lab's decision. If
+the mixing is the likely cause, add `ratio_centre: auto` under `analysis:` in
+the experiment's `experiment.yaml` (or in the lab's settings) and re-run the
+analysis ([How to re-run](#faq.rerun)). `auto` centres each replicate on its
+stable sites, and only when one is clearly off; `median` centres every
+replicate on its median site, which goes wrong when a compound moves many
+sites one way. If the compound really does move most sites, leave the ratios
+as they are. The [liganded calls](#report.cys) say which ratios they used.
+
+## The protein correction needs a look {#issue.PROTEIN_CORRECTION}
+
+`protein_correction` asks Ionomos to subtract each site's protein change, from
+an unenriched proteome of the same treatment, from the site's ratio (the
+MSstatsPTM adjustment). It couldn't do that as asked:
+- The proteome wasn't found or isn't usable. `proteome:` takes the folder of
+  an analysed Ionomos experiment (or its `results` folder), or a protein table:
+  MSstats groupComparison output (Protein, Label, log2FC, SE, DF) or an
+  Ionomos `*_differential.tsv`. A relative path is read from the experiment
+  folder.
+- Few sites found their protein. With `match: gene` both sides need the same
+  gene names; with `match: protein` the same UniProt accessions (isoforms are
+  joined). A table with accessions only needs `match: protein`.
+
+The uncorrected results are not affected: the site comparison without the
+correction is always reported. Fix the setting under `analysis:` in
+`experiment.yaml` and re-run the analysis ([How to re-run](#faq.rerun)).
+
+## Protein correction: the proteome's comparisons don't match the sites' conditions {#issue.PROTEIN_CORRECTION_CONDITIONS}
+
+Each site condition (an isoDTB sample, often named after the experiment, like
+`EJQ_2_027`) needs the proteome comparison of the same compound against its
+control, and Ionomos never guesses it. By default it looks for a comparison
+whose first condition has the site condition's name. Name it instead:
+
+```yaml
+analysis:
+  protein_correction:
+    proteome: D:/Fragpipe_General/EJQ/20261001-DIA_EJQ-2-030
+    conditions: {EJQ_2_027: Cmpd vs DMSO}   # the compound first
+```
+
+and re-run the analysis ([How to re-run](#faq.rerun)). The message lists the
+proteome's comparisons. Site conditions without one are reported uncorrected.
+
 ## Dose-response: the doses need a look {#issue.DOSES}
 
 Ionomos found what looks like a titration but couldn't read every dose, so
