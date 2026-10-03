@@ -1552,7 +1552,8 @@ unasked, so the first is built to be safe to ignore (`notify.py`).
 9. **Settings live in `config.yaml`, not the app, for now.** A tab would
    need GUI tests and a place to show secrets. The app's Save keeps the
    block (`configio.py` writes it, commented). The worker reads `notify:`
-   at start: restart the watcher after a change.
+   at start: restart the watcher after a change. (2026-10-02: the app has
+   a Notifications tab now, D67.)
 10. **Log rotation existed** (`ionomos.log`, 5 MB, 5 old files). What was
     missing is Windows: a rename refused because another process has the
     file open made the stock handler drop records. The handler now keeps
@@ -2122,3 +2123,76 @@ units, moves whenever a share of the features is enriched in one direction.
    setting, and the help says so. The limits (0.1 log2, 3 times the scatter,
    three quarters kept) are choices, not measurements on real data. The
    reproduce-in-R script notes that FragPipeAnalystR has no ratio step.
+
+### D67 — Settings and checks a lab member can reach without config.yaml; the logic is outside Tk
+**2026-10-02.** The maintainer asked for "good options and settings while also
+being user friendly". Three things were command-line or `config.yaml` only:
+the lab's figure style (`analysis.export`, D62), `ionomos compare` /
+`ionomos benchmark` (D60, ROADMAP 5C #10), and notifications (D58 item 9: "a
+tab would need GUI tests and a place to show secrets").
+
+1. **Where they live.** Two new pages on the Analysis tab, **Figure style**
+   and **Check accuracy**, and a new tab, **8 Notifications**. Figure style
+   and Notifications are saved with the app's one Save button like every
+   other setting (validated on a probe file first, the old config backed
+   up); Check accuracy writes no settings.
+2. **The logic has no Tk.** `forms.py` turns `analysis.export` and
+   `notify:` into the text and ticks a window shows and back;
+   `accuracy.py` runs compare / benchmark and builds their command lines.
+   Both have their own tests that run everywhere (`test_forms.py`,
+   `test_accuracy.py`); the Tk modules (`analysis_tab.py`,
+   `accuracy_page.py`, `notify_tab.py`) only copy values in and out. GUI
+   tests in `test_app.py` drive them in CI.
+3. **One definition of valid.** Every value goes through the check the
+   loader uses: `charts.style_layer` for the figure style,
+   `notify.settings_from` for notifications. An error names the field as the
+   window labels it ("Figure style → Text size (pt): must be a number from
+   4 to 48") and the config key. Friendly input is accepted where it is
+   unambiguous: `7,5` for 7.5, a colour without `#`.
+4. **Nothing is lost.** A field left empty leaves its key out, so the
+   default applies (the default is shown in or beside the field). Keys the
+   window has no field for (`line_scale`, `title`, `png_scale` …) are kept as
+   they were, and so is a typo, so that the loader still names it rather
+   than the app silently dropping it.
+5. **Text size follows the size.** A size preset has its own text size
+   (14 pt on a slide, 7 pt in a journal column). The field follows the preset
+   when it held the old preset's size and stays as typed otherwise. Found
+   while building this: `read_config` filled in the slide's 14 pt for an
+   `export:` block that named `size: col1` without `font_pt`, so the app
+   wrote 14 pt for a journal column on its next Save. It now leaves the key
+   out (the writer then writes 7).
+6. **One code path for each check.** `cli.cmd_compare`, `cmd_benchmark` and
+   `cmd_notify_test` now call `accuracy.run_compare`,
+   `run_benchmark_real` / `run_benchmark_simulated` and `notify.run_test`;
+   the app calls the same functions with a `say` callback that posts each
+   line to the window. A test checks the app's lines equal what the command
+   line prints.
+7. **Off the Tk thread.** A check or a test message runs on a daemon thread;
+   every line and the verdict come back through `App.post` (the queue the
+   app pumps with `root.after`). The buttons are disabled while it runs and a
+   second click is refused. Problems that can be seen before starting (no
+   analysis in the folder, no expected-ratios file) are listed in a dialog
+   instead of starting a thread.
+8. **Secrets.** Webhook addresses and the SMTP password are typed into
+   masked fields (`•`). "Show addresses and password" unmasks them while
+   ticked, and every load masks them again. The app logs only channel names
+   and "all sent / not all sent", never a value; the test's lines are the
+   scrubbed results `notify.py` already makes. The app had no secret fields
+   before, so there was no convention to follow; `config.yaml` and its
+   backups still hold the values in plain text, as D58 decided.
+   "Send test" uses the values in the window, saved or not.
+9. **Defaults without spaces.** A simulated benchmark started from the app
+   writes into `<log_dir>/ionomos_benchmark` (C:/Fragpipe_Auto/logs on the
+   PC), not the app's working folder (which may be under Program Files);
+   `names.BENCHMARK_DIR`. Compare and a real benchmark write into the
+   analysis' own results folder, as on the command line.
+10. **Left out of the window**: compare's per-comparison choice, its common
+    cut-offs, `--ref-alpha`; the benchmark's seeds. They remain command-line
+    options; **Copy the command line** gives the run as a start.
+
+**Not verified**: none of the three pages has been seen on screen. The GUI
+tests (figure style round trip, masked fields, Send test with a stubbed
+sender, compare and a tiny benchmark through the page) run only in CI;
+locally they are skipped so windows don't cover the maintainer's screen.
+Layout on Windows at the PC's display scaling, and the colour picker, are
+untested.

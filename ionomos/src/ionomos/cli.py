@@ -805,96 +805,44 @@ def cmd_demo(args) -> int:
 def cmd_compare(args) -> int:
     """Compare an Ionomos analysis with a reference result for the same experiment (downstream/compare.py).
     Reads both, changes neither; writes compare.tsv / .json / .html. Exit 0: every comparison agrees, 1: one
-    differs or could not be judged, 2: nothing to compare."""
-    from ionomos.downstream import compare
+    differs or could not be judged, 2: nothing to compare. The app's Check accuracy runs the same code
+    (accuracy.py)."""
+    from ionomos import accuracy
 
-    try:
-        a = compare.load_side(Path(args.analysis))
-        b = compare.load_side(Path(args.reference))
-        if a.kind != "ionomos" and not args.out:
-            print(f"{args.analysis} is a table, not an Ionomos analysis: say where the result goes with --out DIR "
-                  "(or give the analysed folder first)", file=sys.stderr)
-            return 2
-        res = compare.compare(a, b, by=args.by, comparison=args.comparison, ref_comparison=args.ref_comparison,
-                              flip=args.flip, alpha=args.alpha, log2fc=args.log2fc,
-                              use_adjusted=False if args.raw_p else None, ref_alpha=args.ref_alpha,
-                              ref_log2fc=args.ref_log2fc)
-        out = Path(args.out) if args.out else a.results_dir
-        files = compare.write(res, out)
-    except compare.CompareError as exc:
-        print(f"cannot compare: {exc}", file=sys.stderr)
-        return 2
-    except OSError as exc:
-        print(f"cannot write the comparison: {exc}", file=sys.stderr)
-        return 2
-    print(f"Ionomos: {a.name}   reference: {b.name} ({res['reference_kind']})")
-    for line in compare.summary_lines(res):
-        print(line)
-    for n in res["notes"]:
-        print(f"note: {n}")
-    print(f"page: {files[-1]}")
-    if a.kind == "ionomos" and not args.out:
-        print("the verdict shows at the top of report.html after the next `ionomos analyze` of this folder")
-    if args.open:
-        _open_report(files[-1])
-    return 0 if all(p["verdict"].startswith("agrees") for p in res["pairs"]) else 1
+    out = accuracy.run_compare(args.analysis, args.reference, print, by=args.by, comparison=args.comparison,
+                               ref_comparison=args.ref_comparison, flip=args.flip, alpha=args.alpha,
+                               log2fc=args.log2fc, raw_p=args.raw_p, ref_alpha=args.ref_alpha,
+                               ref_log2fc=args.ref_log2fc, out=args.out)
+    if out.error:
+        print(out.error, file=sys.stderr)
+        return out.code
+    if args.open and out.page:
+        _open_report(out.page)
+    return out.code
 
 
 def cmd_benchmark(args) -> int:
     """Accuracy against known truth (downstream/benchmark.py): simulated data over a grid of designs and
-    settings, or an analysed mixed-species / spike-in experiment against the expected ratios in a YAML."""
-    from ionomos.downstream import benchmark
+    settings, or an analysed mixed-species / spike-in experiment against the expected ratios in a YAML.
+    The app's Check accuracy runs the same code (accuracy.py)."""
+    from ionomos import accuracy
 
     if args.folder or args.expected:
         if not (args.folder and args.expected):
             print("a real benchmark needs both: ionomos benchmark FOLDER --expected hye.yaml (see `ionomos help "
                   "benchmark`). Without a folder, the simulated benchmark runs", file=sys.stderr)
             return 2
-        try:
-            exp = benchmark.load_expected(args.expected)
-            res = benchmark.real(Path(args.folder), exp)
-            from ionomos.downstream.compare import find_analysis
-
-            files = benchmark.write_real(res, Path(args.out) if args.out else find_analysis(Path(args.folder)))
-        except benchmark.BenchmarkError as exc:
-            print(f"cannot benchmark: {exc}", file=sys.stderr)
-            return 2
-        except OSError as exc:
-            print(f"cannot write the benchmark: {exc}", file=sys.stderr)
-            return 2
-        print(f"{res['experiment']}, {res['comparison']}, against {res['expected_file']}")
-        for line in res["verdicts"]:
-            print(f"  {line}")
-        for n in res["notes"]:
-            print(f"  note: {n}")
+        out = accuracy.run_benchmark_real(args.folder, args.expected, print, out=args.out)
     else:
-        extra, designs, alpha, log2fc, out, analysis_info = None, None, 0.05, 1.0, Path.cwd() / "ionomos_benchmark", {}
-        if args.like:
-            try:
-                lk = benchmark.like(Path(args.like))
-            except (benchmark.BenchmarkError, OSError, ValueError) as exc:
-                print(f"cannot read the analysis of {args.like}: {exc}", file=sys.stderr)
-                return 2
-            extra, alpha, log2fc, out = [(lk["label"], lk["settings"])], lk["alpha"], lk["log2fc"], lk["results"]
-            designs = [lk["design"]] if lk["design"] else None
-            analysis_info = lk["analysis"]
-        print(f"simulated benchmark, grid {args.grid}" + (f", with the settings of {args.like}" if args.like else ""))
-        try:
-            res = benchmark.simulated(args.grid, extra, designs, args.seeds, alpha, log2fc,
-                                      progress=None if args.quiet else (lambda m: print(f"  … {m}", flush=True)))
-            if args.like:
-                res["analysis"] = analysis_info
-                res["headline"] = [v for v in res["verdicts"] if v.startswith(extra[0][0] + ":")]
-            files = benchmark.write_simulated(res, Path(args.out) if args.out else out)
-        except OSError as exc:
-            print(f"cannot write the benchmark: {exc}", file=sys.stderr)
-            return 2
-        for line in res["verdicts"]:
-            print(f"  {line}")
-    print(f"page: {files[-1]}")
-    if args.open:
-        _open_report(files[-1])
-    return 0
+        out = accuracy.run_benchmark_simulated(
+            args.grid, print, like=args.like, seeds=args.seeds, out=args.out,
+            progress=None if args.quiet else (lambda m: print(f"  … {m}", flush=True)))
+    if out.error:
+        print(out.error, file=sys.stderr)
+        return out.code
+    if args.open and out.page:
+        _open_report(out.page)
+    return out.code
 
 
 def cmd_help(args) -> int:
@@ -1037,26 +985,12 @@ def cmd_pause(args) -> int:
 
 
 def cmd_notify_test(args) -> int:
-    """Send a test message on every channel in config.yaml notify: and say what happened to each."""
+    """Send a test message on every channel in config.yaml notify: and say what happened to each. The app's
+    Notifications tab -> Send test runs the same code (notify.run_test)."""
     from ionomos import notify
 
     cfg = _load(args, check_paths=False)
-    s = cfg.notify
-    chans = notify.channels(s)
-    if not chans:
-        print("notifications are not set up: config.yaml has no notify: channel (webhook, teams, slack or email).\n"
-              "Nothing was sent. See: ionomos help notify")
-        return 1
-    if not s["enabled"]:
-        print("notify.enabled is false: jobs send nothing. Testing the configured channel(s) anyway.")
-    print(f"sending a test message by {', '.join(chans)} (waiting up to {s['timeout_seconds']:g} s each) ...")
-    results = notify.send_test(s)
-    for r in results:
-        print(f" {'✓' if r.ok else '✗'} {r.channel:<8} {'sent' if r.ok else 'NOT sent'}: {r.detail}")
-    bad = [r for r in results if not r.ok]
-    print("\nall sent; check that the message arrived" if not bad
-          else f"\n{len(bad)} of {len(results)} could not be sent; jobs are not affected by this")
-    return 1 if bad else 0
+    return notify.run_test(cfg.notify, lambda line: print(line, flush=True))
 
 
 def cmd_repair_ledger(args) -> int:

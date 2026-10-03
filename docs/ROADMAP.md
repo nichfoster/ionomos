@@ -157,8 +157,9 @@ is the checklist for that day, and the fingerprints are what to send back.
   - notifications: a JSON webhook, Teams, Slack and SMTP email on done /
     failed / held, off by default, under `notify:` in `config.yaml`;
     `ionomos notify-test`. Not checked against a real Teams / Slack / SMTP
-    server yet. Open: a tab in the app; per-user recipients (each person
-    told about their own jobs)
+    server yet. Open: per-user recipients (each person told about their
+    own jobs). → 2026-10-02 (D67): the app's **8 Notifications** tab, with
+    Send test and masked secrets; not yet seen on screen
   - log rotation: was there (5 MB, 5 files); now also safe when Windows
     refuses the rename
   - disk space: was there since 0.3.0 as a hold (`fragpipe.min_free_gb` +
@@ -186,8 +187,9 @@ is the checklist for that day, and the fingerprints are what to send back.
     the lab PC (text editable? fonts? mm sizes?), and try the export in the
     browser the lab uses. None of this has been checked (D62).
   - PNG from `ionomos export` (needs a renderer; SVG only for now).
-  - The Analysis tab has no fields for `analysis.export`; it is edited in
-    `config.yaml` (the app keeps the block).
+  - ~~The Analysis tab has no fields for `analysis.export`; it is edited in
+    `config.yaml` (the app keeps the block).~~ → 2026-10-02 (D67): Analysis
+    tab → **Figure style**. Not yet seen on screen (GUI tests run in CI).
   - Static figures for dose-response, time courses and liganded sites
     (`ionomos export` draws volcano, PCA, heatmap, correlation; the report
     exports them all).
@@ -408,7 +410,9 @@ real data:
      and with a real MSstats / Perseus export
    - [ ] the same checks for ratio data (isoDTB) and TMT: the simulated
      grid is label-free DIA only
-   - [ ] a button for compare / benchmark in the app (command line only now)
+   - [x] a button for compare / benchmark in the app (2026-10-02, D67:
+     Analysis tab → **Check accuracy**, the same code as the command line,
+     run off the Tk thread; not yet seen on screen)
 
 Stay deterministic. The one credible published "AI interpretation"
 (GeneAgent, Nat Methods 2025) verifies every claim against databases. Plain
@@ -653,6 +657,9 @@ Collected from the other docs; resolve before/during Phase 1.
 - [ ] Normalisation (D64): the lab PC's config.yaml says `normalize: median` (written by the app before 0.14.1);
       set it to `auto` on the Analysis tab. Are the check's limits right on real pulldowns (0.1 log2, 3 times
       the replicate scatter)? Is a pulldown against empty beads normalised at all in the lab's practice?
+- [ ] App settings (D67): open the Figure style, Check accuracy and Notifications pages on the PC (display scaling,
+      the colour picker, the masked fields) and have a lab member set a figure style and send a test message without
+      help. Should "Show addresses and password" exist at all, or should a stored secret only ever be replaced?
 - [ ] Phase 5: which pilot labs can we reach? Does this lab run titrations or phospho? (Orders 5C.)
 - [ ] Phase 6: is the PC's RAM in all 6 memory channels (speed of a local model)? Is a GPU present? May the assistant
       ever use a cloud model (institutional data policy), or strictly local?

@@ -105,7 +105,11 @@ def read_config(path: str | Path) -> dict:
         raw = {}
     if isinstance(raw.get("notify"), dict):
         raw["notify"] = _notify_keys(raw["notify"])  # a bare `on:` key loads as True
-    return _normalise(_merge(defaults(), raw))
+    d = _normalise(_merge(defaults(), raw))
+    ex = (raw.get("analysis") or {}).get("export") if isinstance(raw.get("analysis"), dict) else None
+    if isinstance(ex, dict) and "font_pt" not in ex and isinstance(d["analysis"].get("export"), dict):
+        d["analysis"]["export"].pop("font_pt", None)  # not set: the size's own text size (7 pt for col1), not 14
+    return d
 
 
 def _normalise(d: dict) -> dict:
@@ -284,6 +288,7 @@ def dump_config(d: dict) -> str:
                                     for k, v in _notify_keys(n).items() if v is not None})
     a("notify:   # a message when a search is done, failed or waiting. Off by default: nothing leaves this PC")
     a("          # unless you turn it on. What is sent: docs/ARCHITECTURE.md \"Notifications\". Test: ionomos notify-test")
+    a("          # or the app's Notifications tab (8), which edits this block")
     a(f"  enabled: {_y(n['enabled'])}")
     a(f"  on: {_y(n['on'])}   # which of done, failed, held (= waiting) send a message")
     a(f"  include_names: {_y(n['include_names'])}   # false: only the job number and status are sent")

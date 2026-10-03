@@ -65,6 +65,7 @@ analysis:
                              # volcano, pca, heatmap, correlation (or all). [] = none; the report exports all
     # also: line_scale: 1, point_scale: 1, title / subtitle / legend / note: true, labels: screen | top | none,
     # label_count: 15, png_scale: 2, png_dpi: 0 (the report's PNG), zip_format: both | svg | png
+  # The app's Analysis tab -> Figure style edits size, text, colours, zip_format and figures; it keeps the rest.
 
 # Instrument QC (docs/QC_TREND.md): runs of the lab's QC standard (a HeLa / K562 digest) are trended
 # in logs/qc_trend.html, with Levey-Jennings charts and Westgard rules. Does nothing until one is searched.
@@ -84,6 +85,7 @@ qc_trend:
 # name, user, method, status, the reason or the hit counts, and the local path of the report. Never a
 # file, never a quantity. Webhook addresses and the password are secrets: they are left out of logs and
 # of every diagnostics report. Try it with: ionomos notify-test   (restart the watcher after a change)
+# The app's Notifications tab (8) edits this block (secrets masked) and has a Send test button.
 notify:
   enabled: false
   on: [done, failed, held]    # which events send a message (held = a search is waiting for something)

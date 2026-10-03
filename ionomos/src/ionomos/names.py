@@ -160,3 +160,7 @@ REPORT_PREFIX = "Ionomos-report"  # what "Report a problem" has always called it
 # A search's "run fingerprint" (the versions and settings of that run), in the run folder when there is one.
 RUN_FINGERPRINT = "run_fingerprint.json"
 RUN_FINGERPRINT_GLOB = "run_fingerprint*.json"
+
+# Where a simulated `ionomos benchmark` writes when no folder is given: ./ionomos_benchmark on the command line,
+# <log_dir>/ionomos_benchmark from the app (accuracy.default_benchmark_dir, D67).
+BENCHMARK_DIR = "ionomos_benchmark"

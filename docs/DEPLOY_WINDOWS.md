@@ -159,7 +159,7 @@ py -3.14 -c "import tkinter; print('ok')"
 | look at results | `results\report.html` in the experiment folder (interactive volcano, protein details, heatmap, enrichment, QC); tab 6 → **Open report** |
 | change comparisons / thresholds / sample groups | one experiment: tab **7 Analysis → Analyse an experiment** (pick it, edit, **Run analysis**); lab-wide: tab **7 Analysis → Lab defaults**, then **Save** |
 | analyse an old FragPipe run | tab 7 → **Analyse a folder…** or `ionomos-cli.exe analyze <folder>` |
-| get a message when a search is done / failed / waiting | off by default. Edit `notify:` in `C:\Fragpipe_Auto\config.yaml` (Teams, Slack, a webhook or email; what is sent: ARCHITECTURE.md "Notifications"), run `ionomos-cli.exe notify-test`, restart the watcher |
+| get a message when a search is done / failed / waiting | off by default. The app's **8 Notifications** tab (Teams, Slack, a webhook or email; what is sent: ARCHITECTURE.md "Notifications"): fill in, **Send test**, **Save**, restart the watcher. Or edit `notify:` in `C:\Fragpipe_Auto\config.yaml` and run `ionomos-cli.exe notify-test` |
 | keep the PC free for a while | tab 6 → **Pause searches** (the running search finishes; nothing new starts) |
 | check FragPipe is installed right | tab 6 → **Check FragPipe install**, or `ionomos-cli.exe preflight` (launcher, Java, MSFragger / IonQuant / DIA-NN / Python, decoys in each FASTA, and a FragPipe dry run of each method; a few minutes) |
 | stop / start the watcher | tab 5 buttons; the startup task restarts it at next logon |

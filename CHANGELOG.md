@@ -7,7 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Settings and checks in the app instead of `config.yaml` or a terminal**
+  (D67):
+  - **Analysis tab → Figure style**: the lab's style for exported figures
+    (`analysis.export`, D62): size preset or a custom size, text size and
+    font, colours (with a colour picker for a custom palette), background,
+    what the "Export for slides" zip holds, and which figures are written to
+    `results/figures/` after each analysis. Empty fields show and take the
+    default; keys the page doesn't show are kept. **Check** says what the
+    figures will look like, or what is wrong.
+  - **Analysis tab → Check accuracy**: **Compare** an analysis with a
+    reference result (a table or another analysed folder) and **Run
+    benchmark** on simulated data (quick / standard, optionally with an
+    experiment's settings) or on a benchmark sample with its expected
+    ratios. Runs in the background, shows the verdict in colour and opens
+    the page. Same code as `ionomos compare` / `ionomos benchmark`.
+  - **8 Notifications** tab: `notify:` (Teams, Slack, a JSON webhook,
+    SMTP email; which events; names or not), with **Send test** (the same
+    code as `ionomos notify-test`, on the values in the window). Addresses
+    and the password are masked unless "Show" is ticked, and never logged.
+  - Help entries for each (`faq.figure-style`, `faq.check-accuracy`, and
+    `faq.notify` rewritten for the tab); a Help button on each page.
+
+### Changed
+
+- `ionomos compare`, `ionomos benchmark` and `ionomos notify-test` now run
+  through `accuracy.py` / `notify.run_test`, shared with the app. Their
+  output is unchanged.
+
 ### Fixed
+
+- **A journal-size figure style got slide-size text.** An `analysis.export`
+  block naming `size: col1` (or `col2`, `half`) without `font_pt` was read
+  by the app with the slide's 14 pt and written back that way on the next
+  Save. Now the size's own text size applies (7 pt for a journal column).
 
 - **A test of the slow-copy wait failed now and then on Windows CI.** Its
   settle time (0.3 s) was only six times the pause between copied files, so

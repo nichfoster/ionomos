@@ -282,8 +282,9 @@ once in the log ("could not notify by ..."). The search itself is not
 affected: its status, `DONE.txt` / `FAILED.txt` and the report are written
 before the message is sent.
 
-Run `ionomos notify-test`. It sends a test message to every channel in
-`config.yaml` and says what happened to each:
+Press **Send test** on the app's **8 Notifications** tab, or run
+`ionomos notify-test`. It sends a test message to every channel and says
+what happened to each:
 
 - **notifications are not set up**: there is no channel under `notify:`
   ([how to set one up](#faq.notify)).

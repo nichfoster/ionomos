@@ -47,8 +47,8 @@ line: `--control DMSO`, `--compare "Drug vs DMSO"`, `--de-type all`.
   the cut-offs.
 - **The look**: **Export…** sets the size (16:9, 4:3, half a slide, a journal
   column), text size, font, colours and what is drawn. **Save style** gives a
-  file the whole lab can load; `analysis.export` in `config.yaml` sets the
-  lab's defaults.
+  file the whole lab can load. The lab's defaults are set in the app
+  ([Figure style](#faq.figure-style)).
 - **Without opening the report**: `ionomos export <experiment folder>` writes
   the volcano, PCA, heatmap and correlation plots as SVG to
   `results\figures\`, at the saved cut-offs.
@@ -56,6 +56,31 @@ line: `--control DMSO`, `--compare "Drug vs DMSO"`, `--de-type all`.
 SVG stays sharp and its text can be edited in PowerPoint, Illustrator or
 Inkscape; PNG is a picture. Each file records the cut-offs it was made with,
 so a figure on a slide can be traced back to its report.
+
+## How do I set the lab's figure style? {#faq.figure-style}
+
+In the app: **7 Analysis** → **Figure style**, then **Save** (bottom right).
+Every report's **Export…** starts from this style, and `ionomos export` uses it.
+
+- **Size**: a 16:9 or 4:3 slide, half a slide, a journal column (85 mm) or
+  two columns (180 mm), or **Custom** with your own width, height and unit.
+- **Text size (pt)**: the size of the text in the finished figure. Leave it
+  empty for the size that suits the preset (14 pt on a slide, 7 pt in a
+  journal column); it follows the preset when you change it.
+- **Font**: its name, for example Arial or Segoe UI. It must be installed on
+  the computer where the figure is opened.
+- **Colours**: default, colorblind (a colour-blind-safe set), grey (for
+  print), or custom: then type or **Pick…** the colours of up hits, down hits
+  and the rest. **Background**: light, dark or transparent.
+- **"Export for slides" .zip holds**: SVG and PNG of every figure, or only one.
+- **Written after each analysis**: tick volcano, PCA, heatmap or correlation
+  to get them as SVG in `results\figures\` of every new analysis. None
+  ticked writes none (the report always has every figure).
+
+**Check** shows the result in one line, or what is wrong. A field left empty
+takes its default. Settings the page doesn't show (line width, title on or
+off, …) can still be set in `config.yaml` under `analysis: export:`; the app
+keeps them.
 
 ## How do I share the report? {#faq.share}
 
@@ -98,9 +123,10 @@ with FragPipeAnalystR.
 
 ## Does Ionomos give the same result as my other analysis? {#faq.compare-reference}
 
-Check it on your own experiment. `ionomos compare <experiment folder>
-<reference>` compares the Ionomos analysis with another result for the same
-experiment. The reference can be:
+Check it on your own experiment: in the app, **7 Analysis** →
+[Check accuracy](#faq.check-accuracy) → **Compare**, or `ionomos compare
+<experiment folder> <reference>`. It compares the Ionomos analysis with
+another result for the same experiment. The reference can be:
 
 - a results table with a fold-change and a p-value column per comparison: a
   FragPipe-Analyst export, a limma or MSstats table, a Perseus matrix, the
@@ -127,7 +153,8 @@ offset of …** (a normalisation difference), **differs: …** with the reason, 
 
 ## How accurate is the analysis? {#faq.benchmark}
 
-Two ways to measure it, both with `ionomos benchmark`:
+Two ways to measure it, both with `ionomos benchmark` or, in the app,
+**7 Analysis** → [Check accuracy](#faq.check-accuracy) → **Run benchmark**:
 
 - **On simulated data** (no data needed): `ionomos benchmark` runs the
   analysis on made-up protein tables where the changed proteins are known. It
@@ -167,6 +194,29 @@ from the UniProt names in the result table (`ACTB_HUMAN`); `fasta:` or
 the same way with `proteins:` lists instead of species. The result is also
 shown under [How far to trust this](#report.trust) after the next analysis.
 
+## How do I check the analysis from the app? {#faq.check-accuracy}
+
+**7 Analysis** → **Check accuracy** runs the same checks as `ionomos compare`
+and `ionomos benchmark`, with buttons. Both read results and change neither;
+the page they write opens by itself when they finish, and the verdict is
+shown in colour above the output (green: agrees or done, orange: differs,
+red: could not run, with the reason).
+
+- **Compare**: pick the **Ionomos analysis** (an analysed experiment folder;
+  the experiment open on the first page is filled in) and the **Reference**:
+  a results table (**Table…**) or another analysed folder (**Folder…**).
+  [What the verdict means](#faq.compare-reference). Tick "the other way
+  round" when the reference compares DMSO vs Drug instead of Drug vs DMSO.
+- **Benchmark on simulated data**: **quick** takes seconds, **standard**
+  about a minute. "With the settings of" an analysed experiment adds its
+  settings and group sizes. The page goes into `logs\ionomos_benchmark\`, or
+  into that experiment's `results\` folder.
+- **Benchmark on a benchmark sample**: the analysed experiment and its
+  expected-ratios file ([how to make one](#faq.benchmark-sample)).
+
+The app stays usable while a check runs. **Copy the command line** gives the
+same check for a terminal.
+
 ## What does "low confidence" mean? {#faq.low-confidence}
 
 A group in that comparison has only one sample. The comparison is still tested
@@ -203,25 +253,28 @@ Yes, if the person who looks after Ionomos turns it on. It is off by
 default, because nothing leaves the PC unless the lab asks for it
 ([what a message holds](#safety.notify)).
 
-To set it up, edit `config.yaml` (the app has no tab for this yet). Under
-`notify:` set `enabled: true` and fill in at least one of:
+To set it up, open the app's **8 Notifications** tab, tick **Send
+notifications** and fill in at least one of:
 
-- `slack:` `url:` a Slack incoming-webhook address
-- `teams:` `url:` a Teams webhook address (in Teams: Workflows, "Post to a
-  channel when a webhook request is received")
-- `webhook:` `url:` any service that accepts a JSON POST
-- `email:` `host`, `port`, `from`, `to` and, if the server needs them,
-  `username` and `password`
+- **Slack**: a Slack incoming-webhook address
+- **Microsoft Teams**: a Teams webhook address (in Teams: Workflows, "Post
+  to a channel when a webhook request is received")
+- **Webhook (JSON)**: any service that accepts a JSON POST
+- **Email**: the server, port, security, From and To and, if the server
+  needs them, the user name and password
 
-`on: [done, failed, held]` chooses which events send a message; "held"
-means a search is waiting for something (a FASTA, disk space). A waiting
-search sends one message per reason, not one every few seconds. To keep an
-address or the password out of the file, put it in an environment variable
-and give its name as `url_env:` or `password_env:`.
+The ticks "when a search is done / failed / waiting" choose which events
+send a message; "waiting" means a search is waiting for something (a FASTA,
+disk space). A waiting search sends one message per reason, not one every
+few seconds. Addresses and the password are shown as dots; tick **Show
+addresses and password** to check what you typed. To keep an address or the
+password out of `config.yaml`, put it in an environment variable and give
+its name under "or variable".
 
-Then run `ionomos notify-test`: it sends a test message to each one and
-says which arrived. Restart the watcher (app → **Stop**, **Start**) so it
-uses the new settings. A message that can't be sent never fails or slows a
+Press **Send test**: it sends a test message to each one and says which
+arrived (same as `ionomos notify-test`). Then **Save**, and restart the
+watcher (**5 Run & Test** → **Stop**, **Start**) so it uses the new
+settings. Everything on the tab is also `notify:` in `config.yaml`. A message that can't be sent never fails or slows a
 search ([A notification did not arrive](#trouble.notify)).
 
 ## Can I ask Ionomos a question in plain words? {#faq.assistant}
