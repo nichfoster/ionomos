@@ -309,8 +309,15 @@ caught before FragPipe runs. This is on by default; turn it off with
 - user, method and date;
 - each file's condition, replicate and fraction, all editable;
 - **What Ionomos will assume**: one line per condition with its role
-  (CONTROL / treated, or isoDTB's "ratio vs 0") and its replicates and
-  fractions, plus warnings for single replicates or a single condition;
+  (CONTROL, compound, competition of …, or isoDTB's "ratio vs 0") and its
+  replicates and fractions, plus warnings for single replicates or a single
+  condition;
+- for DIA and label-free drops, a **role** list per condition (control,
+  compound, competition of a compound, pool / reference, QC standard;
+  **automatic** = read from the name), a **?** and **Confirm** on a role read
+  from `pre`, `block`, `cold` or `10x`, and the comparisons the analysis will
+  run with what uneven groups mean (D65). A changed role is saved to
+  `experiment.yaml` → `analysis.roles`;
 - a **Control** picker, which is the "vs" side of every volcano. It defaults
   to the same guess the analysis would make: DMSO, vehicle, control and the
   other control keywords, otherwise the alphabetically first condition. A
@@ -478,8 +485,9 @@ changes; this is about the condition part of a name.
 A TMT condition is one word (the part before the first `_` of
 `ProbeComp_1_128N`), so write a TMT competition as `ProbeComp` or `Comp`.
 `Probe_pre`, `Probe_block` and `Probe_10x` are read as a competition only
-next to a `Probe` condition, and Ionomos asks. Say it yourself with
-`roles:` in `experiment.yaml`.
+next to a `Probe` condition, and Ionomos asks. Say it yourself in the
+review window or the experiment editor (**Roles**), or with `roles:` in
+`experiment.yaml`.
 
 ## Still to confirm with the lab
 

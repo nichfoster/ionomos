@@ -37,6 +37,29 @@ with the control picked in the box beside it, "all pairs", "each condition vs
 all others", or "just these" (for example `Drug vs DMSO; Drug2 vs DMSO`). Then **Run analysis**. On the command
 line: `--control DMSO`, `--compare "Drug vs DMSO"`, `--de-type all`.
 
+## How do I say which condition is DMSO, the compound or the competition? {#faq.roles}
+
+In the experiment editor (tab 7, or the pop-up window), **Roles** lists each
+condition with its number of samples and its [role](#glossary.role): control,
+compound, [competition](#glossary.competition) of a compound, pool /
+reference, or QC standard, and where the role came from (usually the name).
+Select a condition and pick another role in the list; **automatic** goes back
+to what the name says. The review window before filing has the same list
+for DIA and label-free drops.
+
+- A role marked **?** is a guess: a word like `pre`, `block`, `cold` or `10x`
+  in the name often, but not always, means "plus a competitor". Press
+  **Confirm** if it is right, or pick **compound** if it is not.
+- Under the list, the comparisons that will be run, in words, and what the
+  group sizes mean. Two DMSO against four of each compound is normal: with
+  missing values imputed (DIA) every protein is still tested; without (TMT) a
+  protein needs one of the two DMSO values.
+- Making a condition the control also sets the **Control** box.
+
+The roles are saved in `experiment.yaml`, for example
+`analysis: {roles: {Probe_pre: compound}}`, and the next **Run analysis** uses
+them.
+
 ## How do I get a figure into a slide? {#faq.slides}
 
 - **One figure**: set up the view (comparison, cut-offs, search), then use

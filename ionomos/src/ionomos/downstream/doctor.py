@@ -469,8 +469,10 @@ def _role_checks(f: Findings, add) -> None:
     if plan is None or plan.by_construction or not plan.roles:
         return
     listed = plan.describe()
-    how = ["Set the roles under analysis: in the experiment's experiment.yaml, e.g. roles: {DMSO: control, "
-           "Probe: compound, Probe_Comp: competition of Probe}, then Run analysis",
+    how = ["Check each condition's role under Roles in the experiment editor (Analysis tab, or the pop-up window): "
+           "Confirm a guess, or pick the role, then Run analysis",
+           "Or set them under analysis: in the experiment's experiment.yaml, e.g. roles: {DMSO: control, "
+           "Probe: compound, Probe_Comp: competition of Probe}",
            "Or list the comparisons yourself (comparisons: [\"Probe vs DMSO\"]); role_comparisons: false gives "
            "every condition against the control, as for any other experiment"]
     if plan.questions:

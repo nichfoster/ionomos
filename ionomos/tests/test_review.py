@@ -15,7 +15,18 @@ from ionomos.intake import DraftFile, IntakeError, IntakeResult, Kind, draft, in
 from ionomos.ledger import Ledger
 from ionomos.manifest import load_overrides, save_overrides
 from ionomos.naming import DEFAULT_CONDITION_CODES, NamingError, parse_raw_name
-from ionomos.resolve import Answer, guess_control, summarize, to_overrides, validate
+from ionomos.resolve import (
+    Answer,
+    conditions_of,
+    given_roles,
+    guess_control,
+    pinned_control,
+    replicates,
+    role_view,
+    summarize,
+    to_overrides,
+    validate,
+)
 from tests.conftest import make_drop, make_tk_root
 
 KC_RAWS = [f"KC_DIA_{c}{r}.raw" for c in "DC" for r in (1, 2, 3)]
@@ -226,6 +237,93 @@ def test_control_must_be_a_condition():
     assert "not one of the conditions" in validate(a, ["DIA"])
 
 
+# ------------------------------------------------------------- roles (D65) --
+
+PULLDOWN = [f"EJQ_DIA_{c}_{r}.raw" for c, n in (("DMSO", 2), ("Probe", 4), ("Probe_pre", 4)) for r in range(1, n + 1)]
+
+
+def _answer(d, roles=None, control=""):
+    return Answer(user=d.user, method=d.method, date=d.date, allow_uneven=d.allow_uneven, files=d.files,
+                  control=control, roles=roles)
+
+
+def test_the_review_shows_roles_with_replicates_and_the_comparisons(lab):
+    folder = make_drop(lab["inbox"], "20260927_EJQ_DIA_pulldown", PULLDOWN)
+    d = draft(folder, lab["cfg"], review=True)
+    assert d.lab_analysis == {} and d.exp_analysis == {}
+    ctl = guess_control(conditions_of(d.files), d.control_keywords)
+    view = role_view(d.files, "DIA", ctl, d)
+    by = {r.condition: r for r in view.rows}
+    assert [(c, r.n, r.label) for c, r in by.items()] == [("EJQ_DIA_DMSO", 2, "control"),
+                                                          ("EJQ_DIA_Probe", 4, "compound"),
+                                                          ("EJQ_DIA_Probe_pre", 4, "competition of EJQ_DIA_Probe")]
+    assert by["EJQ_DIA_Probe_pre"].confirmable and "'pre' in the name" in by["EJQ_DIA_Probe_pre"].confirm
+    assert view.pairs == [("EJQ_DIA_Probe", "EJQ_DIA_DMSO"), ("EJQ_DIA_Probe_pre", "EJQ_DIA_Probe"),
+                          ("EJQ_DIA_Probe_pre", "EJQ_DIA_DMSO")]
+    assert "imputed (perseus)" in view.uneven[0] and "EJQ_DIA_DMSO has 2 samples" in view.uneven[0]
+    lines = summarize(d.files, "DIA", ctl, {r.condition: r.label for r in view.rows})
+    assert lines == ["EJQ_DIA_DMSO — CONTROL · 2 replicates (1–2)", "EJQ_DIA_Probe — compound · 4 replicates (1–4)",
+                     "EJQ_DIA_Probe_pre — competition of EJQ_DIA_Probe · 4 replicates (1–4)"]
+    # replicates, not files: fractions of one replicate count once
+    assert replicates(_files([("A", 1, 1), ("A", 1, 2), ("A", 2, 1), ("B", 1, None)])) == {"A": 2, "B": 1}
+    # TMT and isoDTB conditions aren't in the file names: no role list
+    assert role_view(d.files, "TMT", "", d) is None and role_view(d.files, "isoDTB", "", d) is None
+
+
+def test_a_role_chosen_in_the_review_is_saved_in_experiment_yaml(lab, ledger):
+    folder = make_drop(lab["inbox"], "20260927_EJQ_DIA_pd2", PULLDOWN)
+    save_overrides(folder, load_overrides(folder).__class__(analysis={"log2fc": 0.5}))
+    d = draft(folder, lab["cfg"], review=True)
+    assert d.exp_analysis == {"log2fc": 0.5}
+    # nothing chosen: nothing written
+    assert _accept_as_read(d, control="EJQ_DIA_DMSO").analysis == {}
+    assert to_overrides(_answer(d, {}, "EJQ_DIA_DMSO"), d).analysis == {}
+    confirmed = {"EJQ_DIA_Probe_pre": "competition of EJQ_DIA_Probe"}
+    assert to_overrides(_answer(d, confirmed, "EJQ_DIA_DMSO"), d).analysis == {"roles": confirmed}
+    rv = Reviewer(lambda dd: to_overrides(_answer(dd, {"EJQ_DIA_Probe_pre": "compound"}, "EJQ_DIA_DMSO"), dd))
+    assert intake(folder, lab["cfg"], ledger, rv) == IntakeResult.QUEUED
+    filed = lab["general"] / "EJQ" / "20260927_EJQ_DIA_pd2"
+    an = load_overrides(filed).analysis
+    assert an == {"log2fc": 0.5, "roles": {"EJQ_DIA_Probe_pre": "compound"}}
+    from ionomos.downstream import analysis as an_mod
+
+    assert an_mod.settings_from(an).roles == {"EJQ_DIA_Probe_pre": "compound"}   # the analysis reads it
+
+
+def test_roles_already_in_experiment_yaml_are_shown_kept_and_can_be_cleared(lab):
+    folder = make_drop(lab["inbox"], "20260927_EJQ_DIA_pd3", PULLDOWN)
+    given = {"EJQ_DIA_Probe_pre": "compound", "Elsewhere": "control"}
+    save_overrides(folder, load_overrides(folder).__class__(analysis={"roles": given}))
+    d = draft(folder, lab["cfg"], review=True)
+    assert given_roles(d) == given
+    view = role_view(d.files, "DIA", "EJQ_DIA_DMSO", d, given_roles(d))
+    row = next(r for r in view.rows if r.condition == "EJQ_DIA_Probe_pre")
+    assert row.set_here and row.label == "compound" and row.auto == "competition of EJQ_DIA_Probe"
+    # unchanged: not written again; back to automatic: the entry goes, a name that isn't a condition here stays
+    assert "roles" not in to_overrides(_answer(d, given_roles(d), "EJQ_DIA_DMSO"), d).analysis
+    assert to_overrides(_answer(d, {"Elsewhere": "control"}, "EJQ_DIA_DMSO"), d).analysis == {
+        "roles": {"Elsewhere": "control"}}
+    assert to_overrides(_answer(d, {}, "EJQ_DIA_DMSO"), d).analysis == {"roles": {"Elsewhere": "control"}}
+
+
+def test_a_control_given_as_a_role_is_the_automatic_control():
+    assert guess_control(["DMSO", "Mock", "Drug"], ["DMSO", "mock"], {"Mock": "control"}) == "Mock"
+    assert guess_control(["DMSO", "Mock", "Drug"], ["DMSO", "mock"], {"DMSO": "compound"}) == "Mock"
+    # no control left: the alphabetically first, which is also the analysis' fallback
+    assert guess_control(["Veh", "Drug"], ["Veh"], {"veh": "compound"}) == "Drug"
+
+
+def test_making_a_condition_the_control_by_role_pins_no_control(lab):
+    folder = make_drop(lab["inbox"], "20260927_EJQ_DIA_pd4", ["Water_1.raw", "Water_2.raw", "Drug_1.raw",
+                                                               "Drug_2.raw"])
+    d = draft(folder, lab["cfg"], review=True)
+    ov = to_overrides(_answer(d, {"Water": "control"}, "Water"), d)
+    assert ov.analysis == {"roles": {"Water": "control"}}        # the role makes Water the analysis' control
+    assert pinned_control("Water", d.files, d) == "Water"         # without the role it would have to be pinned
+    view = role_view(d.files, "DIA", "Water", d, {"Water": "control"})
+    assert view.pairs == [("Drug", "Water")]
+
+
 # ------------------------------------------------------------ real tkinter --
 
 from tests.conftest import gui_tests  # noqa: E402
@@ -270,6 +368,43 @@ def test_review_window_shows_the_reading_and_saves_a_changed_control(lab):
     assert seen["control"] == "KC_DIA_DMSO" and "KC_DIA_DMSO — CONTROL" in seen["summary"]
     assert "D1 = DMSO rep 1" in seen["codes"]
     assert ov is not None and ov.user == "Kosuke" and ov.analysis == {"control": "KC_DIA_Compound"}
+
+
+@pytest.mark.skipif(not _ok, reason=f"no GUI: {_why}")
+def test_review_window_lists_the_roles_and_saves_a_changed_one(lab):
+    from ionomos.resolve import TkResolver
+    from tests.test_resolve import _drive_dialog
+
+    folder = make_drop(lab["inbox"], "20260927_EJQ_DIA_pulldown", PULLDOWN)
+    d = draft(folder, lab["cfg"], review=True)
+    root = make_tk_root()
+    root.withdraw()
+    seen = {}
+
+    def act(win):
+        texts = [str(w.cget("text")) for w in _widgets(win) if w.winfo_class() == "TLabel"]
+        seen["ask"] = [t for t in texts if t.startswith("? read as EJQ_DIA_Probe plus a competitor")]
+        seen["plan"] = next((t for t in texts if t.startswith("Comparisons that will be run")), "")
+        seen["summary"] = next((t for t in texts if "CONTROL" in t), "")
+        combos = [w for w in _widgets(win) if w.winfo_class() == "TCombobox"]
+        role = next(c for c in combos if "compound" in c.cget("values")
+                    and c.get() == "automatic: competition of EJQ_DIA_Probe")
+        role.set("compound")
+        role.event_generate("<<ComboboxSelected>>")
+        win.update()
+        texts = [str(w.cget("text")) for w in _widgets(win) if w.winfo_class() == "TLabel"]
+        seen["after"] = next((t for t in texts if t.startswith("Comparisons that will be run")), "")
+        next(w for w in _widgets(win) if w.winfo_class() == "TButton"
+             and str(w.cget("text")).startswith("Accept")).invoke()
+
+    assert not _drive_dialog(root, act)
+    ov = TkResolver(root).review(d)
+    root.destroy()
+    assert len(seen["ask"]) == 1
+    assert "EJQ_DIA_Probe_pre — competition of EJQ_DIA_Probe · 4 replicates" in seen["summary"]
+    assert "EJQ_DIA_Probe_pre vs EJQ_DIA_Probe — competition" in seen["plan"] and "EJQ_DIA_DMSO has 2" in seen["plan"]
+    assert "EJQ_DIA_Probe_pre vs EJQ_DIA_DMSO · 4 against 2 samples" in seen["after"]
+    assert ov is not None and ov.analysis == {"roles": {"EJQ_DIA_Probe_pre": "compound"}}
 
 
 @pytest.mark.skipif(not _ok, reason=f"no GUI: {_why}")

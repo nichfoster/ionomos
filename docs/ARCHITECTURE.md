@@ -48,7 +48,8 @@
 | `notify_tab.py` | App tab 8 Notifications: `notify:` with masked secrets and Send test (`notify.run_test`) (D67) | — |
 | `forms.py` | No Tk: `analysis.export` and `notify:` ↔ the fields the app shows, checked by `charts.style_layer` / `notify.settings_from` (D67) | — |
 | `accuracy.py` | No Tk: `ionomos compare` / `benchmark` as calls with a line callback, their command lines, and the checks before a run; the CLI and the app both use it (D67) | — |
-| `experiment_editor.py` | One experiment's analysis choices as a Tk panel (samples, conditions, comparisons, cut-offs, Run, issues); used by tab 7 and the pop-ups | — |
+
+| `experiment_editor.py` | One experiment's analysis choices as a Tk panel (samples, conditions, roles, comparisons, cut-offs, Run, issues); used by tab 7 and the pop-ups | — |
 | `attention.py` | Durable "needs a person" queue (`<log_dir>/attention/*.json`): raised by intake, worker, analysis, QC trending (`qc_trend`, a warning: no pop-up unless `qc_trend.popup`); closed when fixed | — |
 | `popups.py` | Pop-up windows + the "needs attention" list, in the app or (app closed) the watcher's own Tk loop; **More help** opens the help page at the item's topic | — |
 | `help/` | The help for users (D46, HELP.md): `*.md` content (getting started, the report, glossary, troubleshooting, never-do, FAQ) parsed and rendered with the stdlib; `report_payload()` for every report, `page()` = `help.html` (`ionomos help`, the app's Help button, pop-ups), `text()` for the terminal, `topic()` / `topic_for_item()` | — |
@@ -596,6 +597,15 @@ to `fpa.limma_contrasts` / `design.limma_design`), `insights.power`
 (the spread is scaled to the usual group size before it is compared). The
 report recomputes the specific-targets calls from the comparisons with its
 live cut-offs; the TSV has them at the saved ones.
+
+The windows (D65) show the same thing before any data is analysed:
+`roles.preview(sizes, settings, overrides, …)` builds an empty matrix of the
+group sizes, runs `roles.plan` and `analysis.choose_comparisons` on it, and
+returns rows, comparisons in words and the uneven-group lines.
+`experiment_editor.py` (from `postprocess.inspect_folder`: samples, data type,
+SDRF roles) and `resolve.role_view` (from the drop's files, replicates per
+condition) only draw it; a choice goes through `roles.set_role` into
+`analysis.roles`.
 
 `results/dose_response.tsv` (`downstream/doseresponse.py`, D44) is made when
 the conditions are a titration: names like `Cmpd_10nM` (or

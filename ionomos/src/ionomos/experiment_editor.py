@@ -6,11 +6,15 @@ the pop-up window that opens when an analysis needs a person.
     ed = ExperimentEditor(parent_frame, host, on_done=callback)
     ed.load(dest, method)                 # reads the samples on a thread
     ed.set_condition(["Drug_3"], "DMSO"); ed.toggle_used(["DMSO_1"]); ed.guess_conditions()
+    ed.set_role("Probe_pre", "compound"); ed.confirm_role("Probe_10x")    # analysis.roles (D65)
     ed.run()                              # saves experiment.yaml analysis:, re-runs the analysis
 
 Shows: what the data is, the doctor's current issues (from the last analysis), every sample with
-its condition / replicate / used, the comparisons, per-experiment cut-offs. After a run the issues
-are refreshed and the attention item for the experiment is closed when nothing is left to decide.
+its condition / replicate / used, the comparisons, each condition's role with its samples (and a list
+to change it; a guess from a weak keyword is marked to confirm), the comparisons that will be run in
+words and what uneven groups mean (downstream/roles.preview, which holds the logic), per-experiment
+cut-offs. After a run the issues are refreshed and the attention item for the experiment is closed
+when nothing is left to decide.
 """
 from __future__ import annotations
 
@@ -51,6 +55,9 @@ class ExperimentEditor:
         self._cond: dict[str, str] = {}
         self._excluded: set[str] = set()
         self._other: dict = {}
+        self._roles: dict = {}          # this experiment's analysis.roles (D65)
+        self._view = None               # roles.RolePreview of the current choices
+        self._role_values: dict[str, str] = {}   # what the role list shows -> analysis.roles value
         self.running = False
         self.last_outcome = None
         self.frame = f = ttk.Frame(parent)
@@ -116,8 +123,34 @@ class ExperimentEditor:
         ttk.Entry(cf, textvariable=self.var("comparisons"), width=30).grid(row=3, column=1, sticky="ew", **PAD)
         ttk.Label(cf, text="e.g.  Drug vs DMSO; Drug2 vs DMSO", foreground="#666").grid(row=4, column=1, sticky="w", padx=6)
 
+        rf = ttk.LabelFrame(right, text="Roles (what each condition is)", padding=6)
+        rf.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        rf.columnconfigure(1, weight=1)
+        rcols = (("condition", 120), ("samples", 60), ("role", 150), ("from", 190))
+        self.roles_tree = ttk.Treeview(rf, columns=[c for c, _ in rcols], show="headings", height=4,
+                                       selectmode="browse")
+        for c, w in rcols:
+            self.roles_tree.heading(c, text=c)
+            self.roles_tree.column(c, width=w, anchor="w", stretch=c in ("role", "from"))
+        self.roles_tree.tag_configure("ask", foreground=SEV_COLOUR["input"])
+        self.roles_tree.tag_configure("set", foreground="#1565c0")
+        self.roles_tree.grid(row=0, column=0, columnspan=3, sticky="ew")
+        self.roles_tree.bind("<<TreeviewSelect>>", self._role_selected)
+        ttk.Label(rf, text="Role of the selected condition:").grid(row=1, column=0, sticky="w", pady=(4, 0))
+        self.role_cb = ttk.Combobox(rf, textvariable=self.var("role"), state="readonly", width=30)
+        self.role_cb.grid(row=1, column=1, sticky="w", padx=4, pady=(4, 0))
+        self.role_cb.bind("<<ComboboxSelected>>", self._role_chosen)
+        self.confirm_btn = ttk.Button(rf, text="Confirm", command=self.confirm_role)
+        self.confirm_btn.grid(row=1, column=2, sticky="w", pady=(4, 0))
+        self.role_ask = ttk.Label(rf, text="", foreground=SEV_COLOUR["input"], wraplength=440, justify="left")
+        self.role_ask.grid(row=2, column=0, columnspan=3, sticky="w")
+        self.role_plan = ttk.Label(rf, text="", foreground="#333", wraplength=440, justify="left")
+        self.role_plan.grid(row=3, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        for k in ("de_type", "control", "comparisons"):
+            self.var(k).trace_add("write", lambda *_: self.refresh_roles())
+
         of = ttk.LabelFrame(right, text="For this experiment only (blank = lab default)", padding=6)
-        of.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        of.grid(row=2, column=0, sticky="ew", pady=(8, 0))
         ttk.Label(of, text="|log2FC| ≥").grid(row=0, column=0, sticky="e", **PAD)
         ttk.Entry(of, textvariable=self.var("log2fc"), width=8).grid(row=0, column=1, sticky="w", **PAD)
         ttk.Label(of, text="p ≤").grid(row=0, column=2, sticky="e", **PAD)
@@ -133,14 +166,14 @@ class ExperimentEditor:
                      values=[LAB_DEFAULT, "median", "gn", "none"]).grid(row=2, column=1, columnspan=3, sticky="w", **PAD)
 
         act = ttk.Frame(right)
-        act.grid(row=2, column=0, sticky="w", pady=(10, 0))
+        act.grid(row=3, column=0, sticky="w", pady=(10, 0))
         self.run_btn = ttk.Button(act, text="Run analysis", command=self.run)
         self.run_btn.pack(side="left", padx=2)
         ttk.Button(act, text="Save choices", command=self.save_choices).pack(side="left", padx=2)
         ttk.Button(act, text="Open report", command=self.open_report).pack(side="left", padx=2)
         ttk.Button(act, text="Results folder", command=self.open_results).pack(side="left", padx=2)
         self.state = ttk.Label(right, text="", foreground="#2e7d32", wraplength=380, justify="left")
-        self.state.grid(row=3, column=0, sticky="w", pady=(6, 0))
+        self.state.grid(row=4, column=0, sticky="w", pady=(6, 0))
         self.log = scrolledtext.ScrolledText(f, height=5 if not compact else 4, wrap="word",
                                              font=("Consolas" if _win() else "Menlo", 9))
         self.log.grid(row=3, column=0, sticky="nsew", pady=(8, 0))
@@ -219,6 +252,10 @@ class ExperimentEditor:
         self._samples = info["samples"]
         self._cond = dict(ov.pop("sample_conditions", None) or {})
         self._excluded = set(ov.pop("exclude_samples", None) or [])
+        given = ov.pop("roles", None)
+        self._roles = dict(given) if isinstance(given, dict) else {}
+        if given is not None and not isinstance(given, dict):
+            ov["roles"] = given  # not a mapping: kept as written, and the preview says what is wrong
         de = ov.pop("de_type", None)
         comps = ov.pop("comparisons", None)
         control = ov.pop("control", None)
@@ -269,6 +306,124 @@ class ExperimentEditor:
                 name, self._cond.get(name, s["condition"]), s.get("replicate") or "", "yes" if used else "left out",
                 s.get("run") or ""))
         self.ctrl.configure(values=self.conditions())
+        self.refresh_roles()
+
+    # --------------------------------------------------------------- roles --
+
+    def sizes(self) -> dict[str, int]:
+        """{condition: used samples}, in the samples' order."""
+        out: dict[str, int] = {}
+        for s in self._samples:
+            if s["sample"] not in self._excluded:
+                c = self._cond.get(s["sample"], s["condition"])
+                out[c] = out.get(c, 0) + 1
+        return out
+
+    def role_view(self):
+        """roles.preview of the current choices: the rows, the comparisons that will run, uneven groups."""
+        from ionomos.downstream import roles
+        from ionomos.downstream.analysis import AnalysisError, settings_from
+
+        if not self.target:
+            return None
+        info = self.target["info"]
+        try:
+            an = self.choices()
+        except ValueError:  # a cut-off being typed: the roles don't depend on it
+            an = {k: v for k, v in self._other.items()}
+        an.pop("roles", None)
+        err = ""
+        try:
+            s = settings_from(self._lab(), an)
+        except AnalysisError as exc:  # the rows can still be shown from the lab's settings
+            err = str(exc)
+            try:
+                s = settings_from(self._lab())
+            except AnalysisError as exc2:
+                return roles.RolePreview(error=str(exc2))
+        view = roles.preview(self.sizes(), s, self._roles, info.get("kind") or "intensity", info.get("exp") or "",
+                             info.get("sdrf_roles"), info.get("sdrf_file") or "")
+        if err:
+            view.error, view.comparisons, view.uneven, view.notes = err, [], [], []
+        return view
+
+    def refresh_roles(self) -> None:
+        try:
+            view = self.role_view()
+        except Exception:  # noqa: BLE001 - the preview must never break the editor
+            log.exception("roles preview failed")
+            view = None
+        self._view = view
+        sel = self.roles_tree.selection()
+        self.roles_tree.delete(*self.roles_tree.get_children())
+        if view is None:
+            self.role_plan.configure(text="")
+            self.role_ask.configure(text="")
+            return
+        for r in view.rows:
+            mark = "  ?" if r.confirm else ""
+            self.roles_tree.insert("", "end", iid=r.condition, values=(r.condition, r.n, r.label + mark, r.source),
+                                   tags=("ask",) if r.confirm else ("set",) if r.set_here else ())
+        keep = [x for x in sel if self.roles_tree.exists(x)] or [r.condition for r in view.rows if r.confirm][:1]
+        if keep:  # the selection survives a refresh; with none, the first role to confirm is selected
+            self.roles_tree.selection_set(keep)
+        self.role_plan.configure(text="\n".join(view.lines()))
+        self._role_selected()
+
+    def _row(self, condition: str | None = None):
+        if self._view is None:
+            return None
+        if condition is None:
+            sel = self.roles_tree.selection()
+            condition = sel[0] if sel else None
+        return next((r for r in self._view.rows if r.condition == condition), None)
+
+    def _role_selected(self, _event=None) -> None:
+        from ionomos.downstream import roles
+
+        row = self._row()
+        fixed = self._view is None or self._view.by_construction or row is None
+        self.role_cb.state(["disabled"] if fixed else ["!disabled"])
+        self.confirm_btn.state(["!disabled"] if not fixed and row.confirmable else ["disabled"])
+        if fixed:
+            self.role_cb.configure(values=[])
+            self.var("role").set("isoDTB: every condition competes with the probe" if self._view is not None
+                                 and self._view.by_construction else "")
+            hint = "Select a condition above to change its role." if row is None and self._view is not None \
+                and self._view.rows and not self._view.by_construction else ""
+            self.role_ask.configure(text=hint if row is None or not row.confirm else f"{row.condition}: {row.confirm}")
+            return
+        pairs = roles.role_choices(self._view, row.condition)
+        self._role_values = dict(pairs)
+        self.role_cb.configure(values=[s for s, _v in pairs])
+        self.var("role").set(next((s for s, v in pairs if row.set_here and v == row.role), pairs[0][0]))
+        self.role_ask.configure(text=f"{row.condition}: {row.confirm}" if row.confirm else "")
+
+    def _role_chosen(self, _event=None) -> None:
+        row = self._row()
+        if row is not None:
+            self.set_role(row.condition, self._role_values.get(self.var("role").get(), ""))
+
+    def set_role(self, condition: str, value: str) -> None:
+        """value: control | compound | competition of X | competition | reference | qc; "" = automatic. A
+        condition made the control also becomes the Control choice."""
+        from ionomos.downstream import roles
+
+        try:
+            self._roles = roles.set_role(self._roles, condition, value)
+        except roles.RoleError as exc:
+            messagebox.showerror("Role", str(exc), parent=self.frame)
+            return
+        if value == "control" and self.var("de_type").get() in ("control", "all"):
+            self.var("control").set(condition)  # refreshes through the variable's trace
+        self.refresh_roles()
+
+    def confirm_role(self, condition: str | None = None) -> None:
+        """Keep the role read from the name ('Probe_pre': competition of Probe): it is written to analysis.roles,
+        so the analysis stops asking."""
+        row = self._row(condition)
+        if row is not None and row.confirmable:
+            self.set_role(row.condition, row.role)
 
     # --------------------------------------------------------------- edits --
 
@@ -346,6 +501,8 @@ class ExperimentEditor:
             an["sample_conditions"] = dict(self._cond)
         if self._excluded:
             an["exclude_samples"] = sorted(self._excluded)
+        if self._roles:  # all of them: an entry for a name that is no longer a condition is the user's, and kept
+            an["roles"] = dict(self._roles)
         de = self.var("de_type").get()
         if de == "custom":
             items = [x.strip() for x in self.var("comparisons").get().replace("\n", ";").split(";") if x.strip()]
@@ -383,6 +540,9 @@ class ExperimentEditor:
                 out.append(f"The control '{ctrl}' isn't one of the conditions ({', '.join(conds)}).")
         if self._samples and not used:
             out.append("Every sample is left out.")
+        for r in (self._view.rows if self._view is not None else []):
+            if r.confirm:
+                out.append(f"{r.condition}: {r.confirm} (Roles, on the right).")
         return out
 
     def save_choices(self, quiet: bool = False) -> bool:
@@ -405,7 +565,7 @@ class ExperimentEditor:
             return True
         ov.analysis = an
         try:
-            path = save_overrides(dest, ov)
+            path = save_overrides(dest, ov, replace_analysis=True)  # the editor shows the whole analysis: block
         except OSError as exc:
             messagebox.showerror("Analysis choices", f"Could not write experiment.yaml:\n{exc}", parent=self.frame)
             return False

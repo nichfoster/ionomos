@@ -195,8 +195,11 @@ def load_overrides(folder: Path) -> Overrides:
     return parse_overrides(data)
 
 
-def save_overrides(folder: Path, ov: Overrides) -> Path:
-    """Write experiment.yaml (merging over an existing one, new values win)."""
+def save_overrides(folder: Path, ov: Overrides, replace_analysis: bool = False) -> Path:
+    """Write experiment.yaml (merging over an existing one, new values win). The analysis: block is merged key by
+    key too (the review window's control keeps saved comparisons), unless replace_analysis: then ov.analysis is
+    the whole block, so a choice taken back in the experiment editor (a role back to automatic, a sample used
+    again) is gone from the file too."""
     p = Path(folder) / EXPERIMENT_YAML
     existing: dict = {}
     if p.is_file():
@@ -207,7 +210,12 @@ def save_overrides(folder: Path, ov: Overrides) -> Path:
     merged = {**existing, **ov.to_dict()}
     if "files" in existing and ov.files:
         merged["files"] = {**existing.get("files", {}), **ov.to_dict()["files"]}
-    if isinstance(existing.get("analysis"), dict) and ov.analysis:  # a new control keeps saved comparisons
+    if replace_analysis:
+        if ov.analysis:
+            merged["analysis"] = dict(ov.analysis)
+        else:
+            merged.pop("analysis", None)
+    elif isinstance(existing.get("analysis"), dict) and ov.analysis:  # a new control keeps saved comparisons
         merged["analysis"] = {**existing["analysis"], **ov.analysis}
     header = "# Written by ionomos. Edit freely; keys are documented in docs/NAMING_CONVENTION.md\n"
     p.write_text(header + yaml.safe_dump(merged, sort_keys=False, allow_unicode=True), encoding="utf-8")

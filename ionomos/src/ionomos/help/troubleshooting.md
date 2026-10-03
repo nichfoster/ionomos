@@ -460,11 +460,14 @@ here it is not sure. The message says which condition and why:
   several and its name doesn't say which. It was then only compared with the
   control.
 
-Say what each condition is under `analysis:` in the experiment's
-`experiment.yaml`, then re-run the analysis ([How to re-run](#faq.rerun)):
+Open the experiment editor (the pop-up window's button, or tab 7 Analysis):
+under **Roles** the condition is marked **?**. Press **Confirm** if the guess
+is right, or pick its role in the list, then **Run analysis**
+([How?](#faq.roles)). A condition that is not a competition gets `compound`.
+The same can be written under `analysis:` in the experiment's
+`experiment.yaml`:
 `roles: {DMSO: control, Probe: compound, Probe_Comp: competition of Probe}`.
-A condition that is not a competition gets `compound`. Listing
-`comparisons:` yourself also settles it.
+Listing `comparisons:` yourself also settles it.
 
 ## Read as a competition experiment {#issue.COMPETITION_DESIGN}
 
@@ -477,7 +480,8 @@ default: not two controls, not a pool or a QC standard, not one compound's
 competition with another compound. The report gets a
 [Specific targets](#report.specific) section.
 
-If a role is wrong, set `roles:` under `analysis:` in `experiment.yaml`
+If a role is wrong, change it under **Roles** in the experiment editor
+([How?](#faq.roles)), or set `roles:` under `analysis:` in `experiment.yaml`
 (see [Check the roles](#issue.ROLES_UNSURE)). For the old behaviour, every
 condition against the control, set `role_comparisons: false`.
 
