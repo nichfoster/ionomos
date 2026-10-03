@@ -2347,3 +2347,85 @@ sender, compare and a tiny benchmark through the page) run only in CI;
 locally they are skipped so windows don't cover the maintainer's screen.
 Layout on Windows at the PC's display scaling, and the colour picker, are
 untested.
+
+### D68 — Every section exports for slides; PNG is drawn by a renderer the computer already has
+**2026-10-02.** The maintainer's priority: figures that are easy to export for
+slides and customisable. After D62, `ionomos export` drew four figures
+(volcano, PCA, heatmap, correlation), wrote SVG only, and could only choose
+among those four. The report's .zip held the dose-response potency plot and
+whatever curve, profile or compound happened to be open.
+
+1. **Six new static figures** (`downstream/sectionfigs.py`), drawn from the
+   report's own data with `charts._compose`, so the style, the title / legend /
+   cut-offs line, the `<desc>` and the D62 SVG rules (text is text, colours
+   written out, no CSS) are the same: `dose_potency`, `dose_curves`,
+   `time_patterns`, `time_profiles`, `liganded_rank`, `liganded_selectivity`.
+   Kinds go in `analysis.export.figures` and `--figures`; `dose`, `time` and
+   `liganded` stand for both of a section's. One file per compound or series.
+2. **Curves and profiles are a grid in one figure** (a slide usually shows
+   several), the panels as large as the size allows. By default the six most
+   relevant: regulated curves by CurveCurator's relevance (the payload's
+   order), changing features by F p-value. `--features` names others (gene,
+   accession, site, its parts, `*` / `?`), `--top N` (1-24) takes more. A
+   panel smaller than 135 x 115 drawing units is not drawn: the figure shows
+   fewer and says "2 of 6: the rest do not fit this size", and a y-axis title
+   with no room goes into the legend. At one journal column (85 mm, 7 pt)
+   that is two panels; the lab can pick `col2` or `--top`.
+3. **The pEC50 interval is drawn as a band** on the dose axis (pEC50 is
+   −log10 dose, so its interval runs the other way), clipped to the doses; a
+   curve that is not up or down says its pEC50 is not read, as the report
+   does. The selectivity map shows sites liganded by any compound, selective
+   ones first (grouped by compound), then shared, then unresolved; colour is
+   the median R from 1 (white) to R² of the threshold; a dot marks a liganded
+   call; rows that do not fit are counted in the legend. With one compound
+   there is no map.
+4. **The browser's .zip gets the same content** in its own way: each compound's
+   six most relevant curves and each series' six most significant features as
+   one figure each (`TOP_PANELS`, compared with `sectionfigs.TOP_PANELS` by a
+   test), each series' patterns and the selectivity map (two export-only
+   renderers, like the heatmap's SVG twin), every compound's rank plot. With
+   more than one compound or series the curve / feature file names carry the
+   series, so the zip keeps one of each. The view is drawn back as it was
+   (the time series, its focus and the compound are now held too).
+5. **Choosing figures.** `ionomos export --list` prints every figure the
+   report can draw (file name, what it is, what can be chosen, notes such as a
+   named feature that is not there) and writes nothing. `--figures` takes
+   kinds, groups and those names with `*` / `?`; a name that matches nothing
+   is an error that lists the names. `charts.catalog()` lists figures without
+   drawing them; `charts.figures()` draws a catalog.
+6. **PNG: an optional renderer, never a dependency.** Options weighed:
+   a pure-Python rasteriser would need a font rasteriser (TrueType outlines,
+   hinting, kerning, fallback fonts) to draw text correctly, which is most of
+   the work and the part a slide shows; faking text with strokes was ruled out.
+   So `downstream/raster.py` uses the first of: the `cairosvg` module if it
+   imports (an `OSError` from a missing Cairo library counts as absent),
+   `resvg`, `rsvg-convert`, `inkscape` on PATH, and Inkscape in its usual
+   install folders (`%ProgramFiles%\Inkscape\bin`, `/Applications`), which
+   are not on PATH by default. `--renderer` picks one. Nothing is downloaded or
+   installed; with none, `--format png | both` prints what to install and exits
+   2 before writing anything. resvg is the suggestion for the lab PC: one
+   file, no installer. The PNG gets the report's size rule (`png_dpi` / 96 or
+   `png_scale` times the px size, at most 16,000 px a side) and the report's
+   `pHYs` and `iTXt` Description chunks; a `pHYs` the renderer wrote is
+   replaced. Every PNG is made before anything is written, so a renderer that
+   fails leaves the folder as it was (exit 1, its last lines of output said).
+   Renderers run with a 120 s timeout and, on Windows, no console window. The
+   watcher still writes SVG only: it should not start other programs.
+7. **The watcher's figures had no section data**: `_static_figures` built the
+   payload without the dose / time / liganded views. It now passes them.
+
+**Verified**: the Python suite (new: `tests/test_export_sections.py`, with the
+renderers stubbed for the found and not-found branches and a real PNG built
+in the test) and the JS suite (new: `sections_export.test.mjs`, the zip with
+synthetic dose / time / site payloads, also in greyscale at half a slide).
+By eye, on simulated dose, time-course and isoDTB experiments: every new
+figure at 16:9 and at one journal column, drawn to PNG by a real cairosvg 2.9
+(Cairo from Homebrew) through `ionomos export --format both --png-dpi 150`;
+sizes 2000 x 1125 and the chunks as described.
+
+**Not verified**: resvg, rsvg-convert and Inkscape themselves (their command
+lines are from their documentation and are only checked as stubs); any
+renderer on Windows; text in PNG with fonts other than macOS's Arial; the new
+SVG files in PowerPoint, Illustrator or Inkscape (as for D62); real lab
+titrations, time courses or isoDTB data; the .zip in a real browser (jsdom
+only).

@@ -29,6 +29,8 @@ from ionomos import tkutil
 
 log = logging.getLogger("ionomos.app")
 
+NORMALIZATION_CHOICES = ("auto", "median", "gn", "ratio", "none")  # downstream/fpa.py, D64; as the Analysis tab
+
 PAD = {"padx": 6, "pady": 3}
 LAB_DEFAULT = "(lab default)"
 SEV_COLOUR = {"error": "#c62828", "input": "#b26a00", "warning": "#555"}
@@ -163,7 +165,7 @@ class ExperimentEditor:
         ttk.Label(of, text="Normalisation").grid(row=2, column=0, sticky="e", **PAD)
         self.var("normalize").set(LAB_DEFAULT)
         ttk.Combobox(of, textvariable=self.var("normalize"), state="readonly", width=12,
-                     values=[LAB_DEFAULT, "median", "gn", "none"]).grid(row=2, column=1, columnspan=3, sticky="w", **PAD)
+                     values=[LAB_DEFAULT, *NORMALIZATION_CHOICES]).grid(row=2, column=1, columnspan=3, sticky="w", **PAD)
 
         act = ttk.Frame(right)
         act.grid(row=3, column=0, sticky="w", pady=(10, 0))

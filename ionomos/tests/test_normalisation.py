@@ -166,3 +166,10 @@ def test_an_ordinary_experiment_is_unchanged_by_the_new_default(tmp_path):
     for name in ("Drug_vs_DMSO_differential.tsv", "protein_matrix_processed.tsv"):
         assert (a / "results" / name).read_bytes() == (b / "results" / name).read_bytes()
     assert not [i for i in auto.issues if i.code == "NORMALISATION_COMPOSITION"]
+
+
+def test_editor_offers_every_normalisation():
+    pytest.importorskip("tkinter")
+    from ionomos import experiment_editor
+
+    assert set(experiment_editor.NORMALIZATION_CHOICES) == set(fpa.NORMALIZATION_METHODS)
