@@ -371,6 +371,7 @@ features × samples matrix of log2 values and runs the same statistics:
   | ZERO_TESTED / NO_VOLCANO / CRASH_* | problem | nothing testable, plot not written, a step crashed |
   | HIGH_IMPUTATION, FEW_FEATURES, NO_HITS, ENRICHMENT | note | worth knowing |
   | NORMALISATION_COMPOSITION | decide / note | median centring would shift the conditions against each other (many features change one way): asks when `median` / `gn` is chosen, a note when `auto` switched to the ratio method |
+  | TMT_PLEXES_NOT_IN_MODEL | note | several TMT plexes, `irs: none` and no block for the plex: the plex effect counts as replicate spread, so the tests miss changes (D71) |
   | TIMES | decide / note | a time course whose time points can't all be read (a name in `analysis.times` that isn't a condition, two times in one name) |
   | LIGANDED_DIRECTION, SITE_ANNOTATION | note | isoDTB: the competition ratio looks reversed; the site annotation file can't be used |
   | PSM_MASS_ERROR, PSM_MISSED_CLEAVAGES | note | a run's median precursor mass error is 10 ppm or more from 0; half or more of a run's PSMs have a missed cleavage |
@@ -513,6 +514,10 @@ conditions against each other:
   than 3 times the scatter among replicates, `auto` uses the ratio method and
   says so (`NORMALISATION_COMPOSITION`, a note). With `median` or `gn` chosen
   explicitly, the same finding asks the user to switch.
+- **TMT plexes not on one scale** (IRS off or not possible): the ratio
+  method and the check are worked out within each plex and combined, since
+  across such plexes a protein jumps with the plex and hides the
+  composition (D71). Plexes joined by IRS are compared all together.
 - When nothing changes in one direction, `auto` is median centring, with
   identical numbers.
 - `analysis.json` → `normalisation` records the method asked, the method

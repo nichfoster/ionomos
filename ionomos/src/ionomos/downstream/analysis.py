@@ -599,6 +599,7 @@ class Model:
     problem: str = ""                # why an asked-for design wasn't used ("" = none asked, or used)
     notes: list[str] = field(default_factory=list)
     prior: dict = field(default_factory=dict)   # the variance prior: DEqMS used or not, d0, ...
+    plex_df: bool = False            # residual df reduced by the plexes - 1 (IRS on the plex means, plex.df_spent)
 
     @property
     def formula(self) -> str:
@@ -613,11 +614,25 @@ class Model:
             out["not_used"] = self.problem
         if self.prior:
             out["prior"] = {k: v for k, v in self.prior.items() if k != "variance_prior"}
+        if self.plex_df:
+            out["plex_df"] = "residual df reduced by the plexes - 1 per feature (IRS on the plex means)"
         return out
 
 def make_model(m: QuantMatrix, s: Settings, comps: list[tuple[str, str | None]]) -> Model:
     """The design asked for in the settings, checked against these samples. A design that can't be used
-    leaves Model.problem set (the doctor raises DESIGN_NOT_USED) and the plain model is used."""
+    leaves Model.problem set (the doctor raises DESIGN_NOT_USED) and the plain model is used. After IRS on the
+    plex means, limma's residual df are reduced by the plexes - 1 unless the design holds the plexes (D71)."""
+    from ionomos.downstream import plex
+
+    out = _make_model(m, s, comps)
+    if s.test == "limma" and m.kind == "intensity" and plex.sum_scaled(m) and \
+            not (out.design is not None and plex.holds_plexes(out.design, m)):
+        out.plex_df = True
+        out.notes.append("IRS on the plex means: each plex's level was estimated from the channels that are then "
+                         "tested, so limma's residual df are reduced by the plexes - 1 per protein")
+    return out
+
+def _make_model(m: QuantMatrix, s: Settings, comps: list[tuple[str, str | None]]) -> Model:
     from ionomos.downstream import design
 
     out = Model()
@@ -678,6 +693,7 @@ def run_contrasts(p: fpa.Processed, comps: list[tuple[str, str | None]], s: Sett
     residual df (limma borrows it from every condition; Welch becomes a pooled t-test), labelled low confidence.
     model: the design (make_model); its .prior is filled with what the variance prior did."""
     from ionomos.downstream import design as dz
+    from ionomos.downstream import plex
 
     m = p.m
     pairs = [(a, b) for a, b in comps if b not in (None, "others")]
@@ -685,16 +701,17 @@ def run_contrasts(p: fpa.Processed, comps: list[tuple[str, str | None]], s: Sett
     des = model.design if model is not None else None
     counts = _counts(m, s)
     if s.test == "limma":
+        spent = plex.df_spent(p, des)  # IRS on the plex means (D71)
         mv = 0 if p.imputation != "none" else s.min_valid
         sq = dz.squeezer(counts, s.variance_prior) if counts is not None else None
         for group, gmv in (([c for c in pairs if c not in low], mv), ([c for c in pairs if c in low], 0)):
             if group:  # eBayes is fitted on every condition's residuals, so splitting contrasts changes nothing else
                 needs = group_needs(m, group, s, gmv)
                 if des is not None:
-                    res, info = dz.limma_design(m.values, des, group, gmv, counts, s.variance_prior, needs)
+                    res, info = dz.limma_design(m.values, des, group, gmv, counts, s.variance_prior, needs, spent)
                 else:
                     res = fpa.limma_contrasts(m.values, m.samples, m.condition, group, min_valid=gmv, squeeze=sq,
-                                              needs=needs)
+                                              needs=needs, df_spent=spent)
                     info = sq.info if sq else {}
                 if model is not None and info:
                     model.prior = info
@@ -702,9 +719,9 @@ def run_contrasts(p: fpa.Processed, comps: list[tuple[str, str | None]], s: Sett
                     out[(r.treatment, r.control)] = r
         if any(b == "others" for _, b in comps):
             if des is not None:
-                res, info = dz.limma_design_others(m.values, des, counts, s.variance_prior)
+                res, info = dz.limma_design_others(m.values, des, counts, s.variance_prior, spent)
             else:
-                res = fpa.limma_others(m.values, m.samples, m.condition, squeeze=sq)
+                res = fpa.limma_others(m.values, m.samples, m.condition, squeeze=sq, df_spent=spent)
                 info = sq.info if sq else {}
             if model is not None and info and not model.prior:
                 model.prior = info
@@ -735,9 +752,11 @@ def f_test(p: fpa.Processed, comps: list[tuple[str, str | None]], s: Settings, m
         ref = find_control(conds, replace(s, control=None))
     if ref not in conds:
         ref = conds[0]
+    from ionomos.downstream import plex
+
     des = model.design if model is not None and model.design is not None else dz.plain(m)
     mv = 0 if p.imputation != "none" else s.min_valid
-    return dz.f_test(m.values, des, ref, mv, _counts(m, s), s.variance_prior)
+    return dz.f_test(m.values, des, ref, mv, _counts(m, s), s.variance_prior, plex.df_spent(p, des))
 
 def _one_sample_classic(m: QuantMatrix, cols: list[int], name: str, s: Settings) -> fpa.ContrastResult:
     diff, t, pv, n_ = [], [], [], []

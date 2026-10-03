@@ -94,6 +94,10 @@ analysis:
   they are and the report warns. `irs: sum` forces the plex means; `none`
   switches IRS off. Plex means are not used while a channel has no
   condition yet (Sage TMT without a channel map).
+- **Plex means spend degrees of freedom**: each plex's mean is estimated
+  from the channels that are then tested, so limma's residual df are
+  reduced by the plexes - 1 for each protein (D71), unless the design
+  already has a block per plex.
 - **Not applied twice**: FragPipe's TMT-Integrator abundances are already
   ratios to the reference channel, and MSstatsTMT input is normalised to its
   `Norm` channels as MSstatsTMT does it.

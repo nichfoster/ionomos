@@ -10,7 +10,8 @@ table in this order; so does this module, with their defaults:
     filter_by_condition   min % with a value in at least one condition     filter_missing(condition_pct)
     MD / GN normalization median centring (+ MAD scaling)                  normalize("median" | "gn")
     (not FragPipe-Analyst) ratio normalisation on stable features, and     normalize("ratio" | "auto")
-                           auto: median unless the composition check fails
+                           auto: median unless the composition check fails (within plexes for TMT
+                           plexes not joined by IRS)
     impute(fun = "man")   Perseus-type draws, set.seed(123)                impute("perseus")   (exact, R's RNG)
       "min" "zero" "MinDet" "MinProb" "knn"                                impute(...)          (see each)
     test_limma            ~0 + condition, per-contrast refit when values   limma_contrasts / limma_others
@@ -169,6 +170,82 @@ def ratio_shifts(cols: list[list[float | None]]) -> tuple[list[float] | None, in
     return [s - mean for s in shifts], len(use)
 
 
+def plex_groups(m: QuantMatrix) -> list[list[int]] | None:
+    """The sample columns of each TMT plex (m.meta["plex"], plex.py) that are not on one scale yet, when every
+    sample has a plex, there are two or more plexes and each holds at least two samples; else None (the samples
+    are then compared all together). Plexes already on one scale (IRS, MSstatsTMT's Norm channels, ratios to a
+    reference) are compared all together: there a protein no longer jumps with the plex, and three times the
+    channels per feature measure the composition a little more surely."""
+    bridge = m.meta.get("bridge")
+    if (isinstance(bridge, dict) and bridge.get("applied")) or m.meta.get("ratio_to_reference"):
+        return None
+    plex = m.meta.get("plex") if isinstance(m.meta.get("plex"), dict) else {}
+    groups: dict[str, list[int]] = {}
+    for j, s in enumerate(m.samples):
+        p = plex.get(s)
+        if p in (None, ""):
+            return None
+        groups.setdefault(str(p), []).append(j)
+    if len(groups) < 2 or any(len(ix) < 2 for ix in groups.values()):
+        return None
+    return list(groups.values())
+
+
+def _composition(d: list[float], cond: list[str], plexes: list[list[int]], features: int) -> dict:
+    """The composition check on d (per sample: its median-centring shift minus its ratio shift). Within each
+    plex (one plex: all samples), the difference between two conditions' mean d; over the plexes holding both,
+    their mean weighted by 1 / (1/n_a + 1/n_b). The largest such difference, and its standard error from the
+    scatter of d among the replicates of a condition within a plex (they share its composition, so that scatter
+    is the check's own noise: a short table with many missing values makes sample medians jump)."""
+    order = list(dict.fromkeys(cond))
+    cells: dict[tuple[int, str], list[float]] = {}
+    for k, ix in enumerate(plexes):
+        for j in ix:
+            cells.setdefault((k, cond[j]), []).append(d[j])
+    mean = {key: sum(v) / len(v) for key, v in cells.items()}
+    df = sum(len(v) - 1 for v in cells.values())
+    var = sum((x - mean[key]) ** 2 for key, v in cells.items() for x in v) / df if df > 0 else 0.0
+    best = None
+    for a in order:  # a == b included, so one condition (or a tie) gives a shift of 0, as the plain check did
+        for b in order:
+            ks = [k for k in range(len(plexes)) if (k, a) in cells and (k, b) in cells]
+            if not ks:
+                continue
+            inv = [1 / len(cells[(k, a)]) + 1 / len(cells[(k, b)]) for k in ks]
+            if len(ks) == 1:  # one plex (or none known): the plain difference, exactly as before D71
+                est, se = mean[(ks[0], a)] - mean[(ks[0], b)], math.sqrt(var * inv[0])
+            else:
+                tot = sum(1 / x for x in inv)
+                est = sum((mean[(k, a)] - mean[(k, b)]) / x for k, x in zip(ks, inv, strict=True)) / tot
+                se = math.sqrt(var / tot)
+            if best is None or est > best[0]:
+                best = (est, a, b, se)
+    shift, hi, lo, se = best
+    return {"shift": shift, "between": [hi, lo], "limit": COMPOSITION_LIMIT, "se": se, "features": features,
+            "exceeded": shift > COMPOSITION_LIMIT and shift > 3 * se}
+
+
+def _plex_ratio_shifts(cols: list[list[float | None]], meds: list[float], plexes: list[list[int]],
+                       overall: list[float] | None) -> tuple[list[float] | None, int]:
+    """ratio_shifts() within each plex (a feature's ratio to its mean over the plex's own channels, which no
+    per-protein plex effect or IRS changes), put together with a level per plex: the plex's mean ratio shift
+    over all samples when there is one (overall), else its mean median shift. (shifts centred on 0, the
+    fewest stable features a plex used); (None, n) when a plex has too few complete features."""
+    shifts = [0.0] * len(cols)
+    fewest = None
+    for ix in plexes:
+        within, n = ratio_shifts([cols[j] for j in ix])
+        fewest = n if fewest is None else min(fewest, n)
+        if within is None:
+            return None, fewest
+        level = overall if overall is not None else meds
+        base = sum(level[j] for j in ix) / len(ix)
+        for j, w in zip(ix, within, strict=True):
+            shifts[j] = base + w
+    mean = sum(shifts) / len(shifts)
+    return [s - mean for s in shifts], fewest or 0
+
+
 def normalize_info(m: QuantMatrix, method: str) -> tuple[QuantMatrix, dict]:
     """(normalised matrix, what was done). Methods:
 
@@ -181,6 +258,9 @@ def normalize_info(m: QuantMatrix, method: str) -> tuple[QuantMatrix, dict]:
       auto     median, unless the composition check fails: the two methods' sample shifts, averaged per condition,
                disagree by more than COMPOSITION_LIMIT log2 between two conditions, and by more than 3 times
                the scatter of that disagreement among replicates. Then ratio is used.
+
+    Several TMT plexes not on one scale (plex_groups, D71): the ratios and the check are taken within each plex
+    and combined, since across such plexes a protein's level jumps with the plex and hides the composition.
 
     The info always carries the composition check when it could be made ("composition": the largest
     disagreement between two conditions, and which), so median / gn can be warned about."""
@@ -195,22 +275,22 @@ def normalize_info(m: QuantMatrix, method: str) -> tuple[QuantMatrix, dict]:
         info["used"] = "none"
         return m, info
     target = stats.median(good)
-    rshift, n_used = ratio_shifts(cols) if all(not math.isnan(x) for x in meds) else (None, 0)
+    complete = all(not math.isnan(x) for x in meds)
+    rshift, n_used = ratio_shifts(cols) if complete else (None, 0)
+    plexes = plex_groups(m) if complete else None
+    if plexes:
+        within, n_within = _plex_ratio_shifts(cols, meds, plexes, rshift)
+        if within is not None:
+            rshift, n_used = within, n_within
+        else:
+            plexes = None
     if rshift is not None:
         mshift = [x - sum(meds) / len(meds) for x in meds]
-        by: dict[str, list[float]] = {}
-        for s, a, b in zip(m.samples, mshift, rshift, strict=True):
-            by.setdefault(m.condition[s], []).append(a - b)
-        mean = {c: sum(v) / len(v) for c, v in by.items()}
-        hi, lo = max(mean, key=mean.get), min(mean, key=mean.get)
-        shift = mean[hi] - mean[lo]
-        # replicates of a condition share its composition, so their scatter is the check's own noise (a short
-        # table with many missing values makes sample medians jump): the shift must also stand out from it
-        df = sum(len(v) - 1 for v in by.values())
-        var = sum((x - mean[c]) ** 2 for c, v in by.items() for x in v) / df if df > 0 else 0.0
-        se = math.sqrt(var * (1 / len(by[hi]) + 1 / len(by[lo])))
-        info["composition"] = {"shift": shift, "between": [hi, lo], "limit": COMPOSITION_LIMIT, "se": se,
-                               "features": n_used, "exceeded": shift > COMPOSITION_LIMIT and shift > 3 * se}
+        d = [a - b for a, b in zip(mshift, rshift, strict=True)]
+        info["composition"] = _composition(d, [m.condition[s] for s in m.samples],
+                                           plexes or [list(range(len(m.samples)))], n_used)
+        if plexes:
+            info["composition"]["plexes"] = len(plexes)
     else:
         info["composition"] = {"shift": None, "features": n_used, "exceeded": False,
                                "reason": f"fewer than {RATIO_MIN_FEATURES} features are measured in every sample"}
@@ -385,7 +465,8 @@ def process(m: QuantMatrix, *, exclude: list[str] | None = None, conditions: dic
     if norm["asked"] == "auto" and norm["used"] == "ratio":
         notes.append(f"normalisation: median centring would have shifted {comp['between'][0]} against "
                      f"{comp['between'][1]} by {comp['shift']:.2f} log2 (many features change in one direction), so "
-                     f"the samples were normalised on the ratios of {comp['features']:,} stable features instead")
+                     f"the samples were normalised on the ratios of {comp['features']:,} stable features instead" +
+                     (f", compared within each of the {comp['plexes']} TMT plexes" if comp.get("plexes") else ""))
     if norm.get("fallback"):
         notes.append(f"normalisation: ratio was asked for, but {norm['fallback']}; median centring was used")
     method = resolve_imputation(imputation, m)
@@ -474,6 +555,23 @@ def _ebayes(s2: list[float], df: list[int | float]):
     return post, dft, d0, s0
 
 
+def spend_df(s2: list[float], df: list[int], spent: list[int] | None) -> tuple[list[float], list[int]]:
+    """(s2, df) with spent[i] residual df taken from feature i: its residual sum of squares over fewer df. For
+    parameters estimated from the same values before the model saw them (IRS on the plex means, D71)."""
+    if not spent:
+        return s2, df
+    out_s2, out_df = [], []
+    for v, d, k in zip(s2, df, spent, strict=True):
+        if k > 0 and d > 0:
+            n = d - k
+            out_s2.append(v * d / n if n > 0 else math.nan)
+            out_df.append(max(n, 0))
+        else:
+            out_s2.append(v)
+            out_df.append(d)
+    return out_s2, out_df
+
+
 def _toptable(coef, su, post, dft, level: float = 0.95):
     t, p, lo, hi = [], [], [], []
     qcache: dict[float, float] = {}
@@ -497,19 +595,20 @@ def _toptable(coef, su, post, dft, level: float = 0.95):
 
 def limma_contrasts(values: Matrix, samples: list[str], condition: dict[str, str],
                     contrasts: list[tuple[str, str]], min_valid: int = 0, squeeze=None,
-                    needs: dict | None = None) -> list[ContrastResult]:
+                    needs: dict | None = None, df_spent: list[int] | None = None) -> list[ContrastResult]:
     """FragPipeAnalystR test_limma(type = "all" | "control" | "manual"): one model over all conditions
     (~ 0 + condition), each contrast refitted from its two coefficients, one eBayes for all contrasts.
     min_valid > 0 additionally leaves a feature untested in a contrast when either group has fewer
     measured values (used when nothing is imputed). squeeze replaces eBayes' variance prior (design.squeezer: DEqMS).
-    needs: {(treatment, control): (values needed in each)} instead of min_valid for both (analysis.group_needs)."""
+    needs: {(treatment, control): (values needed in each)} instead of min_valid for both (analysis.group_needs).
+    df_spent: residual df per feature already used up before the model (spend_df)."""
     conds = []
     for s in samples:
         if condition[s] not in conds:
             conds.append(condition[s])
     groups = [[j for j, s in enumerate(samples) if condition[s] == c] for c in conds]
     ns, means, s2, df = _group_fit(values, groups)
-    post, dft, d0, s0 = (squeeze or _ebayes)(s2, df)
+    post, dft, d0, s0 = (squeeze or _ebayes)(*spend_df(s2, df, df_spent))
     out = []
     for a, b in contrasts:
         ia, ib = conds.index(a), conds.index(b)
@@ -525,7 +624,8 @@ def limma_contrasts(values: Matrix, samples: list[str], condition: dict[str, str
     return out
 
 
-def limma_others(values: Matrix, samples: list[str], condition: dict[str, str], squeeze=None) -> list[ContrastResult]:
+def limma_others(values: Matrix, samples: list[str], condition: dict[str, str], squeeze=None,
+                 df_spent: list[int] | None = None) -> list[ContrastResult]:
     """test_limma(type = "others"): each condition against all other samples, a separate model each."""
     conds = []
     for s in samples:
@@ -535,7 +635,7 @@ def limma_others(values: Matrix, samples: list[str], condition: dict[str, str], 
     for c in conds:
         g = [[j for j, s in enumerate(samples) if condition[s] == c], [j for j, s in enumerate(samples) if condition[s] != c]]
         ns, means, s2, df = _group_fit(values, g)
-        post, dft, d0, s0 = (squeeze or _ebayes)(s2, df)
+        post, dft, d0, s0 = (squeeze or _ebayes)(*spend_df(s2, df, df_spent))
         coef = [m[0] - m[1] if n[0] and n[1] else math.nan for n, m in zip(ns, means, strict=True)]
         su = [math.sqrt(1 / n[0] + 1 / n[1]) if n[0] and n[1] else math.nan for n in ns]
         t, p, lo, hi, q = _toptable(coef, su, post, dft)

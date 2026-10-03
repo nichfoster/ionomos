@@ -2263,7 +2263,8 @@ was label-free DIA only.
      isoDTB replicates give 5.8 – 9.8 % with limma: with 1 df per site the
      test rests on a variance prior whose shape the sites do not follow (with
      equal SDs it is calibrated).
-   None of these is a small, clearly right change, so none was made.
+   None of these is a small, clearly right change, so none was made. ((b)
+   and (c) were fixed in D71.)
 
 **Not verified**: real data of any kind. The simulated tables have the
 layouts of FragPipe's label quant and MaxQuant's protein groups, not their
@@ -2527,3 +2528,82 @@ file unreadable; which code page FragPipe's tools really write (ROADMAP
 the name check find raws through `intake.raw_paths`, so a `<plex>\` drop's
 files are listed and can be removed (moved aside, as every inbox removal is);
 added while combining the 0.15.0 PRs.
+
+### D71 — TMT plexes: the composition check looks within plexes; IRS on the plex means pays its degrees of freedom
+**2026-10-03.** D66's simulated TMT grid left two open questions: (b) without
+IRS the composition check (D64) could not see a pulldown, and (c) IRS on each
+plex's own mean (`irs: sum`) was slightly liberal. Both are fixed; the
+default (IRS on a pool + `auto`) gives the same numbers on the same tables.
+
+1. **The composition check within plexes** (`fpa.plex_groups`,
+   `fpa._composition`, `fpa._plex_ratio_shifts`). When the samples belong to
+   two or more TMT plexes that are **not** on one scale (IRS off or refused),
+   the ratio method's shifts are taken within each plex (a feature's ratio
+   to its mean over that plex's own channels, which a per-protein plex effect
+   does not touch), and the check compares two conditions within each plex
+   and combines the plexes holding both, weighted 1 / (1/n_a + 1/n_b), with
+   its standard error from the replicate scatter within plex and condition.
+   The plexes' levels come from the ratio method over all samples (else the
+   sample medians). Each plex needs two channels and 20 complete features,
+   else the samples are compared all together as before.
+   - **Not after IRS.** Plexes already on one scale (IRS, MSstatsTMT's Norm
+     channels, TMT-Integrator's ratios) are compared all together, as in
+     D64. Tried first within plexes there too: the shift it measured was a
+     little smaller (10 tables of a 2-fold, 20 % pulldown with 2 DMSO
+     channels per plex: 0.153 against 0.157 on average), and in one table it
+     fell to 0.100, at the 0.1 limit, kept median centring and put that
+     scenario at 8.4 % false; across all channels there are three times as
+     many values per feature.
+   - With one plex (or none known) the check is D64's to the last digit (a
+     test recomputes it), so earlier analyses do not change.
+2. **IRS on the plex means spends a df per plex** (`plex.df_spent`,
+   `fpa.spend_df`; `limma_contrasts`, `limma_others`, `design.limma_design`,
+   `limma_design_others`, `f_test` take `df_spent`). Each plex a protein was
+   scaled in (every channel of it measured) had its level estimated from the
+   channels then tested, and the common target gives one back: limma's
+   residual df are reduced by (plexes - 1), the residual variance rescaled to
+   the same sum of squares, before the variance prior. That is what fitting
+   the plex as a fixed effect costs, without the fit. Not applied when the
+   design already holds the plexes (a block per plex or finer:
+   `plex.holds_plexes`, by rank), nor to the t-tests.
+   - **Why not a plex block instead?** Measured: after sum-IRS a block gave
+     6.5 % (both ways) / 5.2 % (pulldown), no better than nothing. limma's
+     `contrasts.fit` approximates the standard error of a protein with a
+     missing value when the design is not orthogonal, and such proteins came
+     out liberal (unchanged p < 0.05: 9.9 % after sum-IRS, 7 % for the block
+     without IRS, 5.4 – 5.6 % for complete proteins). The df reduction keeps
+     the plain, orthogonal model.
+   - **Against R** (`tests/golden/tmt_sum/`, `run_tmt_sum_reference.R`):
+     three plexes of 3 + 3 channels without a pool, with proteins in one, two
+     or three plexes, a channel missing in one plex or in all; IRS, the
+     filter, median normalisation and limma 3.68.5 given the reduced
+     `df.residual` and `sigma` agree to 1e-8 (fold change, interval, t, p,
+     adjusted p, the prior); without the reduction most p-values differ.
+   - `analysis.json` → `model.plex_df` says so; a model note too.
+3. **What a person is told.** "How far to trust this" gets a **TMT plexes**
+   line: reference channels, plex means with the df reduced, or a plex
+   block (ok); neither on one scale nor in the model, or a t-test after IRS
+   on the plex means ("check"). New doctor warning
+   `TMT_PLEXES_NOT_IN_MODEL` (`irs: none` and no plex block; help entry).
+   `NORMALISATION_COMPOSITION` names the plexes when the check was made
+   within them, and now fires without IRS, where it should.
+4. **Numbers** (`ionomos benchmark --kind tmt`, the standard grid; D66's in
+   brackets): IRS on plex means + auto 5.1 % (6.6 %) with changes both ways,
+   4.0 % (5.3 %) in a pulldown, range 3.0 – 7.7 % (3.7 – 9.3 %), the same
+   sensitivity (93 / 98 %). No IRS with a plex block, pulldown: 4.7 % (59 %),
+   unchanged proteins within -0.04 (-0.19 to -0.26). No IRS without a block,
+   pulldown: 0.3 % (5.1 %), 40 % of 2-fold changes found (31 %). Default and
+   IRS + median: unchanged. On 20 seeds of the four "both ways" cells (1,000
+   proteins, 2-fold): plex means 6.89 % → 5.11 %, where the exact plex-block
+   model without IRS gives 5.54 % and IRS on a pool 4.16 %.
+5. **Guards** (`tests/test_benchmark.py`, `TMT_GRIDS["guard_sum"]`,
+   `["guard_pulldown"]`; limits from 30 other blocks of 10 seeds, worst mean
+   + about 3.5 SD): plex means FDP at most 10 % (blocks: mean 4.7 – 5.0 %,
+   SD 0.8 – 1.4 %; without the reduction 6.2 – 7.4 %, and the same seeds
+   without it must come out worse); a pulldown without IRS within 0.06 log2,
+   with the plex block at most 10 % false (mean 5.0 – 6.0 %). About 15 s.
+
+**Not verified**: real TMT data; whether real plex effects are additive per
+protein, as simulated. **Open** (ROADMAP): limma's block approximation with
+missing values; proteins `irs: sum` leaves unscaled or drops a plex for; the
+t-tests after plex means; the 0.1 log2 limit at a 2-fold pulldown.

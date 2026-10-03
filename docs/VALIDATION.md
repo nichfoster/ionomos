@@ -25,6 +25,7 @@ no real FragPipe-Analyst, MSstats or Perseus export has been compared.
 | Time courses | limma 3.68.5 | 1e-8 | `tests/test_timecourse.py` |
 | Dose-response curves | CurveCurator 0.6.0 | classes, pEC50, F, p | `tests/test_dose_response.py` |
 | TMT summaries | MSstatsTMT 2.20 | 1e-9 | `tests/test_plexes.py` |
+| IRS on the plex means (3 plexes, no reference channel), filter, median normalisation, limma with each protein's residual df reduced by its plexes - 1 | base R + limma 3.68.5 | 1e-8 | `tests/test_tmt_plex_stats.py`, `tests/golden/tmt_sum/` |
 | t-tests, Benjamini-Hochberg | scipy | 1e-9 (p), 1e-12 (BH) | `tests/test_downstream.py` |
 
 These say the port computes what the reference computes on the same input.
@@ -275,15 +276,21 @@ reference and are not scaled again). The channels' conditions come in as
   (`irs: sum`); no IRS; no IRS with the plex as a block (`block_from`). TMT is
   not imputed, so `min_valid` and the small-group rule apply.
 
-Measured 2026-10-02:
+Measured 2026-10-03, after D71 (the D66 numbers of 2026-10-02, where they
+differ, in brackets):
 
 | Setting | FDP, changes both ways | FDP, pulldown | range | FDP with \|log2FC\| ≥ 1 (worst scenario) | found 2- / 4-fold | offset of unchanged, pulldown |
 |---|---|---|---|---|---|---|
 | IRS on the pool + auto (**default**) | 4.4 % | 3.8 % | 2.9 – 6.6 % | 0.2 % (1.0 %) | 95 / 99 % | -0.04 – 0.00 |
 | IRS on the pool + median | 4.4 % | 67 % | 2.9 – 77 % | 1.0 % (8.4 %) | 94 / 99 % | -0.43 – -0.20 |
-| IRS on plex means + auto | 6.6 % | 5.3 % | 3.7 – 9.3 % | 0.3 % (0.9 %) | 93 / 98 % | -0.03 – 0.00 |
-| no IRS + auto | 0.3 % | 5.1 % | 0 – 9.9 % | 0.2 % (6.9 %) | 29 / 88 % | -0.26 – -0.19 |
-| no IRS, plex as a block | 5.3 % | 59 % | 4.0 – 70 % | 0.6 % (11 %) | 94 / 99 % | -0.26 – -0.19 |
+| IRS on plex means + auto | 5.1 % (6.6 %) | 4.0 % (5.3 %) | 3.0 – 7.7 % (3.7 – 9.3 %) | 0.3 % (0.9 %) | 93 / 98 % | -0.03 – 0.00 |
+| no IRS + auto | 0.3 % | 0.3 % (5.1 %) | 0 – 1.1 % (0 – 9.9 %) | 0.1 % (1.1 %) (6.9 %) | 40 / 90 % (31 / 88 %) | -0.03 – 0.00 (-0.26 – -0.19) |
+| no IRS, plex as a block | 5.3 % | 4.7 % (59 %) | 3.4 – 6.4 % (4.0 – 70 %) | 0.2 % (1.2 %) (11 %) | 95 / 99 % | -0.04 – 0.00 (-0.26 – -0.19) |
+
+What changed (D71): without IRS the composition check and the ratio method
+work within each plex, so a pulldown is seen through the plex effect; after
+IRS on the plex means limma's residual df are reduced by the plexes - 1.
+The default's rows are the same tables and the same numbers.
 
 What this says, on data like this simulation:
 
@@ -295,16 +302,24 @@ What this says, on data like this simulation:
   fold-change cut-off keeps most of them out of the hits, not all: 8.4 % false
   hits with 2 DMSO channels per plex. The lab PC's `normalize: median` is
   this row.
-- **Without IRS the plex effect stays in.** The plain model then finds 29 %
-  of the 2-fold changes. A plex block gets the power back, but in a pulldown
-  the normalisation cannot see the composition through the plex effect (the
-  ratio method and its check compare a protein across plexes), so the
-  unchanged proteins shift as with median centring. Open question (D66):
-  compare within plexes when plexes are known and IRS is off.
-- **IRS on the plex means is slightly liberal** (6.6 % where 4.5 % is aimed
-  at, up to 9.3 % in one scenario): the plex mean is estimated from the same
-  channels that are then tested, a degree of freedom limma does not know was
-  spent. `irs: auto` uses it only when no reference channel is found.
+- **Without IRS the plex effect stays in.** The plain model then finds 40 %
+  of the 2-fold changes (conservative: 0.3 % false); the doctor warns
+  (`TMT_PLEXES_NOT_IN_MODEL`) and "How far to trust this" marks it. A plex
+  block gets the power back. Since D71 the normalisation compares the
+  samples within each plex when the plexes are not on one scale, so a
+  pulldown is seen there too (before, its unchanged proteins shifted by
+  -0.2 log2 and 59 % of the calls at adjusted p alone were false).
+- **IRS on the plex means spends a degree of freedom per plex.** The plex
+  mean is estimated from the channels that are then tested; limma did not
+  know and was slightly liberal (6.6 %, up to 9.3 % in one scenario). Since
+  D71 each protein's residual df are reduced by the plexes - 1 (5.1 %, up to
+  7.7 %), the same as R's limma given the reduced df
+  (`tests/golden/tmt_sum/`). Fitting the plex as a block after it instead
+  does not help (6.5 % / 5.2 %): with a missing channel, limma's
+  `contrasts.fit` approximates a non-orthogonal design's standard errors,
+  and such proteins came out liberal (7 – 10 % of unchanged p-values below
+  0.05). `irs: auto` uses the plex means only when no reference channel is
+  found.
 
 **The guard**: IRS on the pool + auto, 2 and 3 plexes of 4 vs 4 and 2 vs 6,
 10 % of 600 proteins 2-fold both ways, 10 tables each; the pooled FDP must
@@ -312,7 +327,21 @@ stay at or below **8.5 %**, the sensitivity at or above 0.85, the bias within
 0.05 log2. Over 30 other blocks of 10 seeds: mean 4.5 – 4.8 %, SD 0.8 –
 1.0 %, range 2.6 – 7.0 %; the fixed seeds measure 2.6 – 5.4 %. A second test
 holds the pulldown numbers above in their direction: median centring off by
-more than 0.12 log2 and over 20 % false at alpha, `auto` within 0.03.
+more than 0.12 log2 and over 20 % false at alpha, `auto` within 0.03, the plex
+block within 0.06.
+
+**Two more guards (D71)**, the same way (30 other blocks of 10 seeds):
+- IRS on the plex means + auto, 2 and 3 plexes of 4 vs 4 and 2 vs 6, 10 % of
+  600 proteins 2-fold both ways: pooled FDP at most **10 %**, sensitivity at
+  least 0.83; over the blocks mean 4.7 – 5.0 %, SD 0.8 – 1.4 %, range 2.6 – 9.0 %. The same seeds without the df
+  reduction must come out worse (over the blocks: mean 6.2 – 7.4 %, up to
+  11.8 %).
+- No IRS, 3 plexes of 4 vs 4 and 2 vs 6, 20 % of 600 proteins up 2-fold:
+  with the plex as a block FDP at most **10 %** (over the blocks mean 5.0 –
+  6.0 %, SD 0.8 – 1.2 %, range 2.7 – 9.3 %), and with or without the block
+  the unchanged proteins within 0.06 log2 (over the blocks -0.047 to
+  -0.012); without the block the sensitivity stays below 0.7 (0.30 – 0.53),
+  which is what the doctor warns about.
 
 These simulations share the DIA benchmark's limits: normal noise on the log
 scale, missingness from abundance alone, changes of one size, no outlier

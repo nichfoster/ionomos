@@ -359,10 +359,30 @@ cd ionomos/tests/golden/unequal
 python3 make_unequal_inputs.py && Rscript run_unequal_reference.R <R library with limma>
 ```
 
+**TMT plexes (D71, `tests/test_tmt_plex_stats.py`, `tests/golden/tmt_sum/`)**:
+three TMT plexes of 3 DMSO + 3 Drug channels without a reference, 300
+proteins with a plex effect, proteins in one, two or three plexes, a channel
+missing in one plex or in every plex. IRS on the plex means, the filter,
+median normalisation and limma with each protein's residual df reduced by
+its plexes - 1 agree with base R + limma 3.68.5 to 1e-8 (the R script also
+writes the result without the reduction, which differs). The same file
+checks the composition check within plexes on simulated pulldowns (it sees a
+pulldown through a plex effect of SD 1 log2 that the check across plexes
+misses; it stays quiet when changes go both ways; one plex gives D64's check
+to the last digit), when the df are not reduced (a design that holds the
+plexes, a t-test, no plex means), and end to end what the doctor and "How
+far to trust this" say. Regenerate:
+
+```bash
+cd ionomos/tests/golden/tmt_sum
+python3 make_tmt_sum_inputs.py && Rscript run_tmt_sum_reference.R <R library with limma>
+```
+
 ### The calibration guards and the fuzz (`tests/test_benchmark.py`, `tests/test_robustness.py`)
 
 Both are seeded, so a run is repeatable. There is a guard per kind of data
-(DIA, isoDTB, TMT; D60, D66); their tolerances are written at the top of
+(DIA, isoDTB, TMT; D60, D66), and two more for TMT (`guard_sum`: IRS on the
+plex means; `guard_pulldown`: a pulldown without IRS; D71); their tolerances are written at the top of
 `test_benchmark.py` with the measurement they come from. To measure them
 again with other seeds (about 20 s for DIA, 1 s for isoDTB, 2 minutes for TMT):
 

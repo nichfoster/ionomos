@@ -116,6 +116,13 @@ TMT_GRIDS = {
               "missing": ["typical"], "settings": [s[0] for s in TMT_SETTINGS], "seeds": 2, "proteins": 600},
     "guard": {"designs": [(4, 4), (2, 6)], "plexes": [2, 3], "effects": [1.0], "changed": [(0.1, "both")],
               "missing": ["typical"], "settings": ["IRS on the pool + auto (default)"], "seeds": 4, "proteins": 600},
+    # the D71 guards: IRS on the plex means (its residual df), and a pulldown without IRS (the composition check
+    # within plexes)
+    "guard_sum": {"designs": [(4, 4), (2, 6)], "plexes": [2, 3], "effects": [1.0], "changed": [(0.1, "both")],
+                  "missing": ["typical"], "settings": ["IRS on plex means + auto"], "seeds": 4, "proteins": 600},
+    "guard_pulldown": {"designs": [(4, 4), (2, 6)], "plexes": [3], "effects": [1.0], "changed": [(0.2, "up")],
+                       "missing": ["typical"], "settings": ["no IRS, plex as a block", "no IRS + auto"], "seeds": 4,
+                       "proteins": 600},
 }
 KINDS = {
     "dia": "label-free DIA protein matrices (DIA-NN's report.pg_matrix.tsv)",

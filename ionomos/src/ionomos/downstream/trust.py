@@ -17,6 +17,8 @@ its threshold; the thresholds are the ones those checks already use:
                    principal component (BATCH_SUSPECT); a scorecard warning is named, not marked
     missing        more than 40 % of the values imputed (HIGH_IMPUTATION), or random missingness imputed as
                    low values (IMPUTATION_MISMATCH)
+    plexes         several TMT plexes neither put on one scale (IRS) nor in the model as a block (D71); with IRS on
+                   the plex means, the t-test (limma reduces its df for them)
     imputed hits   5 or more hits, and 30 % or more of a comparison's hits, resting on imputed values
     p-values       a histogram shape of "conservative" or "hump"
     power          the fold change detectable at 80 % power (p 0.05, median spread) is above the cut-off
@@ -133,6 +135,9 @@ def build(m, p, diffs: list, insight: dict | None, qcd: dict | None, settings, g
                 text += " Random missingness imputed as low values can create fold changes."
             out.append(_st("missing", "Missing values", imputed > 0.4 or mismatch, text, missing_share=share,
                            imputed_share=imputed, imputation=p.imputation, pattern=verdict))
+        plexed = _plexes(p, settings)
+        if plexed:
+            out.append(plexed)
 
     for d in diffs:
         hits = d.up + d.down
@@ -211,6 +216,45 @@ def build(m, p, diffs: list, insight: dict | None, qcd: dict | None, settings, g
             "benchmark_simulated": next((x for x in (_external(results_dir, n, digest) for n in SIMULATED_JSONS) if x),
                                         None),
             "basis": "Each statement repeats a check of this analysis with its number. There is no overall score."}
+
+
+def _plexes(p, settings) -> dict | None:
+    """Several TMT plexes (plex.py, D48 / D71): how they were put on one scale, and what that means for the tests.
+    The numbers are the simulated TMT benchmark's (docs/VALIDATION.md)."""
+    from ionomos.downstream import analysis, plex
+
+    pm = p.m
+    if pm.exp != "TMT" or pm.kind != "intensity" or pm.meta.get("ratio_to_reference") or pm.meta.get("precomputed"):
+        return None
+    n = len(set(plex.plexes_of(pm).values()))
+    bridge = pm.meta.get("bridge") if isinstance(pm.meta.get("bridge"), dict) else {}
+    if n < 2:
+        return None
+    comp = (p.normalization or {}).get("composition") or {}
+    within = (f" The normalisation's composition check compared the samples within each of the {comp['plexes']} "
+              "plexes." if comp.get("plexes") else "")
+    if bridge.get("applied") and plex.sum_scaled(pm):
+        limma = settings is None or settings.test == "limma"
+        text = (f"TMT plexes: {n} put on one scale by each plex's own mean (no reference channel found)." +
+                (" The plex means were estimated from the channels that are then tested, so limma's residual df "
+                 "were reduced by the plexes - 1 for each protein (on simulated plexes this keeps the false "
+                 "discoveries at about 5 % instead of 6.6 %)." if limma else
+                 " The t-test does not allow for the plex means having been estimated from the same channels; its "
+                 "p-values are slightly too small (limma allows for it).") + within)
+        return _st("plexes", "TMT plexes", not limma, text, plexes=n, method=bridge.get("method"), df_reduced=limma)
+    if bridge.get("applied"):
+        refs = ", ".join(bridge.get("reference") or [])
+        how = f"the reference channel(s) {refs}" if refs else str(bridge.get("method") or "a reference")
+        return _st("plexes", "TMT plexes", False, f"TMT plexes: {n} put on one scale with {how}.{within}", plexes=n,
+                   method=bridge.get("method"))
+    model = analysis.make_model(pm, settings, []) if settings is not None and settings.has_design else None
+    if model is not None and model.design is not None and plex.holds_plexes(model.design, pm):
+        return _st("plexes", "TMT plexes", False, f"TMT plexes: {n}, not put on one scale; the model has the plex as "
+                   f"a block, so each comparison is made within the plexes.{within}", plexes=n, method="block")
+    return _st("plexes", "TMT plexes", True, f"TMT plexes: {n}, neither put on one scale nor in the model, so the "
+               "plex effect is part of the replicate spread: the tests are conservative and miss changes (on "
+               "simulated plexes 40 % of 2-fold changes found, against 95 % with IRS or a plex block)." + within,
+               plexes=n, method="none")
 
 
 def _external(results_dir: Path | None, name: str, digest: str) -> dict | None:
