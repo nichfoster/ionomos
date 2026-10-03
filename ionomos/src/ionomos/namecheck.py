@@ -88,6 +88,12 @@ def _file(name: str, method: str | None, cfg: Config) -> FileReading:
 
 
 def _raws_on_disk(folder: Path) -> list[str]:
+    from ionomos.intake import IntakeError, raw_paths
+
+    try:
+        return sorted(p.name for p in raw_paths(folder))  # also one folder per plex (D69)
+    except (IntakeError, OSError):
+        pass  # a layout intake refuses: still read every name it can see
     names = []
     for base in (folder, folder / "raw"):
         if base.is_dir():

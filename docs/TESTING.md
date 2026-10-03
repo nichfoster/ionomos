@@ -5,7 +5,7 @@ Three layers, all runnable on macOS and Windows:
 | Layer | What | Command |
 |---|---|---|
 | Unit + e2e (`pytest`) | 284 tests: naming, config, config I/O, ledger, watcher timing, intake, overrides, **FragPipe runner + worker** (done / failed / held / timeout / stop / re-run against the fake FragPipe), resolver logic, **real tkinter dialog and the setup app** (skipped if no display), and 6 end-to-end runs of watcher-thread + intake against testbed samples | `scripts/test_mac.sh` / `scripts\test_windows.ps1` |
-| Testbed (manual) | A fake lab on disk with 12 sample drops covering every path, a fake FragPipe, and the real CLI | `ionomos testbed …` |
+| Testbed (manual) | A fake lab on disk with 17 sample drops covering every path, a fake FragPipe, and the real CLI | `ionomos testbed …` |
 | The real PC | `dry-run` on real folders, then a throwaway drop; **Copy diagnostics** to report back | see DEV_LOOP.md |
 | Downstream | other engines (`tests/test_engines.py`): each format with its real column names, FDR / reverse / contaminant filters, provenance, and the same simulated experiment giving identical hits through DIA-NN, MaxQuant, Spectronaut and Sage files (Sage's `lfq.tsv`: razor grouping, fractions added, peptide and protein q filters, median polish checked by hand); D35 insights: outlier / batch / missingness / p-value-shape detection on planted data and no false alarms on clean data, rank-based gene sets, end to end into the TSVs, analysis.json and the report (`tests/test_insights.py`); R-script ports byte-identical to the real scripts; t-tests/BH vs scipy; moderated t vs limma; planted-effect recovery for isoDTB/DIA/TMT; report self-contained with its data, SVG valid | `tests/test_downstream.py`, golden files in `tests/golden/` |
 | JS harness (report front end) | dev-only jsdom tests of `report.js`: every section against the payload shapes that have bitten before (zero comparisons, one sample, ratio/isoDTB, 10k features × 50 samples, all p-values missing, dark/light) and hostile `<`/`&`/quote names through every dynamic-HTML sink incl. tooltips and the CSV export; the search grammar (lists, wildcards, regex, `desc:`, `term:`), suggestions, box selection, highlight groups, the address state, hit filters and every discovery / QC section (`discovery.test.mjs`); the help: the nav entry, a **?** on each section, QC tab and issue box, panels that open and close, every help link resolving in the page, escaped issue titles, a report without help (`help.test.mjs`); figure export (D62, `export.test.mjs`): the buttons of each chart, every control of the Export dialog changing the SVG (size presets in px and mm, font, palettes, background, title, legend, names, line and point size), text kept as text and no CSS in the file, the cut-offs in `<desc>`, the style kept in the browser, lab defaults and reset, a hostile style file, PNG with its print size and description (a stand-in canvas: jsdom draws nothing), copy as an image (a stand-in clipboard), the store-only .zip unzipped by the harness' own reader with every CRC-32 checked, its README and tables, 10,000 features, and the friendlier options (tooltips, the cut-offs in words, reset to lab defaults); hostile names through the export's file names, SVG, README and CSV (`escaping.test.mjs`); a pytest check fails when `tests/js/fixture.html` drifts from the shipped assets | `cd ionomos/tests/js && npm ci && npm test`; sync check runs with pytest |
@@ -28,7 +28,7 @@ Three layers, all runnable on macOS and Windows:
 | Designs, F-test, DEqMS (D42, D43) | against limma 3.68.5 / DEqMS 1.30.0 to 1e-8 on 200 proteins × 12 samples: a replicate block with complete data and with missing values per row (incl. a condition absent and an unestimable block), block + numeric + factor covariates, one-vs-others with a block, `topTableF` for the blocked, covariate and plain models; R's `loess` (k-d tree + vertex interpolation) and `spectraCounteBayes` on the blocked and plain fits; confounded / incomplete / no-df designs explained, never crashed; settings errors; end to end: blocking on a replicate batch finds more hits, a confounded block falls back byte-identically to the plain model, DEqMS without counts warns. The exported `reproduce_design_in_R.R` is run in R when `IONOMOS_R_LIBS` names a library with limma (dev-only; skipped otherwise). Regenerate: `cd tests/golden/design && python make_design_inputs.py && Rscript run_design_reference.R <R library>` | `tests/test_design.py`, `tests/golden/design/`, `tests/js/test/design.test.mjs` |
 | Messy input (D60) | `analyze()` on malformed but plausible tables: it must not raise, must write a report and a strictly valid `analysis.json`, must not crash a stage (`CRASH_*` fails the test), and must say what it did. 37 hand-made tables, one per kind of mess (duplicate IDs, repeated / empty / unicode sample names, all-missing rows and columns, one replicate, one condition, 1 vs 6, constant values, infinities, negative and zero intensities, text in numeric cells, decimal commas, huge values, 1 feature), each with the text its notes or issues must hold, and each again with three random settings; 160 seeded random damages to simulated DIA, TMT and isoDTB tables with random settings (the input is checked to be unchanged); 50,000 features; one regression test per bug the fuzz found; the four statistical guards (`NO_RESIDUAL_DF`, `VARIANCE_PRIOR` both ways, `ZERO_VARIANCE` for limma and Welch, `IDENTICAL_SAMPLES`) raised on planted cases and silent on clean data. 6,000 further seeds were run once by hand, not in the suite. The damage is to simulated tables, not real exports | `tests/test_robustness.py` |
 | Accuracy: compare (D60) | references made from the Ionomos result itself, so the right verdict is known: its own results table (agrees, r = 1), shifted (an offset), scaled (the slope), noisy (the correlation), other p-values (the hit lists), named the other way round (flipped) and sign-flipped without a telling name (reported, `--flip`); every verdict threshold at its edge; matching by accession inside protein groups and FASTA-style IDs, by gene, repeated keys; comparison names in several spellings; limma, MSstats long format with infinite fold changes, Perseus (`-Log p`, `+`), a gene-symbol table without adjusted p; `compare.tsv` / `.json` / `.html` (self-contained, escaped, SVGs parse); the CLI and its exit codes; neither input changed; the verdict in the next report, marked when the settings changed. **No real FragPipe-Analyst, MSstats or Perseus export**: the layouts are the documented ones | `tests/test_compare.py` |
-| Accuracy: benchmark (D60) | **the calibration guard**: a simulated grid (3 vs 3, 4 vs 4, 2 vs 4; 4-fold changes; Perseus and no imputation; 10 tables of 600 proteins) whose pooled observed FDP at adjusted p ≤ 0.05 must be ≤ 8.5 % per row (measured 1.7 – 6.3 %; over 30 other seed blocks it ranged 1.6 – 7.9 %, mean 4.9 – 5.3 % without imputation), with floors on sensitivity and a limit on bias; the grid is deterministic; `run_pipeline` gives the hits `analyze()` gives; the scoring on a hand-made case; `zero` imputation and no normalisation show their cost; the new simulation options leave the old tables byte-identical. Real path, on a **simulated** mixed-species matrix: the three ratios recovered, the false positive rate and sensitivity, expected ratios the other way round, species from entry names, a column, a FASTA (decoys ignored) and protein lists, a two-species group left out, every error of the YAML, the three files, the CLI, both results in the next report. **No real mixed-species run** | `tests/test_benchmark.py` |
+| Accuracy: benchmark (D60, D66) | **the calibration guards**: a simulated grid (3 vs 3, 4 vs 4, 2 vs 4; 4-fold changes; Perseus and no imputation; 10 tables of 600 proteins) whose pooled observed FDP at adjusted p ≤ 0.05 must be ≤ 8.5 % per row (measured 1.7 – 6.3 %; over 30 other seed blocks it ranged 1.6 – 7.9 %, mean 4.9 – 5.3 % without imputation), with floors on sensitivity and a limit on bias; the same for **isoDTB** site ratios (FragPipe's label quant through the site table; 3 and 4 replicates; ≤ 9 %, measured 3.5 – 3.8 %) and **TMT** (MaxQuant reporter intensities of 2 and 3 plexes with a pool, IRS + auto; ≤ 8.5 %, measured 2.6 – 5.4 %); a heavy / light mixing error shown uncorrected; a TMT pulldown: median centring after IRS off by > 0.12 log2 and > 20 % false at alpha, `auto` within 0.03, no IRS losing power, a plex block not fixing the normalisation; `run_pipeline` against `analyze()` for isoDTB and MaxQuant TMT; the kinds' files, the CLI's `--kind` and `--like` on an isoDTB and a TMT experiment, the trust line; the grids are deterministic; `run_pipeline` gives the hits `analyze()` gives; the scoring on a hand-made case; `zero` imputation and no normalisation show their cost; the new simulation options leave the old tables byte-identical. Real path, on a **simulated** mixed-species matrix: the three ratios recovered, the false positive rate and sensitivity, expected ratios the other way round, species from entry names, a column, a FASTA (decoys ignored) and protein lists, a two-species group left out, every error of the YAML, the three files, the CLI, both results in the next report. **No real mixed-species run** | `tests/test_benchmark.py` |
 | "How far to trust this" (D60) | the statements of a clean experiment and their numbers against the summary; each "check" raised by its planted cause (2 replicates, uneven groups, a group of one, fold change only, a spoiled replicate, hits on imputed values, a cut-off below what the design can see, a copied sample); a results table; nothing analysed; escaping; the settings digest the same from the settings and from `analysis.json`; a crash in the step costs only the list; the block in the shipped page, untouched by the script, in the JS harness | `tests/test_trust.py`, `tests/js/test/trust.test.mjs` |
 | Stress | `ionomos testbed stress --n 150`: messy drops (unicode/emoji/huge names, no raws, empty raws, bad tails, duplicates, slow copies, failing searches) + chaos (worker killed mid-run, ledger locked, corrupt status file, pause/resume, cancel), then invariant checks; plus a 5000-name parser fuzz | any machine; a smaller run is in pytest |
 | GitHub Actions | the pytest suite and the JS report-harness on Linux **and Windows** on every push; on a version tag also the frozen exe (pipeline + stress) and the **installer**: install, retire a fake LabWatch, upgrade, uninstall, data kept | Actions tab |
@@ -79,7 +79,7 @@ ionomos --config C:\ionomos-testbed\Fragpipe_Auto\config.yaml run   # Windows
 **Terminal 2:**
 
 ```bash
-ionomos testbed list                       # the 12 samples and what each proves
+ionomos testbed list                       # the 17 samples and what each proves
 ionomos testbed drop iso_good              # -> queued under Fragpipe_General/EJQ
 ionomos testbed drop iso_good --slow       # file-by-file copy: watch the "waiting for copy to settle" log line
 ionomos testbed drop gui_unknown_user      # -> resolver window pops in terminal 1
@@ -121,6 +121,10 @@ init --slow-defaults` uses production timings (10 s / 60 s).
 | `reject_no_raws` | folder with no `.raw` is left alone forever (no note, no queue) |
 | `reject_two_methods` | ambiguous method → resolver |
 | `fp_fail` | filed fine, then the fake FragPipe fails → `failed` + `FAILED.txt`; retry re-runs it |
+| `tmt_plexes` | two TMT plexes, each in its own folder (`plexA\`, `plexB\`): kept as dropped, an `annotation.txt` in each |
+| `tmt_flat_plexes` | two TMT plexes in one folder: filed as dropped, with a warning that FragPipe names the channels |
+| `fp_cut_table` | the fake leaves its main table cut off mid-row → `failed`, "not written to the end" |
+| `fp_hang` | the fake hangs in MSFragger with a child process → killed with it at the time limit (5 min) |
 
 After a GUI answer, look at `experiment.yaml` inside the moved folder: that is
 the persisted decision, and the same file can be hand-written by a user to
@@ -182,7 +186,33 @@ DONE/FAILED notes present, ledger integrity OK, no CRITICAL log record.
 Failure modes of the fake FragPipe for manual testing:
 `IONOMOS_FAKE_FP_MODE=oom | msfragger | speclib | no-java | locked | diann |
 step-fail-exit0 | step-fail-neg-exit0 | cancel-exit0 | silent-exit0 |
-no-done-line | child` (what each acts out: `fake_fragpipe.MODES`).
+no-done-line | child | hang | killed | disk-full | raw-vanished | garbled-log |
+huge-log | runaway-log | empty-table | header-only | truncated-table |
+missing-table | truncated-psm` (what each acts out: `fake_fragpipe.MODES`),
+several joined by commas. For one experiment only, put the mode(s) in a file
+`fake_fragpipe_mode.txt` in its folder (before dropping it); it wins over the
+environment. The stress tester's `fault` drops do that.
+
+## FragPipe faults (D69)
+
+`tests/test_faults.py` acts out every fault the lab PC can produce through
+the real worker, and checks that each job ends done (with a note), failed
+(with its cause and `FAILED.txt`) or held, that no raw file changes, and that
+the next job still runs: FragPipe exiting non-zero half-way, exiting 0 without
+its end line or with empty / header-only / cut-off / missing tables, garbled
+(cp1252, UTF-16, colour codes, binary) and huge console output, a tool
+printing forever, a hang killed at the time limit with the process it
+started, FragPipe killed from outside, **Ionomos itself killed mid-search
+and restarted** (a real `ionomos run`, SIGKILL / TerminateProcess; the next
+start stops the leftover FragPipe and runs the job once more), a full disk
+for Ionomos' own files, a raw file locked (a real byte-range lock on Windows,
+no read permission on POSIX) or removed while queued, the workflow or FASTA
+vanishing just before the start, a FASTA with a space, two job rows for one
+folder, re-runs within one second, earlier output that can't be moved aside,
+and TMT drops with a folder per plex or several plexes in one folder. Time
+limits run on a fake clock (`fragpipe._clock`) and every "while it runs" step
+waits for what the console log says, so nothing depends on how fast the
+machine is.
 
 ## FragPipe as it really behaves
 
@@ -298,7 +328,7 @@ samples, so numpy's argsort keeps replicates in order as the port does.
 
 ### Roles and unequal groups (`tests/test_roles.py`, `tests/js/test/specific.test.mjs`)
 
-No golden files: `simulate.competition_pg_matrix` (DIA) and
+`simulate.competition_pg_matrix` (DIA) and
 `simulate.competition_tmt` (TMT, not imputed) write a competition
 experiment with DMSO n=2, Probe n=4, Probe_Comp n=4 and planted truth
 (specific targets, unspecific binders). The tests cover the role table
@@ -310,19 +340,37 @@ the truth, the SDRF role column, isoDTB, and for unequal groups: the filter,
 per comparison, the scorecard, the imputation flags and the low-confidence
 wording. The numbers quoted in D61 come from larger runs of the same
 simulators (8 to 40 seeds), not from the test suite. Not covered: a real
-experiment; R's limma with unequal groups.
+experiment.
 
-### The calibration guard and the fuzz (`tests/test_benchmark.py`, `tests/test_robustness.py`)
+**Against R's limma (D66, `tests/golden/unequal/`)**: 320 proteins × DMSO 2 /
+Probe 4 / Probe_Comp 4 with missing values, and rows built for each edge of
+the filters (one DMSO value of two, none, one value in a group of four, rows
+the 50 % filter removes, empty rows). `test_unequal_groups_match_r_limma`
+runs them through `benchmark.run_pipeline` (the filter, median normalisation,
+no imputation or Perseus-type, the role comparisons, `small_group_min_valid`
+`half` and `same`, limma, BH) and compares every feature's fold change,
+interval, t, p and adjusted p, the processed matrix and the variance prior
+with limma 3.68.5 to 1e-8. In R the small-group rule is the coefficient set
+to NA before `eBayes`, so the prior is fitted on every feature, as Ionomos
+does. Regenerate:
 
-Both are seeded, so a run is repeatable. The guard's tolerances are written
-at the top of `test_benchmark.py` with the measurement they come from. To
-measure them again with other seeds (about 20 s):
+```bash
+cd ionomos/tests/golden/unequal
+python3 make_unequal_inputs.py && Rscript run_unequal_reference.R <R library with limma>
+```
+
+### The calibration guards and the fuzz (`tests/test_benchmark.py`, `tests/test_robustness.py`)
+
+Both are seeded, so a run is repeatable. There is a guard per kind of data
+(DIA, isoDTB, TMT; D60, D66); their tolerances are written at the top of
+`test_benchmark.py` with the measurement they come from. To measure them
+again with other seeds (about 20 s for DIA, 1 s for isoDTB, 2 minutes for TMT):
 
 ```python
 from ionomos.downstream import benchmark
 for block in range(30):
     benchmark.BASE_SEED = 5000 + 7919 * block
-    for r in benchmark.simulated("guard", seeds=10)["rows"]:
+    for r in benchmark.simulated("guard", seeds=10)["rows"]:      # kind="isodtb" / kind="tmt"
         print(r["setting"], r["controls"], r["treated"], r["fdp_alpha_only"], r["sensitivity_alpha_only"])
 ```
 

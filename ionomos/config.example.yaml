@@ -52,7 +52,8 @@ analysis:
   # block: replicate         # the replicate number as a block (batch / pair) in the limma model (D42)
   # variance_prior: deqms    # limma (default) | deqms: prior variance by peptide count (D43)
   # Exported figures (D62): the lab's style. The report's Export dialog starts from it ("Reset to lab
-  # defaults" goes back to it), and `ionomos export <experiment>` writes static SVG figures with it.
+  # defaults" goes back to it), and `ionomos export <experiment>` writes static SVG figures with it
+  # (and PNG with --format png, on a computer with resvg, Inkscape or cairosvg: D68).
   export:
     size: slide169           # slide169 (16:9, 1280 x 720 px) | slide43 | half | col1 (85 mm) | col2 (180 mm)
                              # | custom, with width: 900, height: 600, unit: px (or mm)
@@ -62,9 +63,12 @@ analysis:
                              # down: "#0072b2", neutral: "#b3b3b3"
     background: light        # light | dark | transparent
     figures: []              # static SVG written to results/figures/ after each analysis: any of
-                             # volcano, pca, heatmap, correlation (or all). [] = none; the report exports all
+                             # volcano, pca, heatmap, correlation, dose_potency, dose_curves, time_patterns,
+                             # time_profiles, liganded_rank, liganded_selectivity; dose, time, liganded for
+                             # both of a section's (or all). [] = none; the report exports all
     # also: line_scale: 1, point_scale: 1, title / subtitle / legend / note: true, labels: screen | top | none,
     # label_count: 15, png_scale: 2, png_dpi: 0 (the report's PNG), zip_format: both | svg | png
+  # The app's Analysis tab -> Figure style edits size, text, colours, zip_format and figures; it keeps the rest.
 
 # Instrument QC (docs/QC_TREND.md): runs of the lab's QC standard (a HeLa / K562 digest) are trended
 # in logs/qc_trend.html, with Levey-Jennings charts and Westgard rules. Does nothing until one is searched.
@@ -84,6 +88,7 @@ qc_trend:
 # name, user, method, status, the reason or the hit counts, and the local path of the report. Never a
 # file, never a quantity. Webhook addresses and the password are secrets: they are left out of logs and
 # of every diagnostics report. Try it with: ionomos notify-test   (restart the watcher after a change)
+# The app's Notifications tab (8) edits this block (secrets masked) and has a Send test button.
 notify:
   enabled: false
   on: [done, failed, held]    # which events send a message (held = a search is waiting for something)

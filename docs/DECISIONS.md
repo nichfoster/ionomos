@@ -1552,7 +1552,8 @@ unasked, so the first is built to be safe to ignore (`notify.py`).
 9. **Settings live in `config.yaml`, not the app, for now.** A tab would
    need GUI tests and a place to show secrets. The app's Save keeps the
    block (`configio.py` writes it, commented). The worker reads `notify:`
-   at start: restart the watcher after a change.
+   at start: restart the watcher after a change. (2026-10-02: the app has
+   a Notifications tab now, D67.)
 10. **Log rotation existed** (`ionomos.log`, 5 MB, 5 old files). What was
     missing is Windows: a rename refused because another process has the
     file open made the stock handler drop records. The handler now keeps
@@ -2122,3 +2123,407 @@ units, moves whenever a share of the features is enriched in one direction.
    setting, and the help says so. The limits (0.1 log2, 3 times the scatter,
    three quarters kept) are choices, not measurements on real data. The
    reproduce-in-R script notes that FragPipeAnalystR has no ratio step.
+
+### D65 — Roles are shown and chosen in the experiment editor and the review window
+**2026-10-02.** D61 left the roles visible only in the report and settable
+only by editing `experiment.yaml`. The maintainer asked for Ionomos to know
+"DMSO vs competitive vs compound, with DMSO having fewer samples" and for
+options that stay friendly. Now both windows show each condition's role and
+let a person change it.
+
+1. **One function holds the logic.** `roles.preview(sizes, settings,
+   overrides, kind, exp, sdrf_roles)` returns the rows (condition, samples,
+   role, where it came from, what "automatic" would give, whether to
+   confirm), the comparisons in words, what the group sizes mean, and notes.
+   The comparisons are `analysis.choose_comparisons` run on an empty matrix
+   of those sizes, so the preview cannot drift from what the analysis does;
+   a test checks this for every name in the roles table (D61's, including
+   the lab PC's `KL6283A_Comp_KL6159A`). The Tk code only draws the rows and
+   maps a choice to a value (`roles.role_choices`, `roles.set_role`).
+2. **The key is the one roles.py already reads**: `analysis.roles` in the
+   experiment's `experiment.yaml`, written as `{Probe_pre: compound}` or
+   `competition of Probe`. No new setting. A role chosen in a window is an
+   entry; **automatic** removes the entry.
+3. **The choices** are roles.py's five roles: control, compound,
+   competition of each compound condition (and plain competition, linked by
+   name), pool / reference, QC standard. The task sketch had a sixth,
+   "other"; it is not built, because every role must change what the
+   analysis does, and "other" would need a rule nobody has decided (left out
+   of the comparisons? compared like a compound?). On the open questions.
+4. **Weak keywords are marked, not changed.** A competition read from `pre`,
+   `pretreat…`, `block…`, `cold` or `10x` is shown with "?" and the reason;
+   **Confirm** writes the guess to `analysis.roles`, which settles
+   `ROLES_UNSURE`, or the list makes it a compound. A competition that can't
+   be linked has no Confirm: the person picks which compound. The editor's
+   "Run anyway?" check lists unconfirmed roles; the review window does not
+   block on them (the analysis asks afterwards, as before).
+5. **Uneven groups in words**, from the same rules the analysis uses
+   (`fpa.resolve_imputation`, `analysis.group_needs`): imputed data (DIA
+   default) "every feature is tested; the smaller group makes comparisons
+   with DMSO less sensitive"; not imputed (TMT) "a feature needs 1 of 2 DMSO
+   values and 2 in the other group (small_group_min_valid: half)"; Welch /
+   Student, a group under `min_valid` (low confidence), and no replicates at
+   all (fold change only) each have their line. Equal groups say nothing.
+6. **A control chosen by role is the control.** Picking "control" for a
+   condition also sets the Control box. In the review window the automatic
+   control honours the roles (`guess_control`, as `find_control` does), so
+   a control given by its role is not also pinned as `analysis.control`.
+7. **The review window** shows roles for DIA and label-free drops only:
+   TMT conditions come from the channel annotation and isoDTB is a
+   competition by construction. Counts there are replicates (fractions of one
+   replicate count once). It previews with the lab's and the experiment's
+   other settings (new `Draft.lab_analysis` / `Draft.exp_analysis`) and
+   writes `analysis.roles` only when the choice differs from what
+   `experiment.yaml` had; entries naming a condition not in the drop are
+   kept as written.
+8. **SDRF roles** reach the editor: `inspect_folder` now returns the SDRF's
+   roles, its file name and the data type, and the preview applies them
+   below `analysis.roles`, as `analyze()` does.
+9. **Found on the way, fixed**: the experiment editor saved its choices by
+   merging them into the existing `analysis:` block, so a choice taken back
+   (a sample used again, a role back to automatic, comparisons cleared)
+   stayed in the file. `save_overrides(..., replace_analysis=True)` makes the
+   editor's block the whole block; the review window still merges (its
+   control keeps saved comparisons).
+
+**Verified**: unit tests of the preview, the choices, the review window's
+logic and `experiment.yaml` round trips; the Python suite and the JS tests.
+**Not verified**: the two windows on screen. Their Tk tests (one each) were
+written in the existing style and run in CI only; nobody has looked at the
+layout, on Windows or macOS. Not tried on a real lab experiment.
+
+### D66 — Accuracy checks for unequal groups, isoDTB and TMT: an R golden file and two more simulated grids
+**2026-10-02.** The maintainer's priority: the downstream analysis should be
+robust, and how accurate it is should be checkable. Two gaps were left: R's
+limma had never seen unequal groups (D61), and the simulated benchmark (D60)
+was label-free DIA only.
+
+1. **Unequal groups against R** (`tests/golden/unequal/`). DMSO 2 / Probe 4 /
+   Probe_Comp 4, 320 proteins with missing values and rows on each edge of
+   the filters, through `benchmark.run_pipeline` (the calls `analyze()`
+   makes) with median normalisation, no imputation (`small_group_min_valid`
+   `half` and `same`) or Perseus-type imputation. The R script repeats each
+   step in base R + limma 3.68.5. The small-group rule is expressed in R as
+   the coefficient set to NA before `eBayes`, which is what Ionomos does: the
+   variance prior is fitted on every feature, and BH counts the tested ones.
+   Fold changes, intervals, t, p, adjusted p, the processed matrix and the
+   prior agree to 1e-8 in all three cases. Normalisation is `median`, not
+   `auto`: the ratio method is Ionomos' own and R has nothing to check it
+   against.
+2. **`ionomos benchmark --kind isodtb | tmt`** (`benchmark.py`, two new
+   simulators in `simulate.py`). Each kind goes through the loader the lab's
+   data would take, so the loader is part of what is measured:
+   - *isoDTB*: FragPipe's label quant, the port of the lab's site script,
+     `from_isodtb_sites`. The scenarios change sites **one way** (a compound
+     engages its sites) and add a per-replicate **mixing error** (heavy and
+     light not mixed exactly 1:1), the error the lab's protocol can make and
+     the pipeline does not see. Settings: limma or the t-test, since ratio
+     data is neither imputed nor normalised.
+   - *TMT*: MaxQuant's `proteinGroups.txt`, because its reporter intensities
+     are raw and Ionomos' own IRS (D48) then runs; TMT-Integrator's
+     abundances are already ratios to the reference and are not scaled again.
+     A pooled reference in every plex, a plex effect per protein, changes
+     both ways or a pulldown one way. Settings: IRS on the pool (auto or
+     median normalisation), IRS on the plex means, no IRS, no IRS with the
+     plex as a block.
+   - `run_pipeline` now calls `plex.normalise` first, as `analyze()` does;
+     for anything that is not several TMT plexes it changes nothing, so the
+     DIA grid and its guard give the same numbers as before.
+   - Files are named by kind (`benchmark_simulated_isodtb.*`, `_tmt.*`), so
+     the three sit side by side; `--like` takes the kind from the experiment
+     (site ratios, or a TMT analysis with plexes) and "How far to trust this"
+     shows whichever the folder holds.
+   - A new number per scenario: the unchanged features' |mean log2 fold
+     change| per table (`fc_offset_unchanged_abs`). The signed offset pooled
+     over tables averages a random mixing error away; per table it does not.
+   - A guard per kind in the test suite, with limits from 30 other blocks of
+     10 seeds (worst mean + about 3.5 SD): isoDTB 9 %, TMT 8.5 %.
+3. **What the grids found** (numbers in [VALIDATION.md](VALIDATION.md)):
+   - The defaults are calibrated: isoDTB with limma and 3 – 4 replicates
+     4.9 % (BH aims at 4 – 4.75 % here), TMT with IRS on the pool and `auto`
+     3.8 – 4.4 %, unequal channels included.
+   - D64 holds for TMT: after IRS, median centring shifts a pulldown's
+     unchanged proteins by -0.2 to -0.4 log2 and most calls at adjusted p
+     alone are false (67 %); `auto` keeps them within 0.04. The fold-change
+     cut-off hides most of this, not all (8.4 % false hits with 2 DMSO
+     channels per plex, 2-fold).
+   - **Not fixed, on the roadmap with numbers**: (a) isoDTB ratios are never
+     normalised, so a mixing error moves every unchanged site of an
+     experiment (0.07 – 0.13 log2 at an SD of 0.2) and the test against 0
+     calls more of them (up to 10.6 % per scenario). Centring each replicate
+     on its median removes it but brings back the composition shift when
+     many sites go one way (-0.09 log2 with 20 % up); which is right depends
+     on how the lab mixes and how promiscuous its compounds are, and the
+     liganded calls (D52) use the ratios as measured. (b) Without IRS the
+     composition check and the ratio method compare a protein across plexes,
+     where the plex effect hides the composition: a plex block recovers the
+     power but not the normalisation (59 % false at alpha in a pulldown).
+     (c) IRS on the plex means is slightly liberal (6.6 %; up to 9.3 %): the
+     plex mean is estimated from the channels that are then tested. (d) Two
+     isoDTB replicates give 5.8 – 9.8 % with limma: with 1 df per site the
+     test rests on a variance prior whose shape the sites do not follow (with
+     equal SDs it is calibrated).
+   None of these is a small, clearly right change, so none was made.
+
+**Not verified**: real data of any kind. The simulated tables have the
+layouts of FragPipe's label quant and MaxQuant's protein groups, not their
+noise; there is no ratio compression (MS2 TMT) and no outlier channel. No
+TMT-Integrator multi-plex table was simulated: its abundances are already on
+the reference, so IRS is not part of that path.
+
+**For the maintainer to confirm**: the two guards' limits; that a mixing
+error of 15 % (SD 0.2 log2) is a fair stress for the lab's isoDTB protocol;
+the open questions (a) to (d) on the roadmap.
+
+### D67 — Settings and checks a lab member can reach without config.yaml; the logic is outside Tk
+**2026-10-02.** The maintainer asked for "good options and settings while also
+being user friendly". Three things were command-line or `config.yaml` only:
+the lab's figure style (`analysis.export`, D62), `ionomos compare` /
+`ionomos benchmark` (D60, ROADMAP 5C #10), and notifications (D58 item 9: "a
+tab would need GUI tests and a place to show secrets").
+
+1. **Where they live.** Two new pages on the Analysis tab, **Figure style**
+   and **Check accuracy**, and a new tab, **8 Notifications**. Figure style
+   and Notifications are saved with the app's one Save button like every
+   other setting (validated on a probe file first, the old config backed
+   up); Check accuracy writes no settings.
+2. **The logic has no Tk.** `forms.py` turns `analysis.export` and
+   `notify:` into the text and ticks a window shows and back;
+   `accuracy.py` runs compare / benchmark and builds their command lines.
+   Both have their own tests that run everywhere (`test_forms.py`,
+   `test_accuracy.py`); the Tk modules (`analysis_tab.py`,
+   `accuracy_page.py`, `notify_tab.py`) only copy values in and out. GUI
+   tests in `test_app.py` drive them in CI.
+3. **One definition of valid.** Every value goes through the check the
+   loader uses: `charts.style_layer` for the figure style,
+   `notify.settings_from` for notifications. An error names the field as the
+   window labels it ("Figure style → Text size (pt): must be a number from
+   4 to 48") and the config key. Friendly input is accepted where it is
+   unambiguous: `7,5` for 7.5, a colour without `#`.
+4. **Nothing is lost.** A field left empty leaves its key out, so the
+   default applies (the default is shown in or beside the field). Keys the
+   window has no field for (`line_scale`, `title`, `png_scale` …) are kept as
+   they were, and so is a typo, so that the loader still names it rather
+   than the app silently dropping it.
+5. **Text size follows the size.** A size preset has its own text size
+   (14 pt on a slide, 7 pt in a journal column). The field follows the preset
+   when it held the old preset's size and stays as typed otherwise. Found
+   while building this: `read_config` filled in the slide's 14 pt for an
+   `export:` block that named `size: col1` without `font_pt`, so the app
+   wrote 14 pt for a journal column on its next Save. It now leaves the key
+   out (the writer then writes 7).
+6. **One code path for each check.** `cli.cmd_compare`, `cmd_benchmark` and
+   `cmd_notify_test` now call `accuracy.run_compare`,
+   `run_benchmark_real` / `run_benchmark_simulated` and `notify.run_test`;
+   the app calls the same functions with a `say` callback that posts each
+   line to the window. A test checks the app's lines equal what the command
+   line prints.
+7. **Off the Tk thread.** A check or a test message runs on a daemon thread;
+   every line and the verdict come back through `App.post` (the queue the
+   app pumps with `root.after`). The buttons are disabled while it runs and a
+   second click is refused. Problems that can be seen before starting (no
+   analysis in the folder, no expected-ratios file) are listed in a dialog
+   instead of starting a thread.
+8. **Secrets.** Webhook addresses and the SMTP password are typed into
+   masked fields (`•`). "Show addresses and password" unmasks them while
+   ticked, and every load masks them again. The app logs only channel names
+   and "all sent / not all sent", never a value; the test's lines are the
+   scrubbed results `notify.py` already makes. The app had no secret fields
+   before, so there was no convention to follow; `config.yaml` and its
+   backups still hold the values in plain text, as D58 decided.
+   "Send test" uses the values in the window, saved or not.
+9. **Defaults without spaces.** A simulated benchmark started from the app
+   writes into `<log_dir>/ionomos_benchmark` (C:/Fragpipe_Auto/logs on the
+   PC), not the app's working folder (which may be under Program Files);
+   `names.BENCHMARK_DIR`. Compare and a real benchmark write into the
+   analysis' own results folder, as on the command line.
+10. **Left out of the window**: compare's per-comparison choice, its common
+    cut-offs, `--ref-alpha`; the benchmark's seeds. They remain command-line
+    options; **Copy the command line** gives the run as a start.
+
+**Not verified**: none of the three pages has been seen on screen. The GUI
+tests (figure style round trip, masked fields, Send test with a stubbed
+sender, compare and a tiny benchmark through the page) run only in CI;
+locally they are skipped so windows don't cover the maintainer's screen.
+Layout on Windows at the PC's display scaling, and the colour picker, are
+untested.
+
+### D68 — Every section exports for slides; PNG is drawn by a renderer the computer already has
+**2026-10-02.** The maintainer's priority: figures that are easy to export for
+slides and customisable. After D62, `ionomos export` drew four figures
+(volcano, PCA, heatmap, correlation), wrote SVG only, and could only choose
+among those four. The report's .zip held the dose-response potency plot and
+whatever curve, profile or compound happened to be open.
+
+1. **Six new static figures** (`downstream/sectionfigs.py`), drawn from the
+   report's own data with `charts._compose`, so the style, the title / legend /
+   cut-offs line, the `<desc>` and the D62 SVG rules (text is text, colours
+   written out, no CSS) are the same: `dose_potency`, `dose_curves`,
+   `time_patterns`, `time_profiles`, `liganded_rank`, `liganded_selectivity`.
+   Kinds go in `analysis.export.figures` and `--figures`; `dose`, `time` and
+   `liganded` stand for both of a section's. One file per compound or series.
+2. **Curves and profiles are a grid in one figure** (a slide usually shows
+   several), the panels as large as the size allows. By default the six most
+   relevant: regulated curves by CurveCurator's relevance (the payload's
+   order), changing features by F p-value. `--features` names others (gene,
+   accession, site, its parts, `*` / `?`), `--top N` (1-24) takes more. A
+   panel smaller than 135 x 115 drawing units is not drawn: the figure shows
+   fewer and says "2 of 6: the rest do not fit this size", and a y-axis title
+   with no room goes into the legend. At one journal column (85 mm, 7 pt)
+   that is two panels; the lab can pick `col2` or `--top`.
+3. **The pEC50 interval is drawn as a band** on the dose axis (pEC50 is
+   −log10 dose, so its interval runs the other way), clipped to the doses; a
+   curve that is not up or down says its pEC50 is not read, as the report
+   does. The selectivity map shows sites liganded by any compound, selective
+   ones first (grouped by compound), then shared, then unresolved; colour is
+   the median R from 1 (white) to R² of the threshold; a dot marks a liganded
+   call; rows that do not fit are counted in the legend. With one compound
+   there is no map.
+4. **The browser's .zip gets the same content** in its own way: each compound's
+   six most relevant curves and each series' six most significant features as
+   one figure each (`TOP_PANELS`, compared with `sectionfigs.TOP_PANELS` by a
+   test), each series' patterns and the selectivity map (two export-only
+   renderers, like the heatmap's SVG twin), every compound's rank plot. With
+   more than one compound or series the curve / feature file names carry the
+   series, so the zip keeps one of each. The view is drawn back as it was
+   (the time series, its focus and the compound are now held too).
+5. **Choosing figures.** `ionomos export --list` prints every figure the
+   report can draw (file name, what it is, what can be chosen, notes such as a
+   named feature that is not there) and writes nothing. `--figures` takes
+   kinds, groups and those names with `*` / `?`; a name that matches nothing
+   is an error that lists the names. `charts.catalog()` lists figures without
+   drawing them; `charts.figures()` draws a catalog.
+6. **PNG: an optional renderer, never a dependency.** Options weighed:
+   a pure-Python rasteriser would need a font rasteriser (TrueType outlines,
+   hinting, kerning, fallback fonts) to draw text correctly, which is most of
+   the work and the part a slide shows; faking text with strokes was ruled out.
+   So `downstream/raster.py` uses the first of: the `cairosvg` module if it
+   imports (an `OSError` from a missing Cairo library counts as absent),
+   `resvg`, `rsvg-convert`, `inkscape` on PATH, and Inkscape in its usual
+   install folders (`%ProgramFiles%\Inkscape\bin`, `/Applications`), which
+   are not on PATH by default. `--renderer` picks one. Nothing is downloaded or
+   installed; with none, `--format png | both` prints what to install and exits
+   2 before writing anything. resvg is the suggestion for the lab PC: one
+   file, no installer. The PNG gets the report's size rule (`png_dpi` / 96 or
+   `png_scale` times the px size, at most 16,000 px a side) and the report's
+   `pHYs` and `iTXt` Description chunks; a `pHYs` the renderer wrote is
+   replaced. Every PNG is made before anything is written, so a renderer that
+   fails leaves the folder as it was (exit 1, its last lines of output said).
+   Renderers run with a 120 s timeout and, on Windows, no console window. The
+   watcher still writes SVG only: it should not start other programs.
+7. **The watcher's figures had no section data**: `_static_figures` built the
+   payload without the dose / time / liganded views. It now passes them.
+
+**Verified**: the Python suite (new: `tests/test_export_sections.py`, with the
+renderers stubbed for the found and not-found branches and a real PNG built
+in the test) and the JS suite (new: `sections_export.test.mjs`, the zip with
+synthetic dose / time / site payloads, also in greyscale at half a slide).
+By eye, on simulated dose, time-course and isoDTB experiments: every new
+figure at 16:9 and at one journal column, drawn to PNG by a real cairosvg 2.9
+(Cairo from Homebrew) through `ionomos export --format both --png-dpi 150`;
+sizes 2000 x 1125 and the chunks as described.
+
+**Not verified**: resvg, rsvg-convert and Inkscape themselves (their command
+lines are from their documentation and are only checked as stubs); any
+renderer on Windows; text in PNG with fonts other than macOS's Arial; the new
+SVG files in PowerPoint, Illustrator or Inkscape (as for D62); real lab
+titrations, time courses or isoDTB data; the .zip in a real browser (jsdom
+only).
+
+### D69 — FragPipe faults are acted out by the fake, end in a clear state, and never cost data or a second search
+**2026-10-02.** Keeping FragPipe working matters most, and nothing has run
+against a real FragPipe yet (D59). Every way a search can go wrong on the lab
+PC was acted out against the worker (`tests/test_faults.py`) and what broke
+was fixed. A fault ends **done** (with a note), **failed** (with a cause from
+`fragpipe.EXPLANATIONS` and `FAILED.txt`) or **held** (waiting, starts by
+itself); nothing the user made is deleted or written over; the worker goes on
+with the next job.
+
+1. **The fake acts out faults per experiment.** `fake_fragpipe.MODES` gained
+   `hang`, `killed`, `disk-full`, `raw-vanished`, `garbled-log`, `huge-log`,
+   `runaway-log`, `empty-table`, `header-only`, `truncated-table`,
+   `missing-table`, `truncated-psm`; several combine with commas. A file
+   `fake_fragpipe_mode.txt` (`names.FAKE_FP_MODE_FILE`) in an experiment
+   folder sets them for that experiment only, so the testbed (`fp_cut_table`,
+   `fp_hang`) and the stress tester (a `fault` drop) mix faults with good
+   jobs. Where FragPipe's own words for a fault are not known, the fake's are
+   invented (Java's standard messages are used for a full disk and a missing
+   file).
+2. **A FragPipe that outlives Ionomos is stopped before the job runs again.**
+   FragPipe runs in its own process group, so ending Ionomos from Task
+   Manager (or a crash) left it running; the next start re-queued the job and
+   started a second FragPipe on the same folder. While a search runs, its run
+   folder now holds `engine_pid.json` (`names.ENGINE_PID_FILE`): the pid and
+   when the OS says that process started (`health.process_started`). At
+   start-up (`worker.recover`) and before every attempt, a recorded process
+   that is still running **and started at that time** is stopped with
+   everything it started; a process that only has the same number now is
+   left alone. Waiting for the orphan and adopting its result was the
+   alternative: it saves a search, but the exit code is lost and the worker
+   needs another state. It is rare (a reboot or sign-out ends FragPipe too),
+   and a re-run is certain.
+3. **Recovery tells the folder.** A job found `running` at start-up went back
+   to `queued` or, after `MAX_ATTEMPTS`, to `failed` in the job list only; its
+   `ionomos.json` kept saying `running` and a failed one had no `FAILED.txt`.
+   `worker.recover` writes both.
+4. **Exit code 0 needs whole tables.** After a run that says it succeeded, the
+   method's main tables that exist are checked (`fragpipe.table_problem`,
+   first and last 64 kB): empty, binary, or cut off in the middle of a row
+   fails the job ("not written to the end": usually a full disk); a header
+   alone fails it as "no identifications". `psm.tsv` / `combined_protein.tsv`
+   problems are a note. No end line **and** no result table is a failure;
+   either alone stays as D59 had it (a note).
+5. **What an exit code says.** A POSIX signal, a Windows NTSTATUS (Ctrl+C or
+   the console closing, an access violation, out of memory), or a run that
+   stopped in the middle of a step without any message gets a cause: "ended
+   from outside" (Task Manager, sign-out, sleep, Windows out of memory) or a
+   crash. A time limit and a runaway console log get theirs too.
+6. **Console text as Windows writes it.** Each line is UTF-8 when it is, else
+   cp1252 (the PC's ANSI code page); NULs (UTF-16), colour codes and control
+   characters are removed before anything is matched or shown. Every reader
+   takes only the end of the log (`tail()` used to read all of it), and the
+   fingerprint reads lines in pieces of at most 64 kB. A console log that
+   grows by more than 2 GB in one search stops it (`MAX_CONSOLE_BYTES`).
+7. **Ionomos' own failures end the job.** An error inside Ionomos while a
+   search ran (a full disk for the console log or the job list, a bug) left
+   the job `running` with nobody watching it, and FragPipe possibly running
+   unseen. FragPipe is now killed and the job failed with the reason
+   ("Ionomos hit an unexpected error …"); Ionomos' own marker lines in the
+   console log are best effort.
+8. **New holds, not failures, for what is outside the job.** A raw file that
+   can't be opened and read yet (Xcalibur still acquiring it, a copy still
+   running, antivirus); on Windows, a FASTA, launcher, tools folder or raw
+   path with a space (off Windows a note, as the config does); the workflow or
+   FASTA gone between the checks and the start; the earlier attempt's output
+   that can't be moved aside (a file open in Excel): a new search is never
+   written into it. A hold found after the attempt was counted gives the
+   attempt back (`Ledger.requeue(undo_attempt=True)`), and the worker sleeps
+   instead of spinning on it.
+9. **One folder, one search.** A second job row for an experiment folder (a
+   rebuilt or hand-edited job list) is failed in the job list as "duplicate
+   of job N" and never searched; the folder and its notes belong to job N and
+   are not touched. Two drops of the same raws under two names are two
+   experiments, as before.
+10. **Earlier output is never in the way.** `fragpipe_previous_<time>` gets
+    `-2`, `-3` … when the name is taken (two attempts in one second used to
+    fail the job).
+11. **TMT plexes as dropped.** A TMT drop with no raw at the top and none in
+    `raw\` but `<plex>\*.raw` folders is filed with that layout kept (folder
+    names cleaned as file names are; the same raw name in two folders is
+    refused, as FragPipe needs each once). Each folder is one plex
+    (FragPipe's experiment); experiment.yaml `files:` still wins. For other
+    methods raws one folder down are still "no raw files", as before. Each
+    plex's `annotation.txt` is written in its folder, and the SDRF reads it
+    there. A flat drop with several plexes is **not** restructured (that is
+    the lab's choice): it is filed as it is, with a warning in the log,
+    `ionomos.json` (`plan.warnings`) and `DONE.txt`, now also without a
+    `tmt:` map. A drop with raws at the top level still ignores subfolders.
+
+**Verified**: by the suite on the fake, on macOS and in CI. **Not
+verified**: anything against a running FragPipe; that `taskkill /T` and the
+creation-time check behave on the PC as in CI; that Xcalibur's lock makes a
+file unreadable; which code page FragPipe's tools really write (ROADMAP
+"Open questions"). The app's inbox list, the review window's **Delete** and
+the name check find raws through `intake.raw_paths`, so a `<plex>\` drop's
+files are listed and can be removed (moved aside, as every inbox removal is);
+added while combining the 0.15.0 PRs.

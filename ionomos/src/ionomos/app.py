@@ -3,7 +3,8 @@ Ionomos app — setup wizard on first run, control panel afterwards.
 
     ionomos setup [--config PATH]        (or just double-click Ionomos.exe)
 
-Tabs:  1 Folders · 2 Users · 3 Methods · 4 Advanced · 5 Run & Test · Help
+Tabs:  ✓ Setup · 1 Folders · 2 Users · 3 Methods · 4 Advanced · 5 Run & Test · Inbox · 6 Jobs · 7 Analysis
+       · 8 Notifications · Help
 Bottom bar: config path, Reload, Save, Save & Check, Report a problem, Help (the full help page in the browser).
 
 Pure tkinter/ttk. Edits a plain dict (ionomos.configio) and writes a
@@ -143,9 +144,20 @@ RESULTS: FRAGPIPE-ANALYST STATISTICS + INTERACTIVE REPORT (tab 7)
   for that experiment, Run. The choices are saved in its experiment.yaml.
   Analysis tab -> Lab defaults: the settings used after every search
   ("Use FragPipe-Analyst's defaults" = exactly theirs).
+  Analysis tab -> Figure style: the lab's size, text and colours for exported
+  figures, and which figures are written after each analysis (results/figures).
+  Analysis tab -> Check accuracy: Compare an analysis with a reference result
+  (FragPipe-Analyst, limma, Perseus, another run) and Benchmark it on simulated
+  data or a benchmark sample; the page opens when done.
   Jobs tab -> Re-run analysis / Analysis options… for a finished job.
   Enrichment downloads gene-set libraries from Enrichr once; after that it
   runs offline on this PC (gene lists are never sent anywhere).
+
+NOTIFICATIONS (tab 8)
+  A message (Teams, Slack, a webhook, email) when a search is done, failed or
+  waiting. Off by default. Fill in a channel, press Send test, then Save and
+  restart the watcher. Addresses and the password are masked and kept out of
+  logs and diagnostics.
 
 WHEN SOMETHING NEEDS YOU (pop-up windows)
   Ionomos opens a window by itself when it can't go on without a person, and
@@ -210,6 +222,7 @@ COMMAND LINE (same program; ionomos-cli.exe on Windows)
   ionomos help [topic] [--open]   e.g. ionomos help NO_TABLE, ionomos help pca
   ionomos pause | resume | diagnose [--zip] | repair-ledger | testbed ...
   ionomos testbed stress   many messy drops + chaos, then checks nothing was lost
+  ionomos compare | benchmark | export | notify-test   (also buttons on tabs 7 and 8)
 """
 
 
@@ -327,6 +340,7 @@ class App:
         self._tab_inbox()
         self._tab_jobs()
         self._tab_analysis()
+        self._tab_notify()
         self._tab_help()
         self._bottom_bar()
         self._load_vars()
@@ -407,6 +421,7 @@ class App:
                 else:
                     self.v(f"{sec}.{k}").set("" if val is None else str(val))
         self.analysis.load_vars(d)
+        self.notify_tab.load_vars(d)
         self.v("users.default").set(d["users"].get("default", "") or "")
         self.v("users.learned_aliases_file").set(d["users"].get("learned_aliases_file", "") or "")
         self.v("config_path").set(str(self.config_path))
@@ -436,6 +451,7 @@ class App:
         d["users"]["aliases"] = {u: list(a) for u, a in self.data["users"].get("aliases", {}).items() if a}
         d["users"]["default"] = self.v("users.default").get().strip()
         self.analysis.collect(d)
+        self.notify_tab.collect(d)
         d["users"]["learned_aliases_file"] = self.v("users.learned_aliases_file").get().strip()
         d["methods"] = self.data["methods"]
         return d
@@ -1734,6 +1750,12 @@ class App:
         self.analysis = AnalysisTab(self)
         self.tab_analysis = self.analysis.frame
 
+    def _tab_notify(self):
+        from ionomos.notify_tab import NotifyTab
+
+        self.notify_tab = NotifyTab(self)
+        self.tab_notify = self.notify_tab.frame
+
     def analyze_folder(self):
         self.analysis._analyse_folder()
 
@@ -1764,12 +1786,11 @@ class App:
             key = str(path)
             self.inbox_tree.insert("", "end", iid=key, text=path.name, open=key in expanded)
             if path.is_dir() and not path.is_symlink():
-                from ionomos.intake import _find_raws
+                from ionomos.intake import raw_paths
 
                 try:
-                    raw_dir, files, _ = _find_raws(path)
-                    for name in files:
-                        self.inbox_tree.insert(key, "end", iid=str(path / raw_dir / name), text=name)
+                    for raw in raw_paths(path):  # top level, raw/ or <plex>/ (D69)
+                        self.inbox_tree.insert(key, "end", iid=str(raw), text=raw.name)
                 except (OSError, ValueError) as exc:
                     # IntakeError (a ValueError) means an unusable drop layout, e.g. raws
                     # in both places (issue #14): show the reason on the drop, never a

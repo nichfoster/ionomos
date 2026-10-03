@@ -12,13 +12,23 @@ The app's Analysis tab (7): analyse one experiment, and the lab's default analys
     FragPipe-Analyst's settings (filtering, normalisation, imputation, limma, enrichment) as
     used after every search; saved in config.yaml with the Save button.
 
+  Figure style
+    analysis.export (D62, D67): the lab's style for exported figures and the figures written
+    after each analysis. The fields <-> config logic is forms.py; saved with the Save button.
+
+  Check accuracy
+    `ionomos compare` and `ionomos benchmark` with buttons (accuracy_page.py, D67).
+
 All data work runs on a thread; results come back through App.post().
 """
 from __future__ import annotations
 
 import logging
+import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, ttk
+
+from ionomos import forms
 
 log = logging.getLogger("ionomos.app")
 
@@ -48,6 +58,10 @@ class AnalysisTab:
         self.nb.grid(row=0, column=0, sticky="nsew")
         self._page_experiment()
         self._page_defaults()
+        self._page_style()
+        from ionomos.accuracy_page import AccuracyPage
+
+        self.accuracy = AccuracyPage(self)
         app.nb.bind("<<NotebookTabChanged>>", self._on_tab, add="+")
 
     # --------------------------------------------------------------- helpers --
@@ -236,6 +250,190 @@ class AnalysisTab:
         ttk.Button(b, text="Use Ionomos defaults", command=lambda: self._preset(IONOMOS_DEFAULTS)).pack(side="left", padx=2)
         ttk.Button(b, text="Analyse a folder…", command=self._analyse_folder).pack(side="left", padx=12)
 
+    # -------------------------------------------------- page 3: figure style --
+
+    def _page_style(self):
+        """analysis.export: the size, text, colours and files of exported figures (D62). forms.py does the work."""
+        from ionomos.downstream.charts import STATIC_FIGURES
+
+        choices = forms.export_choices()
+        p = ttk.Frame(self.nb, padding=10)
+        self.nb.add(p, text="Figure style")
+        self.style_page = p
+        p.columnconfigure(0, weight=1)
+        p.columnconfigure(1, weight=1)
+        ttk.Label(p, text="The lab's style for figures exported for slides and papers. Every report's Export… starts "
+                          "from it, `ionomos export` uses it, and the figures ticked at the bottom are written after "
+                          "each analysis. An empty field takes the default shown beside it. Press Save (bottom right) "
+                          "to keep changes.", wraplength=900, justify="left").grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
+
+        def hint(frame, r, text, var_name=None):
+            lab = ttk.Label(frame, text=text, foreground="#666", wraplength=300, justify="left")
+            lab.grid(row=r, column=2, sticky="w", **PAD)
+            if var_name:
+                setattr(self, var_name, lab)
+
+        sz = ttk.LabelFrame(p, text="Size and text", padding=6)
+        sz.grid(row=1, column=0, sticky="nsew", padx=(0, 6), pady=4)
+        ttk.Label(sz, text="Size").grid(row=0, column=0, sticky="e", **PAD)
+        self.style_size = ttk.Combobox(sz, textvariable=self.v("export.size"), state="readonly", width=40,
+                                       values=[forms.size_label(k) for k in choices["size"]])
+        self.style_size.grid(row=0, column=1, sticky="w", **PAD)
+        self.style_size.bind("<<ComboboxSelected>>", lambda e: self._style_size_changed())
+        self._style_last_size = "slide169"
+        self.style_custom: list = []
+        for r, (key, label) in enumerate((("width", "Width"), ("height", "Height")), start=1):
+            ttk.Label(sz, text=label).grid(row=r, column=0, sticky="e", **PAD)
+            e = ttk.Entry(sz, textvariable=self.v(f"export.{key}"), width=8)
+            e.grid(row=r, column=1, sticky="w", **PAD)
+            self.style_custom.append(e)
+        hint(sz, 1, "custom size only")
+        ttk.Label(sz, text="Unit").grid(row=3, column=0, sticky="e", **PAD)
+        u = ttk.Combobox(sz, textvariable=self.v("export.unit"), state="readonly", width=6, values=choices["unit"])
+        u.grid(row=3, column=1, sticky="w", **PAD)
+        self.style_custom.append(u)
+        hint(sz, 3, "px for slides (a 16:9 slide is 1280 x 720 px), mm for a journal")
+        ttk.Label(sz, text="Text size (pt)").grid(row=4, column=0, sticky="e", **PAD)
+        ttk.Entry(sz, textvariable=self.v("export.font_pt"), width=8).grid(row=4, column=1, sticky="w", **PAD)
+        hint(sz, 4, "", "style_font_hint")
+        ttk.Label(sz, text="Font").grid(row=5, column=0, sticky="e", **PAD)
+        ttk.Entry(sz, textvariable=self.v("export.font_family"), width=24).grid(row=5, column=1, sticky="w", **PAD)
+        hint(sz, 5, "default Arial; it must be installed where the figure is opened")
+
+        co = ttk.LabelFrame(p, text="Colours", padding=6)
+        co.grid(row=1, column=1, sticky="nsew", pady=4)
+        ttk.Label(co, text="Colours").grid(row=0, column=0, sticky="e", **PAD)
+        pal = ttk.Combobox(co, textvariable=self.v("export.palette"), state="readonly", width=12,
+                           values=choices["palette"])
+        pal.grid(row=0, column=1, sticky="w", **PAD)
+        pal.bind("<<ComboboxSelected>>", lambda e: self._style_enable())
+        hint(co, 0, "colorblind = Okabe and Ito's set; grey for print; custom: the three below")
+        self.style_colour: list = []
+        self.style_swatch: dict = {}
+        for r, (key, label) in enumerate((("up", "Up"), ("down", "Down"), ("neutral", "Not significant")), start=1):
+            ttk.Label(co, text=label).grid(row=r, column=0, sticky="e", **PAD)
+            row = ttk.Frame(co)
+            row.grid(row=r, column=1, columnspan=2, sticky="w", **PAD)
+            e = ttk.Entry(row, textvariable=self.v(f"export.{key}"), width=10)
+            e.pack(side="left")
+            sw = tk.Label(row, text="    ", relief="groove")
+            sw.pack(side="left", padx=4)
+            sw.plain = sw.cget("background")
+            b = ttk.Button(row, text="Pick…", command=lambda k=key: self._pick_colour(k))
+            b.pack(side="left")
+            self.style_colour += [e, b]
+            self.style_swatch[key] = sw
+            self.v(f"export.{key}").trace_add("write", lambda *_a, k=key: self._show_swatch(k))
+        ttk.Label(co, text="Background").grid(row=4, column=0, sticky="e", **PAD)
+        ttk.Combobox(co, textvariable=self.v("export.background"), state="readonly", width=12,
+                     values=choices["background"]).grid(row=4, column=1, sticky="w", **PAD)
+        hint(co, 4, "transparent = dark text on no background, for a coloured slide")
+
+        fi = ttk.LabelFrame(p, text="Files", padding=6)
+        fi.grid(row=2, column=0, columnspan=2, sticky="ew", pady=4)
+        ttk.Label(fi, text="\"Export for slides\" .zip holds").grid(row=0, column=0, sticky="e", **PAD)
+        ttk.Combobox(fi, textvariable=self.v("export.zip_format"), state="readonly", width=8,
+                     values=choices["zip_format"]).grid(row=0, column=1, sticky="w", **PAD)
+        ttk.Label(fi, text="both = SVG (sharp, text editable) and PNG (a picture) of every figure",
+                  foreground="#666").grid(row=0, column=2, columnspan=4, sticky="w", **PAD)
+        ttk.Label(fi, text="Written after each analysis").grid(row=1, column=0, sticky="e", **PAD)
+        for k, name in enumerate(STATIC_FIGURES):
+            ttk.Checkbutton(fi, text=name, variable=self.bv(f"export.figure.{name}")).grid(
+                row=1, column=1 + k, sticky="w", **PAD)
+        ttk.Label(fi, text="as SVG in results/figures/ of each experiment (none ticked = none; the report always has "
+                           "every figure)", foreground="#666").grid(row=2, column=1, columnspan=5, sticky="w", padx=6)
+
+        b = ttk.Frame(p)
+        b.grid(row=3, column=0, columnspan=2, sticky="w", pady=(10, 0))
+        ttk.Button(b, text="Check", command=self.check_style).pack(side="left", padx=2)
+        ttk.Button(b, text="Use the defaults", command=self.style_defaults).pack(side="left", padx=2)
+        ttk.Button(b, text="Help", command=lambda: self.app.open_help("faq.figure-style")).pack(side="left", padx=12)
+        self.style_summary = ttk.Label(p, text="", foreground="#444", wraplength=900, justify="left")
+        self.style_summary.grid(row=4, column=0, columnspan=2, sticky="w", pady=(6, 0))
+
+    def _style_fields(self) -> dict:
+        from ionomos.downstream.charts import STATIC_FIGURES
+
+        f = {k: self.v(f"export.{k}").get() for k in forms.EXPORT_TEXT}
+        f["size"] = forms.size_key(f["size"])
+        for name in STATIC_FIGURES:
+            f[f"figure.{name}"] = self.bv(f"export.figure.{name}").get()
+        return f
+
+    def _style_size_changed(self):
+        new = forms.size_key(self.v("export.size").get())
+        cur = self.v("export.font_pt")
+        cur.set(forms.font_after_size_change(self._style_last_size, new, cur.get()))
+        self._style_last_size = new
+        self._style_enable()
+
+    def _style_enable(self):
+        size = forms.size_key(self.v("export.size").get())
+        for w in self.style_custom:
+            w.configure(state=("readonly" if isinstance(w, ttk.Combobox) else "normal") if size == "custom" else "disabled")
+        own = self.v("export.palette").get() == "custom"
+        for w in self.style_colour:
+            w.configure(state="normal" if own else "disabled")
+        self.style_font_hint.configure(text=f"{forms.default_font_pt(size)} pt suits this size; empty = that")
+
+    def _show_swatch(self, key: str):
+        import re
+
+        val = self.v(f"export.{key}").get().strip()
+        val = val if val.startswith("#") else "#" + val
+        try:
+            sw = self.style_swatch[key]
+            sw.configure(background=val if re.fullmatch(r"#[0-9a-fA-F]{6}", val) else sw.plain)
+        except tk.TclError:
+            pass
+
+    def _pick_colour(self, key: str):
+        from tkinter import colorchooser
+
+        cur = self.v(f"export.{key}").get().strip() or None
+        try:
+            _rgb, hexa = colorchooser.askcolor(color=cur, title=f"Colour of {key} hits" if key != "neutral"
+                                               else "Colour of features that are not hits")
+        except tk.TclError:
+            _rgb, hexa = colorchooser.askcolor(title="Colour")
+        if hexa:
+            self.v(f"export.{key}").set(hexa.lower())
+
+    def check_style(self) -> bool:
+        """Check the fields now (Save checks them too) and show what the figures will look like."""
+        from ionomos.config import ConfigError
+
+        try:
+            block = forms.export_block(self._style_fields(), self._export_on_disk())
+        except ConfigError as exc:
+            self.style_summary.configure(text=str(exc), foreground="#c62828")
+            return False
+        self.style_summary.configure(text="✓ " + forms.export_summary(block), foreground="#2e7d32")
+        return True
+
+    def style_defaults(self):
+        self._set_style(forms.export_defaults())
+        self.app.set_status("figure style: the defaults are filled in — press Save to keep them")
+
+    def _export_on_disk(self) -> dict:
+        try:
+            return dict(((self.app.data or {}).get("analysis") or {}).get("export") or {})
+        except (AttributeError, TypeError):
+            return {}
+
+    def _set_style(self, fields: dict):
+        for k, val in fields.items():
+            if k.startswith("figure."):
+                self.bv(f"export.{k}").set(bool(val))
+            elif k == "size":
+                self.v("export.size").set(forms.size_label(val))
+                self._style_last_size = val
+            else:
+                self.v(f"export.{k}").set(val)
+        self._style_enable()
+        self.style_summary.configure(text="")
+
     def _browse_gmt(self):
         f = filedialog.askopenfilename(title="Gene sets (.gmt)", filetypes=[("GMT gene sets", "*.gmt"), ("All files", "*.*")])
         if f:
@@ -286,6 +484,7 @@ class AnalysisTab:
 
         words = an.get("competition_keywords")
         self.v("analysis.competition_keywords").set(", ".join(DEFAULT_COMPETITION_KEYWORDS if words is None else words))
+        self._set_style(forms.export_fields(an.get("export")))
 
     def collect(self, d: dict) -> None:
         from ionomos.config import ConfigError
@@ -309,4 +508,5 @@ class AnalysisTab:
         an["control_keywords"] = [x.strip() for x in self.v("analysis.control_keywords").get().split(",") if x.strip()]
         an["competition_keywords"] = [x.strip() for x in self.v("analysis.competition_keywords").get().split(",")
                                       if x.strip()]
+        an["export"] = forms.export_block(self._style_fields(), an.get("export"))  # raises FormError (a ConfigError)
         d["analysis"] = an

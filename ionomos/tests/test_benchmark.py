@@ -1,8 +1,10 @@
 """`ionomos benchmark` (downstream/benchmark.py, D60): accuracy against known truth.
 
     calibration guard   the pipeline on simulated tables with planted changes: the observed false discovery
-                        proportion must stay near the nominal alpha, the sensitivity must not drop
-    simulated           what the grid measures and writes; that it is the pipeline analyze() runs
+                        proportion must stay near the nominal alpha, the sensitivity must not drop; one guard
+                        each for label-free DIA, isoDTB site ratios and TMT plexes (D66)
+    simulated           what the grid measures and writes; that it is the pipeline analyze() runs; what a
+                        mixing error (isoDTB) and a pulldown (TMT) do, which the roadmap holds as open questions
     real                a simulated mixed-species (human / yeast / E. coli) experiment through analyze() and
                         then against its expected ratios; species from entry names, a column, a FASTA, lists
 
@@ -18,7 +20,7 @@ from xml.etree import ElementTree as ET
 import pytest
 
 from ionomos import cli, downstream
-from ionomos.downstream import analysis, benchmark, quant, simulate
+from ionomos.downstream import analysis, benchmark, engines, quant, simulate
 from ionomos.downstream.tables import read_tsv
 
 CFG = {"enrichment": False}
@@ -151,6 +153,174 @@ def test_simulated_files_and_cli(tmp_path, capsys, monkeypatch):
     svgs = _self_contained((out / "benchmark_simulated.html").read_text(encoding="utf-8"))
     assert len(svgs) == 1 and "This is a simulation" in (out / "benchmark_simulated.html").read_text(encoding="utf-8")
     assert cli.main(["benchmark", "--expected", "x.yaml"]) == 2 and "needs both" in capsys.readouterr().err
+
+
+# ------------------------------------------------------- isoDTB and TMT (D66) --
+
+# Tolerances of the two guards below, and where they come from (measured 2026-10-02, 30 other blocks of 10 seeds
+# each, the guard grids of benchmark.ISODTB_GRIDS / TMT_GRIDS, pooled FDP at adjusted p <= 0.05 per row):
+#     isoDTB, limma, 3 and 4 replicates, 10 % of 600 sites up 4-fold:
+#         mean 4.9 - 5.1 %, SD 1.0 %, range 3.3 - 7.5 %; sensitivity 0.94 - 0.99; |bias| <= 0.024
+#     TMT, IRS on the pool + auto, 2 and 3 plexes of 4 vs 4 and 2 vs 6, 10 % of 600 proteins 2-fold, both ways:
+#         mean 4.5 - 4.8 %, SD 0.8 - 1.0 %, range 2.6 - 7.0 %; sensitivity 0.89 - 0.98; |bias| <= 0.016
+# (Benjamini-Hochberg with 90 % unchanged aims at 4.5 %.) The limits are the worst mean plus about 3.5 SD.
+ISODTB_FDP_MAX, ISODTB_SENSITIVITY_MIN, ISODTB_BIAS_MAX = 0.09, 0.90, 0.06
+TMT_FDP_MAX, TMT_SENSITIVITY_MIN, TMT_BIAS_MAX = 0.085, 0.85, 0.05
+
+
+@pytest.fixture(scope="module")
+def iso_guard():
+    return benchmark.simulated("guard", seeds=10, kind="isodtb")
+
+
+@pytest.fixture(scope="module")
+def tmt_guard():
+    return benchmark.simulated("guard", seeds=10, kind="tmt")
+
+
+def test_isodtb_calibration_guard(iso_guard):
+    """Site ratios from FragPipe's label quant through the lab's site table, each tested against 0 with limma."""
+    assert iso_guard["data"] == "isodtb" and len(iso_guard["rows"]) == 2
+    for r in iso_guard["rows"]:
+        where = f"{r['treated']} replicates"
+        assert r["kind"] == "isodtb" and r["imputation"] == r["normalize"] == "none" and r["planted"] > 500, where
+        assert r["hits_alpha_only"] > 400 and r["fdp_alpha_only"] <= ISODTB_FDP_MAX, (where, r["fdp_alpha_only"])
+        assert r["fdp"] <= r["fdp_alpha_only"] + 0.01, where
+        assert r["sensitivity_alpha_only"] >= ISODTB_SENSITIVITY_MIN, (where, r["sensitivity_alpha_only"])
+        assert abs(r["fc_bias_changed"]) <= ISODTB_BIAS_MAX and r["fc_offset_unchanged_abs"] < 0.03, where
+        assert r["tested_share"] > 0.95
+
+
+def test_tmt_calibration_guard(tmt_guard):
+    """Two and three TMT plexes as MaxQuant writes them, a pooled reference in each: IRS, normalisation, limma."""
+    assert tmt_guard["data"] == "tmt" and len(tmt_guard["rows"]) == 4
+    for r in tmt_guard["rows"]:
+        where = f"{r['plexes']} plexes of {r['controls']} vs {r['treated']}"
+        assert r["kind"] == "tmt" and r["irs"] == "auto" and r["planted"] > 400, where
+        assert r["hits_alpha_only"] > 400 and r["fdp_alpha_only"] <= TMT_FDP_MAX, (where, r["fdp_alpha_only"])
+        assert r["fdp"] <= r["fdp_alpha_only"] + 0.01, where
+        assert r["sensitivity_alpha_only"] >= TMT_SENSITIVITY_MIN, (where, r["sensitivity_alpha_only"])
+        assert abs(r["fc_bias_changed"]) <= TMT_BIAS_MAX and r["fc_offset_unchanged_abs"] < 0.05, where
+        assert r["tested_share"] > 0.95
+
+
+def test_the_isodtb_and_tmt_benchmarks_are_deterministic(iso_guard):
+    assert benchmark.simulated("guard", seeds=10, kind="isodtb")["rows"] == iso_guard["rows"]
+    a, b = (benchmark.simulated("guard", seeds=2, kind="tmt") for _ in range(2))
+    assert a["rows"] == b["rows"] and a["verdicts"] == b["verdicts"]
+
+
+def test_a_mixing_error_moves_every_isodtb_ratio_and_nothing_corrects_it():
+    """Heavy and light mixed 15 % off 1:1 (SD 0.2 log2 per replicate) moves every ratio of the replicate: ratio data
+    is not normalised (fpa.normalize_info), so the unchanged sites sit off 0 and the test against 0 calls more of
+    them. A known limitation, on the roadmap with these numbers (D66)."""
+    grid = {"designs": [(0, 3)], "effects": [2.0], "changed": [(0.05, "up")], "mixing": [0.0, 0.2], "missing": ["typical"],
+            "settings": ["limma (default)"], "seeds": 8, "proteins": 900}
+    clean, mixed = benchmark.simulated(grid, kind="isodtb")["rows"]
+    assert clean["mixing_sd"] == 0 and mixed["mixing_sd"] == 0.2
+    assert clean["fc_offset_unchanged_abs"] < 0.02 and mixed["fc_offset_unchanged_abs"] > 0.06
+    assert mixed["fdp_alpha_only"] > clean["fdp_alpha_only"]
+
+
+def test_a_tmt_pulldown_needs_irs_and_auto_normalisation():
+    """20 % of the proteins up 2-fold in Drug (a pulldown) over 3 plexes: median centring after IRS shifts every
+    unchanged protein down and the FDP at alpha alone runs away; auto (D64) switches to the ratio method and holds.
+    Without IRS the plex effect stays in: the plain model loses most of its power, and a plex block gets the power
+    back but not the normalisation, which can't see the composition through the plex effect."""
+    grid = {"designs": [(4, 4)], "plexes": [3], "effects": [1.0], "changed": [(0.2, "up")], "missing": ["typical"],
+            "settings": [s for s, _ in benchmark.TMT_SETTINGS], "seeds": 4, "proteins": 600}
+    r = {x["setting"]: x for x in benchmark.simulated(grid, kind="tmt")["rows"]}
+    default, median = r["IRS on the pool + auto (default)"], r["IRS on the pool + median"]
+    assert abs(default["fc_offset_unchanged"]) < 0.03 and default["fdp_alpha_only"] <= TMT_FDP_MAX
+    assert median["fc_offset_unchanged"] < -0.12 and median["fdp_alpha_only"] > 0.2
+    assert median["fdp"] <= 0.01  # the fold-change cut-off still keeps them out of the hits
+    assert r["no IRS + auto"]["sensitivity_alpha_only"] < 0.6 * default["sensitivity_alpha_only"]
+    block = r["no IRS, plex as a block"]
+    assert block["sensitivity_alpha_only"] > 0.9 and block["fc_offset_unchanged"] < -0.12
+    assert abs(r["IRS on plex means + auto"]["fc_offset_unchanged"]) < 0.03
+
+
+def test_isodtb_and_tmt_benchmarks_run_the_pipeline_analyze_runs(tmp_path):
+    # isoDTB: the label quant of an experiment folder, analysed, against the benchmark's own path
+    iso = tmp_path / "iso"
+    lq = iso / "fragpipe" / "combined_modified_peptide_label_quant.tsv"
+    simulate.isodtb_ratios(lq, {"Cmpd": 3}, seed=8, n_sites=300, changed_fraction=0.1, mixing_sd=0.1)
+    downstream.analyze(iso, "isoDTB", analysis_cfg=CFG)
+    _h, want = read_tsv(iso / "results" / "Cmpd_log2_H_L_vs_0_differential.tsv")
+    tab = benchmark._isodtb_table(tmp_path / "t", {"treated": 3, "changed_share": 0.1, "effect_log2": 2.0,
+                                                   "direction": "up", "mixing_sd": 0.1, "missing": "typical"}, 300, 8)
+    _p, diffs = benchmark.run_pipeline(tab.m, analysis.settings_from(CFG))
+    assert [r["id"] for r in diffs[0].rows] == [r["id"] for r in want]
+    assert [r["significant"] or "" for r in diffs[0].rows] == [r["significant"].replace("NA", "") for r in want]
+    # TMT: MaxQuant's proteinGroups.txt of three plexes, analysed with the channels' conditions and the pool
+    mq = tmp_path / "mq"
+    conds, _truth = simulate.tmt_plexes(mq / "combined" / "txt" / "proteinGroups.txt", plexes=3, seed=8, n_proteins=300)
+    cfg = {**CFG, "sample_conditions": conds, "tmt_reference": ["126", "131"]}
+    out = downstream.analyze(mq, analysis_cfg=cfg)
+    _h, want = read_tsv(out.results_dir / "Drug_vs_DMSO_differential.tsv")
+    assert json.loads((out.results_dir / "analysis.json").read_text(encoding="utf-8"))["tmt"]["applied"]
+    m = engines.load_maxquant(mq / "combined" / "txt" / "proteinGroups.txt")
+    _p, diffs = benchmark.run_pipeline(m, analysis.settings_from(cfg))
+    got = next(d for d in diffs if d.name == "Drug vs DMSO")
+    assert [r["id"] for r in got.rows] == [r["id"] for r in want]
+    assert [r["significant"] or "" for r in got.rows] == [r["significant"].replace("NA", "") for r in want]
+
+
+def test_isodtb_and_tmt_files_and_cli(tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert cli.main(["benchmark", "--grid", "quick", "--kind", "isodtb", "--quiet"]) == 0
+    printed = capsys.readouterr().out
+    assert "simulated benchmark, grid quick, isodtb data" in printed and "limma (default): observed FDP" in printed
+    assert "unchanged features by" in printed
+    out = tmp_path / "ionomos_benchmark"
+    header, rows = read_tsv(out / "benchmark_simulated_isodtb.tsv")
+    assert header == benchmark.SIM_COLUMNS and len(rows) == 2 * 2 * 2 and {r["kind"] for r in rows} == {"isodtb"}
+    data = json.loads((out / "benchmark_simulated_isodtb.json").read_text(encoding="utf-8"),
+                      parse_constant=lambda c: pytest.fail(c))
+    assert data["data"] == "isodtb" and data["reference_name"] == "simulated isodtb data with planted changes"
+    html = (out / "benchmark_simulated_isodtb.html").read_text(encoding="utf-8")
+    assert len(_self_contained(html)) == 1 and "mixing error SD 0.2" in html and "tested against 0" in html
+    assert not (out / "benchmark_simulated.json").exists()  # the three kinds sit side by side
+    assert cli.main(["benchmark", "--grid", "quick", "--kind", "tmt", "--quiet", "--seeds", "1"]) == 0
+    assert "IRS on the pool + auto (default): observed FDP" in capsys.readouterr().out
+    header, rows = read_tsv(out / "benchmark_simulated_tmt.tsv")
+    assert len(rows) == 2 * len(benchmark.TMT_SETTINGS) and {r["plexes"] for r in rows} == {"3"}
+    assert "3 plexes × 4 vs 4" in (out / "benchmark_simulated_tmt.html").read_text(encoding="utf-8")
+    with pytest.raises(benchmark.BenchmarkError, match="unknown kind"):
+        benchmark.simulated("quick", kind="lfq")
+
+
+def test_like_an_isodtb_experiment(tmp_path, capsys):
+    dest = tmp_path / "20261002_EJQ_isoDTB_x"
+    simulate.isodtb_ratios(dest / "fragpipe" / "combined_modified_peptide_label_quant.tsv", {"CmpdA": 3}, seed=3,
+                           n_sites=240)
+    downstream.analyze(dest, "isoDTB", analysis_cfg={**CFG, "test": "welch"})
+    lk = benchmark.like(dest)
+    assert lk["kind"] == "isodtb" and lk["design"] == (0, 3) and lk["settings"] == {"test": "welch", "min_valid": 2}
+    assert lk["label"] == "20261002_EJQ_isoDTB_x: welch"
+    assert cli.main(["benchmark", "--grid", "quick", "--like", str(dest), "--kind", "tmt"]) == 2
+    assert "holds isodtb data" in capsys.readouterr().err
+    assert cli.main(["benchmark", "--grid", "quick", "--like", str(dest), "--quiet", "--seeds", "1"]) == 0
+    sim = json.loads((dest / "results" / "benchmark_simulated_isodtb.json").read_text(encoding="utf-8"))
+    assert sim["settings"][-1] == lk["label"] and sim["headline"][0].startswith(lk["label"] + ": observed FDP")
+    out = downstream.analyze(dest, "isoDTB", analysis_cfg={**CFG, "test": "welch"})
+    t = out.summary["trust"]["benchmark_simulated"]
+    assert t["file"] == "benchmark_simulated_isodtb.json" and t["same_settings"] and t["lines"] == sim["headline"]
+
+
+def test_like_a_tmt_experiment(tmp_path):
+    mq = tmp_path / "mq"
+    conds, _truth = simulate.tmt_plexes(mq / "combined" / "txt" / "proteinGroups.txt", plexes=2, controls=2,
+                                        treated=6, seed=4, n_proteins=200)
+    downstream.analyze(mq, analysis_cfg={**CFG, "sample_conditions": conds, "tmt_reference": ["126"],
+                                         "normalize": "median"})
+    lk = benchmark.like(mq)
+    assert lk["kind"] == "tmt" and lk["design"] == (2, 6, 2)
+    assert lk["settings"]["normalize"] == "median" and lk["settings"]["tmt_reference"] == benchmark.POOL_CHANNELS
+    res = benchmark.simulated({**benchmark.TMT_GRIDS["quick"], "settings": [], "designs": []}, [(lk["label"],
+                              lk["settings"])], [lk["design"]], seeds=1, kind="tmt")
+    assert [(r["plexes"], r["controls"], r["treated"]) for r in res["rows"]] == [(2, 2, 6)] * 2
+    assert res["rows"][0]["setting"] == "mq: IRS auto + median" and res["rows"][0]["hits_alpha_only"] > 20
 
 
 # ----------------------------------------------------------------------- real --

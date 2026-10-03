@@ -15,7 +15,8 @@ Layout it reads and writes (inside the experiment folder):
       <comparison>_differential.tsv every feature: log2FC, p, q, significance
       volcano_<comparison>.svg      standalone plot (opens in any browser, pastes into slides)
       figures/*.svg + README.txt    (analysis.export.figures, or `ionomos export`) the figures for slides in the
-                                    lab's export style: volcano, PCA, heatmap, correlation (slides.py, D62)
+                                    lab's export style: volcano, PCA, heatmap, correlation, and the dose-
+                                    response, time-course and liganded-site figures (slides.py, D62, D68)
       sample_qc.tsv                 the per-sample scorecard (insights.py)
       presence_absence.tsv          features measured in one group and never in the other
       gene_set_ranks.tsv            rank-based gene-set test on every protein (enrichment on)
@@ -636,7 +637,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     if settings.export.get("figures") and (processed is not None or diffs):
         say("figures for slides")
         figure_files = stage("figures", _static_figures, results, ctx, m, processed, diffs, settings, qcd, enrichment,
-                             ranked, insight) or []
+                             ranked, insight, dose_view, cys_view, time_view) or []
         out.files += figure_files
     ctx["trust"] = trusted
     say("writing the report")
@@ -900,12 +901,13 @@ def _state(issues) -> str:
     return "failed" if "error" in sev else "needs_input" if "input" in sev else "ok"
 
 def _static_figures(results: Path, ctx: dict, m, processed, diffs, settings, qcd, enrichment, ranked,
-                    insight) -> list[Path]:
+                    insight, dose=None, cys_=None, time=None) -> list[Path]:
     """results/figures/: the figures for slides the lab asks for after every analysis (analysis.export.figures),
     drawn from the report's own data in the lab's export style (slides.py, D62)."""
     from ionomos.downstream import slides
 
-    d = report.payload({**ctx, "issues": []}, m, processed, diffs, [], [], settings, qcd, enrichment, ranked, insight)
+    d = report.payload({**ctx, "issues": []}, m, processed, diffs, [], [], settings, qcd, enrichment, ranked, insight,
+                       dose, cys_, time)
     style = charts.style_from(settings.export, lenient=True)
     return slides.write(results / slides.FOLDER, d, style, style["figures"],
                         f"Ionomos {ctx.get('version', '')}".strip())

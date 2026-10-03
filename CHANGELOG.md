@@ -7,7 +7,158 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-02
+
+### Added
+
+- **Settings and checks in the app instead of `config.yaml` or a terminal**
+  (D67):
+  - **Analysis tab → Figure style**: the lab's style for exported figures
+    (`analysis.export`, D62): size preset or a custom size, text size and
+    font, colours (with a colour picker for a custom palette), background,
+    what the "Export for slides" zip holds, and which figures are written to
+    `results/figures/` after each analysis. Empty fields show and take the
+    default; keys the page doesn't show are kept. **Check** says what the
+    figures will look like, or what is wrong.
+  - **Analysis tab → Check accuracy**: **Compare** an analysis with a
+    reference result (a table or another analysed folder) and **Run
+    benchmark** on simulated data (quick / standard, optionally with an
+    experiment's settings) or on a benchmark sample with its expected
+    ratios. Runs in the background, shows the verdict in colour and opens
+    the page. Same code as `ionomos compare` / `ionomos benchmark`.
+  - **8 Notifications** tab: `notify:` (Teams, Slack, a JSON webhook,
+    SMTP email; which events; names or not), with **Send test** (the same
+    code as `ionomos notify-test`, on the values in the window). Addresses
+    and the password are masked unless "Show" is ticked, and never logged.
+  - Help entries for each (`faq.figure-style`, `faq.check-accuracy`, and
+    `faq.notify` rewritten for the tab); a Help button on each page.
+
+- **Roles in the experiment editor and the review window** (D65,
+  [docs/WORKFLOWS.md](docs/WORKFLOWS.md)). Each condition is listed with its
+  number of samples and its role (control, compound, competition of a
+  compound, pool / reference, QC standard) and where the role came from. A
+  list changes it; **automatic** goes back to the name. A role read from a
+  word that can mean something else (`pre`, `block`, `cold`, `10x`) is
+  marked **?** with a **Confirm** button. Under the list: the comparisons
+  that will be run, in words, and what uneven groups mean ("DMSO has 2
+  samples, Probe 4: a feature needs 1 of 2 DMSO values"). Choices are saved
+  as `analysis.roles` in `experiment.yaml`. The review window shows this for
+  DIA and label-free drops.
+
+- **Unequal groups checked against R's limma** (D66, [docs/VALIDATION.md](docs/VALIDATION.md)).
+  A competition experiment with DMSO 2, Probe 4 and Probe_Comp 4, missing
+  values and rows on each edge of the filters, goes through the analysis'
+  own steps (filter, median normalisation, no imputation or Perseus-type,
+  the role comparisons, `small_group_min_valid: half` and `same`, limma, BH)
+  and agrees with limma 3.68.5 to 1e-8 for every feature
+  (`tests/golden/unequal/`, with the R script that made it).
+- **`ionomos benchmark --kind isodtb` and `--kind tmt`** (D66). The simulated
+  benchmark now covers isoDTB site ratios (FragPipe's label quant through the
+  lab's site table; replicates, sites changed one way, a heavy / light
+  mixing error) and several TMT plexes with a pooled reference (MaxQuant's
+  reporter intensities; IRS on the pool or on the plex means or none, `auto`
+  or `median` normalisation, a pulldown). Each kind writes its own
+  `benchmark_simulated_<kind>.*`; `--like` picks the experiment's kind. The
+  test suite has a calibration guard for each. Measured: both defaults are
+  calibrated (isoDTB 4.9 % false discoveries with 3 – 4 replicates, TMT 3.8 –
+  4.4 % where 4 – 4.75 % is aimed at); in a TMT pulldown, median centring
+  after IRS makes 67 % of the calls at adjusted p alone false and `auto`
+  holds. What the grids found and was not changed (a heavy / light mixing
+  error is not corrected; TMT without IRS; IRS on plex means slightly
+  liberal; two isoDTB replicates) is in the roadmap's open questions with
+  the numbers.
+
+- **Figures for slides from the dose-response, time-course and liganded-site
+  sections** (D68, `downstream/sectionfigs.py`). `ionomos export` and
+  `analysis.export.figures` now also draw, in the same export style:
+  - `dose_potency_<compound>.svg`: pEC50 against the curve's fold change,
+  - `dose_curves_<compound>.svg`: a grid of curves (points, the fit, the 95%
+    interval of pEC50), the six most relevant regulated or those you name,
+  - `time_patterns_<series>.svg` and `time_profiles_<series>.svg`: the
+    patterns of changing features, and the most significant features over
+    time with the series they were compared with,
+  - `liganded_rank_<compound>.svg` and `liganded_selectivity.svg`: sites
+    ranked by competition ratio, and which sites each compound ligands.
+  `figures:` takes these names or `dose`, `time`, `liganded`. The report's
+  **Export for slides** .zip holds them too (one file per curve and feature
+  there), as well as each series' patterns and the selectivity map.
+- **Choose what to export**: `ionomos export --list` names every figure the
+  report can draw and what can be chosen for it; `--figures` takes kinds,
+  groups or those names (`volcano_Drug*`); `--features EGFR,BTK` and
+  `--top N` choose the curves, profiles and sites drawn. A grid that would be
+  too small to read at the chosen size draws fewer panels and says so.
+- **PNG from `ionomos export`** (`--format png | both`, `--png-dpi`,
+  `--png-scale`, `--renderer`), drawn by a program the computer already has:
+  cairosvg, resvg, rsvg-convert or Inkscape (also found in its usual install
+  folder). Ionomos still installs nothing for it; without one it says what to
+  install and writes nothing. The PNG carries its print size and the
+  cut-offs, as the report's does.
+
+- **A fault-injection suite for FragPipe searches** (D69,
+  `tests/test_faults.py`). The testbed's fake FragPipe acts out a hang, being
+  ended from outside, a full disk, a raw file vanishing, garbled and huge
+  console output, and empty, header-only, cut-off or missing result tables,
+  per experiment (`fake_fragpipe_mode.txt`) or for all of them
+  (`IONOMOS_FAKE_FP_MODE`, comma-separated). The testbed has `fp_cut_table`
+  and `fp_hang` samples, and the stress tester mixes such faults into its drops.
+- **TMT drops laid out one folder per plex** (`<plex>\*.raw`) are filed and
+  searched as dropped: each folder is a plex, with its own `annotation.txt`.
+  A flat drop with several plexes is filed as before, with a warning that
+  FragPipe will name the channels itself (testbed samples `tmt_plexes`,
+  `tmt_flat_plexes`).
+- New plain-English causes for a failed search: ended from outside, a crash,
+  the time limit, a runaway console log, a result table not written to the
+  end, a run that did not finish, a raw file that disappeared during the
+  search, an error inside Ionomos. New holds, with help pages: a raw file
+  still open in another program, a path with a space (on Windows), earlier
+  output that can't be moved aside.
+
+### Changed
+
+- `ionomos compare`, `ionomos benchmark` and `ionomos notify-test` now run
+  through `accuracy.py` / `notify.run_test`, shared with the app. Their
+  output is unchanged.
+
+- In a report with more than one compound or time series, an exported
+  dose-response curve or time-course feature is named after both
+  (`dose_curve_CmpdA_EGFR.svg`), so the .zip keeps one of each.
+
 ### Fixed
+
+- **A journal-size figure style got slide-size text.** An `analysis.export`
+  block naming `size: col1` (or `col2`, `half`) without `font_pt` was read
+  by the app with the slide's 14 pt and written back that way on the next
+  Save. Now the size's own text size applies (7 pt for a journal column).
+
+- **The experiment editor could not take a choice back.** It merged its
+  choices into the saved `analysis:` block, so a sample used again, a role
+  back to automatic or cleared comparisons stayed in `experiment.yaml`. The
+  editor now writes the whole block (D65).
+
+- **A raw file in a drop laid out one folder per plex could not be removed
+  from the app** (D69). The inbox list, the review window's **Delete** and
+  the name check now find raws there too (`intake.raw_paths`).
+
+- **The experiment editor's Normalisation list lacked `auto` and `ratio`**
+  (D64). It now offers the same choices as the Analysis tab.
+
+- **A FragPipe left running by an Ionomos that was ended from Task Manager
+  or crashed ran beside the re-run of its job.** The next start now stops it
+  first, only when it is certainly the process Ionomos started.
+- **A job found running at start-up** kept saying `running` in its folder;
+  after three interruptions it was failed without a `FAILED.txt`.
+- **A result table cut off by a full disk counted as a finished search**; so
+  did exit code 0 without the end line and without any result table.
+- **An error inside Ionomos during a search** (e.g. a full disk for its own
+  files) left the job `running` and FragPipe possibly unwatched.
+- **Re-running a job twice within one second** failed it (the earlier output's
+  folder name was taken).
+- **A second job row for the same experiment folder** searched it again over
+  the first job's output; it is now refused as a duplicate.
+- **Console logs**: the reason's "last lines" read the whole log into memory;
+  text in the Windows code page, UTF-16 and colour codes are now read
+  correctly in `FAILED.txt` and the hints.
+
 
 - **A test of the slow-copy wait failed now and then on Windows CI.** Its
   settle time (0.3 s) was only six times the pause between copied files, so

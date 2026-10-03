@@ -929,7 +929,8 @@ def _job_small(plan: Plan, idx: int) -> None:
         _add(plan, f"{arc}/{note}", d / note, "status note", "tail", idx)
     _add(plan, f"{arc}/{EXPERIMENT_YAML}", d / EXPERIMENT_YAML, "experiment.yaml", "yaml", idx)
     raw_dir = str((job.record.get("plan") or {}).get("raw_dir") or "")
-    for folder in dict.fromkeys((d, d / raw_dir if raw_dir else d, d / "raw")):
+    plexes = sorted(set(((job.record.get("plan") or {}).get("raw_subdirs") or {}).values()))  # <plex>\ drops (D69)
+    for folder in dict.fromkeys((d, d / raw_dir if raw_dir else d, d / "raw", *(d / p for p in plexes))):
         try:
             anns = sorted(folder.glob("*annotation*.txt")) if folder.is_dir() else []
         except OSError:

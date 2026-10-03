@@ -20,8 +20,11 @@ result tables (ionomos.downstream.simulate, with planted hits) and every number.
 
 Environment:
     IONOMOS_FAKE_FP_SECONDS   how long a run takes (default 4)
-    IONOMOS_FAKE_FP_MODE      a failure to act out, see MODES
+    IONOMOS_FAKE_FP_MODE      a failure to act out, see MODES; several joined by commas ("child,hang")
+    IONOMOS_FAKE_FP_LOG_MB    how much the huge-log mode prints (default 3)
     IONOMOS_FAKE_FP_STRICT    1 = refuse paths with spaces as on Windows (always on under Windows)
+One experiment only: a file fake_fragpipe_mode.txt (names.FAKE_FP_MODE_FILE) in the experiment folder holds the
+mode(s) for that experiment and wins over the environment, so a testbed or stress run can mix faults (D69).
 A raw file path containing FAKEFAIL makes IonQuant fail, as before.
 """
 from __future__ import annotations
@@ -67,7 +70,34 @@ MODES = {
     "silent-exit0": "prints nothing, writes nothing, exits 0 (a launcher that does not wait for FragPipe)",
     "no-done-line": "a complete run whose log lacks the ALL JOBS DONE line",
     "child": "a normal run that also starts a long-lived child process (pid in <workdir>/child.pid)",
+    # D69: the fault-injection suite (tests/test_faults.py)
+    "hang": "MSFragger starts and never ends (prints nothing more) until it is killed",
+    "killed": "FragPipe is ended from outside in the middle of MSFragger: no message, SIGKILL / exit code 1",
+    "disk-full": "MSFragger stops on Java's 'There is not enough space on the disk', leaving a 0-byte file",
+    "raw-vanished": "MSFragger stops on a FileNotFoundException for the first raw file",
+    "garbled-log": "the console gets Windows code page text, UTF-16, colour codes and binary junk, then "
+                   "PhilosopherReport fails on a locked file under a non-ASCII path",
+    "huge-log": "a complete run that prints IONOMOS_FAKE_FP_LOG_MB MB of chatter, one line of 1 MB",
+    "runaway-log": "a tool prints the same line forever, until it is killed",
+    "empty-table": "a complete run whose main result table is 0 bytes",
+    "header-only": "a complete run whose main result table has its header and no rows",
+    "truncated-table": "a complete run whose main result table stops in the middle of a row",
+    "missing-table": "a complete run that writes no main result table",
+    "truncated-psm": "a complete run whose psm.tsv files stop in the middle of a row",
 }
+
+
+def modes_for(workdir: Path | None) -> set[str]:
+    """The faults to act out: the experiment's own fake_fragpipe_mode.txt, else IONOMOS_FAKE_FP_MODE."""
+    from ionomos.names import FAKE_FP_MODE_FILE
+
+    text = os.environ.get("IONOMOS_FAKE_FP_MODE", "")
+    if workdir is not None:
+        try:
+            text = (Path(workdir).resolve().parent / FAKE_FP_MODE_FILE).read_text(encoding="utf-8")
+        except OSError:
+            pass
+    return {m.strip() for m in text.replace("\n", ",").split(",") if m.strip()}
 
 DASHES = "~~~~~~~~~~~~~~~~~~~~~~"
 
@@ -153,13 +183,13 @@ def _on(props: dict[str, str], key: str, default: bool = False) -> bool:
 def fake_fragpipe(argv: list[str]) -> int:
     from ionomos import fragpipe as fp
 
-    mode = os.environ.get("IONOMOS_FAKE_FP_MODE", "")
-    if mode == "no-java":  # Gradle's start script, before Java (and so FragPipe) ever starts
+    a = _parse(argv)
+    modes = modes_for(Path(a["workdir"]) if isinstance(a, dict) and a.get("workdir") else None)
+    if "no-java" in modes:  # Gradle's start script, before Java (and so FragPipe) ever starts
         print("\nERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH.\n\n"
               "Please set the JAVA_HOME variable in your environment to match the\nlocation of your Java "
               "installation.", file=sys.stderr, flush=True)
         return 1
-    a = _parse(argv)
     if isinstance(a, int):
         return a
     _out("FAKE FragPipe (the Ionomos testbed's stand-in): nothing is searched, every number below is made up")
@@ -193,7 +223,7 @@ def fake_fragpipe(argv: list[str]) -> int:
         return stop(f"DIA-NN executable file path {a['diann']} does not seem right.")
     if a.get("python") is not None and not Path(a["python"]).exists():
         return stop(f"Python path {a['python']} does not seem right.")
-    if mode == "silent-exit0":
+    if "silent-exit0" in modes:
         return 0
 
     wd = Path(a["workdir"]).resolve()
@@ -251,7 +281,7 @@ def fake_fragpipe(argv: list[str]) -> int:
     if not Path(db).is_file():
         _error(f"Could not find fasta file at: {db}")
         return 1
-    if mode == "msfragger":
+    if "msfragger" in modes:
         _error("MSFragger is not valid but it is enabled in the workflow. Please disable MSFragger or fix it in "
                "the Config tab.")
         return 1
@@ -270,7 +300,7 @@ def fake_fragpipe(argv: list[str]) -> int:
         if share < 0.4 or share > 0.6:
             _error(f"FASTA file contains {100 * share:.1f}% decoys.")
             return 1
-    if mode == "speclib" or (run_speclib and a.get("python") is not None and not Path(a["python"]).exists()):
+    if "speclib" in modes or (run_speclib and a.get("python") is not None and not Path(a["python"]).exists()):
         _error("Spectral Library Generation module was not configured correctly. Please make sure that Python "
                "and FragPipe-SpecLib have been installed.")
         return 1
@@ -474,8 +504,16 @@ def fake_fragpipe(argv: list[str]) -> int:
     _out(used.rstrip("\n"))
     _out("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 
+    if "huge-log" in modes:  # a talkative run: lots of lines, and one without an end for a long while
+        mb = float(os.environ.get("IONOMOS_FAKE_FP_LOG_MB", "3"))
+        line = "MSFragger: processed scan block " + "0123456789" * 7 + "\n"
+        for _ in range(int(mb * 1_000_000 / len(line))):
+            sys.stdout.write(line)
+        sys.stdout.write("x" * 1_000_000 + "\n")
+        sys.stdout.flush()
+
     # ---- the run ---------------------------------------------------------------------------------------------------
-    if mode == "child":  # something FragPipe started that outlives a careless kill (Java -> MSFragger)
+    if "child" in modes:  # something FragPipe started that outlives a careless kill (Java -> MSFragger)
         log_fh = open(wd / "child.log", "wb")  # noqa: SIM115 - handed to the child; never a pipe
         child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"], stdout=log_fh,
                                  stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
@@ -496,26 +534,54 @@ def fake_fragpipe(argv: list[str]) -> int:
         _out(name + (f" [Work dir: {where}]" if where else ""))
         _out(cmd)
         now = datetime.now()
-        dies = name == "MSFragger" and mode in ("oom", "step-fail-exit0", "step-fail-neg-exit0", "cancel-exit0")
+        dies = name == "MSFragger" and bool(modes & {"oom", "step-fail-exit0", "step-fail-neg-exit0", "cancel-exit0",
+                                                      "hang", "killed", "disk-full", "raw-vanished"})
         for ln in (said[:8] if dies else said):  # a step that dies doesn't print its closing lines
             _out(ln.replace("{t}", f"{now:%H:%M:%S}").replace("{d}", f"{now:%Y-%m-%d %H:%M:%S}"))
         time.sleep(total / len(steps))
         left = len(steps) - i - 1 + 1  # the steps not started, and the finalizer
         if name == "MSFragger":
-            if mode == "oom":
+            if "oom" in modes:
                 _out('Exception in thread "main" java.lang.OutOfMemoryError: Java heap space\n'
                      "\tat java.base/java.util.Arrays.copyOf(Unknown Source)\n\tat umich.ms.fragger.Main.main(Main.java:123)")
                 return fail(name, 1, left)
-            if mode == "step-fail-exit0":
+            if "step-fail-exit0" in modes:
                 (wd / "partial.txt").write_text("x", encoding="utf-8")
                 return fail(name, 137, left, exit_code=0)
-            if mode == "step-fail-neg-exit0":
+            if "step-fail-neg-exit0" in modes:
                 (wd / "partial.txt").write_text("x", encoding="utf-8")
                 return fail(name, -11, left, exit_code=0)
-            if mode == "cancel-exit0":
+            if "cancel-exit0" in modes:
                 _out(f"\n~~~~~~~~~~~~~~~~~~~~\nCancelling {left} remaining tasks")
                 return 0
-        if name == "PhilosopherReport" and mode == "locked":
+            if "hang" in modes:  # a tool waiting on something that never comes: no output, no end
+                while True:
+                    time.sleep(60)
+            if "killed" in modes:  # Task Manager / taskkill /F: no last words from anybody
+                _die()
+            if "disk-full" in modes:
+                (wd / f"{files[0][0].stem}.pepXML").write_bytes(b"")
+                _out("java.io.IOException: There is not enough space on the disk\n\tat java.base/java.io."
+                     "FileOutputStream.writeBytes(Native Method)\n\tat umich.ms.fragger.Main.main(Main.java:123)")
+                return fail(name, 1, left)
+            if "raw-vanished" in modes:
+                _out(f"java.io.FileNotFoundException: {files[0][0]} (The system cannot find the file specified)\n"
+                     f"\tat java.base/java.io.FileInputStream.open0(Native Method)")
+                return fail(name, 1, left)
+            if "runaway-log" in modes:
+                while True:
+                    _out("Checking spectral files... " + "." * 1000)
+                    time.sleep(0.001)
+        if name == "PhilosopherReport" and "garbled-log" in modes:
+            where_cp = "C:\\Users\\Müller\\Proben\\psm.tsv"  # a Windows path, also when the fake runs elsewhere
+            _raw(b"\x1b[33mWARN\x1b[0m Pr\xfcfe Eingabe f\xfcr 5 \xb5L Probe\r\n")  # cp1252, colour codes
+            _raw("Reading spectra 50%\n".encode("utf-16-le"))  # a tool writing UTF-16
+            _raw(bytes(range(0, 32)) + b"\xff\xfe\x81\x9d\x00\x00garbage\n")  # a crashed tool's binary junk
+            _raw((f'time="{now:%H:%M:%S}" level=error msg="Cannot write file. cannot create report file, open '
+                  f"{where_cp}: The process cannot access the file because it is being used by another "
+                  f'process."\n').encode("cp1252"))
+            return fail(name, 1, left)
+        if name == "PhilosopherReport" and "locked" in modes:
             _out(f'time="{now:%H:%M:%S}" level=error msg="Cannot write file. cannot create report file, open '
                  f"{str(where / 'psm.tsv').replace(chr(92), chr(92) * 2)}: The process cannot access the file "
                  f'because it is being used by another process."')
@@ -523,8 +589,8 @@ def fake_fragpipe(argv: list[str]) -> int:
         if name == "IonQuant" and any("FAKEFAIL" in str(f[0]) for f in files):
             _out(f"{now:%Y-%m-%d %H:%M:%S} [ERROR] - IonQuant crashed (this sample fails on purpose)")
             return fail(name, 1, left)
-        if name == "DIA-Quant run DIA-NN" and (mode == "diann" or any("FAKEFAIL" in str(f[0]) for f in files)):
-            _out("ERROR: DIA-NN crashed (this sample fails on purpose)" if mode != "diann"
+        if name == "DIA-Quant run DIA-NN" and ("diann" in modes or any("FAKEFAIL" in str(f[0]) for f in files)):
+            _out("ERROR: DIA-NN crashed (this sample fails on purpose)" if "diann" not in modes
                  else "ERROR: cannot load the spectral library (acted out by the fake)")
             return fail(name, 1, left)
         _out(f"Process '{name}' finished, exit code: 0")
@@ -532,18 +598,66 @@ def fake_fragpipe(argv: list[str]) -> int:
 
     # ---- the files a run leaves ------------------------------------------------------------------------------------
     _write_outputs(wd, files, groups, gdirs, props, annotations, label, run_tmt, flat, Path(a["workflow"]).name)
+    _spoil_tables(wd, modes)
 
     _citations()
     _out("\nTask Runtimes:")
     for name, minutes in runtimes.items():
         _out(f"  {name}: {minutes:.2f} minutes")
     _out("  Finalizer Task: 0.00 minutes")
-    if mode != "no-done-line":
+    if "no-done-line" not in modes:
         _out("\n=============================================================ALL JOBS DONE IN "
              f"{(time.monotonic() - started) / 60:.1f} MINUTES"
              "=============================================================")
     _save_log(wd)
     return 0
+
+
+def _raw(data: bytes) -> None:
+    """Bytes straight to the console, as a tool that doesn't write UTF-8 does."""
+    sys.stdout.flush()
+    sys.stdout.buffer.write(data)
+    sys.stdout.buffer.flush()
+
+
+def _die() -> None:
+    """Ended from outside: SIGKILL where there are signals, else the exit code taskkill /F leaves (1)."""
+    sys.stdout.flush()
+    if os.name != "nt":
+        import signal
+
+        os.kill(os.getpid(), signal.SIGKILL)
+    os._exit(1)
+
+
+MAIN_TABLES = ("combined_modified_peptide_label_quant.tsv", "tmt-report/abundance_gene_MD.tsv",
+               "dia-quant-output/report.pg_matrix.tsv")
+
+
+def _cut(path: Path) -> None:
+    """Keep a table up to the middle of its third row (or second), as a write that stopped half-way leaves it."""
+    data = path.read_bytes()
+    rows = data.split(b"\n")
+    keep = min(3, len(rows) - 1)
+    head = b"\n".join(rows[:keep]) + b"\n"
+    tabs = [i for i, ch in enumerate(rows[keep]) if ch == 9]
+    path.write_bytes(head + rows[keep][: tabs[len(tabs) // 2] if tabs else len(rows[keep]) // 2])
+
+
+def _spoil_tables(wd: Path, modes: set[str]) -> None:
+    main = next((wd / t for t in MAIN_TABLES if (wd / t).is_file()), None)
+    if main is not None:
+        if "empty-table" in modes:
+            main.write_bytes(b"")
+        elif "header-only" in modes:
+            main.write_bytes(main.read_bytes().split(b"\n", 1)[0] + b"\n")
+        elif "truncated-table" in modes:
+            _cut(main)
+        elif "missing-table" in modes:
+            main.unlink()
+    if "truncated-psm" in modes:
+        for psm in wd.glob("*/psm.tsv"):
+            _cut(psm)
 
 
 def _citations() -> None:

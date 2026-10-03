@@ -60,7 +60,10 @@ their shared name into a new folder.
 
 Before anything is filed, a window shows what Ionomos read: user, method, date,
 and each file's condition, replicate and fraction. The **Control** picker is
-the "vs" side of every [volcano plot](#glossary.volcano).
+the "vs" side of every [volcano plot](#glossary.volcano). For DIA and
+label-free drops each condition also has its [role](#glossary.role) and number
+of replicates, with a list to change the role, and below them the comparisons
+the analysis will make ([How?](#faq.roles)).
 
 Fix anything that is wrong, then **Accept & queue**. Your answers are saved in
 the folder's `experiment.yaml`, so you are never asked twice. **Not now**

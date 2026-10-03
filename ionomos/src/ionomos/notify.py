@@ -460,6 +460,27 @@ def send_test(s: dict, env=None) -> list[Result]:
     return deliver(s, sample_message(s), env)
 
 
+def run_test(s: dict, say=print, env=None) -> int:
+    """`ionomos notify-test` and the app's Send test (D67): a test message on every configured channel, each
+    line of what happened passed to `say` as it comes. Returns the exit code (0: all sent). No line holds a
+    secret: a Result's detail is scrubbed."""
+    chans = channels(s)
+    if not chans:
+        say("notifications are not set up: config.yaml has no notify: channel (webhook, teams, slack or email).\n"
+            "Nothing was sent. See: ionomos help notify")
+        return 1
+    if not s["enabled"]:
+        say("notify.enabled is false: jobs send nothing. Testing the configured channel(s) anyway.")
+    say(f"sending a test message by {', '.join(chans)} (waiting up to {s['timeout_seconds']:g} s each) ...")
+    results = send_test(s, env)
+    for r in results:
+        say(f" {'✓' if r.ok else '✗'} {r.channel:<8} {'sent' if r.ok else 'NOT sent'}: {r.detail}")
+    bad = [r for r in results if not r.ok]
+    say("\nall sent; check that the message arrived" if not bad
+        else f"\n{len(bad)} of {len(results)} could not be sent; jobs are not affected by this")
+    return 1 if bad else 0
+
+
 # ---------------------------------------------------------- from the worker --
 
 _lock = threading.Lock()

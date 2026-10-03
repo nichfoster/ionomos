@@ -6,7 +6,9 @@ Charts as hand-written SVG: no plotting library, works offline, light and dark.
     box_plots(m)             log2 value distribution per sample (QC)
     correlation_heatmap(m)   sample-sample Pearson r (QC)
     figures(payload, style)  the figures for slides, drawn from the report's data with one export style
-                             (volcano, PCA, heatmap, correlation; colours written out, no CSS): see the end
+                             (volcano, PCA, heatmap, correlation, and the dose-response, time-course and
+                             liganded-site figures of sectionfigs.py; colours written out, no CSS): see the end
+    catalog(payload)         the same figures, listed and not drawn yet (ionomos export --list)
 
 Colour roles follow the dataviz reference palette (validated with its
 checker): up/down use the diverging red/blue poles, not-significant is a
@@ -20,6 +22,8 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from html import escape
 
 from ionomos.downstream import stats
@@ -471,7 +475,10 @@ SIZES = {  # name, width, height, unit, text size (pt) that suits it; a 16:9 Pow
     "slide169": ("16:9 slide", 1280, 720, "px", 14), "slide43": ("4:3 slide", 960, 720, "px", 14),
     "half": ("Half a slide", 640, 600, "px", 12), "col1": ("Journal figure, one column (85 mm)", 85, 70, "mm", 7),
     "col2": ("Journal figure, two columns (180 mm)", 180, 110, "mm", 7), "custom": ("Custom size", 0, 0, "", 0)}
-STATIC_FIGURES = ("volcano", "pca", "heatmap", "correlation")
+STATIC_FIGURES = ("volcano", "pca", "heatmap", "correlation", "dose_potency", "dose_curves", "time_patterns",
+                  "time_profiles", "liganded_rank", "liganded_selectivity")  # report.js STATIC_FIGS; the last six: sectionfigs.py
+FIGURE_GROUPS = {"dose": ("dose_potency", "dose_curves"), "time": ("time_patterns", "time_profiles"),
+                 "liganded": ("liganded_rank", "liganded_selectivity")}  # shorthands a config or --figures may use
 STYLE_DEFAULTS: dict = {
     "size": "slide169", "width": 1280, "height": 720, "unit": "px", "font_pt": 14, "font_family": "Arial",
     "line_scale": 1, "point_scale": 1, "palette": "default", "up": "#e34948", "down": "#2a78d6", "neutral": "#c3c2b7",
@@ -545,9 +552,11 @@ def _style_value(k: str, v):
         if isinstance(items, (list, tuple)):
             names = [str(x).strip().lower() for x in items if str(x).strip()]
             names = list(STATIC_FIGURES) if names == ["all"] else [n for n in names if n != "none"]
+            names = [m for n in names for m in FIGURE_GROUPS.get(n, (n,))]
             if all(n in STATIC_FIGURES for n in names):
                 return list(dict.fromkeys(names))
-        raise StyleError(f"export.figures must list any of {', '.join(STATIC_FIGURES)} (or all, or [] for none)")
+        raise StyleError(f"export.figures must list any of {', '.join(STATIC_FIGURES)}, or {', '.join(FIGURE_GROUPS)} "
+                         "for both of a section's figures (or all, or [] for none)")
     raise StyleError(f"unknown export setting {k!r}")
 
 
@@ -693,7 +702,7 @@ def _text(x: float, y: float, s, size: float = 12, fill: str = "", **attrs) -> s
 
 def _compose(style: dict, d: dict, plot, what: str, title: str, subtitle: str,
              legend: list[tuple[str | None, str]], cuts: str = "", warn: str = "", comparison: str = "",
-             generator: str = "") -> str:
+             generator: str = "", about: str = "") -> str:
     """The finished figure around a plot: title, subtitle, legend, the plot, the cut-offs line, and a <desc>
     that says where it came from (report.js composeFigure). `plot` is (body, w, h) for a plot with a size of
     its own (it is made smaller to fit, never stretched), or a function (w, h) -> body for one that fills
@@ -742,13 +751,14 @@ def _compose(style: dict, d: dict, plot, what: str, title: str, subtitle: str,
         oh = lh_
     per = (25.4 / 96) * s if mm else s
     unit = "mm" if mm else ""
-    desc = [f"Figure: {what}", f"Experiment: {exp}", f"Comparison: {clean_text(comparison)}" if comparison else "",
+    desc = [f"Figure: {what}" + (f" ({clean_text(about)})" if about else ""), f"Experiment: {exp}",
+            f"Comparison: {clean_text(comparison)}" if comparison else "",
             f"Cut-offs: {cuts}" if cuts else "", warn, f"Analysis: {analysis_text(d)}",
             f"Source table: {clean_text(d.get('sourceName'))}" if d.get("sourceName") else "",
             f"Export style: {style_text(style)}", generator]
     b = [f'<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="{_n(ow * per)}{unit}" '
          f'height="{_n(oh * per)}{unit}" viewBox="0 0 {_n(ow)} {_n(oh)}" font-family="{_x(font_stack(style["font_family"]))}">',
-         f"<title>{_x(what + (': ' + comparison if comparison else ''))}</title>",
+         f"<title>{_x(what + (': ' + (comparison or about) if comparison or about else ''))}</title>",
          "<desc>" + escape("\n".join(clean_text(x) for x in desc if x), quote=False) + "</desc>"]
     if style["background"] != "transparent":
         b.append(f'<rect x="0" y="0" width="{_n(ow)}" height="{_n(oh)}" fill="{ink["surface"]}"/>')
@@ -1083,19 +1093,59 @@ def figure_correlation(d: dict, style: dict, generator: str = "") -> str:
                     generator=generator)
 
 
-def figures(d: dict, style: dict, which=None, generator: str = "") -> list[tuple[str, str, str]]:
-    """Every static figure asked for that the report's data can draw: [(file name, what it is, the SVG)]."""
-    which = list(STATIC_FIGURES) if which is None else list(which)
-    out: list[tuple[str, str, str]] = []
+@dataclass
+class Figure:
+    """One figure the report's data can draw: its file name, kind (STATIC_FIGURES), what it is (the README
+    line), how to draw it (style, generator) -> SVG text or "", what can be chosen for it, and notes (a named
+    feature that was not found)."""
+    name: str
+    kind: str
+    what: str
+    draw: Callable[[dict, str], str]
+    choose: str = ""
+    notes: list[str] = field(default_factory=list)
+
+
+def catalog(d: dict, which=None, features=None, top: int | None = None) -> list[Figure]:
+    """Every figure of the kinds asked for (default: all) that the report's data can draw, not drawn yet.
+    `features` and `top` choose what the dose-response, time-course and liganded-site figures show
+    (sectionfigs.catalog)."""
+    from ionomos.downstream import sectionfigs
+
+    which = list(STATIC_FIGURES) if which is None else [m for n in which for m in FIGURE_GROUPS.get(n, (n,))]
+    out: list[Figure] = []
     if "volcano" in which:
         for k, c in enumerate(d.get("comps") or []):
-            out.append((safe_name(f"volcano_{c.get('slug') or k + 1}.svg"),
-                        f"Volcano plot, {clean_text(c['name'])}. Cut-offs: {cut_text(d, c)}", figure_volcano(d, k, style, generator)))
+            out.append(Figure(safe_name(f"volcano_{c.get('slug') or k + 1}.svg"), "volcano",
+                              f"Volcano plot, {clean_text(c['name'])}. Cut-offs: {cut_text(d, c)}",
+                              lambda st, g, k=k: figure_volcano(d, k, st, g), "--labels N: names on the N most significant hits"))
+    qc = d.get("qc") or {}
+    has = {"pca": bool((qc.get("pca") or {}).get("scores")),
+           "heatmap": bool((qc.get("heatmap") or {}).get("rows")),
+           "correlation": bool((qc.get("correlation") or {}).get("matrix"))}
     for name, what, fn in (("pca", "PCA of the samples", figure_pca),
                            ("heatmap", f"Heatmap of significant features. Cut-offs: {cut_text(d)}", figure_heatmap),
                            ("correlation", "Sample correlation", figure_correlation)):
-        if name in which:
-            svg = fn(d, style, generator)
-            if svg:
-                out.append((f"{name}.svg", what, svg))
+        if name in which and has[name]:
+            out.append(Figure(f"{name}.svg", name, what, lambda st, g, fn=fn: fn(d, st, g)))
+    out += sectionfigs.catalog(d, which, features, top)
+    seen: set[str] = set()
+    for f in out:  # two series whose names differ only in characters a file name cannot hold
+        stem, _dot, ext = f.name.rpartition(".")
+        k = 2
+        while f.name.lower() in seen:
+            f.name = f"{stem}_{k}.{ext}"
+            k += 1
+        seen.add(f.name.lower())
+    return out
+
+
+def figures(d: dict, style: dict, which=None, generator: str = "", features=None,
+            top: int | None = None) -> list[tuple[str, str, str]]:
+    """Every figure asked for that the report's data can draw: [(file name, what it is, the SVG)]."""
+    out = []
+    for f in catalog(d, which, features, top):
+        svg = f.draw(style, generator)
+        if svg:
+            out.append((f.name, f.what, svg))
     return out

@@ -149,8 +149,9 @@ keep them in one place.
 
 ## No raw files {#intake.no_raws}
 
-The folder has no `.raw` files at the top level or in a `raw\` subfolder. Such
-a folder is simply left alone; add the raw files.
+The folder has no `.raw` files at the top level, in a `raw\` subfolder, or one
+folder down (a folder per TMT plex, `<plex>\*.raw`). Such a folder is simply
+left alone; add the raw files.
 
 ## The experiment already exists {#intake.dest}
 
@@ -275,6 +276,33 @@ reads Sage's `.tsv` tables, so take that option out.
 The experiment's method was removed from the settings after it was queued.
 Add the method back (tab 3 Methods), or change the experiment's method.
 
+## A raw file can't be read yet {#search.hold-raw-locked}
+
+Just before a search starts, Ionomos opens each raw file. One of them could
+not be opened: it is still open in another program (Xcalibur still writing
+it, a copy that has not finished, an antivirus scan), or this Windows
+account may not read it. Nothing is wrong with the experiment. Close the
+program or wait for the copy; the search starts by itself once every file
+can be read. If it never does, check the file's permissions in Explorer
+(right-click → Properties → Security).
+
+## A path has a space in it {#search.hold-spaces}
+
+FragPipe can't use a path with a space in it, so the search waits instead of
+failing half-way. The reason names the path: usually a FASTA whose file name
+has a space (pick or rename it on tab 3 Methods) or a FragPipe or tools
+folder under one (move it, for example to `C:\FragPipe`). Experiment folders
+and raw file names never have spaces: Ionomos takes them out when it files a
+drop.
+
+## The earlier output can't be moved aside {#search.hold-previous-output}
+
+A search starts in an empty `fragpipe` folder, and the output of an earlier
+attempt is kept as `fragpipe_previous_<time>`. Moving it aside failed because
+a file in it is open in another program (a table open in Excel, Explorer's
+preview pane). Ionomos never writes a new search over it: close the file and
+the search starts by itself.
+
 ## A notification did not arrive {#trouble.notify}
 
 A message that can't be sent is given up on after a few seconds and noted
@@ -282,8 +310,9 @@ once in the log ("could not notify by ..."). The search itself is not
 affected: its status, `DONE.txt` / `FAILED.txt` and the report are written
 before the message is sent.
 
-Run `ionomos notify-test`. It sends a test message to every channel in
-`config.yaml` and says what happened to each:
+Press **Send test** on the app's **8 Notifications** tab, or run
+`ionomos notify-test`. It sends a test message to every channel and says
+what happened to each:
 
 - **notifications are not set up**: there is no channel under `notify:`
   ([how to set one up](#faq.notify)).
@@ -333,6 +362,33 @@ pop-up. After fixing the cause, press **Retry**; the earlier output is kept.
   Rename the folder or file.
 - **The experiment folder is gone**: it was moved or renamed after filing.
   Put it back where it was.
+- **Ended from outside, a cut-off table, a duplicate job**: see
+  [When a search ends early](#search.ended-early).
+
+## When a search ends early {#search.ended-early}
+
+- **Ended from outside, or stopped without saying why**: something ended
+  FragPipe while it ran (Task Manager, signing out, the PC going to sleep or
+  shutting down, Windows running out of memory). Retry; keep the PC awake.
+- **The result table was cut off, or is empty**: FragPipe ended while it
+  wrote its table, usually because the disk filled up. Free space, then
+  Retry.
+- **No 'ALL JOBS DONE' line and no result tables**: FragPipe said it
+  succeeded but did not finish. Retry; if it repeats, check that tab 1 names
+  `fragpipe.bat`.
+- **A raw file disappeared while FragPipe searched it**: it was moved,
+  renamed or deleted during the search. Put it back, then Retry.
+- **The console log grew past its limit**: a tool printed the same line over
+  and over, and the search was stopped before the log filled the disk.
+- **Duplicate of job N**: the job list had two jobs for one experiment
+  folder. The second is never searched; retry job N.
+- **Ionomos hit an unexpected error while running the search**: Ionomos
+  itself could not carry on (often a full disk). Fix the cause, then Retry.
+
+When Ionomos itself is ended in the middle of a search (Task Manager, a
+crash), FragPipe can keep running on its own. The next time Ionomos starts
+it stops that FragPipe first and runs the search again from the start, so
+one experiment is never searched twice at once.
 
 ## Analysis issues {#trouble.issues}
 
@@ -459,11 +515,14 @@ here it is not sure. The message says which condition and why:
   several and its name doesn't say which. It was then only compared with the
   control.
 
-Say what each condition is under `analysis:` in the experiment's
-`experiment.yaml`, then re-run the analysis ([How to re-run](#faq.rerun)):
+Open the experiment editor (the pop-up window's button, or tab 7 Analysis):
+under **Roles** the condition is marked **?**. Press **Confirm** if the guess
+is right, or pick its role in the list, then **Run analysis**
+([How?](#faq.roles)). A condition that is not a competition gets `compound`.
+The same can be written under `analysis:` in the experiment's
+`experiment.yaml`:
 `roles: {DMSO: control, Probe: compound, Probe_Comp: competition of Probe}`.
-A condition that is not a competition gets `compound`. Listing
-`comparisons:` yourself also settles it.
+Listing `comparisons:` yourself also settles it.
 
 ## Read as a competition experiment {#issue.COMPETITION_DESIGN}
 
@@ -476,7 +535,8 @@ default: not two controls, not a pool or a QC standard, not one compound's
 competition with another compound. The report gets a
 [Specific targets](#report.specific) section.
 
-If a role is wrong, set `roles:` under `analysis:` in `experiment.yaml`
+If a role is wrong, change it under **Roles** in the experiment editor
+([How?](#faq.roles)), or set `roles:` under `analysis:` in `experiment.yaml`
 (see [Check the roles](#issue.ROLES_UNSURE)). For the old behaviour, every
 condition against the control, set `role_comparisons: false`.
 

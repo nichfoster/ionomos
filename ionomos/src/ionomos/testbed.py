@@ -47,7 +47,10 @@ def _iso(prefix: str, reps=(1, 2, 3), fracs=(1, 2, 3)) -> list[str]:
     return [f"{prefix}_{r}_{f}.raw" for r in reps for f in fracs]
 
 
-# name -> (folder name, files at top level, files in raw/, other files, experiment.yaml dict|None, what it shows)
+_TMT10 = ("126", "127N", "127C", "128N", "128C", "129N", "129C", "130N", "130C", "131N")
+
+# name -> (folder name, files at top level, files in raw/, files in plex folders, other files, experiment.yaml
+# dict|None, the fake FragPipe's fault mode for it, what it shows)
 SAMPLES: dict[str, dict] = {
     "fp_fail": dict(
         folder="20260910_Chris_DIA_crash-test_FAKEFAIL",
@@ -119,6 +122,32 @@ SAMPLES: dict[str, dict] = {
         raws=["S_1_1.raw"],
         shows="two method keywords -> resolver window (pick one)",
     ),
+    # D69: TMT plexes as a drop can hold them, and FragPipe faults the fake acts out per experiment
+    "tmt_plexes": dict(
+        folder="20260127_Aman_TMT_KL6160-2plex",
+        plex_subs={"plexA": ["KL6160A_TMT_F1.raw", "KL6160A_TMT_F2.raw"],
+                   "plexB": ["KL6160B_TMT_F1.raw", "KL6160B_TMT_F2.raw"]},
+        yaml={"tmt": {"tag": "TMT-10", "plexes": {
+            p: {"channels": {ch: (f"{c}_{p}_{ch}" if c else "NA") for ch, (c, r) in zip(_TMT10, (
+                ("DMSO", 1), ("DMSO", 2), ("Drug", 1), ("Drug", 2), ("", 0), ("", 0), ("", 0), ("", 0), ("", 0),
+                ("", 0)), strict=True)}} for p in ("plexA", "plexB")}}},
+        shows="two TMT plexes, each in its own folder (<plex>/*.raw) -> kept as dropped, one annotation.txt per plex",
+    ),
+    "tmt_flat_plexes": dict(
+        folder="20260128_Aman_TMT_KL6161-flat",
+        raws=["KL6161A_TMT_F1.raw", "KL6161A_TMT_F2.raw", "KL6161B_TMT_F1.raw", "KL6161B_TMT_F2.raw"],
+        shows="two TMT plexes in one folder -> filed as dropped, with a warning: FragPipe names the channels itself",
+    ),
+    "fp_cut_table": dict(
+        folder="20260911_EJQ_isoDTB_cut-table",
+        raws=_iso("EJQ_cut", reps=(1, 2), fracs=(1,)), mode="truncated-table",
+        shows="the fake FragPipe leaves its main table cut off mid-row -> failed, 'not written to the end'",
+    ),
+    "fp_hang": dict(
+        folder="20260912_EJQ_isoDTB_hang",
+        raws=_iso("EJQ_hang", reps=(1, 2), fracs=(1,)), mode="hang,child",
+        shows="the fake FragPipe hangs in MSFragger -> killed with everything it started at the time limit",
+    ),
 }
 
 
@@ -136,8 +165,16 @@ def build_sample(dest_parent: Path, name: str, size: int = 4096) -> Path:
         (d / "raw").mkdir(exist_ok=True)
         for f in spec["raw_sub"]:
             _write_raw(d / "raw" / f, size)
+    for sub, files in (spec.get("plex_subs") or {}).items():
+        (d / sub).mkdir(exist_ok=True)
+        for f in files:
+            _write_raw(d / sub / f, size)
     for f in spec.get("others", []):
         (d / f).write_text("just a note\n", encoding="utf-8")
+    if spec.get("mode"):
+        from ionomos.names import FAKE_FP_MODE_FILE
+
+        (d / FAKE_FP_MODE_FILE).write_text(spec["mode"] + "\n", encoding="utf-8")
     if spec.get("yaml"):
         (d / "experiment.yaml").write_text(yaml.safe_dump(spec["yaml"]), encoding="utf-8")
     return d

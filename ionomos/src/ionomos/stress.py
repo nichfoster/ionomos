@@ -111,12 +111,17 @@ def _write(p: Path, nbytes: int, rng: random.Random):
     p.write_bytes(rng.randbytes(nbytes) if nbytes else b"")
 
 
+# Faults a "fault" drop asks the fake FragPipe for: each ends failed with FAILED.txt, or done with a report
+FAULTS = ("oom", "killed", "disk-full", "raw-vanished", "garbled-log", "empty-table", "truncated-table", "header-only",
+          "truncated-psm", "no-done-line", "step-fail-exit0", "cancel-exit0")
+
+
 def _make_drop(staging: Path, i: int, rng: random.Random, used: set[str]) -> tuple[Path, str]:
     """Build one drop in `staging`; returns (folder, kind)."""
     unusable = False
     kind = rng.choices(
-        ["iso", "dia", "tmt", "weird", "noraws", "empty_raw", "deep", "badtail", "fail", "dup", "loose"],
-        weights=[20, 12, 6, 12, 5, 4, 4, 6, 5, 4, 8])[0]
+        ["iso", "dia", "tmt", "weird", "noraws", "empty_raw", "deep", "badtail", "fail", "dup", "loose", "fault"],
+        weights=[20, 12, 6, 12, 5, 4, 4, 6, 5, 4, 8, 6])[0]
     user = rng.choice(["EJQ", "Isaac", "IJD", "Chris", "Aman"])
     tag = "".join(rng.choices(string.ascii_lowercase + string.digits, k=5))
     date = f"2026{rng.randint(1, 12):02d}{rng.randint(1, 28):02d}"
@@ -132,14 +137,14 @@ def _make_drop(staging: Path, i: int, rng: random.Random, used: set[str]) -> tup
     elif kind == "loose":  # raws dropped without a folder; the folder here is only a staging container
         name = f"L{i}{tag}_{user}_DIA_{tag}"
     else:
-        method = {"iso": "isoDTB", "dia": "DIA", "tmt": "TMT"}.get(kind, rng.choice(["isoDTB", "DIA"]))
+        method = {"iso": "isoDTB", "dia": "DIA", "tmt": "TMT", "fault": "isoDTB"}.get(kind, rng.choice(["isoDTB", "DIA"]))
         name = f"{date}_{user}_{method}_{tag}"
     folder = staging / f"{i:03d}" / name
     folder.mkdir(parents=True)
     if unusable:  # user + method supplied, so only the name itself is the problem
         (folder / "experiment.yaml").write_text("method: isoDTB\nuser: EJQ\n", encoding="utf-8")
     size = rng.randint(1_000, 20_000)
-    if kind in ("iso", "empty_raw", "badtail", "deep") or (kind in ("weird", "dup") and "DIA" not in name):
+    if kind in ("iso", "empty_raw", "badtail", "deep", "fault") or (kind in ("weird", "dup") and "DIA" not in name):
         reps, fracs = rng.randint(1, 3), rng.randint(1, 4)
         files = [f"S{tag}_{r}_{f}.raw" for r in range(1, reps + 1) for f in range(1, fracs + 1)]
     elif kind == "tmt":
@@ -158,6 +163,8 @@ def _make_drop(staging: Path, i: int, rng: random.Random, used: set[str]) -> tup
     base = folder / "a" / "b" / "c" if kind == "deep" else folder
     for f in files:
         _write(base / f, 0 if kind == "empty_raw" else size, rng)
+    if kind == "fault":  # the fake FragPipe acts out one of FragPipe's faults for this experiment only (D69)
+        (folder / names.FAKE_FP_MODE_FILE).write_text(rng.choice(FAULTS) + "\n", encoding="utf-8")
     if rng.random() < 0.3:
         (folder / "method_notes.xlsx").write_bytes(b"PK")
     used.add(name)
@@ -270,7 +277,9 @@ def run(n: int = 60, seed: int = 1, root: Path | None = None, keep: bool = False
             workers[-1].stop()
             threads[-1].join(timeout=30)
             led = Ledger(cfg.database)
-            for jid, st in led.recover_on_startup():
+            from ionomos.worker import recover
+
+            for jid, st in recover(cfg, led):
                 log.info("stress: job %d -> %s after worker restart", jid, st)
             start_worker()
             time.sleep(1)

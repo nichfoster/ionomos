@@ -3,6 +3,7 @@ The roles of an experiment's conditions, and the comparisons that follow from th
 
     plan = roles.plan(m, settings)            # roles, the control, the default comparisons, what was skipped
     res  = roles.specific_targets(plan, diffs) # per compound: enriched against the control AND competed off
+    view = roles.preview({"DMSO": 2, "Probe": 4}, settings, overrides)   # the editor's rows and comparisons (D65)
 
 A chemoproteomics experiment is not a flat list of conditions. Each condition has a role:
 
@@ -45,6 +46,11 @@ confirmed it.
 
 Site ratio data (isoDTB) is a competition experiment by construction: every condition is a compound competing
 with the probe, and the vehicle is the other isotopic tag of the same run. Its roles say so; cys.py makes the calls.
+
+The experiment editor and the drop review window (D65) show the roles through preview(): one row per condition
+(role, samples, where the role came from, whether to confirm it), the comparisons that will be run in plain words,
+and what uneven groups mean for the missing-value rule. A role chosen there is saved as analysis.roles in the
+experiment's experiment.yaml, the key infer() already reads.
 """
 from __future__ import annotations
 
@@ -498,4 +504,240 @@ def report_payload(plan_: Plan | None, results: list[Specific], diffs: list) -> 
                                 "e": names.index(r.enrichment), "k": names.index(r.displaced),
                                 "r": names.index(r.remaining) if r.remaining in names else None,
                                 "conf": r.confidence, "note": r.note})
+    return out
+
+
+# ------------------------------------------------------------ the editor's view --
+
+
+ROLE_SHOWN = {"control": "control", "compound": "compound", "competition": "competition",
+              "reference": "pool / reference", "qc": "QC standard"}
+KIND_SHOWN = {"enrichment": "enrichment: what {t} pulls down over the control",
+              "competition": "competition: what the competitor takes off (down = competed off)",
+              "remaining": "what is left with the competitor"}
+
+
+def role_label(role: str, of: str = "") -> str:
+    """A role in words: 'competition of Probe', 'pool / reference', 'QC standard'."""
+    if role == "competition":
+        return f"competition of {of}" if of else "competition (compound not known)"
+    return ROLE_SHOWN.get(role, role)
+
+
+@dataclass
+class RoleRow:
+    condition: str
+    n: int                  # samples (replicates in the review window)
+    role: str               # as analysis.roles writes it: control | compound | competition of X | reference | qc
+    label: str              # in words
+    source: str             # where the role came from, in words
+    auto: str               # the role without this experiment's choice, in words: what "automatic" gives
+    set_here: bool = False  # this experiment's analysis.roles names it
+    confirm: str = ""       # why a person should confirm the role ("" = nothing to confirm)
+
+    @property
+    def confirmable(self) -> bool:
+        """The guess can be kept as it is (a weak keyword's competition of X); an unlinked competition can't."""
+        return bool(self.confirm) and " of " in self.role
+
+
+@dataclass
+class RolePreview:
+    rows: list[RoleRow] = field(default_factory=list)
+    pairs: list[tuple] = field(default_factory=list)       # the comparisons: analysis.choose_comparisons
+    comparisons: list[str] = field(default_factory=list)   # what will be run, in words
+    uneven: list[str] = field(default_factory=list)        # what the group sizes mean for the statistics
+    notes: list[str] = field(default_factory=list)         # not compared, and why; why the roles don't decide
+    follows_roles: bool = False                             # the comparisons are the competition design
+    by_construction: bool = False                           # site ratio data: nothing to choose
+    error: str = ""                                         # the settings can't be used as they are
+
+    def lines(self) -> list[str]:
+        out = [f"⚠ {self.error}"] if self.error else []
+        if self.comparisons:
+            out.append("Comparisons that will be run" + (", following the roles:" if self.follows_roles else ":"))
+            out += [f"  • {x}" for x in self.comparisons]
+        if self.uneven:
+            out.append("Group sizes:")
+            out += [f"  • {x}" for x in self.uneven]
+        out += [f"  {x}" for x in self.notes]
+        return out
+
+
+def _source_words(r: Role, mine: bool) -> str:
+    s = r.source
+    if s == "analysis.roles":
+        out = "set for this experiment" if mine else "the lab's settings (config.yaml analysis.roles)"
+    elif s == "analysis.control":
+        out = "the Control choice"
+    elif s == "name (control_keywords)":
+        out = "the name (a control word)"
+    elif s == "name (pool / bridge / reference)":
+        out = "the name (pool / bridge / reference)"
+    elif s.startswith("name (") and s.endswith(")"):
+        out = f"the name ('{s[6:-1]}')"
+    elif s.startswith("default"):
+        out = "not a control, pool or QC name, so a compound"
+    else:
+        out = s
+    if r.of and r.link == "the only compound":
+        out += f"; {r.of} is the only compound"
+    return out
+
+
+def _confirm_words(r: Role) -> str:
+    if r.sure:
+        return ""
+    kw = r.source[6:-1] if r.source.startswith("name (") else ""
+    if r.of and kw:
+        return (f"read as {r.of} plus a competitor because of '{kw}' in the name, which can also mean a dose or a "
+                "time: confirm it, or choose compound")
+    return "a competition, but the names don't say which compound it competes: choose 'competition of …'"
+
+
+def role_choices(view: RolePreview, condition: str) -> list[tuple[str, str]]:
+    """The roles one condition can be given, as (shown, value); value "" is automatic (no analysis.roles entry)."""
+    row = next((r for r in view.rows if r.condition == condition), None)
+    out = [(f"automatic: {row.auto}" if row else "automatic", ""), ("control", "control"), ("compound", "compound")]
+    out += [(f"competition of {r.condition}", f"competition of {r.condition}") for r in view.rows
+            if r.condition != condition and r.role == "compound"]
+    out += [("competition (compound from the name)", "competition"), ("pool / reference", "reference"),
+            ("QC standard", "qc")]
+    if row and row.set_here and row.role not in {v for _s, v in out}:
+        out.insert(1, (row.label, row.role))
+    return out
+
+
+def set_role(overrides: dict | None, condition: str, value: str) -> dict[str, str]:
+    """analysis.roles after a choice in a role list: value "" (automatic) removes the condition's entry. Raises
+    RoleError for a value analysis.roles can't hold."""
+    out = {c: r for c, r in (overrides or {}).items() if c.lower() != condition.lower()}
+    if str(value or "").strip():
+        out[condition] = format_role(*parse_role(value))
+    return out
+
+
+def keep_roles(overrides: dict | None, conditions: list[str]) -> dict[str, str]:
+    """The entries of analysis.roles that name one of these conditions (a renamed condition's entry is dropped)."""
+    low = {c.lower() for c in conditions}
+    return {c: r for c, r in (overrides or {}).items() if c.lower() in low}
+
+
+def preview(sizes: dict[str, int], s, overrides: dict | None = None, kind: str = "intensity", exp: str = "",
+            sdrf_roles: dict | None = None, sdrf_file: str = "") -> RolePreview:
+    """What the experiment editor and the review window show (D65): each condition's role, the comparisons the
+    analysis will run, and what uneven groups mean, without data. sizes: {condition: samples}, in order.
+    s: analysis.Settings without this experiment's roles (the lab's and the experiment's other choices).
+    overrides: this experiment's analysis.roles. exp: the data type (TMT is not imputed by default).
+    sdrf_roles: roles an SDRF in the folder gives (sdrfdesign: m.meta["roles"]); analysis.roles wins over them.
+    The comparisons come from analysis.choose_comparisons on an empty matrix of these sizes, so they are the
+    ones the analysis will make."""
+    from dataclasses import replace
+
+    from ionomos.downstream import _sdrf_roles, analysis
+    from ionomos.downstream.quant import QuantMatrix
+
+    out = RolePreview()
+    n = {str(c): int(k) for c, k in sizes.items() if str(c).strip() and k}
+    if not n:
+        return out
+    try:
+        mine = normalise(overrides or {})
+    except RoleError as exc:
+        out.error, mine = f"roles: {exc}", {}
+
+    def matrix() -> QuantMatrix:
+        samples = [f"{c}#{i}" for c, k in n.items() for i in range(1, k + 1)]
+        meta = {"roles": dict(sdrf_roles), "sdrf": {"file": sdrf_file or "the SDRF"}} if sdrf_roles else {}
+        return QuantMatrix(kind, "protein", [], samples, [], {x: x.rsplit("#", 1)[0] for x in samples}, exp=exp,
+                           meta=meta)
+
+    def settle(m, st):
+        return _sdrf_roles(m, st, []) if sdrf_roles else st
+
+    m_auto = matrix()
+    auto = plan(m_auto, settle(m_auto, s))
+    m = matrix()
+    eff = settle(m, replace(s, roles={**s.roles, **mine}))
+    design = plan(m, eff)
+    out.by_construction = design.by_construction
+    try:
+        comps, cnotes = analysis.choose_comparisons(m, eff)
+    except analysis.AnalysisError as exc:
+        out.error, comps, cnotes = str(exc), [], []
+    out.pairs = list(comps)
+    low = {k.lower() for k in mine}
+    for c, r in design.roles.items():
+        a = auto.roles.get(c, r)
+        out.rows.append(RoleRow(c, r.n, r.text(), role_label(r.role, r.of), _source_words(r, c.lower() in low),
+                                role_label(a.role, a.of), c.lower() in low, _confirm_words(r)))
+    out.follows_roles = design.active
+    total = sum(n.values())
+
+    def against(a: int, b: int) -> str:
+        return f" · {a} against {b} sample{'s' if b != 1 else ''}"
+
+    for t, c in comps:
+        if c is None:
+            out.comparisons.append(f"{t}: heavy/light ratio against 0 · {n[t]} replicate{'s' if n[t] != 1 else ''}")
+        elif c == "others":
+            out.comparisons.append(f"{t} vs all the others" + against(n[t], total - n[t]))
+        else:
+            words = KIND_SHOWN.get(design.kinds.get((t, c), "") if design.active else "", "").format(t=t)
+            out.comparisons.append(f"{t} vs {c}" + (f" — {words}" if words else "") + against(n[t], n[c]))
+    for compound, comp, ctrl in design.triples if design.active else []:
+        if ctrl:
+            out.comparisons.append(f"Specific targets of {compound}: up in {compound} vs {ctrl} and down in "
+                                   f"{comp} vs {compound}")
+    out.uneven = _uneven(n, [(t, c) for t, c in comps if c not in (None, "others")], eff, m)
+    if design.active:
+        out.notes += [f"Not compared: {what} ({why})" for what, why in design.skipped]
+    else:
+        if design.competitions and design.inactive and not design.by_construction:
+            out.notes.append(f"The roles don't choose the comparisons: {design.inactive}")
+        out.notes += cnotes
+    out.notes += [x for x in design.notes if x.startswith("analysis.roles names")]
+    return out
+
+
+def _uneven(n: dict[str, int], pairs: list[tuple[str, str]], s, m) -> list[str]:
+    """One line per smaller group: low confidence, or what a feature needs from it when nothing is imputed."""
+    from ionomos.downstream import analysis, fpa
+
+    if not pairs:
+        return []
+    if all(k == 1 for k in n.values()):
+        return ["Every condition has one sample: fold change only, no p-values"]
+    imputed = fpa.resolve_imputation(s.imputation, m)
+    groups: dict[tuple, list[str]] = {}
+    for t, c in pairs:
+        a, b = (t, c) if n[t] <= n[c] else (c, t)
+        if n[a] < s.min_valid:
+            key: tuple = ("low", a)
+        elif n[a] == n[b]:
+            continue
+        elif imputed != "none":
+            key = ("imputed", a)
+        elif s.test == "limma":
+            key = ("need", a, analysis.group_needs(m, [(a, b)], s, s.min_valid)[(a, b)][0])
+        else:
+            key = ("classic", a)
+        if b not in groups.setdefault(key, []):
+            groups[key].append(b)
+    out = []
+    for key, others in groups.items():
+        a = key[1]
+        sizes = f"{a} has {n[a]} sample{'s' if n[a] != 1 else ''}, " + ", ".join(f"{b} {n[b]}" for b in others)
+        if key[0] == "low":
+            out.append(f"{sizes}: comparisons with {a} are low confidence (fewer than min_valid: {s.min_valid}); "
+                       "their p-values borrow the replicate spread of the other groups")
+        elif key[0] == "imputed":
+            out.append(f"{sizes}: missing values are imputed ({imputed}), so every feature is tested; the smaller "
+                       f"group makes comparisons with {a} less sensitive")
+        elif key[0] == "need":
+            out.append(f"{sizes}: a feature needs {key[2]} of {n[a]} {a} values and {s.min_valid} in the other "
+                       f"group (small_group_min_valid: {s.small_group_min_valid})")
+        else:
+            out.append(f"{sizes}: a feature needs {s.min_valid} values in each group ({analysis.TESTS[s.test]}; "
+                       "small_group_min_valid applies to limma only)")
     return out

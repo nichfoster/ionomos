@@ -139,8 +139,11 @@ def inspect_folder(dest: Path, cfg, method: str | None = None, table: Path | Non
         issues = json.loads((dest / downstream.RESULTS / "analysis.json").read_text(encoding="utf-8")).get("issues") or []
     except (OSError, ValueError):
         pass
+    meta = (m.meta or {}) if m is not None else {}
     return {"method": found, "source": m.source if m else None, "features": len(m.features) if m else 0,
-            "kind": m.kind if m else None, "samples": samples, "notes": notes, "overrides": p["overrides"],
+            "kind": m.kind if m else None, "exp": m.exp if m else "",
+            "sdrf_roles": dict(meta.get("roles") or {}), "sdrf_file": (meta.get("sdrf") or {}).get("file") or "",
+            "samples": samples, "notes": notes, "overrides": p["overrides"],
             "report": dest / downstream.RESULTS / "report.html", "issues": issues,
             "job_id": (p["record"].get("job_id") if isinstance(p["record"], dict) else None)}
 

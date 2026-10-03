@@ -478,8 +478,8 @@ def test_equal_groups_are_not_touched_by_the_small_group_rule(tmp_path):
 
 def test_limma_pools_the_variance_over_every_group_with_unequal_sizes():
     """~0 + condition on 2 / 4 / 4 samples: the residual variance has 1 + 3 + 3 = 7 df whichever two groups are
-    compared, and the standard error is s * sqrt(1/n1 + 1/n2). Checked against the formula (R's limma is not on
-    this machine; tests/golden/fpa holds the R-checked equal-group cases)."""
+    compared, and the standard error is s * sqrt(1/n1 + 1/n2). Checked against the formula here; against R's
+    limma itself, with missing values and the small-group rule, in test_unequal_groups_match_r_limma."""
     rng = random.Random(5)
     sizes = {"D": 2, "P": 4, "K": 4}
     samples = [f"{c}{r}" for c, n in sizes.items() for r in range(n)]
@@ -507,6 +507,80 @@ def test_limma_pools_the_variance_over_every_group_with_unequal_sizes():
     wide, narrow = res[("P", "D")], res[("K", "P")]
     for i in (3, 42):
         assert (wide.ci_high[i] - wide.diff[i]) / (narrow.ci_high[i] - narrow.diff[i]) == pytest.approx(math.sqrt(1.5))
+
+
+# ------------------------------------------------- unequal groups against R's limma (D66) --
+
+GOLD_UNEQUAL = Path(__file__).parent / "golden" / "unequal"
+
+
+def _gold_matrix(name: str) -> tuple[list[str], dict[str, list[float | None]]]:
+    with open(GOLD_UNEQUAL / name, encoding="utf-8") as fh:
+        rows = list(csv.reader(fh, delimiter="\t"))
+    return rows[0][1:], {r[0].strip(): [None if v.strip() == "NA" else float(v) for v in r[1:]] for r in rows[1:]}
+
+
+def _gold_limma(name: str) -> dict[tuple[str, str], dict[str, float]]:
+    with open(GOLD_UNEQUAL / name, encoding="utf-8") as fh:
+        return {(r["comparison"].strip(), r["ID"].strip()): {k: math.nan if v.strip() == "NA" else float(v)
+                                                             for k, v in r.items() if k not in ("comparison", "ID")}
+                for r in csv.DictReader(fh, delimiter="\t")}
+
+
+def _unequal_matrix() -> QuantMatrix:
+    samples, rows = _gold_matrix("unequal_matrix.tsv")
+    m = QuantMatrix("intensity", "protein", [Feature(k, k) for k in rows], samples, [list(v) for v in rows.values()],
+                    {s: s.rsplit("_", 1)[0] for s in samples}, "unequal_matrix.tsv", exp="DIA")
+    return m
+
+
+@pytest.mark.parametrize("case, over", [
+    ("half", {"imputation": "none", "small_group_min_valid": "half"}),
+    ("same", {"imputation": "none", "small_group_min_valid": "same"}),
+    ("imputed", {"imputation": "perseus"}),
+])
+def test_unequal_groups_match_r_limma(case, over):
+    """DMSO n=2, Probe n=4, Probe_Comp n=4 with missing values, through the pipeline analyze() runs
+    (benchmark.run_pipeline: the filter, median normalisation, imputation, the role comparisons, the
+    small-group rule, limma, BH), against limma 3.68.5 on the same steps in R (tests/golden/unequal/,
+    run_unequal_reference.R) to 1e-8: fold change, interval, t, p and adjusted p of every feature."""
+    from ionomos.downstream import benchmark
+
+    st = settings_from({**CFG, "normalize": "median", **over})
+    p, diffs = benchmark.run_pipeline(_unequal_matrix(), st)
+    _cols, want = _gold_matrix("unequal_imputed.tsv" if case == "imputed" else "unequal_processed.tsv")
+    assert [f.id for f in p.m.features] == list(want) and len(want) == 320 - 16  # the same rows pass the filter
+    worst = max(abs(a - b) for f, row in zip(p.m.features, p.m.values, strict=True)
+                for a, b in zip(row, want[f.id], strict=True) if a is not None or b is not None)
+    assert worst < 1e-9  # R writes 15 significant digits
+    assert [d.name for d in diffs] == ["Probe vs DMSO", "Probe_Comp vs Probe", "Probe_Comp vs DMSO"]  # the roles'
+    gold = _gold_limma(f"unequal_limma_{case}.tsv")
+    with open(GOLD_UNEQUAL / "unequal_priors.tsv", encoding="utf-8") as fh:
+        prior = next(r for r in csv.DictReader(fh, delimiter="\t") if r["case"] == case)
+    tested = {}
+    for d in diffs:
+        assert d.prior == pytest.approx((float(prior["df.prior"]), float(prior["s2.prior"])), rel=1e-9)
+        assert len(d.rows) == len(want)
+        for r in d.rows:
+            g = gold[(d.name, r["id"])]
+            for ours, key in ((r["log2fc"], "diff"), (r["ci_low"], "CI.L"), (r["ci_high"], "CI.R"), (r["t"], "t"),
+                              (r["pvalue"], "p.val"), (r["qvalue"], "p.adj")):
+                ours = math.nan if ours is None else ours
+                assert (math.isnan(ours) and math.isnan(g[key])) or ours == pytest.approx(g[key], rel=1e-8, abs=1e-12), \
+                    (case, d.name, r["id"], key, ours, g[key])
+        tested[d.name] = d.tested
+    if case == "imputed":
+        assert set(tested.values()) == {len(want)}
+    else:  # the edges of the small-group rule: one DMSO value of two is tested with half, not with same
+        n_vs_dmso = sum(1 for k, g in gold.items() if k[0] == "Probe vs DMSO" and not math.isnan(g["p.val"]))
+        assert tested["Probe vs DMSO"] == n_vs_dmso
+        if case == "half":
+            same = _gold_limma("unequal_limma_same.tsv")
+            more = sum(1 for k, g in gold.items() if not math.isnan(g["p.val"]) and math.isnan(same[k]["p.val"]))
+            assert more > 20 and all(not math.isnan(g["p.val"]) or math.isnan(same[k]["p.val"])
+                                     for k, g in gold.items())
+            assert tested["Probe_Comp vs Probe"] == sum(1 for k, g in same.items() if k[0] == "Probe_Comp vs Probe"
+                                                       and not math.isnan(g["p.val"]))  # 4 vs 4: untouched
 
 
 def test_power_is_given_per_comparison_with_its_own_samples():
@@ -641,6 +715,166 @@ def test_low_confidence_wording_for_one_and_two_controls(tmp_path):
     assert "DMSO has 2 samples" in low[0]["message"] and "fewer than the 3 the settings ask for" in low[0]["causes"][0]
     assert "LOW CONFIDENCE — a group has 2 samples" in (out3.results_dir / "volcano_Probe_vs_DMSO.svg").read_text(
         encoding="utf-8")
+
+
+# ------------------------------------------------- the editor's view (D65) --
+
+
+@pytest.mark.parametrize("conds", [c for c, _w in ROLE_CASES])
+def test_preview_shows_the_roles_and_comparisons_the_analysis_uses(conds):
+    """The rows say what infer() says and the comparisons are choose_comparisons' own, for every name table case
+    (the KL6283A_Comp_KL6159A folder on the lab PC among them), with an uneven control."""
+    sizes = {c: (2 if r == "control" else 4) for c, r in ((c, roles.infer(conds, Settings()).roles[c].role)
+                                                          for c in conds)}
+    view = roles.preview(sizes, Settings(), exp="DIA")
+    plan = roles.infer(conds, Settings(), sizes)
+    assert [(r.condition, r.role, r.n) for r in view.rows] == [(c, plan.roles[c].text(), sizes[c]) for c in conds]
+    assert view.pairs == analysis.choose_comparisons(_matrix(sizes), Settings())[0]
+    assert len(view.comparisons) >= len(view.pairs) and not view.error
+    assert all(not r.set_here and r.auto == r.label for r in view.rows)
+
+
+def test_preview_in_words_for_a_competition_with_two_dmso():
+    view = roles.preview(UNEQUAL, Settings(), exp="TMT")
+    by = {r.condition: r for r in view.rows}
+    assert (by["DMSO"].label, by["DMSO"].n, by["DMSO"].source) == ("control", 2, "the name (a control word)")
+    assert (by["Probe_Comp"].label, by["Probe_Comp"].source) == ("competition of Probe", "the name ('comp')")
+    assert by["Probe"].source == "not a control, pool or QC name, so a compound"
+    assert view.follows_roles and view.comparisons == [
+        "Probe vs DMSO — enrichment: what Probe pulls down over the control · 4 against 2 samples",
+        "Probe_Comp vs Probe — competition: what the competitor takes off (down = competed off) · 4 against 4 samples",
+        "Probe_Comp vs DMSO — what is left with the competitor · 4 against 2 samples",
+        "Specific targets of Probe: up in Probe vs DMSO and down in Probe_Comp vs Probe"]
+    # TMT is not imputed: the smaller group's need, as group_needs computes it
+    assert view.uneven == ["DMSO has 2 samples, Probe 4, Probe_Comp 4: a feature needs 1 of 2 DMSO values and 2 in "
+                           "the other group (small_group_min_valid: half)"]
+    lines = view.lines()
+    assert lines[0] == "Comparisons that will be run, following the roles:" and "Group sizes:" in lines
+    same = roles.preview(UNEQUAL, settings_from({"small_group_min_valid": "same"}), exp="TMT")
+    assert same.uneven == ["DMSO has 2 samples, Probe 4, Probe_Comp 4: a feature needs 2 of 2 DMSO values and 2 in "
+                           "the other group (small_group_min_valid: same)"]
+    # DIA is imputed by default: every feature is tested, the small group costs sensitivity
+    dia = roles.preview(UNEQUAL, Settings(), exp="DIA")
+    assert dia.uneven == ["DMSO has 2 samples, Probe 4, Probe_Comp 4: missing values are imputed (perseus), so every "
+                          "feature is tested; the smaller group makes comparisons with DMSO less sensitive"]
+    assert "needs 1 of 2" in roles.preview(UNEQUAL, settings_from({"imputation": "none"}), exp="DIA").uneven[0]
+    welch = roles.preview(UNEQUAL, settings_from({"test": "welch"}), exp="TMT")
+    assert "needs 2 values in each group (Welch t-test; small_group_min_valid applies to limma only)" in welch.uneven[0]
+    # equal groups say nothing; a group of one is low confidence; no replicates at all is fold change only
+    assert roles.preview({"DMSO": 3, "Probe": 3, "Probe_Comp": 3}, Settings(), exp="TMT").uneven == []
+    one = roles.preview({"DMSO": 1, "Probe": 3, "Probe_Comp": 3}, Settings(), exp="TMT")
+    assert one.uneven == ["DMSO has 1 sample, Probe 3, Probe_Comp 3: comparisons with DMSO are low confidence (fewer "
+                          "than min_valid: 2); their p-values borrow the replicate spread of the other groups"]
+    assert roles.preview({"DMSO": 1, "Drug": 1}, Settings()).uneven == [
+        "Every condition has one sample: fold change only, no p-values"]
+    assert roles.preview({"DMSO": 2, "Drug": 3}, Settings(), exp="TMT").comparisons == [
+        "Drug vs DMSO · 3 against 2 samples"]
+
+
+def test_preview_marks_the_weak_keywords_to_confirm_and_a_confirmation_settles_them():
+    for name, kw in (("Probe_pre", "pre"), ("Probe_pretreat", "pretreat"), ("Probe_block", "block"),
+                     ("Probe_cold", "cold"), ("Probe_10x", "10x")):
+        sizes = {"DMSO": 2, "Probe": 3, name: 3}
+        view = roles.preview(sizes, Settings())
+        row = next(r for r in view.rows if r.condition == name)
+        assert row.role == "competition of Probe" and row.confirmable
+        assert row.confirm == (f"read as Probe plus a competitor because of '{kw}' in the name, which can also mean "
+                               "a dose or a time: confirm it, or choose compound")
+        assert not any(r.confirm for r in view.rows if r.condition != name)
+        mine = roles.set_role({}, name, row.role)                         # Confirm
+        assert mine == {name: "competition of Probe"}
+        again = roles.preview(sizes, Settings(), mine)
+        kept = next(r for r in again.rows if r.condition == name)
+        assert not kept.confirm and kept.set_here and kept.source == "set for this experiment"
+        assert again.pairs == view.pairs
+        assert roles.infer(list(sizes), settings_from({"roles": mine})).questions == []    # the analysis stops asking
+        no = roles.preview(sizes, Settings(), roles.set_role(mine, name, "compound"))      # ... or it isn't one
+        assert no.pairs == [("Probe", "DMSO"), (name, "DMSO")] and not no.follows_roles
+        assert next(r for r in no.rows if r.condition == name).auto == "competition of Probe"
+    # a competition the names can't link: not confirmable as it is, the list offers each compound
+    view = roles.preview({"DMSO": 2, "A": 3, "B": 3, "Comp": 3}, Settings())
+    comp = next(r for r in view.rows if r.condition == "Comp")
+    assert comp.label == "competition (compound not known)" and comp.confirm and not comp.confirmable
+    values = [v for _s, v in roles.role_choices(view, "Comp")]
+    assert values == ["", "control", "compound", "competition of A", "competition of B", "competition", "reference",
+                      "qc"]
+    linked = roles.preview({"DMSO": 2, "A": 3, "B": 3, "Comp": 3}, Settings(), {"Comp": "competition of B"})
+    assert ("Comp", "B") in linked.pairs and not any(r.confirm for r in linked.rows)
+
+
+def test_role_choices_and_overrides():
+    view = roles.preview(UNEQUAL, Settings(), {"Probe_Comp": "compound"})
+    pairs = roles.role_choices(view, "Probe_Comp")
+    assert pairs[0] == ("automatic: competition of Probe", "") and ("pool / reference", "reference") in pairs
+    assert ("competition of Probe", "competition of Probe") in pairs and ("QC standard", "qc") in pairs
+    assert not any(v == "competition of Probe_Comp" for _s, v in pairs)                  # not of itself
+    assert view.pairs == [("Probe", "DMSO"), ("Probe_Comp", "DMSO")]
+    # every choice is something analysis.roles accepts
+    for _shown, value in pairs:
+        settings_from({"roles": roles.set_role({}, "Probe_Comp", value)})
+    assert roles.set_role({"probe_comp": "compound", "DMSO": "control"}, "Probe_Comp", "") == {"DMSO": "control"}
+    assert roles.set_role({}, "Pool", "pool") == {"Pool": "reference"}
+    with pytest.raises(roles.RoleError):
+        roles.set_role({}, "X", "bystander")
+    assert roles.keep_roles({"A": "control", "gone": "compound"}, ["a", "B"]) == {"A": "control"}
+    # a control chosen by role is the control; a pool and a QC standard are said not to be compared
+    v = roles.preview({"Mock": 2, "DMSO": 2, "Probe": 3, "Probe_Comp": 3, "Pool": 1, "HeLa": 1}, Settings(),
+                      {"Mock": "control", "DMSO": "compound"})
+    assert v.pairs[0] == ("DMSO", "Mock") and ("Probe", "Mock") in v.pairs
+    assert "Not compared: Pool (a pooled reference, not a treatment)" in v.notes
+    assert "Not compared: HeLa (a QC standard, not a treatment)" in v.notes
+    assert next(r for r in v.rows if r.condition == "Mock").source == "set for this experiment"
+    lab = settings_from({"roles": {"Mock": "control"}})
+    assert next(r for r in roles.preview({"Mock": 2, "Drug": 2}, lab).rows
+                if r.condition == "Mock").source == "the lab's settings (config.yaml analysis.roles)"
+
+
+def test_preview_says_when_the_roles_do_not_choose_and_what_is_wrong():
+    v = roles.preview(UNEQUAL, settings_from({"comparisons": ["Probe_Comp vs DMSO"]}))
+    assert v.pairs == [("Probe_Comp", "DMSO")] and not v.follows_roles
+    assert "The roles don't choose the comparisons: explicit analysis.comparisons are used" in v.notes
+    v = roles.preview(UNEQUAL, settings_from({"control": "Nope"}))
+    assert "not one of the conditions" in v.error and v.pairs == [] and v.lines()[0].startswith("⚠ control 'Nope'")
+    v = roles.preview(UNEQUAL, Settings(), {"Gone": "compound"})
+    assert any(n.startswith("analysis.roles names 'Gone'") for n in v.notes)
+    v = roles.preview(UNEQUAL, Settings(), {"Probe": "bystander"})
+    assert v.error.startswith("roles: role 'bystander'") and len(v.rows) == 3
+    v = roles.preview({"A": 3, "B": 3}, Settings())
+    assert v.pairs == [("B", "A")] and any("no control condition recognised" in n for n in v.notes)
+    others = roles.preview({"DMSO": 2, "Drug": 3}, settings_from({"de_type": "others"}))
+    assert others.comparisons[0] == "DMSO vs all the others · 2 against 3 samples" and others.uneven == []
+    iso = roles.preview({"CmpdA": 3, "CmpdB": 1}, Settings(), kind="ratio", exp="isoDTB")
+    assert iso.by_construction and iso.notes == [] and iso.uneven == []
+    assert iso.comparisons == ["CmpdA: heavy/light ratio against 0 · 3 replicates",
+                               "CmpdB: heavy/light ratio against 0 · 1 replicate"]
+    assert roles.preview({}, Settings()).rows == []
+
+
+def test_the_analysis_tab_reads_the_sdrf_roles_and_the_data_type(tmp_path):
+    from ionomos import postprocess
+
+    dest = tmp_path / "exp"
+    sizes = {"V": 2, "P": 3, "PX": 3}
+    _dia(dest, sizes, control="V", compound="P", competition="PX", n=200)
+    head = ["source name", "characteristics[biological replicate]", "characteristics[role]", "assay name",
+            "comment[data file]", "comment[label]", "factor value[compound]"]
+    role = {"V": "control", "P": "compound", "PX": "competition of P"}
+    lines = [[f"{c} {r}", r, role[c], f"run {c}{r}", f"{c}_{r}.raw", "AC=MS:1002038;NT=label free sample", c]
+             for c, n in sizes.items() for r in range(1, n + 1)]
+    (dest / "design.sdrf.tsv").write_text("\t".join(head) + "\n" + "\n".join("\t".join(map(str, x)) for x in lines)
+                                          + "\n", encoding="utf-8")
+    info = postprocess.inspect_folder(dest, None, "DIA")
+    assert info["exp"] == "DIA" and info["sdrf_roles"] == role and info["sdrf_file"] == "design.sdrf.tsv"
+    counts = {}
+    for x in info["samples"]:
+        counts[x["condition"]] = counts.get(x["condition"], 0) + 1
+    view = roles.preview(counts, Settings(), {}, info["kind"], info["exp"], info["sdrf_roles"], info["sdrf_file"])
+    assert {r.condition: r.source for r in view.rows}["PX"] == "SDRF design.sdrf.tsv"
+    assert view.pairs == [("P", "V"), ("PX", "P"), ("PX", "V")]
+    # analysis.roles wins over the SDRF, as in the analysis
+    mine = roles.preview(counts, Settings(), {"PX": "compound"}, info["kind"], info["exp"], info["sdrf_roles"])
+    assert mine.pairs == [("P", "V"), ("PX", "V")]
+    assert next(r for r in mine.rows if r.condition == "PX").auto == "competition of P"
 
 
 def test_simulated_tables_are_unchanged_without_the_new_arguments(tmp_path):

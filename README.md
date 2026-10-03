@@ -50,10 +50,13 @@ missingness, p-value shape) and adds views beyond the volcano:
 - a power curve
 - search by gene lists, wildcards or pathway terms
 - figures for slides: every chart as SVG or PNG in one export style, or all of them in one .zip
-  (`ionomos export` writes the main ones without a browser)
+  (`ionomos export` writes them without a browser, dose-response, time-course and
+  liganded-site figures included; PNG too where a renderer is installed)
 
 The app's Analysis tab re-runs any experiment with
-other conditions, samples or comparisons. See
+other conditions, samples or comparisons, sets the lab's figure style, and
+checks the analysis against a reference result or a benchmark; its
+Notifications tab sends a Teams / Slack / email message when a search ends. See
 [docs/ROADMAP.md](docs/ROADMAP.md), and [docs/DEPLOY_WINDOWS.md](docs/DEPLOY_WINDOWS.md)
 to put it on the PC.
 

@@ -141,6 +141,20 @@ attempt's log, the progress line, TMT annotation files, decoy rules. New:
 real one's output. **Still not run against a real FragPipe**: FIRST_REAL_RUN.md
 is the checklist for that day, and the fingerprints are what to send back.
 
+2026-10-02 (D69): a fault-injection suite around the worker
+(`tests/test_faults.py`), with the fake FragPipe acting out each fault per
+experiment. Fixed: a FragPipe that outlived a killed Ionomos ran beside the
+re-run (now stopped first, and only when it is provably the one Ionomos
+started); a job recovered to `failed` kept saying `running` in its folder; a
+table cut off by a full disk counted as done; console logs read whole
+(`tail()`), and Windows code page text unreadable in `FAILED.txt`; two
+re-runs in one second failed the job; an error inside Ionomos during a search
+left the job `running`; a second job row for one folder was searched again
+over the first. New: holds for a raw file still open, a path with a space (on
+Windows) and earlier output that can't be moved aside; a limit on the console
+log; causes for a search ended from outside, a crash, a time limit; drops
+laid out one folder per TMT plex. **Still not run against a real FragPipe.**
+
 ## Phase 3 — DIA, then TMT
 
 - DIA: pin workflow, `data_type: DIA`, sort out DIA-NN version/`--config-diann`.
@@ -157,8 +171,9 @@ is the checklist for that day, and the fingerprints are what to send back.
   - notifications: a JSON webhook, Teams, Slack and SMTP email on done /
     failed / held, off by default, under `notify:` in `config.yaml`;
     `ionomos notify-test`. Not checked against a real Teams / Slack / SMTP
-    server yet. Open: a tab in the app; per-user recipients (each person
-    told about their own jobs)
+    server yet. Open: per-user recipients (each person told about their
+    own jobs). → 2026-10-02 (D67): the app's **8 Notifications** tab, with
+    Send test and masked secrets; not yet seen on screen
   - log rotation: was there (5 MB, 5 files); now also safe when Windows
     refuses the rename
   - disk space: was there since 0.3.0 as a hold (`fragpipe.min_free_gb` +
@@ -186,11 +201,21 @@ is the checklist for that day, and the fingerprints are what to send back.
     the lab PC (text editable? fonts? mm sizes?), and try the export in the
     browser the lab uses. None of this has been checked (D62).
   - PNG from `ionomos export` (needs a renderer; SVG only for now).
-  - The Analysis tab has no fields for `analysis.export`; it is edited in
-    `config.yaml` (the app keeps the block).
+    → 2026-10-02, done (D68): `--format png | both` with cairosvg, resvg,
+    rsvg-convert or Inkscape when the computer has one; a clear message when
+    not. Open: put resvg on the lab PC (one file) and check its PNGs there,
+    Windows fonts included.
+  - ~~The Analysis tab has no fields for `analysis.export`; it is edited in
+    `config.yaml` (the app keeps the block).~~ → 2026-10-02 (D67): Analysis
+    tab → **Figure style**. Not yet seen on screen (GUI tests run in CI).
   - Static figures for dose-response, time courses and liganded sites
     (`ionomos export` draws volcano, PCA, heatmap, correlation; the report
-    exports them all).
+    exports them all). → 2026-10-02, done (D68): potency, curve grids,
+    patterns, profiles, liganded-site rank plots and a selectivity map, in
+    `ionomos export`, `analysis.export.figures` and the report's .zip;
+    `--list`, `--figures` by name, `--features`, `--top`. Open: the panel
+    count and the minimum readable panel size are choices; check them on a
+    real titration and time course.
   - Tune the D35 warning thresholds on real lab experiments.
   - PSM-level technical QC from `psm.tsv`: mass error, missed cleavages,
     charge states. → 2026-10-01, done (D55): the Search quality QC tab,
@@ -380,10 +405,13 @@ real data:
 7. [x] **Roles and competition experiments** (2026-10-01, D61: `downstream/roles.py`): control / compound /
    competition, comparisons that follow the design, a specific-targets call,
    unequal groups handled knowingly. Simulated data only. Still to do:
-   - [ ] roles in the experiment editor and the review window (a GUI change)
+   - [x] roles in the experiment editor and the review window (2026-10-02, D65: `roles.preview`; each
+     condition's role and samples, a list to change it, weak keywords to confirm, the comparisons and
+     uneven groups in words; not yet looked at on screen)
    - [x] a normalisation that holds when many features are enriched in one
      direction (2026-10-01, D64: `normalize: auto` / `ratio`; simulated pulldowns only)
-   - [ ] an R (limma) golden file for unequal groups
+   - [x] an R (limma) golden file for unequal groups (2026-10-02, D66: `tests/golden/unequal/`, DMSO 2 /
+     Probe 4 / Probe_Comp 4 with missing values and the small-group rule, limma 3.68.5 to 1e-8)
 8. [ ] Phospho: localisation filter and KSEA kinase activity. Only if a lab
    runs phospho; PhosphoSitePlus is non-commercial, so it is a user download.
 9. [ ] STRING / CORUM overlays: low priority.
@@ -406,9 +434,12 @@ real data:
      from it
    - [ ] compare one real experiment with the lab's FragPipe-Analyst result
      and with a real MSstats / Perseus export
-   - [ ] the same checks for ratio data (isoDTB) and TMT: the simulated
-     grid is label-free DIA only
-   - [ ] a button for compare / benchmark in the app (command line only now)
+   - [x] the same checks for ratio data (isoDTB) and TMT (2026-10-02, D66:
+     `ionomos benchmark --kind isodtb | tmt`, a calibration guard per kind;
+     what they found is under Open questions)
+   - [x] a button for compare / benchmark in the app (2026-10-02, D67:
+     Analysis tab → **Check accuracy**, the same code as the command line,
+     run off the Tk thread; not yet seen on screen)
 
 Stay deterministic. The one credible published "AI interpretation"
 (GeneAgent, Nat Methods 2025) verifies every claim against databases. Plain
@@ -588,8 +619,18 @@ Collected from the other docs; resolve before/during Phase 1.
       (same in 23.1): the one file whose name ends in `annotation.txt` in the folder holding all of the plex's
       LC-MS files; with none or several it writes its own `<workdir>\<plex>\<plex>_annotation.txt` naming the
       channels `<plex>_<channel>`. Not yet seen on the PC.
-- [ ] D59: several TMT plexes in one experiment need a folder each for FragPipe to find their annotations. Intake
-      files raws at the top level or in `raw\`: should a multi-plex drop be laid out as `<plex>\*.raw`?
+- [ ] D59: several TMT plexes in one experiment need a folder each for FragPipe to find their annotations. →
+      2026-10-02 (D69), in part: a drop that already comes as `<plex>\*.raw` is filed and searched that way (the
+      folder is the plex, one `annotation.txt` in each); a flat drop with several plexes is filed as it is, with a
+      warning that FragPipe will name the channels `<plex>_<channel>`. **Still for the lab**: should people be asked
+      to drop multi-plex experiments as `<plex>\*.raw` (NAMING_CONVENTION.md), or should Ionomos one day lay them
+      out itself?
+- [ ] D69: on the PC, check that (1) a FragPipe left by an Ionomos ended from Task Manager is stopped by the next
+      start (`engine_pid.json`, the log line "was still running after Ionomos stopped"); (2) Xcalibur acquiring a
+      file makes "raw file(s) can't be read yet" (a hold), and the search starts once it is done; (3) the console
+      text of a failed search reads right in `FAILED.txt` (cp1252 assumed for non-UTF-8 lines; an OEM code page
+      from `cmd.exe` would show as odd letters); (4) whether a real FragPipe ever exits 0 without `ALL JOBS DONE`
+      and without result tables (now a failure). The 2 GB console limit and the table checks are guesses.
 - [x] D59: FragPipe 24's stock workflows write `fragpipe\sdrf.tsv` (`workflow.misc.save-sdrf=true`), which the
       analysis took for the experiment's own design. Fixed in 0.14.0: an SDRF with no factor value column and no
       sample names is skipped with a note (`sdrfdesign._engine_template`). Confirm on the first real run that the
@@ -623,6 +664,12 @@ Collected from the other docs; resolve before/during Phase 1.
       added. Is that right, or should a set control switch the role comparisons off?
 - [ ] Roles (D61): should a pool or a QC standard also be left out of the comparisons when there is no competition
       condition? (Now: only in a competition experiment, so nothing changed for other experiments.)
+- [ ] Roles in the windows (D65): is a sixth role, "other" (a condition that is neither a treatment nor a control,
+      e.g. beads only or no probe), needed? It would need a rule: left out of the default comparisons, or compared
+      like a compound? Built: the five roles of D61 only.
+- [ ] Roles in the windows (D65): should the review window hold a drop until a "?" role is confirmed, or is the
+      analysis' question afterwards (`ROLES_UNSURE`) enough? Built: it does not block. Is the review window's role
+      list wanted at all for DIA drops, or is it too much on a window shown for every drop?
 - [ ] Unequal groups (D61): is `small_group_min_valid: half` right as the default (a feature with one of two DMSO
       values is tested), and should the filter ask for at least two values in the condition that keeps a feature?
 - [ ] Is a review window on every drop right long-term, or only for new users / methods / code patterns?
@@ -640,6 +687,9 @@ Collected from the other docs; resolve before/during Phase 1.
       buttons use the export style rather than the on-screen size, and whether the watcher should write
       `results/figures/` after every job (built: off, `analysis.export.figures: []`). Does the lab have a house
       style (font, colours) to put in `analysis.export`? Which program do the figures go into?
+- [ ] Section figures and PNG (D68): are six curves / features per grid the right default, and is a grid of
+      separate panels (the CLI) or one file per curve (the report's .zip) what the lab pastes into slides? May
+      resvg (one file, no installer) be put on the lab PC for `ionomos export --format png`?
 - [ ] Bundle (D63): confirm the defaults: generic role words (DMSO, drug, compound, pool) stay readable and
       other condition words are replaced; pseudonyms without an underscore (`user01`, `exp001`, `condA`); the
       2,000 MB and 25 MB limits; with no job named, `validate` takes the last finished job. Is a date in a raw
@@ -653,6 +703,31 @@ Collected from the other docs; resolve before/during Phase 1.
 - [ ] Normalisation (D64): the lab PC's config.yaml says `normalize: median` (written by the app before 0.14.1);
       set it to `auto` on the Analysis tab. Are the check's limits right on real pulldowns (0.1 log2, 3 times
       the replicate scatter)? Is a pulldown against empty beads normalised at all in the lab's practice?
+      (D66: in simulated TMT the same holds after IRS: median centring shifts a pulldown's unchanged proteins by
+      -0.2 to -0.4 log2, 67 % of the calls at adjusted p alone are false, 8.4 % of the hits in the worst case;
+      `auto` keeps them within 0.04.)
+- [ ] isoDTB normalisation (D66): site ratios are never normalised. A heavy / light mixing error moves every ratio
+      of a replicate; in simulation (SD 0.2 log2, i.e. about 15 %) the unchanged sites of an experiment sat 0.07 –
+      0.13 log2 off 0 and the FDP at adjusted p ≤ 0.05 reached 10.6 % in a scenario (3 replicates, 5 % of sites
+      up 4-fold, 20 seeds: 7.4 %). Centring each replicate on its median brings that to 5.1 %, but when 20 % of
+      the sites go one way it shifts every unchanged site by -0.09 log2 instead. How does the lab mix heavy and
+      light (protein assay, by volume), and how far off 1:1 is it? Should the ratios be centred, with a
+      composition-robust centre, and should the liganded calls (R ≥ 4) use the centred ratios too?
+- [ ] TMT without IRS (D66): with the plex effect still in the data, the composition check and the ratio method
+      compare a protein across plexes and cannot see a pulldown: with the plex as a block, 59 % of the calls at
+      adjusted p alone were false in a simulated pulldown (offset -0.19 to -0.26 log2). Worth doing the check
+      within plexes when plexes are known and IRS is off? (With IRS on a pool, the default, it is fine.)
+- [ ] TMT `irs: sum` (D66): IRS on each plex's own mean, used when no reference channel is found and the plexes
+      are balanced, is slightly liberal in simulation: FDP 6.6 % with changes both ways (4.5 % aimed at), up to
+      9.3 % in one scenario, because the plex mean is estimated from the channels then tested. Accept, or
+      correct limma's residual df by the plexes?
+- [ ] isoDTB with two replicates (D66): limma's FDP was 5.8 % (no mixing error) to 9.8 % (with one) in
+      simulation, because with 1 df per site the test rests on the variance prior and the simulated sites differ
+      in variance (with equal SDs it is calibrated). "How far to trust this" already marks two replicates
+      "check"; is that enough, or should isoDTB ask for three?
+- [ ] App settings (D67): open the Figure style, Check accuracy and Notifications pages on the PC (display scaling,
+      the colour picker, the masked fields) and have a lab member set a figure style and send a test message without
+      help. Should "Show addresses and password" exist at all, or should a stored secret only ever be replaced?
 - [ ] Phase 5: which pilot labs can we reach? Does this lab run titrations or phospho? (Orders 5C.)
 - [ ] Phase 6: is the PC's RAM in all 6 memory channels (speed of a local model)? Is a GPU present? May the assistant
       ever use a cloud model (institutional data policy), or strictly local?

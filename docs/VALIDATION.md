@@ -19,6 +19,7 @@ no real FragPipe-Analyst, MSstats or Perseus export has been compared.
 | isoDTB site table, TMT annotation | the lab's R scripts | byte-identical | `tests/test_downstream.py`, `tests/golden/` |
 | Imputation (Perseus-type), R's random numbers | R's `set.seed(123)`, `rnorm`; FragPipeAnalystR's `manual_impute` | 1e-13; 1e-9 | `tests/test_fpa.py` |
 | limma (`~0 + condition`, all / control / others, missing values) | limma 3.68 | 1e-8 | `tests/test_fpa.py`, `tests/golden/fpa/` |
+| Unequal groups (DMSO 2, Probe 4, Probe_Comp 4) through filter, median normalisation, imputation or none, the role comparisons and `small_group_min_valid` (`half` and `same`) | limma 3.68.5 | 1e-8 | `tests/test_roles.py`, `tests/golden/unequal/` |
 | The whole pipeline on a DIA-NN matrix | FragPipeAnalystR 1.1.1 | 1e-8 on every result column | `tests/test_fpa.py`, `tests/golden/fpa/e2e/` |
 | Blocks, covariates, the moderated F, DEqMS | limma 3.68.5, DEqMS 1.30.0 | 1e-8 | `tests/test_design.py` |
 | Time courses | limma 3.68.5 | 1e-8 | `tests/test_timecourse.py` |
@@ -106,7 +107,17 @@ documented ones.
 ionomos benchmark                  # the standard grid, about a minute
 ionomos benchmark --grid quick     # seconds
 ionomos benchmark --like <experiment folder>   # adds that experiment's settings and group sizes
+ionomos benchmark --kind isodtb    # isoDTB site ratios (below)
+ionomos benchmark --kind tmt       # several TMT plexes with a pooled reference (below)
 ```
+
+Without `--kind` the data is label-free DIA, as described first. With
+`--like`, the kind is the experiment's own (site ratios: isodtb; several TMT
+plexes: tmt). Each kind writes its own files (`benchmark_simulated.*`,
+`benchmark_simulated_isodtb.*`, `benchmark_simulated_tmt.*`), so the three
+can sit side by side.
+
+#### Label-free DIA
 
 It runs the pipeline's own loader, processing and statistics
 (`benchmark.run_pipeline`, the calls `analyze()` makes; a test checks the two
@@ -182,6 +193,132 @@ seeds, the pooled FDP per design had a mean of 4.9 – 5.3 % (none) and
 2.9 – 3.3 % (Perseus), an SD of 0.7 – 1.1 %, and ranged 1.6 – 7.9 %; the
 limit is the worst mean plus about 3.5 SD. With its fixed seeds the guard
 measures 1.7 – 6.3 %.
+
+#### isoDTB site ratios (`--kind isodtb`, D66)
+
+The table is FragPipe's `combined_modified_peptide_label_quant.tsv`
+(`simulate.isodtb_ratios`), merged into sites by the port of the lab's R
+script and loaded as `analyze()` loads it; each compound is tested against 0.
+
+- 900 cysteines, three per protein; every site its own replicate SD (0.35
+  log2 on average, log-normal); a quarter of the sites seen by two peptides
+  (the site table averages them); weak peptides go missing more often;
+- **grid**: 2, 3 and 4 replicates; 2- and 4-fold changes; 5 % or 20 % of the
+  sites changed, **all one way** (a compound engages its sites; 20 % is a
+  promiscuous one); **mixing error**: none, or an SD of 0.2 log2 per replicate
+  (heavy and light mixed about 15 % off 1:1, which moves every ratio of that
+  replicate); 5 tables per scenario;
+- **settings**: limma (the default) and the t-test. Imputation and
+  normalisation do not apply to ratio data: Ionomos neither imputes nor
+  normalises site ratios.
+
+Measured 2026-10-02 (FDP at adjusted p ≤ 0.05, pooled; found = planted
+changes called at adjusted p ≤ 0.05; |offset| = how far the unchanged sites'
+mean sits from 0, per table):
+
+| | FDP | range over scenarios | FDP with \|log2FC\| ≥ 1 | found 2- / 4-fold | \|offset\| |
+|---|---|---|---|---|---|
+| limma, no mixing error, 3 – 4 replicates | 4.9 % | 3.7 – 7.0 % | 0.9 – 2.2 % | 72 – 86 / 97 % | 0.005 |
+| limma, no mixing error, 2 replicates | 5.8 % | 4.9 – 8.0 % | 4.2 % | 17 / 89 % | 0.006 |
+| limma, mixing error, 3 – 4 replicates | 4.2 – 5.0 % | 1.7 – 10.3 % | 1.4 – 2.1 % | 67 – 80 / 97 – 99 % | 0.07 – 0.11 |
+| limma, mixing error, 2 replicates | 9.8 % | 8.6 – 10.6 % | 5.7 % | 14 / 89 % | 0.13 |
+| t-test, 4 replicates | 2.1 – 4.3 % | 1.1 – 7.1 % | 0 – 0.1 % | 16 – 34 / 65 – 79 % | as limma |
+
+(With 5 – 20 % of the sites changed, Benjamini-Hochberg at 5 % aims at 4 – 4.75 %.)
+
+What this says, on data like this simulation:
+
+- **limma is calibrated with 3 or more replicates**, and finds almost every
+  4-fold change. The t-test is calibrated too but finds little: with 3
+  replicates it has 2 df per site, and 1 – 32 % of the planted changes are
+  found; with 2 replicates it finds nothing.
+- **Two replicates lean on the variance prior.** limma's prior assumes
+  variances of one shape; with every site its own SD and 1 df each, the FDP
+  is 5 – 8 % without any mixing error. With equal SDs it is 3.7 – 4.7 % (20
+  seeds), so the prior's fit, not the code, is the cause.
+- **A mixing error is not corrected.** Every ratio of a replicate moves by the
+  error, so the unchanged sites sit 0.07 – 0.13 log2 off 0 (mean over the
+  tables; the error is random, so it averages out over many experiments, not
+  within one). The test against 0 then calls more of them: up to 10.6 % per
+  scenario. This is on the roadmap as an open question (D66): centring each
+  replicate on its median removes it (3 replicates, 5 % of the sites up 4-fold,
+  20 seeds: FDP 7.4 % → 5.1 %), but with 20 % of the sites up it shifts every
+  unchanged site by -0.09 log2 instead, which is the composition problem of
+  D64 again.
+
+**The guard** (`tests/test_benchmark.py`): limma, 3 and 4 replicates, 10 % of
+600 sites up 4-fold, no mixing error, 10 tables each. It fails when the
+pooled FDP at adjusted p ≤ 0.05 exceeds **9 %**, the sensitivity drops below
+0.90, or the bias exceeds 0.06 log2. Over 30 other blocks of 10 seeds the FDP
+had a mean of 4.9 – 5.1 %, an SD of 1.0 % and a range of 3.3 – 7.5 %; with its
+fixed seeds the guard measures 3.5 – 3.8 %. A second test shows the mixing
+error's offset (and that nothing removes it).
+
+#### TMT across plexes (`--kind tmt`, D66)
+
+The table is MaxQuant's `proteinGroups.txt` of several TMT 10-plexes
+(`simulate.tmt_plexes`; MaxQuant because its reporter intensities are raw, so
+Ionomos' own IRS runs: TMT-Integrator's abundances are already ratios to the
+reference and are not scaled again). The channels' conditions come in as
+`sample_conditions`, as an SDRF or the Analysis tab gives them.
+
+- 1,000 proteins; per plex a pooled reference at 126 and in every channel the
+  samples leave free (131 for 4 + 4), a **plex effect per protein** (SD 1.0
+  log2: each plex picks its own peptides), a loading difference per channel,
+  replicate SD 0.25 log2 (log-normal per protein); low-abundance proteins go
+  missing from whole plexes, single channels rarely;
+- **grid**: 2 and 3 plexes; 4 DMSO + 4 Drug or 2 + 6 per plex; 2- and 4-fold;
+  10 % of the proteins changed both ways, or 20 % up (a pulldown); 5 tables
+  per scenario;
+- **settings**: IRS on the pool channels (`tmt_reference`) with `auto`
+  normalisation (the default) or `median`; IRS on each plex's own mean
+  (`irs: sum`); no IRS; no IRS with the plex as a block (`block_from`). TMT is
+  not imputed, so `min_valid` and the small-group rule apply.
+
+Measured 2026-10-02:
+
+| Setting | FDP, changes both ways | FDP, pulldown | range | FDP with \|log2FC\| ≥ 1 (worst scenario) | found 2- / 4-fold | offset of unchanged, pulldown |
+|---|---|---|---|---|---|---|
+| IRS on the pool + auto (**default**) | 4.4 % | 3.8 % | 2.9 – 6.6 % | 0.2 % (1.0 %) | 95 / 99 % | -0.04 – 0.00 |
+| IRS on the pool + median | 4.4 % | 67 % | 2.9 – 77 % | 1.0 % (8.4 %) | 94 / 99 % | -0.43 – -0.20 |
+| IRS on plex means + auto | 6.6 % | 5.3 % | 3.7 – 9.3 % | 0.3 % (0.9 %) | 93 / 98 % | -0.03 – 0.00 |
+| no IRS + auto | 0.3 % | 5.1 % | 0 – 9.9 % | 0.2 % (6.9 %) | 29 / 88 % | -0.26 – -0.19 |
+| no IRS, plex as a block | 5.3 % | 59 % | 4.0 – 70 % | 0.6 % (11 %) | 94 / 99 % | -0.26 – -0.19 |
+
+What this says, on data like this simulation:
+
+- **The default is calibrated**, unequal channels (2 vs 6) included, and
+  finds 95 % of the 2-fold changes at adjusted p ≤ 0.05.
+- **A pulldown needs `auto` normalisation (D64) in TMT too.** After IRS,
+  median centring shifts every unchanged protein by -0.2 (2-fold) to -0.4
+  log2 (4-fold); at adjusted p alone most calls are then false. The
+  fold-change cut-off keeps most of them out of the hits, not all: 8.4 % false
+  hits with 2 DMSO channels per plex. The lab PC's `normalize: median` is
+  this row.
+- **Without IRS the plex effect stays in.** The plain model then finds 29 %
+  of the 2-fold changes. A plex block gets the power back, but in a pulldown
+  the normalisation cannot see the composition through the plex effect (the
+  ratio method and its check compare a protein across plexes), so the
+  unchanged proteins shift as with median centring. Open question (D66):
+  compare within plexes when plexes are known and IRS is off.
+- **IRS on the plex means is slightly liberal** (6.6 % where 4.5 % is aimed
+  at, up to 9.3 % in one scenario): the plex mean is estimated from the same
+  channels that are then tested, a degree of freedom limma does not know was
+  spent. `irs: auto` uses it only when no reference channel is found.
+
+**The guard**: IRS on the pool + auto, 2 and 3 plexes of 4 vs 4 and 2 vs 6,
+10 % of 600 proteins 2-fold both ways, 10 tables each; the pooled FDP must
+stay at or below **8.5 %**, the sensitivity at or above 0.85, the bias within
+0.05 log2. Over 30 other blocks of 10 seeds: mean 4.5 – 4.8 %, SD 0.8 –
+1.0 %, range 2.6 – 7.0 %; the fixed seeds measure 2.6 – 5.4 %. A second test
+holds the pulldown numbers above in their direction: median centring off by
+more than 0.12 log2 and over 20 % false at alpha, `auto` within 0.03.
+
+These simulations share the DIA benchmark's limits: normal noise on the log
+scale, missingness from abundance alone, changes of one size, no outlier
+channel, no ratio compression from co-isolated ions (MS2 TMT shrinks real
+ratios; the lab's workflow is MS3). They show how the methods behave on such
+data, not how the lab's samples behave.
 
 ### A real benchmark sample on the lab's instrument
 
@@ -316,7 +453,7 @@ check crossed its own threshold:
 | each comparison | tested, up, down; hits resting on imputed values; p-value histogram shape and π0; the prior | low confidence or fold change only; 5 or more hits and 30 % or more of the hits rest on imputed values; a "conservative" or "hump" histogram |
 | Power | the fold change found 80 % of the time at p 0.05 and 0.001, at this design's group size and median spread | that fold change is above the \|log2FC\| cut-off |
 | Statistics | one line per guard finding above | always |
-| Compared with a reference / Benchmark | the verdict lines of `compare.json` / `benchmark.json` / `benchmark_simulated.json` in the results folder, with a link | made on an analysis with other settings |
+| Compared with a reference / Benchmark | the verdict lines of `compare.json` / `benchmark.json` / `benchmark_simulated.json` (or `_isodtb` / `_tmt`, whichever `--like` wrote) in the results folder, with a link | made on an analysis with other settings |
 
 The thresholds are those of the checks themselves (the doctor, the scorecard,
 D35), plus two that are new here and stated in the list: fewer than 3

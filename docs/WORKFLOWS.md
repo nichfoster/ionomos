@@ -261,7 +261,8 @@ features × samples matrix of log2 values and runs the same statistics:
   `characteristics[role]` column. With a competition condition the default
   comparisons are compound vs control, competition vs its compound and
   competition vs control (see "Competition experiments" below). isoDTB is
-  a competition experiment by construction and is unchanged.
+  a competition experiment by construction and is unchanged. The experiment
+  editor and the review window show and change the roles (D65, below).
 - **Per experiment** (Analysis tab or `experiment.yaml analysis:`):
   `sample_conditions: {Drug_4: DMSO}`, `exclude_samples: [DMSO_3]`,
   comparisons and any setting above.
@@ -467,6 +468,32 @@ analysis:                      # experiment.yaml (one experiment) or config.yaml
   quadrant of specific binders marked; the calls follow the live cut-offs).
 - Not confirmed by the lab: the keywords and the rule. Not tested on a real
   experiment.
+
+**Roles in the windows** (D65; the logic is `roles.preview`, the Tk code only
+draws it). The experiment editor (Analysis tab, or the pop-up after an
+analysis) has a **Roles** box; the review window before filing has the same
+rows for DIA and label-free drops (TMT conditions come from the channel
+annotation, isoDTB is a competition by construction).
+
+- One row per condition: samples (replicates in the review window), role,
+  and where it came from (the name and the word that decided, the Control
+  choice, the lab's or this experiment's `analysis.roles`, an SDRF).
+- A list changes the role: **automatic** (what the name gives), control,
+  compound, competition of each compound condition, competition (compound
+  from the name), pool / reference, QC standard. Making a condition the
+  control also sets the Control box.
+- A competition read from a weak word (`pre`, `pretreat…`, `block…`, `cold`,
+  `10x`) is marked **?** with **Confirm**; one that can't be linked to a
+  compound asks for the compound. The editor's "Run anyway?" lists them.
+- Below: the comparisons that will be run (from `choose_comparisons`, so
+  exactly the analysis' own) with their meaning and the samples on each
+  side, the specific-targets rule when there is one, what is not compared and
+  why, and one line per smaller group: low confidence under `min_valid`;
+  with imputation "every feature is tested, the smaller group makes the
+  comparison less sensitive"; without it the values a feature needs from it
+  (`small_group_min_valid`).
+- A choice is saved as `analysis.roles` in the experiment's
+  `experiment.yaml` (the key above); **automatic** removes the entry.
 
 **Normalisation** (`fpa.normalize_info`, D64). `auto`, the default for new
 set-ups, is FragPipe-Analyst's median centring unless that would shift the

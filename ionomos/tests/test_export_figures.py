@@ -12,7 +12,7 @@ import yaml
 
 from ionomos import cli, configio, downstream
 from ionomos.config import ConfigError, load
-from ionomos.downstream import analysis, charts, simulate, slides
+from ionomos.downstream import analysis, charts, raster, sectionfigs, simulate, slides
 
 SVG = "{http://www.w3.org/2000/svg}"
 REPORT_JS = Path(charts.__file__).parent / "assets" / "report.js"
@@ -101,7 +101,9 @@ def test_the_report_and_python_share_one_style(payload):
     assert {k: tuple(v) for k, v in enums.items() if k != "size"} == {k: v for k, v in charts._ENUMS.items() if k != "size"}
     assert configio._EXPORT_FONT == {k: v[4] for k, v in charts.SIZES.items() if k != "custom"}
     assert {k: tuple(v) for k, v in literal("STYLE_RANGES").items()} == charts._RANGES
-    assert re.search(r'const STATIC_FIGS = \["volcano", "pca", "heatmap", "correlation"\]', js)
+    figs = re.search(r"const STATIC_FIGS = (\[.*?\]);", js).group(1)
+    assert json.loads(figs) == list(charts.STATIC_FIGURES)
+    assert int(re.search(r"const TOP_PANELS = (\d+);", js).group(1)) == sectionfigs.TOP_PANELS
     assert tuple(cli._EXPORT_SIZES) == tuple(k for k in charts.SIZES if k != "custom")
     assert payload["exportDefaults"] == charts.style_from()  # what the report's dialog starts from
 
@@ -256,7 +258,7 @@ def test_cli_export_writes_the_figures_and_a_readme(experiment, tmp_path, capsys
     assert cli.main(["export", str(dest), "--out", str(out)]) == 0
     said = capsys.readouterr().out
     assert "style: 16:9 slide (1280.0 × 720.0 px), text 14 pt Arial, palette default, light background" in said
-    assert "5 figure(s) and README.txt" in said and "PNG" in said
+    assert "5 file(s) and README.txt" in said
     names = sorted(p.name for p in out.iterdir())
     assert names == ["README.txt", "correlation.svg", "heatmap.svg", "pca.svg", "volcano_DrugA_vs_DMSO.svg", "volcano_DrugB_vs_DMSO.svg"]
     readme = (out / "README.txt").read_bytes().decode("utf-8")
@@ -287,9 +289,10 @@ def test_cli_export_writes_the_figures_and_a_readme(experiment, tmp_path, capsys
 def test_cli_export_says_plainly_what_it_cannot_do(experiment, tmp_path, capsys, monkeypatch):
     dest, _out = experiment
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(raster, "find", lambda prefer="auto": None)  # a computer with no SVG renderer
     assert cli.main(["export", str(dest), "--format", "png", "--out", str(tmp_path / "p")]) == 2
     err = capsys.readouterr().err
-    assert "writes SVG only" in err and "report.html" in err and not (tmp_path / "p").exists()
+    assert "none was found" in err and "resvg" in err and "report.html" in err and not (tmp_path / "p").exists()
     assert cli.main(["export", str(tmp_path / "nowhere")]) == 2
     assert "no report.html" in capsys.readouterr().err
     (tmp_path / "plain").mkdir()
@@ -299,7 +302,9 @@ def test_cli_export_says_plainly_what_it_cannot_do(experiment, tmp_path, capsys,
     assert cli.main(["export", str(dest), "--up", "red", "--palette", "custom", "--out", str(tmp_path / "q")]) == 2
     assert "export.up must be a colour" in capsys.readouterr().err
     assert cli.main(["export", str(dest), "--figures", "volcano,upset", "--out", str(tmp_path / "q")]) == 2
-    assert "export.figures must list" in capsys.readouterr().err
+    err = capsys.readouterr().err  # not a kind, so a figure name: none of this report's
+    assert "no figure 'upset' in this report; its figures: volcano_DrugA_vs_DMSO, volcano_DrugB_vs_DMSO, pca" in err
+    assert "ionomos export --list" in err and not (tmp_path / "q").exists()
     assert cli.main(["export", "17"]) == 2  # a job id needs the lab's ledger
     assert "no job ledger" in capsys.readouterr().err
 

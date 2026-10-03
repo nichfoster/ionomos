@@ -116,6 +116,10 @@ class Plan:
     manifest: list[ManifestLine] = field(default_factory=list)
     other_files: list[str] = field(default_factory=list)
     overrides: dict = field(default_factory=dict)
+    # a drop laid out as <plex>/*.raw (one folder per TMT plex, D69): safe raw file name -> its (safe) folder
+    raw_subdirs: dict[str, str] = field(default_factory=dict)
+    subdir_renames: dict[str, str] = field(default_factory=dict)  # folder as dropped -> safe name
+    warnings: list[str] = field(default_factory=list)  # filed anyway, but worth saying (log, ionomos.json)
 
     def to_json(self) -> dict:
         d = asdict(self)
@@ -156,6 +160,8 @@ class Draft:
     condition_codes: dict[str, str] = field(default_factory=dict)  # DIA X_D1 -> DMSO rep 1
     file_rules: dict = field(default_factory=dict)  # method -> naming.FileRule (config naming.methods); {} = built-in
     kinds: dict[str, str] = field(default_factory=dict)  # method -> what it behaves as (Config.kind); {} = its key
+    lab_analysis: dict = field(default_factory=dict)  # config.yaml analysis: (roles preview, D65)
+    exp_analysis: dict = field(default_factory=dict)  # experiment.yaml analysis:, as written (its roles: included)
 
     def kind_of(self, method: str) -> str:
         return self.kinds.get(method, method)
@@ -171,11 +177,19 @@ class Resolver(Protocol):
 
 
 def _find_raws(folder: Path) -> tuple[str, list[str], list[str]]:
-    """(raw_dir, raw filenames, other top-level files). Raws at top level or in raw/.
+    """(raw_dir, raw filenames, other top-level files). Raws at top level or in raw/, else one folder down
+    (<plex>/*.raw; _raw_places says which folder each is in).
 
     Raises IntakeError(Kind.LAYOUT) when .raw files sit in both places — the manifest
     would silently cover just one of the two sets (issue #14).
     """
+    return _raw_places(folder)[:3]
+
+
+def _raw_places(folder: Path) -> tuple[str, list[str], list[str], dict[str, str]]:
+    """_find_raws, and {raw file name: the subfolder it is in} for a drop laid out one folder per plex (D69):
+    used only when neither the top level nor raw/ has a .raw, so a drop that was filed before is read as before.
+    The layout is kept as dropped; FragPipe takes each plex's annotation.txt from the folder of its files."""
     top = [p for p in folder.iterdir() if p.is_file() and not p.name.startswith((".", "~$"))]
     raws = [p.name for p in top if p.name.lower().endswith(RAW_SUFFIX)]
     sub = folder / "raw"
@@ -196,7 +210,27 @@ def _find_raws(folder: Path) -> tuple[str, list[str], list[str]]:
         raws = sub_raws
         raw_dir = "raw"
     others = sorted(p.name for p in top if not p.name.lower().endswith(RAW_SUFFIX))
-    return raw_dir, sorted(raws), others
+    subdirs: dict[str, str] = {}
+    if not raws:
+        seen: dict[str, str] = {}
+        for d in sorted(p for p in folder.iterdir() if p.is_dir() and not p.name.startswith((".", "~$"))
+                        and p.name.lower() != "raw"):
+            for f in sorted(p for p in d.iterdir() if p.is_file() and p.name.lower().endswith(RAW_SUFFIX)
+                            and not p.name.startswith((".", "~$"))):
+                if f.name.lower() in seen:
+                    raise IntakeError(f"{f.name} is in both {seen[f.name.lower()]}/ and {d.name}/: FragPipe needs every "
+                                      f"raw file name once — rename one of them", Kind.RAWS)
+                seen[f.name.lower()] = d.name
+                subdirs[f.name] = d.name
+        raws = list(subdirs)
+    return raw_dir, sorted(raws), others, subdirs
+
+
+def raw_paths(folder: Path) -> list[Path]:
+    """Every .raw file of a drop, where it is: top level, raw/, or one folder per plex (D69). For the app's
+    inbox list and the review window's Delete. Raises IntakeError for a layout intake would refuse."""
+    raw_dir, raws, _others, subdirs = _raw_places(folder)
+    return [folder / (subdirs.get(n) or raw_dir) / n for n in raws]
 
 
 def _users(cfg: Config) -> dict[str, str]:
@@ -273,9 +307,10 @@ def _plan(folder: Path, cfg: Config, ledger: Ledger | None = None) -> Plan:
     except OverridesError as exc:
         raise IntakeError(str(exc), Kind.OVERRIDES) from exc
 
-    raw_dir, raw_names, others = _find_raws(folder)
+    raw_dir, raw_names, others, subdirs = _raw_places(folder)
     if not raw_names:
-        raise IntakeError("no .raw files found (top level or in a raw/ subfolder)", Kind.NO_RAWS)
+        raise IntakeError("no .raw files found (top level, in a raw/ subfolder, or one folder per plex)",
+                          Kind.NO_RAWS)
 
     method = _resolve_method(folder.name, cfg, raw_names, ov)
     user = _resolve_user(folder.name, cfg, ov)
@@ -304,6 +339,24 @@ def _plan(folder: Path, cfg: Config, ledger: Ledger | None = None) -> Plan:
             raise IntakeError(msg, kind) from exc
         # per-file overrides may fix a bad tail: parse leniently, then apply them
         raws = RawSet(method=method, files=[_lenient(f, method, cfg.condition_codes, cfg.file_rules) for f in raw_names])
+    if subdirs and cfg.kind(method) != "TMT":  # a folder per plex is a TMT layout; other methods as before
+        raise IntakeError("no .raw files found (top level or in a raw/ subfolder; raws one folder down are read "
+                          "only for TMT, one folder per plex)", Kind.NO_RAWS)
+    subdir_renames = {d: _safe(d, "plex") for d in dict.fromkeys(subdirs.values())}
+    if len({v.lower() for v in subdir_renames.values()}) != len(subdir_renames):
+        raise IntakeError("two plex folders end up with the same name after removing spaces/symbols; rename one "
+                          "of them", Kind.LAYOUT)
+    if subdirs and cfg.kind(method) == "TMT":
+        # one folder per plex: the folder is the plex (FragPipe's experiment), whatever the file names say;
+        # experiment.yaml files: still wins
+        from ionomos.naming import group_from_parsed
+
+        try:
+            raws = group_from_parsed([RawName(r.filename, r.safe_filename, subdir_renames[subdirs[r.filename]], r.rep,
+                                              r.fraction) for r in raws.files], method,
+                                     allow_uneven=ov.allow_uneven_fractions)
+        except NamingError as exc:
+            raise IntakeError(f"{exc} (each plex folder is one plex)", Kind.LAYOUT) from exc
     try:
         raws = apply_file_overrides(raws, ov)
     except OverridesError as exc:
@@ -323,14 +376,36 @@ def _plan(folder: Path, cfg: Config, ledger: Ledger | None = None) -> Plan:
         raise IntakeError("two raw files end up with the same name after removing spaces/symbols; "
                           "rename one of them", Kind.RAWS)
 
-    prefix = f"{raw_dir}/" if raw_dir else ""
-    manifest = [ManifestLine(prefix + r.safe_filename, r.sample, r.rep, mcfg.data_type) for r in raws.files]
+    def where(r: RawName) -> str:
+        sub = subdir_renames.get(subdirs.get(r.filename, ""), "")
+        return f"{raw_dir}/" if raw_dir else (f"{sub}/" if sub else "")
+
+    manifest = [ManifestLine(where(r) + r.safe_filename, r.sample, r.rep, mcfg.data_type) for r in raws.files]
+    warnings = _plex_warnings(cfg.kind(method), manifest)
     return Plan(
         source=str(folder), folder=fn, dest=str(dest),
         date_source="overrides" if ov.date else ("name" if fn.date else "drop"),
         raw_dir=raw_dir, renames=renames, layout=raws.layout, manifest=manifest,
         other_files=others, overrides=ov.to_dict(),
+        raw_subdirs={r.safe_filename: subdir_renames[subdirs[r.filename]] for r in raws.files if r.filename in subdirs},
+        subdir_renames={d: v for d, v in subdir_renames.items() if d != v}, warnings=warnings,
     )
+
+
+def _plex_warnings(kind: str, manifest: list[ManifestLine]) -> list[str]:
+    """A TMT drop whose plexes share a folder: filed as it is (how a drop is laid out is the lab's choice), with
+    what FragPipe will do about the channel names (D69, fragpipe.shared_plex_warning)."""
+    if kind != "TMT":
+        return []
+    folders: dict[str, set[str]] = {}
+    for m in manifest:
+        folders.setdefault(str(Path(m.file).parent), set()).add(m.experiment)
+    shared = max((len(e) for e in folders.values()), default=0)
+    if shared < 2:
+        return []
+    from ionomos.fragpipe import shared_plex_warning
+
+    return [shared_plex_warning(len({m.experiment for m in manifest}))]
 
 
 # ------------------------------------------------------------------ draft --
@@ -344,8 +419,9 @@ def draft(folder: Path, cfg: Config, error: IntakeError | None = None, review: b
         ov = load_overrides(folder)
     except OverridesError:
         ov = Overrides()
+    subdirs: dict[str, str] = {}
     try:
-        _, raw_names, _ = _find_raws(folder)
+        _, raw_names, _, subdirs = _raw_places(folder)
     except IntakeError:
         # Mixed top-level + raw/ layout: the naming window still gets the raws it can see.
         raw_names = [p.name for p in folder.iterdir()
@@ -376,6 +452,8 @@ def draft(folder: Path, cfg: Config, error: IntakeError | None = None, review: b
                 df.fraction = "" if r.fraction is None else str(r.fraction)
             except NamingError as exc:
                 df.error = str(exc)
+        if f in subdirs and method in cfg.methods and cfg.kind(method) == "TMT":
+            df.experiment = _safe(subdirs[f], "plex")  # one folder per plex: the folder is the plex (D69)
         fo = ov.files.get(f)
         if fo:
             df.experiment = fo.experiment or df.experiment
@@ -405,6 +483,8 @@ def draft(folder: Path, cfg: Config, error: IntakeError | None = None, review: b
         review=review and error is None, control=str((ov.analysis or {}).get("control") or ""),
         control_keywords=keywords, condition_codes=dict(cfg.condition_codes), file_rules=dict(cfg.file_rules),
         kinds={m: cfg.kind(m) for m in cfg.methods},
+        lab_analysis={k: v for k, v in (cfg.analysis or {}).items() if k != "enabled"},
+        exp_analysis=dict(ov.analysis or {}),
     )
 
 
@@ -684,8 +764,13 @@ def _intake(folder: Path, cfg: Config, ledger: Ledger, resolver: Resolver | None
     # does not exist yet. File it best-effort instead.
     raw_base = dest / p.raw_dir if p.raw_dir else dest
     try:
+        for old, new in p.subdir_renames.items():
+            _rename_retry(dest / old, dest / new)
         for old, new in p.renames.items():
-            _rename_retry(raw_base / old, raw_base / new)
+            sub = p.raw_subdirs.get(new, "")
+            _rename_retry(raw_base / sub / old, raw_base / sub / new)
+        for w in p.warnings:
+            log.warning("%s: %s", p.folder.safe, w)
 
         mcfg = cfg.methods[p.folder.method]
         record = {

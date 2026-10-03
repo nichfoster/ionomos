@@ -372,6 +372,60 @@ def test_analysis_tab_edits_samples_and_runs(app, tmp_path, monkeypatch):
     assert any("Placebo" in p for p in ed.problems())
 
 
+def test_analysis_tab_shows_the_roles_and_saves_a_changed_one(app, tmp_path):
+    """D65: each condition's role with its samples, a weak keyword marked to confirm, the comparisons in words,
+    and a role chosen in the list saved as analysis.roles."""
+    from ionomos.downstream import simulate
+    from ionomos.manifest import load_overrides
+
+    _lab_app(app, tmp_path)
+    dest = tmp_path / "General" / "Chris" / "pulldown"
+    simulate.competition_pg_matrix(dest / "fragpipe" / "report.pg_matrix.tsv",
+                                   {"DMSO": 2, "Probe": 4, "Probe_pre": 4}, seed=3, n=150, competition="Probe_pre")
+    ed = app.analysis.editor
+    ed.load(dest, "DIA")
+    assert _pump_until(app, lambda: len(ed.roles_tree.get_children()) == 3)
+    rows = {i: list(ed.roles_tree.item(i)["values"]) for i in ed.roles_tree.get_children()}
+    assert rows["DMSO"][:3] == ["DMSO", 2, "control"] and rows["Probe"][:3] == ["Probe", 4, "compound"]
+    assert rows["Probe_pre"][2] == "competition of Probe  ?" and "ask" in ed.roles_tree.item("Probe_pre")["tags"]
+    plan = ed.role_plan.cget("text")
+    assert "Probe vs DMSO — enrichment" in plan and "DMSO has 2 samples, Probe 4, Probe_pre 4" in plan
+    assert any(p.startswith("Probe_pre: read as Probe plus a competitor") for p in ed.problems())
+    # Confirm keeps the guess and settles the question
+    ed.roles_tree.selection_set("Probe_pre")
+    ed._role_selected()
+    assert ed.confirm_btn.instate(["!disabled"]) and "'pre'" in ed.role_ask.cget("text")
+    ed.confirm_role()
+    assert ed.roles_tree.item("Probe_pre")["values"][2] == "competition of Probe"
+    assert not any("Probe_pre" in p for p in ed.problems())
+    assert ed.choices()["roles"] == {"Probe_pre": "competition of Probe"}
+    # ... or the list says what it is
+    ed.roles_tree.selection_set("Probe_pre")
+    ed._role_selected()
+    ed.var("role").set("compound")
+    ed._role_chosen()
+    assert ed.roles_tree.item("Probe_pre")["values"][2] == "compound"
+    assert "Probe_pre vs DMSO · 4 against 2 samples" in ed.role_plan.cget("text")
+    assert ed.save_choices()
+    assert load_overrides(dest).analysis["roles"] == {"Probe_pre": "compound"}
+    # reopening shows it; automatic removes the entry
+    ed.load(dest, "DIA")
+    assert _pump_until(app, lambda: ed.roles_tree.exists("Probe_pre")
+                       and ed.roles_tree.item("Probe_pre")["values"][2] == "compound")
+    ed.roles_tree.selection_set("Probe_pre")
+    ed._role_selected()
+    assert ed.var("role").get() == "compound"
+    ed.var("role").set(ed.role_cb.cget("values")[0])
+    ed._role_chosen()
+    assert ed.save_choices() and "roles" not in load_overrides(dest).analysis
+    # a condition made the control by its role becomes the Control choice
+    ed.roles_tree.selection_set("Probe")
+    ed._role_selected()
+    ed.var("role").set("control")
+    ed._role_chosen()
+    assert ed.var("control").get() == "Probe"
+
+
 def _experiment_needing_conditions(tmp_path):
     """A DIA experiment where every file got the same condition (the one-condition case)."""
     import json
@@ -653,3 +707,117 @@ def test_inbox_scan_displays_mixed_layout_rejection(app, tmp_path):
     assert len(children) == 1
     note = app.inbox_tree.item(children[0], 'text')
     assert 'top level' in note and 'raw/' in note
+
+
+# ------------------------------------------------- settings and tools (D67) --
+
+
+def test_figure_style_page_round_trips_and_keeps_other_keys(app, tmp_path, monkeypatch):
+    from tkinter import messagebox
+
+    import yaml
+
+    from ionomos import forms
+
+    _lab_app(app, tmp_path)
+    p = tmp_path / "Auto" / "config.yaml"
+    raw = yaml.safe_load(p.read_text(encoding="utf-8"))
+    raw["analysis"]["export"]["line_scale"] = 1.5  # a key the page has no field for
+    p.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    app.reload()
+    a = app.analysis
+    assert a.style_size.get() == forms.size_label("slide169") and app.v("export.font_pt").get() == "14"
+    app.v("export.size").set(forms.size_label("col1"))
+    a._style_size_changed()
+    assert app.v("export.font_pt").get() == "7"  # the text size follows the preset
+    assert str(a.style_custom[0].cget("state")) == "disabled"
+    app.v("export.palette").set("custom")
+    a._style_enable()
+    app.v("export.up").set("d55e00")
+    app.bv("export.figure.volcano").set(True)
+    assert a.check_style() and "7 pt Arial" in a.style_summary.cget("text")
+    assert app.save()
+    ex = load(p, check_paths=False).analysis["export"]
+    assert ex["size"] == "col1" and ex["font_pt"] == 7 and ex["up"] == "#d55e00" and ex["figures"] == ["volcano"]
+    assert ex["line_scale"] == 1.5
+    errors = []
+    monkeypatch.setattr(messagebox, "showerror", lambda *x, **k: errors.append(x))
+    app.v("export.font_pt").set("99")
+    assert not a.check_style() and "Text size" in a.style_summary.cget("text")
+    assert app.save() is False and "Text size" in errors[0][1]
+    assert load(p, check_paths=False).analysis["export"]["font_pt"] == 7  # the good file is untouched
+
+
+def test_notifications_tab_masks_secrets_saves_and_sends_a_test(app, tmp_path, monkeypatch):
+    from tkinter import messagebox
+
+    from ionomos import notify
+
+    _lab_app(app, tmp_path)
+    secret = "https://hooks.slack.com/services/T0/B0/secret-key-123"
+    t = app.notify_tab
+    assert t.secret_entries and all(e.cget("show") == "•" for e in t.secret_entries)
+    app.bv("notify.enabled").set(True)
+    app.v("notify.slack.url").set(secret)
+    app.bv("notify.on.held").set(False)
+    assert app.save()
+    cfg = load(tmp_path / "Auto" / "config.yaml", check_paths=False)
+    assert cfg.notify["enabled"] and cfg.notify["slack"]["url"] == secret and cfg.notify["on"] == ["done", "failed"]
+    app.bv("notify.show").set(True)
+    t._show_secrets()
+    assert all(e.cget("show") == "" for e in t.secret_entries)
+    app.reload()
+    assert all(e.cget("show") == "•" for e in t.secret_entries), "secrets are masked again after a reload"
+    sent = []
+    monkeypatch.setattr(notify, "send_test", lambda s, env=None: sent.append(s) or [
+        notify.Result("slack", True, "HTTP 200")])
+    assert t.send_test()
+    assert _pump_until(app, lambda: "All sent" in t.result.cget("text"))
+    shown = t.out.text.get("1.0", "end")
+    assert "✓ slack    sent: HTTP 200" in shown and secret not in shown and sent[0]["slack"]["url"] == secret
+    monkeypatch.setattr(messagebox, "showerror", lambda *a, **k: None)
+    app.v("notify.slack.url").set("http://plain.example.org/x")  # not https: neither sent nor saved
+    assert not t.send_test() and "https" in t.out.text.get("1.0", "end")
+    assert app.save() is False
+
+
+def test_check_accuracy_page_compares_and_benchmarks_off_the_tk_thread(app, tmp_path, monkeypatch):
+    from tkinter import messagebox
+
+    from ionomos import downstream
+    from ionomos.downstream import benchmark, simulate
+    from ionomos.downstream.tables import read_tsv, write_tsv
+
+    _lab_app(app, tmp_path)
+    dest = tmp_path / "General" / "EJQ" / "dia"
+    runs = [(f"/x/{c}_{r}.raw", c) for c in ("DMSO", "Drug") for r in (1, 2, 3)]
+    simulate.dia_pg_matrix(dest / "fragpipe" / "report.pg_matrix.tsv", runs, seed=2, n_proteins=300)
+    downstream.analyze(dest, "DIA", analysis_cfg={"enrichment": False})
+    _h, rows = read_tsv(dest / "results" / "Drug_vs_DMSO_differential.tsv")
+    ref = write_tsv(tmp_path / "limma.tsv", ["ID", "logFC", "P.Value", "adj.P.Val"],
+                    [{"ID": r["id"], "logFC": r["log2fc"], "P.Value": r["pvalue"], "adj.P.Val": r["qvalue"]}
+                     for r in rows if r["log2fc"] != "NA"])
+    opened = []
+    monkeypatch.setattr(app, "_open", lambda x: opened.append(x))
+    page = app.analysis.accuracy
+    app.v("acc.analysis").set(str(dest))
+    app.v("acc.reference").set(str(ref))
+    assert page.run_compare()
+    assert page.busy and str(page.compare_btn.cget("state")) == "disabled"
+    assert _pump_until(app, lambda: opened, secs=60)
+    assert opened[-1].endswith("compare.html") and "Compare: done" in page.verdict.cget("text")
+    assert "agrees" in page.verdict.cget("text") and "verdict: agrees" in page.out.text.get("1.0", "end")
+    assert not page.busy and str(page.open_btn.cget("state")) == "normal"
+    tiny = {"designs": [(3, 3)], "effects": [2.0], "missing": ["typical"], "settings": ["none + median"],
+            "seeds": 1, "proteins": 200}
+    monkeypatch.setitem(benchmark.GRIDS, "quick", tiny)
+    app.v("acc.kind").set("simulated")
+    page._kind_changed()
+    assert "ionomos_benchmark" in page.where.cget("text")
+    assert page.run_benchmark()
+    assert _pump_until(app, lambda: opened[-1].endswith("benchmark_simulated.html"), secs=60)
+    assert (tmp_path / "Auto" / "logs" / "ionomos_benchmark" / "benchmark_simulated.html").is_file()
+    errors = []
+    monkeypatch.setattr(messagebox, "showerror", lambda *a, **k: errors.append(a))
+    app.v("acc.kind").set("real")
+    assert not page.run_benchmark() and "expected-ratios" in errors[-1][1]

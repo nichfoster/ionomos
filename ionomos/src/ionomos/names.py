@@ -145,6 +145,14 @@ FINGERPRINT_FILE = "run_fingerprint.json"
 PREFLIGHT_DIR = "preflight"
 
 
+# Fault handling (D69). While a search runs, its run folder holds which process Ionomos started (pid + the
+# time the OS says it started), so an Ionomos killed mid-search can stop that FragPipe on its next start instead
+# of running a second one beside it. Removed when the search ends.
+ENGINE_PID_FILE = "engine_pid.json"
+# The testbed's fake FragPipe (fake_fragpipe.py) acts out the fault named in this file in an experiment folder.
+FAKE_FP_MODE_FILE = "fake_fragpipe_mode.txt"
+
+
 def fingerprint_path(dest: Path) -> Path:
     """The latest search's fingerprint; earlier ones sit beside it as run_fingerprint_<time>.json."""
     return run_dir(dest) / FINGERPRINT_FILE
@@ -160,3 +168,7 @@ REPORT_PREFIX = "Ionomos-report"  # what "Report a problem" has always called it
 # A search's "run fingerprint" (the versions and settings of that run), in the run folder when there is one.
 RUN_FINGERPRINT = "run_fingerprint.json"
 RUN_FINGERPRINT_GLOB = "run_fingerprint*.json"
+
+# Where a simulated `ionomos benchmark` writes when no folder is given: ./ionomos_benchmark on the command line,
+# <log_dir>/ionomos_benchmark from the app (accuracy.default_benchmark_dir, D67).
+BENCHMARK_DIR = "ionomos_benchmark"

@@ -79,8 +79,10 @@ def scan_console(path: Path, offset: int = 0) -> dict:
         size = path.stat().st_size
         with open(path, "rb") as fh:
             fh.seek(min(offset, size))
-            for raw in fh:
-                line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+            # readline with a limit: a tool can write megabytes without a line end (D69); the pieces of such a
+            # line count as lines, and nothing larger than 64 kB is ever held
+            for raw in iter(lambda: fh.readline(65_536), b""):
+                line = fragpipe.decode_console(raw).rstrip("\r\n")
                 n += 1
                 if len(head) < HEAD_LINES:
                     head.append(_clip(line))
