@@ -3,8 +3,10 @@ GUI resolver — a small tkinter window that shows how a drop was read: when int
 can't interpret a folder (unknown user, no method, unparseable file tails, uneven
 fractions), and — as a review before filing — for every drop that did parse
 (gui.review_drops). The person sees user, method, date, each file's condition /
-replicate / fraction, and which condition is the control, and edits anything
-wrong; the result is written to experiment.yaml in the folder so it sticks.
+replicate / fraction, which condition is the control, and each condition's role
+with the comparisons that follow (role_view -> downstream/roles.preview, D65),
+and edits anything wrong; the result is written to experiment.yaml in the folder
+so it sticks.
 
 Threading: tkinter must run on the main thread. `TkResolver.resolve()` may be
 called from the watcher thread; it posts the Draft to a queue and blocks on an
@@ -127,14 +129,81 @@ def conditions_of(files: list[DraftFile]) -> list[str]:
     return out
 
 
-def guess_control(conditions: list[str], keywords: list[str]) -> str:
-    """The analysis's own rule (downstream.analysis.find_control): a condition with a control keyword as a
-    token, e.g. KC_DIA_DMSO; otherwise the alphabetically first, which the analysis also falls back to."""
+def guess_control(conditions: list[str], keywords: list[str], roles: dict[str, str] | None = None) -> str:
+    """The analysis's own rule (downstream.analysis.find_control): a condition analysis.roles calls the control;
+    else one with a control keyword as a token, e.g. KC_DIA_DMSO, that the roles don't call something else;
+    otherwise the alphabetically first, which the analysis also falls back to."""
+    given = {str(k).lower(): str(v) for k, v in (roles or {}).items()}
+    for c in conditions:
+        if given.get(c.lower()) == "control":
+            return c
     for kw in keywords:
         for c in conditions:
+            if c.lower() in given:
+                continue
             if kw.lower() in re.split(r"[_\-\s.]+", c.lower()) or c.lower() == kw.lower():
                 return c
     return sorted(conditions)[0] if conditions else ""
+
+
+def replicates(files: list[DraftFile]) -> dict[str, int]:
+    """{condition: number of replicates}, in the files' order (fractions of one replicate count once)."""
+    reps: dict[str, set] = {}
+    for f in files:
+        c = f.experiment.strip()
+        if c:
+            reps.setdefault(c, set()).add(f.bioreplicate.strip())
+    return {c: len(r) for c, r in reps.items()}
+
+
+def given_roles(d: Draft) -> dict[str, str]:
+    """The experiment's analysis.roles as experiment.yaml has them (normalised; {} when unreadable)."""
+    from ionomos.downstream import roles
+
+    try:
+        return roles.normalise((d.exp_analysis or {}).get("roles") or {})
+    except roles.RoleError:
+        return {}
+
+
+def _lab_roles(d: Draft) -> dict[str, str]:
+    from ionomos.downstream import roles
+
+    try:
+        return roles.normalise((d.lab_analysis or {}).get("roles") or {})
+    except roles.RoleError:
+        return {}
+
+
+def pinned_control(control: str, files: list[DraftFile], d: Draft, chosen: dict[str, str] | None = None) -> str:
+    """The control to_overrides writes to analysis.control: the picked one when it isn't what the analysis would
+    pick anyway (or experiment.yaml already names one); "" otherwise."""
+    if not control:
+        return ""
+    automatic = guess_control(conditions_of(files), d.control_keywords, {**_lab_roles(d), **(chosen or {})})
+    return control if control != automatic or d.control else ""
+
+
+def role_view(files: list[DraftFile], method: str, control: str, d: Draft, chosen: dict[str, str] | None = None):
+    """roles.preview for the review window: each condition's role with its replicates, the comparisons the
+    analysis will run, uneven groups. method: the method's kind. chosen: the window's analysis.roles. None for
+    isoDTB and TMT, whose conditions are not in the file names."""
+    from dataclasses import replace
+
+    from ionomos.downstream import roles
+    from ionomos.downstream.analysis import AnalysisError, Settings, settings_from
+
+    if not has_control(method):
+        return None
+    exp = {k: v for k, v in (d.exp_analysis or {}).items()
+           if k not in ("roles", "control", "sample_conditions", "exclude_samples")}
+    pin = pinned_control(control, files, d, chosen)
+    try:
+        s = settings_from(d.lab_analysis, exp, {"control": pin} if pin else None)
+    except AnalysisError:
+        s = replace(Settings(), control_keywords=tuple(d.control_keywords) or Settings().control_keywords,
+                    control=pin or None)
+    return roles.preview(replicates(files), s, chosen, "intensity", method)
 
 
 def _ranges(nums: list[int]) -> str:
@@ -149,8 +218,9 @@ def _ranges(nums: list[int]) -> str:
     return ", ".join(parts)
 
 
-def summarize(files: list[DraftFile], method: str, control: str) -> list[str]:
-    """One line per condition: its role, replicates and fractions — what the search and analysis will assume."""
+def summarize(files: list[DraftFile], method: str, control: str, roles: dict[str, str] | None = None) -> list[str]:
+    """One line per condition: its role, replicates and fractions — what the search and analysis will assume.
+    roles: {condition: role in words} (role_view's rows); without them a condition is CONTROL or treated."""
     lines = []
     for c in sorted(conditions_of(files), key=lambda x: x != control):  # the control first
         reps: dict[int, list[int]] = {}
@@ -165,8 +235,12 @@ def summarize(files: list[DraftFile], method: str, control: str) -> list[str]:
             role = "sample (heavy/light ratio vs 0)"
         elif method == "TMT":
             role = "plex (conditions come from the TMT channel annotation)"
+        elif c == control:
+            role = "CONTROL"
+        elif roles and c in roles:
+            role = roles[c]
         else:
-            role = "CONTROL" if c == control else ("treated" if control else "?")
+            role = "treated" if control else "?"
         n = len(reps)
         text = f"{c} — {role} · {n} replicate{'s' if n != 1 else ''} ({_ranges(list(reps))})"
         fr = {r: tuple(sorted(v)) for r, v in reps.items() if v}
@@ -191,6 +265,7 @@ class Answer:
     files: list[DraftFile]
     remember_alias: str = ""
     control: str = ""
+    roles: dict[str, str] | None = None  # the window's analysis.roles; None = the window has no role list
 
 
 def validate(a: Answer, known_methods: list[str], kinds: dict[str, str] | None = None) -> str:
@@ -249,10 +324,22 @@ def to_overrides(a: Answer, d: Draft) -> Overrides:
             ov.files[f.filename] = FileOverride(
                 experiment=exp, bioreplicate=rep, fraction=int(frac) if frac else -1
             )
-    if a.control and has_control(d.kind_of(a.method)):
-        automatic = guess_control(conditions_of(a.files), d.control_keywords)
-        if a.control != automatic or d.control:  # pin it only when it isn't what the analysis would pick anyway
-            ov.analysis["control"] = a.control
+    if has_control(d.kind_of(a.method)):
+        chosen = a.roles if a.roles is not None else given_roles(d)
+        pin = pinned_control(a.control, a.files, d, chosen)  # only when it isn't what the analysis picks anyway
+        if pin:
+            ov.analysis["control"] = pin
+        if a.roles is not None:
+            from ionomos.downstream.roles import keep_roles
+
+            conds = conditions_of(a.files)
+            given = given_roles(d)
+            mine = keep_roles(a.roles, conds)
+            if mine != keep_roles(given, conds):
+                # the whole mapping (save_overrides replaces analysis.roles): entries for names that aren't
+                # conditions here were not shown, so they are kept as written; {} clears the rest
+                low = {c.lower() for c in conds}
+                ov.analysis["roles"] = {**{c: r for c, r in given.items() if c.lower() not in low}, **mine}
     return ov
 
 
@@ -446,9 +533,95 @@ class TkResolver:
         ctl_note = ttk.Label(ctlrow, foreground="#666")
         summary_v = tkutil.StringVar()
         ttk.Label(sumf, textvariable=summary_v, justify="left", font=("", 9)).pack(anchor="w", pady=(4, 0))
+        # each condition's role (D65): a list to change it, a mark on a guess to confirm, the comparisons in words.
+        # The rows scroll beyond ~7 conditions so the buttons stay on a small screen.
+        rolesbox = ttk.Frame(sumf)
+        rolesbox.pack(anchor="w", fill="x", pady=(4, 0))
+        rolescv = tk.Canvas(rolesbox, height=1, width=1, highlightthickness=0)
+        rolescv.grid(row=0, column=0, sticky="nw")
+        rolesvsb = ttk.Scrollbar(rolesbox, orient="vertical", command=rolescv.yview)
+        rolescv.configure(yscrollcommand=rolesvsb.set)
+        rolesf = ttk.Frame(rolescv)
+        rolescv.create_window((0, 0), window=rolesf, anchor="nw")
+
+        def fit_roles(_e=None) -> None:
+            h = rolesf.winfo_reqheight()
+            rolescv.configure(scrollregion=rolescv.bbox("all"), width=rolesf.winfo_reqwidth(), height=min(h, 200))
+            if h > 200:
+                rolesvsb.grid(row=0, column=1, sticky="ns")
+            else:
+                rolesvsb.grid_remove()
+
+        rolesf.bind("<Configure>", fit_roles)
+        plan_v = tkutil.StringVar()
+        ttk.Label(sumf, textvariable=plan_v, justify="left", foreground="#333", wraplength=640).pack(anchor="w")
         codes_note = ttk.Label(sumf, foreground="#666", wraplength=640, justify="left")
         codes_note.pack(anchor="w")
         guessed_from: list[str] = [""]  # the automatic control for the current conditions
+        chosen: list[dict[str, str]] = [given_roles(d)]  # the window's analysis.roles
+        role_rows: dict[str, list] = {}  # condition -> [combobox, samples label, note, confirm button, {shown: value}]
+        shown: list = [None]             # the conditions the role rows were built for
+        last_view: list = [None]
+
+        def chose(cond: str) -> None:
+            from ionomos.downstream import roles
+
+            value = role_rows[cond][4].get(role_rows[cond][0].get(), "")
+            try:
+                chosen[0] = roles.set_role(chosen[0], cond, value)
+            except roles.RoleError as exc:
+                err_v.set(str(exc))
+                return
+            if value == "control":
+                ctl_v.set(cond)
+            win.after_idle(update_summary)
+
+        def confirm(cond: str) -> None:
+            from ionomos.downstream import roles
+
+            row = next((r for r in (last_view[0].rows if last_view[0] else []) if r.condition == cond), None)
+            if row is not None and row.confirmable:
+                chosen[0] = roles.set_role(chosen[0], cond, row.role)
+                win.after_idle(update_summary)
+
+        def fill_roles(view) -> None:
+            from ionomos.downstream import roles
+
+            conds = [r.condition for r in view.rows] if view is not None else []
+            if conds != shown[0]:
+                for w in rolesf.winfo_children():
+                    w.destroy()
+                role_rows.clear()
+                if conds:
+                    ttk.Label(rolesf, text="Roles (change one if a name misleads; saved in experiment.yaml):",
+                              foreground="#666").grid(row=0, column=0, columnspan=5, sticky="w")
+                for i, r in enumerate(view.rows if view is not None else [], start=1):
+                    ttk.Label(rolesf, text=r.condition).grid(row=i, column=0, sticky="w", padx=4)
+                    n_lbl = ttk.Label(rolesf)
+                    n_lbl.grid(row=i, column=1, sticky="w", padx=4)
+                    cb = ttk.Combobox(rolesf, state="readonly", width=30)
+                    cb.grid(row=i, column=2, sticky="w", padx=4, pady=1)
+                    cb.bind("<<ComboboxSelected>>", lambda _e, c=r.condition: chose(c))
+                    note = ttk.Label(rolesf, wraplength=300, justify="left")
+                    note.grid(row=i, column=3, sticky="w", padx=4)
+                    btn = ttk.Button(rolesf, text="Confirm", command=lambda c=r.condition: confirm(c))
+                    btn.grid(row=i, column=4, sticky="w", padx=4)
+                    role_rows[r.condition] = [cb, n_lbl, note, btn, {}]
+                shown[0] = conds
+            for r in view.rows if view is not None else []:
+                cb, n_lbl, note, btn, values = role_rows[r.condition]
+                pairs = roles.role_choices(view, r.condition)
+                values.clear()
+                values.update(pairs)
+                cb.configure(values=[s for s, _v in pairs])
+                cb.set(next((s for s, v in pairs if r.set_here and v == r.role), pairs[0][0]))
+                n_lbl.configure(text=f"{r.n} rep{'s' if r.n != 1 else ''}")
+                note.configure(text=f"? {r.confirm}" if r.confirm else f"from {r.source}",
+                               foreground="#b26a00" if r.confirm else "#666")
+                if r.confirmable:
+                    btn.grid()
+                else:
+                    btn.grid_remove()
 
         def current_files() -> list[DraftFile]:
             return [DraftFile(filename=f.filename, experiment=ev.get(), bioreplicate=rv.get(), fraction=fv.get())
@@ -461,7 +634,7 @@ class TkResolver:
                 for w in (ctl_lbl, ctl_cb, ctl_note):
                     w.pack_forget()
                 if has_control(method):
-                    auto = guess_control(conds, d.control_keywords)
+                    auto = guess_control(conds, d.control_keywords, {**_lab_roles(d), **chosen[0]})
                     keep = ctl_v.get() in conds and ctl_v.get() != guessed_from[0]  # a person's pick survives edits
                     if not keep:
                         ctl_v.set(d.control if d.control in conds else auto)
@@ -477,9 +650,16 @@ class TkResolver:
                 else:
                     ctl_v.set("")
                     ctl_note.configure(text="isoDTB: every sample is its own heavy/light ratio vs 0 — no control"
-                                       if method == "isoDTB" else "TMT: conditions come from the channel annotation")
+                                       if method == "isoDTB" else "TMT: conditions come from the channel annotation "
+                                       "(their roles can be set on the Analysis tab after the search)")
                     ctl_note.pack(side="left")
-                summary_v.set("\n".join("• " + line for line in summarize(files, method, ctl_v.get())) or "—")
+                view = role_view(files, method, ctl_v.get(), d, chosen[0])
+                last_view[0] = view
+                fill_roles(view)
+                plan_v.set("\n".join(view.lines()) if view is not None else "")
+                labels = {r.condition: r.label for r in view.rows} if view is not None else None
+                summary_v.set("\n".join("• " + line for line in summarize(files, method, ctl_v.get(), labels))
+                              or "—")
                 codes = d.condition_codes or {}
                 codes_note.configure(text=("Short codes in DIA file names: " + ", ".join(
                     f"{k}1 = {v} rep 1" for k, v in codes.items()) + " (config: naming.condition_codes)")
@@ -509,7 +689,8 @@ class TkResolver:
         def answer() -> Answer:
             return Answer(user=user_v.get(), method=meth_v.get(), date=date_v.get(),
                           allow_uneven=uneven_v.get(), files=current_files(),
-                          remember_alias=alias_v.get().strip() if remember_v.get() else "", control=ctl_v.get())
+                          remember_alias=alias_v.get().strip() if remember_v.get() else "", control=ctl_v.get(),
+                          roles=dict(chosen[0]) if has_control(d.kind_of(meth_v.get())) else None)
 
         def accept(*_):
             try:

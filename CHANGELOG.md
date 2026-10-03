@@ -7,7 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Roles in the experiment editor and the review window** (D65,
+  [docs/WORKFLOWS.md](docs/WORKFLOWS.md)). Each condition is listed with its
+  number of samples and its role (control, compound, competition of a
+  compound, pool / reference, QC standard) and where the role came from. A
+  list changes it; **automatic** goes back to the name. A role read from a
+  word that can mean something else (`pre`, `block`, `cold`, `10x`) is
+  marked **?** with a **Confirm** button. Under the list: the comparisons
+  that will be run, in words, and what uneven groups mean ("DMSO has 2
+  samples, Probe 4: a feature needs 1 of 2 DMSO values"). Choices are saved
+  as `analysis.roles` in `experiment.yaml`. The review window shows this for
+  DIA and label-free drops.
+
 ### Fixed
+
+- **The experiment editor could not take a choice back.** It merged its
+  choices into the saved `analysis:` block, so a sample used again, a role
+  back to automatic or cleared comparisons stayed in `experiment.yaml`. The
+  editor now writes the whole block (D65).
 
 - **A test of the slow-copy wait failed now and then on Windows CI.** Its
   settle time (0.3 s) was only six times the pause between copied files, so

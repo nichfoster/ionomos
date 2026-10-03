@@ -2122,3 +2122,72 @@ units, moves whenever a share of the features is enriched in one direction.
    setting, and the help says so. The limits (0.1 log2, 3 times the scatter,
    three quarters kept) are choices, not measurements on real data. The
    reproduce-in-R script notes that FragPipeAnalystR has no ratio step.
+
+
+### D65 — Roles are shown and chosen in the experiment editor and the review window
+**2026-10-02.** D61 left the roles visible only in the report and settable
+only by editing `experiment.yaml`. The maintainer asked for Ionomos to know
+"DMSO vs competitive vs compound, with DMSO having fewer samples" and for
+options that stay friendly. Now both windows show each condition's role and
+let a person change it.
+
+1. **One function holds the logic.** `roles.preview(sizes, settings,
+   overrides, kind, exp, sdrf_roles)` returns the rows (condition, samples,
+   role, where it came from, what "automatic" would give, whether to
+   confirm), the comparisons in words, what the group sizes mean, and notes.
+   The comparisons are `analysis.choose_comparisons` run on an empty matrix
+   of those sizes, so the preview cannot drift from what the analysis does;
+   a test checks this for every name in the roles table (D61's, including
+   the lab PC's `KL6283A_Comp_KL6159A`). The Tk code only draws the rows and
+   maps a choice to a value (`roles.role_choices`, `roles.set_role`).
+2. **The key is the one roles.py already reads**: `analysis.roles` in the
+   experiment's `experiment.yaml`, written as `{Probe_pre: compound}` or
+   `competition of Probe`. No new setting. A role chosen in a window is an
+   entry; **automatic** removes the entry.
+3. **The choices** are roles.py's five roles: control, compound,
+   competition of each compound condition (and plain competition, linked by
+   name), pool / reference, QC standard. The task sketch had a sixth,
+   "other"; it is not built, because every role must change what the
+   analysis does, and "other" would need a rule nobody has decided (left out
+   of the comparisons? compared like a compound?). On the open questions.
+4. **Weak keywords are marked, not changed.** A competition read from `pre`,
+   `pretreat…`, `block…`, `cold` or `10x` is shown with "?" and the reason;
+   **Confirm** writes the guess to `analysis.roles`, which settles
+   `ROLES_UNSURE`, or the list makes it a compound. A competition that can't
+   be linked has no Confirm: the person picks which compound. The editor's
+   "Run anyway?" check lists unconfirmed roles; the review window does not
+   block on them (the analysis asks afterwards, as before).
+5. **Uneven groups in words**, from the same rules the analysis uses
+   (`fpa.resolve_imputation`, `analysis.group_needs`): imputed data (DIA
+   default) "every feature is tested; the smaller group makes comparisons
+   with DMSO less sensitive"; not imputed (TMT) "a feature needs 1 of 2 DMSO
+   values and 2 in the other group (small_group_min_valid: half)"; Welch /
+   Student, a group under `min_valid` (low confidence), and no replicates at
+   all (fold change only) each have their line. Equal groups say nothing.
+6. **A control chosen by role is the control.** Picking "control" for a
+   condition also sets the Control box. In the review window the automatic
+   control honours the roles (`guess_control`, as `find_control` does), so
+   a control given by its role is not also pinned as `analysis.control`.
+7. **The review window** shows roles for DIA and label-free drops only:
+   TMT conditions come from the channel annotation and isoDTB is a
+   competition by construction. Counts there are replicates (fractions of one
+   replicate count once). It previews with the lab's and the experiment's
+   other settings (new `Draft.lab_analysis` / `Draft.exp_analysis`) and
+   writes `analysis.roles` only when the choice differs from what
+   `experiment.yaml` had; entries naming a condition not in the drop are
+   kept as written.
+8. **SDRF roles** reach the editor: `inspect_folder` now returns the SDRF's
+   roles, its file name and the data type, and the preview applies them
+   below `analysis.roles`, as `analyze()` does.
+9. **Found on the way, fixed**: the experiment editor saved its choices by
+   merging them into the existing `analysis:` block, so a choice taken back
+   (a sample used again, a role back to automatic, comparisons cleared)
+   stayed in the file. `save_overrides(..., replace_analysis=True)` makes the
+   editor's block the whole block; the review window still merges (its
+   control keeps saved comparisons).
+
+**Verified**: unit tests of the preview, the choices, the review window's
+logic and `experiment.yaml` round trips; the Python suite and the JS tests.
+**Not verified**: the two windows on screen. Their Tk tests (one each) were
+written in the existing style and run in CI only; nobody has looked at the
+layout, on Windows or macOS. Not tried on a real lab experiment.

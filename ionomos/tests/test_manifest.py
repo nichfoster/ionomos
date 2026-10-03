@@ -36,6 +36,21 @@ def test_merge_keeps_existing_keys(tmp_path):
     assert set(back.files) == {"a.raw", "b.raw"}
 
 
+def test_the_editor_replaces_the_analysis_block_and_the_review_merges_into_it(tmp_path):
+    """The experiment editor writes the whole analysis: block, so a choice taken back (a role back to automatic,
+    a sample used again) leaves the file; the review window's control is merged in and keeps saved comparisons."""
+    save_overrides(tmp_path, Overrides(notes="keep me", analysis={"exclude_samples": ["A_1"], "log2fc": 0.5,
+                                                                  "roles": {"P_pre": "compound"}}))
+    save_overrides(tmp_path, Overrides(analysis={"control": "DMSO"}))
+    assert load_overrides(tmp_path).analysis == {"exclude_samples": ["A_1"], "log2fc": 0.5,
+                                                 "roles": {"P_pre": "compound"}, "control": "DMSO"}
+    save_overrides(tmp_path, Overrides(analysis={"log2fc": 0.5}), replace_analysis=True)
+    back = load_overrides(tmp_path)
+    assert back.analysis == {"log2fc": 0.5} and back.notes == "keep me"
+    save_overrides(tmp_path, Overrides(), replace_analysis=True)
+    assert load_overrides(tmp_path).analysis == {} and load_overrides(tmp_path).notes == "keep me"
+
+
 @pytest.mark.parametrize(
     "data, msg",
     [

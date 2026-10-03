@@ -44,7 +44,7 @@
 | `postprocess.py` | After a done job: runs `downstream` (or only the R-port prep steps when analysis is off); `ionomos analyze` and the Analysis tab use it too (`prepare`, `inspect_folder`); then instrument QC trending for jobs with QC-standard runs | — |
 | `qctrend.py` | Instrument QC trending (D45, [QC_TREND.md](QC_TREND.md)): which runs are the QC standard (`qc_trend.match` / `methods`), the metric store `<log_dir>/qc_trend.jsonl`, per-series baselines, Levey-Jennings z-scores, Westgard rules + CUSUM, plain-English verdicts, a `qc_trend` attention item; `after_job` (postprocess hook, never raises), `scan` (read-only, `ionomos qc-trend --rebuild`), `page_for` (the app's **Jobs → Instrument QC**). Metrics from the searches' own tables (`downstream/qcmetrics.py`: DIA-NN `stats.tsv` / `pg_matrix` / `report.tsv`, FragPipe `psm.tsv` / `combined_protein.tsv`, Sage `results.sage.tsv`, streamed and size-bounded); the page `<log_dir>/qc_trend.html` (`downstream/qcpage.py`: static SVG, report.css, no script) | `prior-work/parsers/`, `store.py` |
 | `analysis_tab.py` | App tab 7: analyse one experiment (samples, conditions, comparisons → experiment.yaml, Run) and the lab defaults | — |
-| `experiment_editor.py` | One experiment's analysis choices as a Tk panel (samples, conditions, comparisons, cut-offs, Run, issues); used by tab 7 and the pop-ups | — |
+| `experiment_editor.py` | One experiment's analysis choices as a Tk panel (samples, conditions, roles, comparisons, cut-offs, Run, issues); used by tab 7 and the pop-ups | — |
 | `attention.py` | Durable "needs a person" queue (`<log_dir>/attention/*.json`): raised by intake, worker, analysis, QC trending (`qc_trend`, a warning: no pop-up unless `qc_trend.popup`); closed when fixed | — |
 | `popups.py` | Pop-up windows + the "needs attention" list, in the app or (app closed) the watcher's own Tk loop; **More help** opens the help page at the item's topic | — |
 | `help/` | The help for users (D46, HELP.md): `*.md` content (getting started, the report, glossary, troubleshooting, never-do, FAQ) parsed and rendered with the stdlib; `report_payload()` for every report, `page()` = `help.html` (`ionomos help`, the app's Help button, pop-ups), `text()` for the terminal, `topic()` / `topic_for_item()` | — |
@@ -592,6 +592,15 @@ to `fpa.limma_contrasts` / `design.limma_design`), `insights.power`
 (the spread is scaled to the usual group size before it is compared). The
 report recomputes the specific-targets calls from the comparisons with its
 live cut-offs; the TSV has them at the saved ones.
+
+The windows (D65) show the same thing before any data is analysed:
+`roles.preview(sizes, settings, overrides, …)` builds an empty matrix of the
+group sizes, runs `roles.plan` and `analysis.choose_comparisons` on it, and
+returns rows, comparisons in words and the uneven-group lines.
+`experiment_editor.py` (from `postprocess.inspect_folder`: samples, data type,
+SDRF roles) and `resolve.role_view` (from the drop's files, replicates per
+condition) only draw it; a choice goes through `roles.set_role` into
+`analysis.roles`.
 
 `results/dose_response.tsv` (`downstream/doseresponse.py`, D44) is made when
 the conditions are a titration: names like `Cmpd_10nM` (or

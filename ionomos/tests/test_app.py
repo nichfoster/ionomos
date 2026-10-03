@@ -372,6 +372,60 @@ def test_analysis_tab_edits_samples_and_runs(app, tmp_path, monkeypatch):
     assert any("Placebo" in p for p in ed.problems())
 
 
+def test_analysis_tab_shows_the_roles_and_saves_a_changed_one(app, tmp_path):
+    """D65: each condition's role with its samples, a weak keyword marked to confirm, the comparisons in words,
+    and a role chosen in the list saved as analysis.roles."""
+    from ionomos.downstream import simulate
+    from ionomos.manifest import load_overrides
+
+    _lab_app(app, tmp_path)
+    dest = tmp_path / "General" / "Chris" / "pulldown"
+    simulate.competition_pg_matrix(dest / "fragpipe" / "report.pg_matrix.tsv",
+                                   {"DMSO": 2, "Probe": 4, "Probe_pre": 4}, seed=3, n=150, competition="Probe_pre")
+    ed = app.analysis.editor
+    ed.load(dest, "DIA")
+    assert _pump_until(app, lambda: len(ed.roles_tree.get_children()) == 3)
+    rows = {i: list(ed.roles_tree.item(i)["values"]) for i in ed.roles_tree.get_children()}
+    assert rows["DMSO"][:3] == ["DMSO", 2, "control"] and rows["Probe"][:3] == ["Probe", 4, "compound"]
+    assert rows["Probe_pre"][2] == "competition of Probe  ?" and "ask" in ed.roles_tree.item("Probe_pre")["tags"]
+    plan = ed.role_plan.cget("text")
+    assert "Probe vs DMSO — enrichment" in plan and "DMSO has 2 samples, Probe 4, Probe_pre 4" in plan
+    assert any(p.startswith("Probe_pre: read as Probe plus a competitor") for p in ed.problems())
+    # Confirm keeps the guess and settles the question
+    ed.roles_tree.selection_set("Probe_pre")
+    ed._role_selected()
+    assert ed.confirm_btn.instate(["!disabled"]) and "'pre'" in ed.role_ask.cget("text")
+    ed.confirm_role()
+    assert ed.roles_tree.item("Probe_pre")["values"][2] == "competition of Probe"
+    assert not any("Probe_pre" in p for p in ed.problems())
+    assert ed.choices()["roles"] == {"Probe_pre": "competition of Probe"}
+    # ... or the list says what it is
+    ed.roles_tree.selection_set("Probe_pre")
+    ed._role_selected()
+    ed.var("role").set("compound")
+    ed._role_chosen()
+    assert ed.roles_tree.item("Probe_pre")["values"][2] == "compound"
+    assert "Probe_pre vs DMSO · 4 against 2 samples" in ed.role_plan.cget("text")
+    assert ed.save_choices()
+    assert load_overrides(dest).analysis["roles"] == {"Probe_pre": "compound"}
+    # reopening shows it; automatic removes the entry
+    ed.load(dest, "DIA")
+    assert _pump_until(app, lambda: ed.roles_tree.exists("Probe_pre")
+                       and ed.roles_tree.item("Probe_pre")["values"][2] == "compound")
+    ed.roles_tree.selection_set("Probe_pre")
+    ed._role_selected()
+    assert ed.var("role").get() == "compound"
+    ed.var("role").set(ed.role_cb.cget("values")[0])
+    ed._role_chosen()
+    assert ed.save_choices() and "roles" not in load_overrides(dest).analysis
+    # a condition made the control by its role becomes the Control choice
+    ed.roles_tree.selection_set("Probe")
+    ed._role_selected()
+    ed.var("role").set("control")
+    ed._role_chosen()
+    assert ed.var("control").get() == "Probe"
+
+
 def _experiment_needing_conditions(tmp_path):
     """A DIA experiment where every file got the same condition (the one-condition case)."""
     import json

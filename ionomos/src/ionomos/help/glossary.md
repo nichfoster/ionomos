@@ -27,8 +27,9 @@ of each compound); that is fine, see [Power](#qc.power).
 What a condition is in the experiment: a [control](#glossary.control), a
 [compound](#glossary.compound), a [competition](#glossary.competition), a
 pooled reference, or a QC standard. Ionomos reads the roles from the
-condition names and shows them under Methods → Settings used. Set them
-yourself with `roles:` under `analysis:` in `experiment.yaml`, for example
+condition names and shows them under Methods → Settings used, in the
+experiment editor and in the review window. Change them there
+([How?](#faq.roles)), or with `roles:` under `analysis:` in `experiment.yaml`, for example
 `roles: {DMSO: control, Probe: compound, Probe_Comp: competition of Probe}`.
 With a competition among them, the comparisons follow the roles
 ([Specific targets](#report.specific)).

@@ -380,7 +380,9 @@ real data:
 7. [x] **Roles and competition experiments** (2026-10-01, D61: `downstream/roles.py`): control / compound /
    competition, comparisons that follow the design, a specific-targets call,
    unequal groups handled knowingly. Simulated data only. Still to do:
-   - [ ] roles in the experiment editor and the review window (a GUI change)
+   - [x] roles in the experiment editor and the review window (2026-10-02, D65: `roles.preview`; each
+     condition's role and samples, a list to change it, weak keywords to confirm, the comparisons and
+     uneven groups in words; not yet looked at on screen)
    - [x] a normalisation that holds when many features are enriched in one
      direction (2026-10-01, D64: `normalize: auto` / `ratio`; simulated pulldowns only)
    - [ ] an R (limma) golden file for unequal groups
@@ -623,6 +625,12 @@ Collected from the other docs; resolve before/during Phase 1.
       added. Is that right, or should a set control switch the role comparisons off?
 - [ ] Roles (D61): should a pool or a QC standard also be left out of the comparisons when there is no competition
       condition? (Now: only in a competition experiment, so nothing changed for other experiments.)
+- [ ] Roles in the windows (D65): is a sixth role, "other" (a condition that is neither a treatment nor a control,
+      e.g. beads only or no probe), needed? It would need a rule: left out of the default comparisons, or compared
+      like a compound? Built: the five roles of D61 only.
+- [ ] Roles in the windows (D65): should the review window hold a drop until a "?" role is confirmed, or is the
+      analysis' question afterwards (`ROLES_UNSURE`) enough? Built: it does not block. Is the review window's role
+      list wanted at all for DIA drops, or is it too much on a window shown for every drop?
 - [ ] Unequal groups (D61): is `small_group_min_valid: half` right as the default (a feature with one of two DMSO
       values is tested), and should the filter ask for at least two values in the condition that keeps a feature?
 - [ ] Is a review window on every drop right long-term, or only for new users / methods / code patterns?

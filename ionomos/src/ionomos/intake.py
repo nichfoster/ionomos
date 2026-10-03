@@ -156,6 +156,8 @@ class Draft:
     condition_codes: dict[str, str] = field(default_factory=dict)  # DIA X_D1 -> DMSO rep 1
     file_rules: dict = field(default_factory=dict)  # method -> naming.FileRule (config naming.methods); {} = built-in
     kinds: dict[str, str] = field(default_factory=dict)  # method -> what it behaves as (Config.kind); {} = its key
+    lab_analysis: dict = field(default_factory=dict)  # config.yaml analysis: (roles preview, D65)
+    exp_analysis: dict = field(default_factory=dict)  # experiment.yaml analysis:, as written (its roles: included)
 
     def kind_of(self, method: str) -> str:
         return self.kinds.get(method, method)
@@ -405,6 +407,8 @@ def draft(folder: Path, cfg: Config, error: IntakeError | None = None, review: b
         review=review and error is None, control=str((ov.analysis or {}).get("control") or ""),
         control_keywords=keywords, condition_codes=dict(cfg.condition_codes), file_rules=dict(cfg.file_rules),
         kinds={m: cfg.kind(m) for m in cfg.methods},
+        lab_analysis={k: v for k, v in (cfg.analysis or {}).items() if k != "enabled"},
+        exp_analysis=dict(ov.analysis or {}),
     )
 
 
