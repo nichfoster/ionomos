@@ -706,6 +706,29 @@ Then re-run the analysis ([How?](#faq.rerun)). If the plexes can't be joined,
 compare conditions within a plex, or block on the plex
 (`analysis.block: {sample: plex}`).
 
+When each plex's own mean serves as the reference, that mean was worked out
+from the same channels that are then tested. limma allows for it: each
+protein loses one degree of freedom per plex beyond the first, which keeps
+the false discoveries where they should be (a t-test does not allow for it).
+
+## The TMT plexes are neither on one scale nor in the model {#issue.TMT_PLEXES_NOT_IN_MODEL}
+
+The experiment has several TMT plexes, IRS was switched off (`irs: none`),
+and the model has no block for the plex. Each plex then measures the same
+protein a little higher or lower, and that jump counts as replicate spread.
+The tests stay honest but find far fewer changes: in simulated plexes 40 %
+of the 2-fold changes were found, against 95 % with IRS or a plex block.
+
+- Put the plexes on one scale: name the pooled (bridge) channel with
+  `analysis.tmt_reference: [126]` and set `irs: auto`; or
+- keep `irs: none` and block on the plex (`analysis.block: {sample: plex}`,
+  or `block_from` with a pattern that picks the plex out of the sample
+  names), so every comparison is made within the plexes.
+
+Then re-run the analysis ([How?](#faq.rerun)). Normalisation is not the
+problem here: without IRS its composition check already compares the
+samples within each plex.
+
 ## The experimental design couldn't be used {#issue.DESIGN_NOT_USED}
 
 The experiment asks for blocks or covariates (`block`, `block_from` or
@@ -853,7 +876,10 @@ samples.
 Ionomos checks for this by also normalising on the features themselves: each
 sample is shifted by the median ratio of its stable features to their mean
 across samples. When the two methods disagree by more than 0.1 log2 between
-two conditions, median centring is not safe.
+two conditions, median centring is not safe. With several TMT plexes that
+were not put on one scale (IRS off or not possible) both are worked out
+within each plex and then combined, because across such plexes the same
+protein jumps with the plex and hides the shift.
 
 - With **Normalisation: auto** (the default for new set-ups) Ionomos uses the
   ratio method by itself whenever that happens, and this entry only tells

@@ -443,6 +443,10 @@ real data:
    - [x] the same checks for ratio data (isoDTB) and TMT (2026-10-02, D66:
      `ionomos benchmark --kind isodtb | tmt`, a calibration guard per kind;
      what they found is under Open questions)
+   - [x] TMT where the D66 grid found problems (2026-10-03, D71): the
+     composition check within plexes (a pulldown without IRS), limma's df
+     after IRS on the plex means, two more guards, a "TMT plexes" line in
+     "How far to trust this" and `TMT_PLEXES_NOT_IN_MODEL`
    - [x] a button for compare / benchmark in the app (2026-10-02, D67:
      Analysis tab → **Check accuracy**, the same code as the command line,
      run off the Tk thread; not yet seen on screen)
@@ -724,14 +728,22 @@ Collected from the other docs; resolve before/during Phase 1.
       the sites go one way it shifts every unchanged site by -0.09 log2 instead. How does the lab mix heavy and
       light (protein assay, by volume), and how far off 1:1 is it? Should the ratios be centred, with a
       composition-robust centre, and should the liganded calls (R ≥ 4) use the centred ratios too?
-- [ ] TMT without IRS (D66): with the plex effect still in the data, the composition check and the ratio method
-      compare a protein across plexes and cannot see a pulldown: with the plex as a block, 59 % of the calls at
-      adjusted p alone were false in a simulated pulldown (offset -0.19 to -0.26 log2). Worth doing the check
-      within plexes when plexes are known and IRS is off? (With IRS on a pool, the default, it is fine.)
-- [ ] TMT `irs: sum` (D66): IRS on each plex's own mean, used when no reference channel is found and the plexes
-      are balanced, is slightly liberal in simulation: FDP 6.6 % with changes both ways (4.5 % aimed at), up to
-      9.3 % in one scenario, because the plex mean is estimated from the channels then tested. Accept, or
-      correct limma's residual df by the plexes?
+- [x] TMT without IRS (D66): the composition check and the ratio method compared a protein across plexes and
+      could not see a pulldown (plex block: 59 % false at adjusted p alone). 2026-10-03 (D71): with plexes known
+      both are worked out within each plex and combined; the plex block now gives 4.7 % (offset within 0.04).
+- [x] TMT `irs: sum` (D66): IRS on each plex's own mean was slightly liberal (FDP 6.6 %, up to 9.3 %).
+      2026-10-03 (D71): limma's residual df are reduced by the plexes - 1 per protein (the plex mean is estimated
+      from the channels then tested); 5.1 % with changes both ways, 4.0 % in a pulldown, checked against R.
+- [ ] TMT, what D71 left (2026-10-03): (1) limma's block model with missing values is a little liberal: with the
+      plex as a block, proteins missing a channel had 7 % of their unchanged p-values below 0.05 (complete ones
+      5.4 %), the FDP 5.3 – 5.8 %. That is limma's own `contrasts.fit` approximation for a non-orthogonal design,
+      ported as it is; IRS on a pool with the plain model (the default) does not have it. (2) `irs: sum` drops a
+      plex for a protein when one channel of it is missing, and leaves a protein with no complete plex unscaled
+      (D48); should such proteins be scaled on the channels they have? (3) After IRS on the plex means the
+      Welch / Student t-tests do not allow for the plex means; "How far to trust this" marks it "check". (4) A
+      2-fold pulldown of 20 % of the proteins sits right at the composition check's 0.1 log2 limit (D64): a table
+      whose shift comes out at 0.098 keeps median centring and its unchanged proteins sit -0.11 log2 off. Should
+      the limit be lower for TMT, whose replicate scatter is small?
 - [ ] isoDTB with two replicates (D66): limma's FDP was 5.8 % (no mixing error) to 9.8 % (with one) in
       simulation, because with 1 df per site the test rests on the variance prior and the simulated sites differ
       in variance (with equal SDs it is calibrated). "How far to trust this" already marks two replicates

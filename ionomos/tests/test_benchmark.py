@@ -2,7 +2,8 @@
 
     calibration guard   the pipeline on simulated tables with planted changes: the observed false discovery
                         proportion must stay near the nominal alpha, the sensitivity must not drop; one guard
-                        each for label-free DIA, isoDTB site ratios and TMT plexes (D66)
+                        each for label-free DIA, isoDTB site ratios and TMT plexes (D66); for TMT also IRS on
+                        the plex means and a pulldown without IRS (D71)
     simulated           what the grid measures and writes; that it is the pipeline analyze() runs; what a
                         mixing error (isoDTB) and a pulldown (TMT) do, which the roadmap holds as open questions
     real                a simulated mixed-species (human / yeast / E. coli) experiment through analyze() and
@@ -204,6 +205,55 @@ def test_tmt_calibration_guard(tmt_guard):
         assert r["tested_share"] > 0.95
 
 
+# D71 guards, measured 2026-10-03 the same way (30 other blocks of 10 seeds, guard grids TMT_GRIDS["guard_sum"] /
+# ["guard_pulldown"]):
+#     IRS on the plex means + auto, 2 and 3 plexes of 4 vs 4 and 2 vs 6, 10 % of 600 proteins 2-fold both ways:
+#         mean 4.7 - 5.0 %, SD 0.8 - 1.4 %, range 2.6 - 9.0 %; sensitivity 0.86 - 0.96; |bias| <= 0.019
+#         (without the df reduction, the same blocks: mean 6.2 - 7.4 %, SD 0.9 - 1.9 %, range 4.1 - 11.8 %)
+#     no IRS, 3 plexes of 4 vs 4 and 2 vs 6, 20 % of 600 proteins 2-fold up (a pulldown):
+#         plex as a block: mean 5.0 - 6.0 %, SD 0.8 - 1.2 %, range 2.7 - 9.3 %; sensitivity 0.95 - 0.98;
+#         unchanged proteins' offset -0.047 to -0.012 (before D71 about -0.2); no block: FDP <= 0.7 %, sensitivity
+#         0.30 - 0.53
+TMT_SUM_FDP_MAX, TMT_SUM_SENSITIVITY_MIN = 0.10, 0.83
+TMT_PULLDOWN_FDP_MAX, TMT_PULLDOWN_OFFSET_MAX = 0.10, 0.06
+
+
+def test_tmt_irs_on_plex_means_guard(monkeypatch):
+    """IRS on each plex's own mean (no reference channel) estimates the plex level from the channels it then tests;
+    limma's residual df are reduced by the plexes - 1 for it (plex.df_spent). Without that the FDP was 6.6 % on the
+    standard grid; the same seeds without the reduction must stay worse than with it."""
+    from ionomos.downstream import plex
+
+    res = benchmark.simulated("guard_sum", seeds=10, kind="tmt")
+    assert len(res["rows"]) == 4
+    for r in res["rows"]:
+        where = f"{r['plexes']} plexes of {r['controls']} vs {r['treated']}"
+        assert r["irs"] == "sum" and r["hits_alpha_only"] > 400, where
+        assert r["fdp_alpha_only"] <= TMT_SUM_FDP_MAX, (where, r["fdp_alpha_only"])
+        assert r["sensitivity_alpha_only"] >= TMT_SUM_SENSITIVITY_MIN, (where, r["sensitivity_alpha_only"])
+        assert abs(r["fc_bias_changed"]) <= TMT_BIAS_MAX, where
+    pooled = sum(r["false_alpha_only"] for r in res["rows"]) / sum(r["hits_alpha_only"] for r in res["rows"])
+    monkeypatch.setattr(plex, "df_spent", lambda p, design=None: None)
+    plain = benchmark.simulated("guard_sum", seeds=10, kind="tmt")["rows"]
+    assert pooled < sum(r["false_alpha_only"] for r in plain) / sum(r["hits_alpha_only"] for r in plain)
+
+
+def test_tmt_pulldown_without_irs_guard():
+    """A pulldown in three plexes left without IRS: the composition check works within the plexes (D71), so `auto`
+    switches to the ratio method and the unchanged proteins stay unchanged, with the plex as a block or not."""
+    res = benchmark.simulated("guard_pulldown", seeds=10, kind="tmt")
+    rows = {(r["setting"], r["controls"]): r for r in res["rows"]}
+    assert len(rows) == 4
+    for (setting, c), r in rows.items():
+        where = f"{setting}, {c} vs {r['treated']}"
+        assert abs(r["fc_offset_unchanged"]) <= TMT_PULLDOWN_OFFSET_MAX, (where, r["fc_offset_unchanged"])
+        assert r["fdp_alpha_only"] <= TMT_PULLDOWN_FDP_MAX, (where, r["fdp_alpha_only"])
+        if setting == "no IRS, plex as a block":
+            assert r["sensitivity_alpha_only"] >= TMT_SENSITIVITY_MIN, where
+        else:  # the plex effect is in the residuals: conservative, and far less sensitive
+            assert r["sensitivity_alpha_only"] < 0.7, where
+
+
 def test_the_isodtb_and_tmt_benchmarks_are_deterministic(iso_guard):
     assert benchmark.simulated("guard", seeds=10, kind="isodtb")["rows"] == iso_guard["rows"]
     a, b = (benchmark.simulated("guard", seeds=2, kind="tmt") for _ in range(2))
@@ -225,8 +275,9 @@ def test_a_mixing_error_moves_every_isodtb_ratio_and_nothing_corrects_it():
 def test_a_tmt_pulldown_needs_irs_and_auto_normalisation():
     """20 % of the proteins up 2-fold in Drug (a pulldown) over 3 plexes: median centring after IRS shifts every
     unchanged protein down and the FDP at alpha alone runs away; auto (D64) switches to the ratio method and holds.
-    Without IRS the plex effect stays in: the plain model loses most of its power, and a plex block gets the power
-    back but not the normalisation, which can't see the composition through the plex effect."""
+    Without IRS the plex effect stays in: the plain model loses most of its power, and a plex block gets it back.
+    The normalisation compares within plexes (D71), so without IRS it sees the composition too (before D71 the
+    block's unchanged proteins sat -0.2 log2 off and 59 % of its calls at alpha were false)."""
     grid = {"designs": [(4, 4)], "plexes": [3], "effects": [1.0], "changed": [(0.2, "up")], "missing": ["typical"],
             "settings": [s for s, _ in benchmark.TMT_SETTINGS], "seeds": 4, "proteins": 600}
     r = {x["setting"]: x for x in benchmark.simulated(grid, kind="tmt")["rows"]}
@@ -236,7 +287,8 @@ def test_a_tmt_pulldown_needs_irs_and_auto_normalisation():
     assert median["fdp"] <= 0.01  # the fold-change cut-off still keeps them out of the hits
     assert r["no IRS + auto"]["sensitivity_alpha_only"] < 0.6 * default["sensitivity_alpha_only"]
     block = r["no IRS, plex as a block"]
-    assert block["sensitivity_alpha_only"] > 0.9 and block["fc_offset_unchanged"] < -0.12
+    assert block["sensitivity_alpha_only"] > 0.9 and abs(block["fc_offset_unchanged"]) < TMT_PULLDOWN_OFFSET_MAX
+    assert block["fdp_alpha_only"] <= TMT_FDP_MAX
     assert abs(r["IRS on plex means + auto"]["fc_offset_unchanged"]) < 0.03
 
 

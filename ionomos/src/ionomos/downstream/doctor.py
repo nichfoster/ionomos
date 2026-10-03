@@ -131,6 +131,19 @@ def suggest_conditions(samples: list[str]) -> dict[str, str]:
         toks = {s: t[n:] for s, t in toks.items()}
     return {s: ("_".join(t) or cleaned[s] or s) for s, t in toks.items()}
 
+def _within(comp: dict) -> str:
+    """The composition check was made within TMT plexes (fpa.normalize_info, D71)."""
+    return f" (compared within each of the {comp['plexes']} TMT plexes)" if comp.get("plexes") else ""
+
+
+def _model_holds_plexes(model, m) -> bool:
+    """Does the model the comparisons used fit a level per TMT plex (plex.holds_plexes)?"""
+    from ionomos.downstream import plex
+
+    design = getattr(model, "design", None)
+    return design is not None and plex.holds_plexes(design, m)
+
+
 def check(f: Findings) -> list[Issue]:
     out: list[Issue] = []
     add = out.append
@@ -294,6 +307,19 @@ def check(f: Findings) -> list[Issue]:
                   ["Set analysis.tmt_reference to the pooled channel (e.g. 126) in experiment.yaml, or mark it "
                    "'pooled' in the SDRF, then Run analysis"],
                   {"plexes": tmt_.get("plexes")}))
+    elif tmt_ and not tmt_.get("applied") and len(tmt_.get("plexes") or {}) > 1 and p is not None and \
+            not _model_holds_plexes(f.model, p.m):
+        add(Issue("TMT_PLEXES_NOT_IN_MODEL", "warning", "The TMT plexes are neither on one scale nor in the model",
+                  f"This experiment has {len(tmt_['plexes'])} TMT plexes, IRS is switched off (irs: none), and the "
+                  "model has no block for the plex. The plex effect then counts as replicate spread: the tests stay "
+                  "conservative but miss many changes (in simulated plexes 40 % of 2-fold changes were found, "
+                  "against 95 % with IRS or a plex block).",
+                  ["irs: none was set for this experiment or the lab", "A block was asked for, but not by plex"],
+                  ["Put the plexes on one scale: name the pooled channel (analysis.tmt_reference) and set irs to "
+                   "auto, then Run analysis",
+                   "Or keep irs: none and block on the plex (analysis.block: {sample: plex}, or block_from on the "
+                   "sample names), so every comparison is made within the plexes"],
+                  {"plexes": tmt_.get("plexes")}))
 
     # ---- duplicates (two runs of one sample)
     dups = sorted(x for x in samples if re.search(r"\.\d+$", x))
@@ -368,8 +394,8 @@ def check(f: Findings) -> list[Issue]:
                 a, b = comp["between"]
                 add(Issue("NORMALISATION_COMPOSITION", "input", "The normalisation shifts the conditions against each other",
                           f"Median centring moves {a} against {b} by {comp['shift']:.2f} log2 compared with a "
-                          f"normalisation on {comp['features']:,} stable features. Unchanged features then look "
-                          "changed by that much, and some pass the fold-change cut-off.",
+                          f"normalisation on {comp['features']:,} stable features{_within(comp)}. Unchanged features "
+                          "then look changed by that much, and some pass the fold-change cut-off.",
                           ["Many features are enriched or depleted in one direction (a pulldown, a depletion, a "
                            "strong treatment), so the middle of the abundance distribution moves",
                            "A sample with far fewer identifications than the others",
@@ -383,7 +409,8 @@ def check(f: Findings) -> list[Issue]:
                 add(Issue("NORMALISATION_COMPOSITION", "warning", "Normalised on stable features, not on the median",
                           f"Median centring would have moved {a} against {b} by {comp['shift']:.2f} log2, because "
                           "many features change in one direction. The samples were normalised on the ratios of "
-                          f"{comp['features']:,} stable features instead, so unchanged features stay unchanged.",
+                          f"{comp['features']:,} stable features{_within(comp)} instead, so unchanged features stay "
+                          "unchanged.",
                           ["A pulldown, a depletion or a strong treatment: a large share of the features is "
                            "enriched or depleted"],
                           ["Nothing to do. To force one method, set Normalisation to median or ratio"],

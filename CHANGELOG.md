@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+
+
+
 ### Added
 
 - **Anonymised "Copy diagnostics"** (D74). The app's **Copy diagnostics**
@@ -69,6 +73,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The assistant's time to first token waits for the first generated token
   (text, reasoning or a tool call), not the opening event. Answers and audit
   records say whether a search was running (`mode`).
+
+- **TMT across plexes: the normalisation looks within each plex, and IRS on
+  the plex means is no longer liberal** (D71, from the D66 benchmark's open
+  questions):
+  - With several TMT plexes that are not on one scale (IRS off, or not
+    possible), `normalize: auto`'s composition check and the `ratio` method
+    are worked out within each plex and combined. Across such plexes a
+    protein jumps with the plex, which hid a pulldown: with the plex as a
+    block, 59 % of the calls at adjusted p alone were false (unchanged
+    proteins -0.19 to -0.26 log2 off); now 4.7 % (within 0.04). The doctor's
+    `NORMALISATION_COMPOSITION` now also fires there, and says the check was
+    made within plexes. Plexes joined by IRS are compared all together as
+    before, so the default's numbers are unchanged (4.4 % / 3.8 %); without
+    plexes the check is the D64 one to the last digit.
+  - IRS on each plex's own mean (`irs: sum`, used when no reference channel
+    is found) estimates the plex level from the channels it then tests;
+    limma's residual df are now reduced by the plexes - 1 for each protein
+    (`plex.df_spent`), unless the design already has a block per plex. FDP
+    on the simulated grid 6.6 % → 5.1 % with changes both ways, 5.3 % → 4.0 %
+    in a pulldown (worst scenario 9.3 % → 7.7 %), sensitivity unchanged; checked against limma 3.68.5 in R
+    (`tests/golden/tmt_sum/`). `analysis.json`'s `model` says so
+    (`plex_df`).
+  - "How far to trust this" has a **TMT plexes** line: how the plexes were
+    put on one scale (reference, plex means with the df reduced, a plex
+    block), marked "check" when they are neither on one scale nor in the
+    model, or when a t-test follows IRS on the plex means.
+  - New doctor warning `TMT_PLEXES_NOT_IN_MODEL` (with help): `irs: none`
+    and no block for the plex, which keeps the tests valid but finds 40 %
+    instead of 95 % of 2-fold changes.
+  - Two more calibration guards in the test suite (IRS on the plex means;
+    a pulldown without IRS).
 
 
 ## [0.15.0] - 2026-10-02

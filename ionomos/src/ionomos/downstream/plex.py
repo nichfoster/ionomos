@@ -3,6 +3,7 @@ TMT across plexes: every plex on one scale before the statistics (D48).
 
     m, info, notes = normalise(m, settings)       # after loading, before fpa.process
     pca = pca_before(processed, settings)         # the report's PCA of the same data before it
+    spent = df_spent(processed, design)           # residual df IRS on the plex means used (analysis.run_contrasts)
 
 A TMT plex (a MaxQuant experiment, an MSstatsTMT mixture, a Proteome Discoverer file, the fraction files of a
 Sage TMT search, a group of SDRF files sharing their channels) measures its channels in the same scans, so
@@ -25,7 +26,8 @@ Choices (settings `irs`, `tmt_reference`; docs/DECISIONS.md D48):
                 pool). It is only valid when every plex holds the same mix of conditions, otherwise it would scale
                 real differences away: "auto" uses it only for such balanced designs and otherwise leaves the data
                 alone with a warning (the doctor's TMT_PLEXES_NOT_NORMALISED). Channels without a condition yet
-                (UNASSIGNED) are not a balanced design either.
+                (UNASSIGNED) are not a balanced design either. The plex mean is estimated from the channels that
+                are then tested, so limma's residual df are reduced by (plexes - 1) per protein (df_spent, D71).
     order       IRS runs on the loaded values; sample-loading normalisation (analysis.normalize) follows in
                 fpa.process. In log2 both are additive, so this equals Plubell's SL -> IRS order up to a constant
                 per sample, which the median centring removes.
@@ -58,6 +60,7 @@ TMT_ORDERS = {
 }
 REFERENCE_WORDS = re.compile(r"(?i)(?:^|[_\-\s.])(?:pool(?:ed)?|bridge|ref(?:erence)?|norm|irs)(?:$|[_\-\s.\d])")
 IRS_MODES = ("auto", "reference", "sum", "none")
+SUM_METHOD = "IRS (plex means)"  # bridge["method"] when each plex's own mean stood in for a reference
 UNASSIGNED = "unassigned"  # the condition of a TMT channel nothing names yet (engines.load_sage_tmt)
 
 
@@ -235,7 +238,7 @@ def normalise(m: QuantMatrix, settings) -> tuple[QuantMatrix, dict | None, list[
     how = (f"reference channel{'s' if len(refs) > 1 else ''} {', '.join(refs[:6])}{'…' if len(refs) > 6 else ''} "
            f"(from {ref_from})" if use == "reference" else "each plex's own mean (no reference channel; the plexes "
                                                             "hold the same mix of conditions)")
-    info.update({"method": "IRS (reference channel)" if use == "reference" else "IRS (plex means)", "applied": True,
+    info.update({"method": "IRS (reference channel)" if use == "reference" else SUM_METHOD, "applied": True,
                  "reference": refs if use == "reference" else [], "reference_from": ref_from if use == "reference"
                  else "", "proteins_scaled": scaled, "values_dropped": dropped,
                  "removed": [m.samples[j] for j in range(len(m.samples)) if j not in keep]})
@@ -246,6 +249,49 @@ def normalise(m: QuantMatrix, settings) -> tuple[QuantMatrix, dict | None, list[
         notes.append("IRS: samples without a plex were left as they are: " + ", ".join(unplexed[:8]))
     out.meta["bridge"] = info
     return out, info, notes
+
+
+def sum_scaled(m: QuantMatrix) -> bool:
+    """Were the plexes of m put on one scale by their own means (IRS without a reference channel)?"""
+    b = m.meta.get("bridge")
+    return isinstance(b, dict) and bool(b.get("applied")) and b.get("method") == SUM_METHOD
+
+
+def holds_plexes(design, m: QuantMatrix) -> bool:
+    """Does the design (design.Design) already fit a level per plex (a block per plex, or a finer one)? Then its
+    fit spends the df of the plex means itself."""
+    from ionomos.downstream import design as dz
+
+    plex = plexes_of(m)
+    cols = [[row[c] for row in design.x] for c in range(len(design.columns))]
+    rank = len(dz._qr(cols)[0])
+    for p in set(plex.values()):
+        ind = [1.0 if plex.get(s) == p else 0.0 for s in design.samples]
+        if len(dz._qr([*cols, ind])[0]) > rank:
+            return False
+    return True
+
+
+def df_spent(p, design=None) -> list[int] | None:
+    """The residual df that IRS on the plex means used up, per feature of the processed data p (fpa.Processed,
+    rows of p.measured): every plex a feature was scaled in had its level estimated from the very channels that
+    are then tested, and the common target gives one back, so (plexes - 1). limma counts them from its own
+    model otherwise, and was liberal by that much (D71: FDP 6.9 % where a plex block gives 5.5 %). A plex was
+    scaled where the feature has every channel of it (normalise() leaves the others missing, or the whole row
+    as it was when no plex is complete). None when the plexes weren't scaled by their means, or the design holds
+    the plexes already (holds_plexes)."""
+    pm = p.m
+    if not sum_scaled(pm):
+        return None
+    plex = plexes_of(pm)
+    groups: dict[str, list[int]] = {}
+    for j, s in enumerate(pm.samples):
+        if s in plex:
+            groups.setdefault(plex[s], []).append(j)
+    if len(groups) < 2 or (design is not None and holds_plexes(design, pm)):
+        return None
+    return [max(0, sum(1 for ix in groups.values() if all(row[j] is not None for j in ix)) - 1)
+            for row in p.measured]
 
 
 def pca_before(p, settings) -> dict | None:
