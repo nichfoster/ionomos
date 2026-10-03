@@ -342,6 +342,73 @@ def disk_free_gb(path: Path) -> float | None:
     return None
 
 
+def process_started(pid: int) -> float | None:
+    """When process `pid` started (seconds since the epoch), or None when no such process is running (gone, a
+    zombie, or the OS won't say). Used to tell a FragPipe Ionomos started from an unrelated process that got the
+    same number later (D69): a pid alone is never enough to kill something. Never raises."""
+    try:
+        pid = int(pid)
+        if pid <= 0:
+            return None
+        if os.name == "nt":
+            return _process_started_windows(pid)
+        if Path("/proc/stat").is_file() and Path(f"/proc/{pid}/stat").is_file():
+            return _process_started_linux(pid)
+        return _process_started_ps(pid)
+    except Exception:  # noqa: BLE001 - a health fact, never a crash
+        return None
+
+
+def _process_started_windows(pid: int) -> float | None:
+    import ctypes
+    from ctypes import wintypes
+
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.OpenProcess.restype = wintypes.HANDLE
+    k32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    k32.GetExitCodeProcess.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
+    k32.GetProcessTimes.argtypes = (wintypes.HANDLE,) + (ctypes.POINTER(wintypes.FILETIME),) * 4
+    k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    handle = k32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return None
+    try:
+        code = wintypes.DWORD()
+        if not k32.GetExitCodeProcess(handle, ctypes.byref(code)) or code.value != 259:  # STILL_ACTIVE
+            return None
+        times = [wintypes.FILETIME() for _ in range(4)]
+        if not k32.GetProcessTimes(handle, *(ctypes.byref(t) for t in times)):
+            return None
+        created = (times[0].dwHighDateTime << 32) | times[0].dwLowDateTime
+        return created / 1e7 - 11644473600  # 100 ns since 1601 -> seconds since 1970
+    finally:
+        k32.CloseHandle(handle)
+
+
+def _process_started_linux(pid: int) -> float | None:
+    text = Path(f"/proc/{pid}/stat").read_text(encoding="ascii", errors="replace")
+    fields = text[text.rindex(")") + 2:].split()  # the name may hold spaces and brackets
+    if fields[0] in ("Z", "X"):
+        return None
+    boot = next(float(ln.split()[1]) for ln in Path("/proc/stat").read_text(encoding="utf-8").splitlines()
+                if ln.startswith("btime"))
+    return boot + int(fields[19]) / os.sysconf("SC_CLK_TCK")
+
+
+def _process_started_ps(pid: int) -> float | None:
+    import subprocess
+
+    r = subprocess.run(["ps", "-o", "stat=", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True,
+                       env={**os.environ, "LC_ALL": "C"}, timeout=10)
+    out = r.stdout.strip()
+    if r.returncode != 0 or not out:
+        return None
+    state, started = out.split(None, 1)
+    if state.startswith("Z"):
+        return None
+    return time.mktime(time.strptime(" ".join(started.split()), "%a %b %d %H:%M:%S %Y"))
+
+
 def memory_gb() -> tuple[float | None, float | None]:
     """(total, available) RAM in GB; None where the OS won't say."""
     try:

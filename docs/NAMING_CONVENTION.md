@@ -91,6 +91,24 @@ in one drop = two different `sample` prefixes. Channel → sample-name mapping
 comes from `experiment.yaml` (below) or a FragPipe `annotation.txt` you put in
 the folder.
 
+**Several plexes: a folder each** (D69). FragPipe reads one annotation file
+per folder, so plexes that share a folder get FragPipe's own channel names
+(`<plex>_<channel>`); the job says so, and the files are filed as dropped.
+For your sample names, drop the experiment with a folder per plex:
+
+```
+20260127_Aman_TMT_KL6160-2plex\
+  plexA\KL6160A_TMT_F1.raw  plexA\KL6160A_TMT_F2.raw
+  plexB\KL6160B_TMT_F1.raw  plexB\KL6160B_TMT_F2.raw
+  experiment.yaml           tmt: plexes: {plexA: {channels: …}, plexB: {channels: …}}
+```
+
+The folder name is the plex (spaces and symbols are cleaned as in file
+names: `plex A` → `plex-A`); the layout is kept, and each folder gets its
+`annotation.txt`. A raw file name may appear only once in the whole drop.
+Subfolders are read only for TMT, and only when no `.raw` is at the top level
+or in `raw\`.
+
 ### DIA — `<condition>_<biorep>.raw`
 
 ```

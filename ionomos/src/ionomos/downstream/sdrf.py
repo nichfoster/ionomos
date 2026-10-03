@@ -370,6 +370,18 @@ def tmt_channels(record: dict | None, dest: Path, m, experiments: list[str]) -> 
     plan = (record or {}).get("plan") or {}
     raw_dir = dest / plan["raw_dir"] if plan.get("raw_dir") else dest
     found: dict = {}
+    # a drop laid out one folder per plex (D69): each plex's annotation.txt is in the folder of its files
+    folders: dict[str, set[str]] = {}
+    for line in plan.get("manifest") or []:
+        exp, parent = str(line.get("experiment")), str(Path(str(line.get("file", ""))).parent)
+        for key in dict.fromkeys((exp, re.sub(r"[^A-Za-z0-9_]", "_", exp))):  # also as FragPipe writes it
+            folders.setdefault(key, set()).add(parent)
+    for exp in experiments:
+        own = folders.get(exp) or set()
+        if len(own) == 1 and next(iter(own)) not in ("", ".", str(plan.get("raw_dir") or "")):
+            ch = _read_annotation(dest / next(iter(own)) / "annotation.txt")
+            if ch:
+                found[exp] = ch
     for d in dict.fromkeys((raw_dir, dest)):
         for exp in experiments:
             ch = _read_annotation(d / f"{exp}_annotation.txt")

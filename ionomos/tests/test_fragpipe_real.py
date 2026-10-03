@@ -412,7 +412,16 @@ def test_every_explanation_is_exercised_by_a_test():
         "Error: Could not find or load main class org.nesvilab.fragpipe.FragPipeMain",
         "'fragpipe.bat' is not recognized as an internal or external command", "Access is denied",
         "output directory is not empty", "philosopher: fatal error", "0 PSMs passed",
-        "Exception in thread \"main\" java.lang.IllegalStateException") for msg in fragpipe.explain(log)}
+        "Exception in thread \"main\" java.lang.IllegalStateException",
+        # D69: Ionomos' own words about how a search ended (tests/test_faults.py runs each through the worker)
+        "timed out after 240 min (fragpipe.timeout_minutes)",
+        "FragPipe wrote more than 2000 MB to its console log; stopped so it can't fill the disk",
+        "FragPipe ended by SIGKILL", "FragPipe crashed with an access violation (0xC0000005)",
+        "FragPipe's result table combined_modified_peptide_label_quant.tsv ends in the middle of a row (it was cut off)",
+        "FragPipe exited 0 without its 'ALL JOBS DONE' line and without any of its result tables: the run did not "
+        "finish", "Ionomos hit an unexpected error while running the search: OSError: x",
+        "java.io.FileNotFoundException: C:\\x\\a.raw (The system cannot find the file specified)",
+    ) for msg in fragpipe.explain(log)}
     missing = [msg for _rx, msg in fragpipe.EXPLANATIONS if msg not in here | elsewhere]
     assert missing == []
 
@@ -531,9 +540,10 @@ def test_the_launcher_gets_java_home_in_its_environment(bed, tmp_path):
     spec.env = {"JAVA_HOME": "C:/FragPipe/FragPipe-24.0/jre"}
     fragpipe.write_inputs(spec)
     res = fragpipe.run(spec, poll=0.1)
-    assert res.code == 0 and out.read_text(encoding="utf-8").strip() == "C:/FragPipe/FragPipe-24.0/jre"
+    assert out.read_text(encoding="utf-8").strip() == "C:/FragPipe/FragPipe-24.0/jre"
     assert "# JAVA_HOME=C:/FragPipe/FragPipe-24.0/jre" in spec.console_log.read_text(encoding="utf-8")
-    assert any("no 'ALL JOBS DONE' line" in w for w in res.warnings)  # this launcher isn't FragPipe
+    # this launcher isn't FragPipe: exit 0 with neither the end line nor a result table is not a search (D69)
+    assert res.code == 1 and "did not finish" in res.reason
 
 
 def test_install_report_reads_a_24_installer_layout(bed, tmp_path):

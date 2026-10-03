@@ -141,6 +141,20 @@ attempt's log, the progress line, TMT annotation files, decoy rules. New:
 real one's output. **Still not run against a real FragPipe**: FIRST_REAL_RUN.md
 is the checklist for that day, and the fingerprints are what to send back.
 
+2026-10-02 (D69): a fault-injection suite around the worker
+(`tests/test_faults.py`), with the fake FragPipe acting out each fault per
+experiment. Fixed: a FragPipe that outlived a killed Ionomos ran beside the
+re-run (now stopped first, and only when it is provably the one Ionomos
+started); a job recovered to `failed` kept saying `running` in its folder; a
+table cut off by a full disk counted as done; console logs read whole
+(`tail()`), and Windows code page text unreadable in `FAILED.txt`; two
+re-runs in one second failed the job; an error inside Ionomos during a search
+left the job `running`; a second job row for one folder was searched again
+over the first. New: holds for a raw file still open, a path with a space (on
+Windows) and earlier output that can't be moved aside; a limit on the console
+log; causes for a search ended from outside, a crash, a time limit; drops
+laid out one folder per TMT plex. **Still not run against a real FragPipe.**
+
 ## Phase 3 — DIA, then TMT
 
 - DIA: pin workflow, `data_type: DIA`, sort out DIA-NN version/`--config-diann`.
@@ -588,8 +602,18 @@ Collected from the other docs; resolve before/during Phase 1.
       (same in 23.1): the one file whose name ends in `annotation.txt` in the folder holding all of the plex's
       LC-MS files; with none or several it writes its own `<workdir>\<plex>\<plex>_annotation.txt` naming the
       channels `<plex>_<channel>`. Not yet seen on the PC.
-- [ ] D59: several TMT plexes in one experiment need a folder each for FragPipe to find their annotations. Intake
-      files raws at the top level or in `raw\`: should a multi-plex drop be laid out as `<plex>\*.raw`?
+- [ ] D59: several TMT plexes in one experiment need a folder each for FragPipe to find their annotations. →
+      2026-10-02 (D69), in part: a drop that already comes as `<plex>\*.raw` is filed and searched that way (the
+      folder is the plex, one `annotation.txt` in each); a flat drop with several plexes is filed as it is, with a
+      warning that FragPipe will name the channels `<plex>_<channel>`. **Still for the lab**: should people be asked
+      to drop multi-plex experiments as `<plex>\*.raw` (NAMING_CONVENTION.md), or should Ionomos one day lay them
+      out itself?
+- [ ] D69: on the PC, check that (1) a FragPipe left by an Ionomos ended from Task Manager is stopped by the next
+      start (`engine_pid.json`, the log line "was still running after Ionomos stopped"); (2) Xcalibur acquiring a
+      file makes "raw file(s) can't be read yet" (a hold), and the search starts once it is done; (3) the console
+      text of a failed search reads right in `FAILED.txt` (cp1252 assumed for non-UTF-8 lines; an OEM code page
+      from `cmd.exe` would show as odd letters); (4) whether a real FragPipe ever exits 0 without `ALL JOBS DONE`
+      and without result tables (now a failure). The 2 GB console limit and the table checks are guesses.
 - [x] D59: FragPipe 24's stock workflows write `fragpipe\sdrf.tsv` (`workflow.misc.save-sdrf=true`), which the
       analysis took for the experiment's own design. Fixed in 0.14.0: an SDRF with no factor value column and no
       sample names is skipped with a note (`sdrfdesign._engine_template`). Confirm on the first real run that the

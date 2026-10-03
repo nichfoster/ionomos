@@ -82,6 +82,17 @@ or press **Report a problem…**, which bundles them.
 | DONE with the note "no 'ALL JOBS DONE' line" | FragPipe's end marker was not in the console Ionomos captured. Send the fingerprint: this decides whether the marker can be required. |
 | Pop-up "The SDRF doesn't describe these runs" | Since 0.14.0 FragPipe's own `fragpipe\sdrf.tsv` is skipped, so this should not appear for it. If it does, the real file differs from what was assumed: send a bundle. |
 | The progress line never changes from "starting" | The console is empty or in a shape Ionomos doesn't know: send `fragpipe_console.log`. |
+| FAILED, "ended from outside" or "stopped in the middle of a step without saying why" | Something ended FragPipe (Task Manager, sleep, sign-out, Windows out of memory). Note what happened on the PC at that time. |
+| FAILED, "result table … not written to the end" or "has only its header line" | The table was cut off (disk full?) or the search found nothing. Send the fingerprint: its `outputs` lists the table sizes. |
+| FAILED, "exited 0 without its 'ALL JOBS DONE' line and without any of its result tables" | FragPipe said it succeeded but left nothing. Check tab 1 says `fragpipe.bat`; send the console log. |
+| Waiting, "raw file(s) can't be read yet" | A raw file is still open (Xcalibur still acquiring it, a copy still running). It starts by itself when the file is free; if it never does, note which program held it. |
+| Odd letters (`Ã¼`, `�`) in `FAILED.txt` | FragPipe's tools wrote another code page than the one assumed (cp1252): send the console log. |
+
+**Try once, on purpose** (D69): during a long search, end `Ionomos` (not
+FragPipe) in Task Manager, then start the watcher again. The log should say
+FragPipe "was still running after Ionomos stopped" and that it was stopped;
+the search then runs again from the start (attempt 2), and Task Manager
+shows only one FragPipe `java.exe`.
 
 After fixing a cause: **Retry**. The earlier output is kept as
 `fragpipe_previous_<time>\`, the earlier fingerprint as
@@ -104,8 +115,12 @@ After fixing a cause: **Retry**. The earlier output is kept as
       FragPipe 24 writes DIA-NN's tables to `fragpipe\dia-quant-output\`.
       If the DIA-NN step fails on `.raw` files, note its message: FragPipe's
       workflow notes ask for mzML for Thermo DIA.
-- [ ] **TMT**: one plex per experiment for now. List all channels of the
-      label type in the review window / `experiment.yaml` (`NA` for unused).
+- [ ] **TMT**: one plex per experiment, or several plexes each in a folder
+      of its own (`<plex>\*.raw`; the folder name is the plex name in
+      `experiment.yaml` `tmt: plexes:`). List all channels of the label type
+      in the review window / `experiment.yaml` (`NA` for unused). Several
+      plexes in one folder are searched, but FragPipe then names the
+      channels `<plex>_<channel>` (the job says so).
 
 ## 4. Report back
 
@@ -128,7 +143,9 @@ every option Ionomos passes, the manifest format, how the TMT annotation is
 found, the decoy rule, the exit codes, and the log lines Ionomos reads.
 Verified by tests on the fake: the whole run loop (done, failed step,
 time limit, cancel, stop, the process tree being killed, re-runs keeping
-earlier output).
+earlier output) and the faults in D69 (hangs, kills, Ionomos itself killed
+and restarted, a full disk, cut-off tables, garbled and huge logs, locked
+or vanished files).
 
 Not verified: anything against a running FragPipe on the PC. That is what
 this page is for.
