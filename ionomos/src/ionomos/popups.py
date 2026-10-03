@@ -19,7 +19,12 @@ Each window says what happened, the most likely causes, what to do, the details
     search_failed                      Retry search, FragPipe log, folder, Report a problem
     search_waiting                     Open Ionomos (setup checklist), folder
     intake_rejected                    Open the inbox, the note
-    every item                         More help (the help page at this problem), Remind me in an hour, Dismiss
+    every item                         Ask about this (the local assistant, read-only: AskWindow), More help (the
+                                       help page at this problem), Remind me in an hour, Dismiss
+
+"Ask about this" is also in the list. The answer is made on a worker thread (assistant/askui.py holds the
+logic) and comes back through host.post(), which _pump runs on the Tk thread; "not set up" shows Ionomos's own
+text and the help, as a normal state (D72).
 """
 from __future__ import annotations
 
@@ -32,6 +37,7 @@ from pathlib import Path
 from tkinter import messagebox, scrolledtext, ttk
 
 from ionomos import attention
+from ionomos.assistant import askui
 
 log = logging.getLogger("ionomos.popups")
 
@@ -69,6 +75,8 @@ class Popups:
         self.window: ItemWindow | None = None
         self._center: tk.Toplevel | None = None
         self._stopped = False
+        self._asks: dict[int, AskWindow] = {}  # open "Ask about this" windows, by token (the worker thread
+        self._ask_seq = 0                      # knows only the token, never a widget)
 
     def start(self, first_ms: int = 1500) -> None:
         self.root.after(first_ms, self._tick)
@@ -169,6 +177,7 @@ class Popups:
         b.grid(row=1, column=0, sticky="w", pady=(8, 0))
         ttk.Button(b, text="Open", command=self._open_selected).pack(side="left", padx=3)
         ttk.Button(b, text="Dismiss", command=self._dismiss_selected).pack(side="left", padx=3)
+        ttk.Button(b, text=askui.BUTTON, command=self._ask_selected).pack(side="left", padx=3)
         ttk.Button(b, text="Refresh", command=self._fill_center).pack(side="left", padx=3)
         ttk.Label(b, text="Items close by themselves once the problem is fixed (a retry, a clean re-analysis).",
                   foreground="#666").pack(side="left", padx=10)
@@ -189,6 +198,33 @@ class Popups:
             it = attention.get(self.host.log_dir(), sel[0])
             if it is not None:
                 self.show(it)
+
+    def _ask_selected(self) -> AskWindow | None:
+        sel = self._center_tree.selection()
+        it = attention.get(self.host.log_dir(), sel[0]) if sel else None
+        return self.ask_about(it) if it is not None else None
+
+    # ------------------------------------------------------- ask about this --
+
+    def ask_about(self, item: attention.Item) -> AskWindow:
+        """Open an "Ask about this" window for an item; it asks at once with the item's default question."""
+        self._ask_seq += 1
+        w = self._asks[self._ask_seq] = AskWindow(self, item, self._ask_seq)
+        return w
+
+    def _ask_done(self, token: int, shown: askui.Shown) -> None:
+        """On the Tk thread (through host.post): the answer for the window with this token, if still open."""
+        w = self._asks.get(token)
+        if w is not None and w.alive():
+            w.show(shown)
+
+    def load_config(self):
+        from ionomos.config import ConfigError, load
+
+        path = self.host.config_path()
+        if path is None:
+            raise ConfigError("Ionomos has no config.yaml yet (the app's Setup tab makes one)")
+        return load(path, check_paths=False)
 
     def _dismiss_selected(self) -> None:
         sel = self._center_tree.selection()
@@ -262,6 +298,7 @@ class ItemWindow:
         ttk.Button(b, text="Dismiss", command=self.dismiss).pack(side="right", padx=3)
         ttk.Button(b, text="Remind me in an hour", command=self.snooze).pack(side="right", padx=3)
         ttk.Button(b, text="More help", command=self.more_help).pack(side="right", padx=3)
+        ttk.Button(b, text=askui.BUTTON, command=self.ask_about).pack(side="right", padx=3)
         win.protocol("WM_DELETE_WINDOW", self.close)
         win.bind("<Escape>", lambda e: self.close())
         win.update_idletasks()
@@ -373,6 +410,9 @@ class ItemWindow:
         except OSError as exc:
             self.msg.configure(text=f"Could not open the help: {exc}", foreground="#c62828")
 
+    def ask_about(self) -> AskWindow:
+        return self.pops.ask_about(self.item)
+
     def snooze(self) -> None:
         attention.snooze(self.host.log_dir(), self.item.id, 60)
         self.close()
@@ -396,3 +436,94 @@ class ItemWindow:
             self.win.after(2500, self.close)
         else:
             self.msg.configure(text="Some things still need a look (listed above).", foreground="#b26a00")
+
+
+# ------------------------------------------------------------ ask about this --
+
+
+class AskWindow:
+    """The local assistant's answer about one item: a question (pre-filled, editable), Ask, the answer as plain
+    text with its sources, More help, Close. Asking runs on a worker thread; nothing here changes anything."""
+
+    def __init__(self, pops: Popups, item: attention.Item, token: int):
+        self.pops, self.host, self.item, self.token = pops, pops.host, item, token
+        self.shown: askui.Shown | None = None
+        self.pending = False
+        win = self.win = tk.Toplevel(pops.root)
+        win.title(askui.TITLE)
+        f = ttk.Frame(win, padding=10)
+        f.pack(fill="both", expand=True)
+        f.columnconfigure(0, weight=1)
+        f.rowconfigure(3, weight=1)
+        ttk.Label(f, text=f"{KIND_TITLE.get(item.kind, 'Needs attention')}: {item.title}", wraplength=720,
+                  justify="left", font=("", 11, "bold")).grid(row=0, column=0, sticky="w")
+        q = ttk.Frame(f)
+        q.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        q.columnconfigure(0, weight=1)
+        self.question = ttk.Entry(q)  # no Tk variable: nothing here may be freed on the worker thread
+        self.question.insert(0, askui.default_question(item))
+        self.question.grid(row=0, column=0, sticky="ew")
+        self.question.bind("<Return>", lambda e: self.ask())
+        self.ask_btn = ttk.Button(q, text="Ask", command=self.ask)
+        self.ask_btn.grid(row=0, column=1, padx=(6, 0))
+        self.status = ttk.Label(f, text="", foreground="#555", wraplength=720, justify="left")
+        self.status.grid(row=2, column=0, sticky="w", pady=(6, 0))
+        self.answer = scrolledtext.ScrolledText(f, height=20, width=96, wrap="word")
+        self.answer.grid(row=3, column=0, sticky="nsew", pady=(6, 0))
+        self.answer.configure(state="disabled")
+        b = ttk.Frame(f)
+        b.grid(row=4, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(b, text="Close", command=self.close).pack(side="right", padx=3)
+        ttk.Button(b, text="More help", command=self.more_help).pack(side="right", padx=3)
+        ttk.Label(b, text=askui.NOTE, foreground="#666", wraplength=520, justify="left").pack(side="left")
+        win.protocol("WM_DELETE_WINDOW", self.close)
+        win.bind("<Escape>", lambda e: self.close())
+        win.lift()  # above the pop-up it was opened from, which may still be topmost
+        try:
+            win.focus_force()
+        except tk.TclError:
+            pass
+        self.ask()
+
+    def alive(self) -> bool:
+        try:
+            return bool(self.win.winfo_exists())
+        except tk.TclError:
+            return False
+
+    def ask(self) -> None:
+        if self.pending:
+            return
+        self.pending = True
+        question = self.question.get().strip() or askui.default_question(self.item)
+        self.ask_btn.configure(state="disabled")
+        self.status.configure(text=askui.ASKING)
+        # the worker thread holds only these: the long-lived Popups and host, the token, plain values
+        pops, token, item_id, load = self.pops, self.token, self.item.id, self.pops.load_config
+        askui.start(lambda: askui.answer_for(load, question, item_id),
+                    lambda shown: pops.host.post(lambda: pops._ask_done(token, shown)))
+
+    def show(self, shown: askui.Shown) -> None:
+        self.shown, self.pending = shown, False
+        self.answer.configure(state="normal")
+        self.answer.delete("1.0", "end")
+        self.answer.insert("1.0", shown.text)  # plain text: nothing in it is a link, an image or markup
+        self.answer.configure(state="disabled")
+        self.ask_btn.configure(state="normal")
+        self.status.configure(text="")
+
+    def more_help(self) -> None:
+        from ionomos import help as helpdoc
+
+        topic = self.shown.help_topic if self.shown is not None else "faq.assistant"
+        try:
+            helpdoc.open_help(topic, log_dir=self.host.log_dir(), opener=self.host.open_path)
+        except OSError as exc:
+            self.status.configure(text=f"Could not open the help: {exc}", foreground="#c62828")
+
+    def close(self) -> None:
+        self.pops._asks.pop(self.token, None)
+        try:
+            self.win.destroy()
+        except tk.TclError:
+            pass
