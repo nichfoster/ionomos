@@ -52,4 +52,5 @@ def test_a_run_that_cannot_exit_after_its_last_test_is_dumped_and_ended(tmp_path
             "    threading.Thread(target=threading.Event().wait, name='forgotten').start()\n")
     code, out, took = _pytest(tmp_path, body, timeout=60, env_extra={"IONOMOS_TEST_EXIT_SECONDS": "2"})
     assert "1 passed" in out and code != 0 and took < 60, out
-    assert "forgotten" in out and "_shutdown" in out, out
+    # the main thread waiting for it at exit (thread names are printed from Python 3.14 on)
+    assert "Timeout (0:00:02)!" in out and "_shutdown" in out, out
