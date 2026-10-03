@@ -94,9 +94,12 @@ def _http(url: str, data: bytes, headers: dict, timeout: float) -> Iterator[byte
 
 
 def request_body(settings: dict, messages: list[dict], tools: list[dict]) -> bytes:
-    """The request, with a fixed key order: model, the messages (system prompt first), then the tools."""
+    """The request, with a fixed key order: model, the messages (system prompt first), then the tools; then
+    keep_alive when it is set (runtime.py: Ollama reads it, other runtimes ignore it)."""
+    from ionomos.assistant import runtime
+
     body = {"model": settings["model"], "messages": messages, "tools": tools, "tool_choice": "auto",
-            "temperature": 0, "stream": bool(settings.get("stream", True))}
+            "temperature": 0, "stream": bool(settings.get("stream", True)), **runtime.request_fields(settings)}
     return json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 
 
@@ -116,7 +119,7 @@ def chat(settings: dict, messages: list[dict], tools: list[dict], transport: Tra
             if size > MAX_REPLY_BYTES:
                 raise ChatError("the model's reply is too large")
             lines.append(raw)
-            if reply.ttft is None and raw.lstrip().startswith(b"data:") and b'"delta"' in raw:
+            if reply.ttft is None and _first_token(raw):
                 reply.ttft = round(time.monotonic() - started, 3)
     except ChatError:
         raise
@@ -132,6 +135,22 @@ def chat(settings: dict, messages: list[dict], tools: list[dict], transport: Tra
         raise ChatError(f"the model runtime's reply is not a chat completion ({type(exc).__name__})") from None
     reply.content = _THINK.sub("", reply.content).strip()
     return reply
+
+
+_TOKEN_KEYS = ("content", "reasoning_content", "reasoning", "tool_calls")
+
+
+def _first_token(raw: bytes) -> bool:
+    """Whether a streamed line carries the first generated token: text, reasoning or a tool call. The opening
+    event that only says role: assistant is not one (a runtime sends it before reading the prompt)."""
+    line = raw.strip()
+    if not line.startswith(b"data:") or b'"delta"' not in line:
+        return False
+    try:
+        d = json.loads(line[5:])
+        return any((c.get("delta") or {}).get(k) for c in d.get("choices") or [] for k in _TOKEN_KEYS)
+    except (ValueError, AttributeError, TypeError):
+        return False
 
 
 def _read_json(d: dict, reply: Reply) -> None:

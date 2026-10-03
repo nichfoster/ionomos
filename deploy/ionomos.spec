@@ -15,7 +15,9 @@ a = Analysis(
     pathex=[str(SRC)],
     binaries=[],
     datas=[(str(SRC / "ionomos" / "downstream" / "assets"), "ionomos/downstream/assets"),  # report.js / report.css
-           (str(SRC / "ionomos" / "help" / "*.md"), "ionomos/help")],  # the help content (ionomos help, reports)
+           (str(SRC / "ionomos" / "help" / "*.md"), "ionomos/help"),  # the help content (ionomos help, reports)
+           # the assistant's scenario corpus, for `ionomos ask-eval` on the PC (D72)
+           (str(SRC / "ionomos" / "assistant" / "scenarios" / "*.json"), "ionomos/assistant/scenarios")],
     hiddenimports=["tkinter", "tkinter.ttk", "tkinter.filedialog", "tkinter.messagebox", "tkinter.scrolledtext",
                    "yaml", "ionomos.app", "ionomos.resolve", "ionomos.testbed", "ionomos.worker",
                    "ionomos.fragpipe", "ionomos.postprocess", "ionomos.health", "ionomos.stress",
@@ -28,7 +30,9 @@ a = Analysis(
                    "ionomos.downstream.rrandom", "ionomos.analysis_tab", "ionomos.manifest",
                    "ionomos.naming_history", "ionomos.inbox", "ionomos.attention", "ionomos.popups",
                    "ionomos.experiment_editor", "ionomos.downstream.doctor", "ionomos.help",
-                   "ionomos.assistant", "ionomos.bundle", "ionomos.bundle_dialog",
+                   "ionomos.assistant", "ionomos.assistant.askui", "ionomos.assistant.evaluate",
+                   "ionomos.assistant.runtime", "ionomos.assistant.scenarios", "ionomos.assistant.scenarios.states",
+                   "ionomos.bundle", "ionomos.bundle_dialog",
                    "ionomos.forms", "ionomos.accuracy", "ionomos.accuracy_page", "ionomos.notify_tab",
                    "ionomos.notify", "ionomos.downstream.compare", "ionomos.downstream.benchmark",
                    "tkinter.colorchooser"],

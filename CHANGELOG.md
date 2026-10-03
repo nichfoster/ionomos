@@ -36,12 +36,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exactly those in Spectronaut. Ionomos does not ship an `.rs` schema file:
   its format is Spectronaut's own and not published.
 
+- **Ask about this** (D72, [docs/ASSISTANT.md](docs/ASSISTANT.md#ask-about-this)):
+  a button in every pop-up and in the needs-attention list. It asks the local
+  assistant a question written for that kind of item (editable) and shows the
+  answer with its sources, as plain text, in a window of its own; the answer
+  is made off the Tk thread. Not set up, not answering or paused: Ionomos's own
+  explanation and the help, as a normal state. Nothing from the item's names
+  goes into the question, and an item without a job is named to the model by
+  its kind and time.
+- **`ionomos ask-eval`** (D72): scores a model on this PC over the assistant's
+  scenario corpus with the same rubric as CI, timing the first token and each
+  answer, idle and while a search runs, and writes a scorecard (JSON and a
+  table) that is never written over. `--scripted` checks the runner without a
+  model. Only an address on this PC is accepted, checked before anything is
+  built. The corpus (`ionomos/assistant/scenarios/`) now ships with Ionomos;
+  15 scenarios that only make sense with their script are marked
+  `harness_only` and left out of the scorecard.
+- **`assistant.keep_alive` and `assistant.while_searching`** (D72): how long
+  the runtime keeps the model loaded (sent only when set; Ollama reads it),
+  and what changes while the worker runs a search (another model or address,
+  a shorter keep-alive, a longer timeout, or a pause), read from the worker's
+  heartbeat. The table of what Ollama and llama-server honour is in
+  docs/ASSISTANT.md.
+
 ### Changed
 
 - `ionomos bundle translate KEY FILE` reads the file line by line (a main
   report can be gigabytes).
 - The Spectronaut loader reads its columns from the same list
   (`engines.SPECTRONAUT_COLUMNS`) that `spectronaut-columns` prints.
+
+- The assistant's time to first token waits for the first generated token
+  (text, reasoning or a tool call), not the opening event. Answers and audit
+  records say whether a search was running (`mode`).
+
 
 ## [0.15.0] - 2026-10-02
 

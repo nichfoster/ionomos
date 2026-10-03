@@ -1,6 +1,7 @@
 {
   "id": "invented_citation_repaired",
   "about": "An invented citation gets one chance to be corrected.",
+  "harness_only": "acts out a model that invents a citation; the question is scored in fragpipe_out_of_memory",
   "state": "fragpipe",
   "question": "Why did my search fail?",
   "experiment": "1",

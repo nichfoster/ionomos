@@ -1,6 +1,7 @@
 {
   "id": "runtime_not_answering",
   "about": "The runtime is not running: Ionomos's own text, and it says why.",
+  "harness_only": "acts out a runtime that is not running",
   "state": "fragpipe",
   "question": "Why did my search fail?",
   "experiment": "1",

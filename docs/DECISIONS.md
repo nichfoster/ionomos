@@ -2529,6 +2529,88 @@ files are listed and can be removed (moved aside, as every inbox removal is);
 added while combining the 0.15.0 PRs.
 
 
+### D72 — "Ask about this", a scorecard runner, and the settings for sharing the PC with a search
+**2026-10-03.** What Phase 6.1 could still do without a real model (D57 left
+it out), inside D49's rules. No model has been tried; Phase 6.1's box stays
+open.
+
+1. **"Ask about this" asks with a fixed question per kind of item.** The
+   pop-ups and the attention list get the button; it opens a window that asks
+   at once with, for example, "Why did this search fail, and what should I
+   do?", which the user can edit. Nothing from the item (title, folder or
+   sample names) goes into the question. An item without a job used to be
+   named to the model by its id, which carries the folder's name; it is now
+   named by its kind and the time Ionomos raised it, and its names reach the
+   model only inside tool results, as data.
+2. **The logic is outside Tk; the thread holds no widget.** `assistant/askui.py`
+   makes the question, asks (never raising: a config that won't load is shown
+   as such) and renders each outcome as plain text with a heading and a help
+   topic. `popups.AskWindow` only draws. The answer comes back through the
+   pop-ups' existing queue (`PopupHost.post`, pumped with `root.after`); the
+   worker thread is handed the long-lived `Popups`, a token and plain values,
+   never the window, and the window uses no Tk variable (tkutil.py: a Tk
+   object freed off the Tk thread aborts the process). A window closed before
+   its answer comes drops it. The window has no button that changes anything.
+3. **The scenario corpus ships with Ionomos.** `ionomos ask-eval` must run on
+   the PC, where Ionomos is a frozen exe without `tests/`, so the JSON files
+   and the fixture states moved to `ionomos/assistant/scenarios/` (package
+   data, and in the PyInstaller spec). `tests/assistant_scenarios` re-exports
+   them. The CI replay and the runner use the same files and the same
+   `score()`.
+4. **15 scenarios are "harness_only".** Their rubric holds only for their
+   script (a runtime that is down, a reply that is not JSON, a model that obeys
+   an injected line, invents a citation or never answers): a good model would
+   fail them. The runner scores the other 38; each question a harness-only
+   scenario asks is scored once, in the scenario with the well-behaved script,
+   and a test checks that none is left unscored.
+5. **The runner builds its own fake lab and writes two new files.** Each
+   fixture state is built once, in a new folder (`C:/ionomos-ask-eval/<time>`
+   on Windows: no spaces), and the questions are audited there, not in the
+   lab's audit log. The scorecard is JSON plus a table, in app data by
+   default, created exclusively: never written over. It keeps each answer and
+   its Sources, because a pass proves only that the rubric found nothing wrong
+   (D57 4), and a person has to read them before choosing a model.
+6. **Only this PC, checked first.** The address (and `while_searching`'s) is
+   checked with the client's own `local_problem()` before anything is built,
+   and every request goes through `client.chat()`. The tests use a scripted
+   HTTP server on 127.0.0.1 and a port the OS picks, with proxy variables set
+   to show they are ignored; `--scripted` runs the same server on the PC to
+   check the runner and the fixture states there without a model.
+7. **Time to first token is the first generated token.** The client counted
+   the opening `role: assistant` event, which a runtime sends before reading
+   the prompt. It now waits for text, reasoning or a tool call.
+8. **Only `keep_alive` is added to the request.** Ollama's
+   `/v1/chat/completions` reads `keep_alive` (checked in its source,
+   2026-10-03); llama-server ignores it. Neither endpoint takes a thread count:
+   Ollama's OpenAI-compatible request has no `num_thread`, and a request with
+   other runner options reloads the model, so preloading with fewer threads
+   does not stick; llama-server's threads are fixed at start (`-t`, `-tb`).
+   So "while a search runs" switches what can be switched per request:
+   `while_searching` may name another `model` (a smaller one, or an Ollama
+   variant made with `PARAMETER num_thread 4`), another `base_url` (a second
+   llama-server started with fewer threads), a shorter `keep_alive`, a longer
+   `timeout_seconds`, or `pause: true` (no model at all; Ionomos's own text).
+   Empty `keep_alive` (the default) sends nothing.
+9. **"A search is running" is read from the worker's heartbeat.** The worker
+   beats "running job N: step" every few seconds during a search; a heartbeat
+   older than `health.STALE_AFTER` means no watcher, so no search. It is read
+   per question, in the app and in `ask-eval` (`--mode auto`). The audit log
+   and the scorecard record the mode.
+10. **Ionomos does not lower another program's priority.** It only reads and
+    asks; starting the runtime at "below normal" is documented as the lab's
+    choice, to be decided by the Phase 6.0 measurements.
+
+**Verified:** by the suite on macOS (the window tests are written in the
+existing style and run in CI only). **Not verified:** any real model or
+runtime; that Ollama on the PC honours `keep_alive` on this endpoint; the
+right `keep_alive` / `while_searching` for the PC; the window on the PC's
+display scaling.
+
+**For the maintainer to confirm:** 1 (naming an item without a job by kind
+and time), 4 (which scenarios are harness-only; `refuse_delete_request`
+expects no grounded answer, which a good model citing the help's "Ionomos
+never deletes" would fail), and 8 (no thread setting in Ionomos).
+
 ### D74 — Diagnostics are anonymised as a bundle is; more tables on request; a name check in `inspect`; Spectronaut gets a column list, not an `.rs` file
 
 **2026-10-03.** The maintainer wants anonymous zips (and text) from the

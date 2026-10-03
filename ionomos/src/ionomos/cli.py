@@ -41,7 +41,10 @@ Command line.
     ionomos ask      "QUESTION" [--experiment JOB_ID|NAME] [--item ID] [--json]
                                                    the local assistant: an answer grounded in the job's log, the
                                                    doctor's findings and the help; changes nothing (docs/ASSISTANT.md)
-    ionomos init     [--root DIR] [--users DIR]   create folders + a config without the app (headless setup)
+    ionomos ask-eval [--base-url URL] [--model NAME] [--out FILE] [--only IDS] [--scripted]
+                                                   score a model on this PC over the scenario corpus: rubric
+                                                   pass rate, injection failures, time to first token
+    ionomos init    [--root DIR] [--users DIR]   create folders + a config without the app (headless setup)
     ionomos qc-trend [--rebuild] [--open]         instrument QC: the QC-standard runs trended (logs/qc_trend.html)
     ionomos cancel   JOB_ID                       stop a running search / drop a queued job
     ionomos pause | resume                        hold / release the FragPipe queue
@@ -958,6 +961,49 @@ def cmd_ask(args) -> int:
     return 0
 
 
+def cmd_ask_eval(args) -> int:
+    """Score a model over the assistant's scenario corpus (assistant/evaluate.py, D72). 0: every exit criterion
+    that was measured is met; 1: not (or the runtime stopped answering); 2: nothing was asked (refused)."""
+    from datetime import datetime
+
+    from ionomos.assistant import evaluate, fake, runtime
+
+    cfg = _load(args, check_paths=False)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    server = fake.ScriptedServer(delay=0.01) if args.scripted else None
+    try:
+        settings = evaluate.settings_for_eval(
+            cfg.assistant, base_url=server.base_url if server else args.base_url,
+            model=fake.MODEL if server else args.model, stream=args.stream)
+        selected = evaluate.select(args.only)
+        json_path, txt_path = evaluate.out_paths(args.out, stamp)
+        workdir = Path(args.workdir) if args.workdir else evaluate.default_workdir(stamp)
+    except evaluate.EvalError as exc:
+        print(f"ask-eval: {exc}", file=sys.stderr)
+        return 2
+    if args.mode == "auto":
+        searching = lambda: runtime.search_running(cfg.log_dir)[0]  # noqa: E731
+    else:
+        searching = args.mode == "searching"
+    print(f"Scoring model {settings['model']} at {settings['base_url']} on {len(selected)} scenarios; "
+          f"fixture states in {workdir}")
+    try:
+        if server:
+            with server:
+                card = evaluate.run(settings, workdir=workdir, only=args.only, searching=searching, progress=print,
+                                    before=lambda s: server.use(s["model"]))
+        else:
+            card = evaluate.run(settings, workdir=workdir, only=args.only, searching=searching, progress=print)
+        evaluate.write(card, json_path, txt_path)
+    except evaluate.EvalError as exc:
+        print(f"ask-eval: {exc}", file=sys.stderr)
+        return 2
+    print()
+    print(evaluate.table(card), end="")
+    print(f"\nscorecard: {json_path}\n           {txt_path}")
+    return 0 if evaluate.meets_exit_criteria(card) else 1
+
+
 def cmd_attention(args) -> int:
     """What needs a person: list, show one, dismiss."""
     from ionomos import attention
@@ -1299,6 +1345,22 @@ def main(argv: list[str] | None = None) -> int:
     ak.add_argument("--item", metavar="ID", help="an attention item (ionomos attention lists them)")
     ak.add_argument("--json", action="store_true", help="print the answer with its tool calls and citations as JSON")
     ak.set_defaults(fn=cmd_ask)
+    ae = sub.add_parser("ask-eval", help="score a model on this PC over the assistant's scenario corpus (scorecard)")
+    ae.add_argument("--base-url", metavar="URL", help="the runtime's OpenAI-compatible address (default: "
+                                                      "assistant.base_url); only this PC is accepted")
+    ae.add_argument("--model", metavar="NAME", help="the model's name in the runtime (default: assistant.model)")
+    ae.add_argument("--out", metavar="FILE", help="the scorecard's JSON file (the table goes beside it as .txt; "
+                                                  "default: app data, assistant-scorecard-<time>.json); never replaced")
+    ae.add_argument("--only", metavar="IDS", help="only these scenarios and/or states, comma-separated")
+    ae.add_argument("--workdir", metavar="DIR", help="a new folder for the fixture states (default: "
+                                                     "C:/ionomos-ask-eval/<time> on Windows, the temp folder elsewhere)")
+    ae.add_argument("--mode", choices=["auto", "idle", "searching"], default="auto",
+                    help="auto: use assistant.while_searching whenever this lab's worker is running a search")
+    ae.add_argument("--stream", action=argparse.BooleanOptionalAction, default=None,
+                    help="stream replies (needed for time to first token; default: assistant.stream)")
+    ae.add_argument("--scripted", action="store_true",
+                    help="no model: a scripted one on 127.0.0.1 checks the runner and the fixture states here")
+    ae.set_defaults(fn=cmd_ask_eval)
     at = sub.add_parser("attention", help="what needs a person (analysis decisions, failed searches, ...)")
     at.add_argument("action", nargs="?", choices=["list", "show", "dismiss"], default="list")
     at.add_argument("item", nargs="?", help="item id (from the list)")

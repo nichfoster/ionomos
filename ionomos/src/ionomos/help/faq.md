@@ -335,12 +335,19 @@ search ([A notification did not arrive](#trouble.notify)).
 
 ## Can I ask Ionomos a question in plain words? {#faq.assistant}
 
-Yes, if your lab has set up the assistant: `ionomos ask "why did my search
-fail?" --experiment 12` (the job number is in the Jobs tab; an experiment's
-name works too). It answers from that job's log, what the analysis found and
-this help, and each statement ends with its source in square brackets, such as
+Yes, if your lab has set up the assistant. In a window that says something
+needs attention, or in the **needs attention** list, press **Ask about this**.
+A window opens with a question already written for that problem; change it if
+you like and press **Ask**. A model on this computer can take a minute or two;
+the rest of Ionomos keeps working meanwhile. In a terminal: `ionomos ask "why
+did my search fail?" --experiment 12` (the job number is in the Jobs tab; an
+experiment's name works too).
+
+It answers from that job's log, what the analysis found and this help, and
+each statement ends with its source in square brackets, such as
 `[log:12#41]` (line 41 of job 12's search log) or `[help:faq.rerun]`
-(`ionomos help faq.rerun` shows it).
+(`ionomos help faq.rerun` shows it). Under the answer, **Sources** shows what
+each of those says, as Ionomos read it.
 
 - It only reads. It cannot retry, change, move or delete anything, whatever
   you type. Use the buttons in the windows for that.
@@ -360,6 +367,12 @@ on this computer and named under `assistant:` in `config.yaml`. `ionomos
 check` has a row named assistant that shows its state. "Not this PC" means the
 address in `config.yaml` points at another computer; Ionomos refuses that and
 sends nothing.
+
+While a search runs, the lab may have set the assistant to use a smaller
+model, or to pause so the search keeps the computer to itself
+(`assistant.while_searching`). A paused assistant says so, and you get
+Ionomos's own explanation, as above. Before choosing a model, the person who
+looks after Ionomos measures it on this computer with `ionomos ask-eval`.
 
 ## Where is this help, and can I change it? {#faq.help}
 

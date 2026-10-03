@@ -125,6 +125,15 @@ assistant:
   timeout_seconds: 120        # how long to wait for the model
   stream: true                # false if the runtime can't stream tool calls
   allow_cloud: false          # reserved for ROADMAP 6.4; a non-local base_url is refused whatever this says
+  keep_alive: ""              # how long the runtime keeps the model loaded after a question: Ollama reads it
+                              # (e.g. 2m; 0 = unload at once). "" = the runtime's own (Ollama: 5m). llama-server
+                              # ignores it (start it with --sleep-idle-seconds instead).
+  while_searching: {}         # what changes while a search runs (docs/ASSISTANT.md), any of:
+                              #   model: a smaller model, or (Ollama) one made with PARAMETER num_thread 4
+                              #   base_url: a second llama-server started with fewer threads (-t 4)
+                              #   keep_alive: 30s     timeout_seconds: 300
+                              #   pause: true         (no model at all; Ionomos's own text instead)
+                              # e.g. {model: "<the model>-t4", keep_alive: 30s}
 
 # Who is who. Users are the subfolders of users_root; a new user = a new folder.
 # Aliases let initials in a folder name resolve to that folder.
