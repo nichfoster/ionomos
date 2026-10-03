@@ -537,7 +537,7 @@ assistant runs on the PC, and no data leaves it.
   per-session banner, sends tool results only (never data files or quant tables),
   optionally hashes sample names, and shows exactly what would be sent.
 
-**Evaluation:** a scenario corpus in `tests/assistant_scenarios/`. Each scenario is a
+**Evaluation:** a scenario corpus in `ionomos/assistant/scenarios/` (shipped, D72). Each scenario is a
 fixture state (the testbed's fake FragPipe / DIA-NN / MaxQuant failures, doctor issues,
 real naming cases from `reference/pc-inventory`) plus a question and a rubric:
 - tools it must call and IDs it must cite
@@ -546,8 +546,8 @@ real naming cases from `reference/pc-inventory`) plus a question and a rubric:
 - whether a refusal is expected
 
 CI replays recorded transcripts through a scripted fake model, testing the harness,
-validators, citation checker and confirm gate. Real models are scored by hand on the
-PC, including time to first token idle and while a search runs. Choose the model by
+validators, citation checker and confirm gate. Real models are scored on the PC with
+`ionomos ask-eval` (D72), including time to first token idle and while a search runs. Choose the model by
 that scorecard, not leaderboards.
 
 **Phases:**
@@ -564,11 +564,16 @@ that scorecard, not leaderboards.
     the audit log, the not-set-up state, `ionomos ask` (`--experiment`, `--item`,
     `--json`), an `assistant` row in `ionomos check`, help entries, and 53 scenarios
     replayed in CI.
+  - **Built 2026-10-03 (D72):** the "Ask about this" button on the pop-ups and the
+    attention list (worker thread + `root.after`; "not set up" shows Ionomos's own text
+    and the help); `ionomos ask-eval`, which scores a model over the corpus on the PC with
+    the CI's rubric and writes a scorecard (pass rate, injection failures, time to first
+    token idle and while searching); `assistant.keep_alive` and
+    `assistant.while_searching` (another model or address, a shorter keep-alive, or a
+    pause while the worker runs a search). The corpus now ships with Ionomos.
   - **Remains (the box stays open):** nothing has run against a real model or runtime,
-    so none of the exit criteria is measured. Needs 6.0 first (a model to try). Then:
-    a runner that scores a real model over the corpus on the PC; the "Ask about this"
-    button on pop-ups and the attention list (the backend, `ask(item_id=…)`, exists);
-    on-demand loading, thread caps and priority while a search runs.
+    so none of the exit criteria is measured. Needs 6.0 first (a model to try), then
+    `ionomos ask-eval` on the PC, idle and during a search, and the settings it suggests.
 - [ ] **6.2 Confirmed actions (2–3 weeks).** The proposal tools and the native
   diff-and-confirm dialog. *Exit:* no path runs an action without a click (tested), and
   3 lab members finish the tasks unaided.
@@ -736,6 +741,12 @@ Collected from the other docs; resolve before/during Phase 1.
 - [ ] Phase 6 (D57): confirm three choices made while building 6.1: `[job:ID]` as a fifth citation form; an
       answer is shown only if *every paragraph* has a valid citation; a non-local `base_url` is refused even
       with `assistant.allow_cloud: true` until 6.4's banner and preview exist.
+- [ ] Phase 6 (D72, 2026-10-03): confirm that an attention item without a job is named to the model by
+      its kind and time, not its id; which scenarios are harness-only (`refuse_delete_request` expects no
+      grounded answer: should a cited "Ionomos never deletes" count as a pass?); and that Ionomos sets no
+      thread count or priority (only `keep_alive`, and a `while_searching` model / address / pause). On the
+      PC: does Ollama honour `keep_alive` on `/v1/chat/completions`, and what `keep_alive` and
+      `while_searching` does `ionomos ask-eval` during a search suggest?
 - [ ] Phase 5: publish on PyPI as `ionomos` (needs a PyPI account / trusted publisher set up by the maintainer).
 - [x] Agent auto-merge: removed 2026-09-27; a person merges (D31).
 - [x] CI Python versions: 3.11 (floor), 3.12 (exe build), 3.14 (the PC) since 2026-09-27.
