@@ -215,6 +215,36 @@ limits run on a fake clock (`fragpipe._clock`) and every "while it runs" step
 waits for what the console log says, so nothing depends on how fast the
 machine is.
 
+## A run that hangs (D73)
+
+A hang ends the run with every thread's stack, instead of eating an outer
+time limit with nothing on screen:
+
+- **A test** still running after 5 minutes (`faulthandler_timeout = 300`,
+  `faulthandler_exit_on_timeout` in `pyproject.toml`; the slowest test takes
+  ~30 s on a loaded Mac) prints `Timeout (0:05:00)!` and the stack of every
+  thread, then the run exits 1. The test's own frames are in the main
+  thread's stack. `-o faulthandler_timeout=0` switches it off for a debugger
+  session.
+- **The exit**: after the last test the process has 120 s to end
+  (`IONOMOS_TEST_EXIT_SECONDS`, `tests/conftest.py`); a thread or child
+  something waits on at exit is dumped the same way.
+- `tests/test_hang_guards.py` runs pytest on a test that waits for ever and
+  on one that leaves a thread behind, and checks that both end with a stack.
+
+Rules for tests that start threads or processes: every `join()`, `wait()`,
+`communicate()` and `subprocess.run()` has a timeout; a child's output goes to
+a file, or is read with `communicate()` (a pipe nobody reads blocks the child
+at 4 KB on Windows); a real `ionomos run` is ended with
+`service.request_stop(..., proc=p)` in a `finally`; a `while
+worker.run_once()` loop is capped (`_drain` in `test_faults.py`).
+
+Running the suite from a script or an agent: send the output to a file
+(`.venv/bin/pytest > run.log 2>&1`) and read it, rather than piping it to
+`tail`, which shows nothing until the end, so a slow run looks like a hung
+one. With several suites and simulations at once on one Mac a full run took
+up to 13.5 minutes instead of 6.
+
 ## FragPipe as it really behaves
 
 `tests/test_fragpipe_real.py` (D59) holds what Ionomos expects of the real

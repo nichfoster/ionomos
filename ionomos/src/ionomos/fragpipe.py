@@ -584,13 +584,24 @@ def _popen_kwargs() -> dict:
     return {"start_new_session": True}
 
 
+TASKKILL_SECONDS = 60  # taskkill /T on a large tree takes seconds; one that never returns must not hold the worker
+
+
+def _taskkill(pid: int) -> None:
+    """Windows: end `pid` and everything it started. Best effort, and bounded (D73)."""
+    try:
+        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), timeout=TASKKILL_SECONDS)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
 def kill_tree(proc: subprocess.Popen) -> None:
     """FragPipe starts Java, which starts MSFragger/IonQuant/DIA-NN: stop the whole tree."""
     if proc.poll() is not None:
         return
     if os.name == "nt":
-        subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True,
-                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        _taskkill(proc.pid)
     else:
         try:
             os.killpg(proc.pid, signal.SIGTERM)
@@ -661,8 +672,7 @@ def _forget_engine(spec: RunSpec) -> None:
 def kill_pid_tree(pid: int, group: bool = False) -> None:
     """Stop a process Ionomos started earlier and no longer has a handle on, with everything it started."""
     if os.name == "nt":
-        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True,
-                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        _taskkill(pid)
         return
     for sig in (signal.SIGTERM, signal.SIGKILL):
         try:

@@ -98,7 +98,7 @@ def test_excepthook_catches_thread_crash(tmp_path):
         health.install_excepthooks(tmp_path)
         t = threading.Thread(target=lambda: 1 / 0, name="doomed")
         t.start()
-        t.join()
+        t.join(timeout=10)
         crash = health.recent_crashes(tmp_path, 1)
         assert crash and "ZeroDivisionError" in crash[0].read_text(encoding="utf-8")
     finally:
@@ -489,7 +489,11 @@ def test_run_process_single_instance_graceful_stop_and_recovery(bed):
         assert _wait(lambda: health.is_locked(log_dir))
         # a second watcher on the same setup refuses to start
         p2 = _run_proc(bed["cfg_path"], {}, capture=True)
-        out2, _ = p2.communicate(timeout=30)
+        try:
+            out2, _ = p2.communicate(timeout=30)
+        except subprocess.TimeoutExpired:
+            p2.kill()
+            out2, _ = p2.communicate(timeout=10)  # drain the pipe so nothing is left blocked on it
         assert p2.returncode == 3 and "already running" in out2
 
         testbed.drop(bed["root"], "iso_good")

@@ -53,7 +53,8 @@ def test_task_status_off_windows():
 
 
 def _git(repo, *args):
-    return subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
+    return subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, check=True,
+                          timeout=60).stdout.strip()
 
 
 @pytest.fixture
