@@ -47,6 +47,35 @@ names). Otherwise they come from the sample names (`DMSO_1`, `Drug_2`, …), as
 for FragPipe. They can always be corrected on the Analysis tab or in
 `experiment.yaml` (`sample_conditions`).
 
+## Exporting a Spectronaut report for Ionomos
+
+`ionomos spectronaut-columns` prints the columns Ionomos reads from a
+Spectronaut Normal Report and how to make a report schema with exactly those
+(`--out DIR` also saves it as `Ionomos_Spectronaut_report_columns.txt`). The
+list is `engines.SPECTRONAUT_COLUMNS`, the same one the loader reads (D74):
+
+| Column | | What for |
+|---|---|---|
+| `R.FileName` | needed | the run |
+| `R.Condition` | optional | the run's condition (else from the run names) |
+| `R.Replicate` | optional | the replicate number |
+| `PG.ProteinGroups` | needed | the protein group |
+| `PG.Genes`, `PG.ProteinDescriptions`, `PG.ProteinNames` | optional | labels and descriptions |
+| `PG.Quantity` (or `PG.MS2Quantity`) | needed | the protein quantity |
+| `PG.Qvalue`, `EG.Qvalue` | optional | rows above 1% are left out |
+| `EG.PrecursorId` | optional | peptides counted per protein |
+
+In Spectronaut: Report perspective → start from one of the preconfigured
+Normal Report schemas → tick these columns in the column chooser (its search
+field finds each) → save the schema under a name of your own → **Export
+Report…** as a text file. Other columns are ignored, so an existing report
+works if it has the three needed ones.
+
+Ionomos does not ship a Spectronaut report-schema file (`.rs`): that format
+is Spectronaut's own and is not published (the manual describes making and
+passing a schema, `-rs` on the command line, but not the file). Once the
+schema is made, Spectronaut can save it as an `.rs` for the rest of the lab.
+
 ## An SDRF as the design
 
 Put the experiment's SDRF-Proteomics file (`*.sdrf.tsv` or `sdrf.tsv`, the
@@ -349,4 +378,7 @@ The formats were built from each vendor's documentation and tested with files
 using the real column names (`tests/test_engines.py`, `tests/test_plexes.py`); the MSstatsTMT summary is checked against MSstatsTMT 2.20 itself. The Proteome Discoverer
 column naming comes from the documentation, not from a real export. If a real
 file from your engine isn't recognised, please send its header line with
-**Report a problem**.
+**Report a problem**. For checking a search itself, `ionomos bundle 12
+--include diann-report,peptides` also puts DIA-NN's main report
+(`report.parquet` as text) and the peptide / ion tables in the anonymised zip
+(D74).

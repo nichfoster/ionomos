@@ -129,6 +129,9 @@ zip**. The window lists what will go in and how large it will be.
   search logs.
 - Tick **Include the search's result tables…** when the numbers are to be
   checked: the analysis can then be run again from the zip.
+- Tick **Also DIA-NN's main report and the peptide / ion tables** when the
+  search itself is to be checked. The zip gets much larger; a very large
+  table goes in as every n-th row.
 - Names are replaced by pseudonyms unless you untick that box.
 
 The zip is saved on the Desktop and shown in a folder window. Ionomos sends
@@ -137,9 +140,31 @@ email). The file next to it with `KEY` in its name stays in the lab. See
 [The zip for troubleshooting](#safety.bundle) for what is in it and what the
 replacing of names cannot do.
 
-From a terminal: `ionomos bundle 12 --level validate` (job 12), and
-`ionomos bundle translate <key file> answer.txt` puts the real names back
-into an answer you received.
+For a quick question, **Copy diagnostics** (Run & Test tab) puts one text
+block on the clipboard with the names replaced in the same way; **Copy with
+real names** is the same text as it is, for use inside the lab.
+
+From a terminal: `ionomos bundle 12 --level validate` (job 12),
+`ionomos bundle 12 --include diann-report,peptides` (with the main report and
+peptide tables), `ionomos bundle inspect <zip>` (what is in it, and every file
+searched for your lab's names), and `ionomos bundle translate <key file>
+answer.txt` puts the real names back into an answer you received.
+
+## How do I export a Spectronaut report for Ionomos? {#faq.spectronaut}
+
+Run `ionomos spectronaut-columns`. It lists the columns Ionomos reads from a
+Spectronaut report and how to make a report schema with exactly those: in
+Spectronaut's Report perspective, start from one of its Normal Report
+schemas, tick the listed columns, save the schema under your own name and
+press **Export Report…**. Then `ionomos analyze <the report>`, or the
+Analysis tab's **Table…** button.
+
+Three columns are needed: `R.FileName`, `PG.ProteinGroups` and
+`PG.Quantity`. With `R.Condition` and `R.Replicate` the conditions come from
+Spectronaut; with the q-value columns Ionomos leaves out rows above 1%.
+Ionomos does not ship a Spectronaut schema file (`.rs`), because that format
+is Spectronaut's own; once your schema is made, Spectronaut can save it as
+one for the rest of the lab.
 
 ## How do I open the data in FragPipe-Analyst? {#faq.fpa}
 

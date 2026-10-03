@@ -10,10 +10,13 @@ Command line.
     ionomos names test NAME... [--method M]       how folder / .raw names are read with this config (naming:)
     ionomos retry    JOB_ID [--config PATH]       failed -> queued
     ionomos testbed  ...                          build/drive a fake lab for testing (see testbed.py)
-    ionomos diagnose [--zip [PATH]]               everything needed to report a problem (text, or a .zip bundle)
+    ionomos diagnose [--zip [PATH]] [--anonymise] everything needed to report a problem (text, or a .zip bundle)
     ionomos bundle   [JOB|FOLDER ...] [--level diagnose|validate] [--out DIR] [--no-anonymise]
+                     [--include diann-report,peptides]
                                                    an anonymised zip on the Desktop for troubleshooting / validation;
-                                                   bundle inspect ZIP | unpack ZIP DIR | translate KEY [FILE] (bundle.py)
+                                                   bundle inspect ZIP [--key KEY] | unpack ZIP DIR | translate KEY [FILE]
+                                                   (bundle.py)
+    ionomos spectronaut-columns [--out DIR]       the columns to tick in a Spectronaut report schema for Ionomos
     ionomos analyze  JOB_ID|FOLDER [--control C] [--compare 'A vs B'] [--de-type all] [--imputation none]
                      [--exclude SAMPLE] [--log2fc F] [--open]
                                                    statistics + volcano plots + results/report.html
@@ -144,6 +147,10 @@ def _maintenance(cfg: Config) -> None:
     except Exception:  # noqa: BLE001
         log.exception("attention purge failed")
     health.prune(cfg.log_dir, "diagnostics-*.zip", keep=10)
+    # the keys of anonymised diagnostics (D74): tiny, and needed to read back a text pasted long ago
+    from ionomos.names import BUNDLE_KEY_SUFFIX
+
+    health.prune(cfg.log_dir, "diagnostics-*" + BUNDLE_KEY_SUFFIX, keep=50)
 
 
 def cmd_run(args) -> int:
@@ -534,10 +541,38 @@ def cmd_diagnose(args) -> int:
         z = save_diagnostics_zip(Path(args.config), Path(args.zip) if args.zip != "auto" else None)
         print(f"diagnostics bundle: {z}")
         return 0
-    text, where = save_diagnostics(Path(args.config))
+    from ionomos.bundle import BundleLeak, key_path_for
+
+    try:
+        text, where = save_diagnostics(Path(args.config), anonymise=args.anonymise)
+    except BundleLeak as exc:
+        print(f"{exc}\nNothing was printed. `ionomos diagnose` without --anonymise prints the text with real names.",
+              file=sys.stderr)
+        return 1
     print(text)
     if where:
         print(f"(saved to {where})")
+        if args.anonymise:
+            print(f"(names replaced by pseudonyms; the key, which stays in the lab: {key_path_for(where)})")
+    return 0
+
+
+def cmd_spectronaut_columns(args) -> int:
+    from ionomos.bundle import unique
+    from ionomos.downstream.engines import SPECTRONAUT_COLUMNS_FILE, spectronaut_columns_text
+
+    text = spectronaut_columns_text()
+    print(text)
+    if args.out:
+        out = unique(Path(args.out) / SPECTRONAUT_COLUMNS_FILE)
+        try:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            with open(out, "x", encoding="utf-8") as f:
+                f.write(text)
+        except OSError as exc:
+            print(f"could not save it: {exc}", file=sys.stderr)
+            return 1
+        print(f"(saved to {out})")
     return 0
 
 
@@ -1104,7 +1139,14 @@ def main(argv: list[str] | None = None) -> int:
     dg = sub.add_parser("diagnose", help="print + save a diagnostics report")
     dg.add_argument("--zip", nargs="?", const="auto", metavar="PATH",
                     help="write a .zip bundle (report, logs, failed jobs' FragPipe logs) instead")
+    dg.add_argument("--anonymise", "--anonymize", action="store_true",
+                    help="replace names by pseudonyms, as a bundle does (the app's Copy diagnostics does this); "
+                         "the key is saved next to the saved copy and stays in the lab")
     dg.set_defaults(fn=cmd_diagnose)
+    sc = sub.add_parser("spectronaut-columns", help="the columns a Spectronaut report needs for Ionomos, and how to "
+                                                    "make Spectronaut export them (D74)")
+    sc.add_argument("--out", metavar="DIR", help="also save it as a text file in DIR (never over an existing file)")
+    sc.set_defaults(fn=cmd_spectronaut_columns)
     from ionomos import bundle
 
     bundle.add_parser(sub).set_defaults(fn=cmd_bundle)

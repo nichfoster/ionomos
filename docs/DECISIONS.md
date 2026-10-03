@@ -2527,3 +2527,104 @@ file unreadable; which code page FragPipe's tools really write (ROADMAP
 the name check find raws through `intake.raw_paths`, so a `<plex>\` drop's
 files are listed and can be removed (moved aside, as every inbox removal is);
 added while combining the 0.15.0 PRs.
+
+
+### D74 — Diagnostics are anonymised as a bundle is; more tables on request; a name check in `inspect`; Spectronaut gets a column list, not an `.rs` file
+
+**2026-10-03.** The maintainer wants anonymous zips (and text) from the
+lab's PC, saved on the Desktop, to carry to Dropbox for troubleshooting and
+validation. D63 left four things open. This entry replaces D63 point 15
+("Copy diagnostics is unchanged") and extends point 3.
+
+1. **"Copy diagnostics" is anonymised by default; the real text is one
+   button away.** The app's **Copy diagnostics** now copies the text with
+   the lab's names replaced; **Copy with real names** (next to it) copies it
+   as before. `ionomos diagnose` keeps printing real names (a terminal on
+   the PC) and takes `--anonymise`. One code path: `bundle.anonymise_text`
+   learns the names with the same `collect` + `learn` a `diagnose` bundle
+   uses (same settings, job list, inbox, problem jobs), rewrites the text
+   with the same `_Scrub`, and runs the same leak check (`check_text`, the
+   search behind `verify`, now one class `_Check`). A name still in the text
+   raises `BundleLeak`: nothing is copied or printed, and the message says
+   so. The pseudonyms are the ones a `diagnose` bundle made at the same time
+   gives (tested). A checkbox was the alternative; two buttons make the
+   choice visible each time and need no state.
+2. **The key of the text stays in the lab.** The saved copy
+   (`logs/diagnostics-<time>-anonymised.txt`) is the anonymised text, with
+   `<name>-KEY-keep-in-the-lab-DO-NOT-SHARE.json` next to it
+   (`bundle.write_key`, the bundle's key format), so `ionomos bundle
+   translate` reads a pasted copy back. Daily housekeeping keeps the newest
+   50 diagnostics keys (they are tiny, and needed long after the text was
+   pasted); the texts stay at 20, as before.
+3. **More tables only when asked: `--include diann-report,peptides`.**
+   `diann-report` is DIA-NN's main report (`report.tsv`, `report.parquet`,
+   or `<out>.tsv` / `.parquet` beside `<out>.pg_matrix.tsv`); `peptides` is
+   FragPipe's `peptide.tsv` / `ion.tsv`, DIA-NN's `*pr_matrix.tsv` and
+   MaxQuant's `peptides.txt` / `modificationSpecificPeptides.txt`.
+   FragPipe's `combined_peptide.tsv`, `combined_ion.tsv` and
+   `combined_modified_peptide.tsv` were already in every `validate` bundle
+   (`combined_*.tsv`). A spectral library (`lib` in the name, `.speclib`) and
+   DIA-NN's first-pass report never go in. `--include` implies `--level
+   validate` (`--level diagnose --include …` is refused); the Report a
+   problem window has a box for both kinds, which also implies the result
+   tables. The tables are added after every other table of every job, so
+   the bundle's size limit drops them first, and each one over `--extra-mb`
+   (default 200 MB) is row-sampled as a PSM table is (header + every n-th
+   row), said in `capped`, `BUNDLE.json` (`one_row_in`) and README. They
+   make a job "not fully reproducible" only when the analysis reads them (a
+   DIA-NN job without its matrices).
+4. **A Parquet report goes in as text.** A binary file's names cannot be
+   replaced or its rows sampled, so `report.parquet` is written as
+   tab-separated text (`report.tsv`, or `report.parquet.tsv` when a
+   `report.tsv` is beside it), batch by batch with pyarrow, each value as
+   `str()` as Ionomos' own Parquet reader turns it into a cell
+   (`engines._read_long`); `BUNDLE.json` says `converted_from`, and
+   `inspect` / `unpack` / README say it. The DIA-NN loader reads the
+   converted file to the same matrix as the original (tested). Without
+   pyarrow (it is in the `[dev]` and `[parquet]` extras, so in the lab's dev
+   install, but not in the exe) the file is left out with that reason.
+5. **Run names in cells are learnt.** A long report names its run in every
+   row (`Run`, `File.Name`, Spectronaut's `R.FileName`), not in its header,
+   so those columns are read whole (Parquet: only those columns) and each
+   value registered as a sample (a path: its stem, and its folder when it
+   is outside the lab's tree). MaxQuant's header prefixes (`LFQ intensity
+   <sample>`, `Intensity <sample>`, `Experiment <sample>`) are now learnt
+   too. `unpack` needs nothing new; `translate` reads a file line by line, so
+   a translated main report is not read into memory.
+6. **`ionomos bundle inspect` checks every file for real names.** It
+   searches each file of the zip, and each file name, for the names this
+   computer knows: the lab's (`learn` with no job named: settings, aliases,
+   the users folder, the OS account and PC, every job in the job list with
+   its sample names, the inbox) and the originals in the bundle's key file
+   (next to the zip, or `--key`). It lists every file with "no real name",
+   or what it found and how often; identifier columns are listed as kept,
+   as in the key file. On the developer's computer (no settings, no key) it
+   says there is nothing to check against. A bundle made without
+   anonymising is expected to be full of names, and `inspect` says so. A
+   home-folder path holding a pseudonym (`C:\Users\user01`) is not a name.
+7. **Spectronaut: a column list and instructions, not an `.rs` file.**
+   Spectronaut's report-schema file (`.rs`) is its own format: the manual
+   (Spectronaut 19, "Report Perspective" and the command line's `-rs`)
+   describes building, saving and passing a schema but not the file, and a
+   public `.rs` (SpectroPipeR's) is an opaque binary file. Writing one would
+   be inventing a format. Instead `engines.SPECTRONAUT_COLUMNS` is the one
+   list the loader reads (`load_spectronaut` takes its `want` from it) and
+   `ionomos spectronaut-columns [--out DIR]` prints it with what each column
+   is for, which three are needed (`R.FileName`, `PG.ProteinGroups`,
+   `PG.Quantity` or `PG.MS2Quantity`) and how to tick them in the Report
+   perspective, save the schema and export a Normal Report. The lab can then
+   save its own `.rs` from Spectronaut and share that. The PG and EG column
+   names are in the manual's Appendix 8; the R columns are those Ionomos
+   already read (also MSstats' Spectronaut converter's).
+
+**Verified**: by the suite on macOS (the window's code by GUI tests that run
+in CI only): the anonymised text has none of the testbed's names (plain
+search), its pseudonyms are a bundle's, a leak stops it; `--include` bundles
+of the fake FragPipe DIA job with a written `report.tsv`, `report.parquet`,
+library, precursor matrix, `peptide.tsv` and `ion.tsv` (real column names)
+pass the plain search, unpack, load and translate back byte for byte; the
+name check finds a name added to a zip. **Not verified**: real DIA-NN 2.x
+Parquet reports (their size, types and how long the conversion takes on the
+PC); real MaxQuant peptide tables; Spectronaut itself (the instructions
+follow the manual, not a session with the program); the buttons and the new
+box on screen.

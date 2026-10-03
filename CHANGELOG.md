@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Anonymised "Copy diagnostics"** (D74). The app's **Copy diagnostics**
+  now replaces the lab's names with the same pseudonyms a bundle uses, and
+  the text is searched for every name Ionomos knows before it reaches the
+  clipboard (a name left: nothing is copied, and the message says so).
+  **Copy with real names** copies the text as before. The saved copy in the
+  log folder has its key file next to it, so `ionomos bundle translate`
+  reads a pasted copy back. `ionomos diagnose --anonymise` does the same in
+  a terminal.
+- **DIA-NN's main report and peptide / ion tables in a bundle, on request**
+  (D74): `ionomos bundle --include diann-report,peptides` (implies
+  `--level validate`) and a box in the **Report a problem** window. Main
+  report: `report.tsv`, or `report.parquet` written as text so its names can
+  be replaced (needs pyarrow). Peptide level: FragPipe `peptide.tsv` /
+  `ion.tsv`, DIA-NN's precursor matrix, MaxQuant `peptides.txt` /
+  `modificationSpecificPeptides.txt`. Each is anonymised like the other
+  tables, row-sampled above `--extra-mb` (200 MB), and the first thing the
+  size limit leaves out. Spectral libraries never go in.
+- **`ionomos bundle inspect` checks every file for real names** (D74): each
+  file of the zip, and its name, is searched for the lab's user,
+  experiment and sample names (on the lab's PC) and for the originals in the
+  key file (next to the zip, or `--key`), and listed as clean or with what
+  was found.
+- **`ionomos spectronaut-columns [--out DIR]`** (D74): the columns a
+  Spectronaut report needs for Ionomos and how to make a report schema with
+  exactly those in Spectronaut. Ionomos does not ship an `.rs` schema file:
+  its format is Spectronaut's own and not published.
+
+### Changed
+
+- `ionomos bundle translate KEY FILE` reads the file line by line (a main
+  report can be gigabytes).
+- The Spectronaut loader reads its columns from the same list
+  (`engines.SPECTRONAUT_COLUMNS`) that `spectronaut-columns` prints.
+
 ## [0.15.0] - 2026-10-02
 
 ### Added

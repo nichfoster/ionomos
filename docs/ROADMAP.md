@@ -234,10 +234,16 @@ laid out one folder per TMT plex. **Still not run against a real FragPipe.**
   - run it on the lab's real folders and read the zip by eye before the
     first one is shared (the leak check only knows the names Ionomos knows)
   - the window has not been seen on screen (GUI tests run in CI only)
-  - "Copy diagnostics" still copies real names; decide whether it should be
-    anonymised too
-  - DIA-NN's main report and peptide-level tables are not bundled; add them
-    behind an option if a validation needs them
+  - ~~"Copy diagnostics" still copies real names; decide whether it should be
+    anonymised too~~ → 2026-10-03 (D74): anonymised by default with the
+    bundle's pseudonymiser and leak check; **Copy with real names** beside it
+  - ~~DIA-NN's main report and peptide-level tables are not bundled; add them
+    behind an option if a validation needs them~~ → 2026-10-03 (D74):
+    `--include diann-report,peptides` and a box in the window; Parquet as
+    text; `bundle inspect` checks every file for real names
+  - try `--include` on a real DIA-NN 2.x `report.parquet` on the PC: how
+    long the conversion takes, and whether its types turn into text as
+    Ionomos' reader expects
 - `ionomos status` as a tiny local web page if people ask.
 - Auto-archive finished experiments to `D:\<user>\` after N days.
 - Optional: auto-pull from `C:\Proteomics_File_Sharing` (reversing D3) once
@@ -315,7 +321,7 @@ installed.
 | 1 ✅ | DIA-NN standalone (1.9 / 2.x) | import ✅, run ✅ (`engine: diann`, D39) | `pg_matrix` parser exists; 2.x `report.parquet` needs an optional Parquet reader. DIA-NN can't be redistributed from 1.9 on (Academia / Enterprise editions): the lab supplies the binary. |
 | 2 ✅ | MaxQuant | import ✅ `proteinGroups.txt`; run ✅ (`engine: maxquant`, D50, #54; tested against a stand-in MaxQuant only) | Free incl. commercial use; not redistributable. Run mode patches an `mqpar.xml` made by the installed version (`--create`), never a shipped template. |
 | 3 ✅ | MSstats long format + SDRF design | import ✅ label-free MSstats, MSstatsTMT (D48) and an SDRF as the design (D47), #60 | One importer covers quantms, Skyline and anything with an MSstats converter; protein summary by Tukey median polish (MSstats' default). |
-| 4 ✅ | Spectronaut | import ✅ pivot + long reports (the `.rs` schema still to ship) | Common in cores; ship an Ionomos report schema (`.rs`), read `PG.Quantity` pivots or the long BGS report. |
+| 4 ✅ | Spectronaut | import ✅ pivot + long reports; column list ✅ (`ionomos spectronaut-columns`, 2026-10-03, D74) instead of an `.rs` schema, whose format is not published | Common in cores; read `PG.Quantity` pivots or the long BGS report. A lab makes its schema from the column list once and can share Spectronaut's own `.rs` of it. |
 | 5 ✅ | Sage | import ✅ `lfq.tsv`, `tmt.tsv` (D56); run ✅ (`engine: sage`, D51; TMT with the lab's `sage_config`, D56; tested against stand-ins for Sage and ThermoRawFileParser only) | MIT and cross-platform. Not bundled: the lab downloads Sage and ThermoRawFileParser (.raw → mzML, Thermo's RawFileReader licence). Proteins are rolled up from `lfq.tsv` by razor grouping and median polish; `tmt.tsv` as MSstatsTMT input is, plexes joined by IRS. QC trending reads `results.sage.tsv`. Not built: Parquet output (`--parquet` has other layouts, and Sage calls it unstable). |
 | 6 ✅ | AlphaDIA | import ✅ `pg.matrix.tsv` | Apache-2.0, pip-installable; column names changed between 1.x and 2.x. |
 | 7 ✅ | Proteome Discoverer | import ✅ (column format from the docs, not yet a real export) | Protein-table text export only; no supported headless mode. |

@@ -126,6 +126,20 @@ def test_dev_section_and_diagnostics(app, tmp_path, monkeypatch):
     shown = app.out.text.get("1.0", "end")
     assert "=== check" in shown and "=== config.yaml" in shown
     assert clip and "=== check" in clip[0]
+    # anonymised by default (D74): the saved copy has its key next to it, in the log folder
+    from ionomos import names
+
+    logs = tmp_path / "Auto" / "logs"
+    assert list(logs.glob("diagnostics-*-anonymised.txt")) and list(logs.glob("diagnostics-*" + names.BUNDLE_KEY_SUFFIX))
+    # ... and the real text is one button away
+    clip.clear()
+    app.copy_diagnostics(anonymise=False)
+    for _ in range(50):
+        app.root.update()
+        if clip:
+            break
+        time.sleep(0.05)
+    assert clip and "=== check" in clip[0] and str(tmp_path) in clip[0]
 
 
 def test_fragpipe_controls(app, tmp_path, monkeypatch):
@@ -593,6 +607,10 @@ def test_report_window_lists_what_goes_in_and_follows_its_boxes(app, tmp_path, m
     d.anonymise.set(False)
     d.refresh()
     assert _pump_until(app, lambda: "Level: validate" in listed() and "NOT anonymised" in listed())
+    d.extras.set(True)  # DIA-NN's main report and the peptide / ion tables (D74)
+    d.refresh()
+    assert _pump_until(app, lambda: "Also: DIA-NN's main report" in listed())
+    assert d.choice().options().include == ("diann-report", "peptides")
     d.save()
     assert _pump_until(app, lambda: shown)
     res = d.result

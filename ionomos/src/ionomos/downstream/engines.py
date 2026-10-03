@@ -299,6 +299,62 @@ def _maxquant_plexes(m: QuantMatrix, path: Path) -> QuantMatrix:
 # ------------------------------------------------------------- Spectronaut --
 
 
+# The columns load_spectronaut reads from a Normal (long) report, in its order: (column, needed, what for). One list
+# for the loader and for `ionomos spectronaut-columns` (D74): the column list a lab ticks in its report schema.
+SPECTRONAUT_COLUMNS = (
+    ("R.FileName", True, "the run (one column per run in the analysis)"),
+    ("R.Condition", False, "the run's condition; without it, conditions come from the run names"),
+    ("R.Replicate", False, "the run's replicate number"),
+    ("PG.ProteinGroups", True, "the protein group (the row of the analysis)"),
+    ("PG.Genes", False, "gene names, the labels in the report"),
+    ("PG.ProteinDescriptions", False, "protein descriptions"),
+    ("PG.ProteinNames", False, "protein names, used when there are no descriptions"),
+    ("PG.Quantity", True, "the protein quantity (PG.MS2Quantity is read when PG.Quantity is not there)"),
+    ("PG.Qvalue", False, "protein group q-value: rows above 1% are left out"),
+    ("EG.Qvalue", False, "precursor q-value: rows above 1% are left out"),
+    ("EG.PrecursorId", False, "the precursor, to count the peptides behind each protein"),
+)
+SPECTRONAUT_COLUMNS_FILE = "Ionomos_Spectronaut_report_columns.txt"
+
+
+def spectronaut_columns_text() -> str:
+    """The columns a Spectronaut report needs for Ionomos, and how to make Spectronaut export exactly those.
+
+    Not a Spectronaut report schema file (.rs): that format is Spectronaut's own and not published (D74)."""
+    width = max(len(c) for c, *_ in SPECTRONAUT_COLUMNS)
+    rows = [f"  {c:<{width}}  {'needed  ' if need else 'optional'}  {why}" for c, need, why in SPECTRONAUT_COLUMNS]
+    return "\n".join([
+        "Spectronaut report for Ionomos",
+        "==============================",
+        "",
+        "Ionomos reads a Spectronaut Normal Report (long format: one row per run and precursor). These are the",
+        "columns it reads; it ignores any others, so a report made for another purpose works if it has these.",
+        "",
+        *rows,
+        "",
+        "Make a report schema with exactly these columns, once, in Spectronaut:",
+        "  1. Open the Report perspective and pick a Normal Report schema in the schema tree as the start",
+        "     (one of Spectronaut's preconfigured schemas).",
+        "  2. In the column chooser, untick what you do not need and tick each column above; the search field",
+        "     below the column chooser finds a column by its name. Run columns (R.) are under Run, PG. under",
+        "     Protein Group, EG. under Elution Group.",
+        "  3. Save it as your own schema (for example 'Ionomos'): it appears in the schema tree from then on.",
+        "  4. Export Report... (bottom left) as a tab- or comma-separated text file.",
+        "",
+        "Then: ionomos analyze <the exported file>   (or the Analysis tab's Table... button).",
+        "",
+        "Without R.Condition the conditions are read from the run names (DMSO_1, Drug_2 ...) and can be set on",
+        "the Analysis tab or in experiment.yaml (sample_conditions). The q-value columns let Ionomos apply its 1%",
+        "filter; without them every row is used. A Run Pivot Report with PG.Quantity as the cell value",
+        "(<run>.PG.Quantity columns) is read too, but has no conditions and no q-values.",
+        "",
+        "Spectronaut can save a report schema as a file (.rs) to share it or to give it to its command line",
+        "(-rs). Ionomos does not ship one: the .rs format is Spectronaut's own and is not published, so this list",
+        "is the reference. Save your schema from Spectronaut once it is made, and share that file in the lab.",
+        "",
+    ])
+
+
 def _spectronaut_score(path: Path) -> float:
     h = _header(path)
     if {"PG.ProteinGroups", "R.FileName"} <= set(h) and any(x in h for x in ("PG.Quantity", "PG.MS2Quantity")):
@@ -315,8 +371,7 @@ def load_spectronaut(path: Path) -> QuantMatrix:
         m.exp, m.meta["engine"], m.meta["quantity"] = "DIA", "Spectronaut", "PG.Quantity (pivot report)"
         return m
     qcol = "PG.Quantity" if "PG.Quantity" in h else "PG.MS2Quantity"
-    want = ["R.FileName", "R.Condition", "R.Replicate", "PG.ProteinGroups", "PG.Genes", "PG.ProteinDescriptions",
-            "PG.ProteinNames", qcol, "PG.Qvalue", "EG.Qvalue", "EG.PrecursorId"]
+    want = [qcol if c == "PG.Quantity" else c for c, _need, _why in SPECTRONAUT_COLUMNS]
     cols, rows = _read_long(path, want)
     ix = {c: j for j, c in enumerate(cols)}
     feats: dict[str, Feature] = {}

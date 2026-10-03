@@ -72,6 +72,22 @@ QUANT_TABLES = (
 PSM_TABLES = (("psm.tsv", "FragPipe PSM table"), ("results.sage.tsv", "Sage PSM table"))  # row-sampled above the cap
 ENGINE_DIRS = ("fragpipe", "diann", "maxquant", "sage")
 RESULTS = "results"
+# Tables a validation may need that the analysis does not read (D74): only with Options.include, after every other
+# table (so the size limit drops them first), row-sampled above Options.extra_mb. FragPipe's combined_peptide.tsv,
+# combined_ion.tsv and combined_modified_peptide.tsv are combined_*.tsv: in every `validate` bundle already.
+EXTRAS = {
+    "diann-report": "DIA-NN's main report (report.tsv; report.parquet is turned into text)",
+    "peptides": "peptide- and ion-level tables (FragPipe peptide.tsv / ion.tsv, DIA-NN's precursor matrix, MaxQuant "
+                "peptides.txt / modificationSpecificPeptides.txt)",
+}
+EXTRA_TABLES = (  # (file name pattern, what, EXTRAS key)
+    ("report.tsv", "DIA-NN main report", "diann-report"), ("report.parquet", "DIA-NN main report", "diann-report"),
+    ("*pr_matrix.tsv", "DIA-NN precursor matrix", "peptides"), ("peptide.tsv", "FragPipe peptide table", "peptides"),
+    ("ion.tsv", "FragPipe ion table", "peptides"), ("peptides.txt", "MaxQuant peptides table", "peptides"),
+    ("modificationSpecificPeptides.txt", "MaxQuant modification-specific peptides table", "peptides"),
+)
+RUN_COLUMNS = ("Run", "File.Name", "R.FileName")  # a long report names its run in every row, not in its header
+_LIBRARY = re.compile(r"(?<![a-z])(?:spec)?lib(?:rary)?(?![a-z])")  # report-lib.parquet, lib.tsv, library.tsv
 
 
 class BundleError(Exception):
@@ -97,10 +113,18 @@ class Options:
     max_mb: float = 2000            # the whole bundle, before compression
     psm_mb: float = 25              # one PSM-level table; a larger one is row-sampled
     note: str = ""
+    include: tuple[str, ...] = ()   # EXTRAS keys: more tables (validate only)
+    extra_mb: float = 200           # one of those tables; a larger one is row-sampled
 
     def __post_init__(self):
         if self.level not in LEVELS:
             raise BundleError(f"level must be one of {', '.join(LEVELS)}, not {self.level!r}")
+        self.include = tuple(dict.fromkeys(str(x).strip() for x in self.include if str(x).strip()))
+        unknown = [x for x in self.include if x not in EXTRAS]
+        if unknown:
+            raise BundleError(f"--include takes {', '.join(EXTRAS)}, not {', '.join(unknown)}")
+        if self.include and self.level != "validate":
+            raise BundleError("--include adds result tables, so it needs --level validate")
 
 
 # ---------------------------------------------------------------- paths ----
@@ -174,6 +198,54 @@ def _sniff(p: Path) -> str | None:
     return None if b"\0" in head else "utf-8"
 
 
+def _parquet():
+    """pyarrow.parquet, or None: it is optional (the [parquet] / [dev] extras; the lab's dev install has it)."""
+    try:
+        import pyarrow.parquet as pq
+    except ImportError:
+        return None
+    return pq
+
+
+def _parquet_size(p: Path) -> int | None:
+    """About how large a Parquet file is as text (its uncompressed size); None when it cannot be read."""
+    pq = _parquet()
+    if pq is None:
+        return None
+    try:
+        with open(_long(p), "rb") as fh:
+            md = pq.ParquetFile(fh).metadata
+            return max(_size(p), sum(md.row_group(i).total_byte_size for i in range(md.num_row_groups)))
+    except Exception:  # noqa: BLE001 - a damaged file: said, and left out
+        return None
+
+
+def _parquet_cell(v) -> str:
+    """A Parquet value as text, as Ionomos' own reader turns it into a cell (engines._read_long: str())."""
+    s = "" if v is None else str(v)
+    return s.replace("\t", " ").replace("\r", " ").replace("\n", " ") if ("\t" in s or "\n" in s or "\r" in s) else s
+
+
+def _parquet_lines(src: Path, every: int = 1) -> Iterator[str]:
+    """A Parquet table as tab-separated lines, header first, one data row in `every`; read in batches."""
+    pq = _parquet()
+    if pq is None:
+        raise OSError("pyarrow is not installed")
+    with open(_long(src), "rb") as fh:
+        pf = pq.ParquetFile(fh)
+        yield "\t".join(_parquet_cell(n) for n in pf.schema_arrow.names) + "\n"
+        n = 0
+        for batch in pf.iter_batches(batch_size=8192):
+            if -(-n // every) * every >= n + batch.num_rows:
+                n += batch.num_rows  # no kept row in this batch: not turned into Python values
+                continue
+            cols = [c.to_pylist() for c in batch.columns]
+            for row in zip(*cols, strict=True):
+                if n % every == 0:
+                    yield "\t".join(_parquet_cell(v) for v in row) + "\n"
+                n += 1
+
+
 # ------------------------------------------------------------ anonymiser ----
 
 _TOKEN = re.compile(r"[^\W_]+")
@@ -190,6 +262,7 @@ _NAME_PART = r"[^\\/\s\"'<>|:*?]+"
 _HOME = re.compile(r"(?i)((?:[a-z]:[\\/]+Users|/Users|/home)[\\/]+)"
                    rf"({_NAME_PART}(?: {_NAME_PART}){{0,3}}(?=[\\/])|{_NAME_PART})")
 _NOT_PEOPLE = {"public", "default", "default user", "all users", "shared"}
+_PSEUDO_USER = re.compile(r"user\d{2,}[a-z]?")  # a bundle's own pseudonym in a home-folder path (self_check reads those)
 # Names the job list no longer knows (a folder rejected or removed long ago, still in an old log line) are
 # recognised by their shape: a folder that starts with a date, a raw file by its extension.
 _DATED = re.compile(r"(?<![\w\-])(?:19|20)\d{6}[_\-](?=[\w\-]*[^\W\d_])[\w\-]+")
@@ -607,7 +680,7 @@ class Anonymiser:
 
     def _home(self, m: re.Match, found: list | None) -> str:
         who = m.group(2)
-        if who.casefold() in _NOT_PEOPLE or who in self.key["users"]:
+        if who.casefold() in _NOT_PEOPLE or who in self.key["users"] or _PSEUDO_USER.fullmatch(who):
             return m.group()
         toks = [t.casefold() for t in _TOKEN.findall(who)]
         if not toks or (len(toks) == 1 and self._keep(toks[0])):
@@ -723,12 +796,14 @@ class Item:
     arc: str                       # path in the zip, with the lab's names (rewritten when anonymising)
     what: str                      # "log", "status file", "DIA-NN protein matrix", ...
     src: Path | None = None
-    mode: str = "text"             # text | tail | sample | config | json | yaml | gen
+    mode: str = "text"             # text | tail | sample | config | json | yaml | gen | parquet
     size: int = 0                  # bytes that will be read
     full: int = 0                  # the file's size
-    every: int = 1                 # sample: keep one data row in `every`
+    every: int = 1                 # sample / parquet: keep one data row in `every`
     gen: Callable[[], str] | None = None
     job: int = -1                  # index into Plan.jobs
+    origin: str = ""               # parquet: the file's own name (it goes in as .tsv)
+    extra: bool = False            # asked for with Options.include
 
 
 @dataclass
@@ -890,9 +965,19 @@ def _add(plan: Plan, arc: str, src: Path, what: str, mode: str = "text", job: in
     return it
 
 
-def _engine_tables(root: Path, skip_dirs: set[str]) -> list[tuple[Path, str, str]]:
+def _extra_what(name: str, mains: set[str], include) -> str | None:
+    """What an EXTRA_TABLES file is, when Options.include asks for its kind; never a spectral library."""
+    low = name.lower()
+    if not include or _LIBRARY.search(low) or "first-pass" in low or low.endswith(".speclib"):
+        return None
+    hit = next((what for pat, what, key in EXTRA_TABLES if key in include and fnmatch.fnmatchcase(name, pat)), None)
+    return hit or ("DIA-NN main report" if name in mains else None)
+
+
+def _engine_tables(root: Path, skip_dirs: set[str], include=()) -> list[tuple[Path, str, str]]:
     """(file, what, kind) for every result table the analysis reads under `root`: kind is "quant" (the
-    analysis starts from it), "psm" (PSM-level: row-sampled above the cap) or "" (read along the way)."""
+    analysis starts from it), "psm" (PSM-level: row-sampled above the cap) or "" (read along the way);
+    with `include` (EXTRAS keys) also "extra" tables, listed last."""
     found: list[tuple[Path, str, str]] = []
     for base, dirs, files in os.walk(_long(root)):
         rel = Path(os.path.relpath(base, _long(root)))
@@ -900,8 +985,15 @@ def _engine_tables(root: Path, skip_dirs: set[str]) -> list[tuple[Path, str, str
         depth = len(here.parts) - len(root.parts)
         dirs[:] = sorted(d for d in dirs if depth < 3 and d not in skip_dirs and "_previous_" not in d
                          and not d.lower().endswith(".d") and not d.startswith("."))
+        # DIA-NN's main report is <out>.tsv / .parquet beside <out>.pg_matrix.tsv (--out names both)
+        mains = {f[: -len(".pg_matrix.tsv")] + ext for f in files if f.endswith(".pg_matrix.tsv")
+                 for ext in (".tsv", ".parquet")} if "diann-report" in include else set()
         for f in sorted(files):
             p = here / f
+            extra = _extra_what(f, mains, include)
+            if extra is not None:
+                found.append((p, extra, "extra"))
+                continue
             if _never(p):
                 continue
             hit = next(((what, quant) for pat, what, quant in QUANT_TABLES if fnmatch.fnmatch(f, pat)), None)
@@ -914,7 +1006,7 @@ def _engine_tables(root: Path, skip_dirs: set[str]) -> list[tuple[Path, str, str
                 found.append((p, dict(PSM_TABLES)[f], "psm"))
             elif f.lower().endswith("sdrf.tsv"):
                 found.append((p, "SDRF sample sheet", ""))
-    found.sort(key=lambda t: (t[2] == "psm", len(t[0].parts), str(t[0])))
+    found.sort(key=lambda t: (t[2] == "extra", t[2] == "psm", len(t[0].parts), str(t[0])))
     return found
 
 
@@ -953,8 +1045,9 @@ def _job_small(plan: Plan, idx: int) -> None:
         _add(plan, f"{arc}/{RESULTS}/{name}", d / RESULTS / name, "analysis summary", "tail", idx)
 
 
-def _job_tables(plan: Plan, idx: int) -> None:
-    """`validate`: the engine's tables the analysis reads, an SDRF the lab supplied, and all of results/."""
+def _job_tables(plan: Plan, idx: int, later: list[tuple[int, Path, str]]) -> None:
+    """`validate`: the engine's tables the analysis reads, an SDRF the lab supplied, and all of results/.
+    Tables asked for with Options.include go into `later`: they are added after every job's other tables."""
     job = plan.jobs[idx]
     d, arc = job.dest, job.arc
     have = {i.arc for i in plan.items}
@@ -963,7 +1056,10 @@ def _job_tables(plan: Plan, idx: int) -> None:
     skip = {RESULTS, rd.name, names.RUN_DIR, *names.LEGACY_RUN_DIRS, "sage_mzml", "raw"}
     cap = int(plan.opts.psm_mb * 1e6)
     for root in roots or [d]:
-        for p, what, kind in _engine_tables(root, {"sage_mzml"} if roots else skip):
+        for p, what, kind in _engine_tables(root, {"sage_mzml"} if roots else skip, plan.opts.include):
+            if kind == "extra":
+                later.append((idx, p, what))
+                continue
             inside = f"{arc}/{p.relative_to(d).as_posix()}"
             it = None if inside in have else _add(plan, inside, p, what, "text", idx)
             if it is None:
@@ -994,6 +1090,45 @@ def _job_tables(plan: Plan, idx: int) -> None:
                 plan.skipped.append({"path": inside, "why": f"never included ({NEVER_SAID})", "bytes": _size(p)})
             else:
                 _add(plan, inside, p, "Ionomos result", "text", idx)
+
+
+def _add_extra(plan: Plan, idx: int, p: Path, what: str) -> None:
+    """One table asked for with Options.include. Row-sampled above Options.extra_mb; a Parquet file goes in
+    as tab-separated text (the only form whose names can be replaced and whose rows can be sampled)."""
+    job = plan.jobs[idx]
+    inside = f"{job.arc}/{p.relative_to(job.dest).as_posix()}"
+    have = {i.arc for i in plan.items}
+    if inside in have:
+        return
+    if p.suffix.lower() == ".parquet":
+        if _parquet() is None:
+            plan.skipped.append({"path": inside, "bytes": _size(p), "why": "a Parquet file: turning it into text, so "
+                                 "its names can be replaced, needs pyarrow (pip install pyarrow)"})
+            return
+        est = _parquet_size(p)
+        if est is None:
+            plan.skipped.append({"path": inside, "bytes": _size(p), "why": "could not be read as a Parquet file"})
+            return
+        arc = inside[: -len(".parquet")] + ".tsv"
+        if arc in have or os.path.lexists(_long(p.with_suffix(".tsv"))):  # DIA-NN 1.x's report.tsv beside it
+            arc = inside + ".tsv"
+        it = Item(arc=arc, what=what, src=p, mode="parquet", size=est, full=est, job=idx, origin=p.name, extra=True)
+        plan.items.append(it)
+    else:
+        it = _add(plan, inside, p, what, "text", idx)
+        if it is None:
+            return
+        it.extra = True
+    cap = int(plan.opts.extra_mb * 1e6)
+    if it.full > cap > 0:
+        it.every = -(-it.full // cap)
+        it.size = it.full // it.every
+        if it.mode == "text":
+            it.mode = "sample"
+        why = f"1 row in {it.every} kept (the table is over {plan.opts.extra_mb:g} MB, --extra-mb)"
+        plan.capped.append({"path": it.arc, "why": why, "bytes": it.full, "kept": it.size})
+        if not job.tables:  # only then does the analysis read it (a DIA-NN run without its matrices)
+            job.incomplete.append(f"{p.name}: {why}")
 
 
 def collect(config_path: Path, targets=(), opts: Options | None = None) -> Plan:
@@ -1039,8 +1174,11 @@ def collect(config_path: Path, targets=(), opts: Options | None = None) -> Plan:
         _job_small(plan, idx)
     if opts.level == "validate":  # after every job's small files, so the size limit never drops a log
         small = len(plan.items)
+        later: list[tuple[int, Path, str]] = []
         for idx in range(len(plan.jobs)):
-            _job_tables(plan, idx)
+            _job_tables(plan, idx, later)
+        for idx, p, what in later:  # last, so the size limit drops these before a table the analysis reads
+            _add_extra(plan, idx, p, what)
         _apply_cap(plan, small)
     return plan
 
@@ -1054,7 +1192,7 @@ def _apply_cap(plan: Plan, first: int) -> None:
             plan.skipped.append({"path": it.arc, "bytes": it.full,
                                  "why": f"over the size limit of {plan.opts.max_mb:g} MB for one bundle (--max-mb)"})
             plan.capped = [c for c in plan.capped if c["path"] != it.arc]
-            if it.job >= 0:
+            if it.job >= 0 and not (it.extra and plan.jobs[it.job].tables):  # an extra the analysis does not read
                 plan.jobs[it.job].incomplete.append(f"{PurePosixPath(it.arc).name} was left out (size limit)")
             continue
         used += it.size
@@ -1080,6 +1218,7 @@ def _stem(name: str) -> str:
 _HEADER_SUFFIXES = (" MaxLFQ Intensity", " Intensity", " Spectral Count", " Total Spectral Count",
                     " Unique Spectral Count", " Total Intensity", " Unique Intensity", " Razor Intensity",
                     " Log2 Ratio HL", " Combined Total Peptides", " Match Type")
+_HEADER_PREFIXES = ("LFQ intensity ", "Intensity ", "Experiment ", "MS/MS count ", "Identification type ")
 
 
 def _learn_record(anon: Anonymiser, rec: dict, into: list[str] | None = None) -> None:
@@ -1184,10 +1323,47 @@ def _learn_header(anon: Anonymiser, path: Path, into: list[str], lab_roots: list
                 anon.add_sample(cell[: -len(suffix)])
                 into.append(cell[: -len(suffix)])
                 break
+        else:
+            for prefix in _HEADER_PREFIXES:  # MaxQuant: "LFQ intensity DMSO_1", "Experiment DMSO_1"
+                if cell.startswith(prefix) and len(cell) > len(prefix):
+                    anon.add_sample(cell[len(prefix):])
+                    into.append(cell[len(prefix):])
+                    break
 
 
-def learn(plan: Plan) -> Anonymiser:
-    """An Anonymiser that knows every name the lab's settings, job list, inbox and the bundled jobs hold."""
+def _learn_runs(anon: Anonymiser, it: Item, into: list[str], lab_roots: list[str]) -> None:
+    """The run names in the cells of a long report (DIA-NN's Run / File.Name, Spectronaut's R.FileName): its
+    header has none. Only those columns are read (the whole column: a report need not be sorted by run)."""
+    values: set[str] = set()
+    try:
+        if it.mode == "parquet":
+            pq = _parquet()
+            with open(_long(it.src), "rb") as fh:
+                pf = pq.ParquetFile(fh)
+                cols = [c for c in RUN_COLUMNS if c in pf.schema_arrow.names]
+                for batch in pf.iter_batches(batch_size=65536, columns=cols) if cols else ():
+                    for c in batch.columns:
+                        values.update(str(v) for v in c.unique().to_pylist() if v is not None)
+        else:
+            with open(_long(it.src), encoding="utf-8", errors="replace") as f:
+                header = f.readline(4_000_000).rstrip("\r\n").split("\t")
+                idx = [i for i, c in enumerate(header) if c.strip() in RUN_COLUMNS]
+                if idx:
+                    last = max(idx)
+                    for line in f:
+                        cells = line.rstrip("\r\n").split("\t", last + 1)
+                        values.update(cells[i] for i in idx if i < len(cells))
+    except Exception:  # noqa: BLE001 - not readable here: the writing step says so
+        return
+    for v in sorted(values):
+        if v.strip() and not _learn_path(anon, v, into, lab_roots):
+            anon.add_sample(v.strip())
+            into.append(v.strip())
+
+
+def learn(plan: Plan, freeze: bool = True) -> Anonymiser:
+    """An Anonymiser that knows every name the lab's settings, job list, inbox and the bundled jobs hold
+    (frozen, unless more names are to be added first)."""
     import getpass
     import platform
     import socket
@@ -1318,6 +1494,8 @@ def learn(plan: Plan) -> Anonymiser:
         if it.src is None or it.job < 0:
             continue
         names_of = plan.jobs[it.job].names
+        if it.extra:
+            _learn_runs(anon, it, names_of, lab_roots)
         if it.what == "TMT annotation":
             try:
                 for ln in it.src.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -1348,7 +1526,7 @@ def learn(plan: Plan) -> Anonymiser:
                     _learn_path(anon, ln.split("\t")[0], names_of, lab_roots)
             except OSError:
                 pass
-    return anon.freeze()
+    return anon.freeze() if freeze else anon
 
 
 def order_kept(anon: Anonymiser, names_of: list[str]) -> bool:
@@ -1390,6 +1568,9 @@ def _lines(it: Item, anon: Anonymiser | None, hide: list[str]) -> Iterator[str]:
 
     if it.mode == "gen":
         yield from (it.gen() if it.gen else "").splitlines(keepends=True)
+        return
+    if it.mode == "parquet":
+        yield from _parquet_lines(it.src, it.every)
         return
     src = _long(it.src)
     if it.mode in ("config", "json", "yaml"):
@@ -1508,6 +1689,18 @@ def _job_manifest(plan: Plan, job: JobInfo, cache: dict) -> dict:
     return out
 
 
+def extras_said(m: dict) -> list[str]:
+    """What a reader must know about the tables included on request: converted from Parquet, row-sampled."""
+    out = []
+    for f in m.get("files") or []:
+        if f.get("converted_from"):
+            out.append(f"{f['path']} was {f['converted_from']}: a Parquet file, written as tab-separated text value by "
+                       "value (as Ionomos reads Parquet), so its names could be replaced")
+        if f.get("one_row_in") and f.get("included_on_request"):
+            out.append(f"{f['path']} holds 1 row in {f['one_row_in']} (header kept): numbers summed over it will differ")
+    return out
+
+
 def _readme(m: dict) -> str:
     a = m["anonymised"]
     lines = [
@@ -1548,6 +1741,10 @@ def _readme(m: dict) -> str:
         lines += ["NOT anonymised: this bundle holds the lab's real names. Secrets (webhook addresses,",
                   "passwords) are still replaced by ***."]
     lines += ["", f"Never included: {NEVER_SAID}.", ""]
+    if m.get("include"):
+        lines += ["Also included on request (--include): " + "; ".join(EXTRAS.get(k, k) for k in m["include"]) + ".",
+                  "The analysis starts from the protein tables and does not need these."]
+        lines += [f"  {s}" for s in extras_said(m)] + [""]
     for title, rows in (("Capped", m["capped"]), ("Left out", m["skipped"])):
         if rows:
             lines += [title, "-" * len(title)]
@@ -1566,7 +1763,7 @@ def _write(plan: Plan, anon: Anonymiser | None, tmp: Path, progress) -> dict:
     files, skipped, total = [], list(plan.skipped), 0
     with zipfile.ZipFile(_long(tmp), "w", compression=zipfile.ZIP_DEFLATED, allowZip64=True) as z:
         for it in plan.items:
-            if it.src is not None and it.mode not in ("config", "json", "yaml"):
+            if it.src is not None and it.mode not in ("config", "json", "yaml", "parquet"):
                 enc = _sniff(it.src)
                 if enc is None and anon is not None:
                     skipped.append({"path": it.arc, "bytes": it.full,
@@ -1581,13 +1778,22 @@ def _write(plan: Plan, anon: Anonymiser | None, tmp: Path, progress) -> dict:
                 if it.mode == "binary":
                     size, sha = _put_binary(z, arc, it.src)
                 else:
-                    table = it.src is not None and it.src.suffix.lower() in _TABLE_SUFFIXES
+                    table = it.src is not None and PurePosixPath(it.arc).suffix.lower() in _TABLE_SUFFIXES
                     size, sha = _put(z, arc, _lines(it, anon, hide), _Scrub(anon, hide, table))
-            except OSError as exc:
+            except Exception as exc:  # noqa: BLE001 - OSError, or a Parquet file that stops half-way
+                if not isinstance(exc, OSError) and it.mode != "parquet":
+                    raise
                 skipped.append({"path": it.arc, "bytes": it.full, "why": f"could not be read ({type(exc).__name__})"})
                 continue
             total += size
-            files.append({"path": arc, "bytes": size, "sha256": sha, "what": it.what})
+            entry = {"path": arc, "bytes": size, "sha256": sha, "what": it.what}
+            if it.origin:
+                entry["converted_from"] = it.origin
+            if it.every > 1:
+                entry["one_row_in"] = it.every
+            if it.extra:
+                entry["included_on_request"] = True
+            files.append(entry)
         cache: dict = {}
         jobs = []
         for job in plan.jobs:
@@ -1604,7 +1810,9 @@ def _write(plan: Plan, anon: Anonymiser | None, tmp: Path, progress) -> dict:
                            "kept_words": sorted(anon.kept_seen) if anon is not None else [],
                            "replaced": anon.counts() if anon is not None else {},
                            "key_file": "a separate file that stays in the lab" if anon is not None else None},
-            "limits": {"max_mb": plan.opts.max_mb, "psm_mb": plan.opts.psm_mb, "log_tail_mb": LOG_TAIL / 1e6},
+            "include": list(plan.opts.include),
+            "limits": {"max_mb": plan.opts.max_mb, "psm_mb": plan.opts.psm_mb, "log_tail_mb": LOG_TAIL / 1e6,
+                       **({"extra_mb": plan.opts.extra_mb} if plan.opts.include else {})},
             "never_included": NEVER_SAID, "jobs": jobs, "capped": plan.capped, "skipped": skipped,
             # a folder that was not found was typed by a person: with names replaced, only that there was one
             "not_found": [p if anon is None or p.startswith("no job ") else "a folder that was not found"
@@ -1639,34 +1847,60 @@ def verify(zip_path: Path, anon: Anonymiser) -> tuple[list[tuple[str, str, int]]
     File names inside the zip are searched too. Identifier columns of tables are reported, not failed."""
     import io
 
-    leaks: dict[tuple[str, str], int] = {}
-    kept: dict[tuple[str, str], int] = {}
-
-    def note(into: dict, arc: str, found: list[str]):
-        for o in found:
-            into[(arc, o)] = into.get((arc, o), 0) + 1
-
+    check = _Check(anon)
     with zipfile.ZipFile(_long(zip_path)) as z:
         for info in z.infolist():
             arc = info.filename
-            note(leaks, arc + " (its name)", anon.find(arc))
-            table = arc.lower().endswith(_TABLE_SUFFIXES)
-            cols: frozenset[int] | None = None
+            check.name(arc)
             with z.open(info) as raw:
-                for line in io.TextIOWrapper(raw, encoding="utf-8", errors="replace", newline="\n"):
-                    if cols is None:
-                        cols = protected_columns(line) if table else frozenset()
-                    if cols:
-                        cells = line.split("\t")
-                        ids = [cells[i] for i in sorted(cols) if i < len(cells)]
-                        for i in cols:
-                            if i < len(cells):
-                                cells[i] = ""
-                        note(leaks, arc, anon.find("\t".join(cells)))
-                        note(kept, arc, anon.find("\t".join(ids)))
-                    else:
-                        note(leaks, arc, anon.find(line))
-    return ([(a, o, n) for (a, o), n in sorted(leaks.items())], [(a, o, n) for (a, o), n in sorted(kept.items())])
+                check.lines(arc, io.TextIOWrapper(raw, encoding="utf-8", errors="replace", newline="\n"))
+    return check.result()
+
+
+class _Check:
+    """The leak check: every original still in some lines (and file names). The one search behind verify()
+    (a finished zip), check_text() (the anonymised diagnostics) and self_check() (`bundle inspect`)."""
+
+    def __init__(self, anon: Anonymiser):
+        self.anon = anon
+        self.leaks: dict[tuple[str, str], int] = {}
+        self.kept: dict[tuple[str, str], int] = {}
+
+    def _note(self, into: dict, arc: str, found: list[str]) -> None:
+        for o in found:
+            into[(arc, o)] = into.get((arc, o), 0) + 1
+
+    def name(self, arc: str) -> None:
+        self._note(self.leaks, arc + " (its name)", self.anon.find(arc))
+
+    def lines(self, arc: str, lines, table: bool | None = None) -> None:
+        """Identifier columns of a table (by its name, .tsv / .txt) are reported as kept, not as leaks."""
+        table = arc.lower().endswith(_TABLE_SUFFIXES) if table is None else table
+        cols: frozenset[int] | None = None
+        for line in lines:
+            if cols is None:
+                cols = protected_columns(line) if table else frozenset()
+            if cols:
+                cells = line.split("\t")
+                ids = [cells[i] for i in sorted(cols) if i < len(cells)]
+                for i in cols:
+                    if i < len(cells):
+                        cells[i] = ""
+                self._note(self.leaks, arc, self.anon.find("\t".join(cells)))
+                self._note(self.kept, arc, self.anon.find("\t".join(ids)))
+            else:
+                self._note(self.leaks, arc, self.anon.find(line))
+
+    def result(self) -> tuple[list[tuple[str, str, int]], list[tuple[str, str, int]]]:
+        return ([(a, o, n) for (a, o), n in sorted(self.leaks.items())],
+                [(a, o, n) for (a, o), n in sorted(self.kept.items())])
+
+
+def check_text(anon: Anonymiser, text: str, where: str = "text") -> list[tuple[str, str, int]]:
+    """The leak check on a text that is not a zip (the anonymised diagnostics): (where, original, count)."""
+    check = _Check(anon)
+    check.lines(where, text.splitlines(keepends=True), table=False)
+    return check.result()[0]
 
 
 def bundle_name(level: str, when: datetime.datetime | None = None) -> str:
@@ -1717,18 +1951,143 @@ def create(config_path: Path, targets=(), opts: Options | None = None, dest: Pat
             os.remove(_long(tmp))  # only our own unfinished .part file
         except OSError:
             pass
-    key_path = None
-    if anon is not None:
-        key_path = unique(final.with_name(final.stem + names.BUNDLE_KEY_SUFFIX))
-        key = {"what": f"The key for {final.name}. KEEP IT IN THE LAB and do not send it with the bundle: it "
-                       "turns the pseudonyms in the bundle back into the lab's real names "
-                       "(`ionomos bundle translate <this file> <a text file>`).",
-               "bundle": final.name, "created": manifest["created"],
-               **{g: dict(sorted(v.items())) for g, v in anon.key.items()},
-               "kept_in_identifier_columns": [{"file": a, "text": o, "count": n} for a, o, n in kept]}
-        with open(_long(key_path), "x", encoding="utf-8") as f:
-            json.dump(key, f, indent=2, ensure_ascii=False)
+    key_path = write_key(final, anon, manifest["created"], kept) if anon is not None else None
     return Result(path=final, key_path=key_path, manifest=manifest, kept_identifiers=kept, problems=plan.problems)
+
+
+def key_path_for(path: Path) -> Path:
+    """Where the key of a bundle (or of saved anonymised diagnostics) is written: next to it."""
+    path = Path(path)
+    return path.with_name(path.stem + names.BUNDLE_KEY_SUFFIX)
+
+
+def write_key(path: Path, anon: Anonymiser, created: str, kept=()) -> Path:
+    """The key file for `path` (a zip, or a saved diagnostics text), next to it, never over an existing file."""
+    path = Path(path)
+    key_path = unique(key_path_for(path))
+    key = {"what": f"The key for {path.name}. KEEP IT IN THE LAB and do not send it with that file: it "
+                   "turns its pseudonyms back into the lab's real names "
+                   "(`ionomos bundle translate <this file> <a text file>`).",
+           "bundle": path.name, "created": created,
+           **{g: dict(sorted(v.items())) for g, v in anon.key.items()},
+           "kept_in_identifier_columns": [{"file": a, "text": o, "count": n} for a, o, n in kept]}
+    with open(_long(key_path), "x", encoding="utf-8") as f:
+        json.dump(key, f, indent=2, ensure_ascii=False)
+    return key_path
+
+
+# ------------------------------------------------------- the diagnostics text ----
+
+
+def anonymise_text(config_path: Path, text: str, where: str = "diagnostics") -> tuple[str, Anonymiser]:
+    """`text` (the 'Copy diagnostics' block) with the lab's names replaced, as a `diagnose` bundle replaces them:
+    the same Anonymiser, learnt from the same settings, job list, inbox and problem jobs, and the same leak check
+    on the result. Raises BundleLeak (and returns nothing) when an original name is still in it."""
+    from ionomos import notify
+
+    config_path = Path(config_path)
+    anon = learn(collect(config_path, (), Options(level="diagnose")))
+    hide = notify.file_secrets(config_path)
+    leaks: list = []
+    for _attempt in range(2):  # a name first met half-way (a home folder) needs a second pass, as in create()
+        scrub = _Scrub(anon, hide, table=False)
+        out = "".join(scrub.line(line) for line in text.splitlines(keepends=True))
+        leaks = check_text(anon, out, where)
+        if not leaks:
+            return out, anon
+    raise BundleLeak(leaks)
+
+
+def diagnostics_text(config_path: Path, anonymise: bool = True) -> tuple[str, Anonymiser | None]:
+    """The 'Copy diagnostics' text (service.diagnostics): anonymised by default (D74), or with real names."""
+    from ionomos import service
+
+    text = service.diagnostics(config_path)
+    if not anonymise:
+        return text, None
+    return anonymise_text(config_path, text)
+
+
+# ------------------------------------------------------------- self-check ----
+
+
+def _checker(config_path: Path | None, key: dict | None) -> tuple[Anonymiser | None, list[str]]:
+    """An Anonymiser that knows the real names a bundle must not hold: the lab's (settings, job list, inbox,
+    users folder) when this computer has the lab's settings, and the originals of a key file."""
+    sources: list[str] = []
+    anon = None
+    if config_path is not None and Path(config_path).is_file():
+        anon = learn(collect(Path(config_path), (), Options()), freeze=False)
+        sources.append(f"the names Ionomos knows on this computer ({Path(config_path)})")
+    if key:
+        anon = anon or Anonymiser()
+        for orig in (key.get("users") or {}).values():
+            anon.add_user(orig)
+        for orig in (key.get("computers") or {}).values():
+            anon.add_pc(orig)
+        for orig in (key.get("experiments") or {}).values():
+            anon.add_folder(orig)
+        for orig in (key.get("folders") or {}).values():
+            anon.add_dir(orig)
+        for orig in (key.get("names") or {}).values():
+            anon.add_name(orig)
+        sources.append(f"the key file's {sum(len(key.get(g) or {}) for g in Anonymiser().key)} original names")
+    return (anon.freeze() if anon is not None else None), sources
+
+
+def self_check(zip_path: Path, config_path: Path | None = None, key_path: Path | None = None) -> dict:
+    """Search every file of a bundle (and every file name) for the real names this computer knows: the lab's
+    users, experiments and samples (from its settings and job list) and the originals of the bundle's key
+    file (`key_path`, else the one next to the zip). {"sources", "files": [{"path", "hits", "kept"}], "hits"}.
+    With nothing to check against (the developer's computer, without the key) "sources" is empty."""
+    import io
+
+    zip_path = Path(zip_path)
+    key = None
+    kp = Path(key_path) if key_path is not None else key_path_for(zip_path)
+    if kp.is_file():
+        try:
+            key = json.loads(kp.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise BundleError(f"{kp} is not a bundle key file: {exc}") from exc
+    elif key_path is not None:
+        raise BundleError(f"no key file {kp}")
+    anon, sources = _checker(config_path, key)
+    out: dict = {"sources": sources, "files": [], "hits": 0}
+    if anon is None:
+        return out
+    try:
+        with zipfile.ZipFile(_long(zip_path)) as z:
+            for info in z.infolist():
+                check = _Check(anon)
+                check.name(info.filename)
+                with z.open(info) as raw:
+                    check.lines(info.filename, io.TextIOWrapper(raw, encoding="utf-8", errors="replace", newline="\n"))
+                leaks, kept = check.result()
+                hits = [(o, n) for _a, o, n in leaks]
+                out["files"].append({"path": info.filename, "hits": hits, "kept": [(o, n) for _a, o, n in kept]})
+                out["hits"] += len(hits)
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise BundleError(f"{zip_path} is not a readable bundle: {exc}") from exc
+    return out
+
+
+def self_check_lines(d: dict) -> list[str]:
+    if not d["sources"]:
+        return ["  name check: nothing to check against here (no key file next to the zip and no Ionomos settings on "
+                "this computer). On the lab's PC, `ionomos bundle inspect` searches it for every name the lab has."]
+    lines = ["  name check against " + " and ".join(d["sources"]) + ":"]
+    for f in d["files"]:
+        if f["hits"]:
+            lines.append(f"    {f['path']}: FOUND " + ", ".join(f"{o!r} x{n}" for o, n in f["hits"][:10])
+                         + (f" (+{len(f['hits']) - 10} more)" if len(f["hits"]) > 10 else ""))
+        else:
+            kept = ("  (kept as protein / gene identifiers: " + ", ".join(f"{o!r} x{n}" for o, n in f["kept"][:5]) + ")"
+                    if f["kept"] else "")
+            lines.append(f"    {f['path']}: no real name{kept}")
+    lines.append(f"  name check: {d['hits']} real name(s) found" if d["hits"] else
+                 "  name check: no real name found in any file")
+    return lines
 
 
 # ------------------------------------------------------ words for people ----
@@ -1747,7 +2106,12 @@ def summary_lines(plan: Plan) -> list[str]:
     lines = [f"Level: {plan.opts.level} ({LEVEL_TEXT[plan.opts.level]})",
              "Names: " + ("replaced by pseudonyms; the key file stays next to the zip" if plan.opts.anonymise
                           else "NOT anonymised (the lab's real names)"),
-             f"Jobs: {', '.join(PurePosixPath(j.arc).name for j in plan.jobs) or 'none'}", ""]
+             f"Jobs: {', '.join(PurePosixPath(j.arc).name for j in plan.jobs) or 'none'}"]
+    if plan.opts.include:
+        found = sum(1 for i in plan.items if i.extra)
+        lines.append("Also: " + "; ".join(EXTRAS[k] for k in plan.opts.include)
+                     + (f" ({found} found)" if found else " (none found in these jobs)"))
+    lines.append("")
     for what, items in groups.items():
         size = sum(i.size for i in items)
         lines.append(f"  {len(items):>3} x {what}  ({_mb(size)})")
@@ -1770,10 +2134,13 @@ class Choice:
     keep_conditions: bool = False
     jobs: tuple[int, ...] = ()
     note: str = ""
+    extras: bool = False   # DIA-NN's main report and the peptide / ion tables (implies validate, as --include does)
 
     def options(self) -> Options:
-        return Options(level="validate" if self.validate else "diagnose", anonymise=self.anonymise,
-                       keep_conditions=self.keep_conditions and self.anonymise, note=self.note)
+        validate = self.validate or self.extras
+        return Options(level="validate" if validate else "diagnose", anonymise=self.anonymise,
+                       keep_conditions=self.keep_conditions and self.anonymise, note=self.note,
+                       include=tuple(EXTRAS) if self.extras else ())
 
     def targets(self) -> list[str]:
         return [str(j) for j in self.jobs]
@@ -1837,7 +2204,9 @@ def inspect(zip_path: Path) -> dict:
     return out
 
 
-def inspect_text(zip_path: Path) -> str:
+def inspect_text(zip_path: Path, config_path: Path | None = None, key_path: Path | None = None,
+                 check: bool = True) -> str:
+    """`ionomos bundle inspect`: what the bundle holds, then (`check`) the name check of every file in it."""
     d = inspect(zip_path)
     lines = [f"{d['zip']}", f"  {d['members']} files, {_mb(d['bytes'])} unpacked, {_mb(d['zip_bytes'])} as a zip"]
     m = d["manifest"]
@@ -1845,6 +2214,8 @@ def inspect_text(zip_path: Path) -> str:
         b = d["legacy"]["build"] or {}
         lines.append(f"  no {names.BUNDLE_MANIFEST}: a report from before bundles (Ionomos {b.get('version', '?')})")
         lines += [f"  job: {j}" for j in d["legacy"]["jobs"]]
+        if check:
+            lines += self_check_lines(self_check(zip_path, config_path, key_path))
         return "\n".join(lines)
     a = m.get("anonymised") or {}
     lines += [f"  level: {m.get('level')}", f"  made by: {m.get('build_line')}  on {m.get('created')}",
@@ -1873,6 +2244,13 @@ def inspect_text(zip_path: Path) -> str:
         for r in rows or []:
             lines.append(f"  {title}: " + (r if isinstance(r, str) else f"{r['path']}: {r['why']}"))
     lines.append(f"  never included: {m.get('never_included')}")
+    if m.get("include"):
+        lines.append("  included on request: " + ", ".join(m["include"]))
+        lines += [f"    {s}" for s in extras_said(m)]
+    if check:
+        if not a.get("enabled"):
+            lines.append("  (not anonymised: the lab's real names are expected in it)")
+        lines += self_check_lines(self_check(zip_path, config_path, key_path))
     return "\n".join(lines)
 
 
@@ -1931,6 +2309,7 @@ def unpack(zip_path: Path, dest: Path) -> dict:
         if j.get("order_preserved") is False:
             notes.append(f"{j.get('folder')}: the pseudonyms changed the order of the sample names, so randomly "
                          "imputed values (and statistics that use them) will differ from the lab's")
+    notes += extras_said(m)
     return {"experiments": exps, "config": config, "hash_mismatches": bad, "notes": notes, "level": m.get("level")}
 
 
@@ -1976,8 +2355,8 @@ def _unpacked_config(dest: Path, notes: list[str]) -> Path | None:
         return None
 
 
-def translate(key_path: Path, text: str) -> str:
-    """`text` with the bundle's pseudonyms turned back into the lab's names (the lab's side, with its key file)."""
+def translator(key_path: Path) -> Callable[[str], str]:
+    """A function that turns the pseudonyms of one bundle (or saved diagnostics) back into the lab's names."""
     try:
         key = json.loads(Path(key_path).read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
@@ -1987,10 +2366,15 @@ def translate(key_path: Path, text: str) -> str:
         for p, orig in (key.get(group) or {}).items():
             back[p.casefold()] = orig
     if not back:
-        return text
+        return lambda text: text
     alts = sorted(back, key=len, reverse=True)
     rx = re.compile(r"(?<![^\W_])(?:" + "|".join(re.escape(a) for a in alts) + r")(?![^\W_])", re.IGNORECASE)
-    return rx.sub(lambda m: back[m.group().casefold()], text)
+    return lambda text: rx.sub(lambda m: back[m.group().casefold()], text)
+
+
+def translate(key_path: Path, text: str) -> str:
+    """`text` with the bundle's pseudonyms turned back into the lab's names (the lab's side, with its key file)."""
+    return translator(key_path)(text)
 
 
 # ------------------------------------------------------------------ cli ----
@@ -2002,7 +2386,11 @@ ionomos bundle [JOB | FOLDER ...] [--level diagnose|validate] [--out DIR] [--no-
     neither, the running, waiting and last failed jobs (validate: also the last finished one).
     Names are replaced by pseudonyms unless --no-anonymise; the key file is saved next to the zip and
     stays in the lab.
-ionomos bundle inspect ZIP           what a bundle holds (level, version, jobs, sizes, what was capped)
+    --include diann-report,peptides adds DIA-NN's main report (report.tsv; report.parquet as text) and the
+    peptide / ion tables (implies --level validate); each is row-sampled above --extra-mb.
+ionomos bundle inspect ZIP [--key KEY]  what a bundle holds (level, version, jobs, sizes, what was capped), and
+                                     each file searched for the real names this computer knows (the lab's
+                                     settings and job list; the key file next to the zip, or KEY)
 ionomos bundle unpack ZIP DIR        lay it out: DIR/<experiment>/ per job, DIR/config.yaml, the rest in DIR/_bundle/
                                      then: ionomos --config DIR/config.yaml analyze DIR/<experiment>
 ionomos bundle translate KEY [FILE]  the lab's side: turn the pseudonyms in FILE (or stdin) back into names
@@ -2017,9 +2405,14 @@ def add_parser(sub):
                        formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("targets", nargs="*", metavar="JOB|FOLDER",
                    help="job numbers or experiment folders; or: inspect ZIP | unpack ZIP DIR | translate KEY [FILE]")
-    p.add_argument("--level", choices=LEVELS, default="diagnose",
+    p.add_argument("--level", choices=LEVELS, default=None,
                    help="diagnose: settings, logs, job status and search logs (default). validate: also the "
                         "search's result tables and results/, so the analysis can be repeated")
+    p.add_argument("--include", default="", metavar="WHAT[,WHAT]",
+                   help=f"more tables for a validation: {', '.join(EXTRAS)} (implies --level validate)")
+    p.add_argument("--extra-mb", type=float, default=Options.extra_mb,
+                   help="a table added with --include above this size is row-sampled (default %(default)s)")
+    p.add_argument("--key", metavar="KEY", help="inspect: the bundle's key file, when it is not next to the zip")
     p.add_argument("--out", metavar="DIR", help="folder for the zip and its key file (default: the Desktop)")
     p.add_argument("--no-anonymise", "--no-anonymize", dest="no_anonymise", action="store_true",
                    help="keep the lab's real names (secrets are still removed)")
@@ -2041,9 +2434,10 @@ def run_cli(args) -> int:
     try:
         if t[:1] == ["inspect"]:
             if len(t) != 2:
-                print("usage: ionomos bundle inspect ZIP", file=sys.stderr)
+                print("usage: ionomos bundle inspect ZIP [--key KEY]", file=sys.stderr)
                 return 2
-            print(inspect_text(Path(t[1])))
+            cfg = Path(args.config) if getattr(args, "config", None) else None
+            print(inspect_text(Path(t[1]), cfg, Path(args.key) if getattr(args, "key", None) else None))
             return 0
         if t[:1] == ["unpack"]:
             if len(t) != 3:
@@ -2065,11 +2459,19 @@ def run_cli(args) -> int:
             if len(t) not in (2, 3):
                 print("usage: ionomos bundle translate KEY [FILE]", file=sys.stderr)
                 return 2
-            text = Path(t[2]).read_text(encoding="utf-8", errors="replace") if len(t) == 3 else sys.stdin.read()
-            sys.stdout.write(translate(Path(t[1]), text))
+            back = translator(Path(t[1]))
+            if len(t) == 2:
+                sys.stdout.write(back(sys.stdin.read()))
+                return 0
+            with open(_long(Path(t[2])), encoding="utf-8", errors="replace") as f:
+                for line in f:  # line by line: a main report or peptide table can be gigabytes
+                    sys.stdout.write(back(line))
             return 0
-        opts = Options(level=args.level, anonymise=not args.no_anonymise, keep_conditions=args.keep_conditions,
-                       max_mb=args.max_mb, psm_mb=args.psm_mb, note=args.note)
+        include = tuple(x for x in str(getattr(args, "include", "") or "").split(",") if x.strip())
+        level = args.level or ("validate" if include else "diagnose")
+        opts = Options(level=level, anonymise=not args.no_anonymise, keep_conditions=args.keep_conditions,
+                       max_mb=args.max_mb, psm_mb=args.psm_mb, note=args.note, include=include,
+                       extra_mb=getattr(args, "extra_mb", Options.extra_mb))
         if args.dry_run:
             plan = collect(Path(args.config), t, opts)
             print("\n".join(summary_lines(plan)))

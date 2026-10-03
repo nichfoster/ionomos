@@ -94,7 +94,8 @@ EXPECTED = {
               "Sage was run with --parquet, which Ionomos doesn't read: run it without",
               "Sage stopped before quantification (see its console output)"]),
     "Spectronaut": ("a Spectronaut report (PG.Quantity columns, or the long BGS report)",
-                    ["The report was exported with a schema that has no PG.Quantity",
+                    ["The report was exported with a schema that has no PG.Quantity (`ionomos spectronaut-columns` "
+                     "lists the columns to tick)",
                      "The export is a peptide / precursor-only report"]),
     "AlphaDIA": ("AlphaDIA's pg.matrix.tsv", ["AlphaDIA stopped before the protein step (see its log)"]),
     "MSstats": ("an MSstats-format table (ProteinName, Run, Condition, BioReplicate, Intensity)",

@@ -31,8 +31,14 @@ That is fine; use the app to see it.
 - **Files were left out**: the window and `README.txt` in the zip list them
   with the reason. A zip has a size limit (2,000 MB before compression;
   `ionomos bundle --max-mb` raises it). A PSM table above 25 MB is cut down
-  to every n-th row. A picture or another file that is not text is left out
-  when names are replaced, because the names in it can't be.
+  to every n-th row, and so is a main report or peptide table above 200 MB
+  (`--extra-mb`). A picture or another file that is not text is left out
+  when names are replaced, because the names in it can't be. A DIA-NN
+  `report.parquet` is written as text, which needs the Python package
+  pyarrow; without it the file is left out with that reason.
+- **Copy diagnostics says "LEAK CHECK FAILED"**: as for the zip, a name was
+  still in the text, so nothing was copied. Report the message; **Copy with
+  real names** still works for use inside the lab.
 - **It was saved in the log folder, not on the Desktop**: there was no
   Desktop folder to write to. The message gives the place.
 - **A name is still readable in the zip**: see the list of what the replacing

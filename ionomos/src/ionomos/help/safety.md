@@ -78,6 +78,9 @@ What is in it:
 - only if you tick the box for result tables: the search's result tables
   (protein, peptide and site tables) and Ionomos' `results` folder, so the
   analysis can be run again on another computer
+- only if you tick that box too: DIA-NN's main report and the peptide and
+  ion tables, with the same names replaced (a very large one as every n-th
+  row)
 - never: raw files, mzML or `.d` files, FASTA files (their name, size, number
   of entries and a checksum are noted instead) or spectral libraries
 
@@ -96,6 +99,13 @@ your compound again.
 
 After writing, Ionomos searches the finished zip for every name it replaced.
 If one is still there, no zip is saved and the message says so.
+`ionomos bundle inspect <zip>` repeats that search on the lab's PC at any
+time and lists every file with what it found.
+
+**Copy diagnostics** (Run & Test tab) replaces the names in its text in the
+same way and checks the text before it is copied. Its key is saved next to
+the copy in the log folder. **Copy with real names** copies the text as it
+is: keep that one inside the lab.
 
 What the replacing cannot do:
 

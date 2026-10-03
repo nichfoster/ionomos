@@ -49,9 +49,13 @@ From a terminal the same thing is `C:\ionomos-src\UPDATE.ps1`.
 `check`, `status --all`, the config, the last 150 log lines, what's in the
 inbox and any `.REJECTED.txt` notes. Also saved as
 `C:\Fragpipe_Auto\logs\diagnostics-<date>.txt`. Paste the whole thing — that's
-everything needed to reproduce a problem on the Mac. The copied text holds
-the lab's real names (secrets are replaced by `***`); the bundle below
-replaces them.
+everything needed to reproduce a problem on the Mac. Since D74 the copied
+text has the lab's names replaced as a bundle does (the same pseudonyms, and
+the same leak check before it reaches the clipboard); the saved copy is
+`diagnostics-<date>-anonymised.txt` with its key next to it, so
+`ionomos bundle translate KEY answer.txt` reads an answer back. **Copy with
+real names** (beside it) copies the text as before; `ionomos diagnose` prints
+real names unless given `--anonymise`. Secrets are `***` either way.
 
 ## Bundles: the lab's files on the developer's side (D63)
 
@@ -82,12 +86,14 @@ ionomos bundle                       # diagnose: settings, logs, the running / w
 ionomos bundle 12 --level validate   # job 12 with the search's result tables and results\
 ionomos bundle C:\Fragpipe_General\EJQ\20260902_EJQ_isoDTB_x --level validate --out D:\tmp
 ionomos bundle 12 --level validate --dry-run     # list what would go in; write nothing
+ionomos bundle 12 --include diann-report,peptides   # validate + DIA-NN's main report and the peptide / ion tables (D74)
 ```
 
 | Level | Holds | Does not hold |
 |---|---|---|
 | `diagnose` (default) | `report.txt` (version, checks, job list, log tail), `config.yaml` (secrets as `***`), watcher and app logs (last 3 MB each), crash files, needs-attention items; per job: `ionomos.json`, `DONE.txt` / `FAILED.txt`, `experiment.yaml`, TMT `annotation.txt`, everything in `ionomos_run\` (workflow, manifest, console logs, engine settings, `run_fingerprint.json` when present), `results\analysis.json` and `analysis_error.txt` | result tables |
 | `validate` | all of the above, plus the tables the analysis reads (FragPipe `combined_*.tsv`, `tmt-report\abundance_*.tsv`, `psm.tsv`; DIA-NN `*pg_matrix.tsv`, `*stats.tsv`; MaxQuant `proteinGroups.txt`, `summary.txt`; Sage `lfq.tsv`, `tmt.tsv`, `results.json`, `results.sage.tsv`), FragPipe's own copy of the workflow and manifest, an SDRF in the experiment folder, and all of `results\` | DIA-NN's main `report.tsv` / `report.parquet`, peptide-level FragPipe files other than `combined_*`, earlier attempts (`*_previous_*`) |
+| `--include diann-report,peptides` (D74; implies `validate`) | also DIA-NN's main report (`report.tsv`; `report.parquet` written as tab-separated text with pyarrow, value by value as Ionomos reads Parquet), DIA-NN `*pr_matrix.tsv`, FragPipe `peptide.tsv` / `ion.tsv`, MaxQuant `peptides.txt` / `modificationSpecificPeptides.txt`; added after every other table, so the size limit drops them first; each over `--extra-mb` (200) cut to every n-th row | spectral libraries (`*lib*`, `.speclib`), DIA-NN's first-pass report |
 
 Never, at either level: raw / mzML / `.d` files, FASTA files (`BUNDLE.json`
 records name, size, entry and decoy count, SHA-256), spectral libraries.
@@ -133,7 +139,10 @@ out). **Nothing here has been run on the lab's real folders yet.**
 ```bash
 ionomos bundle inspect Ionomos-bundle-20261001-1203-validate-v0.13.0.zip
 #   level, version and build, each job (status, method, FASTA facts, "analysis can be repeated: yes"),
-#   what was capped or left out
+#   what was capped or left out, what was converted (report.parquet); then the name check: every file
+#   searched for the real names this computer knows. On the lab's PC (its settings and job list, and the
+#   key next to the zip) that is a second, independent look before the zip is shared; here, without the
+#   key, there is nothing to check against (--key KEY if you have one)
 ionomos bundle unpack Ionomos-bundle-….zip work
 #   work/exp001/            the experiment folder: ionomos.json, ionomos_run/, fragpipe/, results/
 #   work/config.yaml        the lab's methods and analysis defaults; every folder points into work/_lab/

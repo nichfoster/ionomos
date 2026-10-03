@@ -54,12 +54,15 @@ class BundleDialog:
         self.job_list.bind("<<ListboxSelect>>", lambda e: self.refresh())
 
         self.validate = tkutil.BooleanVar(master=win, value=validate)
+        self.extras = tkutil.BooleanVar(master=win, value=False)
         self.anonymise = tkutil.BooleanVar(master=win, value=True)
         self.keep_conditions = tkutil.BooleanVar(master=win, value=False)
         self.debug = tkutil.BooleanVar(master=win, value=False)
         for var, label in (
                 (self.validate, "Include the search's result tables and Ionomos' results, so the analysis can be "
                                 "run again elsewhere (larger)"),
+                (self.extras, "Also DIA-NN's main report and the peptide / ion tables, for checking the search "
+                              "itself (much larger; very large ones are row-sampled)"),
                 (self.anonymise, "Replace names with pseudonyms (users, the PC, experiments, raw files, samples); "
                                  "the key file stays in the lab"),
                 (self.keep_conditions, "Keep every condition word readable (default: only control words such as DMSO)")):
@@ -87,7 +90,7 @@ class BundleDialog:
         picked = tuple(self.jobs[i]["id"] for i in self.job_list.curselection())
         return bundle.Choice(validate=self.validate.get(), anonymise=self.anonymise.get(),
                              keep_conditions=self.keep_conditions.get(), jobs=picked,
-                             note=self.text.get("1.0", "end").strip())
+                             note=self.text.get("1.0", "end").strip(), extras=self.extras.get())
 
     def _show(self, generation: int, lines: list[str]) -> None:
         if generation != self._generation:
