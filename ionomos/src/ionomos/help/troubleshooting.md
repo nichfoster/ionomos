@@ -149,8 +149,9 @@ keep them in one place.
 
 ## No raw files {#intake.no_raws}
 
-The folder has no `.raw` files at the top level or in a `raw\` subfolder. Such
-a folder is simply left alone; add the raw files.
+The folder has no `.raw` files at the top level, in a `raw\` subfolder, or one
+folder down (a folder per TMT plex, `<plex>\*.raw`). Such a folder is simply
+left alone; add the raw files.
 
 ## The experiment already exists {#intake.dest}
 
@@ -275,6 +276,33 @@ reads Sage's `.tsv` tables, so take that option out.
 The experiment's method was removed from the settings after it was queued.
 Add the method back (tab 3 Methods), or change the experiment's method.
 
+## A raw file can't be read yet {#search.hold-raw-locked}
+
+Just before a search starts, Ionomos opens each raw file. One of them could
+not be opened: it is still open in another program (Xcalibur still writing
+it, a copy that has not finished, an antivirus scan), or this Windows
+account may not read it. Nothing is wrong with the experiment. Close the
+program or wait for the copy; the search starts by itself once every file
+can be read. If it never does, check the file's permissions in Explorer
+(right-click → Properties → Security).
+
+## A path has a space in it {#search.hold-spaces}
+
+FragPipe can't use a path with a space in it, so the search waits instead of
+failing half-way. The reason names the path: usually a FASTA whose file name
+has a space (pick or rename it on tab 3 Methods) or a FragPipe or tools
+folder under one (move it, for example to `C:\FragPipe`). Experiment folders
+and raw file names never have spaces: Ionomos takes them out when it files a
+drop.
+
+## The earlier output can't be moved aside {#search.hold-previous-output}
+
+A search starts in an empty `fragpipe` folder, and the output of an earlier
+attempt is kept as `fragpipe_previous_<time>`. Moving it aside failed because
+a file in it is open in another program (a table open in Excel, Explorer's
+preview pane). Ionomos never writes a new search over it: close the file and
+the search starts by itself.
+
 ## A notification did not arrive {#trouble.notify}
 
 A message that can't be sent is given up on after a few seconds and noted
@@ -334,6 +362,33 @@ pop-up. After fixing the cause, press **Retry**; the earlier output is kept.
   Rename the folder or file.
 - **The experiment folder is gone**: it was moved or renamed after filing.
   Put it back where it was.
+- **Ended from outside, a cut-off table, a duplicate job**: see
+  [When a search ends early](#search.ended-early).
+
+## When a search ends early {#search.ended-early}
+
+- **Ended from outside, or stopped without saying why**: something ended
+  FragPipe while it ran (Task Manager, signing out, the PC going to sleep or
+  shutting down, Windows running out of memory). Retry; keep the PC awake.
+- **The result table was cut off, or is empty**: FragPipe ended while it
+  wrote its table, usually because the disk filled up. Free space, then
+  Retry.
+- **No 'ALL JOBS DONE' line and no result tables**: FragPipe said it
+  succeeded but did not finish. Retry; if it repeats, check that tab 1 names
+  `fragpipe.bat`.
+- **A raw file disappeared while FragPipe searched it**: it was moved,
+  renamed or deleted during the search. Put it back, then Retry.
+- **The console log grew past its limit**: a tool printed the same line over
+  and over, and the search was stopped before the log filled the disk.
+- **Duplicate of job N**: the job list had two jobs for one experiment
+  folder. The second is never searched; retry job N.
+- **Ionomos hit an unexpected error while running the search**: Ionomos
+  itself could not carry on (often a full disk). Fix the cause, then Retry.
+
+When Ionomos itself is ended in the middle of a search (Task Manager, a
+crash), FragPipe can keep running on its own. The next time Ionomos starts
+it stops that FragPipe first and runs the search again from the start, so
+one experiment is never searched twice at once.
 
 ## Analysis issues {#trouble.issues}
 

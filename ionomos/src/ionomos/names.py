@@ -145,6 +145,14 @@ FINGERPRINT_FILE = "run_fingerprint.json"
 PREFLIGHT_DIR = "preflight"
 
 
+# Fault handling (D69). While a search runs, its run folder holds which process Ionomos started (pid + the
+# time the OS says it started), so an Ionomos killed mid-search can stop that FragPipe on its next start instead
+# of running a second one beside it. Removed when the search ends.
+ENGINE_PID_FILE = "engine_pid.json"
+# The testbed's fake FragPipe (fake_fragpipe.py) acts out the fault named in this file in an experiment folder.
+FAKE_FP_MODE_FILE = "fake_fragpipe_mode.txt"
+
+
 def fingerprint_path(dest: Path) -> Path:
     """The latest search's fingerprint; earlier ones sit beside it as run_fingerprint_<time>.json."""
     return run_dir(dest) / FINGERPRINT_FILE

@@ -92,6 +92,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   install and writes nothing. The PNG carries its print size and the
   cut-offs, as the report's does.
 
+- **A fault-injection suite for FragPipe searches** (D69,
+  `tests/test_faults.py`). The testbed's fake FragPipe acts out a hang, being
+  ended from outside, a full disk, a raw file vanishing, garbled and huge
+  console output, and empty, header-only, cut-off or missing result tables,
+  per experiment (`fake_fragpipe_mode.txt`) or for all of them
+  (`IONOMOS_FAKE_FP_MODE`, comma-separated). The testbed has `fp_cut_table`
+  and `fp_hang` samples, and the stress tester mixes such faults into its drops.
+- **TMT drops laid out one folder per plex** (`<plex>\*.raw`) are filed and
+  searched as dropped: each folder is a plex, with its own `annotation.txt`.
+  A flat drop with several plexes is filed as before, with a warning that
+  FragPipe will name the channels itself (testbed samples `tmt_plexes`,
+  `tmt_flat_plexes`).
+- New plain-English causes for a failed search: ended from outside, a crash,
+  the time limit, a runaway console log, a result table not written to the
+  end, a run that did not finish, a raw file that disappeared during the
+  search, an error inside Ionomos. New holds, with help pages: a raw file
+  still open in another program, a path with a space (on Windows), earlier
+  output that can't be moved aside.
+
 ### Changed
 
 - `ionomos compare`, `ionomos benchmark` and `ionomos notify-test` now run
@@ -101,7 +120,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - In a report with more than one compound or time series, an exported
   dose-response curve or time-course feature is named after both
   (`dose_curve_CmpdA_EGFR.svg`), so the .zip keeps one of each.
-
 
 ### Fixed
 
@@ -117,6 +135,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **The experiment editor's Normalisation list lacked `auto` and `ratio`**
   (D64). It now offers the same choices as the Analysis tab.
+
+- **A FragPipe left running by an Ionomos that was ended from Task Manager
+  or crashed ran beside the re-run of its job.** The next start now stops it
+  first, only when it is certainly the process Ionomos started.
+- **A job found running at start-up** kept saying `running` in its folder;
+  after three interruptions it was failed without a `FAILED.txt`.
+- **A result table cut off by a full disk counted as a finished search**; so
+  did exit code 0 without the end line and without any result table.
+- **An error inside Ionomos during a search** (e.g. a full disk for its own
+  files) left the job `running` and FragPipe possibly unwatched.
+- **Re-running a job twice within one second** failed it (the earlier output's
+  folder name was taken).
+- **A second job row for the same experiment folder** searched it again over
+  the first job's output; it is now refused as a duplicate.
+- **Console logs**: the reason's "last lines" read the whole log into memory;
+  text in the Windows code page, UTF-16 and colour codes are now read
+  correctly in `FAILED.txt` and the hints.
+
 
 - **A test of the slow-copy wait failed now and then on Windows CI.** Its
   settle time (0.3 s) was only six times the pause between copied files, so

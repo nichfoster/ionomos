@@ -164,9 +164,13 @@ class Ledger:
                 out.append((r["id"], "queued"))
         return out
 
-    def requeue(self, job_id: int, reason: str | None = None, reset_attempts: bool = False) -> None:
-        """Send a job back to queued. A missing job id is a silent no-op (pinned by tests)."""
-        sql = "UPDATE jobs SET status='queued', reason=?, finished_at=NULL" + (", attempts=0" if reset_attempts else "")
+    def requeue(self, job_id: int, reason: str | None = None, reset_attempts: bool = False,
+                undo_attempt: bool = False) -> None:
+        """Send a job back to queued. A missing job id is a silent no-op (pinned by tests).
+        undo_attempt: the attempt just counted never started the engine (a hold found after start_attempt), so it
+        must not count towards MAX_ATTEMPTS."""
+        sql = "UPDATE jobs SET status='queued', reason=?, finished_at=NULL" + (
+            ", attempts=0" if reset_attempts else ", attempts=MAX(attempts-1, 0)" if undo_attempt else "")
         self._conn.execute(sql + " WHERE id=?", (reason, job_id))
         self._conn.commit()
 

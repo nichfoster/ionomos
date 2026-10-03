@@ -5,7 +5,7 @@ Three layers, all runnable on macOS and Windows:
 | Layer | What | Command |
 |---|---|---|
 | Unit + e2e (`pytest`) | 284 tests: naming, config, config I/O, ledger, watcher timing, intake, overrides, **FragPipe runner + worker** (done / failed / held / timeout / stop / re-run against the fake FragPipe), resolver logic, **real tkinter dialog and the setup app** (skipped if no display), and 6 end-to-end runs of watcher-thread + intake against testbed samples | `scripts/test_mac.sh` / `scripts\test_windows.ps1` |
-| Testbed (manual) | A fake lab on disk with 12 sample drops covering every path, a fake FragPipe, and the real CLI | `ionomos testbed …` |
+| Testbed (manual) | A fake lab on disk with 17 sample drops covering every path, a fake FragPipe, and the real CLI | `ionomos testbed …` |
 | The real PC | `dry-run` on real folders, then a throwaway drop; **Copy diagnostics** to report back | see DEV_LOOP.md |
 | Downstream | other engines (`tests/test_engines.py`): each format with its real column names, FDR / reverse / contaminant filters, provenance, and the same simulated experiment giving identical hits through DIA-NN, MaxQuant, Spectronaut and Sage files (Sage's `lfq.tsv`: razor grouping, fractions added, peptide and protein q filters, median polish checked by hand); D35 insights: outlier / batch / missingness / p-value-shape detection on planted data and no false alarms on clean data, rank-based gene sets, end to end into the TSVs, analysis.json and the report (`tests/test_insights.py`); R-script ports byte-identical to the real scripts; t-tests/BH vs scipy; moderated t vs limma; planted-effect recovery for isoDTB/DIA/TMT; report self-contained with its data, SVG valid | `tests/test_downstream.py`, golden files in `tests/golden/` |
 | JS harness (report front end) | dev-only jsdom tests of `report.js`: every section against the payload shapes that have bitten before (zero comparisons, one sample, ratio/isoDTB, 10k features × 50 samples, all p-values missing, dark/light) and hostile `<`/`&`/quote names through every dynamic-HTML sink incl. tooltips and the CSV export; the search grammar (lists, wildcards, regex, `desc:`, `term:`), suggestions, box selection, highlight groups, the address state, hit filters and every discovery / QC section (`discovery.test.mjs`); the help: the nav entry, a **?** on each section, QC tab and issue box, panels that open and close, every help link resolving in the page, escaped issue titles, a report without help (`help.test.mjs`); figure export (D62, `export.test.mjs`): the buttons of each chart, every control of the Export dialog changing the SVG (size presets in px and mm, font, palettes, background, title, legend, names, line and point size), text kept as text and no CSS in the file, the cut-offs in `<desc>`, the style kept in the browser, lab defaults and reset, a hostile style file, PNG with its print size and description (a stand-in canvas: jsdom draws nothing), copy as an image (a stand-in clipboard), the store-only .zip unzipped by the harness' own reader with every CRC-32 checked, its README and tables, 10,000 features, and the friendlier options (tooltips, the cut-offs in words, reset to lab defaults); hostile names through the export's file names, SVG, README and CSV (`escaping.test.mjs`); a pytest check fails when `tests/js/fixture.html` drifts from the shipped assets | `cd ionomos/tests/js && npm ci && npm test`; sync check runs with pytest |
@@ -79,7 +79,7 @@ ionomos --config C:\ionomos-testbed\Fragpipe_Auto\config.yaml run   # Windows
 **Terminal 2:**
 
 ```bash
-ionomos testbed list                       # the 12 samples and what each proves
+ionomos testbed list                       # the 17 samples and what each proves
 ionomos testbed drop iso_good              # -> queued under Fragpipe_General/EJQ
 ionomos testbed drop iso_good --slow       # file-by-file copy: watch the "waiting for copy to settle" log line
 ionomos testbed drop gui_unknown_user      # -> resolver window pops in terminal 1
@@ -121,6 +121,10 @@ init --slow-defaults` uses production timings (10 s / 60 s).
 | `reject_no_raws` | folder with no `.raw` is left alone forever (no note, no queue) |
 | `reject_two_methods` | ambiguous method → resolver |
 | `fp_fail` | filed fine, then the fake FragPipe fails → `failed` + `FAILED.txt`; retry re-runs it |
+| `tmt_plexes` | two TMT plexes, each in its own folder (`plexA\`, `plexB\`): kept as dropped, an `annotation.txt` in each |
+| `tmt_flat_plexes` | two TMT plexes in one folder: filed as dropped, with a warning that FragPipe names the channels |
+| `fp_cut_table` | the fake leaves its main table cut off mid-row → `failed`, "not written to the end" |
+| `fp_hang` | the fake hangs in MSFragger with a child process → killed with it at the time limit (5 min) |
 
 After a GUI answer, look at `experiment.yaml` inside the moved folder: that is
 the persisted decision, and the same file can be hand-written by a user to
@@ -182,7 +186,33 @@ DONE/FAILED notes present, ledger integrity OK, no CRITICAL log record.
 Failure modes of the fake FragPipe for manual testing:
 `IONOMOS_FAKE_FP_MODE=oom | msfragger | speclib | no-java | locked | diann |
 step-fail-exit0 | step-fail-neg-exit0 | cancel-exit0 | silent-exit0 |
-no-done-line | child` (what each acts out: `fake_fragpipe.MODES`).
+no-done-line | child | hang | killed | disk-full | raw-vanished | garbled-log |
+huge-log | runaway-log | empty-table | header-only | truncated-table |
+missing-table | truncated-psm` (what each acts out: `fake_fragpipe.MODES`),
+several joined by commas. For one experiment only, put the mode(s) in a file
+`fake_fragpipe_mode.txt` in its folder (before dropping it); it wins over the
+environment. The stress tester's `fault` drops do that.
+
+## FragPipe faults (D69)
+
+`tests/test_faults.py` acts out every fault the lab PC can produce through
+the real worker, and checks that each job ends done (with a note), failed
+(with its cause and `FAILED.txt`) or held, that no raw file changes, and that
+the next job still runs: FragPipe exiting non-zero half-way, exiting 0 without
+its end line or with empty / header-only / cut-off / missing tables, garbled
+(cp1252, UTF-16, colour codes, binary) and huge console output, a tool
+printing forever, a hang killed at the time limit with the process it
+started, FragPipe killed from outside, **Ionomos itself killed mid-search
+and restarted** (a real `ionomos run`, SIGKILL / TerminateProcess; the next
+start stops the leftover FragPipe and runs the job once more), a full disk
+for Ionomos' own files, a raw file locked (a real byte-range lock on Windows,
+no read permission on POSIX) or removed while queued, the workflow or FASTA
+vanishing just before the start, a FASTA with a space, two job rows for one
+folder, re-runs within one second, earlier output that can't be moved aside,
+and TMT drops with a folder per plex or several plexes in one folder. Time
+limits run on a fake clock (`fragpipe._clock`) and every "while it runs" step
+waits for what the console log says, so nothing depends on how fast the
+machine is.
 
 ## FragPipe as it really behaves
 

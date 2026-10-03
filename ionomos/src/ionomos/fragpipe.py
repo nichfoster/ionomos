@@ -358,6 +358,11 @@ def check_raws(dest: Path, plan: dict, cfg: Config) -> list[tuple[str, str, int,
         more = f" (+{len(empty) - 3} more)" if len(empty) > 3 else ""
         raise JobError(f"raw file(s) are empty (0 bytes): {', '.join(empty[:3])}{more} — an aborted acquisition or "
                        f"an interrupted copy; replace or remove them, then Retry")
+    locked = [Path(p).name for p in sizes if not _readable(Path(p))]
+    if locked:
+        more = f" (+{len(locked) - 3} more)" if len(locked) > 3 else ""
+        raise Hold(f"raw file(s) can't be read yet: {', '.join(locked[:3])}{more} — open in another program "
+                   f"(Xcalibur, a copy still running, antivirus) or not readable; the search starts once they are")
 
     need_free_gb = getattr(cfg, "min_free_gb", 0) or 0
     if need_free_gb:
@@ -369,6 +374,36 @@ def check_raws(dest: Path, plan: dict, cfg: Config) -> list[tuple[str, str, int,
                        f"~{need:.0f} GB (fragpipe.min_free_gb {need_free_gb} + raws {raw_gb:.1f})")
 
     return lines
+
+
+def _readable(raw: Path) -> bool:
+    """Can a raw file be opened and read now? Xcalibur keeps the file it is acquiring open without sharing it, so
+    on Windows opening or reading it fails (sharing / lock violation) until it is done (D69)."""
+    try:
+        with open(raw, "rb") as fh:
+            fh.read(1)
+        return True
+    except OSError:
+        return False
+
+
+def _refuses_spaces() -> bool:
+    """FragPipe refuses paths with spaces; Ionomos holds a search for one on Windows, where FragPipe runs (as the
+    config does: off Windows a testbed may live under "~/Code Projects/")."""
+    return os.name == "nt"
+
+
+def space_problem(spec: RunSpec) -> str:
+    """The first path FragPipe would get that has a space in it, as a hold reason; '' when there is none."""
+    paths = [("the FragPipe launcher", spec.exe), ("the experiment folder", spec.dest),
+             ("the FASTA", spec.fasta), ("the tools folder", spec.config_tools_folder),
+             ("DIA-NN", spec.config_diann), ("FragPipe's Python", spec.config_python)]
+    paths += [("raw file", Path(line[0])) for line in spec.manifest_lines]
+    for what, p in paths:
+        if p and re.search(r"\s", str(p)):
+            return (f"{what} has a space in its path ({p}); FragPipe can't use such a path — move or rename it "
+                    f"(a FASTA: pick a file without spaces on tab 3)")
+    return ""
 
 
 def prepare(job: Job, cfg: Config) -> RunSpec:
@@ -433,36 +468,55 @@ def prepare(job: Job, cfg: Config) -> RunSpec:
             per_exp = tmt_annotation_files(ov, experiments) if ov else {}
         except OverridesError as exc:
             raise JobError(str(exc)) from exc
+        # FragPipe (TmtiPanel, 23.1 and 24.0) takes a plex's annotation from the one folder that holds all
+        # its files, and only when exactly one file ending in annotation.txt is in it.
+        folders = {exp: {str(Path(line[0]).parent) for line in lines if line[1] == exp} for exp in experiments}
+        own_folder = (all(len(fs) == 1 for fs in folders.values())
+                      and len({f for fs in folders.values() for f in fs}) == len(experiments))
         if not per_exp:
             warnings.append("TMT job without a tmt: channel map in experiment.yaml; FragPipe will use its "
                             "default channel names")
-        else:
-            # FragPipe (TmtiPanel, 23.1 and 24.0) takes a plex's annotation from the one folder that holds all
-            # its files, and only when exactly one file ending in annotation.txt is in it.
-            folders = {exp: {str(Path(line[0]).parent) for line in lines if line[1] == exp} for exp in per_exp}
-            own_folder = (all(len(fs) == 1 for fs in folders.values())
-                          and len({f for fs in folders.values() for f in fs}) == len(per_exp))
-            if len(per_exp) == 1:
-                annotations["annotation.txt"] = next(iter(per_exp.values()))
-            elif own_folder:
-                annotations = {str(Path(next(iter(folders[exp]))) / "annotation.txt"): text
-                               for exp, text in per_exp.items()}
-            else:
-                warnings.append(f"{len(per_exp)} TMT plexes share one folder: FragPipe reads one annotation file "
-                                "per folder, so none is written and it will name the channels <plex>_<channel>. "
-                                "Put each plex's raw files in a folder of its own to get the sample names")
-            if annotations:
-                bad = annotation_problems(per_exp, props.get("tmtintegrator.channel_num", ""))
-                if bad:
-                    raise JobError("experiment.yaml tmt: " + "; ".join(bad))
+            if len(experiments) > 1 and not own_folder:
+                warnings.append(shared_plex_warning(len(experiments)))
+        elif own_folder:
+            # each plex's annotation.txt goes in the folder holding its files (the experiment folder, raw/, or
+            # the plex's own <plex>/ subfolder when the drop came laid out that way)
+            def where(exp: str) -> str:
+                folder = Path(next(iter(folders[exp])))
+                return "annotation.txt" if folder == raw_dir else str(folder / "annotation.txt")
 
-    return RunSpec(
+            annotations = {where(exp): text for exp, text in per_exp.items()}
+        elif len(per_exp) == 1:
+            annotations["annotation.txt"] = next(iter(per_exp.values()))
+        else:
+            warnings.append(shared_plex_warning(len(per_exp)))
+        if annotations:
+            bad = annotation_problems(per_exp, props.get("tmtintegrator.channel_num", ""))
+            if bad:
+                raise JobError("experiment.yaml tmt: " + "; ".join(bad))
+
+    spec = RunSpec(
         job_id=job.id or 0, method=job.method, dest=dest, exe=exe, workflow_src=wf, fasta=fasta,
         manifest_lines=lines, threads=cfg.threads, ram_gb=cfg.ram_gb, timeout_minutes=cfg.timeout_minutes,
         config_tools_folder=cfg.config_tools_folder, config_diann=cfg.config_diann,
         annotations=annotations, raw_dir=raw_dir, warnings=warnings, kind=kind,
         config_python=cfg.config_python, env=launcher_env(exe), notes=notes,
     )
+    spaced = space_problem(spec)
+    if spaced and _refuses_spaces():
+        raise Hold(spaced)
+    if spaced:
+        spec.notes.append(spaced + " (tolerated off Windows)")
+    return spec
+
+
+def shared_plex_warning(n: int) -> str:
+    """Several TMT plexes whose raw files sit in one folder (D69). The layout is the lab's choice: Ionomos never
+    moves the files, it says what FragPipe will do."""
+    return (f"{n} TMT plexes share one folder: FragPipe reads one annotation file per folder, so Ionomos writes "
+            f"none and FragPipe will name the channels <plex>_<channel> (an annotation.txt of your own there would "
+            f"be used for every plex, and FragPipe stops on the repeated sample names). To get the sample names, "
+            f"drop the experiment with each plex's raw files in a folder of its own (<plex>\\*.raw)")
 
 
 def write_inputs(spec: RunSpec) -> str | None:
@@ -470,10 +524,15 @@ def write_inputs(spec: RunSpec) -> str | None:
     spec.run_dir.mkdir(parents=True, exist_ok=True)
     moved = None
     if spec.workdir.exists() and any(spec.workdir.iterdir()):
-        # FragPipe wants an empty output folder; keep the old attempt, never delete it
-        moved = f"{WORKDIR}_previous_{datetime.now():%Y%m%d-%H%M%S}"
-        os.replace(spec.workdir, spec.dest / moved)
+        # FragPipe wants an empty output folder; keep the old attempt, never delete it. A name that is taken (two
+        # attempts in one second) gets -2, -3 ...: os.replace onto an existing empty folder would succeed on POSIX
+        # and fail on Windows, and onto a full one fail everywhere (D69)
+        stamp = f"{WORKDIR}_previous_{datetime.now():%Y%m%d-%H%M%S}"
+        moved = next(n for n in (stamp, *(f"{stamp}-{i}" for i in range(2, 1000))) if not (spec.dest / n).exists())
+        os.rename(spec.workdir, spec.dest / moved)
     spec.workdir.mkdir(exist_ok=True)
+    if spec.fasta is not None and not spec.fasta.is_file():  # moved since prepare(): the worker holds the job
+        raise FileNotFoundError(2, "the FASTA is gone", str(spec.fasta))
 
     spec.manifest.write_text(fp_manifest_text(spec.manifest_lines), encoding="utf-8", newline="\n")
     text = spec.workflow_src.read_text(encoding="utf-8", errors="replace")
@@ -547,19 +606,135 @@ def kill_tree(proc: subprocess.Popen) -> None:
         pass
 
 
-def run(spec: RunSpec, stop: threading.Event | None = None, on_start=None, poll: float = 1.0,
+POLL_SECONDS = 1.0  # how often a running search is checked (cancel, stop, time limit, console size)
+# A console log this much bigger than at the start of the attempt means a tool is printing in a loop: the search
+# is stopped before it fills the disk. A real FragPipe log is a few MB, tens for thousands of files.
+MAX_CONSOLE_BYTES = 2_000_000_000
+
+
+def _clock() -> float:
+    """The run loop's clock (time.monotonic); tests replace it to reach a time limit without waiting."""
+    return time.monotonic()
+
+
+def _say(out, text: str) -> None:
+    """One of Ionomos' own lines in the console log. Best effort: a full disk must not lose the job (D69)."""
+    try:
+        out.write(text.encode("utf-8"))
+        out.flush()
+    except (OSError, ValueError):
+        pass
+
+
+# ----------------------------------------------------- the process Ionomos started --
+
+
+def _engine_pid_path(spec: RunSpec) -> Path:
+    from ionomos.names import ENGINE_PID_FILE
+
+    return spec.run_dir / ENGINE_PID_FILE
+
+
+def _record_engine(spec: RunSpec, pid: int) -> None:
+    """Note which process runs this search, and when the OS says it started, so a later Ionomos can tell it from
+    an unrelated process that was given the same number (stop_leftover). Best effort."""
+    import json
+
+    from ionomos.health import process_started
+
+    try:
+        _engine_pid_path(spec).write_text(json.dumps({
+            "pid": pid, "started": process_started(pid), "job": spec.job_id, "ionomos_pid": os.getpid(),
+            "group": os.name != "nt",  # POSIX: started in its own session, so pid is also its process group
+            "at": datetime.now().astimezone().isoformat(timespec="seconds")}), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _forget_engine(spec: RunSpec) -> None:
+    try:
+        _engine_pid_path(spec).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def kill_pid_tree(pid: int, group: bool = False) -> None:
+    """Stop a process Ionomos started earlier and no longer has a handle on, with everything it started."""
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            if group and os.getpgid(pid) == pid:
+                os.killpg(pid, sig)
+            else:
+                os.kill(pid, sig)
+        except OSError:
+            return
+        if _wait_gone(pid, 10):
+            return
+
+
+def _wait_gone(pid: int, seconds: float) -> bool:
+    from ionomos.health import process_started
+
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        if process_started(pid) is None:
+            return True
+        time.sleep(0.05)
+    return process_started(pid) is None
+
+
+def stop_leftover(run_dir: Path) -> str:
+    """Stop a search an earlier Ionomos started in this run folder and did not see end (Ionomos was ended from
+    Task Manager or crashed; FragPipe runs in its own process group and lives on), so a job is never searched
+    twice at once (D69). Only a process that is still running
+    AND started when the record says is stopped: a number the OS has given to another program since is left
+    alone. Returns what was done, '' when there was nothing to do. Never raises."""
+    import json
+
+    from ionomos.health import process_started
+    from ionomos.names import ENGINE_PID_FILE
+
+    marker = Path(run_dir) / ENGINE_PID_FILE
+    try:
+        rec = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    msg = ""
+    try:
+        pid, when = int(rec.get("pid") or 0), rec.get("started")
+        now = process_started(pid) if pid else None
+        if now is not None and when is not None and abs(now - float(when)) < 2.0:
+            kill_pid_tree(pid, bool(rec.get("group")))
+            msg = (f"an earlier search of this experiment (process {pid}, started {rec.get('at', '?')}) was still "
+                   f"running after Ionomos stopped; it was stopped before this attempt"
+                   + ("" if process_started(pid) is None else " (it may still be running: check Task Manager)"))
+    except (TypeError, ValueError):
+        pass
+    try:
+        marker.unlink(missing_ok=True)
+    except OSError:
+        pass
+    return msg
+
+
+def run(spec: RunSpec, stop: threading.Event | None = None, on_start=None, poll: float | None = None,
         on_poll=None) -> RunResult:
     """Run the engine for `spec` (FragPipe, or DIA-NN via diann.py); blocks until it exits, times out, is
     cancelled, or `stop` is set."""
     stop = stop or threading.Event()
-    started = time.monotonic()
+    poll = POLL_SECONDS if poll is None else poll
+    started = _clock()
     started_at = datetime.now().astimezone().isoformat(timespec="seconds")
     try:
         offset = spec.console_log.stat().st_size  # the log keeps every attempt; this one starts here
     except OSError:
         offset = 0
-    res = _run(spec, stop, on_start, poll, on_poll, started)
-    res.seconds = round(time.monotonic() - started, 1)
+    res = _run(spec, stop, on_start, poll, on_poll, started, offset)
+    res.seconds = round(_clock() - started, 1)
     res.started_at = started_at
     res.console_offset = offset
     return res
@@ -571,57 +746,193 @@ def attempt_text(console_text: str) -> str:
     return console_text[at + 1:] if at >= 0 else console_text
 
 
-def _run(spec: RunSpec, stop: threading.Event, on_start, poll: float, on_poll, started: float) -> RunResult:
+def _run(spec: RunSpec, stop: threading.Event, on_start, poll: float, on_poll, started: float,
+         offset: int = 0) -> RunResult:
     cmd = spec.command()
     env = getattr(spec, "env", None) or {}
     deadline = started + spec.timeout_minutes * 60 if spec.timeout_minutes else None
-    with open(spec.console_log, "ab") as out:
-        out.write((f"# ionomos job {spec.job_id}  {datetime.now():%Y-%m-%d %H:%M:%S}\n"
-                   f"# {' '.join(cmd)}\n"
-                   + "".join(f"# {k}={v}\n" for k, v in env.items()) + "\n").encode())
-        out.flush()
+    try:
+        out = open(spec.console_log, "ab")  # noqa: SIM115 - handed to the engine; closed below
+    except OSError as exc:  # the run folder is unwritable or the disk is full: nothing was started
+        return RunResult(None, f"could not open {spec.console_log.name} for {spec.engine_name}'s output: {exc}",
+                         hints=explain(str(exc)))
+    with out:
+        _say(out, f"# ionomos job {spec.job_id}  {datetime.now():%Y-%m-%d %H:%M:%S}\n# {' '.join(cmd)}\n"
+                  + "".join(f"# {k}={v}\n" for k, v in env.items()) + "\n")
         try:
             proc = subprocess.Popen(cmd, stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                                     cwd=str(spec.run_dir), env={**os.environ, **env} if env else None,
                                     **_popen_kwargs())
         except OSError as exc:
-            return RunResult(None, f"could not start {spec.engine_name} ({spec.exe}): {exc}")
-        if on_start:
-            on_start(proc.pid, cmd)
-        while True:
+            return RunResult(None, f"could not start {spec.engine_name} ({spec.exe}): {exc}", hints=explain(str(exc)))
+        _record_engine(spec, proc.pid)
+        try:
+            if on_start:
+                on_start(proc.pid, cmd)
+            ended = _watch(spec, proc, out, stop, poll, on_poll, deadline, offset)
+        except BaseException:
+            kill_tree(proc)  # Ionomos itself failed while watching: never leave a search running unseen
+            raise
+        finally:
+            if proc.poll() is not None:
+                _forget_engine(spec)
+        if ended is not None:
+            return ended
+        code = proc.returncode
+        _say(out, f"\n# exit code {code} after {(_clock() - started) / 60:.1f} min\n")
+    return judge(spec, code, offset)
+
+
+def _watch(spec: RunSpec, proc: subprocess.Popen, out, stop: threading.Event, poll: float, on_poll,
+           deadline: float | None, offset: int) -> RunResult | None:
+    """Wait for the engine. None when it exited by itself, else the result of ending it."""
+    while True:
+        try:
+            proc.wait(timeout=poll)
+            return None
+        except subprocess.TimeoutExpired:
+            pass
+        if on_poll:
             try:
-                code = proc.wait(timeout=poll)
-                break
-            except subprocess.TimeoutExpired:
+                on_poll()
+            except Exception:  # noqa: BLE001 - progress reporting must not kill a search
                 pass
-            if on_poll:
-                try:
-                    on_poll()
-                except Exception:  # noqa: BLE001 - progress reporting must not kill a search
-                    pass
-            if (spec.run_dir / CANCEL_FILE).exists():
-                kill_tree(proc)
-                out.write(b"\n# cancelled by user\n")
-                return RunResult(proc.returncode, "cancelled by user", cancelled=True)
-            if stop.is_set():
-                kill_tree(proc)
-                out.write(b"\n# stopped by ionomos\n")
-                return RunResult(proc.returncode, "stopped (ionomos was shut down)", stopped=True)
-            if deadline and time.monotonic() > deadline:
-                kill_tree(proc)
-                out.write(f"\n# TIMEOUT after {spec.timeout_minutes} min\n".encode())
-                return RunResult(proc.returncode, f"timed out after {spec.timeout_minutes} min "
-                                                  f"(fragpipe.timeout_minutes)", timed_out=True)
-        out.write(f"\n# exit code {code} after {(time.monotonic() - started) / 60:.1f} min\n".encode())
-    text = attempt_text(read_tail_text(spec.console_log))  # this attempt only: the log keeps the earlier ones
+        if (spec.run_dir / CANCEL_FILE).exists():
+            kill_tree(proc)
+            _say(out, "\n# cancelled by user\n")
+            return RunResult(proc.returncode, "cancelled by user", cancelled=True)
+        if stop.is_set():
+            kill_tree(proc)
+            _say(out, "\n# stopped by ionomos\n")
+            return RunResult(proc.returncode, "stopped (ionomos was shut down)", stopped=True)
+        if deadline and _clock() > deadline:
+            kill_tree(proc)
+            _say(out, f"\n# TIMEOUT after {spec.timeout_minutes} min\n")
+            reason = f"timed out after {spec.timeout_minutes} min (fragpipe.timeout_minutes)"
+            text = attempt_text(read_tail_text(spec.console_log, start=offset))
+            return RunResult(proc.returncode, f"{reason}; it was at: {progress(spec.console_log)}",
+                             timed_out=True, hints=explain(reason) + explain(text))
+        try:
+            grown = spec.console_log.stat().st_size - offset
+        except OSError:
+            grown = 0
+        if grown > MAX_CONSOLE_BYTES:
+            kill_tree(proc)
+            mb = f"{MAX_CONSOLE_BYTES / 1e6:g}"
+            _say(out, f"\n# STOPPED: the console log grew past {mb} MB\n")
+            reason = f"{spec.engine_name} wrote more than {mb} MB to its console log; stopped so it can't fill the disk"
+            return RunResult(proc.returncode, reason, hints=explain(reason))
+
+
+# Exit codes that say how a process ended rather than what went wrong in it. Windows reports an NTSTATUS as an
+# unsigned 32-bit number (Python shows 3221225786); a POSIX signal is a negative code.
+_ENDED_FROM_OUTSIDE = {0xC000013A: "Ctrl+C or the console window closing", 0x40010004: "the session ending"}
+_CRASH_CODES = {0xC0000005: "an access violation", 0xC00000FD: "a stack overflow", 0xC0000409: "a stack buffer overrun",
+                0xC0000017: "running out of memory", 0xC0000142: "a DLL that failed to start",
+                0xE0434352: "a .NET exception"}
+
+
+def exit_code_reason(code: int | None, text: str) -> str:
+    """What an exit code alone says when the log names no cause: '' when it says nothing (D69)."""
+    if code is None or code == 0:
+        return ""
+    unsigned = code & 0xFFFFFFFF
+    if code < 0 and os.name != "nt":
+        try:
+            name = signal.Signals(-code).name
+        except ValueError:
+            name = f"signal {-code}"
+        if name in ("SIGSEGV", "SIGABRT", "SIGBUS", "SIGFPE", "SIGILL"):
+            return f"crashed with {name}"
+        return f"ended by {name}"
+    if unsigned in _ENDED_FROM_OUTSIDE:
+        return f"ended by {_ENDED_FROM_OUTSIDE[unsigned]}"
+    if unsigned in _CRASH_CODES:
+        return f"crashed with {_CRASH_CODES[unsigned]} (0x{unsigned:08X})"
+    facts = console_facts(text)
+    if not facts["error_lines"] and not facts["finished"] and not facts["started"] and not facts["commands"]:
+        return ""  # it stopped before running anything: the last lines say why
+    if not _FAILED_STEP.search(text) and not _CANCELLED_TASKS.search(text) and not explain(text):
+        return "stopped in the middle of a step without saying why"
+    return ""
+
+
+# The method's main tables: a file of these that exists must be a whole table (D69). Other engines: their own
+# expected_outputs(); psm.tsv and combined_protein.tsv (FragPipe's per-experiment and protein tables) are checked
+# too, but are only a warning: the analysis reads the main table.
+SIDE_TABLES = ("combined_protein.tsv", "*/psm.tsv", "psm.tsv")
+TABLE_SUFFIXES = (".tsv", ".txt")
+
+
+def table_problem(path: Path) -> str:
+    """'' for a table that looks whole; otherwise what is wrong: empty, binary, only a header, cut off in the
+    middle of a row. Reads the first and the last 64 kB only."""
+    try:
+        size = path.stat().st_size
+        if size == 0:
+            return "is empty (0 bytes)"
+        with open(path, "rb") as fh:
+            head = fh.read(65_536)
+            fh.seek(max(0, size - 65_536))
+            end = fh.read()
+    except OSError as exc:
+        return f"can't be read ({exc.strerror or exc})"
+    if b"\x00" in head or b"\x00" in end:
+        return "is not text (it holds binary data)"
+    first, nl, rest = head.partition(b"\n")
+    columns = first.rstrip(b"\r").count(b"\t") + 1
+    if not nl or not rest.strip():
+        return "has only its header line (no rows)" if nl or size < 65_536 else "has no line ends"
+    if not end.endswith(b"\n"):
+        last = end.rsplit(b"\n", 1)[-1]
+        if last.count(b"\t") + 1 < columns:
+            return "ends in the middle of a row (it was cut off)"
+    return ""
+
+
+def check_tables(spec: RunSpec) -> tuple[str, list[str]]:
+    """(why the run's output can't be used or '', warnings) for the tables an engine left (D69)."""
+    found = []
+    for name in spec.expected_outputs():
+        p = spec.workdir / name
+        if p.is_file() and p.suffix.lower() in TABLE_SUFFIXES:
+            found.append((name, table_problem(p)))
+    broken = [(n, why) for n, why in found if why and "no rows" not in why]
+    if broken:
+        return (f"{spec.engine_name}'s result table {broken[0][0]} {broken[0][1]}: the run did not finish writing "
+                f"it (the disk filled, or the search was ended while it wrote)"), []
+    if found and all("no rows" in why for _n, why in found):
+        return (f"{spec.engine_name}'s result table {found[0][0]} has only its header line: the search found no "
+                f"identifications to report"), []
+    warnings = []
+    seen: set[Path] = set()
+    for pattern in SIDE_TABLES:
+        for p in sorted(spec.workdir.glob(pattern)) if spec.workdir.is_dir() else []:
+            if p in seen:
+                continue
+            seen.add(p)
+            why = table_problem(p)
+            if why:
+                warnings.append(f"{p.relative_to(spec.workdir).as_posix()} {why}")
+    return "", warnings
+
+
+def judge(spec: RunSpec, code: int | None, offset: int = 0) -> RunResult:
+    """Read an attempt that ended by itself: its exit code, its part of the console log (from byte `offset`) and
+    what it wrote."""
+    text = attempt_text(read_tail_text(spec.console_log, start=offset))  # this attempt only: the log keeps the earlier ones
     hints = explain(text)
     bad_step = failed_step(text)  # the first failure is the cause; FragPipe cancels the rest
     if code != 0:
+        how = exit_code_reason(code, text)
+        if how:
+            hints = hints or explain(f"{spec.engine_name} {how}")
         lead = f"{hints[0]} — " if hints else ""
         if bad_step:
             name, c, said = bad_step
             return RunResult(code, f"{lead}FragPipe step {name} failed (exit code {c}); it said: {said}", hints=hints)
-        return RunResult(code, f"{lead}{spec.engine_name} exited with code {code}; last lines: {tail(spec.console_log, 4)}",
+        return RunResult(code, f"{lead}{spec.engine_name} exited with code {code}"
+                               + (f" ({how})" if how else "") + f"; last lines: {tail(spec.console_log, 4)}",
                          hints=hints)
     if bad_step:
         name, c, said = bad_step
@@ -636,14 +947,23 @@ def _run(spec: RunSpec, stop: threading.Event, on_start, poll: float, on_poll, s
         return RunResult(1, f"{spec.engine_name} exited 0 but wrote nothing to the output folder; see "
                             f"{spec.console_log}", hints=hints)
     warnings = []
-    if spec.engine_name == "FragPipe" and _DRY_RUN.search(text):
+    is_fragpipe = spec.engine_name == "FragPipe"
+    if is_fragpipe and _DRY_RUN.search(text):
         return RunResult(1, "FragPipe only did a dry run (its log says so) and searched nothing", hints=hints)
-    if spec.engine_name == "FragPipe" and not _ALL_DONE.search(text):
+    broken, table_warnings = check_tables(spec)
+    if broken:
+        return RunResult(1, broken, hints=explain(broken) + hints)
+    finished = not is_fragpipe or bool(_ALL_DONE.search(text))
+    if not finished and missing_outputs(spec):
+        why = ("FragPipe exited 0 without its 'ALL JOBS DONE' line and without any of its result tables: the run "
+               "did not finish")
+        return RunResult(1, f"{why}; last lines: {tail(spec.console_log, 4)}", hints=explain(why) + hints)
+    if not finished:
         # FragPipe's source prints this line at the end of every complete run. A warning, not a failure, until
         # a real headless run on the PC has shown the line in the console Ionomos captures (docs/ROADMAP.md)
         warnings.append("FragPipe's log has no 'ALL JOBS DONE' line: check the end of "
                         f"{spec.console_log.name} before trusting the output")
-    return RunResult(0, warnings=warnings)
+    return RunResult(0, warnings=warnings + table_warnings)
 
 
 def failed_step(console_text: str) -> tuple[str, str, str] | None:
@@ -665,10 +985,9 @@ def missing_outputs(spec: RunSpec) -> list[str]:
 
 
 def tail(path: Path, n: int = 20) -> str:
-    try:
-        lines = Path(path).read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
-        return ""
+    """The last n lines worth reading of a console log, joined, at most 600 characters. Reads only the end of
+    the file: a console log can be gigabytes (D69)."""
+    lines = read_tail_text(path, 64_000).splitlines()
     lines = [ln for ln in lines if ln.strip() and not ln.startswith("# ")]  # skip ionomos's own markers
     return " | ".join(lines[-n:])[-600:]
 
@@ -679,12 +998,42 @@ def _disk_free_gb(path: Path) -> float | None:
     return disk_free_gb(path)
 
 
-def read_tail_text(path: Path, max_bytes: int = 400_000) -> str:
+# Console text as FragPipe's tools write it on Windows (D69): Java writes in the Windows code page when its
+# output goes to a file (a µ or ü in a path is then not UTF-8), some tools write UTF-16 (a NUL after every
+# letter), progress bars write ANSI colour codes, a crashed tool can write binary. The regexes only need the
+# ASCII words, and a person reading FAILED.txt needs readable text.
+WINDOWS_CODEPAGE = "cp1252"  # what "ANSI" means on the lab PC (English / Western European Windows)
+_ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?")
+_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f﻿￾]")
+
+
+def clean_text(text: str) -> str:
+    """Without colour codes and control characters (tabs, line ends kept): safe for FAILED.txt and the app."""
+    return _CONTROL.sub("", _ANSI.sub("", text))
+
+
+def decode_console(data: bytes) -> str:
+    """Console bytes as text, line by line: UTF-8 where a line is UTF-8, else the Windows code page; NULs are
+    dropped first (so UTF-16 output reads as its letters), then clean_text. Never raises."""
+    if b"\x00" in data:
+        data = data.replace(b"\x00", b"")
+    lines = []
+    for line in data.split(b"\n"):
+        try:
+            lines.append(line.decode("utf-8"))
+        except UnicodeDecodeError:
+            lines.append(line.decode(WINDOWS_CODEPAGE, errors="replace"))
+    return clean_text("\n".join(lines))
+
+
+def read_tail_text(path: Path, max_bytes: int = 400_000, start: int = 0) -> str:
+    """The end of a console log (at most max_bytes, nothing before byte `start`), decoded with decode_console;
+    '' if it can't be read."""
     try:
         with open(path, "rb") as fh:
             fh.seek(0, os.SEEK_END)
-            fh.seek(max(0, fh.tell() - max_bytes))
-            return fh.read().decode("utf-8", errors="replace")
+            fh.seek(max(0, start, fh.tell() - max_bytes))
+            return decode_console(fh.read())
     except OSError:
         return ""
 
@@ -710,6 +1059,31 @@ _RAW_ERR = r"\b(error|exception|fail(ed|ure|s)?|unable|cannot|could not|corrupt(
 # block), every command line with its tool paths, and each tool's banner. tests/test_fragpipe_real.py runs all
 # of them against such a log.
 EXPLANATIONS: list[tuple[str, str]] = [
+    # Ionomos' own words about how a search ended (D69): fragpipe.run / judge / the worker write these
+    (r"timed out after [\d.]+ min \(fragpipe\.timeout_minutes\)",
+     "The search ran longer than the time limit (Time limit in Advanced, fragpipe.timeout_minutes): raise it for "
+     "a big experiment, then Retry. If the log's last step had stopped printing long before, FragPipe hung: Retry "
+     "once, and send Report a problem if it hangs again"),
+    (r"wrote more than [\d.]+ MB to its console log",
+     "A tool printed the same thing over and over, so the search was stopped before its log filled the disk: "
+     "Retry once; if it happens again, send Report a problem (it includes the end of the log)"),
+    (r"(?:FragPipe|DIA-NN|MaxQuant|Sage) (?:ended by (?:SIG[A-Z]+|signal \d+|Ctrl\+C or the console window closing|"
+     r"the session ending)|stopped in the middle of a step without saying why)",
+     "The search was ended from outside while it ran: Task Manager or another program, signing out, the PC "
+     "shutting down or going to sleep, or Windows ending it for lack of memory. Nothing in the search itself "
+     "failed: Retry, and keep the PC awake (Sleep: Never) while searches run"),
+    (r"(?:FragPipe|DIA-NN|MaxQuant|Sage) crashed with ",
+     "FragPipe or a tool it started crashed without a message (Windows reported the crash): Retry once; if it "
+     "crashes again, send Report a problem"),
+    (r"result table .{1,160} (?:is empty \(0 bytes\)|ends in the middle of a row|is not text|has no line ends)",
+     "The search's result table was not written to the end: usually the disk filled up, or the search was ended "
+     "while it wrote. Free space on the drive holding the experiment folders, then Retry"),
+    (r"without its 'ALL JOBS DONE' line and without any of its result tables",
+     "FragPipe reported success but did not finish (no end line, no result tables): it was ended early, or the "
+     "launcher is not FragPipe's own fragpipe.bat (tab 1). Retry; if it happens again, send Report a problem"),
+    (r"Ionomos hit an unexpected error while running the search",
+     "Ionomos itself hit a problem while it ran the search (the reason names it; often a full disk or a folder "
+     "it can't write): fix that, then Retry; if it is unclear, send Report a problem"),
     (r"raw file\(s\) are empty",
      "A raw file is 0 bytes: the acquisition was aborted or the copy was interrupted — copy it again from the "
      "instrument PC (or remove it from the experiment folder), then Retry"),
@@ -751,7 +1125,7 @@ EXPLANATIONS: list[tuple[str, str]] = [
      "and Threads in Advanced so the tools leave room, then Retry"),
     (r"OutOfMemoryError|Java heap space|GC overhead limit",
      "FragPipe ran out of memory: lower Threads or raise RAM (GB) in Advanced, and close other programs"),
-    (r"not enough space on the disk|No space left on device|disk is full",
+    (r"not enough space on the disk|No space left on device|disk is full|\[Errno 28\]|\bENOSPC\b",
      "The disk is full: free space on the drive holding the experiment folders, then Retry"),
     (r"\berror=206\b|WinError 206|The filename or extension is too long|must be less than 260 characters",
      "A path or command line got longer than Windows allows: shorten the experiment folder and raw file names "
@@ -813,6 +1187,12 @@ EXPLANATIONS: list[tuple[str, str]] = [
      + _RAW_ERR + r".{0,80}(?<![\w./\\])(RawFileReader|ThermoRawFileParser)(?![\w/\\]|\.\w)|"
      r"error (loading|reading).{0,60}\.raw|\.raw.{0,60}(corrupt|truncated))",
      "A .raw file couldn't be read: it may be incomplete or corrupt — re-copy it from the instrument PC"),
+    # Java's message for a file that is gone: "java.io.FileNotFoundException: C:\x\a.raw (The system cannot find
+    # the file specified)"; NIO's NoSuchFileException names the path alone
+    (r"(?i)(?:FileNotFoundException|NoSuchFileException)\b.{0,300}\.(?:raw|mzml)\b|"
+     r"\.raw\b.{0,60}(?:No such file or directory|cannot find the file specified)",
+     "A raw file disappeared while FragPipe searched it (moved, renamed or deleted during the search, or taken "
+     "by a sync tool): put it back in the experiment folder, then Retry"),
     (r"UnsupportedClassVersionError|Unsupported class file major version|requires Java 9\+",
      "Wrong Java version: FragPipe must use its bundled Java — reinstall FragPipe or set its launcher again"),
     (r"Could not find or load main class|Unable to access jarfile",
@@ -828,7 +1208,7 @@ EXPLANATIONS: list[tuple[str, str]] = [
      "letter — check the FASTA (re-download it), then Retry"),
     (r"(?i)philosopher.{0,120}(error|fatal)|level=(error|fatal) msg=",
      "Philosopher (the FDR/report tool) failed — often a leftover lock from an interrupted run: Retry once"),
-    (r"(?i)(no|0) (psms|peptides|proteins) (were )?(found|identified|passed)",
+    (r"(?i)(no|0) (psms|peptides|proteins) (were )?(found|identified|passed)|search found no identifications",
      "The search found no identifications: wrong FASTA/species, wrong method, or empty/blank runs"),
     (r"Exception in thread|java\.lang\.\w+Exception",
      "FragPipe (Java) hit an internal error: see the console log; Retry once, then send diagnostics"),

@@ -164,9 +164,14 @@ class Worker:
             log.info("searches resumed")
             self._was_paused = False
         self._beat("idle")
-        for job in self.ledger.list("queued"):
+        jobs = self.ledger.list()
+        for job in [j for j in jobs if j.status == "queued"]:
             if self._stop.is_set():
                 return False
+            twin = _twin(job, jobs)
+            if twin is not None:
+                self._refuse_duplicate(job, twin)
+                continue
             try:
                 spec = runner.prepare(job, self.cfg)
             except fragpipe.Hold as exc:
@@ -176,9 +181,17 @@ class Worker:
                 self._fail(job, str(exc), hints=fragpipe.explain(str(exc)))
                 return True
             self._held.pop(job.id, None)
-            self._run(job, spec)
-            return True
+            return self._run(job, spec)
         return False
+
+    def _refuse_duplicate(self, job: Job, twin: Job) -> None:
+        """A second job row for an experiment folder that already has one (a rebuilt or hand-edited job list): it
+        is never searched, so one folder never gets two FragPipes or two sets of notes (D69). Only the job list
+        says so: the folder, its notes and its ionomos.json belong to the other job."""
+        reason = (f"duplicate of job {twin.id}: the same experiment folder ({job.dest_dir}); not searched twice — "
+                  f"retry job {twin.id} instead")
+        log.error("job %d: %s", job.id, reason)
+        self.ledger.set_status(job.id, "failed", reason)
 
     def _hold(self, job: Job, reason: str) -> None:
         if self._held.get(job.id) == reason:
@@ -195,7 +208,23 @@ class Worker:
 
     # ------------------------------------------------------------- running --
 
-    def _run(self, job: Job, spec: fragpipe.RunSpec) -> None:
+    def _run(self, job: Job, spec: fragpipe.RunSpec) -> bool:
+        """Run one prepared job. True when it ran (whatever the outcome), False when it went back to waiting.
+        Whatever Ionomos itself hits on the way fails the job with that reason instead of leaving it 'running'
+        with nobody watching it (D69)."""
+        try:
+            return self._search(job, spec)
+        except Exception as exc:  # noqa: BLE001 - a full disk, an unwritable folder, a bug: the job must end
+            log.exception("job %d: Ionomos failed while running the search", job.id)
+            self.current = None
+            reason = f"Ionomos hit an unexpected error while running the search: {type(exc).__name__}: {exc}"
+            try:
+                self._fail(job, reason, spec, fragpipe.explain(reason))
+            except Exception:  # noqa: BLE001
+                log.exception("job %d: could not record the failure; it is re-queued when Ionomos restarts", job.id)
+            return True
+
+    def _search(self, job: Job, spec: fragpipe.RunSpec) -> bool:
         dest = spec.dest
         _close(self.cfg, job, "search_waiting", "search_failed")
         # clear a stale CANCEL before the ledger flips to 'running' (issue #17): a cancel delivered
@@ -209,14 +238,27 @@ class Worker:
             # job leaves the queue while its folder keeps claiming "queued" forever.
             log.error("job %d: %s", job.id, exc)
             self._fail(job, f"job vanished from the ledger: {exc}")
-            return
+            return True
         self.current = job
+        # an earlier Ionomos that was killed mid-search left its FragPipe running: stop it before starting
+        # another on the same folder (D69)
+        leftover = fragpipe.stop_leftover(spec.run_dir)
+        if leftover:
+            log.warning("job %d: %s", job.id, leftover)
+            spec.notes.append(leftover)
         try:
             moved = runner.write_inputs(spec)
         except OSError as exc:
             self.current = None
-            self._fail(job, f"could not prepare {spec.engine_name} inputs: {exc}")
-            return
+            waiting = _input_hold(spec, exc)
+            if waiting:
+                self.ledger.requeue(job.id, f"waiting: {waiting}", undo_attempt=True)
+                self._held.pop(job.id, None)
+                self._hold(job, waiting)
+                return False
+            self._fail(job, f"could not prepare {spec.engine_name} inputs: {exc}", spec,
+                       fragpipe.explain(str(exc)))
+            return True
         if moved:
             spec.warnings.append(f"previous attempt's output kept as {moved}/")
         log.info("job %d: %s %s on %s (%d raw files, attempt %d)", job.id, spec.engine_name, job.method, dest,
@@ -232,7 +274,10 @@ class Worker:
             "workdir": str(spec.workdir), "console_log": str(spec.console_log),
             "command": spec.command(), "warnings": list(spec.warnings), "notes": list(getattr(spec, "notes", ())),
         })
-        (dest / FAILED_NOTE).unlink(missing_ok=True)
+        try:
+            (dest / FAILED_NOTE).unlink(missing_ok=True)
+        except OSError:
+            pass
 
         def started(pid, cmd):
             log.info("job %d: %s pid %d: %s", job.id, spec.engine_name, pid, " ".join(cmd))
@@ -256,18 +301,18 @@ class Worker:
             (spec.run_dir / fragpipe.CANCEL_FILE).unlink(missing_ok=True)
             _update_status(job, run={"finished_at": finished, "exit_code": res.code})
             self._fail(job, "cancelled by user", spec)
-            return
+            return True
 
         if res.stopped:
             self.ledger.requeue(job.id, "interrupted (ionomos stopped); will run again")
             _update_status(job, status="queued", reason="interrupted (ionomos stopped); will run again",
                            run={"finished_at": finished, "exit_code": res.code})
             log.warning("job %d: FragPipe stopped; job re-queued", job.id)
-            return
+            return True
         if not res.ok:
             _update_status(job, run={"finished_at": finished, "exit_code": res.code, "hints": res.hints})
             self._fail(job, res.reason, spec, res.hints)
-            return
+            return True
 
         _update_status(job, run={"finished_at": finished, "exit_code": 0})
         self._beat(f"running job {job.id}: analysis")
@@ -289,6 +334,7 @@ class Worker:
               + ("".join(f"Note: {w}\n" for w in warnings)))
         log.info("job %d: done%s", job.id, f" ({len(warnings)} warning(s))" if warnings else "")
         _notify(self.cfg, "done", job, headline or "", summary)
+        return True
 
     def _postprocess(self, job: Job, spec: fragpipe.RunSpec) -> tuple[list[str], dict]:
         """Downstream analysis (never fails the job; see postprocess.py)."""
@@ -301,7 +347,10 @@ class Worker:
             return [f"analysis crashed: {exc}"], {}
 
     def _fail(self, job: Job, reason: str, spec: fragpipe.RunSpec | None = None, hints: list[str] | None = None) -> None:
-        self.ledger.set_status(job.id, "failed", reason)
+        try:
+            self.ledger.set_status(job.id, "failed", reason)
+        except Exception:  # noqa: BLE001 - e.g. a full disk: still tell the person, in the folder (D69)
+            log.exception("job %d: could not record 'failed' in the job list", job.id)
         _update_status(job, status="failed", reason=reason)
         engine = spec.engine_name if spec else "The search"
         if reason != "cancelled by user":
@@ -342,11 +391,80 @@ def _fingerprint(job: Job, spec: fragpipe.RunSpec, res: fragpipe.RunResult, atte
         log.exception("job %s: could not write the run fingerprint", job.id)
 
 
+def _same_folder(a: str, b: str) -> bool:
+    import os
+
+    return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+
+
+def _twin(job: Job, jobs: list[Job]) -> Job | None:
+    """The job that owns `job`'s experiment folder when `job` is a second row for it: one that is running, or one
+    with a smaller id that has not been refused as a duplicate itself."""
+    for other in jobs:
+        if other.id == job.id or not _same_folder(other.dest_dir, job.dest_dir):
+            continue
+        if other.status == "running" or (other.id < job.id and not (other.reason or "").startswith("duplicate of")):
+            return other
+    return None
+
+
+def _input_hold(spec: fragpipe.RunSpec, exc: OSError) -> str:
+    """When writing a search's inputs failed for a reason outside the job, the hold reason; '' to fail it.
+    The workflow or FASTA vanished since prepare() looked (setup: held like a missing one), or the previous
+    attempt's output can't be moved aside because a file in it is open (Excel, Explorer's preview): Ionomos never
+    writes a new search into it, so it waits (D69)."""
+    if not spec.workflow_src.is_file():
+        return f"workflow file for {spec.method} missing: {spec.workflow_src} (it disappeared just before the search)"
+    if spec.fasta is not None and not spec.fasta.is_file():
+        return f"FASTA for {spec.method} missing: {spec.fasta} (it disappeared just before the search)"
+    if isinstance(exc, PermissionError) and spec.workdir.is_dir():
+        return (f"the previous attempt's output {spec.workdir} can't be moved aside ({exc.strerror or exc}): a file in "
+                f"it is open in another program — close it; it is kept as {spec.workdir.name}_previous_<time>")
+    return ""
+
+
+def recover(cfg: Config, ledger: Ledger) -> list[tuple[int, str]]:
+    """At start-up: jobs the last Ionomos left 'running' (ledger.recover_on_startup) go back to queued, or to
+    failed after MAX_ATTEMPTS starts, and their folders say so; a FragPipe that outlived that Ionomos is stopped
+    first, so the re-run is never a second search beside it (D69). Returns [(job id, new status)]."""
+    out = ledger.recover_on_startup()
+    for jid, status in out:
+        job = ledger.get(jid)
+        if job is None:
+            continue
+        dest = Path(job.dest_dir)
+        leftover = fragpipe.stop_leftover(dest / fragpipe.RUN_DIR)
+        if leftover:
+            log.warning("job %d: %s", jid, leftover)
+        if status == "queued":
+            _update_status(job, status="queued", reason=job.reason)
+            continue
+        _update_status(job, status="failed", reason=job.reason)
+        _tell(cfg, "search_failed", job, f"The search failed on {job.user}/{job.inbox_name}", job.reason or "",
+              severity="error", causes=["Ionomos stopped or the PC restarted during this search every time it ran: "
+                                        "it may be what takes the PC down (memory, a crash)"],
+              fixes=["Look at the end of FragPipe's log, then press Retry (or Jobs tab → Retry)"])
+        if dest.is_dir():
+            _note(dest, FAILED_NOTE, f"ionomos could not finish this experiment ({datetime.now():%Y-%m-%d %H:%M}).\n\n"
+                                     f"Reason: {job.reason}\n\nAfter fixing the cause: Ionomos app -> Run & Test -> "
+                                     f"Retry a failed job, or  ionomos retry {jid}\n")
+    return out
+
+
 # -------------------------------------------------------- telling a person --
 
 
 def _waiting_causes(reason: str) -> list[str]:
     r = reason.lower()
+    if "can't be read yet" in r:
+        return ["A raw file is still open in another program — Xcalibur still acquiring, a copy still running, or "
+                "antivirus scanning it; the search starts by itself once it can be read"]
+    if "has a space in its path" in r:
+        return ["FragPipe can't use a path with a space in it: rename the file or folder named above (for a FASTA, "
+                "pick one without spaces on tab 3 Methods)"]
+    if "can't be moved aside" in r:
+        return ["A file in the experiment's fragpipe folder is open (Excel, Explorer's preview pane): close it; "
+                "the earlier output is then kept as fragpipe_previous_<time> and the search starts"]
     if "window program" in r:
         return ["The launcher set on tab 1 is FragPipe's window program (the .exe); searches need fragpipe.bat, "
                 "which FragPipe installs next to it — tab 1 Folders → Find FragPipe"]

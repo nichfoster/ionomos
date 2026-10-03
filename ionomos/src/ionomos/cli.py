@@ -161,7 +161,9 @@ def cmd_run(args) -> int:
         return 3
     log.info("ionomos %s starting (config %s, pid %d)", __version__, cfg.config_path, os.getpid())
     ledger = _open_ledger(cfg)
-    for jid, st in ledger.recover_on_startup():
+    from ionomos.worker import recover
+
+    for jid, st in recover(cfg, ledger):
         log.warning("job %d was running when ionomos stopped; now %s", jid, st)
     write_pid(cfg.log_dir)
     _maintenance(cfg)

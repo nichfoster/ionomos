@@ -63,6 +63,9 @@ HOLD_TOPICS = (
     (r"raw file converter not found", "search.hold-converter"),
     (r"Sage settings", "search.hold-sage-config"),
     (r"is not in config\.yaml any more", "search.hold-method"),
+    (r"raw file\(s\) can't be read yet", "search.hold-raw-locked"),
+    (r"has a space in its path", "search.hold-spaces"),
+    (r"can't be moved aside", "search.hold-previous-output"),
 )
 
 

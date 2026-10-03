@@ -2429,3 +2429,100 @@ renderer on Windows; text in PNG with fonts other than macOS's Arial; the new
 SVG files in PowerPoint, Illustrator or Inkscape (as for D62); real lab
 titrations, time courses or isoDTB data; the .zip in a real browser (jsdom
 only).
+
+### D69 — FragPipe faults are acted out by the fake, end in a clear state, and never cost data or a second search
+**2026-10-02.** Keeping FragPipe working matters most, and nothing has run
+against a real FragPipe yet (D59). Every way a search can go wrong on the lab
+PC was acted out against the worker (`tests/test_faults.py`) and what broke
+was fixed. A fault ends **done** (with a note), **failed** (with a cause from
+`fragpipe.EXPLANATIONS` and `FAILED.txt`) or **held** (waiting, starts by
+itself); nothing the user made is deleted or written over; the worker goes on
+with the next job.
+
+1. **The fake acts out faults per experiment.** `fake_fragpipe.MODES` gained
+   `hang`, `killed`, `disk-full`, `raw-vanished`, `garbled-log`, `huge-log`,
+   `runaway-log`, `empty-table`, `header-only`, `truncated-table`,
+   `missing-table`, `truncated-psm`; several combine with commas. A file
+   `fake_fragpipe_mode.txt` (`names.FAKE_FP_MODE_FILE`) in an experiment
+   folder sets them for that experiment only, so the testbed (`fp_cut_table`,
+   `fp_hang`) and the stress tester (a `fault` drop) mix faults with good
+   jobs. Where FragPipe's own words for a fault are not known, the fake's are
+   invented (Java's standard messages are used for a full disk and a missing
+   file).
+2. **A FragPipe that outlives Ionomos is stopped before the job runs again.**
+   FragPipe runs in its own process group, so ending Ionomos from Task
+   Manager (or a crash) left it running; the next start re-queued the job and
+   started a second FragPipe on the same folder. While a search runs, its run
+   folder now holds `engine_pid.json` (`names.ENGINE_PID_FILE`): the pid and
+   when the OS says that process started (`health.process_started`). At
+   start-up (`worker.recover`) and before every attempt, a recorded process
+   that is still running **and started at that time** is stopped with
+   everything it started; a process that only has the same number now is
+   left alone. Waiting for the orphan and adopting its result was the
+   alternative: it saves a search, but the exit code is lost and the worker
+   needs another state. It is rare (a reboot or sign-out ends FragPipe too),
+   and a re-run is certain.
+3. **Recovery tells the folder.** A job found `running` at start-up went back
+   to `queued` or, after `MAX_ATTEMPTS`, to `failed` in the job list only; its
+   `ionomos.json` kept saying `running` and a failed one had no `FAILED.txt`.
+   `worker.recover` writes both.
+4. **Exit code 0 needs whole tables.** After a run that says it succeeded, the
+   method's main tables that exist are checked (`fragpipe.table_problem`,
+   first and last 64 kB): empty, binary, or cut off in the middle of a row
+   fails the job ("not written to the end": usually a full disk); a header
+   alone fails it as "no identifications". `psm.tsv` / `combined_protein.tsv`
+   problems are a note. No end line **and** no result table is a failure;
+   either alone stays as D59 had it (a note).
+5. **What an exit code says.** A POSIX signal, a Windows NTSTATUS (Ctrl+C or
+   the console closing, an access violation, out of memory), or a run that
+   stopped in the middle of a step without any message gets a cause: "ended
+   from outside" (Task Manager, sign-out, sleep, Windows out of memory) or a
+   crash. A time limit and a runaway console log get theirs too.
+6. **Console text as Windows writes it.** Each line is UTF-8 when it is, else
+   cp1252 (the PC's ANSI code page); NULs (UTF-16), colour codes and control
+   characters are removed before anything is matched or shown. Every reader
+   takes only the end of the log (`tail()` used to read all of it), and the
+   fingerprint reads lines in pieces of at most 64 kB. A console log that
+   grows by more than 2 GB in one search stops it (`MAX_CONSOLE_BYTES`).
+7. **Ionomos' own failures end the job.** An error inside Ionomos while a
+   search ran (a full disk for the console log or the job list, a bug) left
+   the job `running` with nobody watching it, and FragPipe possibly running
+   unseen. FragPipe is now killed and the job failed with the reason
+   ("Ionomos hit an unexpected error …"); Ionomos' own marker lines in the
+   console log are best effort.
+8. **New holds, not failures, for what is outside the job.** A raw file that
+   can't be opened and read yet (Xcalibur still acquiring it, a copy still
+   running, antivirus); on Windows, a FASTA, launcher, tools folder or raw
+   path with a space (off Windows a note, as the config does); the workflow or
+   FASTA gone between the checks and the start; the earlier attempt's output
+   that can't be moved aside (a file open in Excel): a new search is never
+   written into it. A hold found after the attempt was counted gives the
+   attempt back (`Ledger.requeue(undo_attempt=True)`), and the worker sleeps
+   instead of spinning on it.
+9. **One folder, one search.** A second job row for an experiment folder (a
+   rebuilt or hand-edited job list) is failed in the job list as "duplicate
+   of job N" and never searched; the folder and its notes belong to job N and
+   are not touched. Two drops of the same raws under two names are two
+   experiments, as before.
+10. **Earlier output is never in the way.** `fragpipe_previous_<time>` gets
+    `-2`, `-3` … when the name is taken (two attempts in one second used to
+    fail the job).
+11. **TMT plexes as dropped.** A TMT drop with no raw at the top and none in
+    `raw\` but `<plex>\*.raw` folders is filed with that layout kept (folder
+    names cleaned as file names are; the same raw name in two folders is
+    refused, as FragPipe needs each once). Each folder is one plex
+    (FragPipe's experiment); experiment.yaml `files:` still wins. For other
+    methods raws one folder down are still "no raw files", as before. Each
+    plex's `annotation.txt` is written in its folder, and the SDRF reads it
+    there. A flat drop with several plexes is **not** restructured (that is
+    the lab's choice): it is filed as it is, with a warning in the log,
+    `ionomos.json` (`plan.warnings`) and `DONE.txt`, now also without a
+    `tmt:` map. A drop with raws at the top level still ignores subfolders.
+
+**Verified**: by the suite on the fake, on macOS and in CI. **Not
+verified**: anything against a running FragPipe; that `taskkill /T` and the
+creation-time check behave on the PC as in CI; that Xcalibur's lock makes a
+file unreadable; which code page FragPipe's tools really write (ROADMAP
+"Open questions"). The app's inbox list and the review window's **Delete**
+button still look for raws at the top level or in `raw\` only, so in a
+`<plex>\` drop they list the files but can't delete one.

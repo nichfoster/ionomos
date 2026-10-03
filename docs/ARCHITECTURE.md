@@ -96,15 +96,16 @@
  4. worker      first runnable queued job (a job whose launcher/workflow/FASTA
                 is missing is *held*: stays queued with "waiting: …")  →
                   status=running, attempts+1
-                  move an old non-empty dest\fragpipe\ aside (fragpipe_previous_<ts>)
+                  stop a FragPipe that a killed Ionomos left on this folder (engine_pid.json, D69)
+                  move an old non-empty dest\fragpipe\ aside (fragpipe_previous_<ts>[-n])
                   write dest\ionomos_run\fragpipe-files.fp-manifest
                   write dest\ionomos_run\<method>.workflow  (database.db-path = method FASTA)
-                  (TMT) write annotation.txt next to the raws (never over a user's own)
+                  (TMT) write annotation.txt next to each plex's raws (never over a user's own)
                   run fragpipe.bat --headless --workflow <wf> --manifest <mf>
                       --workdir dest\fragpipe --threads N --ram G      (JAVA_HOME = FragPipe's jre)
                   tee → dest\ionomos_run\fragpipe_console.log
                   write dest\ionomos_run\run_fingerprint.json        (whatever the outcome)
-                  exit 0 + output + no failed step → postproc(method) → status=done, DONE.txt
+                  exit 0 + output + no failed step + whole tables → postproc(method) → status=done, DONE.txt
                   else / timeout  → status=failed, FAILED.txt, reason in ionomos.json + ledger
                   ionomos stopped → FragPipe tree killed, job back to queued
 
@@ -133,7 +134,7 @@ C:\Fragpipe_Auto\                    ← the app lives here (no spaces!)
   ionomos.db                        ← SQLite ledger
 
 C:\Fragpipe_General\<user>\<experiment>\    ← where jobs land
-  *.raw                              ← moved as-is (or raw\ if user made one)
+  *.raw                              ← moved as-is (or raw\, or <plex>\ per TMT plex, if the user made them)
   experiment.yaml                    ← if the user wrote one
   ionomos.json                      ← status + provenance, rewritten on every transition
   ionomos_run\                      ← what ionomos gave FragPipe
@@ -141,6 +142,7 @@ C:\Fragpipe_General\<user>\<experiment>\    ← where jobs land
     <method>.workflow                ← pinned workflow, database.db-path set
     fragpipe_console.log             ← FragPipe's console output (all attempts)
     run_fingerprint.json             ← what the latest search did (D59); earlier: run_fingerprint_<time>.json
+    engine_pid.json                  ← only while a search runs: its process and start time (D69)
   fragpipe\                          ← --workdir; all FragPipe output
     fragpipe.workflow                ← FragPipe copies the workflow used here
   fragpipe_previous_<ts>\            ← an earlier attempt's output (never deleted)
@@ -306,6 +308,24 @@ by default and its `base_url` must be on this PC. See ASSISTANT.md.
 | A lab member's or an experiment's name leaves the PC in a bundle | names are replaced by default; the finished zip is searched for every original and is not saved if one is found (`BundleLeak`); the key file is never inside the zip |
 | A bundle overwrites a file, or changes an experiment | it only reads experiment folders; the zip is written as `.part`, renamed when it passed the check, and an existing name gets `-2`, `-3` … |
 | A multi-GB table is bundled | streamed line by line (a few MB of memory); a size limit per bundle and a row-sampled PSM table, both said in `BUNDLE.json`, `README.txt`, `inspect` and the window |
+
+FragPipe faults (D69; each acted out by the fake FragPipe in `tests/test_faults.py`):
+
+| Threat | Defence |
+|---|---|
+| Ionomos is ended (Task Manager, a crash) while FragPipe runs; FragPipe lives on in its own process group | `ionomos_run\engine_pid.json` holds the pid and the OS's start time of the process; the next start (`worker.recover`) and every attempt stop a recorded process that is still running **and** started then (never one that only has its number), before the job runs again; the folder says `queued` / `failed` |
+| FragPipe hangs | the time limit kills the process tree; the cause names the limit and the step it was at |
+| FragPipe is ended from outside, or crashes without a message | a POSIX signal, a Windows NTSTATUS, or a run that stopped mid-step without a word gets a cause ("ended from outside", "crashed") |
+| Exit code 0, but the main result table is empty, binary or cut off mid-row | failed ("not written to the end"); a header alone: "no identifications"; `psm.tsv` problems: a note; no end line and no table: failed |
+| A tool prints forever | the console log may grow 2 GB per search (`fragpipe.MAX_CONSOLE_BYTES`), then the search is stopped |
+| Console text in the Windows code page, UTF-16, colour codes, binary junk, GB-sized | read line by line as UTF-8 else cp1252, NULs and control characters dropped; only the end of the log is ever read |
+| The disk fills, or something else fails inside Ionomos, during a search | FragPipe killed, the job failed with that reason; Ionomos' own log lines are best effort |
+| A raw file is still open (Xcalibur, a copy, antivirus) when its search would start | held until it can be read |
+| A path FragPipe gets has a space (FASTA name, tools folder) | held on Windows; a note elsewhere |
+| The workflow or FASTA vanishes just before the start | held, the attempt not counted |
+| The earlier output can't be moved aside (a file open in Excel) | held; a new search is never written into it; `fragpipe_previous_<time>-2` when the name is taken |
+| Two job rows for one experiment folder | the later one is failed as a duplicate in the job list only; the folder belongs to the first |
+| Several TMT plexes in one folder | filed as dropped with a warning (FragPipe names the channels itself); a drop as `<plex>\*.raw` keeps that layout and gets an `annotation.txt` per plex |
 
 ## Notifications (D58)
 
