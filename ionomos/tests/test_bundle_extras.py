@@ -197,7 +197,8 @@ def test_diann_report_and_peptide_tables_on_request(bed, capsys):
     text = m[f"{arc}/dia-quant-output/report.tsv"].decode()
     conv_text = m[f"{arc}/dia-quant-output/report.parquet.tsv"].decode()
     assert "\tP10275\tP10275\tANDR_HUMAN\tAR\t" in text and conv_text.splitlines()[0] == "\t".join(REPORT_HEAD)
-    assert conv_text.replace(".0\t", "\t") == text.replace(".0\t", "\t")
+    # line by line: report.tsv is bundled as written (\r\n from write_text on Windows), the conversion writes \n
+    assert conv_text.replace(".0\t", "\t").splitlines() == text.replace(".0\t", "\t").splitlines()
 
     # the developer's side: inspect and unpack say what was converted; the loader reads it as it read the original
     assert cli.main(["bundle", "inspect", str(z)]) == 0
@@ -215,7 +216,7 @@ def test_diann_report_and_peptide_tables_on_request(bed, capsys):
     # ... and the key turns the unpacked report back into the lab's own file, line by line
     assert cli.main(["bundle", "translate", str(key), str(un / "exp001" / "fragpipe" / "dia-quant-output" /
                                                          "report.tsv")]) == 0
-    assert capsys.readouterr().out == src["report"].read_text(encoding="utf-8")
+    assert capsys.readouterr().out.splitlines() == src["report"].read_text(encoding="utf-8").splitlines()
 
 
 def test_large_tables_on_request_are_row_sampled_and_dropped_first(bed):
