@@ -403,7 +403,7 @@ three places:
 | Where | What | How |
 |---|---|---|
 | The report | **SVG** / **PNG** / **Export…** on every chart, **Export for slides** (a .zip of every figure, the tables as CSV, the style, a README) | `report.js` "figure export": the chart's part of the report is drawn again with the style answering `css()`, `widthOf()` and `heightOf()`; `svgTools()` hands the SVG over; a title, a legend and the cut-offs are put around it. PNG through a canvas; the zip by a store-only writer. The style is kept in `localStorage` and starts from the payload's `exportDefaults` |
-| `ionomos export <folder>` | volcano, PCA, heatmap, correlation as SVG in `results/figures/` + `README.txt` | `downstream/slides.py` reads the JSON inside `report.html` and `charts.figures()` draws from it: no browser, nothing analysed again. SVG only |
+| `ionomos export <folder>` | volcano, PCA, heatmap, correlation, and the dose-response, time-course and liganded-site figures (`downstream/sectionfigs.py`) as SVG in `results/figures/` + `README.txt`; `--list`, `--figures`, `--features`, `--top`; PNG with `--format png\|both` | `downstream/slides.py` reads the JSON inside `report.html` and `charts.catalog()` / `figures()` draw from it: no browser, nothing analysed again. PNG is drawn by a renderer the computer has (`downstream/raster.py`: cairosvg, resvg, rsvg-convert or Inkscape), never a dependency (D68) |
 | After each analysis | the same files, when `analysis.export.figures` lists any (default: none) | the `figures` stage of `downstream.analyze`, isolated like the others; listed in `analysis.json` → `figures` and in the report's Files |
 
 The exported SVG has no CSS: text is `<text>`, colours are written out, and

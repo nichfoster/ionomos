@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Figures for slides from the dose-response, time-course and liganded-site
+  sections** (D68, `downstream/sectionfigs.py`). `ionomos export` and
+  `analysis.export.figures` now also draw, in the same export style:
+  - `dose_potency_<compound>.svg`: pEC50 against the curve's fold change,
+  - `dose_curves_<compound>.svg`: a grid of curves (points, the fit, the 95%
+    interval of pEC50), the six most relevant regulated or those you name,
+  - `time_patterns_<series>.svg` and `time_profiles_<series>.svg`: the
+    patterns of changing features, and the most significant features over
+    time with the series they were compared with,
+  - `liganded_rank_<compound>.svg` and `liganded_selectivity.svg`: sites
+    ranked by competition ratio, and which sites each compound ligands.
+  `figures:` takes these names or `dose`, `time`, `liganded`. The report's
+  **Export for slides** .zip holds them too (one file per curve and feature
+  there), as well as each series' patterns and the selectivity map.
+- **Choose what to export**: `ionomos export --list` names every figure the
+  report can draw and what can be chosen for it; `--figures` takes kinds,
+  groups or those names (`volcano_Drug*`); `--features EGFR,BTK` and
+  `--top N` choose the curves, profiles and sites drawn. A grid that would be
+  too small to read at the chosen size draws fewer panels and says so.
+- **PNG from `ionomos export`** (`--format png | both`, `--png-dpi`,
+  `--png-scale`, `--renderer`), drawn by a program the computer already has:
+  cairosvg, resvg, rsvg-convert or Inkscape (also found in its usual install
+  folder). Ionomos still installs nothing for it; without one it says what to
+  install and writes nothing. The PNG carries its print size and the
+  cut-offs, as the report's does.
+
+### Changed
+
+- In a report with more than one compound or time series, an exported
+  dose-response curve or time-course feature is named after both
+  (`dose_curve_CmpdA_EGFR.svg`), so the .zip keeps one of each.
+
 ### Fixed
 
 - **A test of the slow-copy wait failed now and then on Windows CI.** Its

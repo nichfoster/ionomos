@@ -18,9 +18,11 @@ Command line.
                      [--exclude SAMPLE] [--log2fc F] [--open]
                                                    statistics + volcano plots + results/report.html
     ionomos export   JOB_ID|FOLDER [--preset slide169|slide43|half|col1|col2] [--palette colorblind]
-                     [--font-pt N] [--figures volcano,pca] [--style FILE] [--out DIR]
-                                                   figures for slides as SVG, from the finished report, in the
-                                                   lab's export style (analysis.export); PNG: the report's Export
+                     [--font-pt N] [--figures volcano,pca,dose,...] [--list] [--features EGFR,BTK] [--top N]
+                     [--format svg|png|both] [--style FILE] [--out DIR]
+                                                   figures for slides from the finished report (volcano, PCA, heatmap,
+                                                   correlation, dose-response, time course, liganded sites), in the
+                                                   lab's export style (analysis.export); PNG with a renderer (D68)
     ionomos demo     [FOLDER] [--open]            a simulated experiment + its report (offline, no lab setup)
     ionomos compare  FOLDER REFERENCE [--by id|gene] [--open]
                                                    an Ionomos analysis against a reference result of the same experiment
@@ -672,16 +674,24 @@ _EXPORT_SIZES = ("slide169", "slide43", "half", "col1", "col2")  # charts.SIZES 
 
 
 def cmd_export(args) -> int:
-    """Figures for slides from a finished analysis: static SVG in the export style (downstream/slides.py)."""
+    """Figures for slides from a finished analysis: SVG (and PNG with a renderer) in the export style
+    (downstream/slides.py, raster.py)."""
     import json
 
-    from ionomos.downstream import charts, slides
+    from ionomos.downstream import charts, raster, sectionfigs, slides
 
-    if args.format != "svg":
-        print("ionomos export writes SVG only: making a PNG needs a renderer, and Ionomos adds no dependency for "
-              "it. Open report.html and use Export (PNG, copy as an image, a .zip of everything), or open the "
-              "SVG in PowerPoint or Inkscape.", file=sys.stderr)
+    formats = ("svg", "png") if args.format == "both" else (args.format,)
+    renderer = None
+    if "png" in formats and not args.list:
+        renderer = raster.find(args.renderer)
+        if renderer is None:
+            print((f"the renderer {args.renderer} was not found. " if args.renderer != "auto" else "") + raster.HOW,
+                  file=sys.stderr)
+            return 2
+    if args.top is not None and not 1 <= args.top <= sectionfigs.MAX_PANELS:
+        print(f"--top takes 1 to {sectionfigs.MAX_PANELS}", file=sys.stderr)
         return 2
+    features = [x.strip() for x in args.features.split(",") if x.strip()] if args.features else None
     cfg = None
     try:
         cfg = load(args.config, check_paths=False)
@@ -700,8 +710,11 @@ def cmd_export(args) -> int:
     flags = {"size": args.preset, "width": args.width, "height": args.height, "unit": args.unit,
              "font_pt": args.font_pt, "font_family": args.font_family, "palette": args.palette, "up": args.up,
              "down": args.down, "neutral": args.neutral, "background": args.background, "line_scale": args.line_scale,
-             "point_scale": args.point_scale, "label_count": args.labels}
+             "point_scale": args.point_scale, "label_count": args.labels, "png_dpi": args.png_dpi,
+             "png_scale": args.png_scale}
     flags = {k: v for k, v in flags.items() if v is not None}
+    if args.png_scale is not None and args.png_dpi is None:
+        flags["png_dpi"] = 0  # a scale asked for wins over a resolution the style may carry
     if (args.width is not None or args.height is not None) and args.preset is None:
         flags["size"] = "custom"
     if args.labels == 0:
@@ -721,24 +734,36 @@ def cmd_export(args) -> int:
         # the style the report was made with, the lab's style now, a saved style file, the command line
         style = charts.style_from(charts.style_layer(d.get("exportDefaults"), lenient=True),
                                   ((cfg.analysis or {}).get("export") if cfg is not None else None), saved, flags)
-        which = charts.style_layer({"figures": args.figures})["figures"] if args.figures else None
+        spec = [x for x in args.figures.split(",") if x.strip()] if args.figures else None
+        figs = slides.select(d, spec, features, args.top)
     except (slides.SlidesError, charts.StyleError) as exc:
         print(str(exc), file=sys.stderr)
         return 2
+    if args.list:
+        print(slides.listing(d, figs))
+        return 0
+    for f in figs:
+        for n in f.notes:
+            print(f"note: {f.name}: {n}", file=sys.stderr)
     folder = Path(args.out) if args.out else report.parent / slides.FOLDER
     try:
-        written = slides.write(folder, d, style, which, f"ionomos export (Ionomos {__version__})")
+        written = slides.write(folder, d, style, generator=f"ionomos export (Ionomos {__version__})", formats=formats,
+                               renderer=renderer, figs=figs)
+    except raster.RasterError as exc:
+        print(f"no PNG made, nothing written: {exc}. --format svg works without a renderer.", file=sys.stderr)
+        return 1
     except OSError as exc:
         print(f"cannot write to {folder}: {exc}", file=sys.stderr)
         return 1
     if not written:
-        print(f"nothing to draw: {report} has no comparison, PCA, heatmap or correlation", file=sys.stderr)
+        print(f"nothing to draw: {report} has none of the figures asked for (ionomos export --list shows what it has)",
+              file=sys.stderr)
         return 1
-    print(f"style: {charts.style_text(style)}")
+    print(f"style: {charts.style_text(style)}" + (f"; PNG by {renderer}" if renderer else ""))
     for p in written:
         print(f"  {p}")
-    print(f"{len(written) - 1} figure(s) and {slides.README} in {folder}. PNG, the other charts, other cut-offs: "
-          "open report.html and use Export.")
+    print(f"{len(written) - 1} file(s) and {slides.README} in {folder}. Other charts, other cut-offs: open report.html "
+          "and use Export.")
     return 0
 
 
@@ -1203,9 +1228,24 @@ def main(argv: list[str] | None = None) -> int:
     for off in ("title", "subtitle", "legend", "note"):
         ex.add_argument(f"--no-{off}", dest=f"no_{off}", action="store_true",
                         help=f"leave the {'cut-offs line' if off == 'note' else off} out")
-    ex.add_argument("--figures", help="which, comma-separated: volcano,pca,heatmap,correlation (default: all)")
-    ex.add_argument("--format", default="svg", choices=["svg", "png"],
-                    help="svg (png is not available here: it needs a browser; use the report's Export)")
+    ex.add_argument("--figures", help="which, comma-separated: kinds (volcano, pca, heatmap, correlation, dose_potency, "
+                                      "dose_curves, time_patterns, time_profiles, liganded_rank, liganded_selectivity), "
+                                      "groups (dose, time, liganded), or names from --list (* and ? allowed). Default: all")
+    ex.add_argument("--list", action="store_true", help="list the figures this report can draw and what can be chosen "
+                                                        "for each; write nothing")
+    ex.add_argument("--features", metavar="NAMES",
+                    help="comma-separated genes, proteins or sites (* and ? allowed) for the dose-response curves, the "
+                         "time-course profiles and the liganded-site figures (default: the most relevant)")
+    ex.add_argument("--top", type=int, metavar="N", help="how many curves / time profiles without --features (default 6)")
+    ex.add_argument("--format", default="svg", choices=["svg", "png", "both"],
+                    help="svg (default), png or both. PNG needs cairosvg, resvg, rsvg-convert or Inkscape on this "
+                         "computer; its size follows png_scale / png_dpi of the style")
+    ex.add_argument("--renderer", default="auto", choices=["auto", "cairosvg", "resvg", "rsvg-convert", "inkscape"],
+                    help="which program draws the PNG (default: the first one found)")
+    ex.add_argument("--png-dpi", dest="png_dpi", type=float, metavar="DPI",
+                    help="PNG resolution in dots per inch, 72 to 1200 (e.g. 300 for print); default: the style's")
+    ex.add_argument("--png-scale", dest="png_scale", type=float, metavar="K",
+                    help="PNG pixels per px of the figure, 1 to 4 (default 2: a 16:9 slide is 2560 x 1440)")
     ex.add_argument("--style", metavar="FILE", help="an export style saved from the report (export_style.json)")
     ex.add_argument("--out", metavar="DIR", help="where to write (default: <results>/figures)")
     ex.set_defaults(fn=cmd_export)

@@ -1982,7 +1982,7 @@
     svg("line", { x1: X(xc) - 10, x2: X(xc) + 10, y1: Y(S.front[k]), y2: Y(S.front[k]), stroke: col, "stroke-width": 2, "stroke-opacity": 0.6 }, g);
     pts.forEach((p) => title(svg("circle", { cx: X(p[0]), cy: Y(Math.min(p[1], ymax)), r: 3.4, fill: p[2] ? "none" : css("--text2"), stroke: css("--text2"), "stroke-width": 1.2 }, g),
       (p[2] ? "control" : fmtDose(Math.pow(10, p[0]))) + ": ratio " + fmt(p[1])));
-    svgTools(host, root, "dose_curve_" + nameOf(i));
+    svgTools(host, root, "dose_curve_" + (D.dose.series.length > 1 ? (S.name || "curves") + "_" : "") + nameOf(i));  // one file per compound and feature
   }
   function renderDoseTable() {
     const S = doseSeries(), host = $("#dosetable");
@@ -2163,7 +2163,7 @@
     pts.forEach((p) => title(svg("circle", { cx: Xs(p[0]) - (other ? 5 : 0), cy: Y(p[1]), r: 3.2, fill: S.cls[k] === "not" ? css("--text2") : col, "fill-opacity": isImputed(i, p[2]) ? 0.3 : 0.85, "data-j": p[2] }, g),
       D.samples[p[2]] + ": " + fmt(p[1]) + (isImputed(i, p[2]) ? " (imputed)" : "")));
     if (other) text(g, L + 8, T + 10, "dashed: " + other.name, { "text-anchor": "start" });
-    svgTools(host, root, "time_course_" + nameOf(i));
+    svgTools(host, root, "time_course_" + (X.series.length > 1 ? (S.name || "series") + "_" : "") + nameOf(i));  // one file per series and feature
   }
   function renderTimeTable() {
     const S = timeSeries(), host = $("#timetable");
@@ -2540,7 +2540,9 @@
   // name, width, height, unit, text size (pt) that suits it. A 16:9 PowerPoint slide is 1280 x 720 px at 96 px / inch.
   const SIZES = { slide169: ["16:9 slide", 1280, 720, "px", 14], slide43: ["4:3 slide", 960, 720, "px", 14], half: ["Half a slide", 640, 600, "px", 12],
     col1: ["Journal figure, one column (85 mm)", 85, 70, "mm", 7], col2: ["Journal figure, two columns (180 mm)", 180, 110, "mm", 7], custom: ["Custom size", 0, 0, "", 0] };
-  const STATIC_FIGS = ["volcano", "pca", "heatmap", "correlation"];  // what `figures:` may list (the watcher's static files)
+  // what `figures:` may list (the watcher's static files; charts.STATIC_FIGURES, where the groups dose, time and liganded are also taken)
+  const STATIC_FIGS = ["volcano", "pca", "heatmap", "correlation", "dose_potency", "dose_curves", "time_patterns", "time_profiles", "liganded_rank", "liganded_selectivity"];
+  const TOP_PANELS = 6;  // dose-response curves and time-course features per series in "Export for slides" (sectionfigs.TOP_PANELS)
   const STYLE_DEFAULTS = { size: "slide169", width: 1280, height: 720, unit: "px", font_pt: 14, font_family: "Arial", line_scale: 1, point_scale: 1,
     palette: "default", up: "#e34948", down: "#2a78d6", neutral: "#c3c2b7", background: "light", title: true, subtitle: true, legend: true, note: true,
     labels: "screen", label_count: null, png_scale: 2, png_dpi: 0, zip_format: "both", figures: [] };
@@ -2633,7 +2635,8 @@
     ["values_", "Values per condition", ""], ["PCA", "PCA of the samples", ""], ["correlation", "Sample correlation", ""], ["cumulative_missing", "Missing values", ""], ["missingness_vs_intensity", "Missing values against intensity", ""],
     ["distributions", "Value distribution per sample", ""], ["cv_", "Coefficient of variation", ""], ["mean_variance", "Mean against variance", ""], ["abundance_rank", "Abundance rank", ""],
     ["identifications", "Identifications per sample", ""], ["imputation", "Measured and imputed values", ""], ["power", "Power", ""], ["search_quality_", "Search quality per run", ""],
-    ["dose_potency_", "Dose-response: potency against effect", ""], ["dose_curve_", "Dose-response curve", ""], ["time_course_", "Time course", ""], ["liganded_rank_", "Liganded sites", ""]];
+    ["dose_potency_", "Dose-response: potency against effect", ""], ["dose_curve_", "Dose-response curve", ""], ["time_course_", "Time course", ""], ["time_patterns_", "Time-course patterns", ""],
+    ["liganded_rank_", "Liganded sites", ""], ["liganded_selectivity", "Liganded sites across compounds", ""]];
   const TEST_NAMES = { limma: "limma moderated t-test", welch: "Welch t-test", student: "Student t-test" };
   /** The cut-offs in plain words: shown beside the plot and written into every exported figure. */
   function cutText(c) {
@@ -2653,7 +2656,7 @@
     if (/^compare_/.test(name) && D.comps[cmpA] && D.comps[cmpB]) detail = D.comps[cmpA].name + " (x) against " + D.comps[cmpB].name + " (y)";
     else if (/^enrichment_/.test(name) && renderORA._st) detail = renderORA._st.comp + ", " + renderORA._st.dir + " hits, " + renderORA._st.lib;
     else if (/^(gene_set_ranks_|barcode_)/.test(name) && renderRank._st) detail = renderRank._st.comp + ", " + renderRank._st.lib + (/^barcode_/.test(name) && renderRank._st.sel ? ", " + renderRank._st.sel : "");
-    else if (/^(values_|dose_curve_|time_course_|cv_|liganded_rank_|dose_potency_)/.test(name)) detail = name.replace(/^(values|dose_curve|time_course|cv|liganded_rank|dose_potency)_/, "");
+    else if (/^(values_|dose_curve_|time_course_|time_patterns_|cv_|liganded_rank_|dose_potency_)/.test(name)) detail = name.replace(/^(values|dose_curve|time_course|time_patterns|cv|liganded_rank|dose_potency)_/, "");
     const cuts = cut === "view" ? cutText(c) + (filterText() ? "; " + filterText() : "") : cut === "saved" ? savedCutText() + " (the report's saved cut-offs)" : "";
     return { what: what, cut: cut, cuts: cuts, c: c, detail: clean(detail), title: clean(c ? c.name : what), subtitle: clean((c ? what + " · " : detail ? detail + " · " : "") + D.title) };
   }
@@ -2758,10 +2761,12 @@
     ["#dosebody", renderDose], ["#cysbody", renderCys], ["#timebody", renderTime], ["#qc", renderQC]];
   function holdState() {
     return { ci: ST.ci, zoom: ST.zoom, mode: ST.mode, labels: ST.labels, lm: ST.opt.labelMatches, pinned: ST.pinned, focus: ST.focus, qc: qcTab, enr: enrMode, ds: DS.s, df: DS.focus,
-      ora: renderORA._st && Object.assign({}, renderORA._st), rank: renderRank._st && Object.assign({}, renderRank._st), psm: qcPsm._st && Object.assign({}, qcPsm._st), pcn: qcPCA._st && qcPCA._st.names };
+      ora: renderORA._st && Object.assign({}, renderORA._st), rank: renderRank._st && Object.assign({}, renderRank._st), psm: qcPsm._st && Object.assign({}, qcPsm._st), pcn: qcPCA._st && qcPCA._st.names,
+      ts: TS.s, tf: TS.focus, cc: CS.c };
   }
   function restoreState(h) {
     ST.ci = h.ci; ST.zoom = h.zoom; ST.mode = h.mode; ST.labels = h.labels; ST.opt.labelMatches = h.lm; ST.pinned = h.pinned; ST.focus = h.focus; qcTab = h.qc; enrMode = h.enr; DS.s = h.ds; DS.focus = h.df;
+    TS.s = h.ts; TS.focus = h.tf; CS.c = h.cc;
     [[renderORA, h.ora], [renderRank, h.rank], [qcPsm, h.psm]].forEach(([fn, was]) => { if (was && fn._st) Object.assign(fn._st, was); else if (!was) delete fn._st; });
     if (qcPCA._st && h.pcn != null) qcPCA._st.names = h.pcn;
   }
@@ -2821,8 +2826,90 @@
       if (k === "psm") [["ppm", "mass error"], ["mc", "missed cleavages"], ["z", "charge states"], ["len", "peptide length"]].forEach(([ch, t]) => add("QC: Search quality, " + t, () => { qcTab = "psm"; qcPsm._st = Object.assign(qcPsm._st || {}, { chart: ch }); renderQC(); }));
       else if (k !== "card") add("QC: " + b.textContent, () => { qcTab = k; renderQC(); });
     });
-    ((D.dose && D.dose.ran && D.dose.series) || []).forEach((S, k) => add("Dose-response: " + (S.name || "curves"), () => { DS.s = k; DS.focus = null; renderDose(); }, "dose_potency_"));
+    // dose-response, time course, liganded sites (D68): the most relevant curves and features, as `ionomos export` draws them
+    const topOf = (cls, ok) => { const r = []; for (let j = 0; j < cls.length && r.length < TOP_PANELS; j++) if (ok(cls[j])) r.push(j); return r; };
+    ((D.dose && D.dose.ran && D.dose.series) || []).forEach((S, k) => {
+      add("Dose-response: " + (S.name || "curves"), () => { DS.s = k; DS.focus = null; renderDose(); }, "dose_potency_");
+      topOf(S.cls, (c) => c === "up" || c === "down").forEach((j) => add("Dose-response curve: " + nameOf(S.i[j]), () => { DS.s = k; DS.focus = j; renderDose(); }, "dose_curve_"));
+    });
+    ((D.time && D.time.ran && D.time.series) || []).forEach((S, k) => {
+      if (S.patterns && S.patterns.length) add("Time-course patterns: " + (S.name || "series"), () => timePatternsSvg(S), "time_patterns_");
+      topOf(S.cls, (c) => c !== "not").forEach((j) => add("Time course: " + nameOf(S.i[j]), () => { TS.s = k; TS.focus = j; renderTime(); }, "time_course_"));
+    });
+    const CY = D.cys && D.cys.ran ? D.cys : null;
+    ((CY && CY.compounds) || []).forEach((C, k) => add("Liganded sites: " + C.name, () => { CS.c = k; renderCys(); }, "liganded_rank_"));
+    if (CY && CY.compounds.length > 1 && CY.nlig.some(Boolean)) add("Liganded sites across compounds", selectivitySvg, "liganded_selectivity");
     return out;
+  }
+  /** The largest panels of about this shape for n charts in W x H: [columns, rows, panel width, panel height] (sectionfigs._grid). */
+  function panelGrid(n, W, H) {
+    let best = [0, 1, n];
+    for (let c = 1; c <= n; c++) { const r = Math.ceil(n / c), z = Math.min(W / c / 1.3, H / r); if (z > best[0] + 1e-9) best = [z, c, r]; }
+    return [best[1], best[2], W / best[1], H / best[2]];
+  }
+  /** A time series' patterns of changing features as one chart (on screen they are tiles), for export only. */
+  function timePatternsSvg(S) {
+    if (!S || !S.patterns || !S.patterns.length) return;
+    const host = document.createElement("div"), W = widthOf(host), H = heightOf(320), n = S.patterns.length;
+    const lim = Math.max(0.5, ...S.patterns.map((p) => Math.max(...p.profile.map((v) => Math.abs(v || 0))))) * 1.1;
+    const [cols, rows, pw, ph] = panelGrid(n, W, H), root = frame(host, W, H);
+    S.patterns.forEach((p, j) => {
+      const r = Math.floor(j / cols), c = j % cols, last = r === rows - 1 || j + cols >= n, m = p.profile.length, L = 52, R = 12, T = 24, B = 40;
+      const g = svg("g", { transform: "translate(" + +(c * pw).toFixed(2) + " " + +(r * ph).toFixed(2) + ")" }, root);
+      const Xs = (a) => L + 12 + (a / Math.max(1, m - 1)) * (pw - L - R - 24), Y = (v) => T + (1 - (v + lim) / (2 * lim)) * (ph - T - B);
+      axes(g, Xs, Y, [], niceTicks(-lim, lim, 4).filter((v) => v >= -lim && v <= lim), L, R, T, B, pw, ph, last ? "time" : "", c === 0 ? "log2 FC vs " + S.labels[0] : "");
+      S.labels.forEach((lab, a) => text(g, Xs(a), ph - B + 16, lab, { "text-anchor": "middle", "font-size": 10.5 }));
+      svg("line", { x1: L, x2: pw - R, y1: Y(0), y2: Y(0), stroke: css("--axis") }, g);
+      const big = p.profile.reduce((a, v) => (v != null && Math.abs(v) > Math.abs(a) ? v : a), 0), col = css(big >= 0 ? "--up" : "--down");
+      let d = "";
+      p.profile.forEach((v, a) => { if (v != null) d += (d ? "L" : "M") + Xs(a).toFixed(1) + " " + Y(v).toFixed(1); });
+      if (d) svg("path", { d: d, fill: "none", stroke: col, "stroke-width": 2 }, g);
+      p.profile.forEach((v, a) => { if (v != null) svg("circle", { cx: +Xs(a).toFixed(1), cy: +Y(v).toFixed(1), r: 3.2, fill: col }, g); });
+      text(g, 6, 15, "Pattern " + (j + 1) + " · " + fmtInt(p.n) + " feature" + (p.n === 1 ? "" : "s"), { "font-size": 12.5, "font-weight": 600, fill: css("--text") });
+    });
+    host.insertAdjacentHTML("beforeend", "<div class='legend'><span><span class='sw' style='background:" + css("--up") + "'></span>rises</span><span><span class='sw' style='background:" + css("--down") +
+      "'></span>falls</span><span>median of each pattern's features · " + fmtInt(S.patterns.reduce((a, p) => a + p.n, 0)) + " changing in " + n + " patterns</span></div>");
+    svgTools(host, root, "time_patterns_" + (S.name || "series"));
+  }
+  /** Sites x compounds: each liganded site's median competition ratio, a dot where it is liganded, its selectivity; for export only. */
+  function selectivitySvg() {
+    const X = D.cys;
+    if (!X || !X.ran || !X.compounds || X.compounds.length < 2) return;
+    const comps = X.compounds, thr = Math.log2(X.ratio || 4), ord = { 1: 0, 2: 1, 3: 2, 0: 3 };
+    const best = (k) => Math.max(...comps.map((c) => (c.r[k] == null ? -Infinity : c.r[k])));
+    const owner = (k) => { const j = comps.findIndex((c) => c.cls[k] === 0); return j < 0 ? comps.length : j; };
+    let ks = [];
+    for (let k = 0; k < X.i.length; k++) if (X.nlig[k]) ks.push(k);
+    if (!ks.length) return;
+    ks.sort((a, b) => ord[X.sel[a]] - ord[X.sel[b]] || (X.sel[a] === 1 ? owner(a) - owner(b) : 0) || best(b) - best(a));
+    const host = document.createElement("div"), W = widthOf(host), Hmax = heightOf(520), lab = 130, right = 96;
+    const cw = Math.max(28, Math.min(72, (W - lab - right) / comps.length));
+    const head = cw >= 60 ? 24 : 16 + Math.min(Math.max(...comps.map((c) => c.name.length)), 18) * 11 * 0.56 * 0.71;
+    const total = ks.length;
+    ks = ks.slice(0, Math.max(1, Math.floor((Hmax - head - 8) / 9)));
+    const ch = Math.max(9, Math.min(18, (Hmax - head - 8) / ks.length));
+    const root = frame(host, Math.round(lab + comps.length * cw + right), Math.round(head + ks.length * ch + 8)), g = svg("g", {}, root);
+    const up = hex(css("--up")), su = hex(css("--surface"));
+    const shade = (r) => { const t = Math.max(0, Math.min(1, r / (2 * thr))); return "rgb(" + su.map((v, q) => Math.round(v + (up[q] - v) * t)).join(",") + ")"; };
+    comps.forEach((c, j) => {
+      const cx = lab + j * cw + cw / 2;
+      if (cw >= 60) text(g, cx, head - 8, c.name.slice(0, Math.floor(cw / 6)), { "text-anchor": "middle", "font-size": 11, fill: css("--text2") });
+      else text(g, 0, 0, c.name.slice(0, 18), { "font-size": 11, fill: css("--text2"), transform: "translate(" + +(cx - 2).toFixed(1) + "," + +(head - 6).toFixed(1) + ") rotate(-45)" });
+    });
+    ks.forEach((k, r) => {
+      const y = head + r * ch;
+      text(g, lab - 6, +(y + ch / 2 + 4).toFixed(1), nameOf(X.i[k]).slice(0, 20), { "text-anchor": "end", "font-size": 11, fill: css("--text2") });
+      comps.forEach((c, j) => {
+        const v = c.r[k], x = lab + j * cw;
+        svg("rect", { x: +x.toFixed(1), y: +y.toFixed(2), width: +(cw - 1).toFixed(1), height: +(ch - 1).toFixed(2), fill: v == null ? css("--sunk") : shade(v) }, g);
+        if (c.cls[k] === 0) svg("circle", { cx: +(x + cw / 2).toFixed(1), cy: +(y + ch / 2 - 0.5).toFixed(2), r: +Math.min(3, ch / 3.5).toFixed(2), fill: v != null && v / (2 * thr) > 0.55 ? css("--surface") : css("--text") }, g);
+      });
+      text(g, lab + comps.length * cw + 8, +(y + ch / 2 + 4).toFixed(1), X.selNames[X.sel[k]] || "", { "font-size": 10.5 });
+    });
+    host.insertAdjacentHTML("beforeend", "<div class='legend'><span><span class='sw' style='background:" + shade(thr) + "'></span>R = " + X.ratio + "</span><span><span class='sw' style='background:" + shade(2 * thr) +
+      "'></span>R ≥ " + X.ratio * X.ratio + "</span><span>white: R ≤ 1 · grey: not measured · dot: liganded</span><span>" + ks.length + " of " + total + " sites liganded by any compound" +
+      (ks.length < total ? " (the rest do not fit this size)" : "") + "</span></div>");
+    svgTools(host, root, "liganded_selectivity");
   }
   /** Every figure, finished: the list above, then whatever else the report shows now (an open protein, a
    * time course, liganded sites, a section added later). One of each name. */

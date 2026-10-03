@@ -353,7 +353,7 @@ _EXPORT_KEYS = (
     ("palette", "default", "default | colorblind | grey | custom (+ up, down, neutral: \"#rrggbb\")"),
     ("background", "light", "light | dark | transparent"),
     ("figures", [], "static SVG written to results/figures after each analysis: any of volcano, pca, heatmap, "
-                    "correlation ([] = none)"),
+                    "correlation, dose, time, liganded ([] = none)"),
 )
 _EXPORT_FONT = {"slide169": 14, "slide43": 14, "half": 12, "col1": 7, "col2": 7}  # charts.SIZES (a test compares)
 

@@ -169,7 +169,10 @@ hits:
 
 Each chart has **SVG**, **PNG** and **Export…** at its top right. **Export for
 slides** in the top bar saves every figure, the tables as CSV and a README in
-one .zip.
+one .zip. With dose-response, time-course or liganded-site results it also
+holds the six most relevant curves of each compound, each series' patterns and
+its six most significant features, each compound's liganded-site plot, and a
+map of which sites each compound ligands.
 
 **Export…** sets one style for all of them: the size (a 16:9 or 4:3 slide,
 half a slide, a journal column, or your own in px or mm), text size and font,

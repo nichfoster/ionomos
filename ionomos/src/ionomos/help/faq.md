@@ -50,8 +50,13 @@ line: `--control DMSO`, `--compare "Drug vs DMSO"`, `--de-type all`.
   file the whole lab can load; `analysis.export` in `config.yaml` sets the
   lab's defaults.
 - **Without opening the report**: `ionomos export <experiment folder>` writes
-  the volcano, PCA, heatmap and correlation plots as SVG to
-  `results\figures\`, at the saved cut-offs.
+  the volcano, PCA, heatmap and correlation plots, and the dose-response,
+  time-course and liganded-site figures, as SVG to `results\figures\`, at the
+  saved cut-offs. `--list` shows what the report has; `--figures dose,pca`
+  picks some; `--features EGFR,BTK` chooses the curves or sites drawn
+  (default: the six most relevant, `--top N` for more). `--format png` (or
+  `both`) also makes PNG if the PC has resvg, Inkscape or cairosvg; without
+  one it says what to install.
 
 SVG stays sharp and its text can be edited in PowerPoint, Illustrator or
 Inkscape; PNG is a picture. Each file records the cut-offs it was made with,

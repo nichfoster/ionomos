@@ -186,11 +186,20 @@ is the checklist for that day, and the fingerprints are what to send back.
     the lab PC (text editable? fonts? mm sizes?), and try the export in the
     browser the lab uses. None of this has been checked (D62).
   - PNG from `ionomos export` (needs a renderer; SVG only for now).
+    → 2026-10-02, done (D68): `--format png | both` with cairosvg, resvg,
+    rsvg-convert or Inkscape when the computer has one; a clear message when
+    not. Open: put resvg on the lab PC (one file) and check its PNGs there,
+    Windows fonts included.
   - The Analysis tab has no fields for `analysis.export`; it is edited in
     `config.yaml` (the app keeps the block).
   - Static figures for dose-response, time courses and liganded sites
     (`ionomos export` draws volcano, PCA, heatmap, correlation; the report
-    exports them all).
+    exports them all). → 2026-10-02, done (D68): potency, curve grids,
+    patterns, profiles, liganded-site rank plots and a selectivity map, in
+    `ionomos export`, `analysis.export.figures` and the report's .zip;
+    `--list`, `--figures` by name, `--features`, `--top`. Open: the panel
+    count and the minimum readable panel size are choices; check them on a
+    real titration and time course.
   - Tune the D35 warning thresholds on real lab experiments.
   - PSM-level technical QC from `psm.tsv`: mass error, missed cleavages,
     charge states. → 2026-10-01, done (D55): the Search quality QC tab,
@@ -640,6 +649,9 @@ Collected from the other docs; resolve before/during Phase 1.
       buttons use the export style rather than the on-screen size, and whether the watcher should write
       `results/figures/` after every job (built: off, `analysis.export.figures: []`). Does the lab have a house
       style (font, colours) to put in `analysis.export`? Which program do the figures go into?
+- [ ] Section figures and PNG (D68): are six curves / features per grid the right default, and is a grid of
+      separate panels (the CLI) or one file per curve (the report's .zip) what the lab pastes into slides? May
+      resvg (one file, no installer) be put on the lab PC for `ionomos export --format png`?
 - [ ] Bundle (D63): confirm the defaults: generic role words (DMSO, drug, compound, pool) stay readable and
       other condition words are replaced; pseudonyms without an underscore (`user01`, `exp001`, `condA`); the
       2,000 MB and 25 MB limits; with no job named, `validate` takes the last finished job. Is a date in a raw
