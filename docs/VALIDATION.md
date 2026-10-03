@@ -25,6 +25,7 @@ no real FragPipe-Analyst, MSstats or Perseus export has been compared.
 | Time courses | limma 3.68.5 | 1e-8 | `tests/test_timecourse.py` |
 | Dose-response curves | CurveCurator 0.6.0 | classes, pEC50, F, p | `tests/test_dose_response.py` |
 | TMT summaries | MSstatsTMT 2.20 | 1e-9 | `tests/test_plexes.py` |
+| isoDTB sites corrected for protein abundance: the sites' moderated one-sample SE and df, then the adjustment (log2FC, SE, Satterthwaite df, t, p, BH), a protein table in MSstats format, two proteins with DF = Inf (D70) | limma 3.68.5 + MSstatsPTM 2.14.0 (`.applyPtmAdjustment`) | 1e-9 on 213 sites | `tests/test_protein_correction.py`, `tests/golden/ptm/` |
 | t-tests, Benjamini-Hochberg | scipy | 1e-9 (p), 1e-12 (BH) | `tests/test_downstream.py` |
 
 These say the port computes what the reference computes on the same input.
@@ -208,9 +209,10 @@ script and loaded as `analyze()` loads it; each compound is tested against 0.
   promiscuous one); **mixing error**: none, or an SD of 0.2 log2 per replicate
   (heavy and light mixed about 15 % off 1:1, which moves every ratio of that
   replicate); 5 tables per scenario;
-- **settings**: limma (the default) and the t-test. Imputation and
-  normalisation do not apply to ratio data: Ionomos neither imputes nor
-  normalises site ratios.
+- **settings**: limma (the default) and the t-test; since D70 also limma with
+  the ratios centred (`ratio_centre: median` and `auto`, below). Imputation
+  and intensity normalisation do not apply to ratio data. The table below is
+  from 2026-10-02, before the centring settings.
 
 Measured 2026-10-02 (FDP at adjusted p ≤ 0.05, pooled; found = planted
 changes called at adjusted p ≤ 0.05; |offset| = how far the unchanged sites'
@@ -236,15 +238,47 @@ What this says, on data like this simulation:
   variances of one shape; with every site its own SD and 1 df each, the FDP
   is 5 – 8 % without any mixing error. With equal SDs it is 3.7 – 4.7 % (20
   seeds), so the prior's fit, not the code, is the cause.
-- **A mixing error is not corrected.** Every ratio of a replicate moves by the
-  error, so the unchanged sites sit 0.07 – 0.13 log2 off 0 (mean over the
-  tables; the error is random, so it averages out over many experiments, not
-  within one). The test against 0 then calls more of them: up to 10.6 % per
-  scenario. This is on the roadmap as an open question (D66): centring each
-  replicate on its median removes it (3 replicates, 5 % of the sites up 4-fold,
-  20 seeds: FDP 7.4 % → 5.1 %), but with 20 % of the sites up it shifts every
-  unchanged site by -0.09 log2 instead, which is the composition problem of
-  D64 again.
+- **A mixing error is not corrected by default.** Every ratio of a replicate
+  moves by the error, so the unchanged sites sit 0.07 – 0.13 log2 off 0 (mean
+  over the tables; the error is random, so it averages out over many
+  experiments, not within one). The test against 0 then calls more of them:
+  up to 10.6 % per scenario. Since D70 the lab can centre the ratios
+  (`ratio_centre`, below); the default stays `none` until the lab decides.
+
+**Centring the ratios** (`ionomos benchmark --kind isodtb`, grid `centring`
+in `benchmark.ISODTB_GRIDS`, D70): 3 replicates, 900 sites, 2- or 4-fold, 5 %
+or 20 % of the sites up, mixing error SD 0 or 0.2 log2, 20 tables per
+scenario, limma. FDP and found at adjusted p ≤ 0.05; |offset| per table:
+
+| mixing error, sites up | none (default): FDP / found / \|offset\| | median | auto |
+|---|---|---|---|
+| none, 5 %, 2-fold | 3.4 % / 38 % / 0.005 | 3.4 % / 31 % / 0.021 | as none (not centred) |
+| none, 5 %, 4-fold | 4.1 % / 94 % / 0.007 | 4.1 % / 94 % / 0.018 | as none |
+| none, 20 %, 2-fold | 4.6 % / 79 % / 0.006 | 5.3 % / 74 % / 0.087 | as none |
+| none, 20 %, 4-fold | 4.9 % / 97 % / 0.007 | 6.1 % / 97 % / 0.097 | as none |
+| SD 0.2, 5 %, 2-fold | **8.4 %** / 18 % / 0.109 | 4.1 % / 24 % / 0.016 | 4.2 % / 28 % / 0.014 |
+| SD 0.2, 5 %, 4-fold | 4.8 % / 95 % / 0.113 | 4.9 % / 93 % / 0.017 | 4.9 % / 93 % / 0.010 |
+| SD 0.2, 20 %, 2-fold | 5.1 % / 61 % / 0.088 | 6.3 % / 74 % / 0.091 | 5.5 % / 80 % / 0.012 |
+| SD 0.2, 20 %, 4-fold | 3.8 % / 98 % / 0.080 | 5.2 % / 97 % / 0.093 | 4.4 % / 97 % / 0.012 |
+
+(BH at 5 % aims at 4.75 % with 5 % of the sites changed, 4 % with 20 %.)
+
+- **auto** never centred a table without a mixing error (0 of 240 tables of
+  900 sites, 2- or 4-fold, 5 % or 20 % up) and centred every one with it
+  (240 of 240). Its offsets on the stable sites had a bias of 0.003 log2 and
+  an SD of 0.017 with 20 % of the sites up, against a reported standard error
+  of 0.020 – 0.027, so the check is on the safe side.
+- **median** removes the mixing error as well, but with 20 % of the sites up
+  it moves every unchanged site by -0.09 log2 whether or not there is a
+  mixing error, and calls more false sites (5.3 – 6.3 %).
+- The FDP with a mixing error is not always high: the error also widens the
+  replicate spread, which makes the test conservative; what it always does
+  is move the unchanged sites (|offset| 0.08 – 0.11).
+
+`ionomos benchmark --kind isodtb` (the standard grid) now runs the two
+centring settings beside limma and the t-test, so the lab can see them on
+2 – 4 replicates; the table above is the `centring` grid
+(`benchmark.simulated("centring", kind="isodtb")`), with more seeds.
 
 **The guard** (`tests/test_benchmark.py`): limma, 3 and 4 replicates, 10 % of
 600 sites up 4-fold, no mixing error, 10 tables each. It fails when the

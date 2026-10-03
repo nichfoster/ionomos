@@ -49,6 +49,15 @@ analysis:
   # role_comparisons: false  # roles are shown, but every condition is compared with the control (as before 0.14)
   # small_group_min_valid: same   # half (default): the smaller group of an unequal comparison (DMSO n=2 vs n=4)
   #                               # needs half its samples measured instead of min_valid, when nothing is imputed
+  # isoDTB site ratios (D70). Both are off by default; the lab decides (docs/ROADMAP.md, Open questions).
+  # ratio_centre: none       # none (as measured) | median (each replicate centred on its median site) | auto
+  #                          # (centred on the stable sites, only when a replicate is clearly off 0: removes a
+  #                          # heavy / light mixing error without the median's shift when many sites go one way)
+  # protein_correction:      # subtract each site's protein change, from an unenriched proteome (MSstatsPTM)
+  #   proteome: D:/Fragpipe_General/EJQ/20261001-DIA_EJQ-2-030   # an analysed Ionomos experiment, or a protein
+  #                          # table (MSstats groupComparison output, or an Ionomos *_differential.tsv); usually
+  #   match: gene            # in experiment.yaml. gene | protein (UniProt accessions)
+  #   conditions: {EJQ_2_027: Cmpd vs DMSO}   # site condition -> proteome comparison, compound first
   # block: replicate         # the replicate number as a block (batch / pair) in the limma model (D42)
   # variance_prior: deqms    # limma (default) | deqms: prior variance by peptide count (D43)
   # Exported figures (D62): the lab's style. The report's Export dialog starts from it ("Reset to lab

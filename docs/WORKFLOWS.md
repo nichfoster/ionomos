@@ -373,6 +373,8 @@ features × samples matrix of log2 values and runs the same statistics:
   | NORMALISATION_COMPOSITION | decide / note | median centring would shift the conditions against each other (many features change one way): asks when `median` / `gn` is chosen, a note when `auto` switched to the ratio method |
   | TIMES | decide / note | a time course whose time points can't all be read (a name in `analysis.times` that isn't a condition, two times in one name) |
   | LIGANDED_DIRECTION, SITE_ANNOTATION | note | isoDTB: the competition ratio looks reversed; the site annotation file can't be used |
+  | RATIO_OFFSET | note | isoDTB: a replicate's ratios sit clearly off 0 on the stable sites (a mixing error?) and `ratio_centre` is none (D70) |
+  | PROTEIN_CORRECTION_CONDITIONS / PROTEIN_CORRECTION | decide / note | isoDTB with `protein_correction`: a site condition has no proteome comparison; the proteome is missing or unusable, or few sites find their protein (D70) |
   | PSM_MASS_ERROR, PSM_MISSED_CLEAVAGES | note | a run's median precursor mass error is 10 ppm or more from 0; half or more of a run's PSMs have a missed cleavage |
   | NO_RESIDUAL_DF | note | features tested with one value per group: their p-values come from limma's variance prior alone (D60) |
   | VARIANCE_PRIOR | note | limma's variance prior could not be estimated (fewer than 3 features with replicate spread), or its fit did not converge |
@@ -560,7 +562,8 @@ analysis:                      # config.yaml (lab) or experiment.yaml (one exper
   liganded: true               # false: no calls
 ```
 
-- The calls use the ratios as measured: no normalisation, no imputation. A
+- The calls use the ratios as measured (no imputation), or centred per
+  replicate when `ratio_centre` is set (D70, below); the rule says which. A
   compound with fewer replicates than the rule asks for is judged on the
   replicates it has, with a note.
 - **Liganded fraction** per compound = liganded / sites measured in enough
@@ -584,9 +587,73 @@ analysis:                      # config.yaml (lab) or experiment.yaml (one exper
   engagement % = 100 × (1 − 1/R), replicates, replicates over, call; then
   liganded_by, selectivity, annotation), `results/cysteine_proteins.tsv`,
   `analysis.json` → `cysteines`, and the report's **Liganded sites** section.
-- Not built yet: correcting site changes for protein abundance (the
-  MSstatsPTM adjustment). It needs a matching unenriched proteome, and the
-  lab has to say where that comes from.
+
+**isoDTB: centring the ratios** (`fpa.centre_ratios`, D70). A heavy / light
+mixing error moves every ratio of a replicate by the same amount. Off by
+default; the lab decides:
+
+```yaml
+analysis:
+  ratio_centre: none     # none: as measured (default) | median: each replicate's median site to 0
+                         # | auto: each replicate centred on its stable sites, only when one is clearly off
+```
+
+- `auto` takes the median over the half of the sites nearest the replicate's
+  centre (five passes), so sites a compound engages, which all move one way,
+  don't pull it; a condition is centred when one of its replicates is more
+  than 0.05 log2 and 3 standard errors off 0, and then all its replicates.
+- `median` is simpler but follows the engaged sites: with 20 % of the sites
+  up it shifts every unchanged site by about -0.09 log2.
+- The offsets are measured either way (`analysis.json` →
+  `normalisation.ratio_centre`). With `none`, a replicate clearly off raises
+  `RATIO_OFFSET`, a note. The liganded calls use the ratios the analysis used
+  and say which ("on the ratios as measured" / "centred …").
+- Simulated numbers for the three options: D70 and
+  [VALIDATION.md](VALIDATION.md).
+
+**isoDTB: site changes corrected for protein abundance**
+(`downstream/proteincorr.py`, D70). A site's ratio also moves when the
+compound changes the amount of its protein. With an unenriched proteome of
+the same treatment, Ionomos subtracts the protein's change, as MSstatsPTM
+does. Off unless the proteome is named; nothing is guessed:
+
+```yaml
+analysis:                      # usually experiment.yaml
+  protein_correction:
+    proteome: D:/Fragpipe_General/EJQ/20261001-DIA_EJQ-2-030   # an analysed Ionomos experiment (folder or results/),
+                                                               # or a protein table (MSstats groupComparison output:
+                                                               # Protein, Label, log2FC, SE, DF; or an Ionomos
+                                                               # *_differential.tsv); relative = in the experiment folder
+    match: gene                # gene | protein (UniProt accessions, isoforms joined)
+    conditions:                # site condition -> proteome comparison, compound first
+      EJQ_2_027: Cmpd vs DMSO  # default: the comparison whose first condition has the site condition's name
+```
+
+- **Scale**: site ratios are log2 heavy / light. A proteome comparison
+  "Cmpd vs DMSO" is log2(Cmpd / DMSO), which on the site's scale is −log2FC
+  when the treated sample carries the light tag (`liganded_direction: high`)
+  and +log2FC when it is heavy (`low`). A proteome analysed as ratios
+  ("X (log2 H/L vs 0)") is used as it is.
+- **Statistics** (MSstatsPTM's adjustment, checked against MSstatsPTM 2.14.0):
+  log2FC = site − protein, SE = √(SE_site² + SE_protein²), Satterthwaite df,
+  two-sided p, Benjamini–Hochberg per condition over the sites that were
+  corrected. The site's SE and df are the moderated one-sample test's;
+  every `*_differential.tsv` now has `se` and `df` columns (older tables are
+  read from `t` and the 95 % interval).
+- **Output**: both results. The uncorrected comparison stays as it was; a
+  second one, `<condition> (log2 H/L vs 0, protein-corrected)`, gets its own
+  volcano and `…_protein-corrected_differential.tsv` with the protein's key,
+  status (*corrected*, *protein not found*, *protein ambiguous*, *protein
+  without SE*, *site not tested*), its log2 H/L, SE and df, and the site's
+  uncorrected numbers. Sites whose protein is not found keep only the
+  uncorrected result (MSstatsPTM drops them). `analysis.json` →
+  `protein_correction` counts them per condition. `cysteine_sites.tsv` gets
+  `<compound> protein_log2_R` and `log2_R_corrected`; the liganded call stays
+  on the site ratio.
+- **Checks**: `PROTEIN_CORRECTION_CONDITIONS` (decide) when a site condition
+  has no proteome comparison, or several; `PROTEIN_CORRECTION` when the
+  proteome is missing or unusable (decide) or fewer than half the sites find
+  their protein (note). The proteome is only read.
 
 Open questions for the lab: which words mark a competition condition and
 what the lab calls a specific target (D61, ROADMAP); which tag the compound-treated sample carries

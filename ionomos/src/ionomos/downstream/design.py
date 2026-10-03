@@ -473,7 +473,8 @@ def limma_design(values: Matrix, design: Design, contrasts: list[tuple[str, str]
             coef.append(est[i][k] if ok else math.nan)
             su.append(sus[i][k] if ok else math.nan)
         t, pv, lo, hi, q = fpa._toptable(coef, su, mod.post, mod.dft)
-        out.append(fpa.ContrastResult(a, b, coef, lo, hi, t, pv, q, na, nb, ma, mb, (mod.d0, mod.s0)))
+        out.append(fpa.ContrastResult(a, b, coef, lo, hi, t, pv, q, na, nb, ma, mb, (mod.d0, mod.s0),
+                                      *fpa.se_df(coef, su, mod.post, mod.dft)))
     return out, mod.info
 
 

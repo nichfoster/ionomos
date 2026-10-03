@@ -113,6 +113,17 @@ R = 4 means it blocked three quarters of the probe labelling (engagement
 1 − 1/R = 75%); R = 10 means 90%. Ionomos takes R as heavy / light unless
 `liganded_direction: low` says the tags are the other way round.
 
+## Protein-corrected {#glossary.protein-corrected}
+
+A site comparison named "… protein-corrected" is the site's log2 ratio minus
+its protein's log2 change in an unenriched proteome of the same treatment
+(`protein_correction` under `analysis:`), tested the way MSstatsPTM does it:
+the two standard errors combined, Satterthwaite degrees of freedom,
+Benjamini–Hochberg. It separates a change in the site (the compound engaging
+it) from a change in how much protein there is. Sites whose protein is not in
+the proteome have no corrected value and are marked "protein not found"; the
+uncorrected comparison is always shown too.
+
 ## Liganded {#glossary.liganded}
 
 A cysteine counts as liganded by a compound when its

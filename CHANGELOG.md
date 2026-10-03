@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **isoDTB site changes corrected for protein abundance** (D70, ROADMAP 5C #3):
+  `analysis.protein_correction: {proteome, match, conditions}` names an
+  unenriched proteome (an analysed Ionomos experiment, an MSstats
+  groupComparison table or an Ionomos `*_differential.tsv`; only read). Each
+  site's log2 heavy / light minus its protein's change on the same scale
+  (from `liganded_direction`), with MSstatsPTM's SE, Satterthwaite df and BH
+  per condition, checked against MSstatsPTM 2.14.0 to 1e-9
+  (`tests/golden/ptm/`). Reported beside the uncorrected comparison as
+  `<condition> (log2 H/L vs 0, protein-corrected)` with its own volcano and
+  table; sites whose protein is not found are flagged. Off by default.
+  New issues `PROTEIN_CORRECTION_CONDITIONS` (a site condition without its
+  proteome comparison; never guessed) and `PROTEIN_CORRECTION`.
+- **Opt-in centring of isoDTB ratios** (D70): `analysis.ratio_centre: none |
+  median | auto` (default `none`). `auto` centres a condition's replicates on
+  their stable sites only when one is clearly off 0 (a heavy / light mixing
+  error), without the median's shift when many sites go one way. The
+  offsets are always measured; with `none` a clear one is the note
+  `RATIO_OFFSET`. Liganded calls say which ratios they used. `ionomos
+  benchmark --kind isodtb` runs the centring settings too; a `centring` grid
+  holds the D70 numbers.
+- Every `*_differential.tsv` has `se` and `df` columns (the standard error
+  and degrees of freedom behind `t`).
+- `cysteine_sites.tsv` gets `<compound> protein_log2_R` and
+  `log2_R_corrected` when the protein correction ran.
+
+### Changed
+
+- The liganded-site rule text ends with the ratios it used ("on the ratios as
+  measured (not centred)").
+
 ## [0.15.0] - 2026-10-02
 
 ### Added

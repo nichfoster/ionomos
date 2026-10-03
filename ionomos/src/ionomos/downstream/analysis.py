@@ -70,6 +70,12 @@ experiment.yaml `analysis:` block:
       liganded_min_replicates: 2  # ... in at least this many replicates
       liganded_direction: high    # high: R = heavy / light | low: R = light / heavy
       site_annotation: cysdb.csv  # a downloaded site table (CysDB) in the experiment folder, or a full path
+      ratio_centre: none          # site ratios (isoDTB): none (default) | median | auto: centre each replicate, which
+                                  #   removes a heavy / light mixing error (fpa.centre_ratios, D70)
+      protein_correction:         # site ratios (isoDTB): subtract each site's protein ratio from a matching
+        proteome: D:/Fragpipe_General/EJQ/20261001-DIA_EJQ-2-030   # unenriched proteome (proteincorr.py, D70):
+        match: gene               #   an analysed Ionomos experiment or a protein table; gene | protein
+        conditions: {EJQ_2_027: Cmpd vs DMSO}   # site condition -> proteome comparison (default: the same name)
 
       psm_qc: true                # false: don't read psm.tsv for the per-run search quality (psmqc.py)
 
@@ -152,6 +158,8 @@ class Settings:
     liganded_min_replicates: int = 2
     liganded_direction: str = "high"   # high: R = heavy / light | low: R = light / heavy
     site_annotation: str = ""          # a site table (CysDB download): known / new sites
+    ratio_centre: str = "none"         # site ratios: none | median | auto (fpa.centre_ratios, D70)
+    protein_correction: dict = field(default_factory=dict)   # {proteome, match, conditions} (proteincorr.py, D70)
     psm_qc: bool = True                # per-run search quality from psm.tsv / DIA-NN stats.tsv (psmqc.py)
     block: str | dict[str, str] = ""   # "" | "replicate" | {sample: block} (design.py)
     block_from: str = ""               # regex on sample names: the block is group "block", else group 1
@@ -368,6 +376,15 @@ def settings_from(*layers: dict | None) -> Settings:
                     v = _covariates(v)
                 elif k == "export":
                     v = {**s.export, **_export_style(v)}  # a later layer adds to / overrides the lab's style
+                elif k == "ratio_centre":
+                    v = str(v).strip().lower()
+                    v = {"off": "none", "false": "none", "no": "none", "centre": "auto", "center": "auto"}.get(v, v)
+                    if v not in fpa.RATIO_CENTRE_METHODS:
+                        raise AnalysisError("ratio_centre must be none (the ratios as measured), median (each replicate "
+                                            "centred on its median site) or auto (centred on the stable sites, only "
+                                            "when a replicate is clearly off)")
+                elif k == "protein_correction":
+                    v = _protein_correction(v, s.protein_correction)
                 elif k == "variance_prior":
                     v = str(v).strip().lower()
                     v = "limma" if v == "ebayes" else v
@@ -403,6 +420,45 @@ def settings_from(*layers: dict | None) -> Settings:
     _check_doses(s)
     _check_times(s)
     return s
+
+PROTEIN_MATCH = ("gene", "protein")
+
+def _protein_correction(v, before: dict) -> dict:
+    """analysis.protein_correction (proteincorr.py, D70): {proteome: path, match: gene | protein, conditions:
+    {site condition: proteome comparison}}. A later layer's keys win; proteome: "" (or false) switches it off."""
+    if v is False or (isinstance(v, str) and v.strip().lower() in ("", "none", "off", "false", "no")):
+        return {}
+    if isinstance(v, str):
+        v = {"proteome": v}
+    if not isinstance(v, dict):
+        raise AnalysisError("protein_correction must be {proteome: <an analysed Ionomos experiment folder or a protein "
+                            "table>, match: gene | protein, conditions: {site condition: proteome comparison}}")
+    unknown = [k for k in v if k not in ("proteome", "match", "conditions")]
+    if unknown:
+        raise AnalysisError(f"protein_correction: unknown key {unknown[0]!r} (known: proteome, match, conditions)")
+    out = dict(before)
+    if "proteome" in v:
+        p = "" if v["proteome"] is None else str(v["proteome"]).strip()
+        if not p or p.lower() in ("none", "off", "false"):
+            return {}
+        out["proteome"] = p
+    if v.get("match") not in (None, ""):
+        mt = str(v["match"]).strip().lower()
+        mt = {"genes": "gene", "proteins": "protein", "accession": "protein", "uniprot": "protein"}.get(mt, mt)
+        if mt not in PROTEIN_MATCH:
+            raise AnalysisError("protein_correction.match must be gene (gene names) or protein (UniProt accessions)")
+        out["match"] = mt
+    if v.get("conditions") not in (None, "", {}):
+        if not isinstance(v["conditions"], dict):
+            raise AnalysisError("protein_correction.conditions must map a site condition to a proteome comparison, "
+                                "e.g. {EJQ_2_027: Cmpd vs DMSO}")
+        out["conditions"] = {**out.get("conditions", {}),
+                             **{str(a).strip(): str(b).strip() for a, b in v["conditions"].items() if str(b).strip()}}
+    if out and not out.get("proteome"):
+        raise AnalysisError("protein_correction needs proteome: the folder of an analysed Ionomos experiment (the "
+                            "unenriched proteome) or a protein table")
+    out.setdefault("match", "gene")
+    return out
 
 def _export_style(v) -> dict:
     from ionomos.downstream.charts import StyleError, style_layer
@@ -542,6 +598,7 @@ class DiffResult:
     groups: tuple = ()            # samples on each side: (treatment, control); () for a results table
     role: str = ""                # roles.KINDS: enrichment | competition | remaining ("" = no competition design)
     relaxed: int = 0              # features tested with fewer than min_valid values in the smaller group
+    correction: dict = field(default_factory=dict)   # a site comparison corrected for protein abundance (D70)
 
     @property
     def up(self) -> int:
@@ -573,7 +630,7 @@ def _classic(p: fpa.Processed, a: str, b: str, s: Settings) -> fpa.ContrastResul
     m = p.m
     ia = [j for j, x in enumerate(m.samples) if m.condition[x] == a]
     ib = [j for j, x in enumerate(m.samples) if (m.condition[x] != a if b == "others" else m.condition[x] == b)]
-    diff, t, pv, na, nb, ma, mb = [], [], [], [], [], [], []
+    diff, t, pv, na, nb, ma, mb, dfs = [], [], [], [], [], [], [], []
     for row in m.values:
         xa = [row[j] for j in ia if row[j] is not None]
         xb = [row[j] for j in ib if row[j] is not None]
@@ -582,15 +639,22 @@ def _classic(p: fpa.Processed, a: str, b: str, s: Settings) -> fpa.ContrastResul
         ma.append(stats.mean(xa))
         mb.append(stats.mean(xb))
         if len(xa) >= s.min_valid and len(xb) >= s.min_valid:
-            tv, _, pp = (stats.welch_t if s.test == "welch" else stats.student_t)(xa, xb)
+            tv, dfv, pp = (stats.welch_t if s.test == "welch" else stats.student_t)(xa, xb)
             diff.append(stats.mean(xa) - stats.mean(xb))
         else:
-            tv, pp = math.nan, math.nan
+            tv, dfv, pp = math.nan, math.nan, math.nan
             diff.append(stats.mean(xa) - stats.mean(xb) if xa and xb else math.nan)
         t.append(tv)
         pv.append(pp)
+        dfs.append(dfv)
     nan = [math.nan] * len(diff)
-    return fpa.ContrastResult(a, b, diff, nan, list(nan), t, pv, stats.bh_adjust(pv), na, nb, ma, mb)
+    return fpa.ContrastResult(a, b, diff, nan, list(nan), t, pv, stats.bh_adjust(pv), na, nb, ma, mb,
+                              se=_se_from_t(diff, t), df=dfs)
+
+def _se_from_t(diff: list[float], t: list[float]) -> list[float]:
+    """A t-test's standard error, diff / t (nan where t is 0, infinite or missing)."""
+    return [abs(d / tv) if d == d and tv == tv and tv not in (0.0, math.inf, -math.inf) else math.nan
+            for d, tv in zip(diff, t, strict=True)]
 
 @dataclass
 class Model:
@@ -740,20 +804,21 @@ def f_test(p: fpa.Processed, comps: list[tuple[str, str | None]], s: Settings, m
     return dz.f_test(m.values, des, ref, mv, _counts(m, s), s.variance_prior)
 
 def _one_sample_classic(m: QuantMatrix, cols: list[int], name: str, s: Settings) -> fpa.ContrastResult:
-    diff, t, pv, n_ = [], [], [], []
+    diff, t, pv, n_, dfs = [], [], [], [], []
     for row in m.values:
         xs = [row[j] for j in cols if row[j] is not None]
         n_.append(len(xs))
         if len(xs) >= s.min_valid:
-            tv, _, pp = stats.one_sample_t(xs, 0.0)
+            tv, dfv, pp = stats.one_sample_t(xs, 0.0)
         else:
-            tv, pp = math.nan, math.nan
+            tv, dfv, pp = math.nan, math.nan, math.nan
         diff.append(stats.mean(xs) if xs else math.nan)
         t.append(tv)
         pv.append(pp)
+        dfs.append(dfv)
     nan = [math.nan] * len(diff)
     return fpa.ContrastResult(name, "", diff, nan, list(nan), t, pv, stats.bh_adjust(pv), n_, [0] * len(diff),
-                              list(diff), list(nan))
+                              list(diff), list(nan), se=_se_from_t(diff, t), df=dfs)
 
 def to_diff(p: fpa.Processed, r: fpa.ContrastResult, control: str | None, s: Settings) -> DiffResult:
     """A ContrastResult as table rows with add_rejections() significance."""
@@ -767,6 +832,8 @@ def to_diff(p: fpa.Processed, r: fpa.ContrastResult, control: str | None, s: Set
         ib = [j for j, x in enumerate(m.samples) if m.condition[x] == control]
     rows = []
     thr_p = None
+    se = r.se if r.se is not None else [math.nan] * len(m.features)
+    dfs = r.df if r.df is not None else [math.nan] * len(m.features)
     for i, f in enumerate(m.features):
         pv, qv, fc = _nan(r.p[i]), _nan(r.q[i]), _nan(r.diff[i])
         score = qv if s.use_adjusted else pv
@@ -781,7 +848,9 @@ def to_diff(p: fpa.Processed, r: fpa.ContrastResult, control: str | None, s: Set
                      "n_control": sum(1 for j in ib if p.measured[i][j] is not None) if control is not None else None,
                      "imputed": sum(1 for j in ia + ib if mask[j]),
                      "mean_treatment": _nan(r.mean_treatment[i]),
-                     "mean_control": _nan(r.mean_control[i]) if control is not None else None})
+                     "mean_control": _nan(r.mean_control[i]) if control is not None else None,
+                     "se": _nan(se[i]) if pv is not None else None,
+                     "df": _nan(dfs[i]) if pv is not None else None})   # df inf (limma's pooled prior) -> "Inf"
     if not s.use_adjusted:
         thr_p = s.alpha
     rows.sort(key=lambda x: (x["pvalue"] is None, x["pvalue"] if x["pvalue"] is not None else 1.0))
@@ -849,4 +918,4 @@ def fold_change_only(d: DiffResult, reason: str) -> None:
                          f"candidates are |log2FC| ≥ {lfc:g}, with no p-values. Treat them as leads to confirm.")
 
 DIFF_COLUMNS = ["id", "label", "description", "log2fc", "ci_low", "ci_high", "pvalue", "qvalue", "significant", "t",
-                "n_treatment", "n_control", "imputed", "mean_treatment", "mean_control"]
+                "n_treatment", "n_control", "imputed", "mean_treatment", "mean_control", "se", "df"]

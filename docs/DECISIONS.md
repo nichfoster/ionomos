@@ -1223,7 +1223,8 @@ adds the convention used in isoTOP-ABPP / isoDTB work.
    When far more sites would be liganded the other way round, the doctor
    warns (`LIGANDED_DIRECTION`) rather than switching by itself.
 4. **Measured ratios only.** No normalisation and no imputation: a liganded
-   call must never rest on a made-up value.
+   call must never rest on a made-up value. (D70: the lab may opt into centring the ratios per
+   replicate; the calls then use the centred ratios and say so.)
 5. **Selectivity needs evidence on both sides.** A site is *selective* only
    when every other compound was measured as not liganding it; if they
    weren't measured well enough it is *unresolved*.
@@ -1235,7 +1236,8 @@ adds the convention used in isoTOP-ABPP / isoDTB work.
 7. **Left out: the protein-abundance correction** (MSstatsPTM). It needs a
    matching unenriched proteome per condition, and where that comes from is
    a question for the lab. The per-protein view ("most of this protein's
-   cysteines are liganded") is the warning available without it.
+   cysteines are liganded") is the warning available without it. (Built in D70,
+   with the proteome named explicitly.)
 
 
 ### D53 — Time courses are tested with time as a factor, on the comparisons' own model
@@ -2527,3 +2529,106 @@ file unreadable; which code page FragPipe's tools really write (ROADMAP
 the name check find raws through `intake.raw_paths`, so a `<plex>\` drop's
 files are listed and can be removed (moved aside, as every inbox removal is);
 added while combining the 0.15.0 PRs.
+
+### D70 — isoDTB: site changes corrected for protein abundance, and opt-in centring of the ratios
+**2026-10-03.** Two open items for isoDTB results the lab can trust: the
+protein-abundance correction left out of D52 (ROADMAP 5C #3), and the mixing
+error D66 found and did not fix. Both are built **off by default**: where the
+proteome comes from, and whether to centre, are the lab's decisions.
+
+1. **The proteome is named, never guessed.** `analysis.protein_correction:
+   {proteome, match, conditions}` (usually in `experiment.yaml`). `proteome`
+   is an analysed Ionomos experiment (its folder or `results/`), or a protein
+   table: MSstats groupComparison output (Protein, Label, log2FC, SE, DF), the
+   format MSstatsPTM itself takes, or an Ionomos `*_differential.tsv`. A
+   relative path is read from the experiment folder; the proteome is only
+   read. `match: gene | protein` (accessions with isoforms joined, as the site
+   annotation does). A site condition (an isoDTB prefix such as `EJQ_2_027`)
+   takes the comparison `conditions` names, else the one whose first
+   condition has its name; none or several is `PROTEIN_CORRECTION_CONDITIONS`
+   (decide) and that condition is not corrected. Alternatives weighed: taking
+   a proteome's only comparison when there is one (a guess, ruled out by the
+   task), and matching by roles (the proteome's roles are not the site
+   data's).
+2. **The scale comes from `liganded_direction`.** Site ratios are log2
+   heavy / light; a proteome "Cmpd vs DMSO" is log2(Cmpd / DMSO), so on the
+   site's scale it is −log2FC when the treated sample is light (`high`) and
+   +log2FC when it is heavy (`low`). A proteome analysed as ratios (a
+   comparison "X (log2 H/L vs 0)") is taken as it is. The orientation is
+   written in `analysis.json` → `protein_correction.orientation`.
+3. **MSstatsPTM's adjustment, exactly.** `proteincorr.adjust` is
+   `.adjustProteinLevel`: log2FC = site − protein, SE = √(SE_site² +
+   SE_protein²), Satterthwaite df, two-sided p; BH per condition over the
+   sites tested (`.applyPtmAdjustment`). The site's SE and df are the
+   moderated one-sample test's posterior SE and residual + prior df; nothing
+   is moderated again, as in MSstatsPTM. To have them, `ContrastResult`
+   carries `se` and `df` for every test (limma, the designs, the t-tests) and
+   **every `*_differential.tsv` gains `se` and `df` columns** (additive; a
+   proteome table without them is read from `t` and the 95 % interval).
+   Infinite df (limma's pooled prior) drops out of the Satterthwaite sum; both
+   infinite gives a normal p.
+4. **Both results, flagged.** The site comparison stays as it was; a second
+   comparison `<condition> (log2 H/L vs 0, protein-corrected)` is added like
+   any comparison (volcano, table, report, results table, `analysis.json`),
+   with the protein's key, status, log2 H/L, SE and df and the site's own
+   numbers in its table. Sites whose protein is missing or ambiguous keep the
+   uncorrected result and are flagged (MSstatsPTM drops them). Fewer than
+   half the sites finding their protein, or a proteome that can't be read, is
+   `PROTEIN_CORRECTION`. The liganded calls stay on the site ratio (R ≥ 4 is
+   a rule about the measured competition); `cysteine_sites.tsv` shows the
+   protein's ratio and the corrected R beside each call.
+5. **`analysis.ratio_centre: none | median | auto`, default `none`.**
+   - `median`: each replicate's median site to 0.
+   - `auto` reuses D64's idea: centre on the sites that don't change, and only
+     when it matters. Each replicate's offset is the median of its ratios over
+     the half of the sites whose mean deviation from the replicates' centres
+     is smallest (five passes): engaged sites all move one way and leave that
+     half, so they stop pulling the centre. A condition is centred, all its
+     replicates, when one of them is more than 0.05 log2 **and** 3 standard
+     errors (1.2533 × robust SD / √sites) off 0. A condition is the unit
+     because its replicates share the compound's composition.
+   - The offsets are measured whatever the setting (`analysis.json` →
+     `normalisation.ratio_centre`); with `none` a clear one is the note
+     `RATIO_OFFSET`, which says what to set.
+   - The liganded calls use the ratios the analysis used and say which in
+     their rule ("on the ratios as measured" / "centred per replicate on the
+     stable sites …"), in `analysis.json` (`cysteines.centred`) and Methods.
+6. **What it measured** (`benchmark.simulated("centring", kind="isodtb")`: 3
+   replicates, 900 sites, limma, 20 tables per scenario; FDP / planted changes
+   found at adjusted p ≤ 0.05 / |mean log2 ratio of the unchanged sites| per
+   table; BH aims at 4.75 % with 5 % changed, 4 % with 20 %):
+
+   | mixing error, sites up, fold | none (default) | median | auto |
+   |---|---|---|---|
+   | 0, 5 %, 2× | 3.4 % / 38 % / 0.005 | 3.4 % / 31 % / 0.021 | = none |
+   | 0, 5 %, 4× | 4.1 % / 94 % / 0.007 | 4.1 % / 94 % / 0.018 | = none |
+   | 0, 20 %, 2× | 4.6 % / 79 % / 0.006 | 5.3 % / 74 % / 0.087 | = none |
+   | 0, 20 %, 4× | 4.9 % / 97 % / 0.007 | 6.1 % / 97 % / 0.097 | = none |
+   | 15 % (SD 0.2), 5 %, 2× | **8.4 %** / 18 % / 0.109 | 4.1 % / 24 % / 0.016 | 4.2 % / 28 % / 0.014 |
+   | 15 %, 5 %, 4× | 4.8 % / 95 % / 0.113 | 4.9 % / 93 % / 0.017 | 4.9 % / 93 % / 0.010 |
+   | 15 %, 20 %, 2× | 5.1 % / 61 % / 0.088 | 6.3 % / 74 % / 0.091 | 5.5 % / 80 % / 0.012 |
+   | 15 %, 20 %, 4× | 3.8 % / 98 % / 0.080 | 5.2 % / 97 % / 0.093 | 4.4 % / 97 % / 0.012 |
+
+   `auto` left all 240 tables without a mixing error untouched (identical
+   numbers to `none`) and centred all 240 with one; on the stable sites its
+   offsets had a bias of 0.003 and an SD of 0.017 log2 with 20 % of the sites
+   up (reported SE 0.020 – 0.027). `median` removes the mixing error too but
+   moves the unchanged sites by −0.09 whenever 20 % go one way. The mixing
+   error does not always raise the FDP (it also widens the replicate spread,
+   making the test conservative), but it always moves the unchanged sites.
+7. **Default `none`, on purpose.** `auto` is better than `none` and `median`
+   in every simulated scenario, but the simulation's mixing error is a guess
+   (D66), a real compound may move more than half the sites, and centring
+   changes the liganded calls. ROADMAP asks the lab.
+
+**Verified**: the adjustment against MSstatsPTM 2.14.0 and limma 3.68.5 on
+the same sites and protein table, to 1e-9 (`tests/golden/ptm/`, R script
+committed; the test needs no R); the readers, the condition matching, the
+issues and the scale on simulated isoDTB + DIA experiments end to end; the
+centring on simulated tables and the benchmark grid above. **Not verified**:
+real data of any kind; a real MSstats or MSstatsTMT protein table (built from
+their documented columns); a proteome searched separately from the sites
+(gene names that differ between the two searches); 2 or 4 replicates with
+centring (the standard isoDTB grid now runs them); the report's new
+comparison in a real browser (the JS is unchanged; the comparison is one more
+entry in the existing list).
