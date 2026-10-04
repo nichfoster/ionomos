@@ -757,6 +757,53 @@ analysis:
 and re-run the analysis ([How to re-run](#faq.rerun)). The message lists the
 proteome's comparisons. Site conditions without one are reported uncorrected.
 
+## Phospho: no phosphosite table could be used {#issue.PHOSPHO_TABLE}
+
+`phospho: true` asks Ionomos to analyse phosphosites, but it found no site
+table it could read, so it analysed the proteins instead (the report is still
+usable, it is just not per site). It looks for FragPipe's
+`combined_site_STY_79.9663.tsv` (label-free; needs PSM site localisation,
+PTMProphet, in the workflow), TMT-Integrator's `abundance_single-site_MD.tsv`,
+or DIA-NN's `report.phosphosites_90.tsv` (needs a FASTA and matrices). Turn on
+the site reports in the workflow and search again, or give the table's full
+path as `phospho_table` under `analysis:` and re-run the analysis
+([How to re-run](#faq.rerun)).
+
+## Phospho: the localisation filter could not be applied as asked {#issue.PHOSPHO_LOCALISATION}
+
+TMT-Integrator's single-site report and DIA-NN's phosphosite matrix have no
+localisation probabilities per site: the search filtered them already, and
+its threshold is lower than `phospho_min_localization`. The sites were
+analysed as the search kept them. For a stricter filter, set it in the search
+(`tmtintegrator.min_site_prob` in the FragPipe workflow) and search again, or
+set `phospho_min_localization` to what the search used so this note goes
+away.
+
+## Kinase activity: the kinase-substrate table could not be used {#issue.KINASE_SUBSTRATES}
+
+`kinase_substrates` names a table of kinases and their substrate sites, which
+the lab downloads itself (PhosphoSitePlus's `Kinase_Substrate_Dataset`, free
+for non-commercial use; Ionomos never ships it). It wasn't found, couldn't be
+read, or too few measured sites are substrates in it:
+- Put the file in the experiment folder, or give its full path. A `.gz` file
+  is read as it is.
+- Matching is by substrate gene and residue (`MAPK1` + `T185`), as KSEAapp
+  does. If gene names differ, try `ksea_match: protein` (UniProt accessions).
+- Only `ksea_organism` (human by default) rows are used.
+- A kinase needs `ksea_min_substrates` (5) measured substrates.
+
+The site statistics are not affected. Fix the setting and re-run the analysis
+([How to re-run](#faq.rerun)).
+
+## Interaction partners: the STRING network could not be used {#issue.STRING_NETWORK}
+
+`string_network` names a STRING network the lab downloaded from string-db.org:
+either `<taxon>.protein.links.v12.0.txt.gz` with `<taxon>.protein.info.v12.0.txt.gz`
+in the same folder (the second gives the gene names), or a network exported
+from the STRING website as a TSV. The file wasn't found or isn't one of
+those. The statistics are not affected; fix the path and re-run the analysis
+([How to re-run](#faq.rerun)).
+
 ## Dose-response: the doses need a look {#issue.DOSES}
 
 Ionomos found what looks like a titration but couldn't read every dose, so

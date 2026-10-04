@@ -78,7 +78,7 @@ def _level_word(m: QuantMatrix | None) -> tuple[str, str]:
 def payload(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: list[DiffResult], notes: list[str],
             files: list[str], s: Settings, qcd: dict, enrichment: list[dict], ranked: list[dict] | None = None,
             insight: dict | None = None, dose: dict | None = None, cys: dict | None = None,
-            time: dict | None = None, psm: dict | None = None) -> dict:
+            time: dict | None = None, psm: dict | None = None, phos: dict | None = None) -> dict:
     pm = p.m if p else m
     title, word = _level_word(pm)
     d: dict = {
@@ -100,6 +100,7 @@ def payload(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: li
         "dose": dose or {"ran": False, "found": False, "reason": "No dose-response curves were fitted."},
         "cys": cys or {"ran": False, "reason": ""},
         "time": time or {"ran": False, "found": False, "reason": "No time course was found."},
+        "phos": phos or {"ran": False},
         "help": _help_payload(ctx.get("issues")),
         "roles": _roles_payload(ctx, diffs),
         "exportDefaults": _export_defaults(s),
@@ -530,6 +531,40 @@ def _cys_methods(cys: dict) -> str:
                "call itself uses the site ratio." if cys.get("proteinShown") else ""))
 
 
+def _phos_title(phos: dict | None) -> str:
+    phos = phos or {}
+    words = ", ".join((["phosphosites"] if phos.get("ran") else []) + (["kinases"] if phos.get("ksea") else [])
+                      + (["partners"] if phos.get("string") else [])) or "phosphosites"
+    return words[0].upper() + words[1:]
+
+
+def _phos_methods(phos: dict) -> str:
+    """Methods for the phospho section (phospho.py, D79)."""
+    out = []
+    loc = phos.get("loc") or {}
+    if phos.get("ran"):
+        out.append(f"Phosphosites were read from {escape(str(loc.get('table', '')))} ({escape(str(loc.get('source', '')))}, "
+                   f"quantity: {escape(str(loc.get('quantity', '')))}); localisation filter: "
+                   f"{escape(str(loc.get('filter', '')))}. {loc.get('sites_kept', 0):,} of "
+                   f"{loc.get('sites_in_table', 0):,} sites were kept and analysed like proteins."
+                   + (" Each site comparison was also corrected for its protein's change in an unenriched proteome "
+                      "(MSstatsPTM's adjustment)." if phos.get("corrected") else ""))
+    k = phos.get("ksea") or {}
+    if k.get("ran"):
+        out.append("Kinase activity was inferred with KSEA (Casado et al., Sci. Signal. 2013; the scores of KSEAapp "
+                   "2.0, Wiredja et al., Bioinformatics 2017) from the kinase-substrate table "
+                   f"{escape(str(k.get('file', '')))} (substrates matched by {escape(str(k.get('match', 'gene')))} and "
+                   "residue" + (f", NetworKIN predictions with score ≥ {k.get('networkin_score')}" if k.get("networkin") else
+                                ", PhosphoSitePlus relationships") + "): z = (mean log2FC of a kinase's measured "
+                   "substrates − mean log2FC of every site) × √m / SD; p two-sided from the normal distribution; "
+                   f"Benjamini-Hochberg over the kinases with at least {k.get('min_substrates')} substrates.")
+    st = phos.get("string") or {}
+    if st.get("ran"):
+        out.append(f"Interaction partners among the hits were taken from the STRING network "
+                   f"{escape(str(st.get('file', '')))} (combined score ≥ {st.get('min_score')}).")
+    return " ".join(out)
+
+
 def _pipeline(p: fpa.Processed | None, diffs: list[DiffResult]) -> str:
     if p is None:
         return ""
@@ -629,7 +664,7 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
            files: list[str], s: Settings | None = None, qcd: dict | None = None,
            enrichment: list[dict] | None = None, ranked: list[dict] | None = None, insight: dict | None = None,
            dose: dict | None = None, cys: dict | None = None, time: dict | None = None,
-           psm: dict | None = None) -> str:
+           psm: dict | None = None, phos: dict | None = None) -> str:
     s = s or Settings()
     enrichment = enrichment or []
     ranked = [b for b in ranked or [] if b["terms"]]
@@ -637,7 +672,7 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
     meta = " · ".join(x for x in (ctx.get("user"), ctx.get("method"), ctx.get("date"),
                                   f"generated {datetime.now():%Y-%m-%d %H:%M}", f"Ionomos {ctx.get('version', '')}") if x)
     data = json.dumps(payload(ctx, m, p, diffs, notes, files, s, qcd or {}, enrichment, ranked, insight, dose, cys, time,
-                              psm),
+                              psm, phos),
                       separators=(",", ":"), allow_nan=False).replace("</", "<\\/").replace("<!--", "<\\u0021--")
     pm = p.m if p else m
     ratio = pm is not None and pm.kind == "ratio"
@@ -645,6 +680,8 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
     cys_shown = bool(cys and cys.get("ran"))
     time_shown = bool(time and (time.get("ran") or time.get("found")))
     spec_shown = bool(ctx.get("specific"))
+    phos_shown = bool(phos and (phos.get("ran") or (phos.get("ksea") or {}).get("ran") is not None
+                                or (phos.get("string") or {}).get("ran") is not None))
     b = [f"<main><div class='top'><div><h1>{escape(title)}</h1><div class='meta'>{escape(meta)}</div></div>"
          "<div><span id='slidesmsg' class='muted' role='status'></span> <button id='theme' title='Light / dark'>◐</button> "
          "<button id='share' title='Copy a link to this view (comparison, cut-offs, search)'>Link</button> "
@@ -659,6 +696,7 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
          + "<a href='#dose' id='navdose'" + ("" if dose_shown else " hidden") + ">Dose-response</a>"
          + "<a href='#time' id='navtime'" + ("" if time_shown else " hidden") + ">Time course</a>"
          + "<a href='#cys' id='navcys'" + ("" if cys_shown else " hidden") + ">Liganded sites</a>"
+         + "<a href='#phos' id='navphos'" + ("" if phos_shown else " hidden") + ">" + _phos_title(phos) + "</a>"
          + "<a href='#quality'>Quality control</a>"
          "<a href='#methods'>Methods</a><a href='#files'>Files</a><a href='#help'>Help</a></nav>",
          "<noscript><div class='notes'>This report draws its charts with JavaScript. The volcano_*.svg and *.tsv "
@@ -777,6 +815,11 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
              "threshold in enough replicates. This is the chemoproteomics convention, not a p-value; the volcano "
              "above tests whether a ratio differs from 1. Click a row to see the site's replicates.</p>"
              "<div id='cysbody'></div></section>")
+    b.append("<section id='phos'" + ("" if phos_shown else " hidden") + "><h2>" + _phos_title(phos) + "</h2>"
+             "<p class='sub'>What the phosphosite table kept after the localisation filter, which kinases' known "
+             "substrates move together (KSEA: a z-score from the substrates' fold changes, not a measurement of the "
+             "kinase), and which hits are known to interact (STRING). The kinase-substrate table and the network "
+             "are the lab's downloads.</p><div id='phosbody'></div></section>")
     b.append("<section id='quality'><h2>Quality control</h2><div id='qc'></div></section>")
     method = ctx.get("method", "")
     text = methods_text(pm, p, diffs, s, method, ctx.get("fragpipe", ""), enrichment, ranked, ctx.get("engine"),
@@ -788,6 +831,8 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
         b.append(f"<p class='methods'>{_time_methods(time)}</p>")
     if cys_shown:
         b.append(f"<p class='methods'>{_cys_methods(cys)}</p>")
+    if phos_shown:
+        b.append(f"<p class='methods'>{_phos_methods(phos)}</p>")
     b.append(_provenance_table(ctx.get("engine") or {}))
     b.append("<h3>Settings used</h3>" + _settings_table(s, p, ctx.get("model"), ctx.get("roles")))
     if any(f.startswith("fragpipe-analyst/") for f in files):

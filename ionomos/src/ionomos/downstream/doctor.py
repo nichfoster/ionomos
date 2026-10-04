@@ -62,6 +62,7 @@ class Findings:
     time_problems: list = field(default_factory=list)     # [(severity, message)] from timecourse.plan_series
     cys_problems: list = field(default_factory=list)      # [(severity, message)] from cys.run / the site annotation
     protein_problems: list = field(default_factory=list)  # [(code, severity, message)] from proteincorr (D70)
+    phospho_problems: list = field(default_factory=list)  # [(code, severity, message)] from phospho.py (D79)
     psm_problems: list = field(default_factory=list)      # [(issue code, message)] from psmqc.run
     run_problems: list = field(default_factory=list)      # [(issue code, message)] from runorder.run (D78)
     model: object = None                # analysis.Model: the design used, or why an asked-for one wasn't
@@ -155,6 +156,47 @@ def _ratio_checks(f: Findings, p, s, add) -> None:
                        "analysis.protein_correction.proteome and Run analysis",
                        "Try match: protein when gene names differ between the two searches",
                        "The uncorrected results are not affected"], {"message": msg}))
+
+
+_PHOSPHO_ISSUES = {i.code: i for i in (  # phospho.py's problems (D79): the message is filled in by _phospho_checks
+    Issue("PHOSPHO_TABLE", "input", "Phospho: no phosphosite table could be used", "",
+          ["The search had no PTM site localisation (PTMProphet) or no site report step, so FragPipe wrote no "
+           "combined_site_STY_79.9663.tsv or single-site report",
+           "DIA-NN was run without a FASTA or without matrices, so report.phosphosites_90.tsv is missing",
+           "analysis.phospho_table names a file that was moved, or is not a site table"],
+          ["Turn on PSM site localisation and the site reports in the FragPipe workflow and search again",
+           "Or give the site table's full path in analysis.phospho_table and Run analysis",
+           "The proteins were analysed instead, so the report is still usable"]),
+    Issue("PHOSPHO_LOCALISATION", "warning", "Phospho: the localisation filter could not be applied as asked", "",
+          ["TMT-Integrator's report and DIA-NN's matrix carry no per-site probabilities: their own threshold was "
+           "applied before Ionomos saw the table, and it is lower than phospho_min_localization"],
+          ["Set the threshold in the search (tmtintegrator.min_site_prob in the workflow) and search again, or lower "
+           "phospho_min_localization to what the search used"]),
+    Issue("KINASE_SUBSTRATES", "warning", "Kinase activity: the kinase-substrate table could not be used", "",
+          ["The file named in analysis.kinase_substrates was moved or renamed",
+           "It is not PhosphoSitePlus's Kinase_Substrate_Dataset (or KSEAapp's PSP&NetworKIN file)",
+           "Few measured sites are substrates in it: gene names differ (try ksea_match: protein), another organism "
+           "(ksea_organism), or ksea_min_substrates is high for this experiment"],
+          ["Download Kinase_Substrate_Dataset from PhosphoSitePlus (free for non-commercial use), put it in the "
+           "experiment folder or give its full path in analysis.kinase_substrates, and Run analysis",
+           "The site statistics are not affected"]),
+    Issue("STRING_NETWORK", "warning", "Interaction partners: the STRING network could not be used", "",
+          ["The file named in analysis.string_network was moved or renamed",
+           "A protein.links file without its protein.info file in the same folder", "Not a STRING file"],
+          ["Download <taxon>.protein.links and <taxon>.protein.info from string-db.org into one folder and give the "
+           "links file's full path in analysis.string_network, then Run analysis", "The statistics are not affected"]),
+)}
+
+
+def _phospho_checks(f: Findings, add) -> None:
+    """phospho.py's problems (D79); the protein correction's go through _ratio_checks."""
+    from dataclasses import replace
+
+    for code, sev, msg in getattr(f, "phospho_problems", None) or []:
+        if code in _PHOSPHO_ISSUES:
+            add(replace(_PHOSPHO_ISSUES[code], severity=sev, message=msg, causes=list(_PHOSPHO_ISSUES[code].causes),
+                        fixes=list(_PHOSPHO_ISSUES[code].fixes), data={"message": msg}))
+
 
 
 def suggest_conditions(samples: list[str]) -> dict[str, str]:
@@ -559,6 +601,9 @@ def check(f: Findings) -> list[Issue]:
 
     # ---- site ratios (D70): a replicate clearly off 0 that was not centred; the protein correction
     _ratio_checks(f, p, s, add)
+
+    # ---- phosphosites, kinase activity, STRING (D79): a site table or a download that can't be used
+    _phospho_checks(f, add)
 
     # ---- statistics that ran but may not mean what they say (guards.py)
     from ionomos.downstream import guards

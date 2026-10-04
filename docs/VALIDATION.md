@@ -29,6 +29,8 @@ no real FragPipe-Analyst, MSstats or Perseus export has been compared.
 | MaxLFQ roll-up (`analysis.rollup: maxlfq`, D76) on 54 proteins × 8 samples: disconnected sample groups, missing values, one feature, one sample, a chain of samples | `iq::maxLFQ()` 2.0.1 (both its scaling and the summed-intensity scaling, and its components); `diann::diann_maxlfq()` 1.0.1 (profiles of connected proteins) | 1e-9; 1e-3 (DIA-NN regularises) | `tests/test_rollup.py`, `tests/golden/maxlfq/` |
 | IRS on the plex means (3 plexes, no reference channel), filter, median normalisation, limma with each protein's residual df reduced by its plexes - 1 | base R + limma 3.68.5 | 1e-8 | `tests/test_tmt_plex_stats.py`, `tests/golden/tmt_sum/` |
 | isoDTB sites corrected for protein abundance: the sites' moderated one-sample SE and df, then the adjustment (log2FC, SE, Satterthwaite df, t, p, BH), a protein table in MSstats format, two proteins with DF = Inf (D70) | limma 3.68.5 + MSstatsPTM 2.14.0 (`.applyPtmAdjustment`) | 1e-9 on 213 sites | `tests/test_protein_correction.py`, `tests/golden/ptm/` |
+| Kinase activity (KSEA): m, mS, Enrichment, z, one-sided p on made-up sites and kinase-substrate pairs (duplicated sites, two names of one kinase, NetworKIN rows); Ionomos' two-sided p and BH over the kinases with m ≥ 5 computed in the same script (D79) | KSEAapp 2.0 (`KSEA.Scores`) | 1e-10 | `tests/test_phospho.py`, `tests/golden/ksea/` |
+| Phosphosite comparisons corrected for protein abundance (D79) | the D70 adjustment (`proteincorr.adjust`, checked against MSstatsPTM above) | exact | `tests/test_phospho.py` |
 | t-tests, Benjamini-Hochberg | scipy | 1e-9 (p), 1e-12 (BH) | `tests/test_downstream.py` |
 
 These say the port computes what the reference computes on the same input.

@@ -419,6 +419,36 @@ experiment (the treated sample carries the heavy tag), set
 `liganded_min_replicates`. Everything is also in `results/cysteine_sites.tsv`
 and `results/cysteine_proteins.tsv`.
 
+## Phosphosites, kinases and partners {#report.phos}
+
+Shown only when the lab asked for it (all of it is off by default):
+
+- **Phosphosites** (`phospho: true` under `analysis:`): the experiment was
+  analysed per phosphosite instead of per protein, from the search's site
+  table (FragPipe's `combined_site_STY_79.9663.tsv`, TMT-Integrator's
+  `abundance_single-site_MD.tsv`, or DIA-NN's `report.phosphosites_90.tsv`).
+  The tiles say how many sites the [localisation](#glossary.localisation)
+  filter kept (by default a best localisation probability of at least 0.75),
+  which residues they are on, and, for FragPipe's label-free table, how the
+  probabilities are spread. TMT-Integrator and DIA-NN filter before Ionomos
+  sees the table; their threshold is shown instead. Everything else in the
+  report (the volcano, the table, the heatmap) is then about sites, named like
+  `MAPK1 T185`. With `protein_correction`, each comparison also has a
+  *protein-corrected* twin: the site's change minus its protein's change in an
+  unenriched proteome.
+- **Kinase activity** (`kinase_substrates:` names a kinase–substrate table the
+  lab downloaded from PhosphoSitePlus): for each comparison, a
+  [KSEA](#glossary.ksea) z-score per kinase. A positive z means the kinase's
+  known substrates went up more than the sites overall: a sign the kinase is
+  more active, not a measurement of it. Kinases need at least
+  `ksea_min_substrates` (5) measured substrates; the coloured bars are those
+  with an adjusted p at or below the report's p-value cut-off. Click a bar or
+  a row for its substrates. The numbers are in `results/kinase_activity.tsv`.
+- **Interaction partners** (`string_network:` names a STRING network the lab
+  downloaded): for each comparison, the hits that are known to interact with
+  other hits, with STRING's combined score. Works for proteins too, not only
+  sites. The list is in `results/string_partners.tsv`.
+
 ## Quality control {#report.quality}
 
 Tabs of checks on the samples and the data. Start with the **Sample

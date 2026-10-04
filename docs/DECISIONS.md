@@ -3351,3 +3351,132 @@ back to the file time); whether ThermoRawFileParser's mzML `startTimeStamp`
 and metadata "Creation date" are UTC or local for the lab's files; the tab
 and the figure in a real browser (jsdom only); the limits on the lab's own
 sequences.
+
+### D79 — Phosphosites, kinase activity and STRING partners are opt-in; the downloads stay the lab's
+**2026-10-04.** ROADMAP 5C #8 and #9. The lab has not said it runs phospho, so
+everything here is **off unless asked for** and an experiment analysed before
+is analysed exactly as before (`analysis.json` gains a `phospho` entry that
+says "not asked for"). `downstream/phospho.py`.
+
+1. **`phospho: true` swaps the protein table for the site table**, and the
+   rest of the analysis does not know the difference: a site is a feature of
+   level `site` and kind `intensity`, named `GENE R123` with the id
+   `sp|ACC|ENTRY|R123` (the isoDTB site convention, so D70's matching and the
+   search work), and goes through the same filter, normalisation, imputation,
+   limma, volcano, heatmap, enrichment and report. The readers were built from
+   the real column names, not from documentation alone:
+   - FragPipe label-free: IonQuant's `combined_site_STY_79.9663.tsv`
+     (`Index` = `ACC_S142`, `Gene`, `Protein`, `Protein ID`, `Peptide`,
+     `Best Localization Probability`, per sample `… Localization
+     Probability`, `… Intensity`, `… MaxLFQ Intensity`; 0 = missing). The
+     header was taken from a public FragPipe output
+     (prolfqua/prolfquappPTMreaders' example) and Nesvilab's DDA+ notebook;
+     FragPipe's own documentation describes only the TMT site reports.
+     MaxLFQ is used when it has values, as for proteins.
+   - FragPipe TMT: TMT-Integrator's `abundance_single-site_MD.tsv` (`Index`,
+     `Gene`, `ProteinID`, `Peptide`, `SequenceWindow`, …,
+     `ReferenceIntensity`, then the channels), read with the TMT loader so
+     the annotation, plexes and "already relative to the reference" rules are
+     the protein table's. Columns as FragPipe-Analyst and FragPipeAnalystR
+     read them.
+   - DIA-NN: `report.phosphosites_90.tsv` / `_99.tsv` (`Protein`,
+     `Protein.Names`, `Gene.Names`, `Residue`, `Site`, `Sequence`, then the
+     runs; 0 = missing), named in DIA-NN's README (1.9 – 2.0) and with the
+     header of a public DIA-NN output; runs are matched to the manifest as
+     for the protein matrix. DIA-NN recommends its Parquet site report over
+     these matrices; reading that is not built.
+   No site table: the proteins are analysed and `PHOSPHO_TABLE` (input) says
+   so. `phospho_table` names one explicitly. Alternatives weighed: finding the
+   site table without a setting (would change existing LFQ-phospho
+   experiments, whose protein table is analysed today); a separate method
+   (`like: LFQ` plus a flag is what the lab would write anyway).
+2. **The localisation filter is a setting, and Ionomos says when it cannot
+   apply it.** `phospho_min_localization` (0.75, the common class I
+   threshold) is applied to the label-free table's best localisation
+   probability; with `phospho_localization_per_sample` a sample's value whose
+   own probability is lower is also dropped. TMT-Integrator's report and
+   DIA-NN's matrices carry no probabilities: they were filtered before
+   (TMT-Integrator's `min_site_prob`, read from `fragpipe.workflow`; DIA-NN's
+   0.9 / 0.99, and the 0.99 matrix is read when the setting is above 0.9).
+   When their threshold is lower than the setting, or unknown,
+   `PHOSPHO_LOCALISATION` (warning) says so; nothing is re-filtered on data
+   that cannot be.
+3. **Protein correction is D70's, per comparison.** With `protein_correction`
+   each site comparison (Drug vs DMSO) is corrected by the proteome's
+   comparison of the same two conditions (or the one named in `conditions:`,
+   keyed by the comparison's name or its treatment); never a guess. The
+   per-comparison block of `proteincorr.run` became
+   `proteincorr.correct_comparison`, used by both (the D70 goldens pass
+   unchanged). Both scales are log2 treatment / control, so the protein's
+   change is used as it is. FragPipeAnalystR's `PTM_normalization` (a
+   regression of site on protein per sample) was not ported: D70's
+   adjustment keeps the site and protein uncertainties, which the regression
+   does not.
+4. **KSEA as KSEAapp computes it, with two documented differences.**
+   (Casado et al., Sci. Signal. 2013; KSEAapp 2.0, MIT.) Per comparison, on
+   every site with a log2 fold change: the mean and SD (n − 1) of all of
+   them; a kinase's substrates are the measured sites the table lists for it,
+   matched on substrate gene and residue (`ksea_match: gene`, KSEAapp's
+   merge) or UniProt accession (`protein`); a site measured twice is averaged
+   first per (kinase, site, source), as KSEAapp's `aggregate`; mS, Enrichment
+   = mS / |mean|, z = (mS − mean) √m / SD. Different: **p is two-sided**
+   (KSEAapp's `pnorm(-|z|)` is one-sided; a kinase can go either way; the
+   table keeps `p_one_sided`), and **BH runs over the kinases reported**, those
+   with at least `ksea_min_substrates` (5, KSEAapp's usual `m.cutoff`)
+   substrates (KSEAapp adjusts over every kinase, then filters). A kinase is
+   "more / less active" at adjusted p ≤ `alpha`. The z-score is a statement
+   about the substrates, not a measurement of the kinase; the report says so.
+5. **The kinase-substrate table is the lab's download, never shipped.**
+   PhosphoSitePlus is free for non-commercial use only (CC BY-NC-SA), so, as
+   CysDB in D52, `kinase_substrates` names a file (a full path or one in the
+   experiment folder; `.gz` read as is; its licence lines before the header
+   skipped); it is only read. Read: PhosphoSitePlus's
+   `Kinase_Substrate_Dataset` (`GENE` = the kinase's gene, `SUB_GENE`,
+   `SUB_ACC_ID`, `SUB_MOD_RSD`, organisms), KSEAapp's PSP&NetworKIN file
+   (`Source`, `networkin_score`; NetworKIN rows only with `ksea_networkin`
+   and a score ≥ `ksea_networkin_score`, PSP rows' `Inf` kept, as KSEAapp),
+   or any table with those columns. `ksea_organism` (human) leaves other
+   organisms out. A missing or unusable file, or no kinase with enough
+   substrates, is `KINASE_SUBSTRATES` (warning); the site results are not
+   affected.
+6. **STRING partners: a table, for any experiment.** `string_network` names
+   a STRING download (CC BY 4.0): `protein.links` with the `protein.info`
+   file in the same folder for the names (the links file is streamed and only
+   pairs of hit genes are kept), or a network exported from the website.
+   Per comparison, each hit gene with its partners among that comparison's
+   hits at combined score ≥ `string_min_score` (700, STRING's "high
+   confidence"). Not drawn as a network: a layout readable at 100+ nodes is
+   its own project. `STRING_NETWORK` (warning) when the file cannot be used.
+7. **CORUM is not built.** Its licence was the open question (ROADMAP Phase
+   4, D35): release 5.1 (Zenodo, January 2025) is CC BY 4.0, earlier ones
+   CC BY-NC. A user download would now be allowed, but its file layout was
+   not checked and the task was low priority.
+8. **Report and figures in the D62 / D68 style.** A section "Phosphosites,
+   kinases, partners" (named after what ran): the filter's tiles, a KSEA bar
+   chart per comparison (click a kinase for its substrates, and a button that
+   finds them in the volcano), the kinase table, the partners table. The bar
+   chart is exported like every chart and is the static figure
+   `kinase_activity` (`analysis.export.figures`, `ionomos export`,
+   `sectionfigs.figure_kinase_activity`; the kinases with the largest |z|
+   when not all fit). The site volcano is the existing volcano (the features
+   are sites). `results/kinase_activity.tsv`, `results/string_partners.tsv`;
+   no FragPipe-Analyst `reproduce_in_R.R` for a site analysis (it would read
+   the site table as proteins).
+
+**Verified**: KSEA against KSEAapp 2.0 (R 4.6.1, installed into a private
+library) on made-up sites and kinase-substrate pairs with duplicated sites, a
+pair under two names of one kinase and NetworKIN rows: m, mS, Enrichment, z
+and KSEAapp's one-sided p to 1e-10, and the two-sided p and the BH over m ≥ 5
+computed in the same R script (`tests/golden/ksea/`, `run_kseaapp.R`; the test
+needs no R); a hand-computed case; the three readers on files with the real
+headers; whole analyses of a simulated LFQ-phospho experiment with phospho
+off (identical protein analysis) and on (the planted kinase called, the
+partners found, the figure written); the protein correction against
+`proteincorr.adjust`; the doctor's issues; the report section and its export
+in jsdom, and the section, a kinase click, the volcano search it starts and the
+exported `kinase_activity` SVG by eye in Chromium (the desktop app's browser
+pane, a simulated experiment served locally). **Not verified**: real data of any kind (no phospho search from the
+lab; the readers rest on public files and documentation); a real
+PhosphoSitePlus or STRING download (made-up tables in their layouts);
+TMT-Integrator's `min_site_prob` key in a real FragPipe 24 workflow; Firefox,
+Safari, Edge; Windows.

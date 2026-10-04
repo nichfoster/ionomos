@@ -35,6 +35,7 @@ a = Analysis(
                    "ionomos.bundle", "ionomos.bundle_dialog",
                    "ionomos.forms", "ionomos.accuracy", "ionomos.accuracy_page", "ionomos.notify_tab",
                    "ionomos.notify", "ionomos.downstream.compare", "ionomos.downstream.benchmark",
+                   "ionomos.downstream.phospho",  # opt-in phosphosites, KSEA, STRING (D79)
                    "tkinter.colorchooser"],
     hookspath=[],
     runtime_hooks=[],

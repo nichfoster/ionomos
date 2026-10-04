@@ -2543,6 +2543,103 @@
     $$("tbody tr[data-k]", host).forEach((tr) => (tr.onclick = () => { const e = rows[+tr.dataset.k]; setHighlight(new Set(e.x), e.g + " sites"); }));
   }
 
+  // -------------------------------------------- phosphosites, kinases, partners
+  // D.phos (phospho.py report_payload, D79), all opt-in: loc = what the site table and the localisation filter
+  // kept; ksea.comps[].k = [kinase, m, mS, z, p, fdr, "up" | "down" | "", substrates]; string.comps[].genes =
+  // [gene, direction, partners, scores]. The numbers are made in Python; the page only shows them.
+  const PH = { c: 0, kin: null };
+  function phosComps() { const K = D.phos && D.phos.ksea; return K && K.ran && K.comps ? K.comps : []; }
+  function renderPhos() {
+    const host = $("#phosbody");
+    if (!host) return;
+    const P = D.phos || {}, L = P.loc || {}, K = P.ksea || null, S = P.string || null;
+    if (!(P.ran || K || S)) { host.innerHTML = ""; return; }
+    ["#phos", "#navphos"].forEach((s) => { const e = $(s); if (e) e.hidden = false; });
+    let h = "";
+    if (P.ran) {
+      const res = L.residues || {}, rs = ["S", "T", "Y"].filter((r) => res[r]).map((r) => r + " " + fmtInt(res[r])).join(" · ");
+      h += "<div class='tiles'><div class='tile'><div class='k'>Phosphosites analysed</div><div class='v'>" + fmtInt(L.sites_kept) + "</div><div class='d'>of " +
+        fmtInt(L.sites_in_table) + " in " + esc(L.table) + (rs ? " · " + esc(rs) : "") + "</div></div>" +
+        "<div class='tile'><div class='k'>Localisation filter</div><div class='v'>" + (L.sites_below != null ? fmtInt(L.sites_below) : "–") + "</div><div class='d'>" +
+        (L.sites_below != null ? "sites left out · " : "") + esc(L.filter) + (L.values_dropped ? " · " + fmtInt(L.values_dropped) + " values left out" : "") + "</div></div>" +
+        (P.corrected ? "<div class='tile'><div class='k'>Protein-corrected</div><div class='v'>yes</div><div class='d'>each comparison also as site minus protein change</div></div>" : "") + "</div>";
+    }
+    const comps = phosComps();
+    if (K && !K.ran) h += "<div class='empty'>Kinase activity: " + esc(K.reason || "no kinase was scored") + "</div>";
+    if (comps.length) {
+      PH.c = Math.min(PH.c, comps.length - 1);
+      const C = comps[PH.c];
+      h += "<h3>Kinase activity</h3><div class='row'>" + (comps.length > 1 ? "<label class='ctl'>Comparison <select id='phcomp'>" +
+        comps.map((c, k) => "<option value='" + k + "'" + (k === PH.c ? " selected" : "") + ">" + esc(c.name) + "</option>").join("") + "</select></label>" : "") +
+        "<span class='muted'>" + esc(C.name) + ": " + fmtInt(C.matched) + " of " + fmtInt(C.sites) + " sites are substrates in " + esc(K.file) + "; kinases with ≥ " + K.min_substrates +
+        " substrates, coloured at adjusted p ≤ " + K.alpha + " · every kinase: <a href='kinase_activity.tsv'>kinase_activity.tsv</a></span></div>" +
+        "<div class='card chart' id='phkin'></div><div class='legend'><span><span class='sw' style='background:" + css("--up") + "'></span>more active</span>" +
+        "<span><span class='sw' style='background:" + css("--down") + "'></span>less active</span><span><span class='sw' style='background:" + css("--ns") + "'></span>not significant</span></div>" +
+        "<div id='phtable'></div>";
+    }
+    if (S) {
+      if (!S.ran) h += "<div class='empty'>Interaction partners: " + esc(S.reason || "not available") + "</div>";
+      else h += "<h3>Interaction partners among the hits</h3><div id='phstring'></div>";
+    }
+    host.innerHTML = h;
+    const sel = $("#phcomp");
+    if (sel) sel.onchange = (e) => { PH.c = +e.target.value; PH.kin = null; renderPhos(); };
+    if (comps.length) { safe(renderKinases, "#phkin"); safe(renderKinaseTable, "#phtable"); }
+    if (S && S.ran) safe(renderPartners, "#phstring");
+  }
+  const kinColor = (r) => css(r[6] === "up" ? "--up" : r[6] === "down" ? "--down" : "--ns");
+  /** One bar per scored kinase (KSEA z-score), highest first: sectionfigs.figure_kinase_activity draws the same. */
+  function renderKinases() {
+    const host = $("#phkin"), C = phosComps()[PH.c];
+    if (!host || !C) return;
+    let ks = C.k.slice();
+    const W = widthOf(host, 900), row = 15, fits = EX ? Math.max(3, Math.floor((EX.h - 54) / 11)) : 60;
+    if (ks.length > fits) ks = ks.slice().sort((a, b) => Math.abs(b[3]) - Math.abs(a[3]) || (a[0] < b[0] ? -1 : 1)).slice(0, fits);
+    ks.sort((a, b) => b[3] - a[3] || (a[0] < b[0] ? -1 : 1));
+    const H = heightOf(Math.max(120, ks.length * row + 54)), nameW = Math.min(18, Math.max(...ks.map((r) => String(r[0]).length))) * 11 * 0.56;
+    const Lm = 22 + nameW + 30, R = 18, T = 10, B = 44, root = frame(host, W, H), g = svg("g", {}, root);
+    if (!ks.length) { text(root, W / 2, H / 2, "No kinase has enough substrates", { "text-anchor": "middle" }); return; }
+    const lim = Math.max(2.5, ...ks.map((r) => Math.abs(r[3]))) * 1.1, Xs = (v) => Lm + ((v + lim) / (2 * lim)) * (W - Lm - R), step = (H - T - B) / ks.length;
+    axes(g, Xs, () => 0, niceTicks(-lim, lim, 6).filter((v) => v >= -lim && v <= lim), [], Lm, R, T, B, W, H, "kinase activity (KSEA z-score)", "");
+    svg("line", { x1: Xs(0), x2: Xs(0), y1: T, y2: H - B, stroke: css("--axis") }, g);
+    const bar = Math.max(2, Math.min(14, step * 0.72));
+    ks.forEach((r, k) => {
+      const y = T + k * step + (step - bar) / 2, x0 = Math.min(Xs(0), Xs(r[3])), x1 = Math.max(Xs(0), Xs(r[3]));
+      const rect = svg("rect", { x: x0, y: y, width: Math.max(0.5, x1 - x0), height: bar, fill: kinColor(r), stroke: PH.kin === r[0] ? css("--sel") : null, style: "cursor:pointer" }, g);
+      rect.onmouseenter = (e) => showTip(e, "<b>" + esc(r[0]) + "</b> · z " + fmt(r[3], 2) + " · adj. p " + fmtP(r[5]) + "<br>" + r[1] + " substrates, mean log2FC " + fmt(r[2], 2));
+      rect.onmouseleave = hideTip;
+      rect.onclick = () => { PH.kin = r[0]; safe(renderKinaseTable, "#phtable"); };
+      if (step >= 9) text(g, Lm - 6, y + bar / 2 + 4, String(r[0]).slice(0, 18) + " (" + r[1] + ")", { "text-anchor": "end", "font-size": Math.min(11, step * 0.9) });
+    });
+    svgTools(host, root, "kinase_activity_" + C.slug);
+  }
+  function renderKinaseTable() {
+    const host = $("#phtable"), C = phosComps()[PH.c];
+    if (!host || !C) return;
+    const r0 = PH.kin ? C.k.find((r) => r[0] === PH.kin) : null;
+    let h = "";
+    if (r0) h += "<p><b>" + esc(r0[0]) + "</b>: " + r0[1] + " measured substrates (" + esc(r0[7].join(", ")) + (r0[7].length < r0[1] ? ", …" : "") +
+      ") <button id='phfind'>Show them in the volcano</button></p>";
+    h += "<table><thead><tr><th>Kinase</th><th>Substrates</th><th>Mean log2FC</th><th>z</th><th>p</th><th>Adjusted p</th><th></th></tr></thead><tbody>" +
+      C.k.map((r) => "<tr data-k='" + esc(r[0]) + "' style='cursor:pointer'><td>" + esc(r[0]) + "</td><td>" + r[1] + "</td><td>" + fmt(r[2], 2) + "</td><td>" + fmt(r[3], 2) + "</td><td>" +
+        fmtP(r[4]) + "</td><td>" + fmtP(r[5]) + "</td><td>" + (r[6] ? "<span class='sw' style='background:" + kinColor(r) + "'></span> " + (r[6] === "up" ? "more active" : "less active") : "") + "</td></tr>").join("") +
+      "</tbody></table>";
+    host.innerHTML = h;
+    $$("tr[data-k]", host).forEach((tr) => (tr.onclick = () => { PH.kin = tr.dataset.k; renderKinaseTable(); safe(renderKinases, "#phkin"); }));
+    const fb = $("#phfind"), box = $("#search");
+    if (fb && box && r0) fb.onclick = () => { box.value = Array.from(new Set(r0[7].map((s) => s.split(" ")[0]))).join(" "); box.oninput(); goTo("differential"); };
+  }
+  function renderPartners() {
+    const host = $("#phstring"), S = D.phos.string;
+    if (!host) return;
+    const name = (phosComps()[PH.c] || {}).name, C = S.comps.find((c) => c.name === name) || S.comps[0];
+    if (!C) { host.innerHTML = "<div class='empty'>No comparison has hits.</div>"; return; }
+    host.innerHTML = "<p class='muted'>" + esc(C.name) + ": " + fmtInt(C.connected) + " of " + fmtInt(C.hits) + " hit genes interact with another hit (" + fmtInt(C.edges) + " interactions, STRING combined score ≥ " +
+      S.min_score + ", " + esc(S.file) + ") · <a href='string_partners.tsv'>string_partners.tsv</a></p>" +
+      (C.genes.length ? "<table><thead><tr><th>Gene</th><th>Change</th><th>Partners among the hits (score)</th></tr></thead><tbody>" +
+        C.genes.map((g) => "<tr><td>" + esc(g[0]) + "</td><td>" + esc(g[1]) + "</td><td>" + g[2].map((p, k) => esc(p) + " (" + g[3][k] + ")").join(", ") + "</td></tr>").join("") + "</tbody></table>" : "");
+  }
+
   // ----------------------------------------------------------------- help
   // Plain-language help from ionomos/help/*.md, rendered to safe HTML in Python (report.py _help_payload):
   // a "?" beside each section title, QC tab and issue opens its entry inline, and the Help section at the
@@ -2552,7 +2649,7 @@
   const HELP_AT = [["#differential > h2", "report.differential"], ["#differential > p.sub", "report.search"],
     ["#differential-body > .bar", "report.cutoffs"], ["#differential-body > h3", "report.phist"],
     ["#differential-body > .tablebar", "report.table"], ["#compare > h2", "report.compare"], ["#specific > h2", "report.specific"], ["#onoff > h2", "report.onoff"],
-    ["#heat > h2", "report.heatmap"], ["#enrichment > h2", "report.enrichment"], ["#dose > h2", "report.dose"], ["#time > h2", "report.time"], ["#cys > h2", "report.cys"], ["#quality > h2", "report.quality"],
+    ["#heat > h2", "report.heatmap"], ["#enrichment > h2", "report.enrichment"], ["#dose > h2", "report.dose"], ["#time > h2", "report.time"], ["#cys > h2", "report.cys"], ["#phos > h2", "report.phos"], ["#quality > h2", "report.quality"],
     ["#methods > h2", "report.methods"], ["#files > h2", "report.files"]];
   const HELP_H = { "Data source": "report.source", "Settings used": "report.methods", "Sample metadata": "report.sdrf",
     "Cross-check": "report.fpa", "Highlight groups": "report.groups", "Hits": "report.hitfilters", "Plot": "report.plotoptions", "Figures for slides": "report.export" };
@@ -2632,7 +2729,7 @@
   const SIZES = { slide169: ["16:9 slide", 1280, 720, "px", 14], slide43: ["4:3 slide", 960, 720, "px", 14], half: ["Half a slide", 640, 600, "px", 12],
     col1: ["Journal figure, one column (85 mm)", 85, 70, "mm", 7], col2: ["Journal figure, two columns (180 mm)", 180, 110, "mm", 7], custom: ["Custom size", 0, 0, "", 0] };
   // what `figures:` may list (the watcher's static files; charts.STATIC_FIGURES, where the groups dose, time and liganded are also taken)
-  const STATIC_FIGS = ["volcano", "pca", "heatmap", "correlation", "dose_potency", "dose_curves", "time_patterns", "time_profiles", "liganded_rank", "liganded_selectivity", "run_order"];
+  const STATIC_FIGS = ["volcano", "pca", "heatmap", "correlation", "dose_potency", "dose_curves", "time_patterns", "time_profiles", "liganded_rank", "liganded_selectivity", "run_order", "kinase_activity"];
   const TOP_PANELS = 6;  // dose-response curves and time-course features per series in "Export for slides" (sectionfigs.TOP_PANELS)
   const STYLE_DEFAULTS = { size: "slide169", width: 1280, height: 720, unit: "px", font_pt: 14, font_family: "Arial", line_scale: 1, point_scale: 1,
     palette: "default", up: "#e34948", down: "#2a78d6", neutral: "#c3c2b7", background: "light", title: true, subtitle: true, legend: true, note: true,
@@ -2727,7 +2824,7 @@
     ["distributions", "Value distribution per sample", ""], ["cv_", "Coefficient of variation", ""], ["mean_variance", "Mean against variance", ""], ["abundance_rank", "Abundance rank", ""],
     ["identifications", "Identifications per sample", ""], ["imputation", "Measured and imputed values", ""], ["power", "Power", ""], ["search_quality_", "Search quality per run", ""], ["run_order_", "QC against the order of acquisition", ""],
     ["dose_potency_", "Dose-response: potency against effect", ""], ["dose_curve_", "Dose-response curve", ""], ["time_course_", "Time course", ""], ["time_patterns_", "Time-course patterns", ""],
-    ["liganded_rank_", "Liganded sites", ""], ["liganded_selectivity", "Liganded sites across compounds", ""]];
+    ["liganded_rank_", "Liganded sites", ""], ["liganded_selectivity", "Liganded sites across compounds", ""], ["kinase_activity_", "Kinase activity (KSEA)", ""]];
   const TEST_NAMES = { limma: "limma moderated t-test", welch: "Welch t-test", student: "Student t-test" };
   /** The cut-offs in plain words: shown beside the plot and written into every exported figure. */
   function cutText(c) {
@@ -2749,6 +2846,7 @@
     else if (/^(gene_set_ranks_|barcode_)/.test(name) && renderRank._st) detail = renderRank._st.comp + ", " + renderRank._st.lib + (/^barcode_/.test(name) && renderRank._st.sel ? ", " + renderRank._st.sel : "");
     else if (/^(values_|dose_curve_|time_course_|time_patterns_|cv_|liganded_rank_|dose_potency_)/.test(name)) detail = name.replace(/^(values|dose_curve|time_course|time_patterns|cv|liganded_rank|dose_potency)_/, "");
     else if (/^run_order_/.test(name) && D.qc.run) detail = ((D.qc.run.metrics || []).find((m) => "run_order_" + m.key === name) || {}).label || "";
+    else if (/^kinase_activity_/.test(name) && phosComps()[PH.c]) detail = phosComps()[PH.c].name;
     const cuts = cut === "view" ? cutText(c) + (filterText() ? "; " + filterText() : "") : cut === "saved" ? savedCutText() + " (the report's saved cut-offs)" : "";
     return { what: what, cut: cut, cuts: cuts, c: c, detail: clean(detail), title: clean(c ? c.name : what), subtitle: clean((c ? what + " · " : detail ? detail + " · " : "") + D.title) };
   }
@@ -2850,15 +2948,15 @@
   }
   // the report's parts as redraw() draws them: a chart's own part is drawn again for its export
   const STEPS = [["#volcano", renderVolcano], ["#phist", renderPHist], ["#detail", renderDetail], ["#comparebody", renderCompare], ["#enrich", renderEnrichment],
-    ["#dosebody", renderDose], ["#cysbody", renderCys], ["#timebody", renderTime], ["#qc", renderQC]];
+    ["#dosebody", renderDose], ["#cysbody", renderCys], ["#timebody", renderTime], ["#phosbody", renderPhos], ["#qc", renderQC]];
   function holdState() {
     return { ci: ST.ci, zoom: ST.zoom, mode: ST.mode, labels: ST.labels, lm: ST.opt.labelMatches, pinned: ST.pinned, focus: ST.focus, qc: qcTab, enr: enrMode, ds: DS.s, df: DS.focus,
       ora: renderORA._st && Object.assign({}, renderORA._st), rank: renderRank._st && Object.assign({}, renderRank._st), psm: qcPsm._st && Object.assign({}, qcPsm._st), run: qcRun._st && Object.assign({}, qcRun._st), pcn: qcPCA._st && qcPCA._st.names,
-      ts: TS.s, tf: TS.focus, cc: CS.c };
+      ts: TS.s, tf: TS.focus, cc: CS.c, pc: PH.c, pk: PH.kin };
   }
   function restoreState(h) {
     ST.ci = h.ci; ST.zoom = h.zoom; ST.mode = h.mode; ST.labels = h.labels; ST.opt.labelMatches = h.lm; ST.pinned = h.pinned; ST.focus = h.focus; qcTab = h.qc; enrMode = h.enr; DS.s = h.ds; DS.focus = h.df;
-    TS.s = h.ts; TS.focus = h.tf; CS.c = h.cc;
+    TS.s = h.ts; TS.focus = h.tf; CS.c = h.cc; PH.c = h.pc; PH.kin = h.pk;
     [[renderORA, h.ora], [renderRank, h.rank], [qcPsm, h.psm], [qcRun, h.run]].forEach(([fn, was]) => { if (was && fn._st) Object.assign(fn._st, was); else if (!was) delete fn._st; });
     if (qcPCA._st && h.pcn != null) qcPCA._st.names = h.pcn;
   }
@@ -2932,6 +3030,8 @@
     const CY = D.cys && D.cys.ran ? D.cys : null;
     ((CY && CY.compounds) || []).forEach((C, k) => add("Liganded sites: " + C.name, () => { CS.c = k; renderCys(); }, "liganded_rank_"));
     if (CY && CY.compounds.length > 1 && CY.nlig.some(Boolean)) add("Liganded sites across compounds", selectivitySvg, "liganded_selectivity");
+    // kinase activity (D79): one bar chart per comparison, as `ionomos export` draws it
+    phosComps().forEach((c, k) => { if (c.k.length) add("Kinase activity: " + c.name, () => { PH.c = k; PH.kin = null; renderPhos(); }, "kinase_activity_"); });
     return out;
   }
   /** The largest panels of about this shape for n charts in W x H: [columns, rows, panel width, panel height] (sectionfigs._grid). */
@@ -3550,7 +3650,7 @@
     safe(renderHeatmap, "#heatmap");
     safe(renderEnrichment, "#enrich");
     safe(renderDose, "#dosebody");
-    safe(renderCys, "#cysbody"); safe(renderTime, "#timebody");
+    safe(renderCys, "#cysbody"); safe(renderTime, "#timebody"); safe(renderPhos, "#phosbody");
     safe(renderQC, "#qc");
     safe(renderHelp, "#helpbody");
     const xo = $("#xopen"), xz = $("#xzipnow"), sl = $("#slides");
@@ -3573,7 +3673,7 @@
   }
   function redraw() {
     if (D.comps.length) { safe(renderVolcano, "#volcano"); safe(renderPHist, "#phist"); safe(renderDetail, "#detail"); safe(renderCompare, "#comparebody"); safe(renderSpecific, "#specificbody"); }
-    safe(renderHeatmap, "#heatmap"); safe(renderEnrichment, "#enrich"); safe(renderDose, "#dosebody"); safe(renderCys, "#cysbody"); safe(renderTime, "#timebody"); safe(renderQC, "#qc");
+    safe(renderHeatmap, "#heatmap"); safe(renderEnrichment, "#enrich"); safe(renderDose, "#dosebody"); safe(renderCys, "#cysbody"); safe(renderTime, "#timebody"); safe(renderPhos, "#phosbody"); safe(renderQC, "#qc");
   }
   let rt = null;
   window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(redraw, 150); });

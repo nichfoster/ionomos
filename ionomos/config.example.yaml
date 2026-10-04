@@ -58,6 +58,24 @@ analysis:
   #                          # table (MSstats groupComparison output, or an Ionomos *_differential.tsv); usually
   #   match: gene            # in experiment.yaml. gene | protein (UniProt accessions)
   #   conditions: {EJQ_2_027: Cmpd vs DMSO}   # site condition -> proteome comparison, compound first
+  # Phosphoproteomics (D79), all off by default; usually per experiment, in experiment.yaml:
+  # phospho: true            # analyse the search's phosphosite table instead of the proteins: FragPipe's
+  #                          # combined_site_STY_79.9663.tsv, TMT-Integrator's abundance_single-site_MD.tsv or
+  #                          # DIA-NN's report.phosphosites_90.tsv (no table: the proteins, and a question)
+  # phospho_min_localization: 0.75   # best localisation probability a site needs (TMT-Integrator and DIA-NN
+  #                          # filter before Ionomos; their threshold is checked against this)
+  # phospho_localization_per_sample: false   # true: also drop a sample's value whose own probability is lower
+  # phospho_table: ""        # a site table to read instead of the one found in the search output
+  # kinase_substrates: D:/downloads/Kinase_Substrate_Dataset.gz   # kinase activity (KSEA). Download it yourself
+  #                          # from PhosphoSitePlus (non-commercial licence: Ionomos never ships it); read only
+  # ksea_min_substrates: 5   # measured substrate sites a kinase needs to be scored
+  # ksea_networkin: false    # true: also NetworKIN rows of KSEAapp's PSP&NetworKIN file, with
+  # ksea_networkin_score: 5  #   at least this score
+  # ksea_organism: human     # rows of other organisms left out ("" keeps every row)
+  # ksea_match: gene         # gene (substrate gene + residue, as KSEAapp) | protein (UniProt accession)
+  # string_network: D:/downloads/9606.protein.links.v12.0.txt.gz   # STRING (CC BY 4.0, a download): partners
+  #                          # among the hits; protein.info must be in the same folder. Any experiment, not only sites
+  # string_min_score: 700    # STRING combined score an interaction needs (0-1000)
   # block: replicate         # the replicate number as a block (batch / pair) in the limma model (D42)
   # variance_prior: deqms    # limma (default) | deqms: prior variance by peptide count (D43)
   # f_test: auto             # auto (default): the moderated F ("any change") whenever limma compares 3+ conditions
@@ -83,7 +101,7 @@ analysis:
     background: light        # light | dark | transparent
     figures: []              # static SVG written to results/figures/ after each analysis: any of
                              # volcano, pca, heatmap, correlation, dose_potency, dose_curves, time_patterns,
-                             # time_profiles, liganded_rank, liganded_selectivity; dose, time, liganded for
+                             # time_profiles, liganded_rank, liganded_selectivity, kinase_activity; dose, time, liganded for
                              # both of a section's (or all). [] = none; the report exports all
     # also: line_scale: 1, point_scale: 1, title / subtitle / legend / note: true, labels: screen | top | none,
     # label_count: 15, png_scale: 2, png_dpi: 0 (the report's PNG), zip_format: both | svg | png

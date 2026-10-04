@@ -444,9 +444,22 @@ real data:
      direction (2026-10-01, D64: `normalize: auto` / `ratio`; simulated pulldowns only)
    - [x] an R (limma) golden file for unequal groups (2026-10-02, D66: `tests/golden/unequal/`, DMSO 2 /
      Probe 4 / Probe_Comp 4 with missing values and the small-group rule, limma 3.68.5 to 1e-8)
-8. [ ] Phospho: localisation filter and KSEA kinase activity. Only if a lab
-   runs phospho; PhosphoSitePlus is non-commercial, so it is a user download.
-9. [ ] STRING / CORUM overlays: low priority.
+8. [x] **Phospho** (2026-10-04, D79: `downstream/phospho.py`; opt-in, `phospho: true`; the lab has not
+   said it runs phospho, so nothing has been seen on real data):
+   - [x] FragPipe's site tables (IonQuant `combined_site_STY_79.9663.tsv`, TMT-Integrator
+     `abundance_single-site_MD.tsv`) and DIA-NN's `report.phosphosites_90/99.tsv`, analysed per site through
+     the same limma path
+   - [x] a localisation filter (best probability ≥ 0.75, a setting; per sample optional)
+   - [x] site changes corrected for protein abundance (D70's MSstatsPTM adjustment, per comparison)
+   - [x] KSEA kinase activity (checked against KSEAapp 2.0) from a kinase-substrate table the lab downloads
+     (PhosphoSitePlus is non-commercial: never shipped); report section, `kinase_activity` figure
+   - [ ] a real phospho search: the column names of a FragPipe 24 site report, a TMT-Integrator single-site
+     report and DIA-NN 2.x matrices from the lab's own runs; a real PhosphoSitePlus download
+   - [ ] not built: PTM-SEA / Kinase Library motifs, site occupancy, multi-site (doubly phosphorylated) tables
+9. [x] **STRING overlay** (2026-10-04, D79): partners among the hits from a STRING download (CC BY 4.0), as
+   a table in the report and `string_partners.tsv`; no network drawing. CORUM: its licence is now CC BY 4.0
+   (release 5.1 on Zenodo, 2025; earlier releases were non-commercial), so a user download would be allowed;
+   not built (its file format has not been checked).
 10. [ ] **Accuracy the lab can check, and robustness on messy tables**
    (2026-10-01, D60, [VALIDATION.md](VALIDATION.md); built on simulated data,
    the real-data half is open):
@@ -807,6 +820,9 @@ Collected from the other docs; resolve before/during Phase 1.
       the colour picker, the masked fields) and have a lab member set a figure style and send a test message without
       help. Should "Show addresses and password" exist at all, or should a stored secret only ever be replaced?
 - [ ] Phase 5: which pilot labs can we reach? Does this lab run titrations or phospho? (Orders 5C.)
+- [ ] D79 (2026-10-04): if the lab runs phospho, send one search's site table (FragPipe, TMT-Integrator or
+      DIA-NN) to check the columns the readers expect, and say which kinase-substrate table it uses
+      (PhosphoSitePlus needs each user to accept its non-commercial licence).
 - [ ] Phase 6: is the PC's RAM in all 6 memory channels (speed of a local model)? Is a GPU present? May the assistant
       ever use a cloud model (institutional data policy), or strictly local?
 - [ ] Phase 6: who is the "ask the maintainer" contact the assistant falls back to? (It goes in

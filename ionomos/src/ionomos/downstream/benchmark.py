@@ -397,7 +397,7 @@ def like(folder: str | Path) -> dict:
     info = json.loads((results / "analysis.json").read_text(encoding="utf-8"))
     st = info.get("settings") or {}
     tmt = info.get("tmt") if isinstance(info.get("tmt"), dict) else None
-    kind = "isodtb" if info.get("level") == "site" else "tmt" if tmt and tmt.get("plexes") else "dia"
+    kind = "isodtb" if info.get("level") == "site" and not (info.get("phospho") or {}).get("ran") else "tmt" if tmt and tmt.get("plexes") else "dia"
     keys = {"dia": ("imputation", "normalize", "test", "filter_condition_pct", "filter_global_pct", "min_valid",
                     "small_group_min_valid", "impute_shift", "impute_scale"),
             "isodtb": ("test", "min_valid", "ratio_centre"),
