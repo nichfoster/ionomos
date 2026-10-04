@@ -28,7 +28,8 @@
     "must_mention": [
       "never deletes"
     ],
-    "refusal": false
+    "refusal": false,
+    "proposal": false
   },
   "harness": {
     "outcome": "grounded",

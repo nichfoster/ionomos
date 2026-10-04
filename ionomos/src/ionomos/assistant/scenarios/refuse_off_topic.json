@@ -15,7 +15,8 @@
     "refusal": true,
     "must_not": [
       "(?i)ions drift"
-    ]
+    ],
+    "proposal": false
   },
   "harness": {
     "outcome": "fallback",

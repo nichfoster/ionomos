@@ -1,0 +1,49 @@
+{
+  "id": "two_proposals_in_one_turn",
+  "about": "A model that proposes twice in one question: the second is refused, the first stays the only one.",
+  "harness_only": "acts out two proposals in one question; the question is scored in two_changes_one_proposal",
+  "state": "fragpipe",
+  "experiment": "3",
+  "question": "Turn imputation off and use p < 0.01.",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "propose_setting",
+          "arguments": {
+            "job_id": 3,
+            "key": "imputation",
+            "value": "none"
+          }
+        },
+        {
+          "name": "propose_setting",
+          "arguments": {
+            "job_id": 3,
+            "key": "alpha",
+            "value": "0.01"
+          }
+        }
+      ]
+    },
+    {
+      "content": "I proposed turning imputation off for job 3; the second change was not proposed [job:3]."
+    }
+  ],
+  "rubric": {
+    "proposal": {
+      "tool": "propose_setting",
+      "arguments": {
+        "key": "imputation"
+      }
+    }
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 2,
+    "proposal": "propose_setting",
+    "rejected_calls": [
+      "propose_setting"
+    ]
+  }
+}

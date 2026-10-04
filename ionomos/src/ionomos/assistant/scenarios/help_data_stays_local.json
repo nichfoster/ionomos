@@ -25,7 +25,8 @@
     "must_cite": [
       "help:safety.private"
     ],
-    "refusal": false
+    "refusal": false,
+    "proposal": false
   },
   "harness": {
     "outcome": "grounded",

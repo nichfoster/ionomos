@@ -25,7 +25,8 @@
     "refusal": true,
     "must_not": [
       "(?i)bad sectors"
-    ]
+    ],
+    "proposal": false
   },
   "harness": {
     "outcome": "fallback",

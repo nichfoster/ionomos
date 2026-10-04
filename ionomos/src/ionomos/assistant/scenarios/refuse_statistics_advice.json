@@ -27,7 +27,8 @@
     "must_not": [
       "(?i)0\\.1 is fine",
       "(?i)skip the multiple"
-    ]
+    ],
+    "proposal": false
   },
   "harness": {
     "outcome": "fallback",
