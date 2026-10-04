@@ -40,6 +40,15 @@ see below.
 | **Proteome Discoverer** | a Proteins table exported as text | `Abundances (Normalized)`, else `Abundance`; TMT: `Abundance: F1: 126, …` is file (plex) F1, channel 126 | none | not in the export |
 | **Any other table** | one ID column plus one numeric column per sample, or a results table with fold change and p (D33) | as found | none | — |
 
+**Phosphosites** (opt-in, `phospho: true`, D79): from FragPipe, IonQuant's
+`combined_site_STY_79.9663.tsv` or TMT-Integrator's `abundance_single-site_MD.tsv`;
+from DIA-NN (in FragPipe or standalone), `report.phosphosites_90.tsv` (or
+`_99.tsv` when `phospho_min_localization` is above 0.9). DIA-NN writes these
+matrices when phosphorylation (UniMod:21) is a variable modification, a FASTA
+is given and matrices are on; its Parquet site report is not read. Other
+engines' site tables can be named with `phospho_table` only when they have one
+of these layouts.
+
 **Conditions and replicates** come from the engine when it records them
 (Spectronaut `R.Condition` / `R.Replicate`, MSstats `Condition` /
 `BioReplicate`, the text after the sample type in Proteome Discoverer column

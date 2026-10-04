@@ -241,6 +241,19 @@ features × samples matrix of log2 values and runs the same statistics:
 | DIA | DIA-NN `*pg_matrix.tsv` (runs mapped to conditions via the manifest) | protein | condition vs control |
 | TMT | `tmt-report/abundance_gene_MD.tsv` (+ R-port annotation) | gene | condition vs control |
 | label-free DDA (future) | `combined_protein.tsv` (MaxLFQ if present) | protein | condition vs control |
+| any of these with `phospho: true` (D79) | the search's phosphosite table: IonQuant `combined_site_STY_79.9663.tsv`, TMT-Integrator `abundance_single-site_MD.tsv`, DIA-NN `report.phosphosites_90.tsv` | site | condition vs control |
+
+- **Phosphoproteomics (opt-in, D79).** For a phospho search, set
+  `phospho: true` under `analysis:` (usually in `experiment.yaml`): the site
+  table is analysed instead of the proteins, after a localisation filter
+  (`phospho_min_localization`, 0.75). In FragPipe this needs **PSM site
+  localisation (PTMProphet)** in the Validation tab and the site reports
+  (IonQuant writes `combined_site_STY_79.9663.tsv` only with localisation on;
+  TMT-Integrator filters single sites with its own `min_site_prob`). Optional
+  downloads the lab keeps itself: `kinase_substrates` (PhosphoSitePlus
+  `Kinase_Substrate_Dataset`) for kinase activity (KSEA), `string_network`
+  (STRING) for partners among the hits, and `protein_correction` for the
+  unenriched proteome of the same treatment.
 
 - **Pipeline:** FragPipe-Analyst's, ported from FragPipeAnalystR (D24) and
   checked against the real package: contaminants removed → features kept when

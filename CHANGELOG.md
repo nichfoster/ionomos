@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Phosphoproteomics, opt-in** (D79, `downstream/phospho.py`). Nothing
+  changes unless `phospho: true` is set under `analysis:`:
+  - The search's phosphosite table is analysed instead of its proteins:
+    FragPipe's `combined_site_STY_79.9663.tsv` (IonQuant, label-free), TMT-Integrator's
+    `abundance_single-site_MD.tsv`, or DIA-NN's `report.phosphosites_90.tsv`
+    / `_99.tsv`. Sites are named like `MAPK1 T185` and go through the same
+    filter, normalisation, imputation, limma, volcano and report as proteins.
+  - A localisation filter, `phospho_min_localization` (0.75): applied on
+    the best localisation probability of FragPipe's label-free table (and per
+    sample with `phospho_localization_per_sample`); for TMT-Integrator and
+    DIA-NN, which filter first, their threshold is read and compared
+    (`PHOSPHO_LOCALISATION`).
+  - `protein_correction` (D70) works on phosphosite comparisons: each site's
+    change minus the same comparison's protein change in an unenriched
+    proteome, MSstatsPTM's adjustment, as a second comparison.
+  - **Kinase activity (KSEA)** with a kinase-substrate table the lab
+    downloads (`kinase_substrates`: PhosphoSitePlus's
+    `Kinase_Substrate_Dataset`, or KSEAapp's PSP&NetworKIN file; never
+    shipped): a z-score per kinase and comparison, `ksea_min_substrates`
+    (5), Benjamini-Hochberg; `results/kinase_activity.tsv`, a bar chart in
+    the report and the `kinase_activity` figure for slides. The scores are
+    KSEAapp 2.0's (checked against it); the p-value is two-sided.
+- **STRING partners among the hits** (D79): `string_network` names a STRING
+  download (protein.links with protein.info, or a website export), and the
+  report lists each hit's partners among the same comparison's hits;
+  `results/string_partners.tsv`. Works for proteins too.
+- Doctor issues with help: `PHOSPHO_TABLE`, `PHOSPHO_LOCALISATION`,
+  `KINASE_SUBSTRATES`, `STRING_NETWORK`.
+
+### Changed
+
+- `proteincorr.correct_comparison`: the per-comparison MSstatsPTM
+  adjustment is one function, shared by isoDTB site ratios and phosphosites
+  (no change in results).
+- A site-level analysis writes no FragPipe-Analyst `reproduce_in_R.R` (it
+  would read the site table as proteins).
+
 ## [0.16.0] - 2026-10-03
 
 ### Added
