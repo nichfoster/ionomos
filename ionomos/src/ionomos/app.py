@@ -1963,7 +1963,7 @@ class App:
 
     def job_action(self, action: str):
         from ionomos import fragpipe
-        from ionomos.worker import request_cancel
+        from ionomos.worker import request_cancel, request_retry
 
         j = self._selected_job()
         if j is None:
@@ -2012,7 +2012,7 @@ class App:
                     if j.status != "failed":
                         messagebox.showinfo("Retry", f"Job {j.id} is {j.status}; only failed jobs can be retried.")
                         return
-                    led.requeue(j.id, "retry requested", reset_attempts=True)
+                    request_retry(led, j.id, self._active_log_dir())  # every Retry is this one (D75)
                     msg = f"job {j.id} re-queued; it starts when the watcher is free"
                 else:
                     if j.status not in ("running", "queued"):

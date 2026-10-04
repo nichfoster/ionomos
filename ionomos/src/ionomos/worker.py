@@ -81,6 +81,23 @@ def request_cancel(ledger: Ledger, job_id: int) -> str:
     return f"job {job_id} is {job.status}; nothing to cancel"
 
 
+def request_retry(ledger: Ledger, job_id: int, log_dir: Path | None = None) -> tuple[bool, str]:
+    """Send a failed job back to the queue: what every Retry does (the app's Jobs tab, the failed-search pop-up,
+    `ionomos retry`, and a retry the assistant proposed once a person pressed Confirm, D75). Its search_failed
+    attention item is closed. Returns (re-queued, a message for the user); only a failed job is re-queued."""
+    job = ledger.get(job_id)
+    if job is None:
+        return False, f"no job {job_id}"
+    if job.status != "failed":
+        return False, f"job {job.id} is {job.status}, not failed; only a failed job can be retried"
+    ledger.requeue(job.id, "retry requested", reset_attempts=True)
+    if log_dir is not None:
+        from ionomos import attention
+
+        attention.resolve_where(log_dir, kind="search_failed", job_id=job.id)
+    return True, f"job {job.id} re-queued; the running watcher picks it up within seconds"
+
+
 def _read_status(dest: Path, fallback: dict) -> dict:
     import json
 

@@ -346,6 +346,7 @@ class ItemWindow:
 
     def retry(self) -> None:
         from ionomos.ledger import Ledger
+        from ionomos.worker import request_retry
 
         db = self.host.database()
         try:
@@ -356,7 +357,7 @@ class ItemWindow:
                     self.msg.configure(text=f"Job {self.item.job_id} is {job.status if job else 'gone'}; nothing to retry.",
                                        foreground="#b26a00")
                     return
-                led.requeue(job.id, "retry requested", reset_attempts=True)
+                request_retry(led, job.id, self.host.log_dir())  # every Retry is this one (D75)
             finally:
                 led.close()
         except Exception as exc:  # noqa: BLE001

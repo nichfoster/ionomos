@@ -520,21 +520,12 @@ def cmd_names(args) -> int:
 
 
 def cmd_retry(args) -> int:
-    cfg = _load(args, check_paths=False)
-    ledger = Ledger(cfg.database)
-    job = ledger.get(args.job_id)
-    if not job:
-        print(f"no job {args.job_id}", file=sys.stderr)
-        return 1
-    if job.status != "failed":
-        print(f"job {job.id} is {job.status}, not failed", file=sys.stderr)
-        return 1
-    ledger.requeue(job.id, "retry requested", reset_attempts=True)
-    from ionomos import attention
+    from ionomos.worker import request_retry
 
-    attention.resolve_where(cfg.log_dir, kind="search_failed", job_id=job.id)
-    print(f"job {job.id} re-queued; the running watcher picks it up within seconds")
-    return 0
+    cfg = _load(args, check_paths=False)
+    ok, msg = request_retry(Ledger(cfg.database), args.job_id, cfg.log_dir)  # the same as every Retry (D75)
+    print(msg, file=sys.stdout if ok else sys.stderr)
+    return 0 if ok else 1
 
 
 def cmd_diagnose(args) -> int:
