@@ -899,8 +899,9 @@ def _run_order(processed, record, dest: Path, insight: dict, psm_view, say) -> t
         return runorder.summary(None, "no processed quantities"), None, [], []
     say("run order (drift during the run, conditions acquired in blocks)")
     res = runorder.run(processed.m, record, dest, (insight or {}).get("scorecard"), psm_view)
-    return (runorder.summary(res), runorder.report_payload(res), res.problems,
-            [f"run order: {n}" for n in res.notes])
+    # its notes (times known for k of n samples, approximate times) stay in its tab and analysis.json entry: they
+    # are about the QC view, not about the results, and would otherwise sit on top of every such report
+    return runorder.summary(res), runorder.report_payload(res), res.problems, []
 
 
 def _design_summary(m, settings) -> dict:
