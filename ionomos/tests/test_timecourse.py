@@ -328,9 +328,8 @@ def test_spline_f_fit_and_interaction_match_limma(matrix, gold, settings):
             pairs = [(r["F"], w[f"{name}_F"]), (r["pvalue"], w[f"{name}_P"]), (r["qvalue"], w[f"{name}_adjP"]),
                      *[(r["fc"][k], w[f"{name}_fc{k}"]) for k in range(1, 8)]]
             if name == "Drug":
-                pairs += [(r["interaction_F"], w["inter_F"]), (r["interaction_pvalue"], w["inter_P"])]
-                if "missing" not in matrix:
-                    pairs += [(r["interaction_qvalue"], w["inter_adjP"])]
+                pairs += [(r["interaction_F"], w["inter_F"]), (r["interaction_pvalue"], w["inter_P"]),
+                          (r["interaction_qvalue"], w["inter_adjP"])]
             assert r["model"] == f"spline ({df} df)"
             bad = [(a, b) for a, b in pairs if not _close(a, b)]
             assert not bad, (name, fid, bad)
