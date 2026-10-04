@@ -40,6 +40,40 @@ see below.
 | **Proteome Discoverer** | a Proteins table exported as text | `Abundances (Normalized)`, else `Abundance`; TMT: `Abundance: F1: 126, …` is file (plex) F1, channel 126 | none | not in the export |
 | **Any other table** | one ID column plus one numeric column per sample, or a results table with fold change and p (D33) | as found | none | — |
 
+**Peptides to proteins** (`analysis.rollup`, D76). For the engines whose
+table holds peptides or precursors, `rollup:` under `analysis:` picks how
+they are combined into one value per protein and sample:
+
+| Table | `auto` (default) | `median_polish` | `maxlfq` |
+|---|---|---|---|
+| Sage `lfq.tsv` | Tukey median polish of the ion intensities | the same | MaxLFQ of the ion intensities |
+| MSstats format | Tukey median polish of the features | the same | MaxLFQ of the features |
+| DIA-NN long report | DIA-NN's own `PG.MaxLFQ` | median polish of `Precursor.Normalised` (else `Precursor.Quantity`) per `Precursor.Id` | Ionomos' MaxLFQ of the same precursors |
+| Spectronaut long report | Spectronaut's `PG.Quantity` | median polish of `FG.Quantity` per `EG.PrecursorId` | Ionomos' MaxLFQ of the same precursors |
+
+- **MaxLFQ** (Cox et al. 2014, `downstream/rollup.py`) works in three
+  steps:
+  - each pair of samples gets the median log2 ratio of the features it
+    shares;
+  - the protein's profile is the least-squares fit to those ratios, per
+    group of samples linked by shared features;
+  - the profile is scaled so its summed intensity equals the features'
+    summed intensity.
+
+  It agrees with R's `iq::maxLFQ()` to 1e-9 and with DIA-NN's R package to
+  1e-3 (VALIDATION.md).
+- **Samples that share no feature** with the rest of the protein's samples
+  are scaled on their own, so a value across such groups is not a ratio.
+  The notes say how many proteins are affected.
+- **Without the precursor columns**, a DIA-NN or Spectronaut report keeps
+  the engine's protein quantity, and a note says why. `ionomos
+  spectronaut-columns` lists `FG.Quantity` as optional.
+- **Tables that already hold proteins** (FragPipe, MaxQuant, AlphaDIA,
+  Proteome Discoverer, pg_matrix, any table) ignore the setting with a note.
+  So do Sage TMT and the MSstatsTMT format, which keep MSstatsTMT's median
+  polish.
+- The report's **Data source → Quantity** says which was used.
+
 **Conditions and replicates** come from the engine when it records them
 (Spectronaut `R.Condition` / `R.Replicate`, MSstats `Condition` /
 `BioReplicate`, the text after the sample type in Proteome Discoverer column
