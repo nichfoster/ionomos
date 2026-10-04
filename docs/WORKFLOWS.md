@@ -377,6 +377,7 @@ features × samples matrix of log2 values and runs the same statistics:
   | RATIO_OFFSET | note | isoDTB: a replicate's ratios sit clearly off 0 on the stable sites (a mixing error?) and `ratio_centre` is none (D70) |
   | PROTEIN_CORRECTION_CONDITIONS / PROTEIN_CORRECTION | decide / note | isoDTB with `protein_correction`: a site condition has no proteome comparison; the proteome is missing or unusable, or few sites find their protein (D70) |
   | PSM_MASS_ERROR, PSM_MISSED_CLEAVAGES | note | a run's median precursor mass error is 10 ppm or more from 0; half or more of a run's PSMs have a missed cleavage |
+  | RUN_ORDER_DRIFT, RUN_ORDER_CONFOUNDED | note | a QC number drifts with the order of acquisition (within the conditions, p < 0.01, a material change); the conditions were run in blocks (η² ≥ 0.6) (D78) |
   | NO_RESIDUAL_DF | note | features tested with one value per group: their p-values come from limma's variance prior alone (D60) |
   | VARIANCE_PRIOR | note | limma's variance prior could not be estimated (fewer than 3 features with replicate spread), or its fit did not converge |
   | ZERO_VARIANCE | note | 5 % or more of the tested features, or any hit, have identical replicates in every group (rounded, copied or constant-imputed values) |
@@ -430,6 +431,34 @@ control section has a **Search quality** tab with one row per raw file:
 - Output: `results/psm_qc.tsv`, `analysis.json` → `psm_qc`.
 - Not tested on real FragPipe output: the column names are from the FragPipe
   documentation.
+
+**Run order** (`downstream/runorder.py`, `acqtime.py`, D78). When the
+samples' raw files have an acquisition time, the Quality control section has a
+**Run order** tab: each sample's numbers in the order of acquisition.
+
+| Number | From | Flagged when the change over the run is at least |
+|---|---|---|
+| identifications, missing values | the sample scorecard | 10 % of the median; 5 percentage points |
+| median log2 intensity before normalisation | the scorecard (intensity data only) | 0.5 log2 |
+| PSMs, median precursor mass error, missed-cleavage rate | Search quality (`psm.tsv`) | 10 %; 3 ppm; 5 points |
+| precursors, MS1 mass accuracy | DIA-NN's `stats.tsv` | 10 %; 3 ppm |
+
+- **Time per raw file**: `ionomos.json` → `acquisition` (intake), else read
+  now: the Thermo header's acquisition start, ThermoRawFileParser's output,
+  the Xcalibur stamp, the file time (approximate; said in the tab and the
+  warning). A sample's time is its first fraction's.
+- **Drift** (`RUN_ORDER_DRIFT`): a stratified Mann-Kendall test, comparing
+  only samples of the same condition (exact p up to 1,500 pairs), p < 0.01,
+  and a Theil-Sen change over the run at least the limit above. Needs 6
+  samples with a time. Missing values are not warned about beside
+  identifications (the same fact).
+- **Blocks** (`RUN_ORDER_CONFOUNDED`): the condition explains 60 % or more of
+  the run positions (η² of the ranks), with two or more conditions of two or
+  more samples.
+- TMT channels share their raw files, so a TMT experiment has no run order.
+- Output: `analysis.json` → `run_order`, the `run_order` export figure.
+- Not checked on real raw files: the header layout is from published format
+  notes and the tests build headers to it.
 
 **Competition experiments** (`downstream/roles.py`, D61). A condition whose
 name has `comp`, `competition`, `competitor`, `competed`, `compete`,

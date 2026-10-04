@@ -221,7 +221,20 @@ laid out one folder per TMT plex. **Still not run against a real FragPipe.**
     charge states. → 2026-10-01, done (D55): the Search quality QC tab,
     `results/psm_qc.tsv`, two warnings with wide limits. Not yet checked on
     real FragPipe output.
-  - Run-order drift, once acquisition times are recorded.
+  - ~~Run-order drift, once acquisition times are recorded.~~ → 2026-10-04,
+    done (D78): acquisition time per raw file at intake (the Thermo header,
+    else ThermoRawFileParser's output, the name stamp, the file time); the
+    Run order QC tab, `RUN_ORDER_DRIFT` / `RUN_ORDER_CONFOUNDED`, the
+    `run_order` figure; the QC trend uses the header's time. Open, on the PC:
+    - read the headers of real raw files from the Eclipse (and any other
+      instrument): is the version one of the known ones, is the start time
+      right, is `matches_file` true (the header's end against the file's
+      time), and does it agree with ThermoRawFileParser's `Creation date`
+      and its mzML `startTimeStamp` (also whether those are UTC)
+    - tune the drift limits and the 60 % block limit on the lab's sequences
+    - TMT: a run order per plex (the fractions) is not tested
+    - Bruker `.d` folders keep their time in `analysis.tdf` (SQLite): not read
+    - a setting to switch the tab off, if anyone asks
   - Protein complexes (CORUM, whose licence needs checking).
   - For isoDTB: → 2026-09-30, done as Phase 5C #3 (D52): liganded calls with
     configurable thresholds, a site-annotation (CysDB) overlay, selectivity

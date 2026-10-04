@@ -23,7 +23,8 @@
 | `naming.py` | Pure functions: folder name → fields; raw filename → (sample, rep, fraction). Per-method file rules are templates or regexes, date formats a list, both from `config.yaml` `naming:` (D37). `method_kind()` is the one place that says what a method key behaves as (its engine's kind, its `like:` target, else the key; D54): `Config.kind()` / `Config.analysis_method()` wrap it, and the search inputs, the review window and the analysis ask them instead of comparing keys | — |
 | `namecheck.py` | "Test your names": how the live config reads folder / `.raw` names (`ionomos names test`, app Methods tab → **Test names…**); read-only | — |
 | `manifest.py` | Read/validate `experiment.yaml`; build `.fp-manifest` + TMT `annotation.txt` | `prior-work/fragpipe_runner.build_manifest` |
-| `intake.py` | Validate a stable folder, show it for review (or hand unresolvable names to the resolver), move it to the user dir, write `ionomos.json`, insert ledger row. The watcher passes a `config.LiveConfig`, so edits to config.yaml apply to the next drop | — |
+| `intake.py` | Validate a stable folder, show it for review (or hand unresolvable names to the resolver), move it to the user dir, write `ionomos.json` (with each raw file's acquisition time, `acqtime.py`), insert ledger row. The watcher passes a `config.LiveConfig`, so edits to config.yaml apply to the next drop | — |
+| `acqtime.py` | When each raw file was acquired, read-only: the Thermo `.raw` header (audit start FILETIME at 0x28, checked), else ThermoRawFileParser's mzML / metadata output, the Xcalibur stamp in the name, the file time (approximate) (D78). Used by intake, the QC trend and the run-order QC | unfinnigan / OpenTFRaw format notes |
 | `resolve.py` | tkinter window for fixing user/method/file tails; writes `experiment.yaml` + learned aliases | — |
 | `testbed.py` | Fake lab + sample drops + the fake engines for testing on any OS | — |
 | `fake_fragpipe.py` | The testbed's FragPipe (`ionomos fake-fragpipe`): FragPipe 24's options, checks, messages, console layout, exit codes and output files, each copied from a named source; no search (D59) | FragPipe's source |
@@ -136,7 +137,8 @@ C:\Fragpipe_Auto\                    ← the app lives here (no spaces!)
 C:\Fragpipe_General\<user>\<experiment>\    ← where jobs land
   *.raw                              ← moved as-is (or raw\, or <plex>\ per TMT plex, if the user made them)
   experiment.yaml                    ← if the user wrote one
-  ionomos.json                      ← status + provenance, rewritten on every transition
+  ionomos.json                      ← status + provenance, rewritten on every transition; "acquisition": when
+                                       each raw file was acquired, read at intake (acqtime.py, D78)
   ionomos_run\                      ← what ionomos gave FragPipe
     fragpipe-files.fp-manifest
     <method>.workflow                ← pinned workflow, database.db-path set
@@ -604,6 +606,25 @@ turns the per-run records into the TSV, the `psm_qc` entry of
 `analysis.json`, the report's Search quality QC tab (`d["qc"]["psm"]`) and
 the two warnings. A table over 4,096 MB is not read. What is shown and the
 limits: WORKFLOWS.md.
+
+**Run order** (`downstream/runorder.py`, D78) runs after the search quality,
+for every analysis with processed samples, isolated like the others:
+
+```
+ionomos.json manifest ─▶ sample_files ─▶ acquisition time per file ─▶ run order of the samples
+ (else the raws in       (run names,      (ionomos.json "acquisition",   (first fraction's time)
+  the folder)             exp_rep, stem)   else acqtime.read, read-only)          │
+scorecard (insights.py) + psm_qc payload (psmqc.py) ─▶ a value per sample and QC number
+                                                       ▼
+          trend(): stratified Mann-Kendall + Theil-Sen     confounding(): η² of the run
+          within each condition                             positions by condition
+                                                       ▼
+          analysis.json "run_order", the report's Run order QC tab (d["qc"]["run"], via
+          ctx["run_order"]), RUN_ORDER_DRIFT / RUN_ORDER_CONFOUNDED, the run_order figure
+```
+
+Samples that share raw files (TMT channels) get no run order; samples with
+no readable time are listed and left out of the tests.
 
 **Roles** (`downstream/roles.py`, D61). `roles.plan(matrix, settings)` gives
 every condition a role and, when one is a competition, the default
