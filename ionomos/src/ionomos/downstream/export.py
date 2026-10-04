@@ -186,6 +186,8 @@ def fragpipe_analyst(folder: Path, m_loaded, p: fpa.Processed, diffs: list[DiffR
     says so and reproduce_design_in_R.R repeats it in limma."""
     if p.m.kind != "intensity" or m_loaded.exp not in ("DIA", "LFQ", "TMT") or not m_loaded.columns:
         return []
+    if m_loaded.level == "site":  # phosphosites (D79): the script would read the table as proteins
+        return []
     design = getattr(model, "design", None)
     deqms = s.test == "limma" and s.variance_prior == "deqms" and (getattr(model, "prior", {}) or {}).get("deqms_used")
     folder.mkdir(parents=True, exist_ok=True)

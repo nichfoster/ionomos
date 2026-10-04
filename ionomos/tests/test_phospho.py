@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from ionomos import downstream
-from ionomos.downstream import analysis, fpa, phospho, proteincorr
+from ionomos.downstream import fpa, phospho, proteincorr
 from ionomos.downstream.analysis import AnalysisError, Settings, settings_from
 from ionomos.downstream.tables import num, read_tsv
 

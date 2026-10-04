@@ -16,7 +16,8 @@ from ionomos import cli, downstream
 from ionomos.downstream import charts, raster, sectionfigs, simulate, slides
 
 SVG = "{http://www.w3.org/2000/svg}"
-SECTION_KINDS = ("dose_potency", "dose_curves", "time_patterns", "time_profiles", "liganded_rank", "liganded_selectivity")
+SECTION_KINDS = ("dose_potency", "dose_curves", "time_patterns", "time_profiles", "liganded_rank", "liganded_selectivity",
+                 "kinase_activity")  # the last: D79
 
 
 @pytest.fixture(scope="module")
