@@ -506,7 +506,7 @@ def peptide_msstats(path: Path, runs: list[tuple[str, str]], seed: int = 1, n_pr
                 truth[c][g] = sign
         n_pep = min(30, 1 + int(rng.expovariate(1 / 3)) + max(0, round(base - 22)))
         sd = noise * math.exp(rng.gauss(0, noise_spread)) if noise_spread > 0 else noise
-        for k in range(n_pep):
+        for _k in range(n_pep):
             pep = _pep(rng, rng.randint(7, 15)) + "K"
             off = rng.gauss(-1.0, offset_sd)
             for r, c in runs:

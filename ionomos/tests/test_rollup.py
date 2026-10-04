@@ -303,7 +303,9 @@ def test_analyze_with_maxlfq_and_the_f_test_switch(tmp_path):
     assert "moderated F-statistic" in out.report.read_text(encoding="utf-8")
     off = downstream.analyze(tmp_path / "e", analysis_cfg={"enrichment": False, "f_test": False})
     s = json.loads((off.results_dir / "analysis.json").read_text(encoding="utf-8"))
-    assert s["settings"]["f_test"] == "off" and s["f_test"] is None and s["settings"]["rollup"] == "auto"
+    assert s["settings"]["f_test"] == "off"
+    assert s["f_test"] == {"off": True, "note": "switched off (analysis.f_test: off)"}
+    assert s["settings"]["rollup"] == "auto"
     assert s["engine"]["quantity"] == "median polish (TMP)"
     html = off.report.read_text(encoding="utf-8")
     assert "moderated F-statistic" not in html and "switched off (f_test: off)" in html

@@ -944,9 +944,10 @@ def _quality_summary(insight: dict) -> dict:
     }
 
 def _f_summary(ftest, settings) -> dict | None:
-    """analysis.json "f_test": the moderated F across the conditions (3+ conditions with limma)."""
+    """analysis.json "f_test": the moderated F across the conditions (3+ conditions with limma); {"off": true}
+    when analysis.f_test is off (D76), so a reader can tell "switched off" from "does not apply"."""
     if ftest is None:
-        return None
+        return {"off": True, "note": "switched off (analysis.f_test: off)"} if settings.f_test == "off" else None
     qs = [q for q in ftest.q if q == q]
     return {"reference": ftest.reference, "conditions": ftest.conditions, "df1": ftest.df1, "tested": len(qs),
             "any_change": sum(1 for q in qs if q <= settings.alpha), "alpha_adjusted": settings.alpha,
