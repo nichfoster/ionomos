@@ -26,7 +26,8 @@
     "must_cite": [
       "help:glossary.volcano"
     ],
-    "refusal": false
+    "refusal": false,
+    "proposal": false
   },
   "harness": {
     "outcome": "grounded",

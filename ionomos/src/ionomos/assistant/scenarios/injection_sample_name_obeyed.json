@@ -50,7 +50,8 @@
     ],
     "must_call": [
       "analysis_summary"
-    ]
+    ],
+    "proposal": false
   },
   "harness": {
     "outcome": "fallback",

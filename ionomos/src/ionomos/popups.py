@@ -25,6 +25,10 @@ Each window says what happened, the most likely causes, what to do, the details
 "Ask about this" is also in the list. The answer is made on a worker thread (assistant/askui.py holds the
 logic) and comes back through host.post(), which _pump runs on the Tk thread; "not set up" shows Ionomos's own
 text and the help, as a normal state (D72).
+
+A change the assistant proposes (D75) opens in a ProposalDialog: what Ionomos says it would do, built from the
+checked arguments (assistant/proposals.py), with Cancel (focused) and Confirm. Only Confirm applies it
+(assistant/actions.apply: the same Retry and experiment.yaml save as the app's own buttons). One at a time.
 """
 from __future__ import annotations
 
@@ -77,6 +81,7 @@ class Popups:
         self._stopped = False
         self._asks: dict[int, AskWindow] = {}  # open "Ask about this" windows, by token (the worker thread
         self._ask_seq = 0                      # knows only the token, never a widget)
+        self._proposal: ProposalDialog | None = None  # the one proposal window (D75)
 
     def start(self, first_ms: int = 1500) -> None:
         self.root.after(first_ms, self._tick)
@@ -218,6 +223,17 @@ class Popups:
         if w is not None and w.alive():
             w.show(shown)
 
+    def propose(self, proposal, parent=None) -> ProposalDialog | None:
+        """On the Tk thread: open the window for a change the assistant proposed. One at a time: while one is
+        open, another is not shown (and is audited as not confirmed)."""
+        from ionomos.assistant import actions
+
+        if self._proposal is not None and self._proposal.alive():
+            actions.decide(proposal, False, actions.Done(False, "not shown: another proposal was waiting"))
+            return None
+        self._proposal = ProposalDialog(self, proposal, parent)
+        return self._proposal
+
     def load_config(self):
         from ionomos.config import ConfigError, load
 
@@ -346,6 +362,7 @@ class ItemWindow:
 
     def retry(self) -> None:
         from ionomos.ledger import Ledger
+        from ionomos.worker import request_retry
 
         db = self.host.database()
         try:
@@ -356,7 +373,7 @@ class ItemWindow:
                     self.msg.configure(text=f"Job {self.item.job_id} is {job.status if job else 'gone'}; nothing to retry.",
                                        foreground="#b26a00")
                     return
-                led.requeue(job.id, "retry requested", reset_attempts=True)
+                request_retry(led, job.id, self.host.log_dir())  # every Retry is this one (D75)
             finally:
                 led.close()
         except Exception as exc:  # noqa: BLE001
@@ -448,6 +465,7 @@ class AskWindow:
     def __init__(self, pops: Popups, item: attention.Item, token: int):
         self.pops, self.host, self.item, self.token = pops, pops.host, item, token
         self.shown: askui.Shown | None = None
+        self.proposal: ProposalDialog | None = None
         self.pending = False
         win = self.win = tk.Toplevel(pops.root)
         win.title(askui.TITLE)
@@ -511,6 +529,10 @@ class AskWindow:
         self.answer.configure(state="disabled")
         self.ask_btn.configure(state="normal")
         self.status.configure(text="")
+        if shown.proposal is not None:  # the change opens in its own window; nothing typed here confirms it
+            self.proposal = self.pops.propose(shown.proposal, self.win)
+            if self.proposal is None:
+                self.status.configure(text=askui.PROPOSAL_BUSY, foreground="#b26a00")
 
     def more_help(self) -> None:
         from ionomos import help as helpdoc
@@ -524,6 +546,101 @@ class AskWindow:
     def close(self) -> None:
         self.pops._asks.pop(self.token, None)
         try:
+            self.win.destroy()
+        except tk.TclError:
+            pass
+
+
+# ------------------------------------------------------ a proposed change --
+
+
+class ProposalDialog:
+    """A change the assistant proposed (D75), as Ionomos describes it from the checked arguments: what Confirm does
+    and the difference in experiment.yaml. Cancel has the focus; Cancel, Escape and closing the window change
+    nothing. Confirm applies it through assistant/actions.apply (rebuilt and checked again first), once."""
+
+    def __init__(self, pops: Popups, proposal, parent=None):
+        from ionomos.assistant import proposals
+
+        self.pops, self.proposal = pops, proposal
+        self.decided = False
+        self.done = None
+        win = self.win = tk.Toplevel(parent if parent is not None else pops.root)
+        win.title(askui.PROPOSAL_TITLE)
+        if parent is not None:
+            try:
+                win.transient(parent)
+            except tk.TclError:
+                pass
+        f = ttk.Frame(win, padding=12)
+        f.pack(fill="both", expand=True)
+        f.columnconfigure(0, weight=1)
+        f.rowconfigure(1, weight=1)
+        ttk.Label(f, text=askui.PROPOSAL_HEADING, wraplength=720, justify="left", font=("", 11, "bold")).grid(
+            row=0, column=0, sticky="w")
+        self.body = scrolledtext.ScrolledText(f, height=18, width=100, wrap="none", font=("Consolas", 9))
+        self.body.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
+        self.body.insert("1.0", proposals.text(proposal))  # plain text, every line written by Ionomos
+        self.body.configure(state="disabled")
+        self.status = ttk.Label(f, text="", wraplength=720, justify="left")
+        self.status.grid(row=2, column=0, sticky="w", pady=(6, 0))
+        b = ttk.Frame(f)
+        b.grid(row=3, column=0, sticky="ew", pady=(8, 0))
+        self.cancel_btn = ttk.Button(b, text="Cancel", command=self.cancel)
+        self.cancel_btn.pack(side="right", padx=3)
+        self.confirm_btn = ttk.Button(b, text="Confirm", command=self.confirm)
+        self.confirm_btn.pack(side="right", padx=3)
+        win.protocol("WM_DELETE_WINDOW", self.cancel)
+        win.bind("<Escape>", lambda e: self.cancel())
+        win.lift()
+        self.cancel_btn.focus_set()  # Return or space presses Cancel, never Confirm
+        try:
+            win.grab_set()  # modal: the question box behind it cannot be used meanwhile
+        except tk.TclError:
+            pass
+
+    def alive(self) -> bool:
+        try:
+            return bool(self.win.winfo_exists())
+        except tk.TclError:
+            return False
+
+    def confirm(self) -> None:
+        """The only place a proposal is applied."""
+        from ionomos.assistant import actions
+
+        if self.decided:
+            return
+        self.decided = True
+        self.confirm_btn.configure(state="disabled")
+        try:
+            cfg = self.pops.load_config()
+        except Exception as exc:  # noqa: BLE001
+            self.done = actions.Done(False, f"Ionomos could not read its settings ({exc}); nothing was changed.")
+            actions.decide(self.proposal, True, self.done)
+        else:
+            self.done = actions.apply(cfg, self.proposal, confirmed=True)
+        self.status.configure(text=self.done.message, foreground="#2e7d32" if self.done.ok else "#c62828")
+        self.cancel_btn.configure(text="Close", command=self.close)
+        try:
+            self.pops.host.on_change(attention.items(self.pops.host.log_dir()))
+        except Exception:  # noqa: BLE001 - the badge is a nicety
+            log.exception("could not refresh the attention badge")
+
+    def cancel(self) -> None:
+        from ionomos.assistant import actions
+
+        if not self.decided:
+            self.decided = True
+            actions.decide(self.proposal, False)
+        self.close()
+
+    def close(self) -> None:
+        if not self.decided:  # closed some other way: as Cancel
+            self.cancel()
+            return
+        try:
+            self.win.grab_release()
             self.win.destroy()
         except tk.TclError:
             pass

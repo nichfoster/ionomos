@@ -548,8 +548,8 @@ class ExperimentEditor:
         return out
 
     def save_choices(self, quiet: bool = False) -> bool:
-        from ionomos.downstream.analysis import AnalysisError, settings_from
-        from ionomos.manifest import OverridesError, load_overrides, save_overrides
+        from ionomos.downstream.analysis import AnalysisError
+        from ionomos.manifest import OverridesError, save_analysis
 
         if not self.target:
             if not quiet:
@@ -557,20 +557,17 @@ class ExperimentEditor:
             return False
         dest = self.target["dest"]
         try:
-            an = self.choices()
-            settings_from(self._lab(), an)
-            ov = load_overrides(dest)
+            # the editor shows the whole analysis: block; checked, and the old file kept in experiment-backups/
+            # (the same save a confirmed proposal of the assistant goes through, D75)
+            path, _backup = save_analysis(dest, self.choices(), self._lab())
         except (ValueError, AnalysisError, OverridesError) as exc:
             messagebox.showerror("Analysis choices", str(exc), parent=self.frame)
             return False
-        if ov.analysis == an:
-            return True
-        ov.analysis = an
-        try:
-            path = save_overrides(dest, ov, replace_analysis=True)  # the editor shows the whole analysis: block
         except OSError as exc:
             messagebox.showerror("Analysis choices", f"Could not write experiment.yaml:\n{exc}", parent=self.frame)
             return False
+        if path is None:
+            return True
         self.state.configure(text=f"saved in {path.name}", foreground="#2e7d32")
         log.info("analysis choices saved in %s", path)
         return True

@@ -68,6 +68,7 @@ class Result:
     model: str = ""
     answer: str = ""                # what the app would show (the fixture states hold no lab data)
     sources: list[str] = field(default_factory=list)
+    proposal: str = ""              # the change it proposed (D75), as Ionomos describes it; never applied here
 
 
 def settings_for_eval(base: dict, base_url: str | None = None, model: str | None = None,
@@ -188,7 +189,8 @@ def run(settings: dict, *, workdir: Path | str, only=None, corpus: list[dict] | 
                    refusal=s["rubric"].get("refusal"), outcome=ans.outcome, reason=ans.reason, passed=not problems,
                    problems=problems, mode=ans.mode, ttft_s=ans.ttft, seconds=ans.seconds, rounds=ans.rounds,
                    tool_calls=[c["name"] for c in ans.tool_calls], citations=ans.citations,
-                   rejected_citations=ans.rejected_citations, model=ans.model, answer=ans.text, sources=ans.sources)
+                   rejected_citations=ans.rejected_citations, model=ans.model, answer=ans.text, sources=ans.sources,
+                   proposal=ans.proposal.title if ans.proposal is not None else "")
         results.append(r)
         say(f"[{n:>2}/{len(chosen)}] {r.id:<34} {'pass' if r.passed else 'FAIL'}  {r.outcome:<11} "
             f"ttft {_s(r.ttft_s):>6}  total {_s(r.seconds):>6}" + (f"  {problems[0]}" if problems else ""))

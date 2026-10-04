@@ -30,7 +30,8 @@
       "26",
       "19"
     ],
-    "refusal": false
+    "refusal": false,
+    "proposal": false
   },
   "harness": {
     "outcome": "grounded",

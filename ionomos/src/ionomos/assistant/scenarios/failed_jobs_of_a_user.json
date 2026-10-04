@@ -29,7 +29,8 @@
     "must_mention": [
       "IJD05_isoDTB_FLAGpull"
     ],
-    "refusal": false
+    "refusal": false,
+    "proposal": false
   },
   "harness": {
     "outcome": "grounded",

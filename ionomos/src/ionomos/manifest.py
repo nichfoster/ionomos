@@ -201,6 +201,14 @@ def save_overrides(folder: Path, ov: Overrides, replace_analysis: bool = False) 
     the whole block, so a choice taken back in the experiment editor (a role back to automatic, a sample used
     again) is gone from the file too."""
     p = Path(folder) / EXPERIMENT_YAML
+    p.write_text(overrides_text(folder, ov, replace_analysis), encoding="utf-8")
+    return p
+
+
+def overrides_text(folder: Path, ov: Overrides, replace_analysis: bool = False) -> str:
+    """What save_overrides would write to <folder>/experiment.yaml, without writing it (the assistant's proposals
+    show the difference before anything is saved, D75)."""
+    p = Path(folder) / EXPERIMENT_YAML
     existing: dict = {}
     if p.is_file():
         try:
@@ -218,8 +226,49 @@ def save_overrides(folder: Path, ov: Overrides, replace_analysis: bool = False) 
     elif isinstance(existing.get("analysis"), dict) and ov.analysis:  # a new control keeps saved comparisons
         merged["analysis"] = {**existing["analysis"], **ov.analysis}
     header = "# Written by ionomos. Edit freely; keys are documented in docs/NAMING_CONVENTION.md\n"
-    p.write_text(header + yaml.safe_dump(merged, sort_keys=False, allow_unicode=True), encoding="utf-8")
-    return p
+    return header + yaml.safe_dump(merged, sort_keys=False, allow_unicode=True)
+
+
+def backup_experiment_yaml(folder: Path) -> Path | None:
+    """Copy <folder>/experiment.yaml to <folder>/experiment-backups/experiment-<time>.yaml (names.py) before it is
+    rewritten. A backup is created exclusively: never replaced, never removed. None when there is no file yet."""
+    from datetime import datetime
+
+    from ionomos import names
+
+    p = Path(folder) / EXPERIMENT_YAML
+    if not p.is_file():
+        return None
+    data = p.read_bytes()
+    d = Path(folder) / names.EXPERIMENT_BACKUP_DIR
+    d.mkdir(exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    for n in range(1000):
+        dest = d / (f"experiment-{stamp}.yaml" if n == 0 else f"experiment-{stamp}-{n}.yaml")
+        try:
+            with open(dest, "xb") as fh:
+                fh.write(data)
+            return dest
+        except FileExistsError:
+            continue
+    raise OSError(f"no free backup name in {d}")
+
+
+def save_analysis(folder: Path, analysis: dict, lab: dict | None = None) -> tuple[Path | None, Path | None]:
+    """Save an experiment's whole analysis: block: the experiment editor's Save, and a change the assistant proposed
+    once a person pressed Confirm (D75), so both are checked and backed up the same way. The block is checked
+    against the lab's settings (raises AnalysisError) and the file must read (raises OverridesError); the version it
+    replaces is kept in experiment-backups/ first. Returns (experiment.yaml, the backup), or (None, None) when the
+    file already says this."""
+    from ionomos.downstream.analysis import settings_from
+
+    settings_from(lab, analysis)
+    ov = load_overrides(folder)
+    if ov.analysis == analysis:
+        return None, None
+    ov.analysis = dict(analysis)
+    backup = backup_experiment_yaml(folder)
+    return save_overrides(folder, ov, replace_analysis=True), backup
 
 
 # ------------------------------------------------------------ apply overrides --

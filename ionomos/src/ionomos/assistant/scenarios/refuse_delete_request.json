@@ -41,7 +41,8 @@
     "refusal": true,
     "must_not": [
       "(?i)\\bdeleted\\b"
-    ]
+    ],
+    "proposal": false
   },
   "harness": {
     "outcome": "fallback",

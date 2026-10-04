@@ -14,7 +14,7 @@ import yaml
 
 from ionomos import assistant, attention, cli, configio, fragpipe, names, service, testbed
 from ionomos import help as helpdoc
-from ionomos.assistant import audit, citations, client, fake, helpsearch, tools
+from ionomos.assistant import audit, citations, client, fake, helpsearch, proposals, tools
 from ionomos.config import ConfigError, load
 from ionomos.intake import intake
 from ionomos.ledger import Job, Ledger
@@ -110,22 +110,23 @@ def test_a_non_local_address_is_refused_before_anything_is_sent(bed):
 
 
 def test_prompt_and_schemas_are_small_and_byte_stable():
-    blob = assistant.SYSTEM_PROMPT + json.dumps(tools.schemas(), separators=(",", ":"))
-    assert len(blob.encode("utf-8")) < 6000, "about 1.5k tokens at 4 bytes per token; the roadmap's budget is ~2k"
+    blob = assistant.SYSTEM_PROMPT + json.dumps(assistant.schemas(), separators=(",", ":"))
+    # about 1.6k tokens at 4 bytes per token with the proposal tools (D75); the roadmap's budget is ~2k
+    assert len(blob.encode("utf-8")) < 6500
     assert assistant.prompt_digest() == audit.digest(blob) == assistant.prompt_digest()
     # Pinned: a changed prompt or schema is a decision. Update this digest with it, and score the real models
     # again (docs/ASSISTANT.md): an audit record's prompt_digest says which prompt an answer came from.
-    assert assistant.prompt_digest() == "2fe1c4cc8fd1bb762b935395113155c0a875fdbc141758aa8005e29db530c45e"
+    assert assistant.prompt_digest() == "4f72891f1234baf9d4beceed027f66432cea752330ce7b7699af2d581d7dcd48"
     # nothing that changes between requests (dates, versions, paths, job numbers) is in the prefix
     from ionomos import __version__
 
     assert __version__ not in blob and "20" not in assistant.SYSTEM_PROMPT
     s = assistant.settings_from({"enabled": True, "model": "m"})
-    a = client.request_body(s, [{"role": "system", "content": assistant.SYSTEM_PROMPT}], tools.schemas())
-    assert a == client.request_body(s, [{"role": "system", "content": assistant.SYSTEM_PROMPT}], tools.schemas())
+    a = client.request_body(s, [{"role": "system", "content": assistant.SYSTEM_PROMPT}], assistant.schemas())
+    assert a == client.request_body(s, [{"role": "system", "content": assistant.SYSTEM_PROMPT}], assistant.schemas())
     body = json.loads(a)
     assert list(body) == ["model", "messages", "tools", "tool_choice", "temperature", "stream"]
-    assert body["temperature"] == 0 and body["tools"] == tools.schemas()
+    assert body["temperature"] == 0 and body["tools"] == assistant.schemas() == tools.schemas() + proposals.schemas()
 
 
 @pytest.mark.parametrize("stream", [False, True])
@@ -211,7 +212,7 @@ def test_the_assistant_package_cannot_write_delete_start_or_connect():
                     "check_call", "check_output", "startfile", "urlopen", "requeue", "set_status", "insert",
                     "start_attempt", "raise_item", "resolve", "dismiss", "snooze", "save_overrides", "exec", "eval"}
     banned_imports = {"subprocess", "shutil", "socket", "urllib", "http", "ftplib", "smtplib", "ctypes", "os"}
-    for name in ("tools.py", "citations.py", "helpsearch.py", "__init__.py"):
+    for name in ("tools.py", "citations.py", "helpsearch.py", "__init__.py", "proposals.py"):
         tree = ast.parse((PKG / name).read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.Call):
@@ -546,4 +547,5 @@ def test_cli_ask_prints_the_fallback_when_not_set_up_and_a_grounded_answer_when_
 def test_the_help_explains_the_assistant():
     ents = helpdoc.entries()
     assert {"faq.assistant", "faq.assistant-setup"} <= set(ents)
-    assert "ionomos ask" in ents["faq.assistant"].body and "cannot retry, change, move or delete" in ents["faq.assistant"].body
+    assert "ionomos ask" in ents["faq.assistant"].body and "changes nothing itself" in ents["faq.assistant"].body
+    assert "faq.assistant-proposal" in ents and "Confirm" in ents["faq.assistant-proposal"].body

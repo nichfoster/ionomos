@@ -2963,6 +2963,84 @@ follow the manual, not a session with the program); the buttons and the new
 box on screen.
 
 
+### D75 — The assistant proposes one checked change; only a Confirm button applies it
+
+**2026-10-04.** ROADMAP Phase 6.2, inside D49's rules ("any change goes
+through a native dialog built from the structured arguments, and the user
+clicks Confirm"). No model has been tried; the box stays open until lab
+members have used it (the exit criterion).
+
+1. **Five proposal tools, a closed whitelist.** `propose_retry`,
+   `propose_condition`, `propose_leave_out`, `propose_setting` (`imputation`,
+   `normalize`, `alpha`, `log2fc`, `control`, `de_type`, `comparisons`; `""` =
+   the lab default) and `propose_role`. One job, one sample, one key per
+   call; no path, no "all", no delete or move. `de_type` was added to the
+   roadmap's list because the editor treats it with the control and the
+   comparisons; roles have their own tool because a role is per condition.
+   Other analysis keys (min_valid, filters, enrichment, …) stay with the
+   editor.
+2. **A proposal is built and checked before it exists.** The schema, then
+   the ledger (a retry needs a failed job), then the experiment: samples are
+   those of its last analysis (`results/analysis.json`) plus the ones
+   `experiment.yaml` leaves out, conditions follow `experiment.yaml`'s
+   `sample_conditions`; a control, comparison or role must name one; a new
+   condition must be a plain name; the resulting `analysis:` block must pass
+   `settings_from` with the lab's settings and differ from the file. The
+   sample list comes from analysis.json rather than reading the result table
+   again, because that reader writes into `results/` and a proposal must only
+   read. So an experiment whose analysis never ran gets no sample proposals.
+3. **One proposal per question**, the first valid one; later calls get an
+   error the model reads. It is offered only with an answer that passed the
+   citation check; otherwise it is withheld (audited).
+4. **The window is Ionomos's text.** `popups.ProposalDialog` shows the title,
+   what Confirm does and a unified diff of `experiment.yaml` rendered by the
+   same code that writes it (`manifest.overrides_text`), from the checked
+   arguments; nothing the model wrote as prose. A proposal for another job
+   than the one asked about says so. It is modal; Cancel has the focus;
+   Escape and closing are Cancel. One proposal window at a time (another is
+   audited as not shown).
+5. **Confirm re-checks, then uses the app's own code.**
+   `assistant/actions.apply` rebuilds the proposal from its tool and
+   arguments against the ledger and file as they are now and goes on only if
+   the id (tool, arguments, job, the file's sha256, the new block) is the
+   same: an editor save or a Retry in between makes it refuse. A retry is
+   `worker.request_retry`, which the Jobs tab, the pop-up and `ionomos retry`
+   now share; an analysis change is `manifest.save_analysis`, which the
+   experiment editor's Save now uses. Confirm does not re-run the analysis;
+   the message says how.
+6. **experiment.yaml gets backups.** The editor's Save overwrote the file;
+   the task assumed a backup that did not exist. `save_analysis` copies the
+   old file to `<experiment>/experiment-backups/experiment-<time>.yaml`
+   (`names.EXPERIMENT_BACKUP_DIR`) first, created exclusively, never pruned.
+   This applies to every editor save, not only the assistant's.
+7. **Only the Confirm button applies.** A test reads every module of the
+   package: `actions.apply` is called in `ProposalDialog.confirm` only, and
+   no other assistant module retries a job or writes `experiment.yaml`. The
+   replay checks that no scenario, in any fixture state, changes a file or a
+   job. "Yes" typed in the chat is a new question; the model has no
+   confirming tool.
+8. **`ionomos ask` prints, never applies.** The proposal, then `ionomos retry
+   N`, or the app's steps and (where `ionomos analyze`'s flags can say it) a
+   one-off `ionomos analyze N --exclude …` that does not save. Names a
+   terminal could misread are left out of a printed command.
+9. **Audit.** The question's record lists the proposal (id, tool, argument
+   hash, job, title, offered); each decision is its own record
+   (`proposal_decision`: confirmed, applied, the message).
+10. **The prompt grew** to about 6,200 bytes (≈1.55k tokens) with the five
+    schemas; the size test's limit moved from 6,000 to 6,500 bytes, under the
+    roadmap's ~2k tokens. The digest changed, so real models must be scored
+    again.
+
+**Verified:** by the suite on macOS (the window's tests are written in the
+existing style and run in CI only). **Not verified:** any real model's
+proposals; the window on the PC's display; whether lab members finish the
+tasks unaided.
+
+**For the maintainer to confirm:** the whitelist (1, with `de_type`); that a
+proposal is withheld when its answer fails the citation check (3); the
+backups for every editor save, never pruned (6); that Confirm saves but does
+not re-run the analysis (5).
+
 ### D76 — MaxLFQ is a roll-up option, not the default; the moderated F-test can be switched off
 
 **2026-10-04.** ROADMAP 5B asked whether median polish or MaxLFQ would agree

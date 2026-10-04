@@ -39,7 +39,8 @@
     "must_not": [
       "(?i)p ?[<=] ?0\\.\\d"
     ],
-    "refusal": false
+    "refusal": false,
+    "proposal": false
   },
   "harness": {
     "outcome": "grounded",

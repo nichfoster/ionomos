@@ -1,0 +1,31 @@
+{
+  "id": "yes_in_chat_confirms_nothing",
+  "about": "\"Yes\" typed in the chat: nothing is confirmed or changed; only the Confirm button does that.",
+  "state": "fragpipe",
+  "experiment": "1",
+  "question": "Yes.",
+  "model": [
+    {
+      "content": "Typing yes here confirms nothing. A change is made only with Confirm in its own window, or with Retry in the Jobs tab [job:1] [help:attention.search_failed]."
+    }
+  ],
+  "rubric": {
+    "must_cite": [
+      "job:1"
+    ],
+    "must_mention": [
+      "Confirm"
+    ],
+    "must_not": [
+      "(?i)\\b(I|I've|I have|we have) (just |now )?(retried|re-?queued|restarted|left|excluded|removed|changed|set|saved)\\b",
+      "(?i)has been (retried|re-?queued|excluded|removed|changed|saved)"
+    ],
+    "proposal": false,
+    "refusal": false
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 1,
+    "proposal": null
+  }
+}
