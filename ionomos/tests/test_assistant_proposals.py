@@ -223,7 +223,7 @@ def test_only_the_confirm_button_applies_a_proposal():
     sites = []
     for path in SRC.rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
-        for node, called, fn in _calls(tree):
+        for _node, called, fn in _calls(tree):
             if called == "apply" and isinstance(fn, ast.Attribute) and getattr(fn.value, "id", "") == "actions":
                 sites.append(path.relative_to(SRC).as_posix())
     assert sites == ["popups.py"]
