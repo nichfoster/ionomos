@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **MaxLFQ protein roll-up** (D76): `analysis.rollup: auto | median_polish |
+  maxlfq`. It decides how a table of peptides or precursors becomes proteins:
+  Sage's `lfq.tsv`, the MSstats format, and DIA-NN and Spectronaut long reports.
+  MaxLFQ (Cox et al. 2014) is computed in pure Python
+  (`downstream/rollup.py`). For each pair of samples it takes the median
+  log-ratio of their shared features, solves least squares per connected
+  component and scales to the summed intensity. It matches R's
+  `iq::maxLFQ()` 2.0.1 to 1e-9 on 54 proteins, including disconnected sample
+  groups, missing values, single features and single samples. Its profiles
+  match `diann::diann_maxlfq()` to 1e-3. `auto` keeps every loader's
+  previous behaviour: median polish for Sage and the MSstats format, and
+  DIA-NN's `PG.MaxLFQ` and Spectronaut's `PG.Quantity` as they are. For a
+  DIA-NN report, `maxlfq` / `median_polish` uses `Precursor.Normalised`; for
+  Spectronaut it uses `FG.Quantity`, now an optional column in
+  `ionomos spectronaut-columns`. When those columns are missing, or the table
+  already holds proteins, a note says the setting was not used. When a
+  protein's samples share no feature, a note gives how many proteins that
+  affected.
+- **`analysis.f_test: auto | off`** (D76): `off` switches off the moderated
+  F-test ("any change") that limma runs on 3+ conditions of intensity data.
+  The report's Methods and settings and `analysis.json` (`f_test: {off:
+  true}`) then say it was switched off. The default `auto` behaves as
+  before. Time-course F-tests are not affected; `time_course` controls those.
+- **`ionomos benchmark --kind rollup`** (D76): simulated peptide tables with
+  their own ionisation offsets, missing values and interferences, rolled up
+  by median polish or MaxLFQ, with and without imputation
+  (`benchmark_simulated_rollup.*`).
+
 ## [0.16.0] - 2026-10-03
 
 ### Added
