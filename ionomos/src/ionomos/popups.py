@@ -591,7 +591,7 @@ class ProposalDialog:
         self.confirm_btn = ttk.Button(b, text="Confirm", command=self.confirm)
         self.confirm_btn.pack(side="right", padx=3)
         win.protocol("WM_DELETE_WINDOW", self.cancel)
-        win.bind("<Escape>", lambda e: self.cancel())
+        win.bind("<Escape>", self.on_escape)
         win.lift()
         self.cancel_btn.focus_set()  # Return or space presses Cancel, never Confirm
         try:
@@ -626,6 +626,9 @@ class ProposalDialog:
             self.pops.host.on_change(attention.items(self.pops.host.log_dir()))
         except Exception:  # noqa: BLE001 - the badge is a nicety
             log.exception("could not refresh the attention badge")
+
+    def on_escape(self, _event=None) -> None:
+        self.cancel()
 
     def cancel(self) -> None:
         from ionomos.assistant import actions

@@ -332,7 +332,10 @@ def test_gui_cancel_escape_and_closing_change_nothing(bed, tk_pops, monkeypatch)
         assert dlg is not None and dlg.win.focus_get() in (dlg.cancel_btn, None)
         assert p.title in dlg.body.get("1.0", "end")
         assert pops.propose(proposals.build(_ctx(bed), "propose_retry", {"job_id": 1})) is None, "one at a time"
-        {"cancel": dlg.cancel, "escape": lambda d=dlg: d.win.event_generate("<Escape>"), "close": dlg.close}[how]()
+        # Escape: check the binding and call its handler. A synthetic <Escape> reaches the window only while it has
+        # keyboard focus, which a Windows CI runner often doesn't give it (the same as #45's <Return>).
+        assert "on_escape" in dlg.win.bind("<Escape>")
+        {"cancel": dlg.cancel, "escape": dlg.on_escape, "close": dlg.close}[how]()
         dlg.win.update() if dlg.alive() else None
         assert not dlg.alive() and dlg.done is None
     assert _snapshot(bed) == before
