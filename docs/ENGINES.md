@@ -98,6 +98,7 @@ list is `engines.SPECTRONAUT_COLUMNS`, the same one the loader reads (D74):
 | `PG.Quantity` (or `PG.MS2Quantity`) | needed | the protein quantity |
 | `PG.Qvalue`, `EG.Qvalue` | optional | rows above 1% are left out |
 | `EG.PrecursorId` | optional | peptides counted per protein |
+| `FG.Quantity` | optional | the precursor quantity, read only for `analysis.rollup: maxlfq` or `median_polish` (D76) |
 
 In Spectronaut: Report perspective → start from one of the preconfigured
 Normal Report schemas → tick these columns in the column chooser (its search
@@ -319,7 +320,8 @@ the exception: see below.
 - The files of one sample (its fractions, from the job's file names) have
   their intensities added.
 - Each group's quantity per sample is the Tukey median polish of its ions'
-  log2 intensities, the summary MSstats uses.
+  log2 intensities, the summary MSstats uses (or MaxLFQ with
+  `analysis.rollup: maxlfq`, above).
 - Gene names and descriptions come from the FASTA named in `results.json`,
   when it is still there; otherwise from the UniProt entry names.
 
