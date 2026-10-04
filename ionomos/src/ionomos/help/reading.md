@@ -559,6 +559,34 @@ DIA, the tab shows DIA-NN's own summary of each run instead. Everything is
 also in `results\psm_qc.tsv`. To skip it, set `psm_qc: false` under
 `analysis:`.
 
+## Run order {#qc.run}
+
+Each sample's quality numbers in the order the samples were acquired:
+identifications, missing values, the median intensity before normalisation,
+and from the search the PSMs, the precursor mass error and the missed
+cleavages (with DIA-NN: precursors and its MS1 mass accuracy). The coloured
+strip above the chart shows which condition was run when.
+
+- **A drift** is a steady slope over the run: a spray or column getting
+  dirtier (fewer identifications, less signal), or the calibration moving
+  (the mass error). It is tested within each condition, so a condition that
+  really differs is not called a drift. The line is the median slope; a
+  number is flagged when its trend has p below 0.01 and it changes by at
+  least its limit from the first run to the last (10% for counts, 0.5 log2
+  for the intensity, 5 points of missing values, 3 ppm, 5 points of missed
+  cleavages) ([what to do](#issue.RUN_ORDER_DRIFT)).
+- **Conditions run in blocks** (all controls, then all treated) are named
+  above the chart, with the share of the run order the condition explains.
+  From 60% the report warns: a drift would then look like a difference
+  between the conditions ([what to do](#issue.RUN_ORDER_CONFOUNDED)).
+
+The times come from each raw file's own header (when the instrument started
+the run). Without a readable header they come from ThermoRawFileParser's
+output, the time stamp Xcalibur adds to a file name, or the file's
+modification time, which is approximate; the table says which. It needs six
+samples with a time to test a drift. TMT channels are acquired together, so a
+TMT experiment has no run order per sample.
+
 ## Methods and settings {#report.methods}
 
 A paragraph describing the analysis, ready to paste into a notebook or a

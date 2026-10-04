@@ -63,6 +63,7 @@ class Findings:
     cys_problems: list = field(default_factory=list)      # [(severity, message)] from cys.run / the site annotation
     protein_problems: list = field(default_factory=list)  # [(code, severity, message)] from proteincorr (D70)
     psm_problems: list = field(default_factory=list)      # [(issue code, message)] from psmqc.run
+    run_problems: list = field(default_factory=list)      # [(issue code, message)] from runorder.run (D78)
     model: object = None                # analysis.Model: the design used, or why an asked-for one wasn't
     roles: object = None                # roles.Plan: the conditions' roles and the comparisons they gave
     guards: list = field(default_factory=list)            # guards.statistics: p-values that may not mean what they say
@@ -225,6 +226,29 @@ def check(f: Findings) -> list[Issue]:
                        "Compare a flagged sample's quantities with its replicates before trusting them; an "
                        "incompletely digested sample measures different peptides",
                        "Check the digestion for the next preparation"], {"message": msg}))
+
+    # ---- run order (runorder.py, D78): drift during the run, conditions acquired in blocks
+    for code, msg in f.run_problems:
+        if code == "RUN_ORDER_DRIFT":
+            add(Issue("RUN_ORDER_DRIFT", "warning", "The samples drift with the order they were run in", msg,
+                      ["The spray, the column or the trap got dirtier over the sequence (fewer identifications, "
+                       "less signal)",
+                       "The mass calibration drifted during the sequence (the mass error moves)",
+                       "Samples waited longer in the autosampler the later they were run"],
+                      ["Look at the Run order tab under Quality control: is it a steady slope, or a step at one run?",
+                       "If the conditions were interleaved, the comparisons are still fair but noisier; if they "
+                       "were acquired in blocks, treat differences between them with care",
+                       "Next time, randomise the run order, and run a QC standard between the samples"],
+                      {"message": msg}))
+        elif code == "RUN_ORDER_CONFOUNDED":
+            add(Issue("RUN_ORDER_CONFOUNDED", "warning", "The conditions were run in blocks", msg,
+                      ["The samples were queued condition by condition (all controls, then all treated)",
+                       "A sequence was split over days or columns along the conditions"],
+                      ["Look at the Run order tab under Quality control: do the QC numbers change along the run?",
+                       "If they do not, the comparisons stand; if they do, part of a difference between the "
+                       "conditions may be the instrument",
+                       "Next time, randomise or interleave the run order (rep 1 of every condition, then rep 2, ...)"],
+                      {"message": msg}))
 
     # ---- nothing to analyse
     if m is None and f.read_problem:

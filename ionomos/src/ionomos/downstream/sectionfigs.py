@@ -1,5 +1,5 @@
 """
-Figures for slides from the report's dose-response, time-course and liganded-site sections (D68).
+Figures for slides from the report's dose-response, time-course and liganded-site sections (D68) and its run-order QC (D78).
 
     catalog(payload, which, features, top)   the figures these sections can draw: [charts.Figure]
 
@@ -14,6 +14,9 @@ the plot, the cut-offs line, a <desc> that says where the figure came from), fro
     liganded_rank         per compound: every measured site ranked by its competition ratio, against the threshold
     liganded_selectivity  sites x compounds: the median competition ratio of each site liganded by any compound
                           (or of the sites asked for), marked where it is liganded
+    run_order             each sample's QC numbers (identifications, missing values, signal, PSMs, mass error,
+                          missed cleavages) against the order of acquisition, a panel per number, drifting
+                          ones first, with the Theil-Sen line (runorder.py, D78)
 
 Nothing is analysed again: the numbers are the report's. Colours are written out, text is <text>, no CSS.
 """
@@ -30,7 +33,7 @@ from ionomos.downstream.doseresponse import fmt_dose
 TOP_PANELS = 6     # curves / profiles drawn when no feature is named (report.js TOP_PANELS)
 MAX_PANELS = 24
 SECTION_FIGURES = ("dose_potency", "dose_curves", "time_patterns", "time_profiles", "liganded_rank",
-                   "liganded_selectivity")
+                   "liganded_selectivity", "run_order")
 _DOSE_CLS = ("up", "down", "not", "unclear")
 _TIME_CLS = ("up", "down", "mixed", "not")
 
@@ -619,6 +622,90 @@ def figure_liganded_selectivity(d: dict, style: dict, generator: str = "", named
 # ------------------------------------------------------------------ catalog --
 
 
+# ------------------------------------------------------------------ run order --
+
+
+def _run_change(m: dict) -> str:
+    c = m.get("change")
+    if c is None:
+        return "–"
+    sg = "+" if c >= 0 else "−"
+    if m.get("judge") == "rel" and m.get("med"):
+        return f"{sg}{abs(c) / abs(m['med']):.0%}"
+    if m["key"] == "missed":
+        return f"{sg}{abs(c):.1%}"
+    if m.get("unit") == "%":
+        return f"{sg}{abs(c):.1f} points"
+    return f"{sg}{abs(c):.2f} {m.get('unit') or ''}".rstrip()
+
+
+def _run_panel(R_: dict, m: dict, W: float, H: float, ink: dict, col: dict, style: dict, xl: str) -> str:
+    L, R, T, B = 60, 10, 38, 42
+    ls, ps = style["line_scale"], style["point_scale"]
+    S = R_["samples"]
+    n = max(2, sum(1 for s in S if s.get("o") is not None))
+    pts = [(s["o"], v, s["c"]) for s, v in zip(S, m["v"], strict=False) if s.get("o") is not None and v is not None]
+    ys = [v for _o, v, _c in pts] or [0.0]
+    lo, hi = min(ys), max(ys)
+    pad = (hi - lo) * 0.1 or abs(hi) * 0.05 or 1
+    lo, hi = lo - pad, hi + pad
+
+    def X(o):
+        return L + (o - 1) / (n - 1) * (W - L - R)
+
+    def Y(v):
+        return T + (1 - (v - lo) / (hi - lo)) * (H - T - B)
+
+    xt = [v for v in charts.nice_ticks(1, n, min(8, n)) if 1 <= v <= n and v == int(v)]
+    b = _axes(ink, X, Y, xt, _inner_ticks(lo, hi, 5), L, R, T, B, W, H, xl, "", ls)
+    if m.get("slope") is not None and pts:
+        b0 = sorted(v - m["slope"] * o for o, v, _c in pts)
+        k = len(b0)
+        b0 = b0[k // 2] if k % 2 else (b0[k // 2 - 1] + b0[k // 2]) / 2
+        y1, y2 = b0 + m["slope"], b0 + m["slope"] * n
+        b.append(f'<line x1="{_n(X(1))}" x2="{_n(X(n))}" y1="{_n(Y(y1))}" y2="{_n(Y(y2))}" '
+                 f'stroke="{ink["up"] if m.get("flag") else ink["muted"]}" stroke-width="{_n((2 if m.get("flag") else 1.5) * ls)}"'
+                 + ("" if m.get("flag") else ' stroke-dasharray="5 4"') + "/>")
+    for o, v, c in pts:
+        b.append(f'<circle cx="{X(o):.1f}" cy="{Y(v):.1f}" r="{_n(4.2 * ps)}" fill="{col.get(c, ink["c"][0])}" '
+                 f'stroke="{ink["surface"]}" stroke-width="{_n(1.2 * ls)}"/>')
+    unit = f" ({m['unit']})" if m.get("unit") else ""
+    line2 = ("not tested" if m.get("p") is None else
+             f"tau {m['tau']:+.2f} · p {_p(m['p'])} · change {_run_change(m)}")
+    return "".join(_heading(clean_text(m["label"]) + unit, "drift" if m.get("flag") else "", ink["up"], line2, W, ink) + b)
+
+
+def figure_run_order(d: dict, style: dict, generator: str = "") -> str:
+    """Each sample's QC numbers against the order of acquisition (runorder.py, D78): a panel per number, the
+    samples coloured by condition, the Theil-Sen line (solid where a drift was flagged)."""
+    R_ = (d.get("qc") or {}).get("run") or {}
+    ms = sorted(R_.get("metrics") or [], key=lambda m: (not m.get("flag"), m.get("p") is None))
+    if not ms or not any(s.get("o") is not None for s in R_.get("samples") or []):
+        return ""
+    ink = _inks(style)
+    col = charts._cond_colors(d, ink)
+    asked = len(ms)
+    fits, _yt = _room(style, asked)
+    ms = ms[:fits]
+
+    def draw(W: int, H: int) -> str:
+        return _panels(len(ms), W, H, lambda p, w, h, first, last: _run_panel(
+            R_, ms[p], w, h, ink, col, style, "run (order of acquisition)" if last else ""))
+
+    cf = R_.get("confound") or {}
+    legend = [(v, k) for k, v in col.items()] + [(None, "line: Theil-Sen slope (solid: a drift)")]
+    legend += _room_notes(asked, len(ms), True, "", top=False)
+    lim = R_.get("limits") or {}
+    cuts = (f"drift: p < {lim.get('alpha', 0.01):g} within the conditions and a change of at least its limit"
+            + (f"; conditions explain {cf['eta2']:.0%} of the run order" + (" (run in blocks)" if cf.get("flag") else "")
+               if cf.get("eta2") is not None else ""))
+    what = "Run order"
+    flagged = sum(1 for m in R_.get("metrics") or [] if m.get("flag"))
+    return _compose(style, d, draw, what, f"{what}: {len(ms)} QC number{'s' if len(ms) != 1 else ''}",
+                    f"Each sample against the order of acquisition{f' · {flagged} drifting' if flagged else ''} · "
+                    f"{d.get('title') or ''}", legend, cuts, about=what, generator=generator)
+
+
 def catalog(d: dict, which, features=None, top: int | None = None) -> list:
     """The section figures asked for (`which`: kinds) that the report's data can draw. `features`: names of
     features for the curve and profile grids, the rank plot's labels and the selectivity map's rows (default:
@@ -692,4 +779,9 @@ def catalog(d: dict, which, features=None, top: int | None = None) -> list:
                           + ("chosen site" if named is not None else "site liganded by any compound") + ", and its selectivity",
                           lambda st, g: figure_liganded_selectivity(d, st, g, named),
                           "--features NAME,... for other sites", note))
+    R_ = (d.get("qc") or {}).get("run") or {}
+    if "run_order" in which and R_.get("metrics") and any(s.get("o") is not None for s in R_.get("samples") or []):
+        out.append(Figure("run_order.svg", "run_order",
+                          "Run order: each sample's QC numbers against the order of acquisition, a drift test within "
+                          "the conditions (D78)", lambda st, g: figure_run_order(d, st, g)))
     return out

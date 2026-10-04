@@ -106,6 +106,8 @@ def payload(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: li
     }
     if psm:  # search quality per run (psmqc.py): shown even when there are no quantities
         d["qc"]["psm"] = psm
+    if ctx.get("run_order"):  # each sample's QC against the order of acquisition (runorder.py, D78)
+        d["qc"]["run"] = ctx["run_order"]
     if pm is None:
         return d
     d["f"] = {"id": [f.id for f in pm.features], "label": [f.label for f in pm.features],

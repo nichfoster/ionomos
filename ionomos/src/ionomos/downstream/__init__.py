@@ -50,6 +50,8 @@ Pipeline stages, each a module:
     cysteines     cys.py                       (site ratio data: liganded calls, selectivity, a site annotation)
                   proteincorr.py               (site ratios corrected for protein abundance, MSstatsPTM; D70)
     search QC     psmqc.py + qcmetrics.py      (per run, from psm.tsv: mass error, missed cleavages, charge states)
+    run order     runorder.py + acqtime.py     (each sample's QC against the order of acquisition: drift, and
+                                                conditions acquired in blocks; D78)
     metadata      sdrf.py                      (SDRF-Proteomics, from the manifest, workflow and FASTA)
     guards, trust guards.py + trust.py         (implausible input made safe and said; statistics that may not
                                                 mean what they say; the "How far to trust this" list; D60)
@@ -404,6 +406,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     prot_info: dict = {"ran": False, "reason": "not asked for (analysis.protein_correction)"}
     protein_hl: dict | None = None
     psm_view: dict | None = None
+    run_view: dict | None = None
     model = analysis.Model()
     ftest = None
     design_plan = None            # roles.Plan: the conditions' roles and the comparisons they give (D61)
@@ -631,6 +634,12 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     else:
         psm_info, psm_view, f.psm_problems, qnotes = searched
         notes += qnotes
+    ordered = stage("run_order", _run_order, processed, record, dest, insight, psm_view, say)
+    if ordered is None:
+        run_info = {"ran": False, "reason": "the run-order step failed (see analysis_error.txt)"}
+    else:
+        run_info, run_view, f.run_problems, rnotes = ordered
+        notes += rnotes
     say("sample metadata (SDRF)")
     sdrf_info = stage("sdrf", _sdrf, method, dest, workdir, record, m, processed, settings, __version__, results,
                       out) or {"file": None, "reason": "the SDRF step failed (see analysis_error.txt)"}
@@ -653,6 +662,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     ctx["issues"] = [i.as_dict() for i in out.issues]
     ctx["sdrf"] = sdrf_info
     ctx["model"], ctx["ftest"] = model, ftest
+    ctx["run_order"] = run_view  # the Run order QC tab and figure (runorder.py, D78)
     ctx["roles"], ctx["specific"] = design_plan, specific
     figure_files: list[Path] = []
     if settings.export.get("figures") and (processed is not None or diffs):
@@ -715,6 +725,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
         "roles": design_plan.as_dict() if design_plan is not None else {},
         "specific_targets": spec_info,
         "psm_qc": psm_info,
+        "run_order": run_info,
         "sdrf": sdrf_info,
         "figures": [f"{RESULTS}/{p.relative_to(results).as_posix()}" for p in figure_files],
         "design": _design_summary(m, settings),
@@ -878,6 +889,19 @@ def _psm_qc(workdir: Path, settings, results: Path, out: Outcome, say) -> tuple[
         table = f"{RESULTS}/psm_qc.tsv"
     return (psmqc.summary(res, table), psmqc.report_payload(res), res.problems,
             [f"search quality: {n}" for n in res.notes])
+
+def _run_order(processed, record, dest: Path, insight: dict, psm_view, say) -> tuple[dict, dict | None, list, list[str]]:
+    """Each sample's QC numbers against the order of acquisition (runorder.py, D78). Returns (analysis.json
+    summary, the report's payload or None, problems for the doctor, notes)."""
+    from ionomos.downstream import runorder
+
+    if processed is None or not processed.m.samples:
+        return runorder.summary(None, "no processed quantities"), None, [], []
+    say("run order (drift during the run, conditions acquired in blocks)")
+    res = runorder.run(processed.m, record, dest, (insight or {}).get("scorecard"), psm_view)
+    return (runorder.summary(res), runorder.report_payload(res), res.problems,
+            [f"run order: {n}" for n in res.notes])
+
 
 def _design_summary(m, settings) -> dict:
     """Where each sample's condition came from, highest first (D47): sample_conditions, an input SDRF, the

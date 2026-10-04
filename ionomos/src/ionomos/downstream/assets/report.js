@@ -1375,21 +1375,21 @@
 
   // ------------------------------------------------------------------- QC
   const QC_TABS = [["card", "Sample scorecard"], ["pca", "PCA"], ["corr", "Correlation"], ["missing", "Missing values"], ["mnar", "Missing vs intensity"], ["dist", "Distributions"], ["cv", "CV"],
-    ["mv", "Mean–variance"], ["rank", "Abundance rank"], ["ids", "Identifications"], ["imp", "Imputation"], ["power", "Power"], ["psm", "Search quality"]];
+    ["mv", "Mean–variance"], ["rank", "Abundance rank"], ["ids", "Identifications"], ["imp", "Imputation"], ["power", "Power"], ["psm", "Search quality"], ["run", "Run order"]];
   const QC_TIPS = { card: "Each sample against the others: which ones stand out", pca: "Do the replicates of a condition sit together?", corr: "How alike the samples are, pair by pair",
     missing: "How many values are missing, and where", mnar: "Are values missing because they are low?", dist: "The spread of values in each sample, before and after normalisation",
     cv: "How reproducible each condition's replicates are", mv: "Does the spread depend on the abundance?", rank: "The abundance of every feature, from most to least",
-    ids: "How many features each sample has", imp: "The imputed values against the measured ones", power: "The smallest fold change this design can detect", psm: "What the search made of each raw file" };
+    ids: "How many features each sample has", imp: "The imputed values against the measured ones", power: "The smallest fold change this design can detect", psm: "What the search made of each raw file", run: "Each sample against the order the samples were acquired in" };
   let qcTab = null;
   function renderQC() {
     const host = $("#qc");
     if (!host) return;
-    const tabs = QC_TABS.filter(([k]) => (k !== "imp" || D.imp) && (k !== "card" || (D.qc.scorecard && D.qc.scorecard.length)) && (k !== "mnar" || D.qc.mnar) && (k !== "power" || D.qc.power) && (k !== "mv" || D.kind !== "ratio" || nS > 2) && (k !== "psm" || D.qc.psm));
+    const tabs = QC_TABS.filter(([k]) => (k !== "imp" || D.imp) && (k !== "card" || (D.qc.scorecard && D.qc.scorecard.length)) && (k !== "mnar" || D.qc.mnar) && (k !== "power" || D.qc.power) && (k !== "mv" || D.kind !== "ratio" || nS > 2) && (k !== "psm" || D.qc.psm) && (k !== "run" || D.qc.run));
     if (!qcTab || !tabs.some(([k]) => k === qcTab)) qcTab = tabs.some(([k]) => k === "card") ? "card" : "pca";
     host.innerHTML = "<div class='tabs'>" + tabs.map(([k, t]) => "<button data-k='" + k + "' title='" + esc(QC_TIPS[k] || "") + "'" + (k === qcTab ? " class='on'" : "") + ">" + t + "</button>").join("") + "</div><div id='qcbody'></div>";
     $$(".tabs button", host).forEach((b) => (b.onclick = () => { qcTab = b.dataset.k; renderQC(); }));
     const body = $("#qcbody");
-    safe(() => ({ card: qcCard, pca: qcPCA, corr: qcCorr, missing: qcMissing, mnar: qcMNAR, dist: qcDist, cv: qcCV, mv: qcMV, rank: qcRank, ids: qcIds, imp: qcImp, power: qcPower, psm: qcPsm })[qcTab](body), body);
+    safe(() => ({ card: qcCard, pca: qcPCA, corr: qcCorr, missing: qcMissing, mnar: qcMNAR, dist: qcDist, cv: qcCV, mv: qcMV, rank: qcRank, ids: qcIds, imp: qcImp, power: qcPower, psm: qcPsm, run: qcRun })[qcTab](body), body);
     addHelp($(":scope > .sub", body), "qc." + qcTab);
   }
   function legend() { return "<div class='legend'>" + D.conditions.map((c) => "<span><span class='sw' style='background:" + condColor(c) + "'></span>" + esc(c) + "</span>").join("") + "</div>"; }
@@ -1824,6 +1824,74 @@
       ch.insertAdjacentHTML("beforeend", "<div class='legend'>" + names.map((s, k) => "<span><span class='sw' style='background:" + css("--c" + (k % 8)) + "'></span>" + esc(s) + "</span>").join("") + "</div>");
     }
     svgTools(ch, root, "search_quality_" + st.chart);
+  }
+
+  /** Each sample's QC numbers in the order the samples were acquired (runorder.py, D78): a drift test within each
+   * condition (stratified Mann-Kendall, Theil-Sen slope), and whether the conditions were acquired in blocks. */
+  const RUN_SRC = { "raw header": "the raw files' own header", "ThermoRawFileParser": "ThermoRawFileParser's output", "file name": "the time stamp in the file names", "file time": "the raw files' modification time (approximate)" };
+  function runValue(m, v) {
+    if (v == null) return "–";
+    if (m.key === "missed") return pct(v, 1);
+    if (m.unit === "%") return fmt(v, 1) + "%";
+    if (m.unit === "ppm" || m.unit === "log2") return fmt(v, 2);
+    return fmtInt(Math.round(v));
+  }
+  function runChange(m) {
+    if (m.change == null) return "–";
+    const sg = m.change >= 0 ? "+" : "−", a = Math.abs(m.change);
+    if (m.judge === "rel" && m.med) return sg + pct(a / Math.abs(m.med), 0) + " (" + sg + fmtInt(Math.round(a)) + ")";
+    if (m.unit === "%") return sg + fmt(a, 1) + " percentage points";
+    if (m.key === "missed") return sg + pct(a, 1);
+    return sg + fmt(a, 2) + (m.unit ? " " + m.unit : "");
+  }
+  function runLimit(m) { return m.judge === "rel" ? pct(m.limit, 0) : m.key === "missed" ? pct(m.limit, 0) : m.unit === "%" ? fmt(m.limit, 0) + " points" : fmt(m.limit, 1) + " " + m.unit; }
+  function qcRun(host) {
+    const P = D.qc.run, S = P.samples || [], M = P.metrics || [], cf = P.confound, lim = P.limits || {};
+    const st = qcRun._st || (qcRun._st = { m: (M.find((m) => m.flag) || M[0] || {}).key });
+    if (M.length && !M.some((m) => m.key === st.m)) st.m = M[0].key;
+    const timed = S.filter((s) => s.o != null), srcKeys = Object.keys(P.sources || {});
+    const srcs = srcKeys.map((k) => (RUN_SRC[k] || k) + (srcKeys.length > 1 ? " (" + P.sources[k] + ")" : "")).join(", ");
+    let h = "<p class='sub'>Each sample's quality numbers in the order the samples were acquired: " + timed.length + " sample(s), the times from " + esc(srcs) + ". " +
+      "A steady slope is a drift during the run (a dirtier spray or column, a calibration moving). It is tested within each condition, so a condition that differs, or was run as a block, is not a drift. " +
+      "A number is flagged when its trend has p &lt; " + fmt(lim.alpha, 2) + " and it changes by at least its limit over the run (wide limits, not yet the lab's own).</p>" +
+      ((P.notes || []).length ? "<p class='muted'>" + P.notes.map(esc).join("<br>") + "</p>" : "");
+    if (cf) {
+      const where = Object.keys(cf.positions || {}).map((c) => "<span class='sw' style='background:" + condColor(c) + "'></span>" + esc(c) + ": runs " + esc(cf.positions[c])).join(" · ");
+      h += "<p" + (cf.flag ? " class='zbad'" : "") + ">" + (cf.flag ? "<b>The conditions were run in blocks.</b> " : "Conditions in the run: ") + where +
+        ". The condition explains " + pct(cf.eta2, 0) + " of where a sample sits in the run (η²; a random order gives as much in " + pct(cf.p, 1) + " of cases)" +
+        (cf.flag ? ": a drift would differ between the conditions too, and the statistics cannot tell it from the biology." : ".") + "</p>";
+    }
+    if (M.length) {
+      h += "<div class='row'><label class='ctl'>Number <select id='runsel'>" + M.map((m) => "<option value='" + m.key + "'" + (m.key === st.m ? " selected" : "") + ">" + esc(m.label) + (m.flag ? " (flagged)" : "") + "</option>").join("") + "</select></label></div><div class='chart card' id='runchart'></div>";
+      h += "<div class='tablewrap'><table id='runtrend'><thead><tr><th>Number</th><th title='Kendall tau within the conditions: +1 every later run higher, −1 every later run lower'>τ</th><th>p</th><th title='Theil-Sen slope times the runs: the change from the first run to the last'>change over the run</th><th>flag at</th><th>Flag</th></tr></thead><tbody>" +
+        M.map((m) => "<tr><td>" + esc(m.label) + "</td><td class='n'>" + (m.tau == null ? "–" : (m.tau >= 0 ? "+" : "") + fmt(m.tau)) + "</td><td class='n'>" + (m.p == null ? "not tested" : fmtP(m.p)) + "</td><td class='n" + (m.flag ? " zbad" : "") + "'>" + runChange(m) + "</td><td class='n'>" + runLimit(m) + "</td><td class='desc'>" + (m.flag ? "drift" : "") + "</td></tr>").join("") + "</tbody></table></div>";
+    }
+    h += "<div class='tablewrap'><table id='runtable'><thead><tr><th>Run</th><th>Sample</th><th>Condition</th><th>Acquired</th><th>From</th>" + M.map((m) => "<th>" + esc(m.label) + "</th>").join("") + "</tr></thead><tbody>" +
+      S.map((s, j) => "<tr><td class='n'>" + (s.o == null ? "–" : s.o) + "</td><td>" + esc(s.s) + "</td><td><span class='sw' style='background:" + condColor(s.c) + "'></span>" + esc(s.c) + "</td><td>" + esc((s.t || "–").replace("T", " ")) + "</td><td class='desc'>" + esc(s.src ? (RUN_SRC[s.src] || s.src) : "no time") + "</td>" +
+        M.map((m) => "<td class='n'>" + runValue(m, m.v[j]) + "</td>").join("") + "</tr>").join("") + "</tbody></table></div>";
+    host.innerHTML = h;
+    const m = M.find((x) => x.key === st.m);
+    if (!m) return;
+    $("#runsel").onchange = (e) => { st.m = e.target.value; qcRun(host); };
+    const pts = [];
+    S.forEach((s, j) => { if (s.o != null && m.v[j] != null) pts.push({ o: s.o, y: m.v[j], s: s }); });
+    const ch = $("#runchart"), W = widthOf(ch), H = heightOf(300), L = 64, R = 12, T = 22, B = 44, n = Math.max(2, timed.length);
+    const root = frame(ch, W, H), g = svg("g", {}, root);
+    if (!pts.length) return;
+    let lo = Math.min(...pts.map((p) => p.y)), hi = Math.max(...pts.map((p) => p.y));
+    const pad = (hi - lo) * 0.1 || Math.abs(hi) * 0.05 || 1;
+    lo -= pad; hi += pad;
+    const X = (o) => L + ((o - 1) / (n - 1)) * (W - L - R), Y = (v) => H - B - ((v - lo) / (hi - lo)) * (H - T - B);
+    axes(g, X, Y, niceTicks(1, n, Math.min(10, n)).filter((v) => v >= 1 && v <= n && v === Math.round(v)), niceTicks(lo, hi, 5), L, R, T, B, W, H, "run (order of acquisition)", m.label + (m.unit && m.unit !== "%" ? " (" + m.unit + ")" : m.unit === "%" ? " (%)" : ""));
+    timed.forEach((s) => title(svg("rect", { x: X(s.o) - Math.max(2, (W - L - R) / n / 2) + 0.5, y: 4, width: Math.max(3, (W - L - R) / n - 1), height: 9, fill: condColor(s.c) }, g), "run " + s.o + ": " + s.s + " (" + s.c + ")"));
+    if (m.slope != null) {  // the Theil-Sen line through the median point
+      const b0 = median(pts.map((p) => p.y - m.slope * p.o));
+      svg("line", { x1: X(1), x2: X(n), y1: Y(b0 + m.slope), y2: Y(b0 + m.slope * n), stroke: css(m.flag ? "--up" : "--muted"), "stroke-width": m.flag ? 2 : 1.5, "stroke-dasharray": m.flag ? null : "5 4" }, g);
+    }
+    pts.forEach((p) => title(svg("circle", { cx: X(p.o), cy: Y(p.y), r: 5, fill: condColor(p.s.c), stroke: css("--surface"), "stroke-width": 1.2 }, g),
+      "run " + p.o + ": " + p.s.s + " (" + p.s.c + ")\n" + (p.s.t || "").replace("T", " ") + "\n" + m.label + ": " + runValue(m, p.y)));
+    ch.insertAdjacentHTML("beforeend", "<p class='muted'>" + esc(m.label) + ": " + (m.p == null ? "not tested (needs " + (lim.min || 6) + " samples with a time)" : "τ " + (m.tau >= 0 ? "+" : "") + fmt(m.tau) + ", p " + fmtP(m.p) + ", change over the run " + runChange(m) + (m.flag ? " — flagged" : "")) + "</p>" + legend());
+    svgTools(ch, root, "run_order_" + m.key);
   }
 
   // -------------------------------------------------------- dose-response
@@ -2541,7 +2609,7 @@
   const SIZES = { slide169: ["16:9 slide", 1280, 720, "px", 14], slide43: ["4:3 slide", 960, 720, "px", 14], half: ["Half a slide", 640, 600, "px", 12],
     col1: ["Journal figure, one column (85 mm)", 85, 70, "mm", 7], col2: ["Journal figure, two columns (180 mm)", 180, 110, "mm", 7], custom: ["Custom size", 0, 0, "", 0] };
   // what `figures:` may list (the watcher's static files; charts.STATIC_FIGURES, where the groups dose, time and liganded are also taken)
-  const STATIC_FIGS = ["volcano", "pca", "heatmap", "correlation", "dose_potency", "dose_curves", "time_patterns", "time_profiles", "liganded_rank", "liganded_selectivity"];
+  const STATIC_FIGS = ["volcano", "pca", "heatmap", "correlation", "dose_potency", "dose_curves", "time_patterns", "time_profiles", "liganded_rank", "liganded_selectivity", "run_order"];
   const TOP_PANELS = 6;  // dose-response curves and time-course features per series in "Export for slides" (sectionfigs.TOP_PANELS)
   const STYLE_DEFAULTS = { size: "slide169", width: 1280, height: 720, unit: "px", font_pt: 14, font_family: "Arial", line_scale: 1, point_scale: 1,
     palette: "default", up: "#e34948", down: "#2a78d6", neutral: "#c3c2b7", background: "light", title: true, subtitle: true, legend: true, note: true,
@@ -2634,7 +2702,7 @@
     ["heatmap", "Heatmap of significant features", "saved"], ["enrichment_", "Gene sets over-represented among the hits", "saved"], ["gene_set_ranks_", "Gene sets by rank", ""], ["barcode_", "Barcode plot of a gene set", ""],
     ["values_", "Values per condition", ""], ["PCA", "PCA of the samples", ""], ["correlation", "Sample correlation", ""], ["cumulative_missing", "Missing values", ""], ["missingness_vs_intensity", "Missing values against intensity", ""],
     ["distributions", "Value distribution per sample", ""], ["cv_", "Coefficient of variation", ""], ["mean_variance", "Mean against variance", ""], ["abundance_rank", "Abundance rank", ""],
-    ["identifications", "Identifications per sample", ""], ["imputation", "Measured and imputed values", ""], ["power", "Power", ""], ["search_quality_", "Search quality per run", ""],
+    ["identifications", "Identifications per sample", ""], ["imputation", "Measured and imputed values", ""], ["power", "Power", ""], ["search_quality_", "Search quality per run", ""], ["run_order_", "QC against the order of acquisition", ""],
     ["dose_potency_", "Dose-response: potency against effect", ""], ["dose_curve_", "Dose-response curve", ""], ["time_course_", "Time course", ""], ["time_patterns_", "Time-course patterns", ""],
     ["liganded_rank_", "Liganded sites", ""], ["liganded_selectivity", "Liganded sites across compounds", ""]];
   const TEST_NAMES = { limma: "limma moderated t-test", welch: "Welch t-test", student: "Student t-test" };
@@ -2657,6 +2725,7 @@
     else if (/^enrichment_/.test(name) && renderORA._st) detail = renderORA._st.comp + ", " + renderORA._st.dir + " hits, " + renderORA._st.lib;
     else if (/^(gene_set_ranks_|barcode_)/.test(name) && renderRank._st) detail = renderRank._st.comp + ", " + renderRank._st.lib + (/^barcode_/.test(name) && renderRank._st.sel ? ", " + renderRank._st.sel : "");
     else if (/^(values_|dose_curve_|time_course_|time_patterns_|cv_|liganded_rank_|dose_potency_)/.test(name)) detail = name.replace(/^(values|dose_curve|time_course|time_patterns|cv|liganded_rank|dose_potency)_/, "");
+    else if (/^run_order_/.test(name) && D.qc.run) detail = ((D.qc.run.metrics || []).find((m) => "run_order_" + m.key === name) || {}).label || "";
     const cuts = cut === "view" ? cutText(c) + (filterText() ? "; " + filterText() : "") : cut === "saved" ? savedCutText() + " (the report's saved cut-offs)" : "";
     return { what: what, cut: cut, cuts: cuts, c: c, detail: clean(detail), title: clean(c ? c.name : what), subtitle: clean((c ? what + " · " : detail ? detail + " · " : "") + D.title) };
   }
@@ -2761,13 +2830,13 @@
     ["#dosebody", renderDose], ["#cysbody", renderCys], ["#timebody", renderTime], ["#qc", renderQC]];
   function holdState() {
     return { ci: ST.ci, zoom: ST.zoom, mode: ST.mode, labels: ST.labels, lm: ST.opt.labelMatches, pinned: ST.pinned, focus: ST.focus, qc: qcTab, enr: enrMode, ds: DS.s, df: DS.focus,
-      ora: renderORA._st && Object.assign({}, renderORA._st), rank: renderRank._st && Object.assign({}, renderRank._st), psm: qcPsm._st && Object.assign({}, qcPsm._st), pcn: qcPCA._st && qcPCA._st.names,
+      ora: renderORA._st && Object.assign({}, renderORA._st), rank: renderRank._st && Object.assign({}, renderRank._st), psm: qcPsm._st && Object.assign({}, qcPsm._st), run: qcRun._st && Object.assign({}, qcRun._st), pcn: qcPCA._st && qcPCA._st.names,
       ts: TS.s, tf: TS.focus, cc: CS.c };
   }
   function restoreState(h) {
     ST.ci = h.ci; ST.zoom = h.zoom; ST.mode = h.mode; ST.labels = h.labels; ST.opt.labelMatches = h.lm; ST.pinned = h.pinned; ST.focus = h.focus; qcTab = h.qc; enrMode = h.enr; DS.s = h.ds; DS.focus = h.df;
     TS.s = h.ts; TS.focus = h.tf; CS.c = h.cc;
-    [[renderORA, h.ora], [renderRank, h.rank], [qcPsm, h.psm]].forEach(([fn, was]) => { if (was && fn._st) Object.assign(fn._st, was); else if (!was) delete fn._st; });
+    [[renderORA, h.ora], [renderRank, h.rank], [qcPsm, h.psm], [qcRun, h.run]].forEach(([fn, was]) => { if (was && fn._st) Object.assign(fn._st, was); else if (!was) delete fn._st; });
     if (qcPCA._st && h.pcn != null) qcPCA._st.names = h.pcn;
   }
   /** Draw `fig` with the style and return its finished figures ([] when it draws nothing here). */
@@ -2824,6 +2893,7 @@
     $$("#qc > .tabs button").forEach((b) => {
       const k = b.dataset.k;
       if (k === "psm") [["ppm", "mass error"], ["mc", "missed cleavages"], ["z", "charge states"], ["len", "peptide length"]].forEach(([ch, t]) => add("QC: Search quality, " + t, () => { qcTab = "psm"; qcPsm._st = Object.assign(qcPsm._st || {}, { chart: ch }); renderQC(); }));
+      else if (k === "run") (D.qc.run.metrics || []).forEach((m) => add("QC: Run order, " + m.label, () => { qcTab = "run"; qcRun._st = Object.assign(qcRun._st || {}, { m: m.key }); renderQC(); }));
       else if (k !== "card") add("QC: " + b.textContent, () => { qcTab = k; renderQC(); });
     });
     // dose-response, time course, liganded sites (D68): the most relevant curves and features, as `ionomos export` draws them
