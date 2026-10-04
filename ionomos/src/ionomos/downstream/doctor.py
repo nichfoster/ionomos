@@ -62,6 +62,7 @@ class Findings:
     time_problems: list = field(default_factory=list)     # [(severity, message)] from timecourse.plan_series
     cys_problems: list = field(default_factory=list)      # [(severity, message)] from cys.run / the site annotation
     protein_problems: list = field(default_factory=list)  # [(code, severity, message)] from proteincorr (D70)
+    phospho_problems: list = field(default_factory=list)  # [(code, severity, message)] from phospho.py (D79)
     psm_problems: list = field(default_factory=list)      # [(issue code, message)] from psmqc.run
     model: object = None                # analysis.Model: the design used, or why an asked-for one wasn't
     roles: object = None                # roles.Plan: the conditions' roles and the comparisons they gave
