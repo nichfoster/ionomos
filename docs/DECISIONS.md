@@ -2961,3 +2961,158 @@ Parquet reports (their size, types and how long the conversion takes on the
 PC); real MaxQuant peptide tables; Spectronaut itself (the instructions
 follow the manual, not a session with the program); the buttons and the new
 box on screen.
+
+
+### D76 — MaxLFQ is a roll-up option, not the default; the moderated F-test can be switched off
+
+**2026-10-04.** ROADMAP 5B asked whether median polish or MaxLFQ would agree
+better with FragPipe's `combined_protein.tsv` for Sage. Ionomos had only
+median polish. The open questions also noted that the moderated F-test
+always runs with 3+ conditions and has no setting to stop it.
+
+1. **One module, pure Python** (`downstream/rollup.py`). `maxlfq(rows)`
+   implements MaxLFQ as Cox et al. (*Mol Cell Proteomics* 13:2513, 2014)
+   describe it and `iq` / DIA-NN implement it:
+   - For every pair of samples, the median log2 ratio of the features
+     measured in both (`min_ratio_count` 1, as in iq and DIA-NN; MaxQuant's
+     default is 2, available as an argument but not as a setting).
+   - Samples linked by such ratios form connected components.
+   - Per component, the least-squares profile is found by solving the
+     system iq's `lsfit` solves. Its normal equations plus the constraint
+     are solved by Gaussian elimination with partial pivoting
+     (`rollup.solve`), so no numpy. The cost is O(n³) per protein in the
+     samples of its component. That is fine for tens of samples; a
+     100-sample study would take minutes.
+   - The scaling is Cox et al.'s: the profile's summed linear intensity
+     equals the summed intensity of the component's feature values
+     (`scale="sum"`, the default). iq's mean-of-logs scaling
+     (`scale="mean"`) is kept for the golden test.
+   - A sample in a component of its own gets its summed intensity (iq: the
+     median feature). A sample with no value stays missing.
+   - Components are **not** put on one scale. Values across them are not
+     ratios, and the loaders say how many proteins that affected.
+     DIA-NN's solve instead pulls every sample weakly (1e-4) towards its most
+     intense feature, which gives disconnected groups a top-1 scale.
+     Ionomos does not copy that: it would invent a ratio the data do not
+     contain.
+   - `median_polish` stays in `engines.py`; `rollup.summarise(rows, method)`
+     dispatches.
+2. **`analysis.rollup: auto | median_polish | maxlfq`**, applied wherever
+   Ionomos rolls features up to proteins:
+   - Sage `lfq.tsv`: ions after razor grouping and fractions.
+   - The MSstats format: its features.
+   - A DIA-NN long report: `Precursor.Normalised`, else
+     `Precursor.Quantity`, per `Precursor.Id`. A precursor reported twice
+     for a run keeps the larger value, as `diann_maxlfq` does.
+   - A Spectronaut long report: `FG.Quantity` per `EG.PrecursorId`. A
+     fragment-level report repeats the value on every fragment row.
+     `FG.Quantity` is a new optional entry in `SPECTRONAUT_COLUMNS` (D74).
+
+   **`auto` keeps every loader's previous default**, so nothing changes for
+   existing experiments:
+   - median polish for Sage (D51) and the MSstats format (MSstats' own
+     default, TMP);
+   - DIA-NN's own `PG.MaxLFQ` and Spectronaut's `PG.Quantity`. MaxLFQ is the
+     engine-standard choice for DIA-NN, and DIA-NN has already computed it,
+     with its own precursor selection. Recomputing it would only make the
+     result differ from DIA-NN's matrices.
+
+   For Sage, MaxLFQ is not *clearly* the engine standard: Sage leaves the
+   protein to the user, FragPipe's IonQuant uses MaxLFQ, and MSstats uses
+   median polish. The benchmark below found no clear winner, so the default
+   stays median polish until a real Sage-vs-FragPipe comparison on the PC
+   decides. Where the setting cannot apply, a note says so:
+   - a table that already holds proteins (MaxQuant, AlphaDIA, FragPipe,
+     pg_matrix, PD, any table);
+   - Sage TMT and MSstatsTMT, which keep MSstatsTMT's median polish;
+   - a long report without the precursor columns. It then uses the engine's
+     protein quantity.
+
+   The report shows the choice in Data source → Quantity, in the notes and
+   in the Settings row "Protein roll-up".
+3. **Validated against R** (`tests/golden/maxlfq/`, `run_maxlfq_reference.R`):
+   `iq::maxLFQ()` 2.0.1 (CRAN) and `diann::diann_maxlfq()` 1.0.1
+   (github.com/vdemichev/diann-rpackage at af538f6), R 4.6.1. The input is
+   54 proteins × 8 samples:
+   - two and three disconnected sample groups;
+   - a sample with no value;
+   - one feature, one sample, two features (even medians);
+   - a chain of samples linked only through each other;
+   - a feature 8 log2 above the rest;
+   - 45 random proteins with abundance-dependent missing values and lost
+     samples.
+
+   Results:
+   - Against iq: every value within 1e-9 (measured 6e-14), in both the
+     mean and the sum scaling, and the components equal iq's annotation.
+   - Against DIA-NN: the centred profiles of connected proteins agree to
+     1e-3 (measured 8e-4, the effect of DIA-NN's regularisation).
+   - The tests need no R.
+4. **Measured on simulated peptide data** (`ionomos benchmark --kind rollup
+   --grid standard`, `simulate.peptide_msstats`):
+   - 800 proteins of 1 to 30 peptides, each with its own ionisation offset
+     (SD 1.5 log2).
+   - 10% of the proteins changed 1.5-, 2- or 4-fold.
+   - Replicate SD 0.3 log2, spread between proteins; a loading shift per run;
+     weak peptides missing more often (typical and heavy); 2% of the values
+     off by an interference (SD 2 log2).
+   - Designs 3v3, 4v4, 6v6 and 2v4, with 5 seeds per scenario (24
+     scenarios), median normalisation.
+
+   FDP is at adjusted p ≤ 0.05 alone, pooled. Its range is over the scenarios
+   with ≥ 50 calls. Sensitivity is at adjusted p ≤ 0.05.
+
+   | Roll-up + imputation | FDP | range | FDP with \|log2FC\| ≥ 1 | found 1.5× / 2× / 4× | log2FC bias |
+   |---|---|---|---|---|---|
+   | median polish + Perseus (default) | 3.9% | 1.8–6.8% | 1.2% | 31 / 71 / 88% | −0.06 |
+   | MaxLFQ + Perseus | 4.6% | 1.3–13.2% | 1.1% | 33 / 72 / 88% | −0.06 |
+   | median polish, no imputation | 4.5% | 1.6–7.1% | 1.1% | 37 / 77 / 90% | −0.03 |
+   | MaxLFQ, no imputation | 5.8% | 2.0–16.5% | 1.2% | 40 / 79 / 90% | −0.02 |
+
+   - **Sensitivity.** MaxLFQ finds 1–3 points more of the 1.5- and 2-fold
+     changes.
+   - **FDP.** Its pooled FDP is 0.7–1.3 points higher, and its worst
+     scenarios are worse. 4v4, 2-fold, heavy missing values reach 13–16%,
+     against 7% for median polish. The cause was traced in one seed. The
+     false calls are not proteins split into components. They are unchanged
+     proteins in a table where median normalisation left an offset of
+     −0.17 (median polish) or −0.19 (MaxLFQ) log2, because changed proteins
+     went missing one way. Both roll-ups carry the offset, and MaxLFQ's
+     slightly larger one moves more proteins past the BH threshold.
+   - **Precision.** The SD of the unchanged fold changes is the same
+     (0.21–0.22).
+
+   Neither is clearly better on this model, which is why the defaults do
+   not change. A guard (`tests/test_rollup.py`, the `guard` grid, 6 seeds)
+   holds both at ≤ 8.5% FDP, with the same sensitivity within 6 points.
+5. **`analysis.f_test: auto | off`**. `auto` (default) is today's behaviour.
+   `off` makes `analysis.f_test()` return nothing, so:
+   - no "Any change (F)" tile and no F columns in `<level>_results.tsv`;
+   - Methods says it was switched off;
+   - Settings used has a row "F-test (any change): off";
+   - `analysis.json` has `f_test: {off: true, note}` instead of `null`,
+     which means "does not apply".
+
+   A bare `off` in YAML is read as `false` and accepted. Time-course
+   F-tests (D53) are separate and still follow `time_course`. The doctor
+   has no F-test issue, so it needed no change. The setting is a key of
+   `config.yaml` / `experiment.yaml` (written back by `configio`); there is
+   no new app field.
+
+**Verified**:
+- Both R references to the tolerances above.
+- Every loader rolls up its table to exactly `rollup.summarise` of the
+  same features (`tests/test_rollup.py`), with the fallbacks and notes.
+- End to end: `analyze()` with `rollup: maxlfq` on an MSstats table, and
+  with `f_test: off` on 3 conditions.
+- The benchmark kind and its files.
+
+**Not verified**:
+- Real data of any engine.
+- Whether MaxLFQ or median polish agrees better with FragPipe's
+  `combined_protein.tsv` on a real Sage search. The question stays open in
+  ROADMAP.
+- How long MaxLFQ takes on large studies on the PC.
+- That Spectronaut's `FG.Quantity` is the precursor quantity the lab's
+  reports carry. The name follows Spectronaut's column naming (FG. =
+  fragment group, the precursor), not a real export.
