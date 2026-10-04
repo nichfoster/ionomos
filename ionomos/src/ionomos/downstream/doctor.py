@@ -497,8 +497,19 @@ def check(f: Findings) -> list[Issue]:
                   ["List every condition's dose in experiment.yaml analysis.doses (DMSO: 0, Cmpd_A: 10 nM, ...) "
                    "and Run analysis"], {"message": msg}))
 
-    # ---- time course (timecourse.py): times that can't be read, two conditions at one time
-    for sev, msg in f.time_problems:
+    # ---- time course (timecourse.py): times that can't be read, two conditions at one time; a spline whose df
+    # the series can't carry (D77)
+    for item in f.time_problems:
+        code, sev, msg = item if len(item) == 3 else ("TIMES", *item)
+        if code == "TIME_SPLINE":
+            add(Issue("TIME_SPLINE", sev, "Time course: the spline was not fitted as asked", msg,
+                      ["analysis.time_spline_df is as high as or higher than the series' time points - 1, so the "
+                       "curve could not smooth anything", "The block or covariates leave the curve no residual "
+                       "degrees of freedom"],
+                      ["Lower time_spline_df under analysis: in experiment.yaml (or remove it: auto is 4, at most the "
+                       "time points - 2) and Run analysis", "Or test time as a factor: time_model: factor"],
+                      {"message": msg}))
+            continue
         add(Issue("TIMES", sev, "Time course: the time points need a look", msg,
                   ["analysis.times names a condition that isn't in this experiment, or a time without a unit",
                    "A condition name holds two times, or two conditions of one series are at the same time"],

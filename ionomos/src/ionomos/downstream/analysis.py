@@ -64,6 +64,9 @@ experiment.yaml `analysis:` block:
       time_unit: h                # unit for bare numbers in times
       time_course: true           # false: never run the time-course tests
       time_min_points: 3          # time points a series needs
+      time_model: auto            # auto: time is a factor up to 6 time points, a natural spline in hours from 7 |
+                                  #   factor | spline (D77)
+      time_spline_df: auto        # the spline's degrees of freedom: auto = 4 (at most the time points - 2)
 
       liganded: true              # site ratio data (isoDTB): call liganded cysteines (cys.py)
       liganded_ratio: 4           # the competition ratio R a replicate must reach ...
@@ -151,6 +154,8 @@ class Settings:
     dose_fc_lim: float = 0.45
     times: dict[str, str | float] = field(default_factory=dict)  # condition -> time ("4 h"); timecourse.py
     time_unit: str = ""
+    time_model: str = "auto"           # auto | factor | spline (timecourse.py, D77)
+    time_spline_df: int = 0            # the spline's df; 0 = auto (4, at most the time points - 2)
     time_course: bool = True
     time_min_points: int = 3
     liganded: bool = True              # liganded-site calls on site ratio data (cys.py)
@@ -366,6 +371,14 @@ def settings_from(*layers: dict | None) -> Settings:
                          for a, b in v.items()}
                 elif k == "time_unit":
                     v = _time_unit(v)
+                elif k == "time_model":
+                    v = str(v).strip().lower()
+                    v = {"splines": "spline", "ns": "spline", "factors": "factor"}.get(v, v)
+                    if v not in ("auto", "factor", "spline"):
+                        raise AnalysisError("time_model must be auto (time as a factor up to 6 time points, a spline "
+                                            "from 7), factor or spline")
+                elif k == "time_spline_df":
+                    v = _spline_df(v)
                 elif k == "block":
                     v = _block(v)
                     s.block_from = ""  # an experiment's block replaces the lab's block_from, and vice versa
@@ -475,6 +488,18 @@ def _dose_unit(v) -> str:
         return normalize_unit(str(v))
     except DoseError as exc:
         raise AnalysisError(f"analysis.dose_unit: {exc}") from exc
+
+def _spline_df(v) -> int:
+    """analysis.time_spline_df: a whole number >= 1, or auto (0: 4, or fewer for a short series)."""
+    if isinstance(v, str) and v.strip().lower() == "auto":
+        return 0
+    try:
+        n = float(v)
+    except (TypeError, ValueError):
+        n = math.nan
+    if isinstance(v, bool) or not math.isfinite(n) or n != int(n) or n < 1:
+        raise AnalysisError(f"time_spline_df must be a whole number of at least 1, or auto (got {v!r})")
+    return int(n)
 
 def _time_unit(v) -> str:
     from ionomos.downstream.timecourse import TimeError, normalize_unit
