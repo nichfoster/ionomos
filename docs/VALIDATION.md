@@ -25,6 +25,7 @@ no real FragPipe-Analyst, MSstats or Perseus export has been compared.
 | Time courses | limma 3.68.5 | 1e-8 | `tests/test_timecourse.py` |
 | Dose-response curves | CurveCurator 0.6.0 | classes, pEC50, F, p | `tests/test_dose_response.py` |
 | TMT summaries | MSstatsTMT 2.20 | 1e-9 | `tests/test_plexes.py` |
+| MaxLFQ roll-up (`analysis.rollup: maxlfq`, D76) on 54 proteins × 8 samples: disconnected sample groups, missing values, one feature, one sample, a chain of samples | `iq::maxLFQ()` 2.0.1 (both its scaling and the summed-intensity scaling, and its components); `diann::diann_maxlfq()` 1.0.1 (profiles of connected proteins) | 1e-9; 1e-3 (DIA-NN regularises) | `tests/test_rollup.py`, `tests/golden/maxlfq/` |
 | IRS on the plex means (3 plexes, no reference channel), filter, median normalisation, limma with each protein's residual df reduced by its plexes - 1 | base R + limma 3.68.5 | 1e-8 | `tests/test_tmt_plex_stats.py`, `tests/golden/tmt_sum/` |
 | isoDTB sites corrected for protein abundance: the sites' moderated one-sample SE and df, then the adjustment (log2FC, SE, Satterthwaite df, t, p, BH), a protein table in MSstats format, two proteins with DF = Inf (D70) | limma 3.68.5 + MSstatsPTM 2.14.0 (`.applyPtmAdjustment`) | 1e-9 on 213 sites | `tests/test_protein_correction.py`, `tests/golden/ptm/` |
 | t-tests, Benjamini-Hochberg | scipy | 1e-9 (p), 1e-12 (BH) | `tests/test_downstream.py` |
@@ -111,6 +112,7 @@ ionomos benchmark --grid quick     # seconds
 ionomos benchmark --like <experiment folder>   # adds that experiment's settings and group sizes
 ionomos benchmark --kind isodtb    # isoDTB site ratios (below)
 ionomos benchmark --kind tmt       # several TMT plexes with a pooled reference (below)
+ionomos benchmark --kind rollup    # peptide tables rolled up by median polish or MaxLFQ (below, D76)
 ```
 
 Without `--kind` the data is label-free DIA, as described first. With
@@ -382,6 +384,42 @@ scale, missingness from abundance alone, changes of one size, no outlier
 channel, no ratio compression from co-isolated ions (MS2 TMT shrinks real
 ratios; the lab's workflow is MS3). They show how the methods behave on such
 data, not how the lab's samples behave.
+
+#### Peptides to proteins: median polish vs MaxLFQ (`--kind rollup`, D76)
+
+`simulate.peptide_msstats` writes peptide-level label-free data in the
+MSstats format, which the pipeline's own loader rolls up once per
+`analysis.rollup`:
+- 800 proteins of 1 to 30 peptides, more for abundant proteins.
+- Each peptide has its own ionisation offset (SD 1.5 log2).
+- 10 % of the proteins are changed.
+- Replicate SD is 0.3 log2, differing between proteins, with a loading
+  shift per run.
+- Weak peptides go missing more often.
+- 2 % of the values are off by an interference (SD 2 log2).
+
+The standard grid has 3v3, 4v4, 6v6 and 2v4; 1.5-, 2- and 4-fold changes;
+typical and heavy missing values; 5 seeds; median normalisation (2026-10-04):
+
+| Roll-up + imputation | FDP, alpha only | range | FDP, both cut-offs | found 1.5× / 2× / 4× | log2FC bias |
+|---|---|---|---|---|---|
+| median polish + Perseus (default) | 3.9 % | 1.8 – 6.8 % | 1.2 % | 31 / 71 / 88 % | −0.06 |
+| MaxLFQ + Perseus | 4.6 % | 1.3 – 13.2 % | 1.1 % | 33 / 72 / 88 % | −0.06 |
+| median polish, no imputation | 4.5 % | 1.6 – 7.1 % | 1.1 % | 37 / 77 / 90 % | −0.03 |
+| MaxLFQ, no imputation | 5.8 % | 2.0 – 16.5 % | 1.2 % | 40 / 79 / 90 % | −0.02 |
+
+- **Sensitivity.** MaxLFQ finds a little more of the small changes.
+- **FDP.** MaxLFQ's FDP is a little higher, and its worst scenarios are
+  worse. In the one traced (4v4, 2-fold, heavy missing values), both
+  roll-ups carry a median-normalisation offset of the unchanged proteins
+  (−0.17 and −0.19 log2), and MaxLFQ's moves more of them past the cut-off.
+- **Precision.** The spread of the unchanged fold changes is the same.
+
+The defaults stay as they were (D76). The guard in `tests/test_rollup.py`
+(2 designs, 6 seeds) holds both at ≤ 8.5 %. The model has no shared
+peptides, no peptide that changes on its own (a PTM, a variant), and
+missingness from abundance only. Whether MaxLFQ suits real Sage data better
+is open (ROADMAP).
 
 ### A real benchmark sample on the lab's instrument
 
