@@ -76,6 +76,20 @@ experiment.yaml `analysis:` block:
         proteome: D:/Fragpipe_General/EJQ/20261001-DIA_EJQ-2-030   # unenriched proteome (proteincorr.py, D70):
         match: gene               #   an analysed Ionomos experiment or a protein table; gene | protein
         conditions: {EJQ_2_027: Cmpd vs DMSO}   # site condition -> proteome comparison (default: the same name)
+                                  #   (phospho: site comparison -> proteome comparison, default: the same conditions)
+
+      phospho: false              # true: analyse the search's phosphosite table instead of its proteins (phospho.py, D79)
+      phospho_min_localization: 0.75   # a site needs this best localisation probability
+      phospho_localization_per_sample: false   # true: also drop a sample's value whose own probability is lower
+      phospho_table: ""           # a site table to read instead of the one found in the search output
+      kinase_substrates: ""       # a downloaded kinase-substrate table (PhosphoSitePlus): kinase activity (KSEA)
+      ksea_min_substrates: 5      # measured substrate sites a kinase needs to be scored
+      ksea_networkin: false       # true: also NetworKIN predictions (KSEAapp's PSP&NetworKIN file) ...
+      ksea_networkin_score: 5     #   ... at least this score
+      ksea_organism: human        # rows of other organisms in the table are left out ("" keeps every row)
+      ksea_match: gene            # gene (substrate gene + residue, as KSEAapp) | protein (UniProt accession)
+      string_network: ""          # a downloaded STRING network: interaction partners among the hits
+      string_min_score: 700       # STRING combined score an interaction needs (0-1000)
 
       psm_qc: true                # false: don't read psm.tsv for the per-run search quality (psmqc.py)
 
@@ -160,6 +174,19 @@ class Settings:
     site_annotation: str = ""          # a site table (CysDB download): known / new sites
     ratio_centre: str = "none"         # site ratios: none | median | auto (fpa.centre_ratios, D70)
     protein_correction: dict = field(default_factory=dict)   # {proteome, match, conditions} (proteincorr.py, D70)
+    # phosphosites, kinase activity, STRING partners (phospho.py, D79): off unless asked for
+    phospho: bool = False
+    phospho_min_localization: float = 0.75
+    phospho_localization_per_sample: bool = False
+    phospho_table: str = ""
+    kinase_substrates: str = ""
+    ksea_min_substrates: int = 5
+    ksea_networkin: bool = False
+    ksea_networkin_score: float = 5.0
+    ksea_organism: str = "human"
+    ksea_match: str = "gene"
+    string_network: str = ""
+    string_min_score: int = 700
     psm_qc: bool = True                # per-run search quality from psm.tsv / DIA-NN stats.tsv (psmqc.py)
     block: str | dict[str, str] = ""   # "" | "replicate" | {sample: block} (design.py)
     block_from: str = ""               # regex on sample names: the block is group "block", else group 1
@@ -278,17 +305,20 @@ def settings_from(*layers: dict | None) -> Settings:
                 continue
             if k not in names:
                 raise AnalysisError(f"unknown analysis setting {k!r} (known: {', '.join(sorted(names))})")
-            if v is None or (v == "" and k not in ("enrichment_gmt",)):
+            if v is None or (v == "" and k not in ("enrichment_gmt", "ksea_organism", "phospho_table",
+                                                   "kinase_substrates", "string_network")):
                 continue
             try:
                 if k in ("log2fc", "alpha", "impute_shift", "impute_scale", "filter_global_pct", "filter_condition_pct",
-                         "dose_alpha", "dose_fc_lim", "liganded_ratio"):
+                         "dose_alpha", "dose_fc_lim", "liganded_ratio", "phospho_min_localization",
+                         "ksea_networkin_score"):
                     v = float(v)
                 elif k in ("min_valid", "top_labels", "seed", "pca_features", "heatmap_max", "dose_min_doses",
-                           "liganded_min_replicates", "time_min_points"):
+                           "liganded_min_replicates", "time_min_points", "ksea_min_substrates", "string_min_score"):
                     v = int(v)
                 elif k in ("use_adjusted", "remove_contaminants", "enrichment", "dose_response", "liganded", "time_course",
-                           "psm_qc", "role_comparisons"):
+                           "psm_qc", "role_comparisons", "phospho", "phospho_localization_per_sample",
+                           "ksea_networkin"):
                     v = _bool(v)
                 elif k == "test":
                     v = str(v).lower()
@@ -333,6 +363,16 @@ def settings_from(*layers: dict | None) -> Settings:
                     v = {str(a): str(b) for a, b in v.items()}
                 elif k in ("control", "enrichment_gmt", "site_annotation"):
                     v = str(v)
+                elif k in ("phospho_table", "kinase_substrates", "string_network"):
+                    v = str(v).strip()
+                elif k == "ksea_organism":
+                    v = str(v).strip().lower()
+                elif k == "ksea_match":
+                    v = str(v).strip().lower()
+                    v = {"genes": "gene", "accession": "protein", "uniprot": "protein", "proteins": "protein"}.get(v, v)
+                    if v not in ("gene", "protein"):
+                        raise AnalysisError("ksea_match must be gene (substrate gene and residue) or protein "
+                                            "(UniProt accession and residue)")
                 elif k == "liganded_direction":
                     v = str(v).strip().lower()
                     v = {"hl": "high", "h/l": "high", "heavy/light": "high", "lh": "low", "l/h": "low",
@@ -415,6 +455,14 @@ def settings_from(*layers: dict | None) -> Settings:
         raise AnalysisError("analysis.liganded_ratio must be above 1 (a competition ratio, e.g. 4)")
     if s.liganded_min_replicates < 1:
         raise AnalysisError("analysis.liganded_min_replicates must be at least 1")
+    if not 0 <= s.phospho_min_localization <= 1:
+        raise AnalysisError("analysis.phospho_min_localization must be a probability from 0 to 1 (e.g. 0.75)")
+    if s.ksea_min_substrates < 1:
+        raise AnalysisError("analysis.ksea_min_substrates must be at least 1")
+    if s.ksea_networkin_score < 0:
+        raise AnalysisError("analysis.ksea_networkin_score must be >= 0")
+    if not 0 <= s.string_min_score <= 1000:
+        raise AnalysisError("analysis.string_min_score must be from 0 to 1000 (STRING's combined score)")
     if s.time_min_points < 3:
         raise AnalysisError("analysis.time_min_points must be >= 3 (two time points are an ordinary comparison)")
     _check_doses(s)
