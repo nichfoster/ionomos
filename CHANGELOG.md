@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Spline fits for long time courses** (D77). A series with 7 or more time
+  points (`analysis.time_model: auto`, the default) or any series with
+  `time_model: spline` is fitted as a natural cubic spline in hours
+  (`time_spline_df`, default 4, at most the time points − 2), as in the limma
+  User's Guide for many time points: the moderated F on the spline
+  coefficients, the series-vs-control test on the interaction of two curves
+  (`~group * ns(time)`), and the profile is the fitted curve's change from
+  the first time point. `downstream/splines.py` is R's `splines::ns`
+  ported step by step. The report's profile and the static `time_profiles`
+  figure draw the fitted curve on an axis in hours; `time_course.tsv` gains
+  a `model` column, `analysis.json` → `time_course` a `time_model` and
+  `spline` per series. A `time_spline_df` the series can't carry raises
+  the new `TIME_SPLINE` issue. Series with up to 6 time points are tested
+  exactly as before. Checked against R 4.6.1 `splines::ns` (1e-12) and
+  limma 3.68.5 (10,350 values, worst relative difference 5.4e-10).
+
 ## [0.16.0] - 2026-10-03
 
 ### Added
