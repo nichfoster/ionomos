@@ -2961,3 +2961,92 @@ Parquet reports (their size, types and how long the conversion takes on the
 PC); real MaxQuant peptide tables; Spectronaut itself (the instructions
 follow the manual, not a session with the program); the buttons and the new
 box on screen.
+
+### D78 — Acquisition time comes from the raw file's own header; run order is tested within the conditions
+**2026-10-04.** ROADMAP Phase 4 left "run-order drift, once acquisition times
+are recorded". The report could not show it, and the QC trend (D45) ordered
+runs by a name stamp or a file time.
+
+1. **The time is the Thermo header's, read in pure Python, read-only**
+   (`acqtime.py`). Every Thermo `.raw` file starts with a 1356-byte
+   FileHeader: magic `0xA101`, `Finnigan` in UTF-16LE, the format version at
+   `0x24`, and two audit tags whose first 8 bytes are Windows FILETIMEs
+   (100 ns since 1601, UTC): acquisition start at `0x28`, end at `0x98`. The
+   layout is the one unfinnigan documented; OpenTFRaw (validated on six real
+   files: LTQ, LTQ Orbitrap, Elite, Fusion, Fusion Lumos, Q Exactive HF) and
+   Philosopher's `fin` package read the same offsets, and it is what Thermo's
+   RawFileReader calls `FileHeader.CreationDate`, which ThermoRawFileParser
+   writes as "Creation date" (its metadata writer, read in its source). Only
+   the first 264 bytes are read. The header is used only when the magic, the
+   signature, a known version (8, 47, 57, 60, 62, 63, 64, 66, or 67–99 for
+   newer software) and a time between 1995 and two days from now all check
+   out, and not when it is more than a day after the file was last written.
+   The variable-length RawFileInfo date (after SeqRow and ASInfo, whose
+   layout changes with the version) was **not** used: that would be guessing.
+   The audit tags' text (it can be a Windows account) is not kept, so
+   `ionomos.json` holds no name a bundle's anonymiser does not know.
+2. **Then, in order:** what ThermoRawFileParser already wrote for the file
+   (an mzML's `<run startTimeStamp>`, as Sage's conversion leaves in
+   `sage_mzml\`, or `-metadata.json` / `-metadata.txt`; times without a
+   zone are taken as local); the Xcalibur stamp in the name; the file's
+   modification time, flagged **approximate** (the instrument writes the
+   file until the run ends; copies keep the time). Ionomos does not start
+   ThermoRawFileParser to get a time: the header holds the same field, and
+   the watcher should not start programs for it (as for PNG, D68).
+3. **Recorded at intake** in `ionomos.json` → `acquisition`
+   (`{manifest file: {time, utc, source, approximate, end, matches_file,
+   file_time, version}}`). `time` is local wall-clock time, as the QC trend
+   has always stored it; `utc` is the same moment. `matches_file` says
+   whether the header's end is within 10 minutes of the file's time: the
+   check to read on the lab PC. A failure to read leaves `{}` and never stops
+   a filing. Older jobs, and `ionomos analyze` on a folder, read the times
+   when analysed. The QC trend uses the recorded time, then the same sources;
+   its rows say "raw header", "ThermoRawFileParser", "name", "file time" or
+   "filed".
+4. **Run-order QC** (`downstream/runorder.py`): per sample, identifications,
+   missing values, the median log2 intensity before normalisation (the
+   scorecard), and from the search the PSMs, the median precursor mass error
+   and the missed-cleavage rate (D55), or DIA-NN's precursors and MS1
+   accuracy. A sample's time is its first raw file's; samples that share raw
+   files (TMT channels) have no order of their own and get none.
+5. **Drift is tested within the conditions.** A plain trend against run
+   order mistakes a condition run as a block for a drift. The test is Hirsch
+   and Slack's seasonal Kendall test with the conditions as the seasons (only
+   pairs of one condition are compared). Its p-value is exact up to 1,500
+   pairs (the conditions' Mahonian distributions convolved; checked against
+   enumeration), normal with the tie-corrected variance above that. The size
+   is the stratified Theil-Sen slope times the runs. Spearman's ρ of the
+   within-condition residuals is shown beside it. A number is flagged
+   (`RUN_ORDER_DRIFT`) at p < 0.01 **and** a change over the run of at least
+   10 % (counts), 0.5 log2 (signal), 5 points (missing values, missed
+   cleavages) or 3 ppm. Missing values are not warned about beside
+   identifications (the same fact). Six samples with a time are needed; a
+   perfectly ordered 3 × 3 design reaches p = 0.009, a 2 × 3 cannot (0.056).
+6. **Blocks** (`RUN_ORDER_CONFOUNDED`): η² of the run positions (ranks) by
+   condition, with how often a random order is as aligned (4,000 seeded
+   permutations), flagged at η² ≥ 0.6 with two or more conditions of two or
+   more samples. A blocked 2 × 3 is 0.77, a blocked 3 × 3 0.90; interleaved
+   (rep 1 of every condition, then rep 2) 0.1. It describes the design and
+   is not a test: a randomised order that came out blocked is still blocked
+   (about 9 % of random 2 × 3 and 3 × 3 orders, 2 % of 3 × 4). Both are
+   warnings, no pop-up.
+7. **Validated on simulated data** (`tests/test_runorder.py`), 3 conditions
+   × 4, identifications with SD 40: a fall of 40 per run is found in at
+   least 90 of 100 randomised experiments (96 % in a 200-run check); no drift
+   is flagged in at most 4 of 200 (0 seen); a condition 400 apart run in
+   blocks is not a drift; a drift inside blocks is still found; blocks are
+   always flagged and randomised orders rarely.
+8. **Shown** as the **Run order** QC tab (a chart per number with the
+   conditions as a strip above it and the Theil-Sen line, the trend table,
+   the samples with their time and its source), `analysis.json` →
+   `run_order`, and the `run_order` export figure (a panel per number,
+   drifting ones first; `charts.STATIC_FIGURES`, report.js `STATIC_FIGS`).
+   The payload goes through `ctx["run_order"]`, so `report.payload`'s
+   signature is unchanged.
+
+**Not verified:** any real `.raw` file (the tests build headers to the
+documented layout; the testbed's raw files are random bytes, so they fall
+back to the file time); whether ThermoRawFileParser's mzML `startTimeStamp`
+and metadata "Creation date" are UTC or local for the lab's files; the tab
+and the figure in a real browser (jsdom only); the limits on the lab's own
+sequences.
