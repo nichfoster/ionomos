@@ -932,11 +932,14 @@ def cmd_help(args) -> int:
 
 
 def cmd_ask(args) -> int:
-    """Ask the local assistant (assistant/, D49 / D57). Read-only. When the assistant is not set up, the model
-    is not answering or its answer can't be backed by what Ionomos knows, Ionomos's own text is printed."""
+    """Ask the local assistant (assistant/, D49 / D57). When the assistant is not set up, the model is not
+    answering or its answer can't be backed by what Ionomos knows, Ionomos's own text is printed. A change the
+    assistant proposes is printed with the `ionomos` command or the app's steps a person would use; it is never
+    made from here (D75: only the app's Confirm button applies a proposal)."""
     import json
 
     from ionomos import assistant
+    from ionomos.assistant import proposals
 
     cfg = _load(args, check_paths=False)
     ans = assistant.ask(cfg, " ".join(args.question), experiment=args.experiment, item_id=args.item)
@@ -948,6 +951,8 @@ def cmd_ask(args) -> int:
         print("\nSources:")
         for line in ans.sources:
             print(f"  {line}")
+    if ans.proposal is not None:
+        print("\n" + proposals.cli_text(ans.proposal))
     print(f"\n(assistant: {ans.outcome}" + (f", model {ans.model}" if ans.grounded else "") + ")")
     return 0
 
@@ -1330,7 +1335,7 @@ def main(argv: list[str] | None = None) -> int:
     hp.add_argument("--open", action="store_true", help="open help.html in the browser, at the topic")
     hp.add_argument("--out", metavar="DIR", help="folder for help.html (default: the log folder, else app data)")
     hp.set_defaults(fn=cmd_help)
-    ak = sub.add_parser("ask", help="ask the local assistant about a job, an issue or the help (read-only)")
+    ak = sub.add_parser("ask", help="ask the local assistant about a job, an issue or the help (changes nothing)")
     ak.add_argument("question", nargs="+", help="the question, in plain words")
     ak.add_argument("--experiment", metavar="JOB_ID|NAME", help="the job the question is about")
     ak.add_argument("--item", metavar="ID", help="an attention item (ionomos attention lists them)")

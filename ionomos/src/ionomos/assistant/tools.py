@@ -54,6 +54,7 @@ class Context:
     cfg: object                         # config.Config
     ledger: object | None = None        # ledger.Ledger (None: no job ledger yet)
     registry: Registry = field(default_factory=Registry)
+    proposal: object | None = None      # the one proposal of this question (proposals.py, D75), if any
 
 
 @dataclass(frozen=True)
@@ -426,8 +427,10 @@ def call(ctx: Context, name: str, raw_args) -> dict:
     """Run one tool call from the model. Returns the cleaned, size-capped result; never raises."""
     tool = BY_NAME.get(name if isinstance(name, str) else "")
     if tool is None:
-        return {"error": f"there is no tool {clean(name, 60)!r}; the tools only read",
-                "tools": [t.name for t in TOOLS]}
+        from ionomos.assistant import proposals
+
+        return {"error": f"there is no tool {clean(name, 60)!r}; nothing can be changed except through a proposal "
+                         "the user confirms", "tools": [t.name for t in (*TOOLS, *proposals.TOOLS)]}
     if isinstance(raw_args, str):
         try:
             raw_args = json.loads(raw_args) if raw_args.strip() else {}

@@ -13,7 +13,9 @@ to one either (a Tk object freed on another thread can abort the process; see tk
 What is shown is plain text: the answer as the assistant checked it, the Sources lines Ionomos wrote from its
 tools, and a heading that says what kind of answer it is. "Not set up" is a normal state: the body is then
 Ionomos's own text (the item's causes and fixes and its help entry), and More help opens the help on setting
-the assistant up. The button never changes anything: no retry, no edit, nothing the model says is acted on.
+the assistant up. The button never changes anything: nothing the model says is acted on. A proposal the
+assistant made (D75) is carried in Shown.proposal, and the window opens it in popups.ProposalDialog, where only
+the Confirm button applies it (assistant/actions.py).
 """
 from __future__ import annotations
 
@@ -27,8 +29,14 @@ log = logging.getLogger("ionomos.assistant")
 BUTTON = "Ask about this"
 TITLE = "Ionomos — Ask about this"
 ASKING = "Asking the assistant … a model on this computer can take a minute or two."
-NOTE = ("The assistant only reads. It cannot retry, change, move or delete anything; use the buttons in the "
-        "windows for that.")
+NOTE = ("The assistant changes nothing itself. It can propose one change, which opens in a window of its own "
+        "with Confirm and Cancel; typing yes here does nothing.")
+PROPOSAL_TITLE = "Ionomos — the assistant proposes a change"
+PROPOSAL_HEADING = ("The assistant proposes this change. Nothing has changed yet: Confirm makes it, the way the "
+                    "app's own buttons do; Cancel drops it.")
+PROPOSAL_BUSY = ("Another proposed change is still waiting in its window, so this one was not opened. Decide "
+                 "that one, then ask again.")
+PROPOSED = "Proposed (nothing has changed yet; confirm or cancel it in the window that opens): {title}"
 
 QUESTIONS = {
     "search_failed": "Why did this search fail, and what should I do?",
@@ -66,11 +74,14 @@ class Shown:
     sources: list[str] = field(default_factory=list)
     footer: str = ""
     help_topic: str = "faq.assistant"
+    proposal: object | None = None  # proposals.Proposal: the window opens popups.ProposalDialog for it (D75)
 
     @property
     def text(self) -> str:
         """Everything in the order the window shows it."""
         parts = [self.heading, "", self.body]
+        if self.proposal is not None:
+            parts += ["", PROPOSED.format(title=self.proposal.title)]
         if self.sources:
             parts += ["", "Sources:", *(f"  {s}" for s in self.sources)]
         if self.footer:
@@ -93,7 +104,7 @@ def render(answer) -> Shown:
     mode = "while a search ran, " if getattr(answer, "mode", "idle") == "searching" else ""
     footer = f"({who}{mode}{answer.seconds:.0f} s) {NOTE}"
     return Shown(outcome, HEADINGS[outcome], answer.text, list(answer.sources) if answer.grounded else [],
-                 footer, HELP[outcome])
+                 footer, HELP[outcome], getattr(answer, "proposal", None) if answer.grounded else None)
 
 
 def failed(exc: BaseException) -> Shown:
