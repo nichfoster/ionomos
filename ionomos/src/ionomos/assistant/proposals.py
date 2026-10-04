@@ -200,8 +200,8 @@ def _analysis_change(ctx, job, tool: str, arguments: dict, mutate, title: str, w
 
 def _block(text: str, limit: int = 6000) -> str:
     """A diff made safe to show: as tools.clean, but the indentation that YAML depends on is kept."""
-    s = tools._ANSI.sub("", str(text)).replace("\t", " ")
-    s = "".join(c for c in s if c == "\n" or unicodedata.category(c) not in ("Cc", "Cf", "Cs", "Co", "Cn"))
+    s = tools._ANSI.sub("", str(text))
+    s = "".join(" " if c == "\t" else c for c in s if c in "\n\t" or unicodedata.category(c) not in ("Cc", "Cf", "Cs", "Co", "Cn"))
     return s if len(s) <= limit else s[: limit - 1] + "…"
 
 

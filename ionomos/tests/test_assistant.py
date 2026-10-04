@@ -547,4 +547,5 @@ def test_cli_ask_prints_the_fallback_when_not_set_up_and_a_grounded_answer_when_
 def test_the_help_explains_the_assistant():
     ents = helpdoc.entries()
     assert {"faq.assistant", "faq.assistant-setup"} <= set(ents)
-    assert "ionomos ask" in ents["faq.assistant"].body and "cannot retry, change, move or delete" in ents["faq.assistant"].body
+    assert "ionomos ask" in ents["faq.assistant"].body and "changes nothing itself" in ents["faq.assistant"].body
+    assert "faq.assistant-proposal" in ents and "Confirm" in ents["faq.assistant-proposal"].body

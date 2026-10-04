@@ -349,14 +349,44 @@ each statement ends with its source in square brackets, such as
 (`ionomos help faq.rerun` shows it). Under the answer, **Sources** shows what
 each of those says, as Ionomos read it.
 
-- It only reads. It cannot retry, change, move or delete anything, whatever
-  you type. Use the buttons in the windows for that.
+- It changes nothing itself. It can propose one change per question, and
+  Ionomos then opens a window that says exactly what would change, with
+  **Confirm** and **Cancel** ([A change the assistant proposes](#faq.assistant-proposal)).
+  Typing "yes" in the question box does nothing. It cannot move or delete
+  anything.
 - It runs on this computer. Nothing you ask and nothing about your data is
   sent anywhere ([Your data stays on the computer](#safety.private)).
 - If it cannot back an answer with a source, it does not answer. You then get
   Ionomos's own text: the likely causes, what to do, and the help entry.
 - It does not know FragPipe settings or statistics beyond what Ionomos did
   with your data. Ask the person who looks after Ionomos for those.
+
+## A change the assistant proposes {#faq.assistant-proposal}
+
+Asked to do something ("retry my job", "leave DMSO_2 out", "turn imputation
+off"), the assistant can propose one of these changes, one per question:
+
+- retry a failed search
+- give a sample another condition
+- leave a sample out of the analysis, or use it again
+- one analysis setting: imputation, normalisation, p ≤, |log2FC| ≥, the
+  control, what is compared, or the comparisons
+- a condition's role (control, compound, competition of a compound, pool /
+  reference, QC standard, or automatic)
+
+A window opens. Its text is written by Ionomos, not by the assistant: the
+job, what **Confirm** does, and for an analysis change the lines of
+`experiment.yaml` that change. **Cancel** (or closing the window) changes
+nothing. **Confirm** does it the way the app's own buttons do: a retry is
+the Jobs tab's **Retry**; an analysis change is the experiment editor's
+Save, and the old `experiment.yaml` is kept in the experiment's
+`experiment-backups` folder. Re-run the analysis to use it (Jobs tab →
+**Re-run analysis**). If the job or its `experiment.yaml` changed after the
+proposal was made, Confirm does nothing and says so; ask again.
+
+In a terminal, `ionomos ask` shows the same proposal and the command or the
+app's steps to make it; it never makes it. Every proposal, and whether it was
+confirmed, is written to the assistant's log.
 
 ## The assistant says it is not set up {#faq.assistant-setup}
 
