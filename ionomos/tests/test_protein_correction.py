@@ -249,4 +249,5 @@ def test_intensity_data_ignores_the_setting(experiment):
     out = downstream.analyze(prot, method="DIA", analysis_cfg={"enrichment": False},
                              overrides={"protein_correction": {"proteome": "x"}})
     assert out.summary["protein_correction"] == {"ran": False,
-                                                 "reason": "protein_correction applies to site ratio data (isoDTB) only"}
+                                                 "reason": "protein_correction applies to site data (isoDTB ratios, "
+                                                           "phosphosites) only"}
