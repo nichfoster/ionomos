@@ -44,6 +44,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ionomos.downstream import anytable
+from ionomos.downstream import rollup as _rollup
 from ionomos.downstream.quant import Feature, QuantMatrix, run_stem
 from ionomos.downstream.tables import num
 
@@ -150,6 +151,31 @@ def _matrix_from_long(path: Path, feats: dict[str, Feature], cells: dict[tuple[s
                        notes=notes, exp=exp, replicate=reps, columns=colmap, meta=meta)
 
 
+def _rolled_up(feats_of: dict[str, dict[str, dict[str, float]]], runs: list[str], method: str
+               ) -> dict[tuple[str, str], float]:
+    """protein -> feature -> run -> log2 quantity, rolled up per protein by `method` (rollup.py, D76) ->
+    {(protein, run): linear quantity}."""
+    cells: dict[tuple[str, str], float] = {}
+    for prot, fmap in feats_of.items():
+        summ = _rollup.summarise([[fmap[f].get(r) for r in runs] for f in fmap], method)
+        for r, s in zip(runs, summ, strict=True):
+            if s is not None:
+                cells[(prot, r)] = 2.0 ** s
+    return cells
+
+
+def _split_note(feats_of: dict[str, dict[str, dict[str, float]]], runs: list[str], method: str) -> str:
+    """MaxLFQ: how many proteins have samples in more than one group that share no feature (each group is
+    scaled on its own, so values across the groups are not ratios)."""
+    if method != "maxlfq":
+        return ""
+    split = sum(1 for fmap in feats_of.values()
+                if len({c for c in _rollup.components([[fmap[f].get(r) for r in runs] for f in fmap])
+                        if c is not None}) > 1)
+    return (f"; {split:,} protein(s) have samples that share no feature with the others (MaxLFQ scales each such "
+            "group on its own)") if split else ""
+
+
 # ------------------------------------------------------------------ DIA-NN --
 
 
@@ -163,18 +189,30 @@ def _diann_long_score(path: Path) -> float:
     return 0.9 if ("PG.MaxLFQ" in h or "PG.Quantity" in h) else 0.5
 
 
-def load_diann_long(path: Path) -> QuantMatrix:
+def load_diann_long(path: Path, rollup: str = "auto") -> QuantMatrix:
     """DIA-NN's long report -> protein matrix: one PG.MaxLFQ per run and protein group, precursors at
-    Q.Value <= 1% and protein groups at PG.Q.Value <= 1% (DIA-NN's matrices use the same 1%)."""
+    Q.Value <= 1% and protein groups at PG.Q.Value <= 1% (DIA-NN's matrices use the same 1%).
+
+    rollup (analysis.rollup, D76): auto keeps DIA-NN's own PG.MaxLFQ; median_polish or maxlfq rolls the
+    precursors (Precursor.Normalised, else Precursor.Quantity) up to the protein groups with Ionomos' own code."""
     want = ["Run", "Protein.Group", "Protein.Ids", "Genes", "Protein.Names", "First.Protein.Description",
-            "PG.MaxLFQ", "PG.Quantity", "Q.Value", "PG.Q.Value", "Global.PG.Q.Value", "Precursor.Id"]
+            "PG.MaxLFQ", "PG.Quantity", "Q.Value", "PG.Q.Value", "Global.PG.Q.Value", "Precursor.Id",
+            "Precursor.Normalised", "Precursor.Quantity"]
     cols, rows = _read_long(path, want)
     ix = {c: j for j, c in enumerate(cols)}
     qcol = "PG.MaxLFQ" if "PG.MaxLFQ" in ix else "PG.Quantity" if "PG.Quantity" in ix else None
-    if qcol is None or "Run" not in ix or "Protein.Group" not in ix:
+    method = _rollup.resolve(rollup, "engine")
+    pcol = next((c for c in ("Precursor.Normalised", "Precursor.Quantity") if c in ix), None)
+    fallback = ""
+    if method != "engine" and (pcol is None or "Precursor.Id" not in ix):
+        fallback = (f"analysis.rollup: {method} needs Precursor.Id and Precursor.Normalised (or Precursor.Quantity) "
+                    f"in the report; {qcol or 'the protein quantity'} was used instead")
+        method = "engine"
+    if (qcol is None and method == "engine") or "Run" not in ix or "Protein.Group" not in ix:
         raise anytable.TableError(f"{path.name}: not a DIA-NN report (needs Run, Protein.Group and PG.MaxLFQ)")
     feats: dict[str, Feature] = {}
     cells: dict[tuple[str, str], float] = {}
+    prec: dict[str, dict[str, dict[str, float]]] = {}
     peps: dict[str, set[str]] = {}
     runs: list[str] = []
     seen_runs: set[str] = set()
@@ -195,19 +233,36 @@ def load_diann_long(path: Path) -> QuantMatrix:
             name = r[ix["Protein.Names"]] if "Protein.Names" in ix else ""
             feats[pg] = Feature(id=pg, label=(genes or name or pg).split(";")[0],
                                 description=r[ix["First.Protein.Description"]] if "First.Protein.Description" in ix else "")
-        v = num(r[ix[qcol]])
-        if v is not None and v > 0:
-            cells[(pg, run)] = v
+        if method == "engine":
+            v = num(r[ix[qcol]])
+            if v is not None and v > 0:
+                cells[(pg, run)] = v
+        else:
+            v = num(r[ix[pcol]])
+            if v is not None and v > 0:  # a precursor reported twice for a run: the larger, as diann_maxlfq does
+                lv = math.log2(v)
+                fmap = prec.setdefault(pg, {}).setdefault(r[ix["Precursor.Id"]], {})
+                fmap[run] = max(lv, fmap.get(run, lv))
         if "Precursor.Id" in ix:
             peps.setdefault(pg, set()).add(r[ix["Precursor.Id"]])
     for pg, f in feats.items():
         f.peptides = len(peps.get(pg, ())) or None
-    notes = [f"DIA-NN long report {path.name}: protein quantity {qcol}, precursors and protein groups at "
-             f"q ≤ {LONG_FDR:g}" + (f" ({dropped:,} rows above it left out)" if dropped else "")]
+    meta = {"engine": "DIA-NN", "evidence": "precursors"}
+    if method == "engine":
+        notes = [f"DIA-NN long report {path.name}: protein quantity {qcol}, precursors and protein groups at "
+                 f"q ≤ {LONG_FDR:g}" + (f" ({dropped:,} rows above it left out)" if dropped else "")]
+    else:
+        cells = _rolled_up(prec, runs, method)
+        meta.update(quantity=f"{_rollup.LABELS[method]} of {pcol} (Ionomos)", rollup=method)
+        notes = [f"DIA-NN long report {path.name}: precursors ({pcol}) rolled up to protein groups by "
+                 f"{_rollup.describe(method)}, not DIA-NN's own {qcol or 'PG.MaxLFQ'}; precursors and protein groups "
+                 f"at q ≤ {LONG_FDR:g}" + (f" ({dropped:,} rows above it left out)" if dropped else "")
+                 + _split_note(prec, runs, method)]
+    if fallback:
+        notes.append(fallback)
     runs_clean = {r: run_stem(r) for r in runs}
     m = _matrix_from_long(path, feats, {(i, runs_clean[r]): v for (i, r), v in cells.items()},
-                          [runs_clean[r] for r in runs], {}, {}, "DIA", notes,
-                          {"engine": "DIA-NN", "evidence": "precursors"})
+                          [runs_clean[r] for r in runs], {}, {}, "DIA", notes, meta)
     return m
 
 
@@ -313,6 +368,7 @@ SPECTRONAUT_COLUMNS = (
     ("PG.Qvalue", False, "protein group q-value: rows above 1% are left out"),
     ("EG.Qvalue", False, "precursor q-value: rows above 1% are left out"),
     ("EG.PrecursorId", False, "the precursor, to count the peptides behind each protein"),
+    ("FG.Quantity", False, "the precursor quantity, read only for analysis.rollup: maxlfq or median_polish (D76)"),
 )
 SPECTRONAUT_COLUMNS_FILE = "Ionomos_Spectronaut_report_columns.txt"
 
@@ -364,16 +420,29 @@ def _spectronaut_score(path: Path) -> float:
     return 0.0
 
 
-def load_spectronaut(path: Path) -> QuantMatrix:
+def load_spectronaut(path: Path, rollup: str = "auto") -> QuantMatrix:
+    """Spectronaut's long (Normal) report -> protein matrix of PG.Quantity per run, or a pivot report.
+
+    rollup (analysis.rollup, D76): auto keeps Spectronaut's PG.Quantity; median_polish or maxlfq rolls the
+    precursors (FG.Quantity per EG.PrecursorId) up to the protein groups with Ionomos' own code."""
     h = _header(path)
+    method = _rollup.resolve(rollup, "engine")
     if "R.FileName" not in h:  # pivot report: the any-table loader reads <run>.PG.Quantity columns
         m = anytable.load(path)
         m.exp, m.meta["engine"], m.meta["quantity"] = "DIA", "Spectronaut", "PG.Quantity (pivot report)"
+        if method != "engine":
+            m.notes.append(f"analysis.rollup: {method} was not used: a pivot report holds proteins already")
         return m
     qcol = "PG.Quantity" if "PG.Quantity" in h else "PG.MS2Quantity"
+    fallback = ""
+    if method != "engine" and not {"FG.Quantity", "EG.PrecursorId"} <= set(h):
+        fallback = (f"analysis.rollup: {method} needs EG.PrecursorId and FG.Quantity in the report; {qcol} was used "
+                    "instead (ionomos spectronaut-columns lists them)")
+        method = "engine"
     want = [qcol if c == "PG.Quantity" else c for c, _need, _why in SPECTRONAUT_COLUMNS]
     cols, rows = _read_long(path, want)
     ix = {c: j for j, c in enumerate(cols)}
+    prec: dict[str, dict[str, dict[str, float]]] = {}
     feats: dict[str, Feature] = {}
     cells: dict[tuple[str, str], float] = {}
     cond: dict[str, str] = {}
@@ -403,17 +472,34 @@ def load_spectronaut(path: Path) -> QuantMatrix:
             desc = r[ix["PG.ProteinDescriptions"]] if "PG.ProteinDescriptions" in ix else (
                 r[ix["PG.ProteinNames"]] if "PG.ProteinNames" in ix else "")
             feats[pg] = Feature(id=pg, label=(genes or pg).split(";")[0], description=desc)
-        v = num(r[ix[qcol]])
-        if v is not None and v > 0:
-            cells[(pg, run)] = v
+        if method == "engine":
+            v = num(r[ix[qcol]])
+            if v is not None and v > 0:
+                cells[(pg, run)] = v
+        else:  # a fragment-level report repeats FG.Quantity on every fragment row of its precursor
+            v = num(r[ix["FG.Quantity"]])
+            if v is not None and v > 0:
+                lv = math.log2(v)
+                fmap = prec.setdefault(pg, {}).setdefault(r[ix["EG.PrecursorId"]], {})
+                fmap[run] = max(lv, fmap.get(run, lv))
         if "EG.PrecursorId" in ix:
             peps.setdefault(pg, set()).add(r[ix["EG.PrecursorId"]])
     for pg, f in feats.items():
         f.peptides = len(peps.get(pg, ())) or None
-    notes = [f"Spectronaut report {path.name}: protein quantity {qcol}; conditions and replicates from "
-             f"R.Condition / R.Replicate" + (f"; {dropped:,} rows above q {LONG_FDR:g} left out" if dropped else "")]
-    return _matrix_from_long(path, feats, cells, runs, cond, rep, "DIA", notes,
-                             {"engine": "Spectronaut", "evidence": "precursors", "quantity": qcol})
+    meta = {"engine": "Spectronaut", "evidence": "precursors", "quantity": qcol}
+    if method == "engine":
+        notes = [f"Spectronaut report {path.name}: protein quantity {qcol}; conditions and replicates from "
+                 f"R.Condition / R.Replicate" + (f"; {dropped:,} rows above q {LONG_FDR:g} left out" if dropped else "")]
+    else:
+        cells = _rolled_up(prec, runs, method)
+        meta.update(quantity=f"{_rollup.LABELS[method]} of FG.Quantity (Ionomos)", rollup=method)
+        notes = [f"Spectronaut report {path.name}: precursors (FG.Quantity) rolled up to protein groups by "
+                 f"{_rollup.describe(method)}, not Spectronaut's {qcol}; conditions and replicates from R.Condition / "
+                 f"R.Replicate" + (f"; {dropped:,} rows above q {LONG_FDR:g} left out" if dropped else "")
+                 + _split_note(prec, runs, method)]
+    if fallback:
+        notes.append(fallback)
+    return _matrix_from_long(path, feats, cells, runs, cond, rep, "DIA", notes, meta)
 
 
 # ---------------------------------------------------------------- AlphaDIA --
@@ -487,10 +573,10 @@ def median_polish(rows: list[list[float | None]], iters: int = 10, eps: float = 
     return [t + ce[j] if present[j] else None for j in range(nc)]
 
 
-def load_msstats(path: Path) -> QuantMatrix:
+def load_msstats(path: Path, rollup: str = "auto") -> QuantMatrix:
     """MSstats long format -> protein matrix: per protein, log2 feature intensities (feature = peptide,
-    charge, fragment, product charge) summarised per run by Tukey median polish. Label-free (IsotopeLabelType
-    L) only; heavy-labelled reference rows are left out."""
+    charge, fragment, product charge) summarised per run by Tukey median polish (MSstats' default; rollup:
+    maxlfq for MaxLFQ, D76). Label-free (IsotopeLabelType L) only; heavy-labelled reference rows are left out."""
     h = _header(path)
     if "Channel" in h and "Mixture" in h:
         return load_msstats_tmt(path)
@@ -521,22 +607,26 @@ def load_msstats(path: Path) -> QuantMatrix:
         v = num(r[ix["Intensity"]])
         if v is not None and v > 1:  # MSstats treats intensities <= 1 as missing
             by.setdefault(prot, {}).setdefault(feat, {})[run] = math.log2(v)
+    method = _rollup.resolve(rollup, "median_polish")
     feats: dict[str, Feature] = {}
     cells: dict[tuple[str, str], float] = {}
     for prot, fmap in by.items():
         mat = [[fmap[f].get(run) for run in runs] for f in fmap]
-        summ = median_polish(mat)
+        summ = _rollup.summarise(mat, method)
         feats[prot] = Feature(id=prot, label=prot.split("|")[-1].split("_")[0] if "|" in prot else prot.split(";")[0],
                               peptides=len({f.split("|")[0] for f in fmap}))
         for run, s in zip(runs, summ, strict=True):
             if s is not None:
                 cells[(prot, run)] = 2 ** s
+    how = "Tukey median polish (MSstats' default)" if method == "median_polish" else _rollup.describe(method)
     notes = [f"MSstats-format {path.name}: {len(feats):,} proteins summarised from {sum(len(v) for v in by.values()):,} "
-             "features by Tukey median polish (MSstats' default)" + (f"; {heavy:,} heavy / reference rows left out"
-                                                                      if heavy else "")]
+             f"features by {how}" + (f"; {heavy:,} heavy / reference rows left out" if heavy else "")
+             + _split_note(by, runs, method)]
     samples_cond = {r: cond[r] for r in runs if cond.get(r)}
     return _matrix_from_long(path, feats, cells, runs, samples_cond, rep, "LFQ", notes,
-                             {"engine": "MSstats format", "evidence": "peptides", "quantity": "median polish (TMP)"})
+                             {"engine": "MSstats format", "evidence": "peptides",
+                              "quantity": "median polish (TMP)" if method == "median_polish" else "MaxLFQ",
+                              "rollup": method})
 
 
 # ------------------------------------------------------- MSstatsTMT format --
@@ -945,7 +1035,7 @@ def _sage_group(g: tuple[str, ...], names: dict[str, tuple[str, str]]) -> tuple[
     return ";".join(acc), gene or (parsed[0].group(2).split("_")[0] if parsed[0] else g[0]), desc
 
 
-def load_sage(path: Path, sample_map: dict[str, tuple[str, int]] | None = None) -> QuantMatrix:
+def load_sage(path: Path, sample_map: dict[str, tuple[str, int]] | None = None, rollup: str = "auto") -> QuantMatrix:
     """Sage's lfq.tsv (a row per peptide ion, a column per file) -> protein matrix.
 
       filters    peptide q-value <= 1% (lfq.tsv q_value); with results.sage.tsv beside it, also the peptide's
@@ -954,7 +1044,7 @@ def load_sage(path: Path, sample_map: dict[str, tuple[str, int]] | None = None) 
                  sample are its fractions, and their intensities are added; without it, one sample per file
       proteins   razor_groups(); gene names and descriptions from the search's FASTA when it is still there
       quantity   per protein group, Tukey median polish of log2 ion intensities over the samples (the summary
-                 MSstats uses), from the ions assigned to the group"""
+                 MSstats uses), from the ions assigned to the group; rollup: maxlfq for MaxLFQ instead (D76)"""
     from ionomos.downstream.doctor import suggest_conditions
     from ionomos.downstream.quant import match_run_stem
 
@@ -1032,19 +1122,27 @@ def load_sage(path: Path, sample_map: dict[str, tuple[str, int]] | None = None) 
     shared = sum(1 for pep, prots in pep_prots.items() if any(p not in group[pep] for p in prots))
     fasta = Path(str((settings.get("database") or {}).get("fasta") or ""))
     names = _fasta_names(fasta) if str(fasta) not in ("", ".") else {}
+    method = _rollup.resolve(rollup, "median_polish")
     feats, values = [], []
+    split = 0
     for g in sorted(by_group):
         fid, label, desc = _sage_group(g, names)
         mat = [[_log2(v) for v in vals] for _pep, vals in by_group[g]]
         feats.append(Feature(id=fid, label=label, description=desc,
                              peptides=len({pep for pep, _v in by_group[g]})))
-        values.append(median_polish(mat))
+        values.append(_rollup.summarise(mat, method))
+        if method == "maxlfq" and len({c for c in _rollup.components(mat) if c is not None}) > 1:
+            split += 1
     version = str(settings.get("version") or "")
     notes = [f"Sage{' ' + version if version else ''} {path.name}: {len(feats):,} protein groups from {len(ions):,} "
              f"peptide ions at peptide q ≤ {LONG_FDR:g}"
              + (f" and protein q ≤ {LONG_FDR:g}" if prot_q else " (no results.sage.tsv beside it, so no protein "
                                                                  "q-value filter)")
-             + "; proteins grouped by razor peptides and summarised by Tukey median polish"]
+             + "; proteins grouped by razor peptides and summarised by "
+             + ("Tukey median polish" if method == "median_polish" else _rollup.describe(method))]
+    if split:
+        notes.append(f"{split:,} protein group(s) have samples that share no peptide ion with the others (MaxLFQ "
+                     "scales each such group on its own)")
     if above_pep or above_prot:
         notes.append(f"{above_pep:,} ion(s) above the peptide q-value and {above_prot:,} above the protein q-value "
                      "were left out")
@@ -1062,7 +1160,8 @@ def load_sage(path: Path, sample_map: dict[str, tuple[str, int]] | None = None) 
     missing = sorted(set(sample_map) - matched)
     if missing:
         notes.append("Expected runs missing from Sage's lfq.tsv: " + ", ".join(missing))
-    meta = {"engine": "Sage", "evidence": "peptides", "quantity": "median polish of lfq.tsv ion intensities",
+    meta = {"engine": "Sage", "evidence": "peptides", "rollup": method,
+            "quantity": ("median polish" if method == "median_polish" else "MaxLFQ") + " of lfq.tsv ion intensities",
             "runs": {s: list(v) for s, v in runs.items()}, "missing_runs": missing, "unmatched_runs": unmatched}
     if matched:
         meta["manifest_run"] = {s: v[0] for s, v in runs.items() if v[0] in sample_map}
@@ -1402,20 +1501,34 @@ def detect(workdir: Path) -> Detected | None:
     return found[0] if found else None
 
 
-def load(method: str, workdir: Path, sample_map: dict[str, tuple[str, int]] | None = None, tmt: dict | None = None
-         ) -> tuple[QuantMatrix | None, list[str]]:
+ROLLUP_LOADERS = ("Sage", "MSstats", "DIA-NN", "Spectronaut")  # the loaders that take analysis.rollup (D76)
+
+
+def load(method: str, workdir: Path, sample_map: dict[str, tuple[str, int]] | None = None, tmt: dict | None = None,
+         rollup: str = "auto") -> tuple[QuantMatrix | None, list[str]]:
     """Load the best table of this engine under workdir (or workdir itself when it is the table). sample_map:
     the watcher's manifest (file stem -> (condition, replicate)), for engines whose table has a column per file.
-    tmt: experiment.yaml's tmt: channel map, for Sage's tmt.tsv."""
+    tmt: experiment.yaml's tmt: channel map, for Sage's tmt.tsv. rollup: analysis.rollup (rollup.py, D76), for the
+    tables of peptides / precursors (ROLLUP_LOADERS); for a protein table it does not apply, and a note says so."""
     adapter = METHODS[method]
     cands = [d for d in detect_all(workdir) if d.method == method]
     if not cands:
         return None, [f"no {adapter[0]} results found in {Path(workdir).name}/"]
+    path = cands[0].path
     if method == "Sage":  # tmt.tsv when the search quantified reporter ions (it scores above lfq.tsv), else lfq.tsv
-        if cands[0].path.name == "tmt.tsv":
-            return load_sage_tmt(cands[0].path, sample_map, tmt), []
-        return load_sage(cands[0].path, sample_map), []
-    return adapter[4](cands[0].path), []
+        if path.name == "tmt.tsv":
+            return load_sage_tmt(path, sample_map, tmt), rollup_unused(rollup, "Sage's tmt.tsv is summarised as "
+                                                                               "MSstatsTMT's MedianPolish")
+        return load_sage(path, sample_map, rollup), []
+    if method in ROLLUP_LOADERS:
+        return adapter[4](path, rollup), []
+    return adapter[4](path), rollup_unused(rollup, f"{adapter[0]}'s {path.name} holds proteins already")
+
+
+def rollup_unused(rollup: str | None, why: str) -> list[str]:
+    """The note for analysis.rollup set on a table it does not apply to (D76)."""
+    asked = (rollup or "auto").lower()
+    return [f"analysis.rollup: {asked} was not used: {why}"] if asked != "auto" else []
 
 
 # --------------------------------------------------------------- provenance --

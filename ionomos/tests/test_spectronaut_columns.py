@@ -24,7 +24,7 @@ def _rows(head):
                     "PG.ProteinGroups": pg, "PG.Genes": gene, "PG.ProteinDescriptions": f"{gene} protein",
                     "PG.ProteinNames": f"{gene}_HUMAN", "PG.Quantity": 1000.0 * (k + 1) + j, "PG.Qvalue": 0.001,
                     "EG.Qvalue": 0.05 if j == 2 else 0.001, "EG.PrecursorId": f"_PEPK{j}_.2",
-                    "EG.ModifiedSequence": "_PEPK_", "FG.Charge": 2}
+                    "EG.ModifiedSequence": "_PEPK_", "FG.Charge": 2, "FG.Quantity": 300.0 * (k + 1) + j}
             out.append([cell[h] for h in head])
     return out
 

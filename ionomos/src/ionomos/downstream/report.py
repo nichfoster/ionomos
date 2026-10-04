@@ -351,6 +351,9 @@ def methods_text(m: QuantMatrix | None, p: fpa.Processed | None, diffs: list[Dif
             parts.append(f"Whether a feature changes between any of the {len(ftest.conditions)} conditions was tested "
                          f"with limma's moderated F-statistic on the contrasts of every condition against "
                          f"{escape(ftest.reference)} (topTableF, {ftest.df1} numerator df), BH-adjusted.")
+        elif s.f_test == "off" and s.test == "limma" and m.kind == "intensity" and len(m.conditions) >= 3:
+            parts.append("The moderated F-test across the conditions (\"any change\") was switched off "
+                         "(f_test: off).")
         if s.test != "limma":
             parts.append(f"Conditions were compared with a two-sided {TESTS[s.test]}.")
         parts += _roles_sentences(m, p, diffs, s, roles, specific)
@@ -570,6 +573,10 @@ def _settings_table(s: Settings, p: fpa.Processed | None, model=None, plan=None)
         if s.protein_correction.get("proteome"):
             rows.append(("Protein correction", f"{s.protein_correction['proteome']} (match: "
                                                f"{s.protein_correction.get('match', 'gene')})"))
+    if s.rollup != "auto":  # D76; what each table actually used is in Data source → Quantity and the notes
+        rows.append(("Protein roll-up", s.rollup))
+    if s.f_test == "off" and s.test == "limma":
+        rows.append(("F-test (any change)", "off"))
     if s.exclude_samples:
         rows.append(("Samples left out", ", ".join(s.exclude_samples)))
     if s.sample_conditions:

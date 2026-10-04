@@ -38,6 +38,12 @@ experiment.yaml `analysis:` block:
       block_from: '_(P\\d+)_'     # ... or read from the sample names (a regex group, or (?P<block>...))
       covariates: {age: {DMSO_1: 54, Drug_1: 61}}   # numeric -> a slope, text -> a factor ({sample: value} = one)
       variance_prior: limma       # limma (one prior, eBayes) | deqms (a prior per peptide count, DEqMS)
+      f_test: auto                # auto: the moderated F ("any change") whenever limma compares 3+ conditions of
+                                  #   intensity data | off: never (D76)
+      rollup: auto                # peptides / precursors -> proteins, for tables that need it (rollup.py, D76):
+                                  #   auto (each engine's own default: median polish for Sage lfq.tsv and the MSstats
+                                  #   format, the engine's protein quantity for DIA-NN / Spectronaut long reports)
+                                  #   | median_polish | maxlfq
       sdrf:                       # sample metadata for results/sdrf.tsv (sdrf.py): lab-wide in config.yaml,
         instrument: Orbitrap Eclipse   # per experiment in experiment.yaml (keys merge; the experiment's win)
         organism: homo sapiens    # default: the FASTA's OS=; also organism_part, cell_type, disease, cleavage_agent
@@ -165,6 +171,8 @@ class Settings:
     block_from: str = ""               # regex on sample names: the block is group "block", else group 1
     covariates: dict[str, dict] = field(default_factory=dict)   # name -> {sample: value}
     variance_prior: str = "limma"      # limma | deqms
+    f_test: str = "auto"               # auto | off: the moderated F across 3+ conditions (D76)
+    rollup: str = "auto"               # auto | median_polish | maxlfq: features -> proteins in the loaders (D76)
     export: dict = field(default_factory=dict)  # the keys the lab / experiment set for exported figures (charts.py)
 
     @property
@@ -208,6 +216,7 @@ def _sdrf_meta(v) -> dict[str, str]:
     return out
 
 VARIANCE_PRIORS = ("limma", "deqms")
+F_TEST_MODES = ("auto", "off")
 SMALL_GROUP_RULES = ("half", "same")
 
 def _roles(v) -> dict[str, str]:
@@ -385,6 +394,21 @@ def settings_from(*layers: dict | None) -> Settings:
                                             "when a replicate is clearly off)")
                 elif k == "protein_correction":
                     v = _protein_correction(v, s.protein_correction)
+                elif k == "f_test":
+                    v = str(v).strip().lower() if not isinstance(v, bool) else ("auto" if v else "off")
+                    v = {"on": "auto", "true": "auto", "yes": "auto", "false": "off", "no": "off", "none": "off"
+                         }.get(v, v)
+                    if v not in F_TEST_MODES:
+                        raise AnalysisError("f_test must be auto (the moderated F whenever limma compares 3 or more "
+                                            "conditions) or off")
+                elif k == "rollup":
+                    from ionomos.downstream.rollup import ROLLUP_SETTINGS
+
+                    v = str(v).strip().lower().replace(" ", "_").replace("-", "_")
+                    v = {"medianpolish": "median_polish", "tmp": "median_polish", "polish": "median_polish",
+                         "max_lfq": "maxlfq", "lfq": "maxlfq", "default": "auto", "engine": "auto"}.get(v, v)
+                    if v not in ROLLUP_SETTINGS:
+                        raise AnalysisError("rollup must be auto (each engine's own default), median_polish or maxlfq")
                 elif k == "variance_prior":
                     v = str(v).strip().lower()
                     v = "limma" if v == "ebayes" else v
@@ -804,12 +828,12 @@ def run_contrasts(p: fpa.Processed, comps: list[tuple[str, str | None]], s: Sett
 
 def f_test(p: fpa.Processed, comps: list[tuple[str, str | None]], s: Settings, model: Model | None = None):
     """The moderated F ("any change between the conditions") for 3+ conditions with limma, on the same
-    model and variance prior as the comparisons. None when it doesn't apply."""
+    model and variance prior as the comparisons. None when it doesn't apply or analysis.f_test is off (D76)."""
     from ionomos.downstream import design as dz
 
     m = p.m
     conds = m.conditions
-    if s.test != "limma" or m.kind != "intensity" or len(conds) < 3:
+    if s.f_test == "off" or s.test != "limma" or m.kind != "intensity" or len(conds) < 3:
         return None
     ref = next((b for _, b in comps if b not in (None, "others")), None)
     if ref not in conds:

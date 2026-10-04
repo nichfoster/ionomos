@@ -141,13 +141,15 @@ def _merge_ratio(mats: list[quant.QuantMatrix]) -> quant.QuantMatrix:
 
 def load_quantities(method: str | None, workdir: Path, results: Path, record: dict | None,
                     mod_mass: str = "561.3387", table: Path | None = None, sdrf_factor=None,
-                    dest: Path | None = None) -> tuple[quant.QuantMatrix | None, list[Path], list[str]]:
+                    dest: Path | None = None, rollup: str = "auto"
+                    ) -> tuple[quant.QuantMatrix | None, list[Path], list[str]]:
     """Method prep + loading. Returns (matrix or None, files written, notes). table: a file to read with
     the any-format loader (anytable.py) instead of looking for FragPipe's tables. An SDRF the user put in the
     experiment folder (or next to the table) then sets the design (sdrfdesign.py, D47); sdrf_factor picks its
-    factor value column(s). dest: the experiment folder (default: the folder holding fragpipe/)."""
+    factor value column(s). dest: the experiment folder (default: the folder holding fragpipe/). rollup:
+    analysis.rollup, how peptide / precursor tables become proteins (rollup.py, D76)."""
     workdir = Path(workdir)
-    m, files, notes = _load_quantities(method, workdir, results, record, mod_mass, table)
+    m, files, notes = _load_quantities(method, workdir, results, record, mod_mass, table, rollup)
     if m is not None:
         if dest is None:
             dest = workdir.parent if workdir.name == "fragpipe" else workdir
@@ -157,15 +159,18 @@ def load_quantities(method: str | None, workdir: Path, results: Path, record: di
 
 
 def _load_quantities(method: str | None, workdir: Path, results: Path, record: dict | None,
-                     mod_mass: str = "561.3387", table: Path | None = None
+                     mod_mass: str = "561.3387", table: Path | None = None, rollup: str = "auto"
                      ) -> tuple[quant.QuantMatrix | None, list[Path], list[str]]:
     files: list[Path] = []
     notes: list[str] = []
     results.mkdir(parents=True, exist_ok=True)
     if method in engines.METHODS:  # results from another engine (engines.py)
         tmt_map = (((record or {}).get("plan") or {}).get("overrides") or {}).get("tmt")  # experiment.yaml tmt:
-        m, enotes = engines.load(method, Path(table) if table is not None else workdir, _sample_map(record), tmt_map)
+        m, enotes = engines.load(method, Path(table) if table is not None else workdir, _sample_map(record), tmt_map,
+                                 rollup)
         return m, files, notes + enotes
+    if (rollup or "auto") != "auto":  # FragPipe's and any other table hold proteins (or sites) already
+        notes += engines.rollup_unused(rollup, "this table holds proteins or sites already, not peptides")
     if table is not None or method == "table":
         path = Path(table) if table is not None else anytable.find_table(workdir)
         if path is None:
@@ -412,7 +417,8 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
 
     def read():
         try:
-            return load_quantities(method, workdir, results, record, mod_mass, table, settings.sdrf_factor, dest)
+            return load_quantities(method, workdir, results, record, mod_mass, table, settings.sdrf_factor, dest,
+                                   settings.rollup)
         except (isodtb.SiteError, anytable.TableError) as exc:
             f.read_problem = str(exc)
             notes.append(f"the result table has nothing usable: {exc}")
