@@ -589,6 +589,15 @@ that scorecard, not leaderboards.
 - [ ] **6.2 Confirmed actions (2–3 weeks).** The proposal tools and the native
   diff-and-confirm dialog. *Exit:* no path runs an action without a click (tested), and
   3 lab members finish the tasks unaided.
+  - **Built 2026-10-04 (D75), against the scripted fake model only:** five proposal tools
+    (retry, a sample's condition, leave out / use again, a whitelisted setting, a role),
+    checked before a window opens; the confirm window (Ionomos's text and the
+    `experiment.yaml` diff, Cancel focused, one at a time) whose Confirm re-checks and uses
+    the app's own Retry and the editor's Save (now with `experiment-backups/`); `ionomos ask`
+    prints the proposal and the command; proposals and decisions audited; 13 new scenarios
+    (66). "No path runs an action without a click" is tested (source and replay).
+  - **Remains (the box stays open):** 3 lab members finishing the tasks unaided, on the PC,
+    with a real model.
 - [ ] **6.3 Analysis questions and chat panel (3–4 weeks).** Report-section and
   analysis.json context, multi-turn chat. *Exit:* ≥ 85% on 20 analysis scenarios, and a
   statistics-advice red-team set passes.
@@ -784,6 +793,9 @@ Collected from the other docs; resolve before/during Phase 1.
       thread count or priority (only `keep_alive`, and a `while_searching` model / address / pause). On the
       PC: does Ollama honour `keep_alive` on `/v1/chat/completions`, and what `keep_alive` and
       `while_searching` does `ionomos ask-eval` during a search suggest?
+- [ ] Phase 6 (D75, 2026-10-04): confirm the proposal whitelist (with `de_type`); that a proposal
+      is withheld when its answer fails the citation check; `experiment-backups/` for every editor
+      save, never pruned; and that Confirm saves without re-running the analysis.
 - [ ] Phase 5: publish on PyPI as `ionomos` (needs a PyPI account / trusted publisher set up by the maintainer).
 - [x] Agent auto-merge: removed 2026-09-27; a person merges (D31).
 - [x] CI Python versions: 3.11 (floor), 3.12 (exe build), 3.14 (the PC) since 2026-09-27.

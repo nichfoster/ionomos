@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The assistant can propose a change; a person confirms it** (D75,
+  [docs/ASSISTANT.md](docs/ASSISTANT.md#proposals-and-the-confirm-window)).
+  Asked to act, the local assistant may propose one change per question:
+  retry a failed search, give a sample another condition, leave a sample out
+  (or use it again), one analysis setting (imputation, normalisation, p ≤,
+  |log2FC| ≥, the control, what is compared, the comparisons) or a
+  condition's role. Ionomos checks it first (a sample or condition the
+  experiment has, a value the analysis accepts, a failed job for a retry) and
+  opens a window written by Ionomos, not by the model: the job, what Confirm
+  does and the `experiment.yaml` diff, with **Cancel** (focused) and
+  **Confirm**. Typing "yes" does nothing. Confirm re-checks the proposal
+  against the job and file as they are now and uses the app's own Retry and
+  the experiment editor's Save. `ionomos ask` prints the proposal and the
+  command or app steps; it never applies it. Proposals and decisions are in
+  the assistant's audit log. 13 new scenarios (66 in all).
+- **experiment.yaml backups**: the experiment editor's Save (and a confirmed
+  proposal) keeps the version it replaces in the experiment's
+  `experiment-backups/` folder (D75). Backups are never replaced or removed.
+
+### Changed
+
+- Every Retry (the Jobs tab, the failed-search pop-up, `ionomos retry`, a
+  confirmed proposal) is one function, `worker.request_retry`; the Jobs tab's
+  Retry now also closes the job's "search failed" item, as the others did
+  (D75).
+- The assistant's system prompt and tools changed (five proposal tools), so
+  its prompt digest changed: score real models again with `ionomos ask-eval`.
+
 ## [0.16.0] - 2026-10-03
 
 ### Added
