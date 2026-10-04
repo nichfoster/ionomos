@@ -110,21 +110,21 @@ def _householder(cols: list[list[float]]):
     n = len(cols[0])
     x = [list(c) for c in cols]
     qraux = [0.0] * len(x)
-    for l in range(min(len(x), n - 1)):
-        nrm = math.sqrt(sum(v * v for v in x[l][l:]))
+    for c in range(min(len(x), n - 1)):
+        nrm = math.sqrt(sum(v * v for v in x[c][c:]))
         if nrm == 0:
             continue
-        if x[l][l] != 0:
-            nrm = math.copysign(nrm, x[l][l])
-        for i in range(l, n):
-            x[l][i] /= nrm
-        x[l][l] += 1.0
-        for j in range(l + 1, len(x)):
-            t = -sum(x[l][i] * x[j][i] for i in range(l, n)) / x[l][l]
-            for i in range(l, n):
-                x[j][i] += t * x[l][i]
-        qraux[l] = x[l][l]
-        x[l][l] = -nrm
+        if x[c][c] != 0:
+            nrm = math.copysign(nrm, x[c][c])
+        for i in range(c, n):
+            x[c][i] /= nrm
+        x[c][c] += 1.0
+        for j in range(c + 1, len(x)):
+            t = -sum(x[c][i] * x[j][i] for i in range(c, n)) / x[c][c]
+            for i in range(c, n):
+                x[j][i] += t * x[c][i]
+        qraux[c] = x[c][c]
+        x[c][c] = -nrm
     return x, qraux
 
 
