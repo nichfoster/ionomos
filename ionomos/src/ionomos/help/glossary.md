@@ -132,6 +132,22 @@ enough replicates: by default R ≥ 4 in at least 2. A site that reaches it in
 fewer replicates is *inconsistent*; one measured in too few replicates is
 not assessed. See [Liganded sites](#report.cys).
 
+## Localisation probability {#glossary.localisation}
+
+How sure the search is that a phosphate sits on this residue and not on a
+neighbouring S, T or Y of the same peptide (PTMProphet in FragPipe, DIA-NN's
+own score). Sites below `phospho_min_localization` (0.75 by default) are left
+out, because their changes may belong to another site.
+
+## KSEA {#glossary.ksea}
+
+Kinase–substrate enrichment analysis (Casado et al. 2013, as the KSEAapp
+package computes it): the mean log2 fold change of a kinase's measured
+substrates, compared with the mean of all sites, scaled by the number of
+substrates and the spread of all sites. The kinase–substrate pairs come from
+a table the lab downloads (PhosphoSitePlus), so a kinase with few known
+substrates can't be scored. See [Phosphosites, kinases and partners](#report.phos).
+
 ## LFQ {#glossary.lfq}
 
 Label-free quantification: each sample is its own run and is compared by its
