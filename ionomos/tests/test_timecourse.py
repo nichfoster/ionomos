@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from ionomos import downstream
-from ionomos.downstream import analysis, fpa, simulate
+from ionomos.downstream import analysis, fpa, simulate, splines
 from ionomos.downstream import timecourse as tc
 from ionomos.downstream.analysis import AnalysisError, Settings, settings_from
 from ionomos.downstream.quant import Feature, QuantMatrix
@@ -248,3 +248,160 @@ def test_unreadable_times_become_an_issue(tmp_path):
     issue = next(i for i in out.issues if i.code == "TIMES")
     assert issue.severity == "input" and "'Nope', which is not a condition here" in issue.message
     assert s["time_course"]["ran"] and [x["name"] for x in s["time_course"]["series"]] == ["Drug"]
+
+
+# ------------------------------------------------------- splines (D77) --
+
+
+def _ns_gold() -> dict[str, dict]:
+    out: dict[str, dict] = {}
+    with open(GOLD / "ns_basis.tsv", encoding="utf-8") as fh:
+        for r in csv.DictReader(fh, delimiter="\t"):
+            c = out.setdefault(r["case"].strip(), {"basis": {}, "predict": {}, "knot": {}})
+            x = None if r["x"].strip() == "NA" else float(r["x"])
+            c[r["what"].strip()][(int(r["row"]), int(r["col"]))] = (x, float(r["value"]))
+    return out
+
+
+def test_ns_basis_matches_r():
+    """splines.ns against R's splines::ns and predict(): the columns themselves, not only their span."""
+    gold = _ns_gold()
+    assert len(gold) == 8
+    for case, g in gold.items():
+        rows = max(r for r, _c in g["basis"])
+        df = max(c for _r, c in g["basis"])
+        x = [g["basis"][(r, 1)][0] for r in range(1, rows + 1)]
+        b = splines.ns(x, df)
+        assert b.knots == pytest.approx([g["knot"][(k, 0)][1] for k in range(1, len(g["knot"]) + 1)], abs=1e-14), case
+        bad = [(rc, b.basis[rc[0] - 1][rc[1] - 1], v) for rc, (_x, v) in g["basis"].items()
+               if abs(b.basis[rc[0] - 1][rc[1] - 1] - v) > 1e-12]
+        assert not bad, (case, bad[:3])
+        grid = [g["predict"][(r, 1)][0] for r in range(1, max(r for r, _c in g["predict"]) + 1)]
+        p = b.predict(grid)
+        bad = [(rc, v) for rc, (_x, v) in g["predict"].items() if abs(p[rc[0] - 1][rc[1] - 1] - v) > 1e-12]
+        assert not bad, (case, bad[:3])
+    with pytest.raises(splines.SplineError):
+        splines.ns([1, 1, 1], 2)
+    with pytest.raises(splines.SplineError):
+        splines.ns([0, 1, 2], 0)
+
+
+def _sp_matrix(name: str) -> QuantMatrix:
+    with open(GOLD / "sp_samples.tsv", encoding="utf-8") as fh:
+        sd = list(csv.DictReader(fh, delimiter="\t"))
+    with open(GOLD / name, encoding="utf-8") as fh:
+        rows = list(csv.reader(fh, delimiter="\t"))
+    assert rows[0][1:] == [x["sample"] for x in sd]
+    vals = [[None if v == "NA" else float(v) for v in r[1:]] for r in rows[1:]]
+    return QuantMatrix("intensity", "protein", [Feature(id=r[0], label=r[0]) for r in rows[1:]], rows[0][1:], vals,
+                       {x["sample"]: x["condition"] for x in sd}, name,
+                       replicate={x["sample"]: int(x["replicate"]) for x in sd})
+
+
+@pytest.mark.parametrize("matrix, gold, settings", [
+    ("sp_matrix.tsv", "sp_df4.tsv", {}),                                   # auto: 8 time points -> a 4-df spline
+    ("sp_matrix.tsv", "sp_df4_block.tsv", {"block": "replicate", "time_model": "spline"}),
+    ("sp_matrix_missing.tsv", "sp_df3_missing.tsv", {"time_spline_df": 3}),
+])
+def test_spline_f_fit_and_interaction_match_limma(matrix, gold, settings):
+    m = _sp_matrix(matrix)
+    p = fpa.Processed(m=m, measured=[list(r) for r in m.values], imputed=[[False] * len(m.samples) for _ in m.values],
+                      imputation="given")
+    s = Settings(log2fc=1.0, **settings)
+    model = analysis.make_model(m, s, [])
+    assert not model.problem
+    res, plan = tc.run(p, s, None, model)
+    assert not plan.spline_problems
+    want = _gold(gold)
+    df = settings.get("time_spline_df", 4)
+    assert [(c.series.name, c.model_label, c.interaction_vs) for c in res.courses] == \
+        [("Drug", f"spline ({df} df)", "DMSO"), ("DMSO", f"spline ({df} df)", "")]
+    assert res.courses[0].series.times == [0.0, 0.5, 1.0, 2.0, 4.0, 8.0, 24.0, 48.0]
+    checked = 0
+    for c in res.courses:
+        name = c.series.name
+        got = {r["id"]: r for r in c.rows}
+        tested = [i for i, w in want.items() if not math.isnan(w[f"{name}_P"])]
+        assert sorted(got) == sorted(tested) and c.untested == len(want) - len(tested)
+        for fid, r in got.items():
+            w = want[fid]
+            pairs = [(r["F"], w[f"{name}_F"]), (r["pvalue"], w[f"{name}_P"]), (r["qvalue"], w[f"{name}_adjP"]),
+                     *[(r["fc"][k], w[f"{name}_fc{k}"]) for k in range(1, 8)]]
+            if name == "Drug":
+                pairs += [(r["interaction_F"], w["inter_F"]), (r["interaction_pvalue"], w["inter_P"])]
+                if "missing" not in matrix:
+                    pairs += [(r["interaction_qvalue"], w["inter_adjP"])]
+            assert r["model"] == f"spline ({df} df)"
+            bad = [(a, b) for a, b in pairs if not _close(a, b)]
+            assert not bad, (name, fid, bad)
+            checked += len(pairs)
+    assert checked > 3000
+    planted = {f"F{i}" for i in range(40)}
+    called = {r["id"] for r in res.courses[0].rows if r["class"] != "not"}
+    assert len(called & planted) >= 25 and len(called - planted) <= 2
+    assert not [r for r in res.courses[1].rows if r["class"] != "not"]
+
+
+def test_spline_df_and_model_choice():
+    s = Settings()
+    assert [tc.spline_df(n, s)[0] for n in (3, 6, 7, 8, 20)] == [0, 0, 4, 4, 4]      # auto: factor up to 6 points
+    sp = Settings(time_model="spline")
+    assert [tc.spline_df(n, sp)[0] for n in (3, 4, 5, 6, 7)] == [1, 2, 3, 4, 4]       # at most points - 2
+    assert tc.spline_df(12, Settings(time_model="factor"))[0] == 0
+    assert tc.spline_df(9, Settings(time_spline_df=6)) == (6, "")
+    df, why = tc.spline_df(7, Settings(time_spline_df=6), "Drug: ")
+    assert df == 5 and "time_spline_df is 6, too high for 7 time points" in why and "every time point's mean" in why
+    df, why = tc.spline_df(7, Settings(time_spline_df=9))
+    assert df == 5 and "can't be fitted" in why
+    assert settings_from({"time_model": "Splines", "time_spline_df": "auto"}).time_model == "spline"
+    assert settings_from({"time_spline_df": 3}).time_spline_df == 3
+    for bad in ({"time_model": "curve"}, {"time_spline_df": 0}, {"time_spline_df": 2.5}, {"time_spline_df": "x"},
+                {"time_spline_df": True}):
+        with pytest.raises(AnalysisError):
+            settings_from(bad)
+
+
+LONG = ["0h", "1h", "2h", "4h", "6h", "8h", "12h", "24h"]
+
+
+def test_spline_end_to_end_report_and_figures(tmp_path):
+    from ionomos.downstream import charts, sectionfigs
+
+    d, truth, out, s = _experiment(tmp_path, series={"Drug": LONG, "DMSO": LONG})
+    t = s["time_course"]
+    drug, dmso = t["series"]
+    assert drug["time_model"] == dmso["time_model"] == "spline" and drug["spline"]["df"] == 4
+    assert drug["spline"]["boundary_h"] == [0.0, 24.0] and len(drug["spline"]["knots_h"]) == 3
+    assert drug["differs_from"]["series"] == "DMSO" and drug["differs_from"]["features"] > 20
+    with open(d / "results" / "time_course.tsv", encoding="utf-8") as fh:
+        rows = list(csv.DictReader(fh, delimiter="\t"))
+    assert list(rows[0]) == tc.COLUMNS and {r["model"] for r in rows} == {"spline (4 df)"}
+    called = {r["label"] for r in rows if r["series"] == "Drug" and r["class"] != "not"}
+    assert len(called & set(truth["Drug"])) / len(truth["Drug"]) > 0.7 and len(called - set(truth["Drug"])) <= 3
+    html = out.report.read_text(encoding="utf-8")
+    assert "natural cubic spline" in html
+    data = json.loads(html.split("<script id='ionomos-data' type='application/json'>")[1].split("</script>")[0])
+    S = data["time"]["series"][0]
+    assert S["model"] == "spline" and S["df"] == 4 and len(S["grid"]) == tc.GRID_POINTS and len(S["gb"][0]) == 4
+    assert S["grid"][0] == 0 and S["grid"][-1] == 24 and len(S["cf"]) == len(S["lv"]) == len(S["i"])
+    # the curve runs through the replicates, and its change from the start at each time point is the table's fc
+    curve = tc.curve_at(S, 0)
+    first = [data["v"][S["i"][0]][j] for j in S["samples"][:3]]
+    assert abs(curve[0] - sum(first) / 3) < 1.0
+    for a, hours in enumerate(S["times"]):
+        if hours in S["grid"]:
+            assert curve[S["grid"].index(hours)] - curve[0] == pytest.approx(S["fc"][0][a], abs=2e-3)
+    svg = sectionfigs.figure_time_profiles(data, 0, [0, 1], charts.style_from())
+    assert "fitted spline (4 df)" in svg
+    assert not [i for i in out.issues if i.code in ("TIMES", "TIME_SPLINE")]
+
+
+def test_spline_df_too_high_is_an_issue(tmp_path):
+    _d, _truth, out, s = _experiment(tmp_path, time_model="spline", time_spline_df=5)
+    issue = next(i for i in out.issues if i.code == "TIME_SPLINE")
+    assert issue.severity == "warning" and "too high for 4 time points" in issue.message
+    drug = s["time_course"]["series"][0]
+    assert drug["time_model"] == "spline" and drug["spline"]["df"] == 2
+    _d, _t, plain, s2 = _experiment(tmp_path / "auto")                  # 4 time points, auto: as before
+    assert {x["time_model"] for x in s2["time_course"]["series"]} == {"factor"}
+    assert not [i for i in plain.issues if i.code == "TIME_SPLINE"]
