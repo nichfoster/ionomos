@@ -1,5 +1,6 @@
 """
-Figures for slides from the report's dose-response, time-course and liganded-site sections (D68).
+Figures for slides from the report's dose-response, time-course, liganded-site (D68) and kinase-activity
+(D79) sections.
 
     catalog(payload, which, features, top)   the figures these sections can draw: [charts.Figure]
 
@@ -14,6 +15,8 @@ the plot, the cut-offs line, a <desc> that says where the figure came from), fro
     liganded_rank         per compound: every measured site ranked by its competition ratio, against the threshold
     liganded_selectivity  sites x compounds: the median competition ratio of each site liganded by any compound
                           (or of the sites asked for), marked where it is liganded
+    kinase_activity       per comparison (phosphosites with a kinase-substrate table, D79): the KSEA z-score of every
+                          kinase with enough substrates, coloured where it is significant
 
 Nothing is analysed again: the numbers are the report's. Colours are written out, text is <text>, no CSS.
 """
@@ -30,7 +33,7 @@ from ionomos.downstream.doseresponse import fmt_dose
 TOP_PANELS = 6     # curves / profiles drawn when no feature is named (report.js TOP_PANELS)
 MAX_PANELS = 24
 SECTION_FIGURES = ("dose_potency", "dose_curves", "time_patterns", "time_profiles", "liganded_rank",
-                   "liganded_selectivity")
+                   "liganded_selectivity", "kinase_activity")
 _DOSE_CLS = ("up", "down", "not", "unclear")
 _TIME_CLS = ("up", "down", "mixed", "not")
 
@@ -616,6 +619,73 @@ def figure_liganded_selectivity(d: dict, style: dict, generator: str = "", named
                     legend, f"liganded: {clean_text(X.get('rule'))}", about=", ".join(names), generator=generator)
 
 
+# ----------------------------------------------------------- kinase activity --
+
+
+def kinase_rows(C: dict, fits: int) -> list[list]:
+    """The kinases a bar chart shows: every scored one, or the `fits` with the largest |z|; highest z first."""
+    ks = list(C.get("k") or [])
+    if len(ks) > fits:
+        ks = sorted(ks, key=lambda r: (-abs(r[3] or 0), r[0]))[:fits]
+    return sorted(ks, key=lambda r: (-(r[3] or 0), r[0]))
+
+
+def figure_kinase_activity(d: dict, ci: int, style: dict, generator: str = "") -> str:
+    """Comparison ci's kinase activity (KSEA z-scores, phospho.py D79): a bar per kinase with enough substrates,
+    coloured when its adjusted p is at or below the report's p-value cut-off."""
+    X = (d.get("phos") or {}).get("ksea") or {}
+    C = (X.get("comps") or [])[ci]
+    total = len(C.get("k") or [])
+    if not total:
+        return ""
+    ink = _inks(style)
+    _W, Hbox = charts._box(style)
+    fits = max(3, int((Hbox - 60) / 11))
+    ks = kinase_rows(C, fits)
+    ls = style["line_scale"]
+    lim = max(2.5, max(abs(r[3] or 0) for r in ks) * 1.1)
+    name_w = min(18, max(len(clean_text(r[0])) for r in ks)) * 11 * 0.56
+
+    def colour(r):
+        return ink["up"] if r[6] == "up" else ink["down"] if r[6] == "down" else ink["ns"]
+
+    def draw(W: int, H: int) -> str:
+        L, R, T, B = 22 + name_w, 18, 10, 44
+        n = len(ks)
+        row = (H - T - B) / n
+
+        def Xs(v):
+            return L + (v + lim) / (2 * lim) * (W - L - R)
+
+        b = _axes(ink, Xs, lambda v: 0, _inner_ticks(-lim, lim, 6), [], L, R, T, B, W, H,
+                  "kinase activity (KSEA z-score)", "", ls)
+        b.append(f'<line x1="{_n(Xs(0))}" x2="{_n(Xs(0))}" y1="{T}" y2="{_n(H - B)}" stroke="{ink["axis"]}" '
+                 f'stroke-width="{_n(ls)}"/>')
+        bar = max(2.0, min(14.0, row * 0.72))
+        for k, r in enumerate(ks):
+            y = T + k * row + (row - bar) / 2
+            z = r[3] or 0.0
+            x0, x1 = sorted((Xs(0), Xs(z)))
+            b.append(f'<rect x="{_n(x0)}" y="{_n(y)}" width="{_n(max(0.5, x1 - x0))}" height="{_n(bar)}" '
+                     f'fill="{colour(r)}"/>')
+            if row >= 9:
+                b.append(_text(L - 6, y + bar / 2 + 4, clean_text(r[0])[:18] + f" ({r[1]})", min(11.0, row * 0.9),
+                               ink["text2"], text_anchor="end"))
+        return "".join(b)
+
+    alpha = X.get("alpha", (d.get("settings") or {}).get("alpha", 0.05))
+    legend = [(ink["up"], f"more active {sum(1 for r in C['k'] if r[6] == 'up')}"),
+              (ink["down"], f"less active {sum(1 for r in C['k'] if r[6] == 'down')}"),
+              (ink["ns"], "not significant"), (None, "(m) = measured substrates")]
+    if len(ks) < total:
+        legend.append((None, f"{len(ks)} of {total} kinases with the largest |z| (the rest do not fit this size)"))
+    name = clean_text(C.get("name")) or "Comparison"
+    rule = (f"KSEA on {clean_text(X.get('file'))}: kinases with ≥ {X.get('min_substrates')} substrates, "
+            f"coloured at adjusted p ≤ {alpha:g}")
+    return _compose(style, d, draw, "Kinase activity", name, f"Kinase activity (KSEA) · {d.get('title') or ''}",
+                    legend, rule, about=name, generator=generator)
+
+
 # ------------------------------------------------------------------ catalog --
 
 
@@ -692,4 +762,11 @@ def catalog(d: dict, which, features=None, top: int | None = None) -> list:
                           + ("chosen site" if named is not None else "site liganded by any compound") + ", and its selectivity",
                           lambda st, g: figure_liganded_selectivity(d, st, g, named),
                           "--features NAME,... for other sites", note))
+    K = (d.get("phos") or {}).get("ksea") or {}
+    for ci, C in enumerate(K.get("comps") or [] if K.get("ran") else []):
+        if "kinase_activity" in which and C.get("k"):
+            nm = clean_text(C.get("name"))
+            out.append(Figure(safe_name(f"kinase_activity_{C.get('slug') or nm or ci + 1}.svg"), "kinase_activity",
+                              f"Kinase activity, {nm}: KSEA z-score of every kinase with enough measured substrates",
+                              lambda st, g, ci=ci: figure_kinase_activity(d, ci, st, g)))
     return out

@@ -2541,7 +2541,7 @@
   const SIZES = { slide169: ["16:9 slide", 1280, 720, "px", 14], slide43: ["4:3 slide", 960, 720, "px", 14], half: ["Half a slide", 640, 600, "px", 12],
     col1: ["Journal figure, one column (85 mm)", 85, 70, "mm", 7], col2: ["Journal figure, two columns (180 mm)", 180, 110, "mm", 7], custom: ["Custom size", 0, 0, "", 0] };
   // what `figures:` may list (the watcher's static files; charts.STATIC_FIGURES, where the groups dose, time and liganded are also taken)
-  const STATIC_FIGS = ["volcano", "pca", "heatmap", "correlation", "dose_potency", "dose_curves", "time_patterns", "time_profiles", "liganded_rank", "liganded_selectivity"];
+  const STATIC_FIGS = ["volcano", "pca", "heatmap", "correlation", "dose_potency", "dose_curves", "time_patterns", "time_profiles", "liganded_rank", "liganded_selectivity", "kinase_activity"];
   const TOP_PANELS = 6;  // dose-response curves and time-course features per series in "Export for slides" (sectionfigs.TOP_PANELS)
   const STYLE_DEFAULTS = { size: "slide169", width: 1280, height: 720, unit: "px", font_pt: 14, font_family: "Arial", line_scale: 1, point_scale: 1,
     palette: "default", up: "#e34948", down: "#2a78d6", neutral: "#c3c2b7", background: "light", title: true, subtitle: true, legend: true, note: true,

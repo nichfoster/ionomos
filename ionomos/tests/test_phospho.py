@@ -48,7 +48,7 @@ def _phospho_experiment(dest: Path, n: int = 240, seed: int = 79, up_genes: tupl
         rsd = f"{'STY'[i % 3]}{10 + 7 * i}"
         base = rng.uniform(14, 22)
         up = 2.0 if gene in up_genes else 0.0
-        best = rng.uniform(0.2, 0.7) if i < low_loc else rng.uniform(0.8, 1.0)
+        best = rng.uniform(0.2, 0.7) if i >= n - low_loc else rng.uniform(0.8, 1.0)
         vals, locs = [], []
         for s in SAMPLES:
             v = base + (up if s.startswith("Drug") else 0.0) + rng.gauss(0, 0.25)
@@ -170,8 +170,8 @@ def test_lfq_site_table_and_localisation_filter(tmp_path):
     assert info["quantity"] == "MaxLFQ Intensity" and sum(info["hist"]) == plan["n"]
     assert set(info["residues"]) == {"S", "T", "Y"}
     f = m.features[0]
-    assert f.id == f"sp|Q00007|GENE007_HUMAN|{'STY'[20 % 3]}{10 + 7 * 20}" and f.label.startswith("GENE007 ")
-    assert phospho.site_parts(f) == ("Q00007", "GENE007", f"{'STY'[20 % 3]}{150}")
+    assert f.id == "sp|Q00001|GENE001_HUMAN|S10" and f.label == "GENE001 S10"
+    assert phospho.site_parts(f) == ("Q00001", "GENE001", "S10")
     assert m.condition["Drug_2"] == "Drug" and m.replicate["Drug_2"] == 2
     strict = phospho.load(path, "lfq", Settings(phospho=True, phospho_min_localization=0.95,
                                                 phospho_localization_per_sample=True), tmp_path)

@@ -1254,7 +1254,7 @@ def main(argv: list[str] | None = None) -> int:
         ex.add_argument(f"--no-{off}", dest=f"no_{off}", action="store_true",
                         help=f"leave the {'cut-offs line' if off == 'note' else off} out")
     ex.add_argument("--figures", help="which, comma-separated: kinds (volcano, pca, heatmap, correlation, dose_potency, "
-                                      "dose_curves, time_patterns, time_profiles, liganded_rank, liganded_selectivity), "
+                                      "dose_curves, time_patterns, time_profiles, liganded_rank, liganded_selectivity, kinase_activity), "
                                       "groups (dose, time, liganded), or names from --list (* and ? allowed). Default: all")
     ex.add_argument("--list", action="store_true", help="list the figures this report can draw and what can be chosen "
                                                         "for each; write nothing")
