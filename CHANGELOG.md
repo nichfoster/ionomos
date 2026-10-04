@@ -72,6 +72,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   proposal) keeps the version it replaces in the experiment's
   `experiment-backups/` folder (D75). Backups are never replaced or removed.
 
+- **Acquisition time per raw file** (D78). Intake records when each raw file
+  was acquired in `ionomos.json` (`acquisition`), read from the Thermo
+  `.raw` file's own header (the acquisition start Xcalibur writes; only the
+  first bytes are read, nothing is written), else from ThermoRawFileParser's
+  output, the Xcalibur stamp in the name, or the file's modification time,
+  marked approximate. Each entry says where its time came from.
+- **Run order QC** (D78). A **Run order** tab under Quality control: each
+  sample's identifications, missing values, signal, PSMs, mass error and
+  missed cleavages (or DIA-NN's precursors and mass accuracy) in the order of
+  acquisition, with a drift test within each condition and which runs each
+  condition was in. Two new warnings: `RUN_ORDER_DRIFT` (a number drifts
+  over the run) and `RUN_ORDER_CONFOUNDED` (the conditions were run in
+  blocks, so a drift would look like biology). `analysis.json` →
+  `run_order`; a `run_order` figure for slides (`ionomos export --figures
+  run_order`, `analysis.export.figures`, the report's zip).
+
 ### Changed
 
 - Every Retry (the Jobs tab, the failed-search pop-up, `ionomos retry`, a
@@ -80,6 +96,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (D75).
 - The assistant's system prompt and tools changed (five proposal tools), so
   its prompt digest changed: score real models again with `ionomos ask-eval`.
+
+- **The QC trend orders runs by the raw file's header** (D78) when the
+  experiment's `ionomos.json` or the file has one, before the name stamp and
+  the file time.
 
 
 ## [0.16.0] - 2026-10-03

@@ -87,11 +87,20 @@ RT minus its median RT in the baseline runs. At least 5 shared peptides are
 needed. That makes the "fixed peptide set" the standard's own most intense
 peptides, so no spiked-in iRT peptides are needed.
 
-**Acquisition time** is what orders the runs:
-- the Xcalibur stamp in the file name (`…_20260930143015.raw`), if present
+**Acquisition time** is what orders the runs (D78, `acqtime.py`):
+- what intake recorded in the experiment's `ionomos.json` (`acquisition`),
+  which is the first of the next four that gives a time
+- the raw file's own header: the acquisition start Xcalibur writes into every
+  Thermo `.raw` file (read-only, first 264 bytes, checked before use)
+- what ThermoRawFileParser wrote for the file (Sage's `sage_mzml\` mzML, or a
+  `-metadata.json` / `.txt`)
+- the Xcalibur stamp in the file name (`…_20260930143015.raw`)
 - else the raw file's modification time (the instrument writes the file as it
-  acquires, and intake keeps the time when it moves the file)
+  acquires, and intake keeps the time when it moves the file); approximate
 - else when the folder was filed
+
+Rows written before D78 keep the time they had; `ionomos qc-trend --rebuild`
+reads them again from the headers.
 
 The page shows which was used (hover a date).
 

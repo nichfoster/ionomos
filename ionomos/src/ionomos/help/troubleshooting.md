@@ -619,6 +619,32 @@ compare it with its replicates in the [scorecard](#qc.card) and
 [Search quality](#qc.psm) tab. The 50% limit is a wide default, not yet the
 lab's own.
 
+## The samples drift with the order they were run in {#issue.RUN_ORDER_DRIFT}
+
+Over the sequence, a quality number moved steadily: fewer identifications or
+less signal the later a sample was run (a spray or column getting dirtier,
+samples waiting in the autosampler), or a mass error that wanders (the
+calibration). The test compares samples within each condition, so a
+condition that differs does not count. Look at the [Run order](#qc.run) tab:
+a steady slope is a drift, a step at one run is an event (a column change, a
+recalibration). If the conditions were interleaved, the comparisons are
+still fair, only noisier. If they were run in blocks, a drift can look like
+biology: see [the conditions were run in blocks](#issue.RUN_ORDER_CONFOUNDED).
+Next time, randomise the run order and put a QC standard between the samples.
+The limits are wide defaults, not yet the lab's own.
+
+## The conditions were run in blocks {#issue.RUN_ORDER_CONFOUNDED}
+
+The samples were acquired condition by condition (all controls, then all
+treated, ...): the condition explains 60% or more of where a sample sits in
+the run order. Anything that changed during the run (the spray, the column,
+the calibration) then differs between the conditions as well, and the
+statistics cannot tell it from the biology. Look at the [Run order](#qc.run)
+tab: if the quality numbers stay flat along the run, the comparisons stand.
+If they drift, treat the differences between the conditions with care, and
+confirm the main hits another way. Next time, interleave the conditions (rep 1
+of every condition, then rep 2, ...) or randomise the order.
+
 ## Time course: the time points need a look {#issue.TIMES}
 
 Ionomos found what looks like a time course but couldn't place every

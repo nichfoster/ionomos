@@ -476,7 +476,7 @@ SIZES = {  # name, width, height, unit, text size (pt) that suits it; a 16:9 Pow
     "half": ("Half a slide", 640, 600, "px", 12), "col1": ("Journal figure, one column (85 mm)", 85, 70, "mm", 7),
     "col2": ("Journal figure, two columns (180 mm)", 180, 110, "mm", 7), "custom": ("Custom size", 0, 0, "", 0)}
 STATIC_FIGURES = ("volcano", "pca", "heatmap", "correlation", "dose_potency", "dose_curves", "time_patterns",
-                  "time_profiles", "liganded_rank", "liganded_selectivity")  # report.js STATIC_FIGS; the last six: sectionfigs.py
+                  "time_profiles", "liganded_rank", "liganded_selectivity", "run_order")  # report.js STATIC_FIGS; the last seven: sectionfigs.py
 FIGURE_GROUPS = {"dose": ("dose_potency", "dose_curves"), "time": ("time_patterns", "time_profiles"),
                  "liganded": ("liganded_rank", "liganded_selectivity")}  # shorthands a config or --figures may use
 STYLE_DEFAULTS: dict = {
