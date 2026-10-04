@@ -108,3 +108,24 @@ test("the report search marks time-course rows; hostile names are escaped", asyn
   assert.equal(r.document.querySelector("#timebody img"), null);
   assert.deepEqual(errors, []);
 });
+
+test("a spline series (D77): the fitted curve on an axis in hours, the control's curve dashed", async () => {
+  const times = [0, 0.5, 1, 2, 4, 8, 24, 48], labels = times.map((t) => (t < 1 && t ? t * 60 + " min" : t + " h"));
+  const grid = [0, 12, 24, 36, 48], gb = [[0, 0], [0.5, 0.1], [0.9, 0.3], [1.1, 0.6], [1.2, 1]];
+  const spl = (name, idx, off, vs) => withData(series(name, idx, off, vs), {
+    times, labels, stime: [0, 4, 48], model: "spline", df: 2, grid, gb,
+    cf: idx.map(() => [1, 0.5]), lv: idx.map(() => 20), fc: idx.map(() => times.map(() => 0)) });
+  const time = withData(TIME, { series: [spl("Drug", [0, 1, 2, 3], 0, "DMSO"), spl("DMSO", [0, 1, 2, 3], 3)] });
+  const { document, errors } = await loadReport({ data: withData(BASE, { time }) });
+  assert.deepEqual(errors, []);
+  assert.match(document.querySelector("#timebody").textContent, /time as a natural spline in hours, 2 df/);
+  const prof = document.querySelector("#timeprofile");
+  const paths = [...prof.querySelectorAll("path")].filter((p) => (p.getAttribute("d") || "").split("L").length === grid.length);
+  assert.equal(paths.length, 2, "the series' curve and the control's, one segment per grid point");
+  assert.ok(paths.some((p) => p.getAttribute("stroke-dasharray") === "5 4"));
+  assert.match(prof.querySelector("svg").textContent, /line: spline, 2 df/);
+  assert.match(prof.querySelector("svg").textContent, /time \(h\)/);
+  assert.equal(prof.querySelectorAll("circle[data-j]").length, 3);
+  const xs = [...prof.querySelectorAll("circle[data-j]")].map((c) => +c.getAttribute("cx"));
+  assert.ok((xs[1] - xs[0]) * 5 < xs[2] - xs[1], "x is in hours: 0 -> 4 h is much shorter than 4 -> 48 h");
+});

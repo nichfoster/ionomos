@@ -432,6 +432,8 @@ analysis:                   # results/report.html for this experiment (lab defau
     Drug_start: 0           #   Drug_4h, 2d; units s, min, h, d). 3+ time points per series get the time-course
     Drug_early: 30 min      #   tests; a bare number needs time_unit
     Drug_late: 4 h
+  time_model: auto          # auto: time is a factor up to 6 time points, a natural spline in hours from 7 (D77);
+  time_spline_df: auto      #   factor | spline. The spline's df: auto = 4 (at most the time points - 2)
   roles:                    # what each condition is (D61); default: read from the names. A competition (probe +
     DMSO: control           #   competitor) changes the default comparisons: compound vs control, competition
     Probe: compound         #   vs its compound, competition vs control, and adds results/specific_targets.tsv

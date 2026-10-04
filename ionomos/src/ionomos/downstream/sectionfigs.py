@@ -10,7 +10,8 @@ the plot, the cut-offs line, a <desc> that says where the figure came from), fro
                           pEC50): the `top` most relevant regulated curves, or the features asked for
     time_patterns         per series: the median profile of each pattern of changing features
     time_profiles         per series: a grid of features over time (every replicate, the mean, the series it
-                          was compared with dashed): the `top` most significant changing ones, or those asked for
+                          was compared with dashed): the `top` most significant changing ones, or those asked for;
+                          a spline series (D77) draws its fitted curves on an axis in hours
     liganded_rank         per compound: every measured site ranked by its competition ratio, against the threshold
     liganded_selectivity  sites x compounds: the median competition ratio of each site liganded by any compound
                           (or of the sites asked for), marked where it is liganded
@@ -26,6 +27,7 @@ import re
 from ionomos.downstream import charts
 from ionomos.downstream.charts import _axes, _compose, _inks, _inner_ticks, _labels, _n, _text, clean_text, safe_name
 from ionomos.downstream.doseresponse import fmt_dose
+from ionomos.downstream.timecourse import curve_at
 
 TOP_PANELS = 6     # curves / profiles drawn when no feature is named (report.js TOP_PANELS)
 MAX_PANELS = 24
@@ -318,6 +320,19 @@ def _time_axis(b: list, ink: dict, S: dict, Xs, H: float, B: float, W: float, L:
             b.append(_text(Xs(a), H - B + 16, lab, 10.5, ink["muted"], text_anchor="middle"))
 
 
+def _time_axis_hours(b: list, ink: dict, S: dict, Xh, H: float, B: float) -> None:
+    """Time point labels on an axis in hours (a spline series): left to right, a label that would touch the one
+    before it is left out (the early time points crowd together)."""
+    last = None
+    for t, lab in zip(S.get("times") or [], [clean_text(x) for x in S.get("labels") or []], strict=False):
+        x, half = Xh(t), len(lab) * 10.5 * 0.56 / 2
+        if last is not None and x - half < last + 4:
+            continue
+        b.append(f'<line x1="{x:.1f}" x2="{x:.1f}" y1="{_n(H - B)}" y2="{_n(H - B + 4)}" stroke="{ink["axis"]}"/>')
+        b.append(_text(x, H - B + 16, lab, 10.5, ink["muted"], text_anchor="middle"))
+        last = x + half
+
+
 def figure_time_patterns(d: dict, si: int, style: dict, generator: str = "") -> str:
     """Each pattern of changing features of series si: its median log2 fold change at each time point."""
     X = d.get("time") or {}
@@ -381,27 +396,36 @@ def _time_panel(d: dict, X: dict, S: dict, k: int, W: float, H: float, ink: dict
     imp = d.get("imp")
     times = S["times"]
 
-    def points(Q):
+    spline = S.get("model") == "spline"
+    # a spline series is drawn on an axis in hours (the curve is a function of time), a factor one by order
+    on_axis = (lambda t: times[0] <= t <= times[-1]) if spline else (lambda t: t in times)  # noqa: E731
+
+    def points(Q):   # (hours, value, sample) on this series' axis
         out = []
         for a, j in enumerate(Q["samples"]):
             t = Q["stime"][a] if a < len(Q["stime"]) else None
-            if t in Q["times"] and j < len(row) and row[j] is not None:
-                out.append((Q["times"].index(t), row[j], j))
+            if t is not None and on_axis(t) and j < len(row) and row[j] is not None:
+                out.append((t, row[j], j))
         return out
 
-    def means(pts, n):
+    def means(pts, ts):
         out = []
-        for a in range(n):
-            v = [p[1] for p in pts if p[0] == a]
-            out.append(sum(v) / len(v) if v else None)
+        for t in ts:
+            v = [p[1] for p in pts if p[0] == t]
+            out.append((t, sum(v) / len(v) if v else None))
         return out
+
+    def curve(Q):    # [(hours, value)] of the fitted spline, or None
+        if Q is None or Q.get("model") != "spline" or i not in Q.get("i", []):
+            return None
+        c = curve_at(Q, Q["i"].index(i))
+        return None if c is None else [(t, v) for t, v in zip(Q["grid"], c, strict=True) if on_axis(t)]
 
     pts = points(S)
     other = next((q for q in X.get("series") or [] if S.get("vs") and q.get("name") == S["vs"]), None)
-    opts = []
-    if other:  # the series it was compared with, on this series' time axis (the shared time points)
-        opts = [(times.index(other["times"][a]), v, j) for a, v, j in points(other) if other["times"][a] in times]
-    ys = [p[1] for p in pts + opts]
+    opts = points(other) if other else []  # the series it was compared with, on this series' time axis
+    fit, ofit = (curve(S), curve(other)) if spline else (None, None)
+    ys = [p[1] for p in pts + opts] + [v for c in (fit, ofit) if c for _t, v in c]
     cls = S["cls"][k]
     col = _time_ink(ink, cls)
     line2 = f"adj. p {_p(S['q'][k])} · largest {_f(S['max'][k])} at {clean_text(S['labels'][S['peak'][k]])}" \
@@ -417,34 +441,42 @@ def _time_panel(d: dict, X: dict, S: dict, k: int, W: float, H: float, ink: dict
     def Xs(a):
         return L + 14 + a / max(1, n - 1) * (W - L - R - 28)
 
+    def Xt(t):   # hours -> x
+        if spline:
+            return L + 14 + (t - times[0]) / ((times[-1] - times[0]) or 1) * (W - L - R - 28)
+        return Xs(times.index(t))
+
     def Y(v):
         return T + (1 - (v - y0) / (y1 - y0)) * (H - T - B)
 
     b = _axes(ink, Xs, Y, [], _inner_ticks(y0, y1, 5), L, R, T, B, W, H, xl, yl, ls)
-    _time_axis(b, ink, S, Xs, H, B, W, L, R)
+    if spline:
+        _time_axis_hours(b, ink, S, Xt, H, B)
+    else:
+        _time_axis(b, ink, S, Xs, H, B, W, L, R)
 
     def line(m, c, dash):
         d_, pen = "", False
-        for a, v in enumerate(m):
+        for t, v in m:
             if v is None:
                 pen = False
                 continue
-            d_ += f"{'L' if pen else 'M'}{Xs(a):.1f} {Y(v):.1f}"
+            d_ += f"{'L' if pen else 'M'}{Xt(t):.1f} {Y(v):.1f}"
             pen = True
         if d_:
             b.append(f'<path d="{d_}" fill="none" stroke="{c}" stroke-width="{_n(2 * ls)}"' +
                      (f' stroke-dasharray="{dash}"' if dash else "") + "/>")
 
-    shift = 5 if other else 0
+    shift = 5 if other and not spline else 0
     if other:
-        line(means(opts, n), ink["muted"], "5 4")
-        for a, v, _j in opts:
-            b.append(f'<circle cx="{Xs(a) + shift:.1f}" cy="{Y(v):.1f}" r="{_n(2.8 * ps)}" fill="none" stroke="{ink["muted"]}" '
+        line(ofit or means(opts, [t for t in other["times"] if on_axis(t)] if spline else times), ink["muted"], "5 4")
+        for t, v, _j in opts:
+            b.append(f'<circle cx="{Xt(t) + shift:.1f}" cy="{Y(v):.1f}" r="{_n(2.8 * ps)}" fill="none" stroke="{ink["muted"]}" '
                      f'stroke-width="{_n(1.2 * ls)}"/>')
-    line(means(pts, n), col, "")
-    for a, v, j in pts:
+    line(fit or means(pts, times), col, "")
+    for t, v, j in pts:
         faint = bool(imp) and i < len(imp) and j < len(imp[i]) and imp[i][j] == "1"
-        b.append(f'<circle cx="{Xs(a) - shift:.1f}" cy="{Y(v):.1f}" r="{_n(3.2 * ps)}" fill="{col}" '
+        b.append(f'<circle cx="{Xt(t) - shift:.1f}" cy="{Y(v):.1f}" r="{_n(3.2 * ps)}" fill="{col}" '
                  f'fill-opacity="{0.3 if faint else 0.85}"/>')
     return "".join(head + b)
 
@@ -468,7 +500,9 @@ def figure_time_profiles(d: dict, si: int, ks: list[int], style: dict, generator
     name = clean_text(S.get("name")) or "Time course"
     legend = [(c, w) for c, w in ((ink["up"], "up"), (ink["down"], "down"), (ink["c"][3], "mixed"), (ink["text2"], "not"))
               if any(_time_ink(ink, S["cls"][k]) == c and S["cls"][k] == w for k in ks)]
-    legend += [(None, "points: replicates (faint: imputed)"), (None, "line: mean per time point")]
+    curve = f"line: fitted spline ({S.get('df')} df), time in hours" if S.get("model") == "spline" else \
+        "line: mean per time point"
+    legend += [(None, "points: replicates (faint: imputed)"), (None, curve)]
     if S.get("vs"):
         legend.append((ink["muted"], f"dashed: {clean_text(S['vs'])}"))
     legend += _room_notes(asked, len(ks), ytitle, yl)

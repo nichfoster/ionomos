@@ -478,6 +478,9 @@ def _time_methods(time: dict) -> str:
     names = ", ".join(escape(x["name"] or "the experiment") + " (" + escape(", ".join(x["labels"])) + ")"
                       for x in time.get("series") or [])
     vs = sorted({x["vs"] for x in time.get("series") or [] if x.get("vs")})
+    curves = [x for x in time.get("series") or [] if x.get("model") == "spline"]
+    if curves:
+        return _spline_methods(time, names, curves, vs)
     return (f"Time courses: {names}. Time was a factor in the comparisons' linear model "
             f"({escape(time.get('model', '~0 + condition'))}; limma User's Guide, time course experiments). Change "
             "over time was tested per feature with the moderated F-statistic on the contrasts of every time point "
@@ -486,6 +489,28 @@ def _time_methods(time: dict) -> str:
             + (f" Whether a series responds differently from {escape(', '.join(vs))} was tested with the moderated "
                "F on the interaction contrasts (the change from the first time point in one series minus that in "
                "the other)." if vs else "")
+            + f" Features with F adjusted p ≤ {time.get('alpha', 0.05):g} and a largest |log2 fold change| ≥ "
+            f"{time.get('lfc', 1):g} against the first time point were grouped into patterns by k-means on their "
+            "profiles scaled to the largest change.")
+
+
+def _spline_methods(time: dict, names: str, curves: list[dict], vs: list[str]) -> str:
+    """Methods for time courses with at least one series fitted as a spline (D77)."""
+    which = ", ".join(escape(x["name"] or "the experiment") + f" ({x['df']} df)" for x in curves)
+    factor = [x for x in time.get("series") or [] if x.get("model") != "spline"]
+    return (f"Time courses: {names}. Over many time points, a smooth curve in time was fitted per feature "
+            f"(limma User's Guide, many time points): a natural cubic spline in hours, splines::ns with interior "
+            f"knots at quantiles of the sample times, for {which}. Each such series was fitted on the comparisons' "
+            f"model ({escape(time.get('model', '~0 + condition'))}) with its conditions replaced by a level and the "
+            "spline terms, and change over time was tested with the moderated F-statistic on the spline "
+            "coefficients, BH-adjusted; its profile is the fitted curve's change from the first time point."
+            + (f" Series with fewer time points ({escape(', '.join(x['name'] or 'the experiment' for x in factor))}) "
+               "treated time as a factor (moderated F on every time point against the first)." if factor else "")
+            + " A trend was tested with the moderated t-statistic of the linear contrast over the ordered time "
+            "points of the group-means model."
+            + (f" Whether a series responds differently from {escape(', '.join(vs))} was tested with the moderated "
+               "F on the interaction terms of a model holding both series as curves on one spline basis "
+               "(~group * ns(time))." if vs else "")
             + f" Features with F adjusted p ≤ {time.get('alpha', 0.05):g} and a largest |log2 fold change| ≥ "
             f"{time.get('lfc', 1):g} against the first time point were grouped into patterns by k-means on their "
             "profiles scaled to the largest change.")

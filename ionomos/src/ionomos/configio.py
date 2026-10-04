@@ -242,6 +242,7 @@ def dump_config(d: dict) -> str:
               "liganded", "liganded_ratio", "liganded_min_replicates", "liganded_direction",  # cys.py: D52
               "site_annotation",
               "time_course", "time_min_points", "time_unit",  # time courses: D53
+              "time_model", "time_spline_df",  # spline time courses: D77
               "psm_qc",  # search quality per run: D55
               "f_test", "rollup"):  # the F-test switch and the protein roll-up: D76
         if an.get(k) not in (None, ""):

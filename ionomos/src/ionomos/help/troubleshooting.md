@@ -635,6 +635,25 @@ time course, add `time_course: false`. The [Time course](#report.time)
 section and the pairwise comparisons for the other conditions are not
 affected.
 
+## Time course: the spline was not fitted as asked {#issue.TIME_SPLINE}
+
+A series with many time points is fitted as a smooth curve (a natural
+spline, `time_model: spline`, or `auto` from 7 time points), and the curve
+couldn't be fitted the way the settings ask. The message says which series
+and why:
+- `time_spline_df` is too high for the series. A curve needs fewer degrees
+  of freedom than the series has time points minus 1: with as many, it goes
+  through every time point's mean and smooths nothing; with more, it can't
+  be fitted. Ionomos used the highest that works (time points minus 2).
+- The block or covariates leave the curve no residual degrees of freedom;
+  the series was then tested with time as a factor.
+
+Lower `time_spline_df` under `analysis:` in the experiment's
+`experiment.yaml` (or remove it: `auto` is 4, at most the time points
+minus 2), or test time as a factor with `time_model: factor`, and re-run
+the analysis ([How to re-run](#faq.rerun)). The rest of the
+[Time course](#report.time) section is not affected.
+
 ## Liganded sites: the ratio may be the other way round {#issue.LIGANDED_DIRECTION}
 
 Far more sites would count as [liganded](#glossary.liganded) if the

@@ -2020,6 +2020,15 @@
   const TIME_CLS = ["up", "down", "mixed", "not"];
   const timeColor = (c) => css(c === "up" ? "--up" : c === "down" ? "--down" : c === "mixed" ? "--c3" : "--ns");
   function timeSeries() { const X = D.time; return X && X.ran && X.series && X.series.length ? X.series[Math.min(TS.s, X.series.length - 1)] : null; }
+  /** Feature i's fitted spline in series Q as [[hours, log2 value]] on Q.grid (timecourse.curve_at), or null: the
+   * curve is its level plus the basis (gb, less its value at the first time point) times its coefficients (cf). */
+  function timeCurve(Q, i) {
+    const k = Q && Q.model === "spline" && Q.cf ? Q.i.indexOf(i) : -1;
+    if (k < 0) return null;
+    const cf = Q.cf[k], lv = Q.lv[k];
+    if (lv == null || cf.some((v) => v == null)) return null;
+    return Q.grid.map((t, g) => [t, lv + Q.gb[g].reduce((s, b, a) => s + b * cf[a], 0)]);
+  }
   const TIME_COLS = [
     { k: "name", t: D.kind === "ratio" ? "Site" : "Gene", f: (S, k) => esc(nameOf(S.i[k])) },
     { k: "cls", t: "class", f: (S, k) => "<span class='dot' style='background:" + timeColor(S.cls[k]) + "'></span> " + esc(S.cls[k]) },
@@ -2073,7 +2082,9 @@
     if (X.series.length > 1) h += "<label class='ctl'>Series <select id='tseries'>" + X.series.map((x, k) => "<option value='" + k + "'" + (k === TS.s ? " selected" : "") + ">" + esc(x.name || "time course") + "</option>").join("") + "</select></label>";
     h += "<label class='ctl'>Show <select id='tshow'>" + opts.map((o) => "<option value='" + o[0] + "'" + (o[0] === TS.show ? " selected" : "") + ">" + esc(o[1]) + "</option>").join("") + "</select></label>" +
       "<input type='search' id='tq' placeholder='Find a feature' aria-label='Find a feature' value='" + esc(TS.q) + "'>" +
-      "<span class='muted'>" + S.labels.length + " time points: " + esc(S.labels.join(", ")) + " · changing: F adj. p ≤ " + X.alpha + " and |log2FC| ≥ " + X.lfc + " against " + esc(S.labels[0]) +
+      "<span class='muted'>" + S.labels.length + " time points: " + esc(S.labels.join(", ")) +
+      (S.model === "spline" ? " · time as a natural spline in hours, " + S.df + " df (the F tests the curve; log2FC is the fitted change)" : "") +
+      " · changing: F adj. p ≤ " + X.alpha + " and |log2FC| ≥ " + X.lfc + " against " + esc(S.labels[0]) +
       (S.untested ? " · " + fmtInt(S.untested) + " not tested (not measured at every time point)" : "") + " · <a href='time_course.tsv'>time_course.tsv</a></span></div>" +
       "<div id='timepatterns' class='tiles'></div><div id='timehl' class='muted'></div>" +
       "<div class='split'><div id='timetable'></div><div class='card detail'><div id='timehead'></div><div class='chart' id='timeprofile'></div></div></div>";
@@ -2131,38 +2142,50 @@
     const i = S.i[k];
     if (head) head.innerHTML = "<h4>" + esc(nameOf(i)) + " <span class='badge' style='color:" + timeColor(S.cls[k]) + ";border-color:" + timeColor(S.cls[k]) + "'>" + esc(S.cls[k]) + "</span></h4>" +
       "<div class='muted'>F " + fmt(S.F[k]) + " · adj. p " + fmtP(S.q[k]) + " · largest change " + fmt(S.max[k]) + " at " + esc(S.labels[S.peak[k]]) + (S.iq && S.iq[k] != null ? " · differs from " + esc(S.vs) + ": adj. p " + fmtP(S.iq[k]) : "") + "</div>";
-    const pointsOf = (Q) => Q.samples.map((j, a) => [Q.times.indexOf(Q.stime[a]), D.v[i] ? D.v[i][j] : null, j]).filter((p) => p[1] != null && p[0] >= 0);
-    const meansOf = (Q, pts) => Q.times.map((_t, a) => { const v = pts.filter((p) => p[0] === a).map((p) => p[1]); return v.length ? v.reduce((x, y) => x + y, 0) / v.length : null; });
-    const pts = pointsOf(S), means = meansOf(S, pts);
+    // a spline series (D77) is drawn on an axis in hours with its fitted curve; a factor series by order, with its means
+    const spline = S.model === "spline", t0 = S.times[0], t1 = S.times[S.times.length - 1];
+    const onAxis = spline ? (t) => t >= t0 && t <= t1 : (t) => S.times.indexOf(t) >= 0;
+    const pointsOf = (Q) => Q.samples.map((j, a) => [Q.stime[a], D.v[i] ? D.v[i][j] : null, j]).filter((p) => p[1] != null && p[0] != null && onAxis(p[0]));
+    const meansOf = (ts, pts) => ts.map((t) => { const v = pts.filter((p) => p[0] === t).map((p) => p[1]); return [t, v.length ? v.reduce((x, y) => x + y, 0) / v.length : null]; });
+    const pts = pointsOf(S);
     const other = S.vs ? X.series.find((q) => q.name === S.vs) : null;
-    // the control series on this series' time axis (the shared time points)
-    const opts = other ? pointsOf(other).map((p) => [S.times.indexOf(other.times[p[0]]), p[1], p[2]]).filter((p) => p[0] >= 0) : [];
-    const omeans = other ? S.times.map((_t, a) => { const v = opts.filter((p) => p[0] === a).map((p) => p[1]); return v.length ? v.reduce((x, y) => x + y, 0) / v.length : null; }) : [];
+    const opts = other ? pointsOf(other) : [];  // the control series on this series' time axis
+    const fit = spline ? timeCurve(S, i) : null, ofit = spline && other ? timeCurve(other, i) : null;
+    const means = fit ? fit.filter((p) => onAxis(p[0])) : meansOf(S.times, pts);
+    const omeans = !other ? [] : ofit ? ofit.filter((p) => onAxis(p[0])) : meansOf(spline ? other.times.filter(onAxis) : S.times, opts);
     const W = widthOf(host, 420), H = heightOf(300), L = 52, R = 14, T = 14, B = 44;
     const root = frame(host, W, H);
-    const ys = pts.concat(opts).map((p) => p[1]);
-    if (!ys.length) { text(root, W / 2, H / 2, "No measured values", { "text-anchor": "middle" }); return; }
+    const ys = pts.concat(opts).map((p) => p[1]).concat(fit ? means.map((p) => p[1]) : [], ofit ? omeans.map((p) => p[1]) : []);
+    if (!pts.concat(opts).length) { text(root, W / 2, H / 2, "No measured values", { "text-anchor": "middle" }); return; }
     let y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
     const py = (y1 - y0) * 0.1 || 0.5;
     y0 -= py; y1 += py;
     const n = S.times.length, Xs = (a) => L + 14 + (a / Math.max(1, n - 1)) * (W - L - R - 28), Y = (v) => T + (1 - (v - y0) / (y1 - y0)) * (H - T - B);
+    const Xt = spline ? (t) => L + 14 + ((t - t0) / (t1 - t0 || 1)) * (W - L - R - 28) : (t) => Xs(S.times.indexOf(t));
     const g = svg("g", {}, root);
-    axes(g, Xs, Y, [], niceTicks(y0, y1, 5), L, R, T, B, W, H, "time", D.kind === "ratio" ? "log2 ratio" : "log2 intensity");
-    S.labels.forEach((lab, a) => text(g, Xs(a), H - B + 16, lab, { "text-anchor": "middle" }));
+    axes(g, Xs, Y, [], niceTicks(y0, y1, 5), L, R, T, B, W, H, spline ? "time (h)" : "time", D.kind === "ratio" ? "log2 ratio" : "log2 intensity");
+    let last = -Infinity;
+    S.labels.forEach((lab, a) => {
+      const x = Xt(S.times[a]), half = lab.length * 3.2;
+      if (spline && x - half < last + 4) return;  // early time points crowd together on an axis in hours
+      text(g, x, H - B + 16, lab, { "text-anchor": "middle" });
+      last = x + half;
+    });
     const line = (m, col, dash) => {
       let d = "", pen = false;
-      m.forEach((v, a) => { if (v == null) { pen = false; return; } d += (pen ? "L" : "M") + Xs(a).toFixed(1) + " " + Y(v).toFixed(1); pen = true; });
+      m.forEach((p) => { if (p[1] == null) { pen = false; return; } d += (pen ? "L" : "M") + Xt(p[0]).toFixed(1) + " " + Y(p[1]).toFixed(1); pen = true; });
       if (d) svg("path", { d: d, fill: "none", stroke: col, "stroke-width": 2, "stroke-dasharray": dash }, g);
     };
-    const muted = css("--muted"), col = timeColor(S.cls[k] === "not" ? "not" : S.cls[k]) || css("--c0");
+    const muted = css("--muted"), col = timeColor(S.cls[k] === "not" ? "not" : S.cls[k]) || css("--c0"), shift = other && !spline ? 5 : 0;
     if (other) {
       line(omeans, muted, "5 4");
-      opts.forEach((p) => title(svg("circle", { cx: Xs(p[0]) + 5, cy: Y(p[1]), r: 2.8, fill: "none", stroke: muted, "stroke-width": 1.2, "data-ctrl": 1 }, g), D.samples[p[2]] + ": " + fmt(p[1])));
+      opts.forEach((p) => title(svg("circle", { cx: Xt(p[0]) + shift, cy: Y(p[1]), r: 2.8, fill: "none", stroke: muted, "stroke-width": 1.2, "data-ctrl": 1 }, g), D.samples[p[2]] + ": " + fmt(p[1])));
     }
     line(means, S.cls[k] === "not" ? css("--text2") : col, null);
-    pts.forEach((p) => title(svg("circle", { cx: Xs(p[0]) - (other ? 5 : 0), cy: Y(p[1]), r: 3.2, fill: S.cls[k] === "not" ? css("--text2") : col, "fill-opacity": isImputed(i, p[2]) ? 0.3 : 0.85, "data-j": p[2] }, g),
+    pts.forEach((p) => title(svg("circle", { cx: Xt(p[0]) - shift, cy: Y(p[1]), r: 3.2, fill: S.cls[k] === "not" ? css("--text2") : col, "fill-opacity": isImputed(i, p[2]) ? 0.3 : 0.85, "data-j": p[2] }, g),
       D.samples[p[2]] + ": " + fmt(p[1]) + (isImputed(i, p[2]) ? " (imputed)" : "")));
     if (other) text(g, L + 8, T + 10, "dashed: " + other.name, { "text-anchor": "start" });
+    if (fit) text(g, W - R - 4, T + 10, "line: spline, " + S.df + " df", { "text-anchor": "end" });
     svgTools(host, root, "time_course_" + (X.series.length > 1 ? (S.name || "series") + "_" : "") + nameOf(i));  // one file per series and feature
   }
   function renderTimeTable() {

@@ -390,7 +390,11 @@ real data:
    patient as fixed effects, Smyth's advice), covariates, time courses, and a
    moderated F-test. Every lab needs this. Checked against limma 3.68.5.
    Time courses treat time as a factor (F over time, trend, series vs
-   control, patterns); spline fits for long series are not built.
+   control, patterns); spline fits for long series → 2026-10-04 (D77): built.
+   From 7 time points (`time_model: auto`) a natural cubic spline in hours
+   (`time_spline_df`, default 4), the F on its coefficients and the
+   `~group * ns(time)` interaction; checked against R's `splines::ns` and
+   limma 3.68.5.
 2. [x] **Dose-response** (2026-09-30, D44, #59; checked against CurveCurator 0.6.0) (CurveCurator, Apache-2.0):
    - a 4-parameter log-logistic fit
    - pEC50 with a confidence interval
@@ -711,6 +715,9 @@ Collected from the other docs; resolve before/during Phase 1.
       dependency-free either way.
 - [ ] Time courses (D53): does the lab run them, and are 3 time points the right minimum? Should the trend use the
       order of the time points (built) or the hours?
+- [ ] Spline time courses (D77, 2026-10-04): is 7 time points the right place for `auto` to switch from a factor to
+      a spline, and 4 df the right default? The spline uses the hours (built); for very uneven spacing (minutes to
+      weeks) should it use log time instead? Should the trend then also move to the hours, or stay the order?
 - [ ] Search quality (D55): open a real `psm.tsv` from the PC and confirm the column names (`Spectrum`,
       `Observed Mass`, `Calculated Peptide Mass`, `Number of Missed Cleavages`, `Charge`, `Peptide Length`). What
       mass error and missed-cleavage share does the lab call a problem (built: 10 ppm and 50 %, both wide)? Should

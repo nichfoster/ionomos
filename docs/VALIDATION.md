@@ -23,6 +23,7 @@ no real FragPipe-Analyst, MSstats or Perseus export has been compared.
 | The whole pipeline on a DIA-NN matrix | FragPipeAnalystR 1.1.1 | 1e-8 on every result column | `tests/test_fpa.py`, `tests/golden/fpa/e2e/` |
 | Blocks, covariates, the moderated F, DEqMS | limma 3.68.5, DEqMS 1.30.0 | 1e-8 | `tests/test_design.py` |
 | Time courses | limma 3.68.5 | 1e-8 | `tests/test_timecourse.py` |
+| Spline time courses (D77): the natural spline basis and its `predict()` (8 time vectors, df 1-6, knots shoved off a boundary, tied knots); the F on the spline coefficients, the fitted change at each time point and the interaction F from limma's own `~Group * ns(time)` (plain, replicate block, missing values with df 3; a condition outside the series) | R 4.6.1 `splines::ns`, limma 3.68.5 | 1e-12 (basis); 1e-8 (worst 5.4e-10 on 10,350 values) | `tests/test_timecourse.py`, `tests/golden/timecourse/` |
 | Dose-response curves | CurveCurator 0.6.0 | classes, pEC50, F, p | `tests/test_dose_response.py` |
 | TMT summaries | MSstatsTMT 2.20 | 1e-9 | `tests/test_plexes.py` |
 | MaxLFQ roll-up (`analysis.rollup: maxlfq`, D76) on 54 proteins × 8 samples: disconnected sample groups, missing values, one feature, one sample, a chain of samples | `iq::maxLFQ()` 2.0.1 (both its scaling and the summed-intensity scaling, and its components); `diann::diann_maxlfq()` 1.0.1 (profiles of connected proteins) | 1e-9; 1e-3 (DIA-NN regularises) | `tests/test_rollup.py`, `tests/golden/maxlfq/` |

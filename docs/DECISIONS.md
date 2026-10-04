@@ -3116,3 +3116,71 @@ always runs with 3+ conditions and has no setting to stop it.
 - That Spectronaut's `FG.Quantity` is the precursor quantity the lab's
   reports carry. The name follows Spectronaut's column naming (FG. =
   fragment group, the precursor), not a real export.
+
+### D77 — Long time courses are fitted as natural splines in hours; short ones stay a factor
+**2026-10-04.** ROADMAP 5C #1 left "spline fits for long series are not
+built" (D53). With many time points the factor model spends a parameter on
+every time point and tests noise as change; the limma User's Guide (9.6.2,
+many time points) fits a regression spline instead.
+
+1. **When.** `analysis.time_model: auto | factor | spline` (default
+   `auto`). `auto` keeps time a factor up to 6 time points and fits a
+   spline from 7 (`timecourse.AUTO_SPLINE_POINTS`). Why 7: proteomics time
+   courses usually have 3 to 6 points (D53), and every series that exists
+   today keeps its numbers; with the default 4 df, a spline only saves
+   parameters once a series has more than 5 time points, at 6 it saves one,
+   and from 7 it saves at least two, which is the lack of fit that smoothing
+   turns into power. The lab hasn't said whether it runs time courses, so
+   the switch is where nothing changes for what exists.
+2. **How many df.** `time_spline_df` (default `auto` = 4, the middle of the
+   guide's "3 to 5 is reasonable"), never more than the time points − 2: at
+   time points − 1 the curve goes through every mean (the factor model with
+   extra assumptions), above it can't be fitted. A higher value is lowered
+   to time points − 2 with the `TIME_SPLINE` issue (a note, with help), as
+   is a spline model that can't be fitted (then that series is a factor).
+   `time_model: spline` on a short series uses min(4, points − 2), so 3
+   points give a straight line in hours.
+3. **The basis is R's, column for column.** `downstream/splines.py` ports
+   `splines::ns` (R 4.6.1): interior knots at type-7 quantiles of the
+   sample times (with replicates, as `ns(targets$Time)`), R's shoving of a
+   knot that lands on a boundary, Cox–de Boor `splineDesign` with
+   derivatives, and the natural constraint by LINPACK's Householder QR
+   (`dqrdc2` / `qr.qty`), so the coefficients are R's and not only their
+   span. `predict()` on new times is the same code.
+4. **Hours, not order.** A curve is a function of time, so the spline uses
+   the hours (knots at quantiles adapt to uneven spacing). The trend t
+   still uses the order of the time points (D53, an open question).
+5. **One model per series.** The comparisons' model (`~0 + condition` plus
+   block and covariates) with the series' conditions replaced by a level
+   and the spline columns; every other condition keeps its own mean, so the
+   residual variance uses every sample, as in the comparisons. Change over
+   time is the moderated F on the spline coefficients. The series-vs-control
+   test fits both series as curves on one basis made from both series'
+   times and takes the F on the differences of their coefficients, which is
+   limma's `~Group * ns(time)` interaction (the golden computes it in that
+   parameterisation). It needs what the factor test needs (the same first
+   time and a shared later one, not a shared baseline). The variance prior
+   (limma or DEqMS) is squeezed per model.
+6. **What the rows mean.** log2FC is the fitted curve's change from the
+   first time point at each time point; the largest change, its time, the
+   class and the patterns follow from it, so a single noisy time point
+   among many does not make a feature "changing". `mean_log2` keeps the
+   observed means; `time_course.tsv` has a `model` column (`factor` /
+   `spline (4 df)`); `analysis.json` gives `time_model` and the knots.
+7. **Drawn as a curve.** The payload carries per series the basis on 61
+   points of hours (less its value at the first time point) and per feature
+   its coefficients and a level (the mean of each value less the fitted
+   change at its time, so the curve runs through the replicates whatever the
+   block). The report's profile and `time_profiles` (D68) draw the curve on
+   an axis in hours, labels thinned where early time points crowd, the
+   control series' curve dashed. Pattern tiles stay by order.
+
+**Checked** against R 4.6.1 `splines::ns` (bases and `predict()` for 8 time
+vectors, df 1–6, shoved and tied knots: 1e-12) and limma 3.68.5
+(`tests/golden/timecourse/run_spline_reference.R`): 150 features × 51
+samples, Drug and DMSO at 8 time points from 0 to 48 h and a Pool condition;
+plain, replicate block, missing values with df 3; F, p, adjusted p, the
+fitted changes and the interaction F, p, adjusted p: 10,350 values, worst
+relative difference 5.4e-10. **Not verified**: a real lab time course; the
+default N = 7 and df = 4 against what the lab would call a long series;
+very uneven spacing (0 to 2 weeks) where a log-time axis might fit better.

@@ -776,7 +776,9 @@ def _time_course(p, settings, results: Path, out: Outcome, model) -> tuple[dict,
     if res is not None:
         out.files.append(write_tsv(results / "time_course.tsv", tc.COLUMNS, tc.table_rows(res)))
         table = f"{RESULTS}/time_course.tsv"
-    return (tc.summary(res, plan, table), tc.report_payload(res, plan), plan.problems,
+    problems = [("TIMES", sev, msg) for sev, msg in plan.problems] + \
+        [("TIME_SPLINE", sev, msg) for sev, msg in plan.spline_problems]
+    return (tc.summary(res, plan, table), tc.report_payload(res, plan), problems,
             res.notes if res is not None else plan.notes)
 
 def _protein_correction(p, diffs, settings, results: Path, out: Outcome, dest: Path):

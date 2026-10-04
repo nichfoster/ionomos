@@ -365,10 +365,17 @@ name (`DMSO`) counts as time 0.
   `DMSO_4h` …) its mean is the dashed line, and **differs from** tests
   whether the feature behaves differently over time than in the control.
 
-The time points are treated as separate groups, so no curve is assumed; with
-two or three points per series this is the honest reading. The pairwise
-comparisons in the volcano plot are unchanged. The numbers are also in
-`results/time_course.tsv`.
+With up to 6 time points per series, the time points are treated as
+separate groups, so no curve is assumed; with few points this is the honest
+reading. From 7 time points (or with `time_model: spline`), a smooth curve
+is fitted instead: a natural cubic spline in hours with 4 degrees of
+freedom (`time_spline_df`). The F-test then asks whether the curve changes
+at all, the log2 fold changes are the curve's change from the first time
+point, and the profile draws the fitted curve on an axis in hours (the
+control series' curve dashed). The trend still uses the order of the time
+points. The pairwise comparisons in the volcano plot are unchanged. The
+numbers are also in `results/time_course.tsv` (its `model` column says
+which was used).
 
 ## Liganded sites {#report.cys}
 
