@@ -352,8 +352,9 @@ real data:
 - `DESIGN_NOT_USED` is an input issue (the report still comes out, with
   ~0 + condition). Decide whether a design the user asked for should instead
   stop the analysis.
-- The moderated F-test runs whenever limma compares 3+ conditions of
-  intensity data; there is no setting to switch it off.
+- ~~The moderated F-test runs whenever limma compares 3+ conditions of
+  intensity data; there is no setting to switch it off.~~ → 2026-10-04
+  (D76): `analysis.f_test: auto | off`, default `auto` (as before).
 - Proteome Discoverer and MaxQuant TMT layouts are from the documentation;
   a real export of each is still needed.
 - `irs: auto` falls back to the plex means only for balanced plexes; check
@@ -369,6 +370,12 @@ real data:
   with a FragPipe LFQ search of the same files. Check the default tolerances
   (±20 ppm) suit the instrument, and whether the median-polish roll-up or a
   MaxLFQ would agree better with FragPipe's `combined_protein.tsv`.
+  2026-10-04 (D76): MaxLFQ is built (`analysis.rollup: maxlfq`, checked
+  against R's `iq` and `diann`), so this is now one re-analysis with
+  `rollup: maxlfq` followed by `ionomos compare` of both against the
+  FragPipe result. The simulated benchmark found no clear winner (MaxLFQ: 1–3
+  points more sensitive, 0.7–1.3 points more false discoveries), so the
+  default stays median polish until real data decide.
 - Sage TMT (D56) is built from Sage's source, not a real `tmt.tsv`. On a
   real TMT search check: that `scannr` in `tmt.tsv` matches
   `results.sage.tsv` for MS3 quantification; that `tmt_1 … tmt_n` are in
