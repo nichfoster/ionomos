@@ -747,7 +747,10 @@ def string_rows(info: dict) -> list[dict]:
 
 
 def _r(v, d: int = 4):
-    return None if v is None or (isinstance(v, float) and not math.isfinite(v)) else round(v, d)
+    """Rounded for the report; a small p-value keeps 4 significant digits instead of becoming 0."""
+    if v is None or (isinstance(v, float) and not math.isfinite(v)):
+        return None
+    return float(f"{v:.4g}") if v != 0 and abs(v) < 1e-4 else round(v, d)
 
 
 def report_payload(local: dict | None, ksea: dict | None, net: dict | None, correction: dict | None) -> dict:
