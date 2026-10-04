@@ -571,6 +571,19 @@ def _rmtree_retry(src: Path, attempts: int = 5) -> None:
             time.sleep(0.5 * (i + 1))
 
 
+def _acquisition(dest: Path, p: Plan) -> dict:
+    """ionomos.json "acquisition": when each raw file was acquired (acqtime.py, D78), {manifest file: info}.
+    Reads the first bytes of each file; a file that can't be read gets what else is known. Never raises: a
+    time is never a reason not to file a folder."""
+    try:
+        from ionomos import acqtime
+
+        return acqtime.for_manifest(dest, [m.file for m in p.manifest])
+    except Exception:  # noqa: BLE001
+        log.exception("could not read the acquisition times of %s", dest)
+        return {}
+
+
 def write_status(dest: Path, record: dict) -> None:
     from ionomos import names
 
@@ -788,6 +801,7 @@ def _intake(folder: Path, cfg: Config, ledger: Ledger, resolver: Resolver | None
                 "analysis_method": cfg.analysis_method(p.folder.method),  # what it is analysed as (D54)
             },
         }
+        record["acquisition"] = _acquisition(dest, p)
         write_status(dest, record)
     except Exception as exc:  # noqa: BLE001 - the folder is already moved; don't report a retry
         log.exception("trouble finishing intake for %s; filing a minimal record instead", dest)
