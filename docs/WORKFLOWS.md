@@ -373,6 +373,7 @@ features × samples matrix of log2 values and runs the same statistics:
   | NORMALISATION_COMPOSITION | decide / note | median centring would shift the conditions against each other (many features change one way): asks when `median` / `gn` is chosen, a note when `auto` switched to the ratio method |
   | TMT_PLEXES_NOT_IN_MODEL | note | several TMT plexes, `irs: none` and no block for the plex: the plex effect counts as replicate spread, so the tests miss changes (D71) |
   | TIMES | decide / note | a time course whose time points can't all be read (a name in `analysis.times` that isn't a condition, two times in one name) |
+  | TIME_SPLINE | note | a spline time course (D77) not fitted as asked: `time_spline_df` too high for the series' time points (lowered to time points − 2), or the spline model can't be fitted (time is a factor for that series) |
   | LIGANDED_DIRECTION, SITE_ANNOTATION | note | isoDTB: the competition ratio looks reversed; the site annotation file can't be used |
   | RATIO_OFFSET | note | isoDTB: a replicate's ratios sit clearly off 0 on the stable sites (a mixing error?) and `ratio_centre` is none (D70) |
   | PROTEIN_CORRECTION_CONDITIONS / PROTEIN_CORRECTION | decide / note | isoDTB with `protein_correction`: a site condition has no proteome comparison; the proteome is missing or unusable, or few sites find their protein (D70) |
@@ -540,10 +541,29 @@ the report adds, per series and feature:
   are grouped into at most 6 patterns by profile shape.
 - The trend uses the order of the time points, not the hours, so `0 / 1 h /
   24 h` is not dominated by the long gap.
-- Time is a factor: no curve or spline is fitted. Features not measured at
-  every time point of a series are not tested (unless imputed).
+- Up to 6 time points, time is a factor: no curve is fitted. Features not
+  measured at every time point of a series are not tested (unless imputed).
+- **Many time points** (D77, limma User's Guide "many time points"): from 7
+  time points (`time_model: auto`), or always with `time_model: spline`, a
+  series is a natural cubic spline in hours (R's `ns()`, knots at quantiles
+  of the sample times) with `time_spline_df` degrees of freedom (`auto`: 4,
+  at most the time points − 2). The series gets its own model (the
+  comparisons' model with its conditions replaced by a level and the spline
+  terms; other conditions, the block and covariates stay):
+
+  | Question | Test |
+  |---|---|
+  | Does it change over time? | moderated F on the spline coefficients |
+  | Does it respond differently from the control series? | moderated F on the interaction terms of both series as curves on one basis (`~group * ns(time)`) |
+
+  log2FC, the largest change, the class and the patterns use the fitted
+  curve's change from the first time point; the trend t stays the factor
+  model's. The report's profile and `time_profiles` draw the fitted curve
+  on an axis in hours. A `time_spline_df` the series can't carry is lowered
+  to the time points − 2 with a `TIME_SPLINE` issue.
 - Settings: `times`, `time_unit`, `time_min_points` (3), `time_course`
-  (false switches it off). Intensity data with the limma test only.
+  (false switches it off), `time_model` (auto | factor | spline),
+  `time_spline_df` (auto). Intensity data with the limma test only.
 - Output: `results/time_course.tsv`, `analysis.json` → `time_course`, the
   report's **Time course** section. The pairwise comparisons are unchanged.
 
