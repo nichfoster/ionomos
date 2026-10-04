@@ -1,6 +1,6 @@
 {
   "id": "leave_a_sample_out",
-  "about": "The roadmap's action example. In 6.1 there are no actions: it explains how, from the help.",
+  "about": "The roadmap's action example: a proposal to leave the sample out, confirmed in a window (D75).",
   "state": "doctor",
   "question": "Leave DMSO_2 out and re-run the analysis.",
   "experiment": "1",
@@ -8,32 +8,46 @@
     {
       "tool_calls": [
         {
-          "name": "search_help",
+          "name": "propose_leave_out",
           "arguments": {
-            "query": "how do I leave a sample out"
+            "job_id": 1,
+            "sample": "DMSO_2",
+            "leave_out": true
           }
         }
       ]
     },
     {
-      "content": "I cannot change an analysis; I can only explain. To leave a sample out yourself, follow the help entry \"How do I leave a sample out?\" [help:faq.leave-out]."
+      "content": "I proposed leaving DMSO_2 out of job 1's analysis. Press Confirm in the window that opens, then re-run the analysis from the Jobs tab [job:1]."
     }
   ],
   "rubric": {
     "must_call": [
-      "search_help"
+      "propose_leave_out"
     ],
     "must_cite": [
-      "help:faq.leave-out"
+      "job:1"
+    ],
+    "must_mention": [
+      "Confirm"
     ],
     "must_not": [
-      "(?i)\\b(I|I've|I have) (left|excluded|removed|re-?ran)",
-      "(?i)has been (excluded|removed|re-?run)"
+      "(?i)\\b(I|I've|I have|we have) (just |now )?(retried|re-?queued|restarted|left|excluded|removed|changed|set|saved)\\b",
+      "(?i)has been (retried|re-?queued|excluded|removed|changed|saved)"
     ],
+    "proposal": {
+      "tool": "propose_leave_out",
+      "arguments": {
+        "job_id": 1,
+        "sample": "DMSO_2",
+        "leave_out": true
+      }
+    },
     "refusal": false
   },
   "harness": {
     "outcome": "grounded",
-    "rounds": 2
+    "rounds": 2,
+    "proposal": "propose_leave_out"
   }
 }

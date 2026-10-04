@@ -16,6 +16,9 @@ Simulated (no data needed; `ionomos benchmark [--kind dia|isodtb|tmt]`):
     tmt       MaxQuant reporter intensities of 2 or 3 TMT plexes with a pooled reference (D66): balanced and
               unbalanced channels, changes both ways or a pulldown one way; IRS on the pool, on the plex means, or
               none, with auto or median normalisation, or the plex as a block
+    rollup    label-free peptide intensities (MSstats format, D76): peptides with their own offsets, missing values
+              and interferences, rolled up to proteins by Tukey median polish or MaxLFQ (analysis.rollup), with
+              and without imputation
     measured  sensitivity (planted changes found, right direction), the observed false discovery proportion
               (FDP) against the nominal alpha, the bias of the fold changes, the offset of the unchanged features
 
@@ -132,18 +135,37 @@ TMT_GRIDS = {
                        "missing": ["typical"], "settings": ["no IRS, plex as a block", "no IRS + auto"], "seeds": 4,
                        "proteins": 600},
 }
+# the roll-up (D76): peptide tables (simulate.peptide_msstats) rolled up by each analysis.rollup, then the defaults
+ROLLUP_KIND_SETTINGS = [
+    ("median polish + perseus (default)", {"rollup": "median_polish", "imputation": "perseus", "normalize": "median"}),
+    ("MaxLFQ + perseus", {"rollup": "maxlfq", "imputation": "perseus", "normalize": "median"}),
+    ("median polish, no imputation", {"rollup": "median_polish", "imputation": "none", "normalize": "median"}),
+    ("MaxLFQ, no imputation", {"rollup": "maxlfq", "imputation": "none", "normalize": "median"}),
+]
+ROLLUP_GRIDS = {
+    "standard": {"designs": [(3, 3), (4, 4), (6, 6), (2, 4)], "effects": [0.585, 1.0, 2.0],
+                 "missing": ["typical", "heavy"], "settings": [s[0] for s in ROLLUP_KIND_SETTINGS], "seeds": 5,
+                 "proteins": 800},
+    "quick": {"designs": [(3, 3)], "effects": [1.0], "missing": ["typical"],
+              "settings": [s[0] for s in ROLLUP_KIND_SETTINGS], "seeds": 2, "proteins": 500},
+    "guard": {"designs": [(3, 3), (2, 4)], "effects": [1.0], "missing": ["typical"],
+              "settings": ["median polish + perseus (default)", "MaxLFQ + perseus"], "seeds": 3, "proteins": 500},
+}
 KINDS = {
     "dia": "label-free DIA protein matrices (DIA-NN's report.pg_matrix.tsv)",
     "isodtb": "isoDTB site ratios (FragPipe's label quant, merged into sites as the lab's R script does)",
     "tmt": "TMT reporter intensities of several plexes with a pooled reference (MaxQuant's proteinGroups.txt)",
+    "rollup": "label-free peptide intensities (the MSstats format) rolled up to proteins: median polish vs MaxLFQ",
 }
-FILE_STEM = {"dia": "benchmark_simulated", "isodtb": "benchmark_simulated_isodtb", "tmt": "benchmark_simulated_tmt"}
+FILE_STEM = {"dia": "benchmark_simulated", "isodtb": "benchmark_simulated_isodtb", "tmt": "benchmark_simulated_tmt",
+             "rollup": "benchmark_simulated_rollup"}
+SIM_NAMES = {"dia": "DIA", "rollup": "peptide"}   # the data's name in reference_name, where it is not the kind
 
 SIM_COLUMNS = ["setting", "imputation", "normalize", "controls", "treated", "effect_log2", "missing", "seeds",
                "planted", "tested_share", "hits", "false_hits", "sensitivity", "fdp", "sensitivity_alpha_only",
                "fdp_alpha_only", "fdp_alpha_only_max_seed", "fc_bias_changed", "fc_offset_unchanged",
                "fc_offset_unchanged_abs", "kind", "test", "irs", "plexes", "changed_share", "direction", "mixing_sd",
-               "ratio_centre"]
+               "ratio_centre", "rollup"]
 
 
 def run_pipeline(m, settings: analysis.Settings):
@@ -202,8 +224,10 @@ class _Table:
     """One simulated table, loaded by the pipeline's own loader, with its truth."""
 
     def __init__(self, m, truth: dict[str, int], comparison: tuple[str, str | None], key: str = "label",
-                 base: dict | None = None, pools: tuple[list[str], list[str]] = ([], [])):
+                 base: dict | None = None, pools: tuple[list[str], list[str]] = ([], []),
+                 by_rollup: dict | None = None):
         self.m, self.truth, self.comparison, self.key = m, truth, comparison, key
+        self.by_rollup = by_rollup or {}  # analysis.rollup -> the table loaded with it (the roll-up kind, D76)
         self.base = base or {}        # settings every setting of this kind needs (the design of the TMT channels)
         self.pools = pools            # (pool channels, pool samples) of a TMT table
 
@@ -257,6 +281,20 @@ def _tmt_table(folder: Path, cell: dict, proteins: int, seed: int) -> _Table:
                   pools=(pool_channels, pool_samples))
 
 
+def _rollup_table(folder: Path, cell: dict, proteins: int, seed: int) -> _Table:
+    """Peptides in the MSstats format, loaded once per roll-up by the pipeline's own loader (engines.load_msstats)."""
+    from ionomos.downstream import engines
+
+    runs = [(f"DMSO_{r}", "DMSO") for r in range(1, cell["controls"] + 1)] + \
+           [(f"Drug_{r}", "Drug") for r in range(1, cell["treated"] + 1)]
+    path = folder / f"rollup_{seed}" / "msstats_input.tsv"
+    truth = simulate.peptide_msstats(path, runs, seed=seed, n_proteins=proteins, changed_fraction=CHANGED_FRACTION,
+                                     effect=cell["effect_log2"], noise=NOISE, noise_spread=NOISE_SPREAD,
+                                     missing=MISSING[cell["missing"]])
+    loaded = {method: engines.load_msstats(path, method) for method in ("median_polish", "maxlfq")}
+    return _Table(loaded["median_polish"], truth["Drug"], ("Drug", "DMSO"), by_rollup=loaded)
+
+
 def _cells(kind: str, g: dict, designs: list[tuple]) -> list[dict]:
     """The scenarios of a grid: one dict per cell, every kind with the same keys."""
     out = []
@@ -275,7 +313,7 @@ def _cells(kind: str, g: dict, designs: list[tuple]) -> list[dict]:
 
 def _describe(kind: str, cell: dict) -> str:
     fold = f"{2 ** cell['effect_log2']:.3g}-fold"
-    if kind == "dia":
+    if kind in ("dia", "rollup"):
         return f"{cell['controls']} vs {cell['treated']} samples, {fold}, missing values {cell['missing']}"
     changed = f"{cell['changed_share']:.0%} changed {'one way' if cell['direction'] == 'up' else 'both ways'}"
     if kind == "isodtb":
@@ -298,7 +336,7 @@ def _pick(diffs: list, comparison: tuple[str, str | None]):
 
 
 def kind_settings(kind: str) -> list[tuple[str, dict]]:
-    return {"dia": SETTINGS, "isodtb": ISODTB_SETTINGS, "tmt": TMT_SETTINGS}[kind]
+    return {"dia": SETTINGS, "isodtb": ISODTB_SETTINGS, "tmt": TMT_SETTINGS, "rollup": ROLLUP_KIND_SETTINGS}[kind]
 
 
 def simulated(grid: str | dict = "standard", extra_settings: list[tuple[str, dict]] | None = None,
@@ -309,7 +347,7 @@ def simulated(grid: str | dict = "standard", extra_settings: list[tuple[str, dic
     plex. Deterministic: the seeds are fixed."""
     if kind not in KINDS:
         raise BenchmarkError(f"unknown kind {kind!r} (known: {', '.join(KINDS)})")
-    grids = {"dia": GRIDS, "isodtb": ISODTB_GRIDS, "tmt": TMT_GRIDS}[kind]
+    grids = {"dia": GRIDS, "isodtb": ISODTB_GRIDS, "tmt": TMT_GRIDS, "rollup": ROLLUP_GRIDS}[kind]
     g = dict(grids[grid]) if isinstance(grid, str) else dict(grid)
     known = dict(kind_settings(kind))
     todo = [(name, known[name]) for name in g["settings"]] + list(extra_settings or [])
@@ -317,7 +355,7 @@ def simulated(grid: str | dict = "standard", extra_settings: list[tuple[str, dic
     if kind == "tmt":
         all_designs = [d for d in all_designs if d[0] + d[1] <= 9]  # a TMT 10-plex, with a pooled reference
     n_seeds = seeds or g["seeds"]
-    table = {"dia": _dia_table, "isodtb": _isodtb_table, "tmt": _tmt_table}[kind]
+    table = {"dia": _dia_table, "isodtb": _isodtb_table, "tmt": _tmt_table, "rollup": _rollup_table}[kind]
     rows = []
     cells = _cells(kind, g, all_designs)
     with tempfile.TemporaryDirectory(prefix="ionomos-benchmark-") as td:
@@ -330,20 +368,20 @@ def simulated(grid: str | dict = "standard", extra_settings: list[tuple[str, dic
                 for name, over in todo:
                     st = analysis.settings_from({"alpha": alpha, "log2fc": log2fc, "enrichment": False,
                                                  **_resolve(over, tab)})
-                    _p, diffs = run_pipeline(tab.m, st)
+                    _p, diffs = run_pipeline(tab.by_rollup.get(st.rollup, tab.m), st)
                     d = _pick(diffs, tab.comparison)
                     if d is not None:
                         pooled[name].append(score(d, tab.truth, cell["effect_log2"], alpha, tab.key))
             for name, over in todo:
                 rows.append(_pool(name, over, cell, pooled[name], kind))
-    noise = {"dia": NOISE, "isodtb": ISODTB_NOISE, "tmt": 0.25}[kind]
+    noise = {"dia": NOISE, "isodtb": ISODTB_NOISE, "tmt": 0.25, "rollup": NOISE}[kind]
     return {"kind": "simulated", "data": kind, "data_description": KINDS[kind],
             "grid": grid if isinstance(grid, str) else "custom", "alpha": alpha, "log2fc": log2fc,
-            "proteins": g["proteins"], "changed_fraction": CHANGED_FRACTION if kind == "dia" else None,
+            "proteins": g["proteins"], "changed_fraction": CHANGED_FRACTION if kind in ("dia", "rollup") else None,
             "noise_sd": noise,
             "noise_spread": NOISE_SPREAD, "seeds": n_seeds, "rows": rows,
             "settings": [name for name, _ in todo], "generated_at": datetime.now().isoformat(timespec="seconds"),
-            "reference_name": f"simulated {kind if kind != 'dia' else 'DIA'} data with planted changes",
+            "reference_name": f"simulated {SIM_NAMES.get(kind, kind)} data with planted changes",
             "verdicts": _sim_verdicts(rows, alpha, log2fc)}
 
 
@@ -359,7 +397,7 @@ def like(folder: str | Path) -> dict:
     info = json.loads((results / "analysis.json").read_text(encoding="utf-8"))
     st = info.get("settings") or {}
     tmt = info.get("tmt") if isinstance(info.get("tmt"), dict) else None
-    kind = "isodtb" if info.get("level") == "site" else "tmt" if tmt and tmt.get("plexes") else "dia"
+    kind = "isodtb" if info.get("level") == "site" and not (info.get("phospho") or {}).get("ran") else "tmt" if tmt and tmt.get("plexes") else "dia"
     keys = {"dia": ("imputation", "normalize", "test", "filter_condition_pct", "filter_global_pct", "min_valid",
                     "small_group_min_valid", "impute_shift", "impute_scale"),
             "isodtb": ("test", "min_valid", "ratio_centre"),
@@ -418,6 +456,7 @@ def _pool(name: str, over: dict, cell: dict, runs: list[dict], kind: str = "dia"
             "normalize": "none" if ratio else over.get("normalize", "auto"), "test": over.get("test", "limma"),
             "irs": over.get("irs", "auto") if kind == "tmt" else "", "controls": cell["controls"],
             "ratio_centre": over.get("ratio_centre", "none") if ratio else "",
+            "rollup": over.get("rollup", "") if kind == "rollup" else "",
             "treated": cell["treated"], "plexes": cell["plexes"] or "", "effect_log2": cell["effect_log2"],
             "changed_share": cell["changed_share"], "direction": cell["direction"], "mixing_sd": cell["mixing_sd"],
             "missing": cell["missing"], "seeds": len(runs),
@@ -487,7 +526,7 @@ def _sim_verdicts(rows: list[dict], alpha: float, log2fc: float) -> list[str]:
                    f"found at adjusted p ≤ {alpha:g}: {found}; fold changes of real changes off by "
                    f"{s['fc_bias_changed']:+.2f} log2 on average" +
                    (f", unchanged features by {s['fc_offset_unchanged_abs']:.2f} (|mean| per table)"
-                    if s["kind"] != "dia" and s["fc_offset_unchanged_abs"] is not None else ""))
+                    if s["kind"] not in ("dia", "rollup") and s["fc_offset_unchanged_abs"] is not None else ""))
     return out
 
 
@@ -516,6 +555,12 @@ def _sim_page(res: dict) -> str:
                 f"(SD {TMT_PLEX_SD} log2), a loading difference per channel, replicate SD {res['noise_sd']} log2 "
                 "(differing between proteins), proteins missing from whole plexes more often at low abundance; "
                 "a share of the proteins changed both ways, or one way (a pulldown)"),
+        "rollup": (f"on simulated label-free peptide tables (the MSstats format) with known truth: {res['proteins']:,} "
+                   "proteins of 1 to 30 peptides, each peptide with its own ionisation offset, "
+                   f"{res.get('changed_fraction') or CHANGED_FRACTION:.0%} of the proteins changed by a planted fold "
+                   f"change, replicate SD {res['noise_sd']} log2 (differing between proteins), a loading difference "
+                   "per run, weak peptides missing more often, and 2% of the values off by an interference; the "
+                   "peptides are rolled up to proteins by Tukey median polish or by MaxLFQ (analysis.rollup)"),
     }[kind]
     b = [f"<p class='sub'>The Ionomos pipeline (loader, plexes, filter, normalisation, imputation, limma, "
          f"Benjamini–Hochberg) {what}. {res['seeds']} simulated tables per scenario, pooled. Hits: adjusted p ≤ "
@@ -552,7 +597,7 @@ def _sim_page(res: dict) -> str:
             return "–" if v is None else format(v, "+.2f")
 
         rk = r.get("kind", "dia")
-        samples = (f"{r['controls']} vs {r['treated']}" if rk == "dia" else
+        samples = (f"{r['controls']} vs {r['treated']}" if rk in ("dia", "rollup") else
                    f"{r['treated']} replicates" + (f", mixing error SD {r['mixing_sd']:g}" if r["mixing_sd"] else "")
                    if rk == "isodtb" else f"{r['plexes']} plexes × {r['controls']} vs {r['treated']}")
         changed = f"{r['changed_share']:.0%} {'one way' if r['direction'] == 'up' else 'both ways'}"
@@ -569,7 +614,8 @@ def _sim_page(res: dict) -> str:
              "negative means underestimated. Offset of unchanged: their mean log2 fold change, pooled (signed; "
              "the per-table size without its sign is in the TSV). The same numbers are in "
              f"<a href='{stem}.tsv'>{stem}.tsv</a> and <a href='{stem}.json'>{stem}.json</a>.</p></section>")
-    title = {"dia": "simulated data", "isodtb": "simulated isoDTB data", "tmt": "simulated TMT data"}[kind]
+    title = {"dia": "simulated data", "isodtb": "simulated isoDTB data", "tmt": "simulated TMT data",
+             "rollup": "simulated peptide data (roll-up)"}[kind]
     return plots.page(f"Ionomos benchmark: {title}", f"generated {res['generated_at']} · grid {res['grid']}",
                       "".join(b))
 

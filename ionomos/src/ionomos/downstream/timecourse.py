@@ -19,6 +19,19 @@ set of contrasts between its coefficients, with the same variance prior as the c
     vs the control     (2 series sharing time points, one of them the control) moderated F on the interaction
     series             contrasts (A_t - A_0) - (B_t - B_0): does the series respond differently over time
 
+Many time points (D77, limma User's Guide 9.6.2): a series with analysis.time_model: spline (or auto and at
+least AUTO_SPLINE_POINTS time points) is a smooth curve in hours instead, a natural cubic spline with
+time_spline_df degrees of freedom (splines.ns: R's ns(), ported exactly). Each such series gets a model of its
+own: the comparisons' model with the series' conditions replaced by one level and the spline's columns (every
+other condition keeps its own mean; the block / covariates stay), and
+
+    change over time   moderated F on the spline coefficients (time_spline_df of them)
+    vs the control     a model holding both series as curves on one basis made from both series' times (limma's
+                       ~Group * ns(time)): moderated F on the differences of their spline coefficients
+    profile            the fitted curve's change from the first time point, at each time point (log2fc)
+
+The trend t stays the factor model's linear contrast over the ordered time points.
+
 Then, descriptively: each feature's log2 fold change against the first time point, its largest change and
 when, a class (up / down / mixed / not, at the report's alpha and |log2FC| cut-offs on the F q-value), and
 for the changing features a pattern: k-means on the profiles scaled to their largest change, started from
@@ -33,7 +46,7 @@ import re
 import statistics
 from dataclasses import dataclass, field
 
-from ionomos.downstream import stats
+from ionomos.downstream import splines, stats
 
 HOURS = {"s": 1 / 3600, "min": 1 / 60, "h": 1.0, "d": 24.0}
 _UNIT = {"s": "s", "sec": "s", "secs": "s", "min": "min", "mins": "min", "h": "h", "hr": "h", "hrs": "h",
@@ -43,9 +56,16 @@ _UNITS_RX = "secs|sec|s|mins|min|hours|hour|hrs|hr|h|days|day|d"
 _TIME_RE = re.compile(rf"(?<![A-Za-z0-9.])[tT]?(\d+(?:[.p]\d+)?)\s?({_UNITS_RX})(?![A-Za-z0-9])")
 CLASSES = ("up", "down", "mixed", "not")
 MAX_PATTERNS = 6
+TIME_MODELS = ("auto", "factor", "spline")
+# auto (D77): time is a factor up to 6 time points and a spline from 7. Up to 6 points (what a proteomics time
+# course usually has, D53) a 4-df spline would save at most one parameter on the factor model; from 7 on it uses
+# at least 2 fewer than there are time points, and that lack of fit is what the smoothing buys.
+AUTO_SPLINE_POINTS = 7
+DEFAULT_SPLINE_DF = 4        # the middle of the limma User's Guide's "3 to 5 is reasonable" (9.6.2)
+GRID_POINTS = 61             # points of a fitted curve in the report
 COLUMNS = ["series", "id", "label", "description", "class", "pattern", "F", "pvalue", "qvalue", "trend_t",
            "trend_pvalue", "trend_qvalue", "max_log2fc", "peak_time", "times", "log2fc", "mean_log2",
-           "interaction_vs", "interaction_F", "interaction_pvalue", "interaction_qvalue"]
+           "interaction_vs", "interaction_F", "interaction_pvalue", "interaction_qvalue", "model"]
 
 
 class TimeError(ValueError):
@@ -130,7 +150,8 @@ class Plan:
     series: list[Series] = field(default_factory=list)
     skipped: list[Series] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
-    problems: list[tuple[str, str]] = field(default_factory=list)   # (severity, message) for the doctor
+    problems: list[tuple[str, str]] = field(default_factory=list)   # (severity, message) for the doctor (TIMES)
+    spline_problems: list[tuple[str, str]] = field(default_factory=list)   # (severity, message): TIME_SPLINE
     reason: str = ""
 
 
@@ -232,6 +253,16 @@ class Course:
     sample_time: list[float]
     interaction_vs: str = ""
     untested: int = 0
+    spline: dict | None = None   # {"df", "knots", "boundary", "grid", "basis"}: the curve's basis on the grid,
+                                 # less its value at the first time point; None: time is a factor
+
+    @property
+    def model(self) -> str:
+        return "spline" if self.spline else "factor"
+
+    @property
+    def model_label(self) -> str:
+        return f"spline ({self.spline['df']} df)" if self.spline else "factor"
 
 
 @dataclass
@@ -265,6 +296,119 @@ def _f(est, sus, mod, idx: list[int], cmat, v, enough) -> tuple[list[float], lis
     cvc = [[sum(ci[a] * v[a][b] * cj[b] for a in range(p) if ci[a] for b in range(p) if cj[b]) for cj in cs]
            for ci in cs]
     return dz.moderated_f(t_rows, cvc, mod.df2)
+
+
+def spline_df(n_times: int, s, label: str = "") -> tuple[int, str]:
+    """(df, problem) for a series of n_times time points under analysis.time_model / time_spline_df. df 0: time
+    is a factor. A df the series can't carry (more than n_times - 2) becomes n_times - 2, with the reason."""
+    mode = getattr(s, "time_model", "auto")
+    if mode == "factor" or (mode == "auto" and n_times < AUTO_SPLINE_POINTS):
+        return 0, ""
+    most = n_times - 2
+    asked = int(getattr(s, "time_spline_df", 0) or 0)
+    if not asked:
+        return min(DEFAULT_SPLINE_DF, most), ""
+    if asked <= most:
+        return asked, ""
+    why = ("would pass through every time point's mean, as the factor model does, so nothing would be smoothed"
+           if asked == n_times - 1 else "would have more parameters than there are time points and can't be fitted")
+    return most, (f"time course {label}analysis.time_spline_df is {asked}, too high for {n_times} time points: such "
+                  f"a curve {why}. {most} df were used (at most the number of time points minus 2)")
+
+
+def _spline_model(m, des, members: list[Series], df: int):
+    """The comparisons' design with the conditions of members replaced by, per series, a level and the columns
+    of a natural spline in hours (one basis, made from every member sample's time: limma's ~Group * ns(time)).
+    Returns (x, the spline columns of each member, the basis)."""
+    of = {c: sr for sr in members for c in sr.time_of}
+    rows = [j for j, smp in enumerate(m.samples) if m.condition[smp] in of]
+    when = {j: of[m.condition[m.samples[j]]].time_of[m.condition[m.samples[j]]] for j in rows}
+    basis = splines.ns([when[j] for j in rows], df)
+    at = dict(zip(rows, basis.basis, strict=True))
+    others = [c for c in des.conditions if c not in of]
+    nc = len(des.conditions)
+    drow = dict(zip(des.samples, des.x, strict=True))
+    x = []
+    for j, smp in enumerate(m.samples):
+        c = m.condition[smp]
+        row = [1.0 if c == o else 0.0 for o in others]
+        for sr in members:
+            mine = of.get(c) is sr
+            row += [1.0 if mine else 0.0] + (list(at[j]) if mine else [0.0] * df)
+        x.append(row + list(drow[smp][nc:]))
+    cols, k = [], len(others)
+    for _sr in members:
+        cols.append(list(range(k + 1, k + 1 + df)))
+        k += 1 + df
+    return x, cols, basis
+
+
+def _spline_fit(m, des, members: list[Series], df: int, counts, s):
+    """lmFit + the variance prior on the spline model. Raises design.DesignError / splines.SplineError."""
+    from ionomos.downstream import design as dz
+
+    x, cols, basis = _spline_model(m, des, members, df)
+    if len(x) - len(x[0]) <= 0:
+        raise dz.DesignError(f"no residual degrees of freedom ({len(x)} samples, {len(x[0])} parameters)")
+    v = dz.cov_unscaled(x)
+    fit = dz.lm_fit(m.values, x)
+    return x, cols, basis, fit, v, dz.squeeze(fit.s2, fit.df, counts, s.variance_prior)
+
+
+def _unit(p: int, k: int) -> list[float]:
+    return [1.0 if c == k else 0.0 for c in range(p)]
+
+
+def _spline_series(m, des, sr: Series, df: int, counts, s, enough):
+    """Series sr as a natural spline in hours on its own model. Returns (the curve for the report, per feature
+    the fitted change from the first time point at each time point, F, p, the spline coefficients, the curve's
+    level)."""
+    from ionomos.downstream import design as dz
+
+    x, cols, basis, fit, v, mod = _spline_fit(m, des, [sr], df, counts, s)
+    sc, p, times = cols[0], len(x[0]), sr.times
+    b0 = basis.predict([times[0]])[0]
+    rel = lambda rows: [[b - a for a, b in zip(b0, r, strict=True)] for r in rows]  # noqa: E731
+    at = rel(basis.predict(times))
+    cmat = [_unit(p, c) for c in sc]
+    for k in range(1, len(times)):
+        w = [0.0] * p
+        for a, c in enumerate(sc):
+            w[c] = at[k][a]
+        cmat.append(w)
+    est, sus = dz.contrasts_fit(fit, v, cmat)
+    fs, ps, _r = _f(est, sus, mod, list(range(df)), cmat, v, enough)
+    fcs =[[0.0] + est[i][df:] for i in range(len(est))]
+    coefs = [[fit.coef[i][c] for c in sc] for i in range(len(est))]
+    # the curve's level: the mean of each measured value less the fitted change at its time, so the curve is
+    # drawn through the replicates whatever the block or covariates
+    member = [(j, rel(basis.predict([sr.time_of[m.condition[smp]]]))[0])
+              for j, smp in enumerate(m.samples) if m.condition[smp] in sr.time_of]
+    levels = []
+    for i, row in enumerate(m.values):
+        vals = [row[j] - sum(c * d for c, d in zip(coefs[i], dj, strict=True)) for j, dj in member
+                if row[j] is not None and not math.isnan(row[j])]
+        levels.append(sum(vals) / len(vals) if vals and not any(math.isnan(c) for c in coefs[i]) else math.nan)
+    lo, hi = basis.boundary
+    grid = [lo + (hi - lo) * g / (GRID_POINTS - 1) for g in range(GRID_POINTS)]
+    curve = {"df": df, "knots": list(basis.knots), "boundary": [lo, hi], "grid": grid, "basis": rel(basis.predict(grid))}
+    return curve, fcs, fs, ps, coefs, levels
+
+
+def _spline_interaction(m, des, sr: Series, ref: Series, df: int, counts, s, enough, mv):
+    """Does sr's curve differ from ref's: both series as curves on one basis in one model, the moderated F on
+    the differences of their spline coefficients (limma ~Group * ns(time), the interaction terms)."""
+    from ionomos.downstream import design as dz
+
+    x, cols, _basis, fit, v, mod = _spline_fit(m, des, [sr, ref], df, counts, s)
+    p = len(x[0])
+    cmat = [[a - b for a, b in zip(_unit(p, c), _unit(p, r), strict=True)] for c, r in zip(cols[0], cols[1], strict=True)]
+    est, sus = dz.contrasts_fit(fit, v, cmat)
+    idx =[j for j, smp in enumerate(m.samples) if m.condition[smp] in ref.time_of]
+    groups = [dz._group_stats(m.values, [j for j in idx if m.condition[m.samples[j]] == c]) for c in ref.conditions]
+    both = [enough[i] and (not mv or all(g[0][i] >= mv for g in groups)) for i in range(len(m.values))]
+    fs, ps, _r = _f(est, sus, mod, list(range(df)), cmat, v, both)
+    return fs, ps
 
 
 def _control_series(series: list[Series], s) -> Series | None:
@@ -366,12 +510,37 @@ def run(p, s, control: str | None, model=None) -> tuple[TimeResult | None, Plan]
             both = [enough[i] and (not mv or all(g[0][i] >= mv for g in others)) for i in range(len(m.values))]
             ifs, ips, _ = _f(est, sus, mod, inter, cmat, v, both)
             iqs = stats.bh_adjust(ips)
+        label = f"{sr.name}: " if sr.name else ""
+        df, problem = spline_df(nt, s, label)
+        if problem:
+            plan.spline_problems.append(("warning", problem))
+        curve, fcs = None, None
+        if df:
+            try:
+                curve, fcs, fs, ps, coefs, levels = _spline_series(m, des, sr, df, counts, s, enough)
+            except (dz.DesignError, splines.SplineError) as exc:
+                plan.spline_problems.append(("warning", f"time course {label}the spline ({df} df) can't be fitted "
+                                                        f"({exc}); time is a factor for this series"))
+            else:
+                qs = stats.bh_adjust(ps)
+                if inter:
+                    pair = None
+                    if not set(sr.time_of) & set(ref.time_of):
+                        try:
+                            pair = _spline_interaction(m, des, sr, ref, df, counts, s, enough, mv)
+                        except (dz.DesignError, splines.SplineError) as exc:
+                            plan.spline_problems.append((
+                                "warning", f"time course {label}the spline model with {ref.name} can't be fitted "
+                                           f"({exc}); the difference from {ref.name} is tested with time as a factor"))
+                    if pair is not None:
+                        ifs, ips = pair
+                        iqs = stats.bh_adjust(ips)
         rows, untested = [], 0
         for i, feat in enumerate(m.features):
             if math.isnan(ps[i]):
                 untested += 1
                 continue
-            fc = [0.0] + [est[i][k] for k in range(nt - 1)]
+            fc = fcs[i] if curve else [0.0] + [est[i][k] for k in range(nt - 1)]
             peak = max(range(nt), key=lambda k: abs(fc[k]))
             sig = qs[i] <= s.alpha and abs(fc[peak]) >= s.log2fc
             up, down = max(fc) >= s.log2fc, min(fc) <= -s.log2fc
@@ -388,6 +557,9 @@ def run(p, s, control: str | None, model=None) -> tuple[TimeResult | None, Plan]
             if inter:
                 row.update({"interaction_vs": ref.name, "interaction_F": _nan(ifs[i]),
                             "interaction_pvalue": _nan(ips[i]), "interaction_qvalue": _nan(iqs[i])})
+            row["model"] = f"spline ({df} df)" if curve else "factor"
+            if curve:
+                row["coef"], row["level"] = coefs[i], levels[i]
             rows.append(row)
         rows.sort(key=lambda r: (r["pvalue"], -abs(r["max_log2fc"])))
         changing = [r for r in rows if r["class"] != "not"]
@@ -402,7 +574,7 @@ def run(p, s, control: str | None, model=None) -> tuple[TimeResult | None, Plan]
                 found.append({"n": len(mem), "profile": [statistics.median(col) for col in zip(*mem, strict=True)]})
         cols = [j for c in conds for j, x in enumerate(m.samples) if m.condition[x] == c]
         courses.append(Course(sr, rows, found, cols, [sr.time_of[m.condition[m.samples[j]]] for j in cols],
-                              ref.name if inter else "", untested))
+                              ref.name if inter else "", untested, curve))
         label = f" ({sr.name})" if sr.name else ""
         if untested:
             notes.append(f"time course{label}: {untested:,} features not measured at every time point were not tested")
@@ -433,7 +605,10 @@ def summary(res: TimeResult | None, plan: Plan, table: str | None) -> dict:
         entry = {"name": c.series.name, "times": [fmt_time(t, c.series.unit) for t in c.series.times],
                  "conditions": c.series.conditions, "tested": len(c.rows), "not_tested": c.untested,
                  **{k: cls.count(k) for k in CLASSES}, "patterns": [x["n"] for x in c.patterns],
-                 "trend": sum(1 for r in c.rows if r["trend_qvalue"] is not None and r["trend_qvalue"] <= res.alpha)}
+                 "trend": sum(1 for r in c.rows if r["trend_qvalue"] is not None and r["trend_qvalue"] <= res.alpha),
+                 "time_model": c.model}
+        if c.spline:
+            entry["spline"] = {"df": c.spline["df"], "knots_h": c.spline["knots"], "boundary_h": c.spline["boundary"]}
         if c.interaction_vs:
             entry["differs_from"] = {"series": c.interaction_vs,
                                      "features": sum(1 for r in c.rows if r["interaction_qvalue"] is not None
@@ -446,6 +621,28 @@ def _num(v, digits: int = 4):
     if v is None or not isinstance(v, (int, float)) or not math.isfinite(v):
         return None
     return float(f"{v:.{digits}g}") if v and abs(v) < 1e-3 else round(v, digits)
+
+
+def _curve_payload(c: Course) -> dict:
+    """A spline series' fitted curves, compactly: the basis on a grid of hours (less its value at the first time
+    point) once, and per feature its coefficients and level; the curve is level + basis . coefficients."""
+    if not c.spline:
+        return {}
+    sp = c.spline
+    return {"df": sp["df"], "knots": [_num(k, 6) for k in sp["knots"]], "grid": [_num(g, 6) for g in sp["grid"]],
+            "gb": [[_num(v, 6) for v in row] for row in sp["basis"]],
+            "cf": [[_num(v, 5) for v in r["coef"]] for r in c.rows], "lv": [_num(r["level"], 4) for r in c.rows]}
+
+
+def curve_at(S: dict, k: int) -> list[float | None] | None:
+    """Feature k's fitted curve on S["grid"] from a report payload series (None when time is a factor or the
+    curve wasn't estimable): what the report and the static figures draw."""
+    if S.get("model") != "spline" or not S.get("cf") or k >= len(S["cf"]):
+        return None
+    cf, lv = S["cf"][k], S["lv"][k]
+    if lv is None or any(v is None for v in cf):
+        return None
+    return [lv + sum(a * b for a, b in zip(row, cf, strict=True)) for row in S["gb"]]
 
 
 def report_payload(res: TimeResult | None, plan: Plan) -> dict:
@@ -470,6 +667,6 @@ def report_payload(res: TimeResult | None, plan: Plan) -> dict:
                        "patterns": [{"n": x["n"], "profile": [_num(v, 3) for v in x["profile"]]} for x in c.patterns],
                        "vs": c.interaction_vs,
                        "iq": [_num(r["interaction_qvalue"], 8) for r in rows] if c.interaction_vs else None,
-                       "untested": c.untested})
+                       "untested": c.untested, "model": c.model, **_curve_payload(c)})
     return {"ran": True, "found": True, "alpha": res.alpha, "lfc": res.log2fc, "model": res.formula,
             "series": series, "reason": ""}

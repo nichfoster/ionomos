@@ -1,5 +1,6 @@
 """
-Figures for slides from the report's dose-response, time-course and liganded-site sections (D68).
+Figures for slides from the report's dose-response, time-course and liganded-site sections (D68), its run-order
+QC (D78) and its kinase-activity section (D79).
 
     catalog(payload, which, features, top)   the figures these sections can draw: [charts.Figure]
 
@@ -10,10 +11,16 @@ the plot, the cut-offs line, a <desc> that says where the figure came from), fro
                           pEC50): the `top` most relevant regulated curves, or the features asked for
     time_patterns         per series: the median profile of each pattern of changing features
     time_profiles         per series: a grid of features over time (every replicate, the mean, the series it
-                          was compared with dashed): the `top` most significant changing ones, or those asked for
+                          was compared with dashed): the `top` most significant changing ones, or those asked for;
+                          a spline series (D77) draws its fitted curves on an axis in hours
     liganded_rank         per compound: every measured site ranked by its competition ratio, against the threshold
     liganded_selectivity  sites x compounds: the median competition ratio of each site liganded by any compound
                           (or of the sites asked for), marked where it is liganded
+    run_order             each sample's QC numbers (identifications, missing values, signal, PSMs, mass error,
+                          missed cleavages) against the order of acquisition, a panel per number, drifting
+                          ones first, with the Theil-Sen line (runorder.py, D78)
+    kinase_activity       per comparison (phosphosites with a kinase-substrate table, D79): the KSEA z-score of every
+                          kinase with enough substrates, coloured where it is significant
 
 Nothing is analysed again: the numbers are the report's. Colours are written out, text is <text>, no CSS.
 """
@@ -26,11 +33,12 @@ import re
 from ionomos.downstream import charts
 from ionomos.downstream.charts import _axes, _compose, _inks, _inner_ticks, _labels, _n, _text, clean_text, safe_name
 from ionomos.downstream.doseresponse import fmt_dose
+from ionomos.downstream.timecourse import curve_at
 
 TOP_PANELS = 6     # curves / profiles drawn when no feature is named (report.js TOP_PANELS)
 MAX_PANELS = 24
 SECTION_FIGURES = ("dose_potency", "dose_curves", "time_patterns", "time_profiles", "liganded_rank",
-                   "liganded_selectivity")
+                   "liganded_selectivity", "run_order", "kinase_activity")
 _DOSE_CLS = ("up", "down", "not", "unclear")
 _TIME_CLS = ("up", "down", "mixed", "not")
 
@@ -318,6 +326,19 @@ def _time_axis(b: list, ink: dict, S: dict, Xs, H: float, B: float, W: float, L:
             b.append(_text(Xs(a), H - B + 16, lab, 10.5, ink["muted"], text_anchor="middle"))
 
 
+def _time_axis_hours(b: list, ink: dict, S: dict, Xh, H: float, B: float) -> None:
+    """Time point labels on an axis in hours (a spline series): left to right, a label that would touch the one
+    before it is left out (the early time points crowd together)."""
+    last = None
+    for t, lab in zip(S.get("times") or [], [clean_text(x) for x in S.get("labels") or []], strict=False):
+        x, half = Xh(t), len(lab) * 10.5 * 0.56 / 2
+        if last is not None and x - half < last + 4:
+            continue
+        b.append(f'<line x1="{x:.1f}" x2="{x:.1f}" y1="{_n(H - B)}" y2="{_n(H - B + 4)}" stroke="{ink["axis"]}"/>')
+        b.append(_text(x, H - B + 16, lab, 10.5, ink["muted"], text_anchor="middle"))
+        last = x + half
+
+
 def figure_time_patterns(d: dict, si: int, style: dict, generator: str = "") -> str:
     """Each pattern of changing features of series si: its median log2 fold change at each time point."""
     X = d.get("time") or {}
@@ -381,27 +402,36 @@ def _time_panel(d: dict, X: dict, S: dict, k: int, W: float, H: float, ink: dict
     imp = d.get("imp")
     times = S["times"]
 
-    def points(Q):
+    spline = S.get("model") == "spline"
+    # a spline series is drawn on an axis in hours (the curve is a function of time), a factor one by order
+    on_axis = (lambda t: times[0] <= t <= times[-1]) if spline else (lambda t: t in times)  # noqa: E731
+
+    def points(Q):   # (hours, value, sample) on this series' axis
         out = []
         for a, j in enumerate(Q["samples"]):
             t = Q["stime"][a] if a < len(Q["stime"]) else None
-            if t in Q["times"] and j < len(row) and row[j] is not None:
-                out.append((Q["times"].index(t), row[j], j))
+            if t is not None and on_axis(t) and j < len(row) and row[j] is not None:
+                out.append((t, row[j], j))
         return out
 
-    def means(pts, n):
+    def means(pts, ts):
         out = []
-        for a in range(n):
-            v = [p[1] for p in pts if p[0] == a]
-            out.append(sum(v) / len(v) if v else None)
+        for t in ts:
+            v = [p[1] for p in pts if p[0] == t]
+            out.append((t, sum(v) / len(v) if v else None))
         return out
+
+    def curve(Q):    # [(hours, value)] of the fitted spline, or None
+        if Q is None or Q.get("model") != "spline" or i not in Q.get("i", []):
+            return None
+        c = curve_at(Q, Q["i"].index(i))
+        return None if c is None else [(t, v) for t, v in zip(Q["grid"], c, strict=True) if on_axis(t)]
 
     pts = points(S)
     other = next((q for q in X.get("series") or [] if S.get("vs") and q.get("name") == S["vs"]), None)
-    opts = []
-    if other:  # the series it was compared with, on this series' time axis (the shared time points)
-        opts = [(times.index(other["times"][a]), v, j) for a, v, j in points(other) if other["times"][a] in times]
-    ys = [p[1] for p in pts + opts]
+    opts = points(other) if other else []  # the series it was compared with, on this series' time axis
+    fit, ofit = (curve(S), curve(other)) if spline else (None, None)
+    ys = [p[1] for p in pts + opts] + [v for c in (fit, ofit) if c for _t, v in c]
     cls = S["cls"][k]
     col = _time_ink(ink, cls)
     line2 = f"adj. p {_p(S['q'][k])} · largest {_f(S['max'][k])} at {clean_text(S['labels'][S['peak'][k]])}" \
@@ -417,34 +447,42 @@ def _time_panel(d: dict, X: dict, S: dict, k: int, W: float, H: float, ink: dict
     def Xs(a):
         return L + 14 + a / max(1, n - 1) * (W - L - R - 28)
 
+    def Xt(t):   # hours -> x
+        if spline:
+            return L + 14 + (t - times[0]) / ((times[-1] - times[0]) or 1) * (W - L - R - 28)
+        return Xs(times.index(t))
+
     def Y(v):
         return T + (1 - (v - y0) / (y1 - y0)) * (H - T - B)
 
     b = _axes(ink, Xs, Y, [], _inner_ticks(y0, y1, 5), L, R, T, B, W, H, xl, yl, ls)
-    _time_axis(b, ink, S, Xs, H, B, W, L, R)
+    if spline:
+        _time_axis_hours(b, ink, S, Xt, H, B)
+    else:
+        _time_axis(b, ink, S, Xs, H, B, W, L, R)
 
     def line(m, c, dash):
         d_, pen = "", False
-        for a, v in enumerate(m):
+        for t, v in m:
             if v is None:
                 pen = False
                 continue
-            d_ += f"{'L' if pen else 'M'}{Xs(a):.1f} {Y(v):.1f}"
+            d_ += f"{'L' if pen else 'M'}{Xt(t):.1f} {Y(v):.1f}"
             pen = True
         if d_:
             b.append(f'<path d="{d_}" fill="none" stroke="{c}" stroke-width="{_n(2 * ls)}"' +
                      (f' stroke-dasharray="{dash}"' if dash else "") + "/>")
 
-    shift = 5 if other else 0
+    shift = 5 if other and not spline else 0
     if other:
-        line(means(opts, n), ink["muted"], "5 4")
-        for a, v, _j in opts:
-            b.append(f'<circle cx="{Xs(a) + shift:.1f}" cy="{Y(v):.1f}" r="{_n(2.8 * ps)}" fill="none" stroke="{ink["muted"]}" '
+        line(ofit or means(opts, [t for t in other["times"] if on_axis(t)] if spline else times), ink["muted"], "5 4")
+        for t, v, _j in opts:
+            b.append(f'<circle cx="{Xt(t) + shift:.1f}" cy="{Y(v):.1f}" r="{_n(2.8 * ps)}" fill="none" stroke="{ink["muted"]}" '
                      f'stroke-width="{_n(1.2 * ls)}"/>')
-    line(means(pts, n), col, "")
-    for a, v, j in pts:
+    line(fit or means(pts, times), col, "")
+    for t, v, j in pts:
         faint = bool(imp) and i < len(imp) and j < len(imp[i]) and imp[i][j] == "1"
-        b.append(f'<circle cx="{Xs(a) - shift:.1f}" cy="{Y(v):.1f}" r="{_n(3.2 * ps)}" fill="{col}" '
+        b.append(f'<circle cx="{Xt(t) - shift:.1f}" cy="{Y(v):.1f}" r="{_n(3.2 * ps)}" fill="{col}" '
                  f'fill-opacity="{0.3 if faint else 0.85}"/>')
     return "".join(head + b)
 
@@ -468,7 +506,9 @@ def figure_time_profiles(d: dict, si: int, ks: list[int], style: dict, generator
     name = clean_text(S.get("name")) or "Time course"
     legend = [(c, w) for c, w in ((ink["up"], "up"), (ink["down"], "down"), (ink["c"][3], "mixed"), (ink["text2"], "not"))
               if any(_time_ink(ink, S["cls"][k]) == c and S["cls"][k] == w for k in ks)]
-    legend += [(None, "points: replicates (faint: imputed)"), (None, "line: mean per time point")]
+    curve = f"line: fitted spline ({S.get('df')} df), time in hours" if S.get("model") == "spline" else \
+        "line: mean per time point"
+    legend += [(None, "points: replicates (faint: imputed)"), (None, curve)]
     if S.get("vs"):
         legend.append((ink["muted"], f"dashed: {clean_text(S['vs'])}"))
     legend += _room_notes(asked, len(ks), ytitle, yl)
@@ -616,7 +656,158 @@ def figure_liganded_selectivity(d: dict, style: dict, generator: str = "", named
                     legend, f"liganded: {clean_text(X.get('rule'))}", about=", ".join(names), generator=generator)
 
 
+# ----------------------------------------------------------- kinase activity --
+
+
+def kinase_rows(C: dict, fits: int) -> list[list]:
+    """The kinases a bar chart shows: every scored one, or the `fits` with the largest |z|; highest z first."""
+    ks = list(C.get("k") or [])
+    if len(ks) > fits:
+        ks = sorted(ks, key=lambda r: (-abs(r[3] or 0), r[0]))[:fits]
+    return sorted(ks, key=lambda r: (-(r[3] or 0), r[0]))
+
+
+def figure_kinase_activity(d: dict, ci: int, style: dict, generator: str = "") -> str:
+    """Comparison ci's kinase activity (KSEA z-scores, phospho.py D79): a bar per kinase with enough substrates,
+    coloured when its adjusted p is at or below the report's p-value cut-off."""
+    X = (d.get("phos") or {}).get("ksea") or {}
+    C = (X.get("comps") or [])[ci]
+    total = len(C.get("k") or [])
+    if not total:
+        return ""
+    ink = _inks(style)
+    _W, Hbox = charts._box(style)
+    fits = max(3, int((Hbox - 60) / 11))
+    ks = kinase_rows(C, fits)
+    ls = style["line_scale"]
+    lim = max(2.5, max(abs(r[3] or 0) for r in ks) * 1.1)
+    name_w = min(18, max(len(clean_text(r[0])) for r in ks)) * 11 * 0.56
+
+    def colour(r):
+        return ink["up"] if r[6] == "up" else ink["down"] if r[6] == "down" else ink["ns"]
+
+    def draw(W: int, H: int) -> str:
+        L, R, T, B = 22 + name_w, 18, 10, 44
+        n = len(ks)
+        row = (H - T - B) / n
+
+        def Xs(v):
+            return L + (v + lim) / (2 * lim) * (W - L - R)
+
+        b = _axes(ink, Xs, lambda v: 0, _inner_ticks(-lim, lim, 6), [], L, R, T, B, W, H,
+                  "kinase activity (KSEA z-score)", "", ls)
+        b.append(f'<line x1="{_n(Xs(0))}" x2="{_n(Xs(0))}" y1="{T}" y2="{_n(H - B)}" stroke="{ink["axis"]}" '
+                 f'stroke-width="{_n(ls)}"/>')
+        bar = max(2.0, min(14.0, row * 0.72))
+        for k, r in enumerate(ks):
+            y = T + k * row + (row - bar) / 2
+            z = r[3] or 0.0
+            x0, x1 = sorted((Xs(0), Xs(z)))
+            b.append(f'<rect x="{_n(x0)}" y="{_n(y)}" width="{_n(max(0.5, x1 - x0))}" height="{_n(bar)}" '
+                     f'fill="{colour(r)}"/>')
+            if row >= 9:
+                b.append(_text(L - 6, y + bar / 2 + 4, clean_text(r[0])[:18] + f" ({r[1]})", min(11.0, row * 0.9),
+                               ink["text2"], text_anchor="end"))
+        return "".join(b)
+
+    alpha = X.get("alpha", (d.get("settings") or {}).get("alpha", 0.05))
+    legend = [(ink["up"], f"more active {sum(1 for r in C['k'] if r[6] == 'up')}"),
+              (ink["down"], f"less active {sum(1 for r in C['k'] if r[6] == 'down')}"),
+              (ink["ns"], "not significant"), (None, "(m) = measured substrates")]
+    if len(ks) < total:
+        legend.append((None, f"{len(ks)} of {total} kinases with the largest |z| (the rest do not fit this size)"))
+    name = clean_text(C.get("name")) or "Comparison"
+    rule = (f"KSEA on {clean_text(X.get('file'))}: kinases with ≥ {X.get('min_substrates')} substrates, "
+            f"coloured at adjusted p ≤ {alpha:g}")
+    return _compose(style, d, draw, "Kinase activity", name, f"Kinase activity (KSEA) · {d.get('title') or ''}",
+                    legend, rule, about=name, generator=generator)
+
+
 # ------------------------------------------------------------------ catalog --
+
+
+# ------------------------------------------------------------------ run order --
+
+
+def _run_change(m: dict) -> str:
+    c = m.get("change")
+    if c is None:
+        return "–"
+    sg = "+" if c >= 0 else "−"
+    if m.get("judge") == "rel" and m.get("med"):
+        return f"{sg}{abs(c) / abs(m['med']):.0%}"
+    if m["key"] == "missed":
+        return f"{sg}{abs(c):.1%}"
+    if m.get("unit") == "%":
+        return f"{sg}{abs(c):.1f} points"
+    return f"{sg}{abs(c):.2f} {m.get('unit') or ''}".rstrip()
+
+
+def _run_panel(R_: dict, m: dict, W: float, H: float, ink: dict, col: dict, style: dict, xl: str) -> str:
+    L, R, T, B = 60, 10, 38, 42
+    ls, ps = style["line_scale"], style["point_scale"]
+    S = R_["samples"]
+    n = max(2, sum(1 for s in S if s.get("o") is not None))
+    pts = [(s["o"], v, s["c"]) for s, v in zip(S, m["v"], strict=False) if s.get("o") is not None and v is not None]
+    ys = [v for _o, v, _c in pts] or [0.0]
+    lo, hi = min(ys), max(ys)
+    pad = (hi - lo) * 0.1 or abs(hi) * 0.05 or 1
+    lo, hi = lo - pad, hi + pad
+
+    def X(o):
+        return L + (o - 1) / (n - 1) * (W - L - R)
+
+    def Y(v):
+        return T + (1 - (v - lo) / (hi - lo)) * (H - T - B)
+
+    xt = [v for v in charts.nice_ticks(1, n, min(8, n)) if 1 <= v <= n and v == int(v)]
+    b = _axes(ink, X, Y, xt, _inner_ticks(lo, hi, 5), L, R, T, B, W, H, xl, "", ls)
+    if m.get("slope") is not None and pts:
+        b0 = sorted(v - m["slope"] * o for o, v, _c in pts)
+        k = len(b0)
+        b0 = b0[k // 2] if k % 2 else (b0[k // 2 - 1] + b0[k // 2]) / 2
+        y1, y2 = b0 + m["slope"], b0 + m["slope"] * n
+        b.append(f'<line x1="{_n(X(1))}" x2="{_n(X(n))}" y1="{_n(Y(y1))}" y2="{_n(Y(y2))}" '
+                 f'stroke="{ink["up"] if m.get("flag") else ink["muted"]}" stroke-width="{_n((2 if m.get("flag") else 1.5) * ls)}"'
+                 + ("" if m.get("flag") else ' stroke-dasharray="5 4"') + "/>")
+    for o, v, c in pts:
+        b.append(f'<circle cx="{X(o):.1f}" cy="{Y(v):.1f}" r="{_n(4.2 * ps)}" fill="{col.get(c, ink["c"][0])}" '
+                 f'stroke="{ink["surface"]}" stroke-width="{_n(1.2 * ls)}"/>')
+    unit = f" ({m['unit']})" if m.get("unit") else ""
+    line2 = ("not tested" if m.get("p") is None else
+             f"tau {m['tau']:+.2f} · p {_p(m['p'])} · change {_run_change(m)}")
+    return "".join(_heading(clean_text(m["label"]) + unit, "drift" if m.get("flag") else "", ink["up"], line2, W, ink) + b)
+
+
+def figure_run_order(d: dict, style: dict, generator: str = "") -> str:
+    """Each sample's QC numbers against the order of acquisition (runorder.py, D78): a panel per number, the
+    samples coloured by condition, the Theil-Sen line (solid where a drift was flagged)."""
+    R_ = (d.get("qc") or {}).get("run") or {}
+    ms = sorted(R_.get("metrics") or [], key=lambda m: (not m.get("flag"), m.get("p") is None))
+    if not ms or not any(s.get("o") is not None for s in R_.get("samples") or []):
+        return ""
+    ink = _inks(style)
+    col = charts._cond_colors(d, ink)
+    asked = len(ms)
+    fits, _yt = _room(style, asked)
+    ms = ms[:fits]
+
+    def draw(W: int, H: int) -> str:
+        return _panels(len(ms), W, H, lambda p, w, h, first, last: _run_panel(
+            R_, ms[p], w, h, ink, col, style, "run (order of acquisition)" if last else ""))
+
+    cf = R_.get("confound") or {}
+    legend = [(v, k) for k, v in col.items()] + [(None, "line: Theil-Sen slope (solid: a drift)")]
+    legend += _room_notes(asked, len(ms), True, "", top=False)
+    lim = R_.get("limits") or {}
+    cuts = (f"drift: p < {lim.get('alpha', 0.01):g} within the conditions and a change of at least its limit"
+            + (f"; conditions explain {cf['eta2']:.0%} of the run order" + (" (run in blocks)" if cf.get("flag") else "")
+               if cf.get("eta2") is not None else ""))
+    what = "Run order"
+    flagged = sum(1 for m in R_.get("metrics") or [] if m.get("flag"))
+    return _compose(style, d, draw, what, f"{what}: {len(ms)} QC number{'s' if len(ms) != 1 else ''}",
+                    f"Each sample against the order of acquisition{f' · {flagged} drifting' if flagged else ''} · "
+                    f"{d.get('title') or ''}", legend, cuts, about=what, generator=generator)
 
 
 def catalog(d: dict, which, features=None, top: int | None = None) -> list:
@@ -692,4 +883,16 @@ def catalog(d: dict, which, features=None, top: int | None = None) -> list:
                           + ("chosen site" if named is not None else "site liganded by any compound") + ", and its selectivity",
                           lambda st, g: figure_liganded_selectivity(d, st, g, named),
                           "--features NAME,... for other sites", note))
+    R_ = (d.get("qc") or {}).get("run") or {}
+    if "run_order" in which and R_.get("metrics") and any(s.get("o") is not None for s in R_.get("samples") or []):
+        out.append(Figure("run_order.svg", "run_order",
+                          "Run order: each sample's QC numbers against the order of acquisition, a drift test within "
+                          "the conditions (D78)", lambda st, g: figure_run_order(d, st, g)))
+    K = (d.get("phos") or {}).get("ksea") or {}
+    for ci, C in enumerate(K.get("comps") or [] if K.get("ran") else []):
+        if "kinase_activity" in which and C.get("k"):
+            nm = clean_text(C.get("name"))
+            out.append(Figure(safe_name(f"kinase_activity_{C.get('slug') or nm or ci + 1}.svg"), "kinase_activity",
+                              f"Kinase activity, {nm}: KSEA z-score of every kinase with enough measured substrates",
+                              lambda st, g, ci=ci: figure_kinase_activity(d, ci, st, g)))
     return out

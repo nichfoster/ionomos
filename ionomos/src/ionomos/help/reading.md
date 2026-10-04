@@ -10,7 +10,10 @@ keep the saved settings.
 The tiles at the top count the [features](#glossary.feature) (proteins or
 sites) and samples, give a sample-quality verdict, and count the hits in each
 [comparison](#glossary.comparison). Click a comparison's tile to open its
-volcano plot.
+volcano plot. With three or more conditions, **Any change (F)** counts the
+features that differ between any of them (limma's moderated F-test, adjusted
+p, no fold-change cut-off); `f_test: off` under `analysis:` leaves it out
+([How?](#faq.rerun)).
 
 Below them: the key findings, the issues Ionomos found, any notes, and a row of
 steps showing what happened to the data (loaded → contaminants removed →
@@ -362,10 +365,17 @@ name (`DMSO`) counts as time 0.
   `DMSO_4h` …) its mean is the dashed line, and **differs from** tests
   whether the feature behaves differently over time than in the control.
 
-The time points are treated as separate groups, so no curve is assumed; with
-two or three points per series this is the honest reading. The pairwise
-comparisons in the volcano plot are unchanged. The numbers are also in
-`results/time_course.tsv`.
+With up to 6 time points per series, the time points are treated as
+separate groups, so no curve is assumed; with few points this is the honest
+reading. From 7 time points (or with `time_model: spline`), a smooth curve
+is fitted instead: a natural cubic spline in hours with 4 degrees of
+freedom (`time_spline_df`). The F-test then asks whether the curve changes
+at all, the log2 fold changes are the curve's change from the first time
+point, and the profile draws the fitted curve on an axis in hours (the
+control series' curve dashed). The trend still uses the order of the time
+points. The pairwise comparisons in the volcano plot are unchanged. The
+numbers are also in `results/time_course.tsv` (its `model` column says
+which was used).
 
 ## Liganded sites {#report.cys}
 
@@ -408,6 +418,36 @@ experiment (the treated sample carries the heavy tag), set
 `liganded_direction: low`. Change the threshold with `liganded_ratio` and
 `liganded_min_replicates`. Everything is also in `results/cysteine_sites.tsv`
 and `results/cysteine_proteins.tsv`.
+
+## Phosphosites, kinases and partners {#report.phos}
+
+Shown only when the lab asked for it (all of it is off by default):
+
+- **Phosphosites** (`phospho: true` under `analysis:`): the experiment was
+  analysed per phosphosite instead of per protein, from the search's site
+  table (FragPipe's `combined_site_STY_79.9663.tsv`, TMT-Integrator's
+  `abundance_single-site_MD.tsv`, or DIA-NN's `report.phosphosites_90.tsv`).
+  The tiles say how many sites the [localisation](#glossary.localisation)
+  filter kept (by default a best localisation probability of at least 0.75),
+  which residues they are on, and, for FragPipe's label-free table, how the
+  probabilities are spread. TMT-Integrator and DIA-NN filter before Ionomos
+  sees the table; their threshold is shown instead. Everything else in the
+  report (the volcano, the table, the heatmap) is then about sites, named like
+  `MAPK1 T185`. With `protein_correction`, each comparison also has a
+  *protein-corrected* twin: the site's change minus its protein's change in an
+  unenriched proteome.
+- **Kinase activity** (`kinase_substrates:` names a kinase–substrate table the
+  lab downloaded from PhosphoSitePlus): for each comparison, a
+  [KSEA](#glossary.ksea) z-score per kinase. A positive z means the kinase's
+  known substrates went up more than the sites overall: a sign the kinase is
+  more active, not a measurement of it. Kinases need at least
+  `ksea_min_substrates` (5) measured substrates; the coloured bars are those
+  with an adjusted p at or below the report's p-value cut-off. Click a bar or
+  a row for its substrates. The numbers are in `results/kinase_activity.tsv`.
+- **Interaction partners** (`string_network:` names a STRING network the lab
+  downloaded): for each comparison, the hits that are known to interact with
+  other hits, with STRING's combined score. Works for proteins too, not only
+  sites. The list is in `results/string_partners.tsv`.
 
 ## Quality control {#report.quality}
 
@@ -559,6 +599,34 @@ DIA, the tab shows DIA-NN's own summary of each run instead. Everything is
 also in `results\psm_qc.tsv`. To skip it, set `psm_qc: false` under
 `analysis:`.
 
+## Run order {#qc.run}
+
+Each sample's quality numbers in the order the samples were acquired:
+identifications, missing values, the median intensity before normalisation,
+and from the search the PSMs, the precursor mass error and the missed
+cleavages (with DIA-NN: precursors and its MS1 mass accuracy). The coloured
+strip above the chart shows which condition was run when.
+
+- **A drift** is a steady slope over the run: a spray or column getting
+  dirtier (fewer identifications, less signal), or the calibration moving
+  (the mass error). It is tested within each condition, so a condition that
+  really differs is not called a drift. The line is the median slope; a
+  number is flagged when its trend has p below 0.01 and it changes by at
+  least its limit from the first run to the last (10% for counts, 0.5 log2
+  for the intensity, 5 points of missing values, 3 ppm, 5 points of missed
+  cleavages) ([what to do](#issue.RUN_ORDER_DRIFT)).
+- **Conditions run in blocks** (all controls, then all treated) are named
+  above the chart, with the share of the run order the condition explains.
+  From 60% the report warns: a drift would then look like a difference
+  between the conditions ([what to do](#issue.RUN_ORDER_CONFOUNDED)).
+
+The times come from each raw file's own header (when the instrument started
+the run). Without a readable header they come from ThermoRawFileParser's
+output, the time stamp Xcalibur adds to a file name, or the file's
+modification time, which is approximate; the table says which. It needs six
+samples with a time to test a drift. TMT channels are acquired together, so a
+TMT experiment has no run order per sample.
+
 ## Methods and settings {#report.methods}
 
 A paragraph describing the analysis, ready to paste into a notebook or a
@@ -571,7 +639,10 @@ out, conditions changed). The same values are in `results\analysis.json`.
 Where the numbers came from: the search engine and its version, the tools it
 ran, the result table Ionomos read, which quantity column, the FDR filter, the
 FASTA and the parameter files. Keep it with the report: it is the audit trail
-for anyone who re-checks the analysis.
+for anyone who re-checks the analysis. For a table of peptides or precursors
+(Sage, the MSstats format, a DIA-NN or Spectronaut long report), **Quantity**
+also says how they were combined into proteins: median polish, MaxLFQ, or the
+engine's own protein quantity ([Which one?](#faq.rollup)).
 
 ## The SDRF sample sheet {#report.sdrf}
 

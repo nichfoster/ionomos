@@ -619,6 +619,32 @@ compare it with its replicates in the [scorecard](#qc.card) and
 [Search quality](#qc.psm) tab. The 50% limit is a wide default, not yet the
 lab's own.
 
+## The samples drift with the order they were run in {#issue.RUN_ORDER_DRIFT}
+
+Over the sequence, a quality number moved steadily: fewer identifications or
+less signal the later a sample was run (a spray or column getting dirtier,
+samples waiting in the autosampler), or a mass error that wanders (the
+calibration). The test compares samples within each condition, so a
+condition that differs does not count. Look at the [Run order](#qc.run) tab:
+a steady slope is a drift, a step at one run is an event (a column change, a
+recalibration). If the conditions were interleaved, the comparisons are
+still fair, only noisier. If they were run in blocks, a drift can look like
+biology: see [the conditions were run in blocks](#issue.RUN_ORDER_CONFOUNDED).
+Next time, randomise the run order and put a QC standard between the samples.
+The limits are wide defaults, not yet the lab's own.
+
+## The conditions were run in blocks {#issue.RUN_ORDER_CONFOUNDED}
+
+The samples were acquired condition by condition (all controls, then all
+treated, ...): the condition explains 60% or more of where a sample sits in
+the run order. Anything that changed during the run (the spray, the column,
+the calibration) then differs between the conditions as well, and the
+statistics cannot tell it from the biology. Look at the [Run order](#qc.run)
+tab: if the quality numbers stay flat along the run, the comparisons stand.
+If they drift, treat the differences between the conditions with care, and
+confirm the main hits another way. Next time, interleave the conditions (rep 1
+of every condition, then rep 2, ...) or randomise the order.
+
 ## Time course: the time points need a look {#issue.TIMES}
 
 Ionomos found what looks like a time course but couldn't place every
@@ -634,6 +660,25 @@ re-run the analysis ([How to re-run](#faq.rerun)). If the experiment isn't a
 time course, add `time_course: false`. The [Time course](#report.time)
 section and the pairwise comparisons for the other conditions are not
 affected.
+
+## Time course: the spline was not fitted as asked {#issue.TIME_SPLINE}
+
+A series with many time points is fitted as a smooth curve (a natural
+spline, `time_model: spline`, or `auto` from 7 time points), and the curve
+couldn't be fitted the way the settings ask. The message says which series
+and why:
+- `time_spline_df` is too high for the series. A curve needs fewer degrees
+  of freedom than the series has time points minus 1: with as many, it goes
+  through every time point's mean and smooths nothing; with more, it can't
+  be fitted. Ionomos used the highest that works (time points minus 2).
+- The block or covariates leave the curve no residual degrees of freedom;
+  the series was then tested with time as a factor.
+
+Lower `time_spline_df` under `analysis:` in the experiment's
+`experiment.yaml` (or remove it: `auto` is 4, at most the time points
+minus 2), or test time as a factor with `time_model: factor`, and re-run
+the analysis ([How to re-run](#faq.rerun)). The rest of the
+[Time course](#report.time) section is not affected.
 
 ## Liganded sites: the ratio may be the other way round {#issue.LIGANDED_DIRECTION}
 
@@ -711,6 +756,53 @@ analysis:
 
 and re-run the analysis ([How to re-run](#faq.rerun)). The message lists the
 proteome's comparisons. Site conditions without one are reported uncorrected.
+
+## Phospho: no phosphosite table could be used {#issue.PHOSPHO_TABLE}
+
+`phospho: true` asks Ionomos to analyse phosphosites, but it found no site
+table it could read, so it analysed the proteins instead (the report is still
+usable, it is just not per site). It looks for FragPipe's
+`combined_site_STY_79.9663.tsv` (label-free; needs PSM site localisation,
+PTMProphet, in the workflow), TMT-Integrator's `abundance_single-site_MD.tsv`,
+or DIA-NN's `report.phosphosites_90.tsv` (needs a FASTA and matrices). Turn on
+the site reports in the workflow and search again, or give the table's full
+path as `phospho_table` under `analysis:` and re-run the analysis
+([How to re-run](#faq.rerun)).
+
+## Phospho: the localisation filter could not be applied as asked {#issue.PHOSPHO_LOCALISATION}
+
+TMT-Integrator's single-site report and DIA-NN's phosphosite matrix have no
+localisation probabilities per site: the search filtered them already, and
+its threshold is lower than `phospho_min_localization`. The sites were
+analysed as the search kept them. For a stricter filter, set it in the search
+(`tmtintegrator.min_site_prob` in the FragPipe workflow) and search again, or
+set `phospho_min_localization` to what the search used so this note goes
+away.
+
+## Kinase activity: the kinase-substrate table could not be used {#issue.KINASE_SUBSTRATES}
+
+`kinase_substrates` names a table of kinases and their substrate sites, which
+the lab downloads itself (PhosphoSitePlus's `Kinase_Substrate_Dataset`, free
+for non-commercial use; Ionomos never ships it). It wasn't found, couldn't be
+read, or too few measured sites are substrates in it:
+- Put the file in the experiment folder, or give its full path. A `.gz` file
+  is read as it is.
+- Matching is by substrate gene and residue (`MAPK1` + `T185`), as KSEAapp
+  does. If gene names differ, try `ksea_match: protein` (UniProt accessions).
+- Only `ksea_organism` (human by default) rows are used.
+- A kinase needs `ksea_min_substrates` (5) measured substrates.
+
+The site statistics are not affected. Fix the setting and re-run the analysis
+([How to re-run](#faq.rerun)).
+
+## Interaction partners: the STRING network could not be used {#issue.STRING_NETWORK}
+
+`string_network` names a STRING network the lab downloaded from string-db.org:
+either `<taxon>.protein.links.v12.0.txt.gz` with `<taxon>.protein.info.v12.0.txt.gz`
+in the same folder (the second gives the gene names), or a network exported
+from the STRING website as a TSV. The file wasn't found or isn't one of
+those. The statistics are not affected; fix the path and re-run the analysis
+([How to re-run](#faq.rerun)).
 
 ## Dose-response: the doses need a look {#issue.DOSES}
 

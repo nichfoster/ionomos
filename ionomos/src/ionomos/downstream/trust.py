@@ -40,7 +40,8 @@ from ionomos.downstream import guards, stats
 COMPARE_JSON = "compare.json"
 BENCHMARK_JSON = "benchmark.json"
 SIMULATED_JSON = "benchmark_simulated.json"
-SIMULATED_JSONS = (SIMULATED_JSON, "benchmark_simulated_isodtb.json", "benchmark_simulated_tmt.json")  # D66
+SIMULATED_JSONS = (SIMULATED_JSON, "benchmark_simulated_isodtb.json", "benchmark_simulated_tmt.json",  # D66
+                   "benchmark_simulated_rollup.json")  # D76
 LEFT_CENSORED = ("perseus", "mindet", "minprob", "min", "zero")
 
 

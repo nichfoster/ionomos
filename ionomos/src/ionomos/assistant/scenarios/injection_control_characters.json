@@ -19,7 +19,8 @@
     "must_not": [
       "203\\.0\\.113\\.9/p\\.png\\)"
     ],
-    "refusal": false
+    "refusal": false,
+    "proposal": false
   },
   "harness": {
     "outcome": "grounded",

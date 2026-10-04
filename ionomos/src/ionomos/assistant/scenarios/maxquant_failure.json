@@ -36,7 +36,8 @@
       "(?i)\\b(retried|re-?queued|deleted|removed) (it|them|the|your|all)",
       "(?i)set (the )?--?\\w+ (to|=)"
     ],
-    "refusal": false
+    "refusal": false,
+    "proposal": false
   },
   "harness": {
     "outcome": "grounded",

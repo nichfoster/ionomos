@@ -62,7 +62,9 @@ class Findings:
     time_problems: list = field(default_factory=list)     # [(severity, message)] from timecourse.plan_series
     cys_problems: list = field(default_factory=list)      # [(severity, message)] from cys.run / the site annotation
     protein_problems: list = field(default_factory=list)  # [(code, severity, message)] from proteincorr (D70)
+    phospho_problems: list = field(default_factory=list)  # [(code, severity, message)] from phospho.py (D79)
     psm_problems: list = field(default_factory=list)      # [(issue code, message)] from psmqc.run
+    run_problems: list = field(default_factory=list)      # [(issue code, message)] from runorder.run (D78)
     model: object = None                # analysis.Model: the design used, or why an asked-for one wasn't
     roles: object = None                # roles.Plan: the conditions' roles and the comparisons they gave
     guards: list = field(default_factory=list)            # guards.statistics: p-values that may not mean what they say
@@ -156,6 +158,47 @@ def _ratio_checks(f: Findings, p, s, add) -> None:
                        "The uncorrected results are not affected"], {"message": msg}))
 
 
+_PHOSPHO_ISSUES = {i.code: i for i in (  # phospho.py's problems (D79): the message is filled in by _phospho_checks
+    Issue("PHOSPHO_TABLE", "input", "Phospho: no phosphosite table could be used", "",
+          ["The search had no PTM site localisation (PTMProphet) or no site report step, so FragPipe wrote no "
+           "combined_site_STY_79.9663.tsv or single-site report",
+           "DIA-NN was run without a FASTA or without matrices, so report.phosphosites_90.tsv is missing",
+           "analysis.phospho_table names a file that was moved, or is not a site table"],
+          ["Turn on PSM site localisation and the site reports in the FragPipe workflow and search again",
+           "Or give the site table's full path in analysis.phospho_table and Run analysis",
+           "The proteins were analysed instead, so the report is still usable"]),
+    Issue("PHOSPHO_LOCALISATION", "warning", "Phospho: the localisation filter could not be applied as asked", "",
+          ["TMT-Integrator's report and DIA-NN's matrix carry no per-site probabilities: their own threshold was "
+           "applied before Ionomos saw the table, and it is lower than phospho_min_localization"],
+          ["Set the threshold in the search (tmtintegrator.min_site_prob in the workflow) and search again, or lower "
+           "phospho_min_localization to what the search used"]),
+    Issue("KINASE_SUBSTRATES", "warning", "Kinase activity: the kinase-substrate table could not be used", "",
+          ["The file named in analysis.kinase_substrates was moved or renamed",
+           "It is not PhosphoSitePlus's Kinase_Substrate_Dataset (or KSEAapp's PSP&NetworKIN file)",
+           "Few measured sites are substrates in it: gene names differ (try ksea_match: protein), another organism "
+           "(ksea_organism), or ksea_min_substrates is high for this experiment"],
+          ["Download Kinase_Substrate_Dataset from PhosphoSitePlus (free for non-commercial use), put it in the "
+           "experiment folder or give its full path in analysis.kinase_substrates, and Run analysis",
+           "The site statistics are not affected"]),
+    Issue("STRING_NETWORK", "warning", "Interaction partners: the STRING network could not be used", "",
+          ["The file named in analysis.string_network was moved or renamed",
+           "A protein.links file without its protein.info file in the same folder", "Not a STRING file"],
+          ["Download <taxon>.protein.links and <taxon>.protein.info from string-db.org into one folder and give the "
+           "links file's full path in analysis.string_network, then Run analysis", "The statistics are not affected"]),
+)}
+
+
+def _phospho_checks(f: Findings, add) -> None:
+    """phospho.py's problems (D79); the protein correction's go through _ratio_checks."""
+    from dataclasses import replace
+
+    for code, sev, msg in getattr(f, "phospho_problems", None) or []:
+        if code in _PHOSPHO_ISSUES:
+            add(replace(_PHOSPHO_ISSUES[code], severity=sev, message=msg, causes=list(_PHOSPHO_ISSUES[code].causes),
+                        fixes=list(_PHOSPHO_ISSUES[code].fixes), data={"message": msg}))
+
+
+
 def suggest_conditions(samples: list[str]) -> dict[str, str]:
     """Best guess at each sample's condition from its name: drop the part every name shares,
     trailing replicate numbers and Xcalibur timestamps. 'CS_22rv1_MA25_DMSO_1' -> 'DMSO'."""
@@ -225,6 +268,29 @@ def check(f: Findings) -> list[Issue]:
                        "Compare a flagged sample's quantities with its replicates before trusting them; an "
                        "incompletely digested sample measures different peptides",
                        "Check the digestion for the next preparation"], {"message": msg}))
+
+    # ---- run order (runorder.py, D78): drift during the run, conditions acquired in blocks
+    for code, msg in f.run_problems:
+        if code == "RUN_ORDER_DRIFT":
+            add(Issue("RUN_ORDER_DRIFT", "warning", "The samples drift with the order they were run in", msg,
+                      ["The spray, the column or the trap got dirtier over the sequence (fewer identifications, "
+                       "less signal)",
+                       "The mass calibration drifted during the sequence (the mass error moves)",
+                       "Samples waited longer in the autosampler the later they were run"],
+                      ["Look at the Run order tab under Quality control: is it a steady slope, or a step at one run?",
+                       "If the conditions were interleaved, the comparisons are still fair but noisier; if they "
+                       "were acquired in blocks, treat differences between them with care",
+                       "Next time, randomise the run order, and run a QC standard between the samples"],
+                      {"message": msg}))
+        elif code == "RUN_ORDER_CONFOUNDED":
+            add(Issue("RUN_ORDER_CONFOUNDED", "warning", "The conditions were run in blocks", msg,
+                      ["The samples were queued condition by condition (all controls, then all treated)",
+                       "A sequence was split over days or columns along the conditions"],
+                      ["Look at the Run order tab under Quality control: do the QC numbers change along the run?",
+                       "If they do not, the comparisons stand; if they do, part of a difference between the "
+                       "conditions may be the instrument",
+                       "Next time, randomise or interleave the run order (rep 1 of every condition, then rep 2, ...)"],
+                      {"message": msg}))
 
     # ---- nothing to analyse
     if m is None and f.read_problem:
@@ -497,8 +563,19 @@ def check(f: Findings) -> list[Issue]:
                   ["List every condition's dose in experiment.yaml analysis.doses (DMSO: 0, Cmpd_A: 10 nM, ...) "
                    "and Run analysis"], {"message": msg}))
 
-    # ---- time course (timecourse.py): times that can't be read, two conditions at one time
-    for sev, msg in f.time_problems:
+    # ---- time course (timecourse.py): times that can't be read, two conditions at one time; a spline whose df
+    # the series can't carry (D77)
+    for item in f.time_problems:
+        code, sev, msg = item if len(item) == 3 else ("TIMES", *item)
+        if code == "TIME_SPLINE":
+            add(Issue("TIME_SPLINE", sev, "Time course: the spline was not fitted as asked", msg,
+                      ["analysis.time_spline_df is as high as or higher than the series' time points - 1, so the "
+                       "curve could not smooth anything", "The block or covariates leave the curve no residual "
+                       "degrees of freedom"],
+                      ["Lower time_spline_df under analysis: in experiment.yaml (or remove it: auto is 4, at most the "
+                       "time points - 2) and Run analysis", "Or test time as a factor: time_model: factor"],
+                      {"message": msg}))
+            continue
         add(Issue("TIMES", sev, "Time course: the time points need a look", msg,
                   ["analysis.times names a condition that isn't in this experiment, or a time without a unit",
                    "A condition name holds two times, or two conditions of one series are at the same time"],
@@ -524,6 +601,9 @@ def check(f: Findings) -> list[Issue]:
 
     # ---- site ratios (D70): a replicate clearly off 0 that was not centred; the protein correction
     _ratio_checks(f, p, s, add)
+
+    # ---- phosphosites, kinase activity, STRING (D79): a site table or a download that can't be used
+    _phospho_checks(f, add)
 
     # ---- statistics that ran but may not mean what they say (guards.py)
     from ionomos.downstream import guards

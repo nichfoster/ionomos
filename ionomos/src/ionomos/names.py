@@ -143,6 +143,11 @@ ASSISTANT_AUDIT_FILE = "assistant-audit.jsonl"
 ASSISTANT_SCORECARD_PREFIX = "assistant-scorecard"
 ASSISTANT_EVAL_DIR = "ionomos-ask-eval"
 
+# Before the experiment editor's Save or a confirmed change the assistant proposed (D75) rewrites an experiment's
+# experiment.yaml, the version it replaces is copied to <experiment>/experiment-backups/experiment-<time>.yaml
+# (manifest.backup_experiment_yaml). Backups are never replaced or removed.
+EXPERIMENT_BACKUP_DIR = "experiment-backups"
+
 # FragPipe hardening (D59). The run fingerprint: one small text file per finished search, in the job's run
 # folder, for checking Ionomos' parsers against a real FragPipe. The preflight's own scratch folder, in log_dir.
 FINGERPRINT_FILE = "run_fingerprint.json"

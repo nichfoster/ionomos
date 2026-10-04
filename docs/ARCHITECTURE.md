@@ -23,7 +23,8 @@
 | `naming.py` | Pure functions: folder name → fields; raw filename → (sample, rep, fraction). Per-method file rules are templates or regexes, date formats a list, both from `config.yaml` `naming:` (D37). `method_kind()` is the one place that says what a method key behaves as (its engine's kind, its `like:` target, else the key; D54): `Config.kind()` / `Config.analysis_method()` wrap it, and the search inputs, the review window and the analysis ask them instead of comparing keys | — |
 | `namecheck.py` | "Test your names": how the live config reads folder / `.raw` names (`ionomos names test`, app Methods tab → **Test names…**); read-only | — |
 | `manifest.py` | Read/validate `experiment.yaml`; build `.fp-manifest` + TMT `annotation.txt` | `prior-work/fragpipe_runner.build_manifest` |
-| `intake.py` | Validate a stable folder, show it for review (or hand unresolvable names to the resolver), move it to the user dir, write `ionomos.json`, insert ledger row. The watcher passes a `config.LiveConfig`, so edits to config.yaml apply to the next drop | — |
+| `intake.py` | Validate a stable folder, show it for review (or hand unresolvable names to the resolver), move it to the user dir, write `ionomos.json` (with each raw file's acquisition time, `acqtime.py`), insert ledger row. The watcher passes a `config.LiveConfig`, so edits to config.yaml apply to the next drop | — |
+| `acqtime.py` | When each raw file was acquired, read-only: the Thermo `.raw` header (audit start FILETIME at 0x28, checked), else ThermoRawFileParser's mzML / metadata output, the Xcalibur stamp in the name, the file time (approximate) (D78). Used by intake, the QC trend and the run-order QC | unfinnigan / OpenTFRaw format notes |
 | `resolve.py` | tkinter window for fixing user/method/file tails; writes `experiment.yaml` + learned aliases | — |
 | `testbed.py` | Fake lab + sample drops + the fake engines for testing on any OS | — |
 | `fake_fragpipe.py` | The testbed's FragPipe (`ionomos fake-fragpipe`): FragPipe 24's options, checks, messages, console layout, exit codes and output files, each copied from a named source; no search (D59) | FragPipe's source |
@@ -53,7 +54,7 @@
 | `attention.py` | Durable "needs a person" queue (`<log_dir>/attention/*.json`): raised by intake, worker, analysis, QC trending (`qc_trend`, a warning: no pop-up unless `qc_trend.popup`); closed when fixed | — |
 | `popups.py` | Pop-up windows + the "needs attention" list, in the app or (app closed) the watcher's own Tk loop; **More help** opens the help page at the item's topic | — |
 | `help/` | The help for users (D46, HELP.md): `*.md` content (getting started, the report, glossary, troubleshooting, never-do, FAQ) parsed and rendered with the stdlib; `report_payload()` for every report, `page()` = `help.html` (`ionomos help`, the app's Help button, pop-ups), `text()` for the terminal, `topic()` / `topic_for_item()` | — |
-| `assistant/` | The read-only "Explain" assistant (D49, D57, [ASSISTANT.md](ASSISTANT.md)): `ask()` runs one question through a model on this PC and shows the answer only if its citations check out, else Ionomos's own text (`fallback`). `client.py` (the OpenAI-compatible chat API over urllib, localhost only, no proxy or redirect), `tools.py` (seven read-only tools over the ledger, attention items, help, engine logs and analysis.json, with schema-checked arguments and cleaned, capped results), `helpsearch.py` (BM25 over the help: SQLite FTS5 or pure Python), `citations.py` (what the tools returned is what may be cited), `audit.py` (append-only JSONL in app data), `fake.py` (the scripted fake model for tests). Off unless `assistant.enabled` and a model are set; nothing else depends on it | — |
+| `assistant/` | The local assistant (D49, D57, D75, [ASSISTANT.md](ASSISTANT.md)): `ask()` runs one question through a model on this PC and shows the answer only if its citations check out, else Ionomos's own text (`fallback`). `client.py` (the OpenAI-compatible chat API over urllib, localhost only, no proxy or redirect), `tools.py` (seven read-only tools over the ledger, attention items, help, engine logs and analysis.json, with schema-checked arguments and cleaned, capped results), `helpsearch.py` (BM25 over the help: SQLite FTS5 or pure Python), `citations.py` (what the tools returned is what may be cited), `audit.py` (append-only JSONL in app data), `fake.py` (the scripted fake model for tests), `proposals.py` (five proposal tools: checked, read-only descriptions of one change), `actions.py` (applies a proposal; called only by the confirm window's Confirm, `popups.ProposalDialog`). Off unless `assistant.enabled` and a model are set; nothing else depends on it | — |
 | `downstream/doctor.py` | The analysis check-up: issues with severity, likely causes, fixes; condition suggestions from file names | — |
 | `downstream/` | FragPipe tables → `QuantMatrix` → FragPipe-Analyst processing + limma → interactive `results/report.html`. `isodtb.py`/`tmt.py` (R ports), `quant.py` (loaders), `engines.py` (other engines' outputs — DIA-NN standalone incl. 2.x Parquet, MaxQuant, Spectronaut, AlphaDIA, MSstats and MSstatsTMT format, Proteome Discoverer — and the provenance of any result; ENGINES.md, D36), `fpa.py` (FragPipeAnalystR port: filter, normalise, impute, `test_limma`), `design.py` (limma designs with blocks and covariates, the moderated F; D42), `deqms.py` (R's loess and DEqMS' peptide-count prior; D43), `doseresponse.py` (CurveCurator's dose-response curves for titrations; D44), `sdrfdesign.py` (an input SDRF as the design; D47), `plex.py` (IRS across TMT plexes; D48), `rrandom.py` (R's RNG), `analysis.py` (settings, comparisons), `qc.py` (PCA, clustering, CV, missingness), `insights.py` (sample scorecard, PC ↔ condition/replicate, missingness vs intensity, p-value shape + π0, on/off features, imputation-driven hits, power; D35), `enrich.py` (local ORA and a correlation-adjusted rank test on Enrichr libraries), `export.py` (result tables, FragPipe-Analyst annotation + R script), `sdrf.py` (SDRF-Proteomics sample metadata; D38), `report.py` + `assets/report.js`, `charts.py` (static SVG volcano), `stats.py`, `simulate.py` | the lab's R scripts; FragPipeAnalystR; limma |
 | `downstream/guards.py`, `trust.py` | D60. `guards.check_input` makes a loaded matrix safe (implausible values to missing, repeated sample columns dropped) and says so; `guards.statistics` reports p-values that may not mean what they say (`NO_RESIDUAL_DF`, `VARIANCE_PRIOR`, `ZERO_VARIANCE`, `IDENTICAL_SAMPLES`); `trust.build` turns the analysis' own checks into the "How far to trust this" list (`analysis.json` → `trust`, static HTML at the top of the report) | — |
@@ -136,7 +137,8 @@ C:\Fragpipe_Auto\                    ← the app lives here (no spaces!)
 C:\Fragpipe_General\<user>\<experiment>\    ← where jobs land
   *.raw                              ← moved as-is (or raw\, or <plex>\ per TMT plex, if the user made them)
   experiment.yaml                    ← if the user wrote one
-  ionomos.json                      ← status + provenance, rewritten on every transition
+  ionomos.json                      ← status + provenance, rewritten on every transition; "acquisition": when
+                                       each raw file was acquired, read at intake (acqtime.py, D78)
   ionomos_run\                      ← what ionomos gave FragPipe
     fragpipe-files.fp-manifest
     <method>.workflow                ← pinned workflow, database.db-path set
@@ -604,6 +606,25 @@ turns the per-run records into the TSV, the `psm_qc` entry of
 `analysis.json`, the report's Search quality QC tab (`d["qc"]["psm"]`) and
 the two warnings. A table over 4,096 MB is not read. What is shown and the
 limits: WORKFLOWS.md.
+
+**Run order** (`downstream/runorder.py`, D78) runs after the search quality,
+for every analysis with processed samples, isolated like the others:
+
+```
+ionomos.json manifest ─▶ sample_files ─▶ acquisition time per file ─▶ run order of the samples
+ (else the raws in       (run names,      (ionomos.json "acquisition",   (first fraction's time)
+  the folder)             exp_rep, stem)   else acqtime.read, read-only)          │
+scorecard (insights.py) + psm_qc payload (psmqc.py) ─▶ a value per sample and QC number
+                                                       ▼
+          trend(): stratified Mann-Kendall + Theil-Sen     confounding(): η² of the run
+          within each condition                             positions by condition
+                                                       ▼
+          analysis.json "run_order", the report's Run order QC tab (d["qc"]["run"], via
+          ctx["run_order"]), RUN_ORDER_DRIFT / RUN_ORDER_CONFOUNDED, the run_order figure
+```
+
+Samples that share raw files (TMT channels) get no run order; samples with
+no readable time are listed and left out of the tests.
 
 **Roles** (`downstream/roles.py`, D61). `roles.plan(matrix, settings)` gives
 every condition a role and, when one is a competition, the default

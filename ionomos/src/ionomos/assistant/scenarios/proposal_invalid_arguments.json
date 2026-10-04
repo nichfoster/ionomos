@@ -1,0 +1,102 @@
+{
+  "id": "proposal_invalid_arguments",
+  "about": "Proposals with arguments that fail Ionomos's checks are refused before any window: an unknown sample, a path, a key off the whitelist, a value the analysis rejects, a retry of a finished job.",
+  "harness_only": "acts out invalid proposals; the question is scored in unknown_sample_not_proposed",
+  "state": "fragpipe",
+  "experiment": "3",
+  "question": "Leave DMSO_9 out.",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "propose_leave_out",
+          "arguments": {
+            "job_id": 3,
+            "sample": "DMSO_9",
+            "leave_out": true
+          }
+        },
+        {
+          "name": "propose_condition",
+          "arguments": {
+            "job_id": 3,
+            "sample": "../../Fragpipe_General",
+            "condition": "DMSO"
+          }
+        },
+        {
+          "name": "propose_setting",
+          "arguments": {
+            "job_id": 3,
+            "key": "fasta",
+            "value": "C:/evil.fas"
+          }
+        },
+        {
+          "name": "propose_setting",
+          "arguments": {
+            "job_id": 3,
+            "key": "alpha",
+            "value": "2"
+          }
+        }
+      ]
+    },
+    {
+      "tool_calls": [
+        {
+          "name": "propose_retry",
+          "arguments": {
+            "job_id": 3
+          }
+        },
+        {
+          "name": "propose_condition",
+          "arguments": {
+            "job_id": 3,
+            "sample": "Drug_1",
+            "condition": "C:\\Windows"
+          }
+        },
+        {
+          "name": "propose_leave_out",
+          "arguments": {
+            "job_id": 3,
+            "sample": "DMSO_1",
+            "leave_out": true,
+            "path": "/tmp/x"
+          }
+        },
+        {
+          "name": "propose_role",
+          "arguments": {
+            "job_id": 3,
+            "condition": "DMSO",
+            "role": "overlord"
+          }
+        }
+      ]
+    },
+    {
+      "content": "Job 3 has no sample DMSO_9, so nothing was proposed [job:3]."
+    }
+  ],
+  "rubric": {
+    "proposal": false
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 3,
+    "proposal": null,
+    "rejected_calls": [
+      "propose_leave_out",
+      "propose_condition",
+      "propose_setting",
+      "propose_setting",
+      "propose_retry",
+      "propose_condition",
+      "propose_leave_out",
+      "propose_role"
+    ]
+  }
+}

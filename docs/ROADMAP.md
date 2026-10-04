@@ -221,7 +221,20 @@ laid out one folder per TMT plex. **Still not run against a real FragPipe.**
     charge states. → 2026-10-01, done (D55): the Search quality QC tab,
     `results/psm_qc.tsv`, two warnings with wide limits. Not yet checked on
     real FragPipe output.
-  - Run-order drift, once acquisition times are recorded.
+  - ~~Run-order drift, once acquisition times are recorded.~~ → 2026-10-04,
+    done (D78): acquisition time per raw file at intake (the Thermo header,
+    else ThermoRawFileParser's output, the name stamp, the file time); the
+    Run order QC tab, `RUN_ORDER_DRIFT` / `RUN_ORDER_CONFOUNDED`, the
+    `run_order` figure; the QC trend uses the header's time. Open, on the PC:
+    - read the headers of real raw files from the Eclipse (and any other
+      instrument): is the version one of the known ones, is the start time
+      right, is `matches_file` true (the header's end against the file's
+      time), and does it agree with ThermoRawFileParser's `Creation date`
+      and its mzML `startTimeStamp` (also whether those are UTC)
+    - tune the drift limits and the 60 % block limit on the lab's sequences
+    - TMT: a run order per plex (the fractions) is not tested
+    - Bruker `.d` folders keep their time in `analysis.tdf` (SQLite): not read
+    - a setting to switch the tab off, if anyone asks
   - Protein complexes (CORUM, whose licence needs checking).
   - For isoDTB: → 2026-09-30, done as Phase 5C #3 (D52): liganded calls with
     configurable thresholds, a site-annotation (CysDB) overlay, selectivity
@@ -352,8 +365,9 @@ real data:
 - `DESIGN_NOT_USED` is an input issue (the report still comes out, with
   ~0 + condition). Decide whether a design the user asked for should instead
   stop the analysis.
-- The moderated F-test runs whenever limma compares 3+ conditions of
-  intensity data; there is no setting to switch it off.
+- ~~The moderated F-test runs whenever limma compares 3+ conditions of
+  intensity data; there is no setting to switch it off.~~ → 2026-10-04
+  (D76): `analysis.f_test: auto | off`, default `auto` (as before).
 - Proteome Discoverer and MaxQuant TMT layouts are from the documentation;
   a real export of each is still needed.
 - `irs: auto` falls back to the plex means only for balanced plexes; check
@@ -369,6 +383,12 @@ real data:
   with a FragPipe LFQ search of the same files. Check the default tolerances
   (±20 ppm) suit the instrument, and whether the median-polish roll-up or a
   MaxLFQ would agree better with FragPipe's `combined_protein.tsv`.
+  2026-10-04 (D76): MaxLFQ is built (`analysis.rollup: maxlfq`, checked
+  against R's `iq` and `diann`), so this is now one re-analysis with
+  `rollup: maxlfq` followed by `ionomos compare` of both against the
+  FragPipe result. The simulated benchmark found no clear winner (MaxLFQ: 1–3
+  points more sensitive, 0.7–1.3 points more false discoveries), so the
+  default stays median polish until real data decide.
 - Sage TMT (D56) is built from Sage's source, not a real `tmt.tsv`. On a
   real TMT search check: that `scannr` in `tmt.tsv` matches
   `results.sage.tsv` for MS3 quantification; that `tmt_1 … tmt_n` are in
@@ -383,7 +403,11 @@ real data:
    patient as fixed effects, Smyth's advice), covariates, time courses, and a
    moderated F-test. Every lab needs this. Checked against limma 3.68.5.
    Time courses treat time as a factor (F over time, trend, series vs
-   control, patterns); spline fits for long series are not built.
+   control, patterns); spline fits for long series → 2026-10-04 (D77): built.
+   From 7 time points (`time_model: auto`) a natural cubic spline in hours
+   (`time_spline_df`, default 4), the F on its coefficients and the
+   `~group * ns(time)` interaction; checked against R's `splines::ns` and
+   limma 3.68.5.
 2. [x] **Dose-response** (2026-09-30, D44, #59; checked against CurveCurator 0.6.0) (CurveCurator, Apache-2.0):
    - a 4-parameter log-logistic fit
    - pEC50 with a confidence interval
@@ -420,9 +444,22 @@ real data:
      direction (2026-10-01, D64: `normalize: auto` / `ratio`; simulated pulldowns only)
    - [x] an R (limma) golden file for unequal groups (2026-10-02, D66: `tests/golden/unequal/`, DMSO 2 /
      Probe 4 / Probe_Comp 4 with missing values and the small-group rule, limma 3.68.5 to 1e-8)
-8. [ ] Phospho: localisation filter and KSEA kinase activity. Only if a lab
-   runs phospho; PhosphoSitePlus is non-commercial, so it is a user download.
-9. [ ] STRING / CORUM overlays: low priority.
+8. [x] **Phospho** (2026-10-04, D79: `downstream/phospho.py`; opt-in, `phospho: true`; the lab has not
+   said it runs phospho, so nothing has been seen on real data):
+   - [x] FragPipe's site tables (IonQuant `combined_site_STY_79.9663.tsv`, TMT-Integrator
+     `abundance_single-site_MD.tsv`) and DIA-NN's `report.phosphosites_90/99.tsv`, analysed per site through
+     the same limma path
+   - [x] a localisation filter (best probability ≥ 0.75, a setting; per sample optional)
+   - [x] site changes corrected for protein abundance (D70's MSstatsPTM adjustment, per comparison)
+   - [x] KSEA kinase activity (checked against KSEAapp 2.0) from a kinase-substrate table the lab downloads
+     (PhosphoSitePlus is non-commercial: never shipped); report section, `kinase_activity` figure
+   - [ ] a real phospho search: the column names of a FragPipe 24 site report, a TMT-Integrator single-site
+     report and DIA-NN 2.x matrices from the lab's own runs; a real PhosphoSitePlus download
+   - [ ] not built: PTM-SEA / Kinase Library motifs, site occupancy, multi-site (doubly phosphorylated) tables
+9. [x] **STRING overlay** (2026-10-04, D79): partners among the hits from a STRING download (CC BY 4.0), as
+   a table in the report and `string_partners.tsv`; no network drawing. CORUM: its licence is now CC BY 4.0
+   (release 5.1 on Zenodo, 2025; earlier releases were non-commercial), so a user download would be allowed;
+   not built (its file format has not been checked).
 10. [ ] **Accuracy the lab can check, and robustness on messy tables**
    (2026-10-01, D60, [VALIDATION.md](VALIDATION.md); built on simulated data,
    the real-data half is open):
@@ -589,6 +626,15 @@ that scorecard, not leaderboards.
 - [ ] **6.2 Confirmed actions (2–3 weeks).** The proposal tools and the native
   diff-and-confirm dialog. *Exit:* no path runs an action without a click (tested), and
   3 lab members finish the tasks unaided.
+  - **Built 2026-10-04 (D75), against the scripted fake model only:** five proposal tools
+    (retry, a sample's condition, leave out / use again, a whitelisted setting, a role),
+    checked before a window opens; the confirm window (Ionomos's text and the
+    `experiment.yaml` diff, Cancel focused, one at a time) whose Confirm re-checks and uses
+    the app's own Retry and the editor's Save (now with `experiment-backups/`); `ionomos ask`
+    prints the proposal and the command; proposals and decisions audited; 13 new scenarios
+    (66). "No path runs an action without a click" is tested (source and replay).
+  - **Remains (the box stays open):** 3 lab members finishing the tasks unaided, on the PC,
+    with a real model.
 - [ ] **6.3 Analysis questions and chat panel (3–4 weeks).** Report-section and
   analysis.json context, multi-turn chat. *Exit:* ≥ 85% on 20 analysis scenarios, and a
   statistics-advice red-team set passes.
@@ -704,6 +750,9 @@ Collected from the other docs; resolve before/during Phase 1.
       dependency-free either way.
 - [ ] Time courses (D53): does the lab run them, and are 3 time points the right minimum? Should the trend use the
       order of the time points (built) or the hours?
+- [ ] Spline time courses (D77, 2026-10-04): is 7 time points the right place for `auto` to switch from a factor to
+      a spline, and 4 df the right default? The spline uses the hours (built); for very uneven spacing (minutes to
+      weeks) should it use log time instead? Should the trend then also move to the hours, or stay the order?
 - [ ] Search quality (D55): open a real `psm.tsv` from the PC and confirm the column names (`Spectrum`,
       `Observed Mass`, `Calculated Peptide Mass`, `Number of Missed Cleavages`, `Charge`, `Peptide Length`). What
       mass error and missed-cleavage share does the lab call a problem (built: 10 ppm and 50 %, both wide)? Should
@@ -771,6 +820,9 @@ Collected from the other docs; resolve before/during Phase 1.
       the colour picker, the masked fields) and have a lab member set a figure style and send a test message without
       help. Should "Show addresses and password" exist at all, or should a stored secret only ever be replaced?
 - [ ] Phase 5: which pilot labs can we reach? Does this lab run titrations or phospho? (Orders 5C.)
+- [ ] D79 (2026-10-04): if the lab runs phospho, send one search's site table (FragPipe, TMT-Integrator or
+      DIA-NN) to check the columns the readers expect, and say which kinase-substrate table it uses
+      (PhosphoSitePlus needs each user to accept its non-commercial licence).
 - [ ] Phase 6: is the PC's RAM in all 6 memory channels (speed of a local model)? Is a GPU present? May the assistant
       ever use a cloud model (institutional data policy), or strictly local?
 - [ ] Phase 6: who is the "ask the maintainer" contact the assistant falls back to? (It goes in
@@ -784,6 +836,9 @@ Collected from the other docs; resolve before/during Phase 1.
       thread count or priority (only `keep_alive`, and a `while_searching` model / address / pause). On the
       PC: does Ollama honour `keep_alive` on `/v1/chat/completions`, and what `keep_alive` and
       `while_searching` does `ionomos ask-eval` during a search suggest?
+- [ ] Phase 6 (D75, 2026-10-04): confirm the proposal whitelist (with `de_type`); that a proposal
+      is withheld when its answer fails the citation check; `experiment-backups/` for every editor
+      save, never pruned; and that Confirm saves without re-running the analysis.
 - [ ] Phase 5: publish on PyPI as `ionomos` (needs a PyPI account / trusted publisher set up by the maintainer).
 - [x] Agent auto-merge: removed 2026-09-27; a person merges (D31).
 - [x] CI Python versions: 3.11 (floor), 3.12 (exe build), 3.14 (the PC) since 2026-09-27.

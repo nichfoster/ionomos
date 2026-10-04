@@ -199,21 +199,22 @@ def _key(dest, stem: str) -> str:
     return f"{os.path.normcase(os.path.abspath(str(dest)))}|{stem}"
 
 
-def acquired(raw: Path, stem: str, fallback: str = "") -> tuple[str, str]:
-    """When the run was acquired: the Xcalibur stamp in its name, else the raw file's modification time
-    (the instrument writes it as it acquires), else when it was filed. Returns (ISO time, source)."""
-    from ionomos.naming import ACQ_STAMP
+ACQ_SOURCE = {"file name": "name"}  # acqtime's word -> the word older store rows use
 
-    m = ACQ_STAMP.search(stem)
-    if m:
-        try:
-            return datetime.strptime(re.sub(r"\D", "", m.group(0)), "%Y%m%d%H%M%S").isoformat(), "name"
-        except ValueError:
-            pass
-    try:
-        return datetime.fromtimestamp(raw.stat().st_mtime).replace(microsecond=0).isoformat(), "file time"
-    except OSError:
-        pass
+
+def acquired(raw: Path, stem: str, fallback: str = "", known: dict | None = None) -> tuple[str, str]:
+    """When the run was acquired (acqtime.py, D78): what intake recorded in ionomos.json ("acquisition", passed
+    as `known`), else the raw file's own header, ThermoRawFileParser's output, the Xcalibur stamp in its name,
+    the raw file's modification time; else when it was filed. Returns (ISO local time, source)."""
+    from ionomos import acqtime
+
+    info = known if known and known.get("time") else None
+    if info is None:
+        raw = Path(raw)
+        info = acqtime.read(raw, [raw.parent / "sage_mzml", raw.parent.parent / "sage_mzml"], stem)
+    if info.get("time"):
+        src = info.get("source") or "file time"
+        return str(info["time"])[:19], ACQ_SOURCE.get(src, src)
     when = str(fallback or "")[:19]
     return (when or datetime.now().replace(microsecond=0).isoformat()), "filed"
 
@@ -249,7 +250,8 @@ def build_rows(dest: Path, record: dict, method: str | None, s: dict, job_id: in
     rows = []
     for r in runs:
         got = found.get(r["stem"]) or {"metrics": {}, "sources": {}, "rt": {}}
-        when, source = acquired(dest / r["file"], r["stem"], record.get("queued_at") or "")
+        when, source = acquired(dest / r["file"], r["stem"], record.get("queued_at") or "",
+                                (record.get("acquisition") or {}).get(r["file"]))
         acq = dtype or ("DIA" if "precursors" in got["metrics"] else "DDA" if "psms" in got["metrics"] else "")
         series = " · ".join(x for x in (s["instrument"], method or "", r["standard"], r["amount"]) if x)
         rows.append({

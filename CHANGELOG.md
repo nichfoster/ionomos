@@ -7,6 +7,138 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-04
+
+### Added
+
+- **MaxLFQ protein roll-up** (D76): `analysis.rollup: auto | median_polish |
+  maxlfq`. It decides how a table of peptides or precursors becomes proteins:
+  Sage's `lfq.tsv`, the MSstats format, and DIA-NN and Spectronaut long reports.
+  MaxLFQ (Cox et al. 2014) is computed in pure Python
+  (`downstream/rollup.py`). For each pair of samples it takes the median
+  log-ratio of their shared features, solves least squares per connected
+  component and scales to the summed intensity. It matches R's
+  `iq::maxLFQ()` 2.0.1 to 1e-9 on 54 proteins, including disconnected sample
+  groups, missing values, single features and single samples. Its profiles
+  match `diann::diann_maxlfq()` to 1e-3. `auto` keeps every loader's
+  previous behaviour: median polish for Sage and the MSstats format, and
+  DIA-NN's `PG.MaxLFQ` and Spectronaut's `PG.Quantity` as they are. For a
+  DIA-NN report, `maxlfq` / `median_polish` uses `Precursor.Normalised`; for
+  Spectronaut it uses `FG.Quantity`, now an optional column in
+  `ionomos spectronaut-columns`. When those columns are missing, or the table
+  already holds proteins, a note says the setting was not used. When a
+  protein's samples share no feature, a note gives how many proteins that
+  affected.
+- **`analysis.f_test: auto | off`** (D76): `off` switches off the moderated
+  F-test ("any change") that limma runs on 3+ conditions of intensity data.
+  The report's Methods and settings and `analysis.json` (`f_test: {off:
+  true}`) then say it was switched off. The default `auto` behaves as
+  before. Time-course F-tests are not affected; `time_course` controls those.
+- **`ionomos benchmark --kind rollup`** (D76): simulated peptide tables with
+  their own ionisation offsets, missing values and interferences, rolled up
+  by median polish or MaxLFQ, with and without imputation
+  (`benchmark_simulated_rollup.*`).
+
+- **Spline fits for long time courses** (D77). A series with 7 or more time
+  points (`analysis.time_model: auto`, the default) or any series with
+  `time_model: spline` is fitted as a natural cubic spline in hours
+  (`time_spline_df`, default 4, at most the time points − 2), as in the limma
+  User's Guide for many time points: the moderated F on the spline
+  coefficients, the series-vs-control test on the interaction of two curves
+  (`~group * ns(time)`), and the profile is the fitted curve's change from
+  the first time point. `downstream/splines.py` is R's `splines::ns`
+  ported step by step. The report's profile and the static `time_profiles`
+  figure draw the fitted curve on an axis in hours; `time_course.tsv` gains
+  a `model` column, `analysis.json` → `time_course` a `time_model` and
+  `spline` per series. A `time_spline_df` the series can't carry raises
+  the new `TIME_SPLINE` issue. Series with up to 6 time points are tested
+  exactly as before. Checked against R 4.6.1 `splines::ns` (1e-12) and
+  limma 3.68.5 (10,350 values, worst relative difference 5.4e-10).
+
+- **The assistant can propose a change; a person confirms it** (D75,
+  [docs/ASSISTANT.md](docs/ASSISTANT.md#proposals-and-the-confirm-window)).
+  Asked to act, the local assistant may propose one change per question:
+  retry a failed search, give a sample another condition, leave a sample out
+  (or use it again), one analysis setting (imputation, normalisation, p ≤,
+  |log2FC| ≥, the control, what is compared, the comparisons) or a
+  condition's role. Ionomos checks it first (a sample or condition the
+  experiment has, a value the analysis accepts, a failed job for a retry) and
+  opens a window written by Ionomos, not by the model: the job, what Confirm
+  does and the `experiment.yaml` diff, with **Cancel** (focused) and
+  **Confirm**. Typing "yes" does nothing. Confirm re-checks the proposal
+  against the job and file as they are now and uses the app's own Retry and
+  the experiment editor's Save. `ionomos ask` prints the proposal and the
+  command or app steps; it never applies it. Proposals and decisions are in
+  the assistant's audit log. 13 new scenarios (66 in all).
+- **experiment.yaml backups**: the experiment editor's Save (and a confirmed
+  proposal) keeps the version it replaces in the experiment's
+  `experiment-backups/` folder (D75). Backups are never replaced or removed.
+
+- **Acquisition time per raw file** (D78). Intake records when each raw file
+  was acquired in `ionomos.json` (`acquisition`), read from the Thermo
+  `.raw` file's own header (the acquisition start Xcalibur writes; only the
+  first bytes are read, nothing is written), else from ThermoRawFileParser's
+  output, the Xcalibur stamp in the name, or the file's modification time,
+  marked approximate. Each entry says where its time came from.
+- **Run order QC** (D78). A **Run order** tab under Quality control: each
+  sample's identifications, missing values, signal, PSMs, mass error and
+  missed cleavages (or DIA-NN's precursors and mass accuracy) in the order of
+  acquisition, with a drift test within each condition and which runs each
+  condition was in. Two new warnings: `RUN_ORDER_DRIFT` (a number drifts
+  over the run) and `RUN_ORDER_CONFOUNDED` (the conditions were run in
+  blocks, so a drift would look like biology). `analysis.json` →
+  `run_order`; a `run_order` figure for slides (`ionomos export --figures
+  run_order`, `analysis.export.figures`, the report's zip).
+
+- **Phosphoproteomics, opt-in** (D79, `downstream/phospho.py`). Nothing
+  changes unless `phospho: true` is set under `analysis:`:
+  - The search's phosphosite table is analysed instead of its proteins:
+    FragPipe's `combined_site_STY_79.9663.tsv` (IonQuant, label-free), TMT-Integrator's
+    `abundance_single-site_MD.tsv`, or DIA-NN's `report.phosphosites_90.tsv`
+    / `_99.tsv`. Sites are named like `MAPK1 T185` and go through the same
+    filter, normalisation, imputation, limma, volcano and report as proteins.
+  - A localisation filter, `phospho_min_localization` (0.75): applied on
+    the best localisation probability of FragPipe's label-free table (and per
+    sample with `phospho_localization_per_sample`); for TMT-Integrator and
+    DIA-NN, which filter first, their threshold is read and compared
+    (`PHOSPHO_LOCALISATION`).
+  - `protein_correction` (D70) works on phosphosite comparisons: each site's
+    change minus the same comparison's protein change in an unenriched
+    proteome, MSstatsPTM's adjustment, as a second comparison.
+  - **Kinase activity (KSEA)** with a kinase-substrate table the lab
+    downloads (`kinase_substrates`: PhosphoSitePlus's
+    `Kinase_Substrate_Dataset`, or KSEAapp's PSP&NetworKIN file; never
+    shipped): a z-score per kinase and comparison, `ksea_min_substrates`
+    (5), Benjamini-Hochberg; `results/kinase_activity.tsv`, a bar chart in
+    the report and the `kinase_activity` figure for slides. The scores are
+    KSEAapp 2.0's (checked against it); the p-value is two-sided.
+- **STRING partners among the hits** (D79): `string_network` names a STRING
+  download (protein.links with protein.info, or a website export), and the
+  report lists each hit's partners among the same comparison's hits;
+  `results/string_partners.tsv`. Works for proteins too.
+- Doctor issues with help: `PHOSPHO_TABLE`, `PHOSPHO_LOCALISATION`,
+  `KINASE_SUBSTRATES`, `STRING_NETWORK`.
+
+### Changed
+
+- Every Retry (the Jobs tab, the failed-search pop-up, `ionomos retry`, a
+  confirmed proposal) is one function, `worker.request_retry`; the Jobs tab's
+  Retry now also closes the job's "search failed" item, as the others did
+  (D75).
+- The assistant's system prompt and tools changed (five proposal tools), so
+  its prompt digest changed: score real models again with `ionomos ask-eval`.
+
+- **The QC trend orders runs by the raw file's header** (D78) when the
+  experiment's `ionomos.json` or the file has one, before the name stamp and
+  the file time.
+
+- `proteincorr.correct_comparison`: the per-comparison MSstatsPTM
+  adjustment is one function, shared by isoDTB site ratios and phosphosites
+  (no change in results).
+- A site-level analysis writes no FragPipe-Analyst `reproduce_in_R.R` (it
+  would read the site table as proteins).
+
+
 ## [0.16.0] - 2026-10-03
 
 ### Added

@@ -164,7 +164,9 @@ def _series_section(k: int, ser: dict) -> str:
     rows = []
     for r in reversed(runs):
         when = (r.get("acquired") or "")[:16].replace("T", " ")
-        src = {"name": "from the file name", "file time": "the raw file's time", "filed": "when it was filed"}.get(
+        src = {"raw header": "from the raw file's header", "ThermoRawFileParser": "from ThermoRawFileParser's output",
+               "name": "from the file name", "file time": "the raw file's time (approximate)",
+               "filed": "when it was filed"}.get(
             r.get("acquired_from") or "", "")
         exp = escape(r.get("experiment") or "")
         if r.get("report"):

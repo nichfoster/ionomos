@@ -1375,21 +1375,21 @@
 
   // ------------------------------------------------------------------- QC
   const QC_TABS = [["card", "Sample scorecard"], ["pca", "PCA"], ["corr", "Correlation"], ["missing", "Missing values"], ["mnar", "Missing vs intensity"], ["dist", "Distributions"], ["cv", "CV"],
-    ["mv", "Mean–variance"], ["rank", "Abundance rank"], ["ids", "Identifications"], ["imp", "Imputation"], ["power", "Power"], ["psm", "Search quality"]];
+    ["mv", "Mean–variance"], ["rank", "Abundance rank"], ["ids", "Identifications"], ["imp", "Imputation"], ["power", "Power"], ["psm", "Search quality"], ["run", "Run order"]];
   const QC_TIPS = { card: "Each sample against the others: which ones stand out", pca: "Do the replicates of a condition sit together?", corr: "How alike the samples are, pair by pair",
     missing: "How many values are missing, and where", mnar: "Are values missing because they are low?", dist: "The spread of values in each sample, before and after normalisation",
     cv: "How reproducible each condition's replicates are", mv: "Does the spread depend on the abundance?", rank: "The abundance of every feature, from most to least",
-    ids: "How many features each sample has", imp: "The imputed values against the measured ones", power: "The smallest fold change this design can detect", psm: "What the search made of each raw file" };
+    ids: "How many features each sample has", imp: "The imputed values against the measured ones", power: "The smallest fold change this design can detect", psm: "What the search made of each raw file", run: "Each sample against the order the samples were acquired in" };
   let qcTab = null;
   function renderQC() {
     const host = $("#qc");
     if (!host) return;
-    const tabs = QC_TABS.filter(([k]) => (k !== "imp" || D.imp) && (k !== "card" || (D.qc.scorecard && D.qc.scorecard.length)) && (k !== "mnar" || D.qc.mnar) && (k !== "power" || D.qc.power) && (k !== "mv" || D.kind !== "ratio" || nS > 2) && (k !== "psm" || D.qc.psm));
+    const tabs = QC_TABS.filter(([k]) => (k !== "imp" || D.imp) && (k !== "card" || (D.qc.scorecard && D.qc.scorecard.length)) && (k !== "mnar" || D.qc.mnar) && (k !== "power" || D.qc.power) && (k !== "mv" || D.kind !== "ratio" || nS > 2) && (k !== "psm" || D.qc.psm) && (k !== "run" || D.qc.run));
     if (!qcTab || !tabs.some(([k]) => k === qcTab)) qcTab = tabs.some(([k]) => k === "card") ? "card" : "pca";
     host.innerHTML = "<div class='tabs'>" + tabs.map(([k, t]) => "<button data-k='" + k + "' title='" + esc(QC_TIPS[k] || "") + "'" + (k === qcTab ? " class='on'" : "") + ">" + t + "</button>").join("") + "</div><div id='qcbody'></div>";
     $$(".tabs button", host).forEach((b) => (b.onclick = () => { qcTab = b.dataset.k; renderQC(); }));
     const body = $("#qcbody");
-    safe(() => ({ card: qcCard, pca: qcPCA, corr: qcCorr, missing: qcMissing, mnar: qcMNAR, dist: qcDist, cv: qcCV, mv: qcMV, rank: qcRank, ids: qcIds, imp: qcImp, power: qcPower, psm: qcPsm })[qcTab](body), body);
+    safe(() => ({ card: qcCard, pca: qcPCA, corr: qcCorr, missing: qcMissing, mnar: qcMNAR, dist: qcDist, cv: qcCV, mv: qcMV, rank: qcRank, ids: qcIds, imp: qcImp, power: qcPower, psm: qcPsm, run: qcRun })[qcTab](body), body);
     addHelp($(":scope > .sub", body), "qc." + qcTab);
   }
   function legend() { return "<div class='legend'>" + D.conditions.map((c) => "<span><span class='sw' style='background:" + condColor(c) + "'></span>" + esc(c) + "</span>").join("") + "</div>"; }
@@ -1826,6 +1826,74 @@
     svgTools(ch, root, "search_quality_" + st.chart);
   }
 
+  /** Each sample's QC numbers in the order the samples were acquired (runorder.py, D78): a drift test within each
+   * condition (stratified Mann-Kendall, Theil-Sen slope), and whether the conditions were acquired in blocks. */
+  const RUN_SRC = { "raw header": "the raw files' own header", "ThermoRawFileParser": "ThermoRawFileParser's output", "file name": "the time stamp in the file names", "file time": "the raw files' modification time (approximate)" };
+  function runValue(m, v) {
+    if (v == null) return "–";
+    if (m.key === "missed") return pct(v, 1);
+    if (m.unit === "%") return fmt(v, 1) + "%";
+    if (m.unit === "ppm" || m.unit === "log2") return fmt(v, 2);
+    return fmtInt(Math.round(v));
+  }
+  function runChange(m) {
+    if (m.change == null) return "–";
+    const sg = m.change >= 0 ? "+" : "−", a = Math.abs(m.change);
+    if (m.judge === "rel" && m.med) return sg + pct(a / Math.abs(m.med), 0) + " (" + sg + fmtInt(Math.round(a)) + ")";
+    if (m.unit === "%") return sg + fmt(a, 1) + " percentage points";
+    if (m.key === "missed") return sg + pct(a, 1);
+    return sg + fmt(a, 2) + (m.unit ? " " + m.unit : "");
+  }
+  function runLimit(m) { return m.judge === "rel" ? pct(m.limit, 0) : m.key === "missed" ? pct(m.limit, 0) : m.unit === "%" ? fmt(m.limit, 0) + " points" : fmt(m.limit, 1) + " " + m.unit; }
+  function qcRun(host) {
+    const P = D.qc.run, S = P.samples || [], M = P.metrics || [], cf = P.confound, lim = P.limits || {};
+    const st = qcRun._st || (qcRun._st = { m: (M.find((m) => m.flag) || M[0] || {}).key });
+    if (M.length && !M.some((m) => m.key === st.m)) st.m = M[0].key;
+    const timed = S.filter((s) => s.o != null), srcKeys = Object.keys(P.sources || {});
+    const srcs = srcKeys.map((k) => (RUN_SRC[k] || k) + (srcKeys.length > 1 ? " (" + P.sources[k] + ")" : "")).join(", ");
+    let h = "<p class='sub'>Each sample's quality numbers in the order the samples were acquired: " + timed.length + " sample(s), the times from " + esc(srcs) + ". " +
+      "A steady slope is a drift during the run (a dirtier spray or column, a calibration moving). It is tested within each condition, so a condition that differs, or was run as a block, is not a drift. " +
+      "A number is flagged when its trend has p &lt; " + fmt(lim.alpha, 2) + " and it changes by at least its limit over the run (wide limits, not yet the lab's own).</p>" +
+      ((P.notes || []).length ? "<p class='muted'>" + P.notes.map(esc).join("<br>") + "</p>" : "");
+    if (cf) {
+      const where = Object.keys(cf.positions || {}).map((c) => "<span class='sw' style='background:" + condColor(c) + "'></span>" + esc(c) + ": runs " + esc(cf.positions[c])).join(" · ");
+      h += "<p" + (cf.flag ? " class='zbad'" : "") + ">" + (cf.flag ? "<b>The conditions were run in blocks.</b> " : "Conditions in the run: ") + where +
+        ". The condition explains " + pct(cf.eta2, 0) + " of where a sample sits in the run (η²; a random order gives as much in " + pct(cf.p, 1) + " of cases)" +
+        (cf.flag ? ": a drift would differ between the conditions too, and the statistics cannot tell it from the biology." : ".") + "</p>";
+    }
+    if (M.length) {
+      h += "<div class='row'><label class='ctl'>Number <select id='runsel'>" + M.map((m) => "<option value='" + m.key + "'" + (m.key === st.m ? " selected" : "") + ">" + esc(m.label) + (m.flag ? " (flagged)" : "") + "</option>").join("") + "</select></label></div><div class='chart card' id='runchart'></div>";
+      h += "<div class='tablewrap'><table id='runtrend'><thead><tr><th>Number</th><th title='Kendall tau within the conditions: +1 every later run higher, −1 every later run lower'>τ</th><th>p</th><th title='Theil-Sen slope times the runs: the change from the first run to the last'>change over the run</th><th>flag at</th><th>Flag</th></tr></thead><tbody>" +
+        M.map((m) => "<tr><td>" + esc(m.label) + "</td><td class='n'>" + (m.tau == null ? "–" : (m.tau >= 0 ? "+" : "") + fmt(m.tau)) + "</td><td class='n'>" + (m.p == null ? "not tested" : fmtP(m.p)) + "</td><td class='n" + (m.flag ? " zbad" : "") + "'>" + runChange(m) + "</td><td class='n'>" + runLimit(m) + "</td><td class='desc'>" + (m.flag ? "drift" : "") + "</td></tr>").join("") + "</tbody></table></div>";
+    }
+    h += "<div class='tablewrap'><table id='runtable'><thead><tr><th>Run</th><th>Sample</th><th>Condition</th><th>Acquired</th><th>From</th>" + M.map((m) => "<th>" + esc(m.label) + "</th>").join("") + "</tr></thead><tbody>" +
+      S.map((s, j) => "<tr><td class='n'>" + (s.o == null ? "–" : s.o) + "</td><td>" + esc(s.s) + "</td><td><span class='sw' style='background:" + condColor(s.c) + "'></span>" + esc(s.c) + "</td><td>" + esc((s.t || "–").replace("T", " ")) + "</td><td class='desc'>" + esc(s.src ? (RUN_SRC[s.src] || s.src) : "no time") + "</td>" +
+        M.map((m) => "<td class='n'>" + runValue(m, m.v[j]) + "</td>").join("") + "</tr>").join("") + "</tbody></table></div>";
+    host.innerHTML = h;
+    const m = M.find((x) => x.key === st.m);
+    if (!m) return;
+    $("#runsel").onchange = (e) => { st.m = e.target.value; qcRun(host); };
+    const pts = [];
+    S.forEach((s, j) => { if (s.o != null && m.v[j] != null) pts.push({ o: s.o, y: m.v[j], s: s }); });
+    const ch = $("#runchart"), W = widthOf(ch), H = heightOf(300), L = 64, R = 12, T = 22, B = 44, n = Math.max(2, timed.length);
+    const root = frame(ch, W, H), g = svg("g", {}, root);
+    if (!pts.length) return;
+    let lo = Math.min(...pts.map((p) => p.y)), hi = Math.max(...pts.map((p) => p.y));
+    const pad = (hi - lo) * 0.1 || Math.abs(hi) * 0.05 || 1;
+    lo -= pad; hi += pad;
+    const X = (o) => L + ((o - 1) / (n - 1)) * (W - L - R), Y = (v) => H - B - ((v - lo) / (hi - lo)) * (H - T - B);
+    axes(g, X, Y, niceTicks(1, n, Math.min(10, n)).filter((v) => v >= 1 && v <= n && v === Math.round(v)), niceTicks(lo, hi, 5), L, R, T, B, W, H, "run (order of acquisition)", m.label + (m.unit && m.unit !== "%" ? " (" + m.unit + ")" : m.unit === "%" ? " (%)" : ""));
+    timed.forEach((s) => title(svg("rect", { x: X(s.o) - Math.max(2, (W - L - R) / n / 2) + 0.5, y: 4, width: Math.max(3, (W - L - R) / n - 1), height: 9, fill: condColor(s.c) }, g), "run " + s.o + ": " + s.s + " (" + s.c + ")"));
+    if (m.slope != null) {  // the Theil-Sen line through the median point
+      const b0 = median(pts.map((p) => p.y - m.slope * p.o));
+      svg("line", { x1: X(1), x2: X(n), y1: Y(b0 + m.slope), y2: Y(b0 + m.slope * n), stroke: css(m.flag ? "--up" : "--muted"), "stroke-width": m.flag ? 2 : 1.5, "stroke-dasharray": m.flag ? null : "5 4" }, g);
+    }
+    pts.forEach((p) => title(svg("circle", { cx: X(p.o), cy: Y(p.y), r: 5, fill: condColor(p.s.c), stroke: css("--surface"), "stroke-width": 1.2 }, g),
+      "run " + p.o + ": " + p.s.s + " (" + p.s.c + ")\n" + (p.s.t || "").replace("T", " ") + "\n" + m.label + ": " + runValue(m, p.y)));
+    ch.insertAdjacentHTML("beforeend", "<p class='muted'>" + esc(m.label) + ": " + (m.p == null ? "not tested (needs " + (lim.min || 6) + " samples with a time)" : "τ " + (m.tau >= 0 ? "+" : "") + fmt(m.tau) + ", p " + fmtP(m.p) + ", change over the run " + runChange(m) + (m.flag ? " — flagged" : "")) + "</p>" + legend());
+    svgTools(ch, root, "run_order_" + m.key);
+  }
+
   // -------------------------------------------------------- dose-response
   // D.dose (doseresponse.py report_payload): per series the curves as columns (i = feature, cls, pec50, ciL/ciR,
   // ec50, slope, front, back, fc, p, q, rel, r2, n) and y = each curve's log2 ratios to the control per series
@@ -2020,6 +2088,15 @@
   const TIME_CLS = ["up", "down", "mixed", "not"];
   const timeColor = (c) => css(c === "up" ? "--up" : c === "down" ? "--down" : c === "mixed" ? "--c3" : "--ns");
   function timeSeries() { const X = D.time; return X && X.ran && X.series && X.series.length ? X.series[Math.min(TS.s, X.series.length - 1)] : null; }
+  /** Feature i's fitted spline in series Q as [[hours, log2 value]] on Q.grid (timecourse.curve_at), or null: the
+   * curve is its level plus the basis (gb, less its value at the first time point) times its coefficients (cf). */
+  function timeCurve(Q, i) {
+    const k = Q && Q.model === "spline" && Q.cf ? Q.i.indexOf(i) : -1;
+    if (k < 0) return null;
+    const cf = Q.cf[k], lv = Q.lv[k];
+    if (lv == null || cf.some((v) => v == null)) return null;
+    return Q.grid.map((t, g) => [t, lv + Q.gb[g].reduce((s, b, a) => s + b * cf[a], 0)]);
+  }
   const TIME_COLS = [
     { k: "name", t: D.kind === "ratio" ? "Site" : "Gene", f: (S, k) => esc(nameOf(S.i[k])) },
     { k: "cls", t: "class", f: (S, k) => "<span class='dot' style='background:" + timeColor(S.cls[k]) + "'></span> " + esc(S.cls[k]) },
@@ -2073,7 +2150,9 @@
     if (X.series.length > 1) h += "<label class='ctl'>Series <select id='tseries'>" + X.series.map((x, k) => "<option value='" + k + "'" + (k === TS.s ? " selected" : "") + ">" + esc(x.name || "time course") + "</option>").join("") + "</select></label>";
     h += "<label class='ctl'>Show <select id='tshow'>" + opts.map((o) => "<option value='" + o[0] + "'" + (o[0] === TS.show ? " selected" : "") + ">" + esc(o[1]) + "</option>").join("") + "</select></label>" +
       "<input type='search' id='tq' placeholder='Find a feature' aria-label='Find a feature' value='" + esc(TS.q) + "'>" +
-      "<span class='muted'>" + S.labels.length + " time points: " + esc(S.labels.join(", ")) + " · changing: F adj. p ≤ " + X.alpha + " and |log2FC| ≥ " + X.lfc + " against " + esc(S.labels[0]) +
+      "<span class='muted'>" + S.labels.length + " time points: " + esc(S.labels.join(", ")) +
+      (S.model === "spline" ? " · time as a natural spline in hours, " + S.df + " df (the F tests the curve; log2FC is the fitted change)" : "") +
+      " · changing: F adj. p ≤ " + X.alpha + " and |log2FC| ≥ " + X.lfc + " against " + esc(S.labels[0]) +
       (S.untested ? " · " + fmtInt(S.untested) + " not tested (not measured at every time point)" : "") + " · <a href='time_course.tsv'>time_course.tsv</a></span></div>" +
       "<div id='timepatterns' class='tiles'></div><div id='timehl' class='muted'></div>" +
       "<div class='split'><div id='timetable'></div><div class='card detail'><div id='timehead'></div><div class='chart' id='timeprofile'></div></div></div>";
@@ -2131,38 +2210,50 @@
     const i = S.i[k];
     if (head) head.innerHTML = "<h4>" + esc(nameOf(i)) + " <span class='badge' style='color:" + timeColor(S.cls[k]) + ";border-color:" + timeColor(S.cls[k]) + "'>" + esc(S.cls[k]) + "</span></h4>" +
       "<div class='muted'>F " + fmt(S.F[k]) + " · adj. p " + fmtP(S.q[k]) + " · largest change " + fmt(S.max[k]) + " at " + esc(S.labels[S.peak[k]]) + (S.iq && S.iq[k] != null ? " · differs from " + esc(S.vs) + ": adj. p " + fmtP(S.iq[k]) : "") + "</div>";
-    const pointsOf = (Q) => Q.samples.map((j, a) => [Q.times.indexOf(Q.stime[a]), D.v[i] ? D.v[i][j] : null, j]).filter((p) => p[1] != null && p[0] >= 0);
-    const meansOf = (Q, pts) => Q.times.map((_t, a) => { const v = pts.filter((p) => p[0] === a).map((p) => p[1]); return v.length ? v.reduce((x, y) => x + y, 0) / v.length : null; });
-    const pts = pointsOf(S), means = meansOf(S, pts);
+    // a spline series (D77) is drawn on an axis in hours with its fitted curve; a factor series by order, with its means
+    const spline = S.model === "spline", t0 = S.times[0], t1 = S.times[S.times.length - 1];
+    const onAxis = spline ? (t) => t >= t0 && t <= t1 : (t) => S.times.indexOf(t) >= 0;
+    const pointsOf = (Q) => Q.samples.map((j, a) => [Q.stime[a], D.v[i] ? D.v[i][j] : null, j]).filter((p) => p[1] != null && p[0] != null && onAxis(p[0]));
+    const meansOf = (ts, pts) => ts.map((t) => { const v = pts.filter((p) => p[0] === t).map((p) => p[1]); return [t, v.length ? v.reduce((x, y) => x + y, 0) / v.length : null]; });
+    const pts = pointsOf(S);
     const other = S.vs ? X.series.find((q) => q.name === S.vs) : null;
-    // the control series on this series' time axis (the shared time points)
-    const opts = other ? pointsOf(other).map((p) => [S.times.indexOf(other.times[p[0]]), p[1], p[2]]).filter((p) => p[0] >= 0) : [];
-    const omeans = other ? S.times.map((_t, a) => { const v = opts.filter((p) => p[0] === a).map((p) => p[1]); return v.length ? v.reduce((x, y) => x + y, 0) / v.length : null; }) : [];
+    const opts = other ? pointsOf(other) : [];  // the control series on this series' time axis
+    const fit = spline ? timeCurve(S, i) : null, ofit = spline && other ? timeCurve(other, i) : null;
+    const means = fit ? fit.filter((p) => onAxis(p[0])) : meansOf(S.times, pts);
+    const omeans = !other ? [] : ofit ? ofit.filter((p) => onAxis(p[0])) : meansOf(spline ? other.times.filter(onAxis) : S.times, opts);
     const W = widthOf(host, 420), H = heightOf(300), L = 52, R = 14, T = 14, B = 44;
     const root = frame(host, W, H);
-    const ys = pts.concat(opts).map((p) => p[1]);
-    if (!ys.length) { text(root, W / 2, H / 2, "No measured values", { "text-anchor": "middle" }); return; }
+    const ys = pts.concat(opts).map((p) => p[1]).concat(fit ? means.map((p) => p[1]) : [], ofit ? omeans.map((p) => p[1]) : []);
+    if (!pts.concat(opts).length) { text(root, W / 2, H / 2, "No measured values", { "text-anchor": "middle" }); return; }
     let y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
     const py = (y1 - y0) * 0.1 || 0.5;
     y0 -= py; y1 += py;
     const n = S.times.length, Xs = (a) => L + 14 + (a / Math.max(1, n - 1)) * (W - L - R - 28), Y = (v) => T + (1 - (v - y0) / (y1 - y0)) * (H - T - B);
+    const Xt = spline ? (t) => L + 14 + ((t - t0) / (t1 - t0 || 1)) * (W - L - R - 28) : (t) => Xs(S.times.indexOf(t));
     const g = svg("g", {}, root);
-    axes(g, Xs, Y, [], niceTicks(y0, y1, 5), L, R, T, B, W, H, "time", D.kind === "ratio" ? "log2 ratio" : "log2 intensity");
-    S.labels.forEach((lab, a) => text(g, Xs(a), H - B + 16, lab, { "text-anchor": "middle" }));
+    axes(g, Xs, Y, [], niceTicks(y0, y1, 5), L, R, T, B, W, H, spline ? "time (h)" : "time", D.kind === "ratio" ? "log2 ratio" : "log2 intensity");
+    let last = -Infinity;
+    S.labels.forEach((lab, a) => {
+      const x = Xt(S.times[a]), half = lab.length * 3.2;
+      if (spline && x - half < last + 4) return;  // early time points crowd together on an axis in hours
+      text(g, x, H - B + 16, lab, { "text-anchor": "middle" });
+      last = x + half;
+    });
     const line = (m, col, dash) => {
       let d = "", pen = false;
-      m.forEach((v, a) => { if (v == null) { pen = false; return; } d += (pen ? "L" : "M") + Xs(a).toFixed(1) + " " + Y(v).toFixed(1); pen = true; });
+      m.forEach((p) => { if (p[1] == null) { pen = false; return; } d += (pen ? "L" : "M") + Xt(p[0]).toFixed(1) + " " + Y(p[1]).toFixed(1); pen = true; });
       if (d) svg("path", { d: d, fill: "none", stroke: col, "stroke-width": 2, "stroke-dasharray": dash }, g);
     };
-    const muted = css("--muted"), col = timeColor(S.cls[k] === "not" ? "not" : S.cls[k]) || css("--c0");
+    const muted = css("--muted"), col = timeColor(S.cls[k] === "not" ? "not" : S.cls[k]) || css("--c0"), shift = other && !spline ? 5 : 0;
     if (other) {
       line(omeans, muted, "5 4");
-      opts.forEach((p) => title(svg("circle", { cx: Xs(p[0]) + 5, cy: Y(p[1]), r: 2.8, fill: "none", stroke: muted, "stroke-width": 1.2, "data-ctrl": 1 }, g), D.samples[p[2]] + ": " + fmt(p[1])));
+      opts.forEach((p) => title(svg("circle", { cx: Xt(p[0]) + shift, cy: Y(p[1]), r: 2.8, fill: "none", stroke: muted, "stroke-width": 1.2, "data-ctrl": 1 }, g), D.samples[p[2]] + ": " + fmt(p[1])));
     }
     line(means, S.cls[k] === "not" ? css("--text2") : col, null);
-    pts.forEach((p) => title(svg("circle", { cx: Xs(p[0]) - (other ? 5 : 0), cy: Y(p[1]), r: 3.2, fill: S.cls[k] === "not" ? css("--text2") : col, "fill-opacity": isImputed(i, p[2]) ? 0.3 : 0.85, "data-j": p[2] }, g),
+    pts.forEach((p) => title(svg("circle", { cx: Xt(p[0]) - shift, cy: Y(p[1]), r: 3.2, fill: S.cls[k] === "not" ? css("--text2") : col, "fill-opacity": isImputed(i, p[2]) ? 0.3 : 0.85, "data-j": p[2] }, g),
       D.samples[p[2]] + ": " + fmt(p[1]) + (isImputed(i, p[2]) ? " (imputed)" : "")));
     if (other) text(g, L + 8, T + 10, "dashed: " + other.name, { "text-anchor": "start" });
+    if (fit) text(g, W - R - 4, T + 10, "line: spline, " + S.df + " df", { "text-anchor": "end" });
     svgTools(host, root, "time_course_" + (X.series.length > 1 ? (S.name || "series") + "_" : "") + nameOf(i));  // one file per series and feature
   }
   function renderTimeTable() {
@@ -2452,6 +2543,103 @@
     $$("tbody tr[data-k]", host).forEach((tr) => (tr.onclick = () => { const e = rows[+tr.dataset.k]; setHighlight(new Set(e.x), e.g + " sites"); }));
   }
 
+  // -------------------------------------------- phosphosites, kinases, partners
+  // D.phos (phospho.py report_payload, D79), all opt-in: loc = what the site table and the localisation filter
+  // kept; ksea.comps[].k = [kinase, m, mS, z, p, fdr, "up" | "down" | "", substrates]; string.comps[].genes =
+  // [gene, direction, partners, scores]. The numbers are made in Python; the page only shows them.
+  const PH = { c: 0, kin: null };
+  function phosComps() { const K = D.phos && D.phos.ksea; return K && K.ran && K.comps ? K.comps : []; }
+  function renderPhos() {
+    const host = $("#phosbody");
+    if (!host) return;
+    const P = D.phos || {}, L = P.loc || {}, K = P.ksea || null, S = P.string || null;
+    if (!(P.ran || K || S)) { host.innerHTML = ""; return; }
+    ["#phos", "#navphos"].forEach((s) => { const e = $(s); if (e) e.hidden = false; });
+    let h = "";
+    if (P.ran) {
+      const res = L.residues || {}, rs = ["S", "T", "Y"].filter((r) => res[r]).map((r) => r + " " + fmtInt(res[r])).join(" · ");
+      h += "<div class='tiles'><div class='tile'><div class='k'>Phosphosites analysed</div><div class='v'>" + fmtInt(L.sites_kept) + "</div><div class='d'>of " +
+        fmtInt(L.sites_in_table) + " in " + esc(L.table) + (rs ? " · " + esc(rs) : "") + "</div></div>" +
+        "<div class='tile'><div class='k'>Localisation filter</div><div class='v'>" + (L.sites_below != null ? fmtInt(L.sites_below) : "–") + "</div><div class='d'>" +
+        (L.sites_below != null ? "sites left out · " : "") + esc(L.filter) + (L.values_dropped ? " · " + fmtInt(L.values_dropped) + " values left out" : "") + "</div></div>" +
+        (P.corrected ? "<div class='tile'><div class='k'>Protein-corrected</div><div class='v'>yes</div><div class='d'>each comparison also as site minus protein change</div></div>" : "") + "</div>";
+    }
+    const comps = phosComps();
+    if (K && !K.ran) h += "<div class='empty'>Kinase activity: " + esc(K.reason || "no kinase was scored") + "</div>";
+    if (comps.length) {
+      PH.c = Math.min(PH.c, comps.length - 1);
+      const C = comps[PH.c];
+      h += "<h3>Kinase activity</h3><div class='row'>" + (comps.length > 1 ? "<label class='ctl'>Comparison <select id='phcomp'>" +
+        comps.map((c, k) => "<option value='" + k + "'" + (k === PH.c ? " selected" : "") + ">" + esc(c.name) + "</option>").join("") + "</select></label>" : "") +
+        "<span class='muted'>" + esc(C.name) + ": " + fmtInt(C.matched) + " of " + fmtInt(C.sites) + " sites are substrates in " + esc(K.file) + "; kinases with ≥ " + K.min_substrates +
+        " substrates, coloured at adjusted p ≤ " + K.alpha + " · every kinase: <a href='kinase_activity.tsv'>kinase_activity.tsv</a></span></div>" +
+        "<div class='card chart' id='phkin'></div><div class='legend'><span><span class='sw' style='background:" + css("--up") + "'></span>more active</span>" +
+        "<span><span class='sw' style='background:" + css("--down") + "'></span>less active</span><span><span class='sw' style='background:" + css("--ns") + "'></span>not significant</span></div>" +
+        "<div id='phtable'></div>";
+    }
+    if (S) {
+      if (!S.ran) h += "<div class='empty'>Interaction partners: " + esc(S.reason || "not available") + "</div>";
+      else h += "<h3>Interaction partners among the hits</h3><div id='phstring'></div>";
+    }
+    host.innerHTML = h;
+    const sel = $("#phcomp");
+    if (sel) sel.onchange = (e) => { PH.c = +e.target.value; PH.kin = null; renderPhos(); };
+    if (comps.length) { safe(renderKinases, "#phkin"); safe(renderKinaseTable, "#phtable"); }
+    if (S && S.ran) safe(renderPartners, "#phstring");
+  }
+  const kinColor = (r) => css(r[6] === "up" ? "--up" : r[6] === "down" ? "--down" : "--ns");
+  /** One bar per scored kinase (KSEA z-score), highest first: sectionfigs.figure_kinase_activity draws the same. */
+  function renderKinases() {
+    const host = $("#phkin"), C = phosComps()[PH.c];
+    if (!host || !C) return;
+    let ks = C.k.slice();
+    const W = widthOf(host, 900), row = 15, fits = EX ? Math.max(3, Math.floor((EX.h - 54) / 11)) : 60;
+    if (ks.length > fits) ks = ks.slice().sort((a, b) => Math.abs(b[3]) - Math.abs(a[3]) || (a[0] < b[0] ? -1 : 1)).slice(0, fits);
+    ks.sort((a, b) => b[3] - a[3] || (a[0] < b[0] ? -1 : 1));
+    const H = heightOf(Math.max(120, ks.length * row + 54)), nameW = Math.min(18, Math.max(...ks.map((r) => String(r[0]).length))) * 11 * 0.56;
+    const Lm = 22 + nameW + 30, R = 18, T = 10, B = 44, root = frame(host, W, H), g = svg("g", {}, root);
+    if (!ks.length) { text(root, W / 2, H / 2, "No kinase has enough substrates", { "text-anchor": "middle" }); return; }
+    const lim = Math.max(2.5, ...ks.map((r) => Math.abs(r[3]))) * 1.1, Xs = (v) => Lm + ((v + lim) / (2 * lim)) * (W - Lm - R), step = (H - T - B) / ks.length;
+    axes(g, Xs, () => 0, niceTicks(-lim, lim, 6).filter((v) => v >= -lim && v <= lim), [], Lm, R, T, B, W, H, "kinase activity (KSEA z-score)", "");
+    svg("line", { x1: Xs(0), x2: Xs(0), y1: T, y2: H - B, stroke: css("--axis") }, g);
+    const bar = Math.max(2, Math.min(14, step * 0.72));
+    ks.forEach((r, k) => {
+      const y = T + k * step + (step - bar) / 2, x0 = Math.min(Xs(0), Xs(r[3])), x1 = Math.max(Xs(0), Xs(r[3]));
+      const rect = svg("rect", { x: x0, y: y, width: Math.max(0.5, x1 - x0), height: bar, fill: kinColor(r), stroke: PH.kin === r[0] ? css("--sel") : null, style: "cursor:pointer" }, g);
+      rect.onmouseenter = (e) => showTip(e, "<b>" + esc(r[0]) + "</b> · z " + fmt(r[3], 2) + " · adj. p " + fmtP(r[5]) + "<br>" + r[1] + " substrates, mean log2FC " + fmt(r[2], 2));
+      rect.onmouseleave = hideTip;
+      rect.onclick = () => { PH.kin = r[0]; safe(renderKinaseTable, "#phtable"); };
+      if (step >= 9) text(g, Lm - 6, y + bar / 2 + 4, String(r[0]).slice(0, 18) + " (" + r[1] + ")", { "text-anchor": "end", "font-size": Math.min(11, step * 0.9) });
+    });
+    svgTools(host, root, "kinase_activity_" + C.slug);
+  }
+  function renderKinaseTable() {
+    const host = $("#phtable"), C = phosComps()[PH.c];
+    if (!host || !C) return;
+    const r0 = PH.kin ? C.k.find((r) => r[0] === PH.kin) : null;
+    let h = "";
+    if (r0) h += "<p><b>" + esc(r0[0]) + "</b>: " + r0[1] + " measured substrates (" + esc(r0[7].join(", ")) + (r0[7].length < r0[1] ? ", …" : "") +
+      ") <button id='phfind'>Show them in the volcano</button></p>";
+    h += "<table><thead><tr><th>Kinase</th><th>Substrates</th><th>Mean log2FC</th><th>z</th><th>p</th><th>Adjusted p</th><th></th></tr></thead><tbody>" +
+      C.k.map((r) => "<tr data-k='" + esc(r[0]) + "' style='cursor:pointer'><td>" + esc(r[0]) + "</td><td>" + r[1] + "</td><td>" + fmt(r[2], 2) + "</td><td>" + fmt(r[3], 2) + "</td><td>" +
+        fmtP(r[4]) + "</td><td>" + fmtP(r[5]) + "</td><td>" + (r[6] ? "<span class='sw' style='background:" + kinColor(r) + "'></span> " + (r[6] === "up" ? "more active" : "less active") : "") + "</td></tr>").join("") +
+      "</tbody></table>";
+    host.innerHTML = h;
+    $$("tr[data-k]", host).forEach((tr) => (tr.onclick = () => { PH.kin = tr.dataset.k; renderKinaseTable(); safe(renderKinases, "#phkin"); }));
+    const fb = $("#phfind"), box = $("#search");
+    if (fb && box && r0) fb.onclick = () => { box.value = Array.from(new Set(r0[7].map((s) => s.split(" ")[0]))).join(" "); box.oninput(); goTo("differential"); };
+  }
+  function renderPartners() {
+    const host = $("#phstring"), S = D.phos.string;
+    if (!host) return;
+    const name = (phosComps()[PH.c] || {}).name, C = S.comps.find((c) => c.name === name) || S.comps[0];
+    if (!C) { host.innerHTML = "<div class='empty'>No comparison has hits.</div>"; return; }
+    host.innerHTML = "<p class='muted'>" + esc(C.name) + ": " + fmtInt(C.connected) + " of " + fmtInt(C.hits) + " hit genes interact with another hit (" + fmtInt(C.edges) + " interactions, STRING combined score ≥ " +
+      S.min_score + ", " + esc(S.file) + ") · <a href='string_partners.tsv'>string_partners.tsv</a></p>" +
+      (C.genes.length ? "<table><thead><tr><th>Gene</th><th>Change</th><th>Partners among the hits (score)</th></tr></thead><tbody>" +
+        C.genes.map((g) => "<tr><td>" + esc(g[0]) + "</td><td>" + esc(g[1]) + "</td><td>" + g[2].map((p, k) => esc(p) + " (" + g[3][k] + ")").join(", ") + "</td></tr>").join("") + "</tbody></table>" : "");
+  }
+
   // ----------------------------------------------------------------- help
   // Plain-language help from ionomos/help/*.md, rendered to safe HTML in Python (report.py _help_payload):
   // a "?" beside each section title, QC tab and issue opens its entry inline, and the Help section at the
@@ -2461,7 +2649,7 @@
   const HELP_AT = [["#differential > h2", "report.differential"], ["#differential > p.sub", "report.search"],
     ["#differential-body > .bar", "report.cutoffs"], ["#differential-body > h3", "report.phist"],
     ["#differential-body > .tablebar", "report.table"], ["#compare > h2", "report.compare"], ["#specific > h2", "report.specific"], ["#onoff > h2", "report.onoff"],
-    ["#heat > h2", "report.heatmap"], ["#enrichment > h2", "report.enrichment"], ["#dose > h2", "report.dose"], ["#time > h2", "report.time"], ["#cys > h2", "report.cys"], ["#quality > h2", "report.quality"],
+    ["#heat > h2", "report.heatmap"], ["#enrichment > h2", "report.enrichment"], ["#dose > h2", "report.dose"], ["#time > h2", "report.time"], ["#cys > h2", "report.cys"], ["#phos > h2", "report.phos"], ["#quality > h2", "report.quality"],
     ["#methods > h2", "report.methods"], ["#files > h2", "report.files"]];
   const HELP_H = { "Data source": "report.source", "Settings used": "report.methods", "Sample metadata": "report.sdrf",
     "Cross-check": "report.fpa", "Highlight groups": "report.groups", "Hits": "report.hitfilters", "Plot": "report.plotoptions", "Figures for slides": "report.export" };
@@ -2541,7 +2729,7 @@
   const SIZES = { slide169: ["16:9 slide", 1280, 720, "px", 14], slide43: ["4:3 slide", 960, 720, "px", 14], half: ["Half a slide", 640, 600, "px", 12],
     col1: ["Journal figure, one column (85 mm)", 85, 70, "mm", 7], col2: ["Journal figure, two columns (180 mm)", 180, 110, "mm", 7], custom: ["Custom size", 0, 0, "", 0] };
   // what `figures:` may list (the watcher's static files; charts.STATIC_FIGURES, where the groups dose, time and liganded are also taken)
-  const STATIC_FIGS = ["volcano", "pca", "heatmap", "correlation", "dose_potency", "dose_curves", "time_patterns", "time_profiles", "liganded_rank", "liganded_selectivity"];
+  const STATIC_FIGS = ["volcano", "pca", "heatmap", "correlation", "dose_potency", "dose_curves", "time_patterns", "time_profiles", "liganded_rank", "liganded_selectivity", "run_order", "kinase_activity"];
   const TOP_PANELS = 6;  // dose-response curves and time-course features per series in "Export for slides" (sectionfigs.TOP_PANELS)
   const STYLE_DEFAULTS = { size: "slide169", width: 1280, height: 720, unit: "px", font_pt: 14, font_family: "Arial", line_scale: 1, point_scale: 1,
     palette: "default", up: "#e34948", down: "#2a78d6", neutral: "#c3c2b7", background: "light", title: true, subtitle: true, legend: true, note: true,
@@ -2634,9 +2822,9 @@
     ["heatmap", "Heatmap of significant features", "saved"], ["enrichment_", "Gene sets over-represented among the hits", "saved"], ["gene_set_ranks_", "Gene sets by rank", ""], ["barcode_", "Barcode plot of a gene set", ""],
     ["values_", "Values per condition", ""], ["PCA", "PCA of the samples", ""], ["correlation", "Sample correlation", ""], ["cumulative_missing", "Missing values", ""], ["missingness_vs_intensity", "Missing values against intensity", ""],
     ["distributions", "Value distribution per sample", ""], ["cv_", "Coefficient of variation", ""], ["mean_variance", "Mean against variance", ""], ["abundance_rank", "Abundance rank", ""],
-    ["identifications", "Identifications per sample", ""], ["imputation", "Measured and imputed values", ""], ["power", "Power", ""], ["search_quality_", "Search quality per run", ""],
+    ["identifications", "Identifications per sample", ""], ["imputation", "Measured and imputed values", ""], ["power", "Power", ""], ["search_quality_", "Search quality per run", ""], ["run_order_", "QC against the order of acquisition", ""],
     ["dose_potency_", "Dose-response: potency against effect", ""], ["dose_curve_", "Dose-response curve", ""], ["time_course_", "Time course", ""], ["time_patterns_", "Time-course patterns", ""],
-    ["liganded_rank_", "Liganded sites", ""], ["liganded_selectivity", "Liganded sites across compounds", ""]];
+    ["liganded_rank_", "Liganded sites", ""], ["liganded_selectivity", "Liganded sites across compounds", ""], ["kinase_activity_", "Kinase activity (KSEA)", ""]];
   const TEST_NAMES = { limma: "limma moderated t-test", welch: "Welch t-test", student: "Student t-test" };
   /** The cut-offs in plain words: shown beside the plot and written into every exported figure. */
   function cutText(c) {
@@ -2657,6 +2845,8 @@
     else if (/^enrichment_/.test(name) && renderORA._st) detail = renderORA._st.comp + ", " + renderORA._st.dir + " hits, " + renderORA._st.lib;
     else if (/^(gene_set_ranks_|barcode_)/.test(name) && renderRank._st) detail = renderRank._st.comp + ", " + renderRank._st.lib + (/^barcode_/.test(name) && renderRank._st.sel ? ", " + renderRank._st.sel : "");
     else if (/^(values_|dose_curve_|time_course_|time_patterns_|cv_|liganded_rank_|dose_potency_)/.test(name)) detail = name.replace(/^(values|dose_curve|time_course|time_patterns|cv|liganded_rank|dose_potency)_/, "");
+    else if (/^run_order_/.test(name) && D.qc.run) detail = ((D.qc.run.metrics || []).find((m) => "run_order_" + m.key === name) || {}).label || "";
+    else if (/^kinase_activity_/.test(name) && phosComps()[PH.c]) detail = phosComps()[PH.c].name;
     const cuts = cut === "view" ? cutText(c) + (filterText() ? "; " + filterText() : "") : cut === "saved" ? savedCutText() + " (the report's saved cut-offs)" : "";
     return { what: what, cut: cut, cuts: cuts, c: c, detail: clean(detail), title: clean(c ? c.name : what), subtitle: clean((c ? what + " · " : detail ? detail + " · " : "") + D.title) };
   }
@@ -2758,16 +2948,16 @@
   }
   // the report's parts as redraw() draws them: a chart's own part is drawn again for its export
   const STEPS = [["#volcano", renderVolcano], ["#phist", renderPHist], ["#detail", renderDetail], ["#comparebody", renderCompare], ["#enrich", renderEnrichment],
-    ["#dosebody", renderDose], ["#cysbody", renderCys], ["#timebody", renderTime], ["#qc", renderQC]];
+    ["#dosebody", renderDose], ["#cysbody", renderCys], ["#timebody", renderTime], ["#phosbody", renderPhos], ["#qc", renderQC]];
   function holdState() {
     return { ci: ST.ci, zoom: ST.zoom, mode: ST.mode, labels: ST.labels, lm: ST.opt.labelMatches, pinned: ST.pinned, focus: ST.focus, qc: qcTab, enr: enrMode, ds: DS.s, df: DS.focus,
-      ora: renderORA._st && Object.assign({}, renderORA._st), rank: renderRank._st && Object.assign({}, renderRank._st), psm: qcPsm._st && Object.assign({}, qcPsm._st), pcn: qcPCA._st && qcPCA._st.names,
-      ts: TS.s, tf: TS.focus, cc: CS.c };
+      ora: renderORA._st && Object.assign({}, renderORA._st), rank: renderRank._st && Object.assign({}, renderRank._st), psm: qcPsm._st && Object.assign({}, qcPsm._st), run: qcRun._st && Object.assign({}, qcRun._st), pcn: qcPCA._st && qcPCA._st.names,
+      ts: TS.s, tf: TS.focus, cc: CS.c, pc: PH.c, pk: PH.kin };
   }
   function restoreState(h) {
     ST.ci = h.ci; ST.zoom = h.zoom; ST.mode = h.mode; ST.labels = h.labels; ST.opt.labelMatches = h.lm; ST.pinned = h.pinned; ST.focus = h.focus; qcTab = h.qc; enrMode = h.enr; DS.s = h.ds; DS.focus = h.df;
-    TS.s = h.ts; TS.focus = h.tf; CS.c = h.cc;
-    [[renderORA, h.ora], [renderRank, h.rank], [qcPsm, h.psm]].forEach(([fn, was]) => { if (was && fn._st) Object.assign(fn._st, was); else if (!was) delete fn._st; });
+    TS.s = h.ts; TS.focus = h.tf; CS.c = h.cc; PH.c = h.pc; PH.kin = h.pk;
+    [[renderORA, h.ora], [renderRank, h.rank], [qcPsm, h.psm], [qcRun, h.run]].forEach(([fn, was]) => { if (was && fn._st) Object.assign(fn._st, was); else if (!was) delete fn._st; });
     if (qcPCA._st && h.pcn != null) qcPCA._st.names = h.pcn;
   }
   /** Draw `fig` with the style and return its finished figures ([] when it draws nothing here). */
@@ -2824,6 +3014,7 @@
     $$("#qc > .tabs button").forEach((b) => {
       const k = b.dataset.k;
       if (k === "psm") [["ppm", "mass error"], ["mc", "missed cleavages"], ["z", "charge states"], ["len", "peptide length"]].forEach(([ch, t]) => add("QC: Search quality, " + t, () => { qcTab = "psm"; qcPsm._st = Object.assign(qcPsm._st || {}, { chart: ch }); renderQC(); }));
+      else if (k === "run") (D.qc.run.metrics || []).forEach((m) => add("QC: Run order, " + m.label, () => { qcTab = "run"; qcRun._st = Object.assign(qcRun._st || {}, { m: m.key }); renderQC(); }));
       else if (k !== "card") add("QC: " + b.textContent, () => { qcTab = k; renderQC(); });
     });
     // dose-response, time course, liganded sites (D68): the most relevant curves and features, as `ionomos export` draws them
@@ -2839,6 +3030,8 @@
     const CY = D.cys && D.cys.ran ? D.cys : null;
     ((CY && CY.compounds) || []).forEach((C, k) => add("Liganded sites: " + C.name, () => { CS.c = k; renderCys(); }, "liganded_rank_"));
     if (CY && CY.compounds.length > 1 && CY.nlig.some(Boolean)) add("Liganded sites across compounds", selectivitySvg, "liganded_selectivity");
+    // kinase activity (D79): one bar chart per comparison, as `ionomos export` draws it
+    phosComps().forEach((c, k) => { if (c.k.length) add("Kinase activity: " + c.name, () => { PH.c = k; PH.kin = null; renderPhos(); }, "kinase_activity_"); });
     return out;
   }
   /** The largest panels of about this shape for n charts in W x H: [columns, rows, panel width, panel height] (sectionfigs._grid). */
@@ -3457,7 +3650,7 @@
     safe(renderHeatmap, "#heatmap");
     safe(renderEnrichment, "#enrich");
     safe(renderDose, "#dosebody");
-    safe(renderCys, "#cysbody"); safe(renderTime, "#timebody");
+    safe(renderCys, "#cysbody"); safe(renderTime, "#timebody"); safe(renderPhos, "#phosbody");
     safe(renderQC, "#qc");
     safe(renderHelp, "#helpbody");
     const xo = $("#xopen"), xz = $("#xzipnow"), sl = $("#slides");
@@ -3480,7 +3673,7 @@
   }
   function redraw() {
     if (D.comps.length) { safe(renderVolcano, "#volcano"); safe(renderPHist, "#phist"); safe(renderDetail, "#detail"); safe(renderCompare, "#comparebody"); safe(renderSpecific, "#specificbody"); }
-    safe(renderHeatmap, "#heatmap"); safe(renderEnrichment, "#enrich"); safe(renderDose, "#dosebody"); safe(renderCys, "#cysbody"); safe(renderTime, "#timebody"); safe(renderQC, "#qc");
+    safe(renderHeatmap, "#heatmap"); safe(renderEnrichment, "#enrich"); safe(renderDose, "#dosebody"); safe(renderCys, "#cysbody"); safe(renderTime, "#timebody"); safe(renderPhos, "#phosbody"); safe(renderQC, "#qc");
   }
   let rt = null;
   window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(redraw, 150); });

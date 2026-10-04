@@ -242,7 +242,12 @@ def dump_config(d: dict) -> str:
               "liganded", "liganded_ratio", "liganded_min_replicates", "liganded_direction",  # cys.py: D52
               "site_annotation",
               "time_course", "time_min_points", "time_unit",  # time courses: D53
-              "psm_qc"):  # search quality per run: D55
+              "time_model", "time_spline_df",  # spline time courses: D77
+              "psm_qc",  # search quality per run: D55
+              "phospho", "phospho_min_localization", "phospho_localization_per_sample", "phospho_table",  # D79
+              "kinase_substrates", "ksea_min_substrates", "ksea_networkin", "ksea_networkin_score", "ksea_organism",
+              "ksea_match", "string_network", "string_min_score",
+              "f_test", "rollup"):  # the F-test switch and the protein roll-up: D76
         if an.get(k) not in (None, ""):
             a(f"  {k}: {_y(an[k])}")
     if isinstance(an.get("times"), dict) and an["times"]:

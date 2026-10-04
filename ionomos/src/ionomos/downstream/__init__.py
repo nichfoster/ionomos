@@ -24,6 +24,9 @@ Layout it reads and writes (inside the experiment folder):
       time_course.tsv               a time course (3+ time points): change over time (F), trend, class, pattern
       cysteine_sites.tsv            isoDTB: per site and compound the competition ratio, liganded call, selectivity
       cysteine_proteins.tsv         isoDTB: proteins with a liganded cysteine, how many of their sites are
+      kinase_activity.tsv           phosphosites (analysis.phospho) with a downloaded kinase-substrate table: KSEA
+                                    per comparison and kinase (phospho.py, D79)
+      string_partners.tsv           with a downloaded STRING network: each hit's partners among the hits
       <condition>_log2_H_L_vs_0_protein-corrected_differential.tsv
                                     isoDTB with analysis.protein_correction: each site's ratio minus its protein's
                                     from an unenriched proteome, MSstatsPTM's adjustment (proteincorr.py, D70)
@@ -49,7 +52,10 @@ Pipeline stages, each a module:
     time course   timecourse.py                (limma's F over time, trend, series vs control; patterns)
     cysteines     cys.py                       (site ratio data: liganded calls, selectivity, a site annotation)
                   proteincorr.py               (site ratios corrected for protein abundance, MSstatsPTM; D70)
+    phospho       phospho.py                   (opt-in: phosphosites, localisation filter, KSEA, STRING; D79)
     search QC     psmqc.py + qcmetrics.py      (per run, from psm.tsv: mass error, missed cleavages, charge states)
+    run order     runorder.py + acqtime.py     (each sample's QC against the order of acquisition: drift, and
+                                                conditions acquired in blocks; D78)
     metadata      sdrf.py                      (SDRF-Proteomics, from the manifest, workflow and FASTA)
     guards, trust guards.py + trust.py         (implausible input made safe and said; statistics that may not
                                                 mean what they say; the "How far to trust this" list; D60)
@@ -141,13 +147,15 @@ def _merge_ratio(mats: list[quant.QuantMatrix]) -> quant.QuantMatrix:
 
 def load_quantities(method: str | None, workdir: Path, results: Path, record: dict | None,
                     mod_mass: str = "561.3387", table: Path | None = None, sdrf_factor=None,
-                    dest: Path | None = None) -> tuple[quant.QuantMatrix | None, list[Path], list[str]]:
+                    dest: Path | None = None, rollup: str = "auto"
+                    ) -> tuple[quant.QuantMatrix | None, list[Path], list[str]]:
     """Method prep + loading. Returns (matrix or None, files written, notes). table: a file to read with
     the any-format loader (anytable.py) instead of looking for FragPipe's tables. An SDRF the user put in the
     experiment folder (or next to the table) then sets the design (sdrfdesign.py, D47); sdrf_factor picks its
-    factor value column(s). dest: the experiment folder (default: the folder holding fragpipe/)."""
+    factor value column(s). dest: the experiment folder (default: the folder holding fragpipe/). rollup:
+    analysis.rollup, how peptide / precursor tables become proteins (rollup.py, D76)."""
     workdir = Path(workdir)
-    m, files, notes = _load_quantities(method, workdir, results, record, mod_mass, table)
+    m, files, notes = _load_quantities(method, workdir, results, record, mod_mass, table, rollup)
     if m is not None:
         if dest is None:
             dest = workdir.parent if workdir.name == "fragpipe" else workdir
@@ -157,15 +165,18 @@ def load_quantities(method: str | None, workdir: Path, results: Path, record: di
 
 
 def _load_quantities(method: str | None, workdir: Path, results: Path, record: dict | None,
-                     mod_mass: str = "561.3387", table: Path | None = None
+                     mod_mass: str = "561.3387", table: Path | None = None, rollup: str = "auto"
                      ) -> tuple[quant.QuantMatrix | None, list[Path], list[str]]:
     files: list[Path] = []
     notes: list[str] = []
     results.mkdir(parents=True, exist_ok=True)
     if method in engines.METHODS:  # results from another engine (engines.py)
         tmt_map = (((record or {}).get("plan") or {}).get("overrides") or {}).get("tmt")  # experiment.yaml tmt:
-        m, enotes = engines.load(method, Path(table) if table is not None else workdir, _sample_map(record), tmt_map)
+        m, enotes = engines.load(method, Path(table) if table is not None else workdir, _sample_map(record), tmt_map,
+                                 rollup)
         return m, files, notes + enotes
+    if (rollup or "auto") != "auto":  # FragPipe's and any other table hold proteins (or sites) already
+        notes += engines.rollup_unused(rollup, "this table holds proteins or sites already, not peptides")
     if table is not None or method == "table":
         path = Path(table) if table is not None else anytable.find_table(workdir)
         if path is None:
@@ -337,7 +348,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     out.issues (doctor.py), which the worker and the app turn into pop-up windows.
     progress(text) is called between stages (the app shows it)."""
     from ionomos import __version__
-    from ionomos.downstream import doctor, export, fpa, guards, insights, roles, trust
+    from ionomos.downstream import doctor, export, fpa, guards, insights, phospho, roles, trust
 
     dest = Path(dest)
     workdir = dest / "fragpipe" if (dest / "fragpipe").is_dir() else dest
@@ -404,6 +415,9 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     prot_info: dict = {"ran": False, "reason": "not asked for (analysis.protein_correction)"}
     protein_hl: dict | None = None
     psm_view: dict | None = None
+    run_view: dict | None = None
+    phos_got: dict | None = None    # kinase activity and STRING partners (phospho.py, D79)
+    phos_sites = False              # the quantities are phosphosites (analysis.phospho)
     model = analysis.Model()
     ftest = None
     design_plan = None            # roles.Plan: the conditions' roles and the comparisons they give (D61)
@@ -411,8 +425,15 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     spec_info: list[dict] = []
 
     def read():
+        if settings.phospho and table is None:  # opt-in: the phosphosite table instead of the proteins (D79)
+            results.mkdir(parents=True, exist_ok=True)
+            pm_, pnotes_, f.phospho_problems = phospho.read_sites(method, workdir, dest, record, settings,
+                                                                  _sample_map(record))
+            if pm_ is not None:
+                return pm_, [], pnotes_
         try:
-            return load_quantities(method, workdir, results, record, mod_mass, table, settings.sdrf_factor, dest)
+            return load_quantities(method, workdir, results, record, mod_mass, table, settings.sdrf_factor, dest,
+                                   settings.rollup)
         except (isodtb.SiteError, anytable.TableError) as exc:
             f.read_problem = str(exc)
             notes.append(f"the result table has nothing usable: {exc}")
@@ -561,8 +582,10 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
             got = stage("specific_targets", _specific_targets, design_plan, diffs, results, out)
             if got is not None:
                 specific, spec_info = got
-        if settings.protein_correction.get("proteome") and pm.kind != "ratio":
-            prot_info = {"ran": False, "reason": "protein_correction applies to site ratio data (isoDTB) only"}
+        phos_sites = phospho.applies(pm)
+        if settings.protein_correction.get("proteome") and pm.kind != "ratio" and not phos_sites:
+            prot_info = {"ran": False, "reason": "protein_correction applies to site data (isoDTB ratios, "
+                                                 "phosphosites) only"}
         elif settings.protein_correction.get("proteome") and diffs:
             say("site ratios corrected for protein abundance")
             got = stage("protein_correction", _protein_correction, processed, diffs, settings, results, out, dest)
@@ -576,6 +599,13 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
                     f.volcanos[d.name] = _write_volcano(results, d, stage)
                     if f.volcanos[d.name]:
                         out.files.append(f.volcanos[d.name])
+        if diffs and (settings.kinase_substrates or settings.string_network):  # downloads the lab named (D79)
+            say("kinase activity and interaction partners")
+            phos_got = stage("phospho", phospho.stage, processed, diffs, settings, results, dest)
+            if phos_got is not None:
+                out.files += phos_got["files"]
+                notes += phos_got["notes"]
+                f.phospho_problems = list(f.phospho_problems) + phos_got["problems"]
         if pm.features:
             pmx = stage("tables", export.processed_matrix, results / f"{m.level}_matrix_processed.tsv", processed)
             if pmx:
@@ -631,6 +661,12 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     else:
         psm_info, psm_view, f.psm_problems, qnotes = searched
         notes += qnotes
+    ordered = stage("run_order", _run_order, processed, record, dest, insight, psm_view, say)
+    if ordered is None:
+        run_info = {"ran": False, "reason": "the run-order step failed (see analysis_error.txt)"}
+    else:
+        run_info, run_view, f.run_problems, rnotes = ordered
+        notes += rnotes
     say("sample metadata (SDRF)")
     sdrf_info = stage("sdrf", _sdrf, method, dest, workdir, record, m, processed, settings, __version__, results,
                       out) or {"file": None, "reason": "the SDRF step failed (see analysis_error.txt)"}
@@ -653,12 +689,16 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     ctx["issues"] = [i.as_dict() for i in out.issues]
     ctx["sdrf"] = sdrf_info
     ctx["model"], ctx["ftest"] = model, ftest
+    ctx["run_order"] = run_view  # the Run order QC tab and figure (runorder.py, D78)
     ctx["roles"], ctx["specific"] = design_plan, specific
     figure_files: list[Path] = []
+    phos_view = stage("phospho", phospho.report_payload, (m.meta.get("phospho") if m is not None else None),
+                      (phos_got or {}).get("ksea"), (phos_got or {}).get("string"),
+                      prot_info if phos_sites else None)
     if settings.export.get("figures") and (processed is not None or diffs):
         say("figures for slides")
         figure_files = stage("figures", _static_figures, results, ctx, m, processed, diffs, settings, qcd, enrichment,
-                             ranked, insight, dose_view, cys_view, time_view) or []
+                             ranked, insight, dose_view, cys_view, time_view, phos_view) or []
         out.files += figure_files
     ctx["trust"] = trusted
     say("writing the report")
@@ -666,7 +706,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
            for p in out.files]
     out.report = results / "report.html"
     html = stage("report", report.render, ctx, m, processed, diffs, out.warnings, rel, settings, qcd, enrichment,
-                 ranked, insight, dose=dose_view, cys=cys_view, time=time_view, psm=psm_view)
+                 ranked, insight, dose=dose_view, cys=cys_view, time=time_view, psm=psm_view, phos=phos_view)
     if html is None:  # the fallback page: issues, notes and the volcano plots themselves
         out.issues = doctor.check(f)
         ctx["issues"] = [i.as_dict() for i in out.issues]
@@ -712,9 +752,11 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
         "time_course": time_info,
         "cysteines": cys_info,
         "protein_correction": prot_info,
+        "phospho": stage("phospho", phospho.summary, m, phos_got, prot_info if phos_sites else None) or {},
         "roles": design_plan.as_dict() if design_plan is not None else {},
         "specific_targets": spec_info,
         "psm_qc": psm_info,
+        "run_order": run_info,
         "sdrf": sdrf_info,
         "figures": [f"{RESULTS}/{p.relative_to(results).as_posix()}" for p in figure_files],
         "design": _design_summary(m, settings),
@@ -770,7 +812,9 @@ def _time_course(p, settings, results: Path, out: Outcome, model) -> tuple[dict,
     if res is not None:
         out.files.append(write_tsv(results / "time_course.tsv", tc.COLUMNS, tc.table_rows(res)))
         table = f"{RESULTS}/time_course.tsv"
-    return (tc.summary(res, plan, table), tc.report_payload(res, plan), plan.problems,
+    problems = [("TIMES", sev, msg) for sev, msg in plan.problems] + \
+        [("TIME_SPLINE", sev, msg) for sev, msg in plan.spline_problems]
+    return (tc.summary(res, plan, table), tc.report_payload(res, plan), problems,
             res.notes if res is not None else plan.notes)
 
 def _protein_correction(p, diffs, settings, results: Path, out: Outcome, dest: Path):
@@ -790,8 +834,14 @@ def _protein_correction(p, diffs, settings, results: Path, out: Outcome, dest: P
     except proteincorr.ProteomeError as exc:
         msg = f"protein_correction: {exc}"
         return proteincorr.off(msg), [], [("PROTEIN_CORRECTION", "input", msg)], [], None
-    res = proteincorr.run(p, diffs, settings, proteome)
-    cols = analysis.DIFF_COLUMNS + proteincorr.CORRECTION_COLUMNS
+    from ionomos.downstream import phospho
+
+    if phospho.applies(p.m):  # phosphosite comparisons: site change minus the same comparison's protein change (D79)
+        res = phospho.correct(p, diffs, settings, proteome)
+        cols = analysis.DIFF_COLUMNS + phospho.CORRECTION_COLUMNS
+    else:
+        res = proteincorr.run(p, diffs, settings, proteome)
+        cols = analysis.DIFF_COLUMNS + proteincorr.CORRECTION_COLUMNS
     for d, c in zip(res.diffs, [x for x in res.summary["conditions"] if x.get("proteome_comparison")], strict=True):
         tsv = write_tsv(results / f"{d.slug()}_differential.tsv", cols, d.rows)
         out.files.append(tsv)
@@ -879,6 +929,20 @@ def _psm_qc(workdir: Path, settings, results: Path, out: Outcome, say) -> tuple[
     return (psmqc.summary(res, table), psmqc.report_payload(res), res.problems,
             [f"search quality: {n}" for n in res.notes])
 
+def _run_order(processed, record, dest: Path, insight: dict, psm_view, say) -> tuple[dict, dict | None, list, list[str]]:
+    """Each sample's QC numbers against the order of acquisition (runorder.py, D78). Returns (analysis.json
+    summary, the report's payload or None, problems for the doctor, notes)."""
+    from ionomos.downstream import runorder
+
+    if processed is None or not processed.m.samples:
+        return runorder.summary(None, "no processed quantities"), None, [], []
+    say("run order (drift during the run, conditions acquired in blocks)")
+    res = runorder.run(processed.m, record, dest, (insight or {}).get("scorecard"), psm_view)
+    # its notes (times known for k of n samples, approximate times) stay in its tab and analysis.json entry: they
+    # are about the QC view, not about the results, and would otherwise sit on top of every such report
+    return runorder.summary(res), runorder.report_payload(res), res.problems, []
+
+
 def _design_summary(m, settings) -> dict:
     """Where each sample's condition came from, highest first (D47): sample_conditions, an input SDRF, the
     engine's own columns, the ionomos.json manifest, the names."""
@@ -938,9 +1002,10 @@ def _quality_summary(insight: dict) -> dict:
     }
 
 def _f_summary(ftest, settings) -> dict | None:
-    """analysis.json "f_test": the moderated F across the conditions (3+ conditions with limma)."""
+    """analysis.json "f_test": the moderated F across the conditions (3+ conditions with limma); {"off": true}
+    when analysis.f_test is off (D76), so a reader can tell "switched off" from "does not apply"."""
     if ftest is None:
-        return None
+        return {"off": True, "note": "switched off (analysis.f_test: off)"} if settings.f_test == "off" else None
     qs = [q for q in ftest.q if q == q]
     return {"reference": ftest.reference, "conditions": ftest.conditions, "df1": ftest.df1, "tested": len(qs),
             "any_change": sum(1 for q in qs if q <= settings.alpha), "alpha_adjusted": settings.alpha,
@@ -951,13 +1016,13 @@ def _state(issues) -> str:
     return "failed" if "error" in sev else "needs_input" if "input" in sev else "ok"
 
 def _static_figures(results: Path, ctx: dict, m, processed, diffs, settings, qcd, enrichment, ranked,
-                    insight, dose=None, cys_=None, time=None) -> list[Path]:
+                    insight, dose=None, cys_=None, time=None, phos=None) -> list[Path]:
     """results/figures/: the figures for slides the lab asks for after every analysis (analysis.export.figures),
     drawn from the report's own data in the lab's export style (slides.py, D62)."""
     from ionomos.downstream import slides
 
     d = report.payload({**ctx, "issues": []}, m, processed, diffs, [], [], settings, qcd, enrichment, ranked, insight,
-                       dose, cys_, time)
+                       dose, cys_, time, phos=phos)
     style = charts.style_from(settings.export, lenient=True)
     return slides.write(results / slides.FOLDER, d, style, style["figures"],
                         f"Ionomos {ctx.get('version', '')}".strip())

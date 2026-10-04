@@ -241,6 +241,19 @@ features × samples matrix of log2 values and runs the same statistics:
 | DIA | DIA-NN `*pg_matrix.tsv` (runs mapped to conditions via the manifest) | protein | condition vs control |
 | TMT | `tmt-report/abundance_gene_MD.tsv` (+ R-port annotation) | gene | condition vs control |
 | label-free DDA (future) | `combined_protein.tsv` (MaxLFQ if present) | protein | condition vs control |
+| any of these with `phospho: true` (D79) | the search's phosphosite table: IonQuant `combined_site_STY_79.9663.tsv`, TMT-Integrator `abundance_single-site_MD.tsv`, DIA-NN `report.phosphosites_90.tsv` | site | condition vs control |
+
+- **Phosphoproteomics (opt-in, D79).** For a phospho search, set
+  `phospho: true` under `analysis:` (usually in `experiment.yaml`): the site
+  table is analysed instead of the proteins, after a localisation filter
+  (`phospho_min_localization`, 0.75). In FragPipe this needs **PSM site
+  localisation (PTMProphet)** in the Validation tab and the site reports
+  (IonQuant writes `combined_site_STY_79.9663.tsv` only with localisation on;
+  TMT-Integrator filters single sites with its own `min_site_prob`). Optional
+  downloads the lab keeps itself: `kinase_substrates` (PhosphoSitePlus
+  `Kinase_Substrate_Dataset`) for kinase activity (KSEA), `string_network`
+  (STRING) for partners among the hits, and `protein_correction` for the
+  unenriched proteome of the same treatment.
 
 - **Pipeline:** FragPipe-Analyst's, ported from FragPipeAnalystR (D24) and
   checked against the real package: contaminants removed → features kept when
@@ -373,10 +386,12 @@ features × samples matrix of log2 values and runs the same statistics:
   | NORMALISATION_COMPOSITION | decide / note | median centring would shift the conditions against each other (many features change one way): asks when `median` / `gn` is chosen, a note when `auto` switched to the ratio method |
   | TMT_PLEXES_NOT_IN_MODEL | note | several TMT plexes, `irs: none` and no block for the plex: the plex effect counts as replicate spread, so the tests miss changes (D71) |
   | TIMES | decide / note | a time course whose time points can't all be read (a name in `analysis.times` that isn't a condition, two times in one name) |
+  | TIME_SPLINE | note | a spline time course (D77) not fitted as asked: `time_spline_df` too high for the series' time points (lowered to time points − 2), or the spline model can't be fitted (time is a factor for that series) |
   | LIGANDED_DIRECTION, SITE_ANNOTATION | note | isoDTB: the competition ratio looks reversed; the site annotation file can't be used |
   | RATIO_OFFSET | note | isoDTB: a replicate's ratios sit clearly off 0 on the stable sites (a mixing error?) and `ratio_centre` is none (D70) |
   | PROTEIN_CORRECTION_CONDITIONS / PROTEIN_CORRECTION | decide / note | isoDTB with `protein_correction`: a site condition has no proteome comparison; the proteome is missing or unusable, or few sites find their protein (D70) |
   | PSM_MASS_ERROR, PSM_MISSED_CLEAVAGES | note | a run's median precursor mass error is 10 ppm or more from 0; half or more of a run's PSMs have a missed cleavage |
+  | RUN_ORDER_DRIFT, RUN_ORDER_CONFOUNDED | note | a QC number drifts with the order of acquisition (within the conditions, p < 0.01, a material change); the conditions were run in blocks (η² ≥ 0.6) (D78) |
   | NO_RESIDUAL_DF | note | features tested with one value per group: their p-values come from limma's variance prior alone (D60) |
   | VARIANCE_PRIOR | note | limma's variance prior could not be estimated (fewer than 3 features with replicate spread), or its fit did not converge |
   | ZERO_VARIANCE | note | 5 % or more of the tested features, or any hit, have identical replicates in every group (rounded, copied or constant-imputed values) |
@@ -430,6 +445,34 @@ control section has a **Search quality** tab with one row per raw file:
 - Output: `results/psm_qc.tsv`, `analysis.json` → `psm_qc`.
 - Not tested on real FragPipe output: the column names are from the FragPipe
   documentation.
+
+**Run order** (`downstream/runorder.py`, `acqtime.py`, D78). When the
+samples' raw files have an acquisition time, the Quality control section has a
+**Run order** tab: each sample's numbers in the order of acquisition.
+
+| Number | From | Flagged when the change over the run is at least |
+|---|---|---|
+| identifications, missing values | the sample scorecard | 10 % of the median; 5 percentage points |
+| median log2 intensity before normalisation | the scorecard (intensity data only) | 0.5 log2 |
+| PSMs, median precursor mass error, missed-cleavage rate | Search quality (`psm.tsv`) | 10 %; 3 ppm; 5 points |
+| precursors, MS1 mass accuracy | DIA-NN's `stats.tsv` | 10 %; 3 ppm |
+
+- **Time per raw file**: `ionomos.json` → `acquisition` (intake), else read
+  now: the Thermo header's acquisition start, ThermoRawFileParser's output,
+  the Xcalibur stamp, the file time (approximate; said in the tab and the
+  warning). A sample's time is its first fraction's.
+- **Drift** (`RUN_ORDER_DRIFT`): a stratified Mann-Kendall test, comparing
+  only samples of the same condition (exact p up to 1,500 pairs), p < 0.01,
+  and a Theil-Sen change over the run at least the limit above. Needs 6
+  samples with a time. Missing values are not warned about beside
+  identifications (the same fact).
+- **Blocks** (`RUN_ORDER_CONFOUNDED`): the condition explains 60 % or more of
+  the run positions (η² of the ranks), with two or more conditions of two or
+  more samples.
+- TMT channels share their raw files, so a TMT experiment has no run order.
+- Output: `analysis.json` → `run_order`, the `run_order` export figure.
+- Not checked on real raw files: the header layout is from published format
+  notes and the tests build headers to it.
 
 **Competition experiments** (`downstream/roles.py`, D61). A condition whose
 name has `comp`, `competition`, `competitor`, `competed`, `compete`,
@@ -540,10 +583,29 @@ the report adds, per series and feature:
   are grouped into at most 6 patterns by profile shape.
 - The trend uses the order of the time points, not the hours, so `0 / 1 h /
   24 h` is not dominated by the long gap.
-- Time is a factor: no curve or spline is fitted. Features not measured at
-  every time point of a series are not tested (unless imputed).
+- Up to 6 time points, time is a factor: no curve is fitted. Features not
+  measured at every time point of a series are not tested (unless imputed).
+- **Many time points** (D77, limma User's Guide "many time points"): from 7
+  time points (`time_model: auto`), or always with `time_model: spline`, a
+  series is a natural cubic spline in hours (R's `ns()`, knots at quantiles
+  of the sample times) with `time_spline_df` degrees of freedom (`auto`: 4,
+  at most the time points − 2). The series gets its own model (the
+  comparisons' model with its conditions replaced by a level and the spline
+  terms; other conditions, the block and covariates stay):
+
+  | Question | Test |
+  |---|---|
+  | Does it change over time? | moderated F on the spline coefficients |
+  | Does it respond differently from the control series? | moderated F on the interaction terms of both series as curves on one basis (`~group * ns(time)`) |
+
+  log2FC, the largest change, the class and the patterns use the fitted
+  curve's change from the first time point; the trend t stays the factor
+  model's. The report's profile and `time_profiles` draw the fitted curve
+  on an axis in hours. A `time_spline_df` the series can't carry is lowered
+  to the time points − 2 with a `TIME_SPLINE` issue.
 - Settings: `times`, `time_unit`, `time_min_points` (3), `time_course`
-  (false switches it off). Intensity data with the limma test only.
+  (false switches it off), `time_model` (auto | factor | spline),
+  `time_spline_df` (auto). Intensity data with the limma test only.
 - Output: `results/time_course.tsv`, `analysis.json` → `time_course`, the
   report's **Time course** section. The pairwise comparisons are unchanged.
 

@@ -31,7 +31,7 @@ Command line.
                                                    an Ionomos analysis against a reference result of the same experiment
                                                    (another Ionomos run, FragPipe-Analyst, limma, MSstats, Perseus, R):
                                                    agreement of fold changes, hit calls and p-values, with a verdict
-    ionomos benchmark [--grid quick|standard] [--kind dia|isodtb|tmt] [--like FOLDER]
+    ionomos benchmark [--grid quick|standard] [--kind dia|isodtb|tmt|rollup] [--like FOLDER]
                                                    accuracy on simulated data with planted changes: sensitivity and
                                                    observed false discoveries for each imputation / normalisation
                                                    (isoDTB: test, mixing error; TMT: IRS, a pulldown)
@@ -520,21 +520,12 @@ def cmd_names(args) -> int:
 
 
 def cmd_retry(args) -> int:
-    cfg = _load(args, check_paths=False)
-    ledger = Ledger(cfg.database)
-    job = ledger.get(args.job_id)
-    if not job:
-        print(f"no job {args.job_id}", file=sys.stderr)
-        return 1
-    if job.status != "failed":
-        print(f"job {job.id} is {job.status}, not failed", file=sys.stderr)
-        return 1
-    ledger.requeue(job.id, "retry requested", reset_attempts=True)
-    from ionomos import attention
+    from ionomos.worker import request_retry
 
-    attention.resolve_where(cfg.log_dir, kind="search_failed", job_id=job.id)
-    print(f"job {job.id} re-queued; the running watcher picks it up within seconds")
-    return 0
+    cfg = _load(args, check_paths=False)
+    ok, msg = request_retry(Ledger(cfg.database), args.job_id, cfg.log_dir)  # the same as every Retry (D75)
+    print(msg, file=sys.stdout if ok else sys.stderr)
+    return 0 if ok else 1
 
 
 def cmd_diagnose(args) -> int:
@@ -941,11 +932,14 @@ def cmd_help(args) -> int:
 
 
 def cmd_ask(args) -> int:
-    """Ask the local assistant (assistant/, D49 / D57). Read-only. When the assistant is not set up, the model
-    is not answering or its answer can't be backed by what Ionomos knows, Ionomos's own text is printed."""
+    """Ask the local assistant (assistant/, D49 / D57). When the assistant is not set up, the model is not
+    answering or its answer can't be backed by what Ionomos knows, Ionomos's own text is printed. A change the
+    assistant proposes is printed with the `ionomos` command or the app's steps a person would use; it is never
+    made from here (D75: only the app's Confirm button applies a proposal)."""
     import json
 
     from ionomos import assistant
+    from ionomos.assistant import proposals
 
     cfg = _load(args, check_paths=False)
     ans = assistant.ask(cfg, " ".join(args.question), experiment=args.experiment, item_id=args.item)
@@ -957,6 +951,8 @@ def cmd_ask(args) -> int:
         print("\nSources:")
         for line in ans.sources:
             print(f"  {line}")
+    if ans.proposal is not None:
+        print("\n" + proposals.cli_text(ans.proposal))
     print(f"\n(assistant: {ans.outcome}" + (f", model {ans.model}" if ans.grounded else "") + ")")
     return 0
 
@@ -1254,7 +1250,7 @@ def main(argv: list[str] | None = None) -> int:
         ex.add_argument(f"--no-{off}", dest=f"no_{off}", action="store_true",
                         help=f"leave the {'cut-offs line' if off == 'note' else off} out")
     ex.add_argument("--figures", help="which, comma-separated: kinds (volcano, pca, heatmap, correlation, dose_potency, "
-                                      "dose_curves, time_patterns, time_profiles, liganded_rank, liganded_selectivity), "
+                                      "dose_curves, time_patterns, time_profiles, liganded_rank, liganded_selectivity, kinase_activity), "
                                       "groups (dose, time, liganded), or names from --list (* and ? allowed). Default: all")
     ex.add_argument("--list", action="store_true", help="list the figures this report can draw and what can be chosen "
                                                         "for each; write nothing")
@@ -1314,7 +1310,8 @@ def main(argv: list[str] | None = None) -> int:
                                     "against the nominal alpha and the fold-change bias for each imputation / "
                                     "normalisation setting. --kind isodtb: site ratios (replicates, sites changed "
                                     "one way, a heavy / light mixing error); --kind tmt: several TMT plexes with a "
-                                    "pooled reference (IRS settings, a pulldown). With FOLDER and --expected: "
+                                    "pooled reference (IRS settings, a pulldown); --kind rollup: peptide tables "
+                                    "rolled up by median polish or MaxLFQ (analysis.rollup). With FOLDER and --expected: "
                                     "compare an analysed mixed-species (human / yeast / E. coli) or spike-in "
                                     "experiment with the expected ratio per species or protein list.")
     bm.add_argument("folder", nargs="?", help="an analysed benchmark experiment (with --expected)")
@@ -1322,7 +1319,7 @@ def main(argv: list[str] | None = None) -> int:
                                                        "expected: {HUMAN: 1, YEAST: 2, ECOLI: 0.25}")
     bm.add_argument("--grid", choices=["quick", "standard"], default="standard",
                     help="simulated: quick (seconds) or standard (about a minute; default)")
-    bm.add_argument("--kind", choices=["dia", "isodtb", "tmt"],
+    bm.add_argument("--kind", choices=["dia", "isodtb", "tmt", "rollup"],
                     help="simulated: the kind of data (default dia: label-free protein intensities; with --like the "
                          "experiment's own kind)")
     bm.add_argument("--like", metavar="FOLDER", help="simulated: add the settings and group sizes of this analysed "
@@ -1339,7 +1336,7 @@ def main(argv: list[str] | None = None) -> int:
     hp.add_argument("--open", action="store_true", help="open help.html in the browser, at the topic")
     hp.add_argument("--out", metavar="DIR", help="folder for help.html (default: the log folder, else app data)")
     hp.set_defaults(fn=cmd_help)
-    ak = sub.add_parser("ask", help="ask the local assistant about a job, an issue or the help (read-only)")
+    ak = sub.add_parser("ask", help="ask the local assistant about a job, an issue or the help (changes nothing)")
     ak.add_argument("question", nargs="+", help="the question, in plain words")
     ak.add_argument("--experiment", metavar="JOB_ID|NAME", help="the job the question is about")
     ak.add_argument("--item", metavar="ID", help="an attention item (ionomos attention lists them)")

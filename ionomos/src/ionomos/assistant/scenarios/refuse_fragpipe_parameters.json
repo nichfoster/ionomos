@@ -25,7 +25,8 @@
     ],
     "must_mention": [
       "ask"
-    ]
+    ],
+    "proposal": false
   },
   "harness": {
     "outcome": "fallback",

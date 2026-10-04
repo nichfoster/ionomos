@@ -370,11 +370,82 @@ def to_hl(comp: Comparison, fc: float, direction: str) -> float:
     return -fc if direction == "high" else fc
 
 
+def correct_comparison(d, comp: Comparison, keys: list[list[str]], settings, protein_fc, name: str,
+                       proteome: Proteome, protein_col: str = "protein_log2_hl"):
+    """One site comparison d corrected by the proteome comparison comp: (the corrected DiffResult, the count per
+    status, {site index: the protein's change on the site's scale}). keys: each site's protein keys (site_keys);
+    protein_fc(fc) puts a proteome fold change on the site's scale; protein_col names that column in the rows.
+    Used for isoDTB site ratios (run) and for phosphosite comparisons (phospho.correct, D79)."""
+    from ionomos.downstream import analysis
+
+    rows, pvals, hl_of = [], [], {}
+    counts = dict.fromkeys(STATUSES, 0)
+    for r in sorted(d.rows, key=lambda x: x["index"]):
+        i = r["index"]
+        key = next((k for k in keys[i] if k in comp.rows), keys[i][0] if keys[i] else "")
+        entry = comp.rows.get(key)
+        row = {**{k: r[k] for k in ("index", "id", "label", "description", "n_treatment", "n_control")},
+               "imputed": 0, "mean_control": None, "protein_key": key, "protein_comparison": comp.name,
+               "site_log2fc": r["log2fc"], "site_se": r.get("se"), "site_df": r.get("df"),
+               "site_pvalue": r["pvalue"], "site_qvalue": r["qvalue"], protein_col: None,
+               "protein_se": None, "protein_df": None, "log2fc": None, "ci_low": None, "ci_high": None,
+               "pvalue": None, "t": None, "se": None, "df": None, "mean_treatment": None}
+        if entry is None:
+            status = "protein not found"
+        elif key in comp.ambiguous:
+            status = "protein ambiguous"
+        else:
+            hl = protein_fc(entry[0])
+            hl_of[i] = hl
+            row.update({protein_col: hl, "protein_se": entry[1], "protein_df": entry[2]})
+            if r["log2fc"] is None:
+                status = "site not tested"
+            elif r.get("se") is None or r.get("df") is None or r["pvalue"] is None:
+                status = "site not tested"
+                row["log2fc"] = row["mean_treatment"] = r["log2fc"] - hl
+            elif entry[1] is None or entry[2] is None:
+                status = "protein without SE"
+                row["log2fc"] = row["mean_treatment"] = r["log2fc"] - hl
+            else:
+                status = "corrected"
+                fc, se, df, t, pv = adjust(r["log2fc"], r["se"], r["df"], hl, entry[1], entry[2])
+                q = stats.qt_upper(0.05, df) if math.isfinite(df) else 1.959963984540054
+                row.update(log2fc=fc, se=se, df=df, t=t, pvalue=pv, mean_treatment=fc,
+                           ci_low=fc - q * se, ci_high=fc + q * se)
+        row["protein_status"] = status
+        counts[status] += 1
+        rows.append(row)
+        pvals.append(math.nan if row["pvalue"] is None else row["pvalue"])
+    qs = stats.bh_adjust(pvals)
+    thr = None
+    for row, q in zip(rows, qs, strict=True):
+        row["qvalue"] = None if q != q else q
+        score = row["qvalue"] if settings.use_adjusted else row["pvalue"]
+        fc = row["log2fc"]
+        row["significant"] = fpa.significant(fc if fc is not None else math.nan, score, settings.alpha,
+                                             settings.log2fc)
+        if score is not None and score <= settings.alpha and row["pvalue"] is not None:
+            thr = row["pvalue"] if thr is None else max(thr, row["pvalue"])
+    if not settings.use_adjusted:
+        thr = settings.alpha
+    rows.sort(key=lambda x: (x["pvalue"] is None, x["pvalue"] if x["pvalue"] is not None else 1.0))
+    cd = analysis.DiffResult(name, d.treatment, d.control, d.kind, rows, settings, thr)
+    cd.test_used = SUFFIX
+    cd.groups = d.groups
+    cd.correction = {"proteome": str(proteome.path), "comparison": comp.name, "scale": comp.scale,
+                     "match": proteome.match, "counts": counts}
+    if d.confidence == "none" or not any(r["pvalue"] is not None for r in rows):
+        if any(r["log2fc"] is not None for r in rows):
+            what = "site ratios" if d.kind == "ratio" else "site changes"
+            analysis.fold_change_only(cd, f"{d.treatment}: the {what} have no p-values"
+                                      if d.confidence == "none" else
+                                      f"{d.treatment}: no site has a protein with a standard error")
+    return cd, counts, hl_of
+
+
 def run(p, diffs: list, settings, proteome: Proteome) -> Result:
     """The corrected comparisons for every site condition that has its protein comparison. diffs: the site
     comparisons of analyze() (ratio vs 0)."""
-    from ionomos.downstream import analysis
-
     m = p.m
     pc = settings.protein_correction
     given = pc.get("conditions") or {}
@@ -390,68 +461,10 @@ def run(p, diffs: list, settings, proteome: Proteome) -> Result:
             unmatched.append(why)
             per_cond.append({"site_condition": d.treatment, "proteome_comparison": None, "reason": why})
             continue
-        rows, pvals, hl_of = [], [], {}
-        counts = dict.fromkeys(STATUSES, 0)
-        for r in sorted(d.rows, key=lambda x: x["index"]):
-            i = r["index"]
-            key = next((k for k in keys[i] if k in comp.rows), keys[i][0] if keys[i] else "")
-            entry = comp.rows.get(key)
-            row = {**{k: r[k] for k in ("index", "id", "label", "description", "n_treatment", "n_control")},
-                   "imputed": 0, "mean_control": None, "protein_key": key, "protein_comparison": comp.name,
-                   "site_log2fc": r["log2fc"], "site_se": r.get("se"), "site_df": r.get("df"),
-                   "site_pvalue": r["pvalue"], "site_qvalue": r["qvalue"], "protein_log2_hl": None,
-                   "protein_se": None, "protein_df": None, "log2fc": None, "ci_low": None, "ci_high": None,
-                   "pvalue": None, "t": None, "se": None, "df": None, "mean_treatment": None}
-            if entry is None:
-                status = "protein not found"
-            elif key in comp.ambiguous:
-                status = "protein ambiguous"
-            else:
-                hl = to_hl(comp, entry[0], settings.liganded_direction)
-                hl_of[i] = hl
-                row.update(protein_log2_hl=hl, protein_se=entry[1], protein_df=entry[2])
-                if r["log2fc"] is None:
-                    status = "site not tested"
-                elif r.get("se") is None or r.get("df") is None or r["pvalue"] is None:
-                    status = "site not tested"
-                    row["log2fc"] = row["mean_treatment"] = r["log2fc"] - hl
-                elif entry[1] is None or entry[2] is None:
-                    status = "protein without SE"
-                    row["log2fc"] = row["mean_treatment"] = r["log2fc"] - hl
-                else:
-                    status = "corrected"
-                    fc, se, df, t, pv = adjust(r["log2fc"], r["se"], r["df"], hl, entry[1], entry[2])
-                    q = stats.qt_upper(0.05, df) if math.isfinite(df) else 1.959963984540054
-                    row.update(log2fc=fc, se=se, df=df, t=t, pvalue=pv, mean_treatment=fc,
-                               ci_low=fc - q * se, ci_high=fc + q * se)
-            row["protein_status"] = status
-            counts[status] += 1
-            rows.append(row)
-            pvals.append(math.nan if row["pvalue"] is None else row["pvalue"])
-        qs = stats.bh_adjust(pvals)
-        thr = None
-        for row, q in zip(rows, qs, strict=True):
-            row["qvalue"] = None if q != q else q
-            score = row["qvalue"] if settings.use_adjusted else row["pvalue"]
-            fc = row["log2fc"]
-            row["significant"] = fpa.significant(fc if fc is not None else math.nan, score, settings.alpha,
-                                                 settings.log2fc)
-            if score is not None and score <= settings.alpha and row["pvalue"] is not None:
-                thr = row["pvalue"] if thr is None else max(thr, row["pvalue"])
-        if not settings.use_adjusted:
-            thr = settings.alpha
-        rows.sort(key=lambda x: (x["pvalue"] is None, x["pvalue"] if x["pvalue"] is not None else 1.0))
-        cd = analysis.DiffResult(f"{d.treatment} (log2 H/L vs 0, {SUFFIX})", d.treatment, None, "ratio", rows,
-                                 settings, thr)
-        cd.test_used = SUFFIX
-        cd.groups = d.groups
-        cd.correction = {"proteome": str(proteome.path), "comparison": comp.name, "scale": comp.scale,
-                         "match": proteome.match, "counts": counts}
-        if d.confidence == "none" or not any(r["pvalue"] is not None for r in rows):
-            if any(r["log2fc"] is not None for r in rows):
-                analysis.fold_change_only(cd, f"{d.treatment}: the site ratios have no p-values"
-                                          if d.confidence == "none" else
-                                          f"{d.treatment}: no site has a protein with a standard error")
+        cd, counts, hl_of = correct_comparison(
+            d, comp, keys, settings, lambda fc, comp=comp: to_hl(comp, fc, settings.liganded_direction),
+            f"{d.treatment} (log2 H/L vs 0, {SUFFIX})", proteome)
+        rows = cd.rows
         out.diffs.append(cd)
         out.protein_hl[d.treatment] = hl_of
         measured = sum(1 for r in rows if r["site_log2fc"] is not None)

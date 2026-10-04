@@ -15,6 +15,8 @@ Column names and layouts follow the real files:
                                                          a mixing error per replicate)
             tmt_plexes                                  (MaxQuant proteinGroups.txt of several TMT 10-plexes with a
                                                          pooled reference, a plex effect per protein)
+            peptide_msstats                             (peptide-level label-free data in the MSstats format, for
+                                                         the roll-up: median polish vs MaxLFQ, D76)
 
 Each writer returns the planted truth so a test can measure recall and false
 discoveries of the whole downstream pipeline.
@@ -463,6 +465,56 @@ def time_course_pg_matrix(path: Path, series: dict[str, list[str]], replicates: 
             v = base + eff + rng.gauss(0, 0.25)
             row.append("" if rng.random() < missing else f"{2 ** v:.1f}")
         lines.append(row)
+    _write(path, header, lines)
+    return truth
+
+
+def peptide_msstats(path: Path, runs: list[tuple[str, str]], seed: int = 1, n_proteins: int = 600,
+                    changed_fraction: float = 0.1, effect: float = 1.0, noise: float = 0.3, noise_spread: float = 0.5,
+                    missing: float = 1.0, offset_sd: float = 1.5, outliers: float = 0.02) -> dict[str, dict[str, int]]:
+    """Peptide-level label-free data in the MSstats long format (benchmark.py's roll-up kind, D76): runs = [(run,
+    condition)], returns {condition: {gene: +1/-1}} vs the control, keyed by the label the MSstats loader gives
+    (the gene of sp|P…|GENE_HUMAN).
+
+    Each protein has 1 to 30 peptides (more for abundant proteins; many with 1-3), each with its own ionisation
+    offset (SD offset_sd log2) on the protein's profile; a loading difference per run; replicate noise with an SD
+    per protein (noise, spread log-normally by noise_spread); missing values more likely for weak peptides
+    (scaled by missing); and now and then (outliers) a value off by an interference (SD 2 log2). The roll-up has
+    to undo the offsets, the missing values and the interferences."""
+    rng = random.Random(seed)
+    conds = list(dict.fromkeys(c for _, c in runs))
+    ctrl = _control(conds)
+    truth: dict[str, dict[str, int]] = {c: {} for c in conds if c != ctrl}
+    shift = {r: rng.gauss(0, 0.4) for r, _ in runs}
+    rep: dict[str, int] = {}
+    seen: dict[str, int] = {}
+    for r, c in runs:
+        seen[c] = seen.get(c, 0) + 1
+        rep[r] = seen[c]
+    header = ["ProteinName", "PeptideSequence", "PrecursorCharge", "FragmentIon", "ProductCharge", "IsotopeLabelType",
+              "Condition", "BioReplicate", "Run", "Intensity"]
+    lines = []
+    for i in range(n_proteins):
+        g = _gene(i)
+        prot = f"sp|P{20000 + i}|{g}_HUMAN"
+        base = rng.gauss(22, 2.2)
+        eff = {}
+        for c in truth:
+            if rng.random() < changed_fraction:
+                sign = rng.choice((1, -1))
+                eff[c] = sign * effect
+                truth[c][g] = sign
+        n_pep = min(30, 1 + int(rng.expovariate(1 / 3)) + max(0, round(base - 22)))
+        sd = noise * math.exp(rng.gauss(0, noise_spread)) if noise_spread > 0 else noise
+        for _k in range(n_pep):
+            pep = _pep(rng, rng.randint(7, 15)) + "K"
+            off = rng.gauss(-1.0, offset_sd)
+            for r, c in runs:
+                v = base + off + eff.get(c, 0.0) + shift[r] + rng.gauss(0, sd)
+                if rng.random() < outliers:
+                    v += rng.gauss(0, 2.0)
+                gone = rng.random() < min(1.0, (0.02 + max(0.0, 19 - v) * 0.15) * missing)
+                lines.append([prot, pep, "2", "NA", "NA", "L", c, str(rep[r]), r, "NA" if gone else f"{2 ** v:.1f}"])
     _write(path, header, lines)
     return truth
 

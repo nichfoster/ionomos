@@ -2961,3 +2961,522 @@ Parquet reports (their size, types and how long the conversion takes on the
 PC); real MaxQuant peptide tables; Spectronaut itself (the instructions
 follow the manual, not a session with the program); the buttons and the new
 box on screen.
+
+
+### D75 — The assistant proposes one checked change; only a Confirm button applies it
+
+**2026-10-04.** ROADMAP Phase 6.2, inside D49's rules ("any change goes
+through a native dialog built from the structured arguments, and the user
+clicks Confirm"). No model has been tried; the box stays open until lab
+members have used it (the exit criterion).
+
+1. **Five proposal tools, a closed whitelist.** `propose_retry`,
+   `propose_condition`, `propose_leave_out`, `propose_setting` (`imputation`,
+   `normalize`, `alpha`, `log2fc`, `control`, `de_type`, `comparisons`; `""` =
+   the lab default) and `propose_role`. One job, one sample, one key per
+   call; no path, no "all", no delete or move. `de_type` was added to the
+   roadmap's list because the editor treats it with the control and the
+   comparisons; roles have their own tool because a role is per condition.
+   Other analysis keys (min_valid, filters, enrichment, …) stay with the
+   editor.
+2. **A proposal is built and checked before it exists.** The schema, then
+   the ledger (a retry needs a failed job), then the experiment: samples are
+   those of its last analysis (`results/analysis.json`) plus the ones
+   `experiment.yaml` leaves out, conditions follow `experiment.yaml`'s
+   `sample_conditions`; a control, comparison or role must name one; a new
+   condition must be a plain name; the resulting `analysis:` block must pass
+   `settings_from` with the lab's settings and differ from the file. The
+   sample list comes from analysis.json rather than reading the result table
+   again, because that reader writes into `results/` and a proposal must only
+   read. So an experiment whose analysis never ran gets no sample proposals.
+3. **One proposal per question**, the first valid one; later calls get an
+   error the model reads. It is offered only with an answer that passed the
+   citation check; otherwise it is withheld (audited).
+4. **The window is Ionomos's text.** `popups.ProposalDialog` shows the title,
+   what Confirm does and a unified diff of `experiment.yaml` rendered by the
+   same code that writes it (`manifest.overrides_text`), from the checked
+   arguments; nothing the model wrote as prose. A proposal for another job
+   than the one asked about says so. It is modal; Cancel has the focus;
+   Escape and closing are Cancel. One proposal window at a time (another is
+   audited as not shown).
+5. **Confirm re-checks, then uses the app's own code.**
+   `assistant/actions.apply` rebuilds the proposal from its tool and
+   arguments against the ledger and file as they are now and goes on only if
+   the id (tool, arguments, job, the file's sha256, the new block) is the
+   same: an editor save or a Retry in between makes it refuse. A retry is
+   `worker.request_retry`, which the Jobs tab, the pop-up and `ionomos retry`
+   now share; an analysis change is `manifest.save_analysis`, which the
+   experiment editor's Save now uses. Confirm does not re-run the analysis;
+   the message says how.
+6. **experiment.yaml gets backups.** The editor's Save overwrote the file;
+   the task assumed a backup that did not exist. `save_analysis` copies the
+   old file to `<experiment>/experiment-backups/experiment-<time>.yaml`
+   (`names.EXPERIMENT_BACKUP_DIR`) first, created exclusively, never pruned.
+   This applies to every editor save, not only the assistant's.
+7. **Only the Confirm button applies.** A test reads every module of the
+   package: `actions.apply` is called in `ProposalDialog.confirm` only, and
+   no other assistant module retries a job or writes `experiment.yaml`. The
+   replay checks that no scenario, in any fixture state, changes a file or a
+   job. "Yes" typed in the chat is a new question; the model has no
+   confirming tool.
+8. **`ionomos ask` prints, never applies.** The proposal, then `ionomos retry
+   N`, or the app's steps and (where `ionomos analyze`'s flags can say it) a
+   one-off `ionomos analyze N --exclude …` that does not save. Names a
+   terminal could misread are left out of a printed command.
+9. **Audit.** The question's record lists the proposal (id, tool, argument
+   hash, job, title, offered); each decision is its own record
+   (`proposal_decision`: confirmed, applied, the message).
+10. **The prompt grew** to about 6,200 bytes (≈1.55k tokens) with the five
+    schemas; the size test's limit moved from 6,000 to 6,500 bytes, under the
+    roadmap's ~2k tokens. The digest changed, so real models must be scored
+    again.
+
+**Verified:** by the suite on macOS (the window's tests are written in the
+existing style and run in CI only). **Not verified:** any real model's
+proposals; the window on the PC's display; whether lab members finish the
+tasks unaided.
+
+**For the maintainer to confirm:** the whitelist (1, with `de_type`); that a
+proposal is withheld when its answer fails the citation check (3); the
+backups for every editor save, never pruned (6); that Confirm saves but does
+not re-run the analysis (5).
+
+### D76 — MaxLFQ is a roll-up option, not the default; the moderated F-test can be switched off
+
+**2026-10-04.** ROADMAP 5B asked whether median polish or MaxLFQ would agree
+better with FragPipe's `combined_protein.tsv` for Sage. Ionomos had only
+median polish. The open questions also noted that the moderated F-test
+always runs with 3+ conditions and has no setting to stop it.
+
+1. **One module, pure Python** (`downstream/rollup.py`). `maxlfq(rows)`
+   implements MaxLFQ as Cox et al. (*Mol Cell Proteomics* 13:2513, 2014)
+   describe it and `iq` / DIA-NN implement it:
+   - For every pair of samples, the median log2 ratio of the features
+     measured in both (`min_ratio_count` 1, as in iq and DIA-NN; MaxQuant's
+     default is 2, available as an argument but not as a setting).
+   - Samples linked by such ratios form connected components.
+   - Per component, the least-squares profile is found by solving the
+     system iq's `lsfit` solves. Its normal equations plus the constraint
+     are solved by Gaussian elimination with partial pivoting
+     (`rollup.solve`), so no numpy. The cost is O(n³) per protein in the
+     samples of its component. That is fine for tens of samples; a
+     100-sample study would take minutes.
+   - The scaling is Cox et al.'s: the profile's summed linear intensity
+     equals the summed intensity of the component's feature values
+     (`scale="sum"`, the default). iq's mean-of-logs scaling
+     (`scale="mean"`) is kept for the golden test.
+   - A sample in a component of its own gets its summed intensity (iq: the
+     median feature). A sample with no value stays missing.
+   - Components are **not** put on one scale. Values across them are not
+     ratios, and the loaders say how many proteins that affected.
+     DIA-NN's solve instead pulls every sample weakly (1e-4) towards its most
+     intense feature, which gives disconnected groups a top-1 scale.
+     Ionomos does not copy that: it would invent a ratio the data do not
+     contain.
+   - `median_polish` stays in `engines.py`; `rollup.summarise(rows, method)`
+     dispatches.
+2. **`analysis.rollup: auto | median_polish | maxlfq`**, applied wherever
+   Ionomos rolls features up to proteins:
+   - Sage `lfq.tsv`: ions after razor grouping and fractions.
+   - The MSstats format: its features.
+   - A DIA-NN long report: `Precursor.Normalised`, else
+     `Precursor.Quantity`, per `Precursor.Id`. A precursor reported twice
+     for a run keeps the larger value, as `diann_maxlfq` does.
+   - A Spectronaut long report: `FG.Quantity` per `EG.PrecursorId`. A
+     fragment-level report repeats the value on every fragment row.
+     `FG.Quantity` is a new optional entry in `SPECTRONAUT_COLUMNS` (D74).
+
+   **`auto` keeps every loader's previous default**, so nothing changes for
+   existing experiments:
+   - median polish for Sage (D51) and the MSstats format (MSstats' own
+     default, TMP);
+   - DIA-NN's own `PG.MaxLFQ` and Spectronaut's `PG.Quantity`. MaxLFQ is the
+     engine-standard choice for DIA-NN, and DIA-NN has already computed it,
+     with its own precursor selection. Recomputing it would only make the
+     result differ from DIA-NN's matrices.
+
+   For Sage, MaxLFQ is not *clearly* the engine standard: Sage leaves the
+   protein to the user, FragPipe's IonQuant uses MaxLFQ, and MSstats uses
+   median polish. The benchmark below found no clear winner, so the default
+   stays median polish until a real Sage-vs-FragPipe comparison on the PC
+   decides. Where the setting cannot apply, a note says so:
+   - a table that already holds proteins (MaxQuant, AlphaDIA, FragPipe,
+     pg_matrix, PD, any table);
+   - Sage TMT and MSstatsTMT, which keep MSstatsTMT's median polish;
+   - a long report without the precursor columns. It then uses the engine's
+     protein quantity.
+
+   The report shows the choice in Data source → Quantity, in the notes and
+   in the Settings row "Protein roll-up".
+3. **Validated against R** (`tests/golden/maxlfq/`, `run_maxlfq_reference.R`):
+   `iq::maxLFQ()` 2.0.1 (CRAN) and `diann::diann_maxlfq()` 1.0.1
+   (github.com/vdemichev/diann-rpackage at af538f6), R 4.6.1. The input is
+   54 proteins × 8 samples:
+   - two and three disconnected sample groups;
+   - a sample with no value;
+   - one feature, one sample, two features (even medians);
+   - a chain of samples linked only through each other;
+   - a feature 8 log2 above the rest;
+   - 45 random proteins with abundance-dependent missing values and lost
+     samples.
+
+   Results:
+   - Against iq: every value within 1e-9 (measured 6e-14), in both the
+     mean and the sum scaling, and the components equal iq's annotation.
+   - Against DIA-NN: the centred profiles of connected proteins agree to
+     1e-3 (measured 8e-4, the effect of DIA-NN's regularisation).
+   - The tests need no R.
+4. **Measured on simulated peptide data** (`ionomos benchmark --kind rollup
+   --grid standard`, `simulate.peptide_msstats`):
+   - 800 proteins of 1 to 30 peptides, each with its own ionisation offset
+     (SD 1.5 log2).
+   - 10% of the proteins changed 1.5-, 2- or 4-fold.
+   - Replicate SD 0.3 log2, spread between proteins; a loading shift per run;
+     weak peptides missing more often (typical and heavy); 2% of the values
+     off by an interference (SD 2 log2).
+   - Designs 3v3, 4v4, 6v6 and 2v4, with 5 seeds per scenario (24
+     scenarios), median normalisation.
+
+   FDP is at adjusted p ≤ 0.05 alone, pooled. Its range is over the scenarios
+   with ≥ 50 calls. Sensitivity is at adjusted p ≤ 0.05.
+
+   | Roll-up + imputation | FDP | range | FDP with \|log2FC\| ≥ 1 | found 1.5× / 2× / 4× | log2FC bias |
+   |---|---|---|---|---|---|
+   | median polish + Perseus (default) | 3.9% | 1.8–6.8% | 1.2% | 31 / 71 / 88% | −0.06 |
+   | MaxLFQ + Perseus | 4.6% | 1.3–13.2% | 1.1% | 33 / 72 / 88% | −0.06 |
+   | median polish, no imputation | 4.5% | 1.6–7.1% | 1.1% | 37 / 77 / 90% | −0.03 |
+   | MaxLFQ, no imputation | 5.8% | 2.0–16.5% | 1.2% | 40 / 79 / 90% | −0.02 |
+
+   - **Sensitivity.** MaxLFQ finds 1–3 points more of the 1.5- and 2-fold
+     changes.
+   - **FDP.** Its pooled FDP is 0.7–1.3 points higher, and its worst
+     scenarios are worse. 4v4, 2-fold, heavy missing values reach 13–16%,
+     against 7% for median polish. The cause was traced in one seed. The
+     false calls are not proteins split into components. They are unchanged
+     proteins in a table where median normalisation left an offset of
+     −0.17 (median polish) or −0.19 (MaxLFQ) log2, because changed proteins
+     went missing one way. Both roll-ups carry the offset, and MaxLFQ's
+     slightly larger one moves more proteins past the BH threshold.
+   - **Precision.** The SD of the unchanged fold changes is the same
+     (0.21–0.22).
+
+   Neither is clearly better on this model, which is why the defaults do
+   not change. A guard (`tests/test_rollup.py`, the `guard` grid, 6 seeds)
+   holds both at ≤ 8.5% FDP, with the same sensitivity within 6 points.
+5. **`analysis.f_test: auto | off`**. `auto` (default) is today's behaviour.
+   `off` makes `analysis.f_test()` return nothing, so:
+   - no "Any change (F)" tile and no F columns in `<level>_results.tsv`;
+   - Methods says it was switched off;
+   - Settings used has a row "F-test (any change): off";
+   - `analysis.json` has `f_test: {off: true, note}` instead of `null`,
+     which means "does not apply".
+
+   A bare `off` in YAML is read as `false` and accepted. Time-course
+   F-tests (D53) are separate and still follow `time_course`. The doctor
+   has no F-test issue, so it needed no change. The setting is a key of
+   `config.yaml` / `experiment.yaml` (written back by `configio`); there is
+   no new app field.
+
+**Verified**:
+- Both R references to the tolerances above.
+- Every loader rolls up its table to exactly `rollup.summarise` of the
+  same features (`tests/test_rollup.py`), with the fallbacks and notes.
+- End to end: `analyze()` with `rollup: maxlfq` on an MSstats table, and
+  with `f_test: off` on 3 conditions.
+- The benchmark kind and its files.
+
+**Not verified**:
+- Real data of any engine.
+- Whether MaxLFQ or median polish agrees better with FragPipe's
+  `combined_protein.tsv` on a real Sage search. The question stays open in
+  ROADMAP.
+- How long MaxLFQ takes on large studies on the PC.
+- That Spectronaut's `FG.Quantity` is the precursor quantity the lab's
+  reports carry. The name follows Spectronaut's column naming (FG. =
+  fragment group, the precursor), not a real export.
+
+### D77 — Long time courses are fitted as natural splines in hours; short ones stay a factor
+**2026-10-04.** ROADMAP 5C #1 left "spline fits for long series are not
+built" (D53). With many time points the factor model spends a parameter on
+every time point and tests noise as change; the limma User's Guide (9.6.2,
+many time points) fits a regression spline instead.
+
+1. **When.** `analysis.time_model: auto | factor | spline` (default
+   `auto`). `auto` keeps time a factor up to 6 time points and fits a
+   spline from 7 (`timecourse.AUTO_SPLINE_POINTS`). Why 7: proteomics time
+   courses usually have 3 to 6 points (D53), and every series that exists
+   today keeps its numbers; with the default 4 df, a spline only saves
+   parameters once a series has more than 5 time points, at 6 it saves one,
+   and from 7 it saves at least two, which is the lack of fit that smoothing
+   turns into power. The lab hasn't said whether it runs time courses, so
+   the switch is where nothing changes for what exists.
+2. **How many df.** `time_spline_df` (default `auto` = 4, the middle of the
+   guide's "3 to 5 is reasonable"), never more than the time points − 2: at
+   time points − 1 the curve goes through every mean (the factor model with
+   extra assumptions), above it can't be fitted. A higher value is lowered
+   to time points − 2 with the `TIME_SPLINE` issue (a note, with help), as
+   is a spline model that can't be fitted (then that series is a factor).
+   `time_model: spline` on a short series uses min(4, points − 2), so 3
+   points give a straight line in hours.
+3. **The basis is R's, column for column.** `downstream/splines.py` ports
+   `splines::ns` (R 4.6.1): interior knots at type-7 quantiles of the
+   sample times (with replicates, as `ns(targets$Time)`), R's shoving of a
+   knot that lands on a boundary, Cox–de Boor `splineDesign` with
+   derivatives, and the natural constraint by LINPACK's Householder QR
+   (`dqrdc2` / `qr.qty`), so the coefficients are R's and not only their
+   span. `predict()` on new times is the same code.
+4. **Hours, not order.** A curve is a function of time, so the spline uses
+   the hours (knots at quantiles adapt to uneven spacing). The trend t
+   still uses the order of the time points (D53, an open question).
+5. **One model per series.** The comparisons' model (`~0 + condition` plus
+   block and covariates) with the series' conditions replaced by a level
+   and the spline columns; every other condition keeps its own mean, so the
+   residual variance uses every sample, as in the comparisons. Change over
+   time is the moderated F on the spline coefficients. The series-vs-control
+   test fits both series as curves on one basis made from both series'
+   times and takes the F on the differences of their coefficients, which is
+   limma's `~Group * ns(time)` interaction (the golden computes it in that
+   parameterisation). It needs what the factor test needs (the same first
+   time and a shared later one, not a shared baseline). The variance prior
+   (limma or DEqMS) is squeezed per model.
+6. **What the rows mean.** log2FC is the fitted curve's change from the
+   first time point at each time point; the largest change, its time, the
+   class and the patterns follow from it, so a single noisy time point
+   among many does not make a feature "changing". `mean_log2` keeps the
+   observed means; `time_course.tsv` has a `model` column (`factor` /
+   `spline (4 df)`); `analysis.json` gives `time_model` and the knots.
+7. **Drawn as a curve.** The payload carries per series the basis on 61
+   points of hours (less its value at the first time point) and per feature
+   its coefficients and a level (the mean of each value less the fitted
+   change at its time, so the curve runs through the replicates whatever the
+   block). The report's profile and `time_profiles` (D68) draw the curve on
+   an axis in hours, labels thinned where early time points crowd, the
+   control series' curve dashed. Pattern tiles stay by order.
+
+**Checked** against R 4.6.1 `splines::ns` (bases and `predict()` for 8 time
+vectors, df 1–6, shoved and tied knots: 1e-12) and limma 3.68.5
+(`tests/golden/timecourse/run_spline_reference.R`): 150 features × 51
+samples, Drug and DMSO at 8 time points from 0 to 48 h and a Pool condition;
+plain, replicate block, missing values with df 3; F, p, adjusted p, the
+fitted changes and the interaction F, p, adjusted p: 10,350 values, worst
+relative difference 5.4e-10. **Not verified**: a real lab time course; the
+default N = 7 and df = 4 against what the lab would call a long series;
+very uneven spacing (0 to 2 weeks) where a log-time axis might fit better.
+
+### D78 — Acquisition time comes from the raw file's own header; run order is tested within the conditions
+**2026-10-04.** ROADMAP Phase 4 left "run-order drift, once acquisition times
+are recorded". The report could not show it, and the QC trend (D45) ordered
+runs by a name stamp or a file time.
+
+1. **The time is the Thermo header's, read in pure Python, read-only**
+   (`acqtime.py`). Every Thermo `.raw` file starts with a 1356-byte
+   FileHeader: magic `0xA101`, `Finnigan` in UTF-16LE, the format version at
+   `0x24`, and two audit tags whose first 8 bytes are Windows FILETIMEs
+   (100 ns since 1601, UTC): acquisition start at `0x28`, end at `0x98`. The
+   layout is the one unfinnigan documented; OpenTFRaw (validated on six real
+   files: LTQ, LTQ Orbitrap, Elite, Fusion, Fusion Lumos, Q Exactive HF) and
+   Philosopher's `fin` package read the same offsets, and it is what Thermo's
+   RawFileReader calls `FileHeader.CreationDate`, which ThermoRawFileParser
+   writes as "Creation date" (its metadata writer, read in its source). Only
+   the first 264 bytes are read. The header is used only when the magic, the
+   signature, a known version (8, 47, 57, 60, 62, 63, 64, 66, or 67–99 for
+   newer software) and a time between 1995 and two days from now all check
+   out, and not when it is more than a day after the file was last written.
+   The variable-length RawFileInfo date (after SeqRow and ASInfo, whose
+   layout changes with the version) was **not** used: that would be guessing.
+   The audit tags' text (it can be a Windows account) is not kept, so
+   `ionomos.json` holds no name a bundle's anonymiser does not know.
+2. **Then, in order:** what ThermoRawFileParser already wrote for the file
+   (an mzML's `<run startTimeStamp>`, as Sage's conversion leaves in
+   `sage_mzml\`, or `-metadata.json` / `-metadata.txt`; times without a
+   zone are taken as local); the Xcalibur stamp in the name; the file's
+   modification time, flagged **approximate** (the instrument writes the
+   file until the run ends; copies keep the time). Ionomos does not start
+   ThermoRawFileParser to get a time: the header holds the same field, and
+   the watcher should not start programs for it (as for PNG, D68).
+3. **Recorded at intake** in `ionomos.json` → `acquisition`
+   (`{manifest file: {time, utc, source, approximate, end, matches_file,
+   file_time, version}}`). `time` is local wall-clock time, as the QC trend
+   has always stored it; `utc` is the same moment. `matches_file` says
+   whether the header's end is within 10 minutes of the file's time: the
+   check to read on the lab PC. A failure to read leaves `{}` and never stops
+   a filing. Older jobs, and `ionomos analyze` on a folder, read the times
+   when analysed. The QC trend uses the recorded time, then the same sources;
+   its rows say "raw header", "ThermoRawFileParser", "name", "file time" or
+   "filed".
+4. **Run-order QC** (`downstream/runorder.py`): per sample, identifications,
+   missing values, the median log2 intensity before normalisation (the
+   scorecard), and from the search the PSMs, the median precursor mass error
+   and the missed-cleavage rate (D55), or DIA-NN's precursors and MS1
+   accuracy. A sample's time is its first raw file's; samples that share raw
+   files (TMT channels) have no order of their own and get none.
+5. **Drift is tested within the conditions.** A plain trend against run
+   order mistakes a condition run as a block for a drift. The test is Hirsch
+   and Slack's seasonal Kendall test with the conditions as the seasons (only
+   pairs of one condition are compared). Its p-value is exact up to 1,500
+   pairs (the conditions' Mahonian distributions convolved; checked against
+   enumeration), normal with the tie-corrected variance above that. The size
+   is the stratified Theil-Sen slope times the runs. Spearman's ρ of the
+   within-condition residuals is shown beside it. A number is flagged
+   (`RUN_ORDER_DRIFT`) at p < 0.01 **and** a change over the run of at least
+   10 % (counts), 0.5 log2 (signal), 5 points (missing values, missed
+   cleavages) or 3 ppm. Missing values are not warned about beside
+   identifications (the same fact). Six samples with a time are needed; a
+   perfectly ordered 3 × 3 design reaches p = 0.009, a 2 × 3 cannot (0.056).
+6. **Blocks** (`RUN_ORDER_CONFOUNDED`): η² of the run positions (ranks) by
+   condition, with how often a random order is as aligned (4,000 seeded
+   permutations), flagged at η² ≥ 0.6 with two or more conditions of two or
+   more samples. A blocked 2 × 3 is 0.77, a blocked 3 × 3 0.90; interleaved
+   (rep 1 of every condition, then rep 2) 0.1. It describes the design and
+   is not a test: a randomised order that came out blocked is still blocked
+   (about 9 % of random 2 × 3 and 3 × 3 orders, 2 % of 3 × 4). Both are
+   warnings, no pop-up.
+7. **Validated on simulated data** (`tests/test_runorder.py`), 3 conditions
+   × 4, identifications with SD 40: a fall of 40 per run is found in at
+   least 90 of 100 randomised experiments (96 % in a 200-run check); no drift
+   is flagged in at most 4 of 200 (0 seen); a condition 400 apart run in
+   blocks is not a drift; a drift inside blocks is still found; blocks are
+   always flagged and randomised orders rarely.
+8. **Shown** as the **Run order** QC tab (a chart per number with the
+   conditions as a strip above it and the Theil-Sen line, the trend table,
+   the samples with their time and its source), `analysis.json` →
+   `run_order`, and the `run_order` export figure (a panel per number,
+   drifting ones first; `charts.STATIC_FIGURES`, report.js `STATIC_FIGS`).
+   The payload goes through `ctx["run_order"]`, so `report.payload`'s
+   signature is unchanged.
+
+**Not verified:** any real `.raw` file (the tests build headers to the
+documented layout; the testbed's raw files are random bytes, so they fall
+back to the file time); whether ThermoRawFileParser's mzML `startTimeStamp`
+and metadata "Creation date" are UTC or local for the lab's files; the tab
+and the figure in a real browser (jsdom only); the limits on the lab's own
+sequences.
+
+### D79 — Phosphosites, kinase activity and STRING partners are opt-in; the downloads stay the lab's
+**2026-10-04.** ROADMAP 5C #8 and #9. The lab has not said it runs phospho, so
+everything here is **off unless asked for** and an experiment analysed before
+is analysed exactly as before (`analysis.json` gains a `phospho` entry that
+says "not asked for"). `downstream/phospho.py`.
+
+1. **`phospho: true` swaps the protein table for the site table**, and the
+   rest of the analysis does not know the difference: a site is a feature of
+   level `site` and kind `intensity`, named `GENE R123` with the id
+   `sp|ACC|ENTRY|R123` (the isoDTB site convention, so D70's matching and the
+   search work), and goes through the same filter, normalisation, imputation,
+   limma, volcano, heatmap, enrichment and report. The readers were built from
+   the real column names, not from documentation alone:
+   - FragPipe label-free: IonQuant's `combined_site_STY_79.9663.tsv`
+     (`Index` = `ACC_S142`, `Gene`, `Protein`, `Protein ID`, `Peptide`,
+     `Best Localization Probability`, per sample `… Localization
+     Probability`, `… Intensity`, `… MaxLFQ Intensity`; 0 = missing). The
+     header was taken from a public FragPipe output
+     (prolfqua/prolfquappPTMreaders' example) and Nesvilab's DDA+ notebook;
+     FragPipe's own documentation describes only the TMT site reports.
+     MaxLFQ is used when it has values, as for proteins.
+   - FragPipe TMT: TMT-Integrator's `abundance_single-site_MD.tsv` (`Index`,
+     `Gene`, `ProteinID`, `Peptide`, `SequenceWindow`, …,
+     `ReferenceIntensity`, then the channels), read with the TMT loader so
+     the annotation, plexes and "already relative to the reference" rules are
+     the protein table's. Columns as FragPipe-Analyst and FragPipeAnalystR
+     read them.
+   - DIA-NN: `report.phosphosites_90.tsv` / `_99.tsv` (`Protein`,
+     `Protein.Names`, `Gene.Names`, `Residue`, `Site`, `Sequence`, then the
+     runs; 0 = missing), named in DIA-NN's README (1.9 – 2.0) and with the
+     header of a public DIA-NN output; runs are matched to the manifest as
+     for the protein matrix. DIA-NN recommends its Parquet site report over
+     these matrices; reading that is not built.
+   No site table: the proteins are analysed and `PHOSPHO_TABLE` (input) says
+   so. `phospho_table` names one explicitly. Alternatives weighed: finding the
+   site table without a setting (would change existing LFQ-phospho
+   experiments, whose protein table is analysed today); a separate method
+   (`like: LFQ` plus a flag is what the lab would write anyway).
+2. **The localisation filter is a setting, and Ionomos says when it cannot
+   apply it.** `phospho_min_localization` (0.75, the common class I
+   threshold) is applied to the label-free table's best localisation
+   probability; with `phospho_localization_per_sample` a sample's value whose
+   own probability is lower is also dropped. TMT-Integrator's report and
+   DIA-NN's matrices carry no probabilities: they were filtered before
+   (TMT-Integrator's `min_site_prob`, read from `fragpipe.workflow`; DIA-NN's
+   0.9 / 0.99, and the 0.99 matrix is read when the setting is above 0.9).
+   When their threshold is lower than the setting, or unknown,
+   `PHOSPHO_LOCALISATION` (warning) says so; nothing is re-filtered on data
+   that cannot be.
+3. **Protein correction is D70's, per comparison.** With `protein_correction`
+   each site comparison (Drug vs DMSO) is corrected by the proteome's
+   comparison of the same two conditions (or the one named in `conditions:`,
+   keyed by the comparison's name or its treatment); never a guess. The
+   per-comparison block of `proteincorr.run` became
+   `proteincorr.correct_comparison`, used by both (the D70 goldens pass
+   unchanged). Both scales are log2 treatment / control, so the protein's
+   change is used as it is. FragPipeAnalystR's `PTM_normalization` (a
+   regression of site on protein per sample) was not ported: D70's
+   adjustment keeps the site and protein uncertainties, which the regression
+   does not.
+4. **KSEA as KSEAapp computes it, with two documented differences.**
+   (Casado et al., Sci. Signal. 2013; KSEAapp 2.0, MIT.) Per comparison, on
+   every site with a log2 fold change: the mean and SD (n − 1) of all of
+   them; a kinase's substrates are the measured sites the table lists for it,
+   matched on substrate gene and residue (`ksea_match: gene`, KSEAapp's
+   merge) or UniProt accession (`protein`); a site measured twice is averaged
+   first per (kinase, site, source), as KSEAapp's `aggregate`; mS, Enrichment
+   = mS / |mean|, z = (mS − mean) √m / SD. Different: **p is two-sided**
+   (KSEAapp's `pnorm(-|z|)` is one-sided; a kinase can go either way; the
+   table keeps `p_one_sided`), and **BH runs over the kinases reported**, those
+   with at least `ksea_min_substrates` (5, KSEAapp's usual `m.cutoff`)
+   substrates (KSEAapp adjusts over every kinase, then filters). A kinase is
+   "more / less active" at adjusted p ≤ `alpha`. The z-score is a statement
+   about the substrates, not a measurement of the kinase; the report says so.
+5. **The kinase-substrate table is the lab's download, never shipped.**
+   PhosphoSitePlus is free for non-commercial use only (CC BY-NC-SA), so, as
+   CysDB in D52, `kinase_substrates` names a file (a full path or one in the
+   experiment folder; `.gz` read as is; its licence lines before the header
+   skipped); it is only read. Read: PhosphoSitePlus's
+   `Kinase_Substrate_Dataset` (`GENE` = the kinase's gene, `SUB_GENE`,
+   `SUB_ACC_ID`, `SUB_MOD_RSD`, organisms), KSEAapp's PSP&NetworKIN file
+   (`Source`, `networkin_score`; NetworKIN rows only with `ksea_networkin`
+   and a score ≥ `ksea_networkin_score`, PSP rows' `Inf` kept, as KSEAapp),
+   or any table with those columns. `ksea_organism` (human) leaves other
+   organisms out. A missing or unusable file, or no kinase with enough
+   substrates, is `KINASE_SUBSTRATES` (warning); the site results are not
+   affected.
+6. **STRING partners: a table, for any experiment.** `string_network` names
+   a STRING download (CC BY 4.0): `protein.links` with the `protein.info`
+   file in the same folder for the names (the links file is streamed and only
+   pairs of hit genes are kept), or a network exported from the website.
+   Per comparison, each hit gene with its partners among that comparison's
+   hits at combined score ≥ `string_min_score` (700, STRING's "high
+   confidence"). Not drawn as a network: a layout readable at 100+ nodes is
+   its own project. `STRING_NETWORK` (warning) when the file cannot be used.
+7. **CORUM is not built.** Its licence was the open question (ROADMAP Phase
+   4, D35): release 5.1 (Zenodo, January 2025) is CC BY 4.0, earlier ones
+   CC BY-NC. A user download would now be allowed, but its file layout was
+   not checked and the task was low priority.
+8. **Report and figures in the D62 / D68 style.** A section "Phosphosites,
+   kinases, partners" (named after what ran): the filter's tiles, a KSEA bar
+   chart per comparison (click a kinase for its substrates, and a button that
+   finds them in the volcano), the kinase table, the partners table. The bar
+   chart is exported like every chart and is the static figure
+   `kinase_activity` (`analysis.export.figures`, `ionomos export`,
+   `sectionfigs.figure_kinase_activity`; the kinases with the largest |z|
+   when not all fit). The site volcano is the existing volcano (the features
+   are sites). `results/kinase_activity.tsv`, `results/string_partners.tsv`;
+   no FragPipe-Analyst `reproduce_in_R.R` for a site analysis (it would read
+   the site table as proteins).
+
+**Verified**: KSEA against KSEAapp 2.0 (R 4.6.1, installed into a private
+library) on made-up sites and kinase-substrate pairs with duplicated sites, a
+pair under two names of one kinase and NetworKIN rows: m, mS, Enrichment, z
+and KSEAapp's one-sided p to 1e-10, and the two-sided p and the BH over m ≥ 5
+computed in the same R script (`tests/golden/ksea/`, `run_kseaapp.R`; the test
+needs no R); a hand-computed case; the three readers on files with the real
+headers; whole analyses of a simulated LFQ-phospho experiment with phospho
+off (identical protein analysis) and on (the planted kinase called, the
+partners found, the figure written); the protein correction against
+`proteincorr.adjust`; the doctor's issues; the report section and its export
+in jsdom, and the section, a kinase click, the volcano search it starts and the
+exported `kinase_activity` SVG by eye in Chromium (the desktop app's browser
+pane, a simulated experiment served locally). **Not verified**: real data of any kind (no phospho search from the
+lab; the readers rest on public files and documentation); a real
+PhosphoSitePlus or STRING download (made-up tables in their layouts);
+TMT-Integrator's `min_site_prob` key in a real FragPipe 24 workflow; Firefox,
+Safari, Edge; Windows.
