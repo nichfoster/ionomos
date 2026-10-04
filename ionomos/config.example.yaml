@@ -60,6 +60,11 @@ analysis:
   #   conditions: {EJQ_2_027: Cmpd vs DMSO}   # site condition -> proteome comparison, compound first
   # block: replicate         # the replicate number as a block (batch / pair) in the limma model (D42)
   # variance_prior: deqms    # limma (default) | deqms: prior variance by peptide count (D43)
+  # f_test: auto             # auto (default): the moderated F ("any change") whenever limma compares 3+ conditions
+  #                          # of intensity data | off: never (D76)
+  # rollup: auto             # peptide / precursor tables -> proteins (D76): auto (default) keeps each engine's own:
+  #                          # median polish for Sage lfq.tsv and the MSstats format, DIA-NN's PG.MaxLFQ and
+  #                          # Spectronaut's PG.Quantity | median_polish | maxlfq (Ionomos' own, on every one of them)
   # Exported figures (D62): the lab's style. The report's Export dialog starts from it ("Reset to lab
   # defaults" goes back to it), and `ionomos export <experiment>` writes static SVG figures with it
   # (and PNG with --format png, on a computer with resvg, Inkscape or cairosvg: D68).

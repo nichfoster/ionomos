@@ -10,7 +10,10 @@ keep the saved settings.
 The tiles at the top count the [features](#glossary.feature) (proteins or
 sites) and samples, give a sample-quality verdict, and count the hits in each
 [comparison](#glossary.comparison). Click a comparison's tile to open its
-volcano plot.
+volcano plot. With three or more conditions, **Any change (F)** counts the
+features that differ between any of them (limma's moderated F-test, adjusted
+p, no fold-change cut-off); `f_test: off` under `analysis:` leaves it out
+([How?](#faq.rerun)).
 
 Below them: the key findings, the issues Ionomos found, any notes, and a row of
 steps showing what happened to the data (loaded → contaminants removed →
@@ -571,7 +574,10 @@ out, conditions changed). The same values are in `results\analysis.json`.
 Where the numbers came from: the search engine and its version, the tools it
 ran, the result table Ionomos read, which quantity column, the FDR filter, the
 FASTA and the parameter files. Keep it with the report: it is the audit trail
-for anyone who re-checks the analysis.
+for anyone who re-checks the analysis. For a table of peptides or precursors
+(Sage, the MSstats format, a DIA-NN or Spectronaut long report), **Quantity**
+also says how they were combined into proteins: median polish, MaxLFQ, or the
+engine's own protein quantity ([Which one?](#faq.rollup)).
 
 ## The SDRF sample sheet {#report.sdrf}
 

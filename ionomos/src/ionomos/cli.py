@@ -31,7 +31,7 @@ Command line.
                                                    an Ionomos analysis against a reference result of the same experiment
                                                    (another Ionomos run, FragPipe-Analyst, limma, MSstats, Perseus, R):
                                                    agreement of fold changes, hit calls and p-values, with a verdict
-    ionomos benchmark [--grid quick|standard] [--kind dia|isodtb|tmt] [--like FOLDER]
+    ionomos benchmark [--grid quick|standard] [--kind dia|isodtb|tmt|rollup] [--like FOLDER]
                                                    accuracy on simulated data with planted changes: sensitivity and
                                                    observed false discoveries for each imputation / normalisation
                                                    (isoDTB: test, mixing error; TMT: IRS, a pulldown)
@@ -1314,7 +1314,8 @@ def main(argv: list[str] | None = None) -> int:
                                     "against the nominal alpha and the fold-change bias for each imputation / "
                                     "normalisation setting. --kind isodtb: site ratios (replicates, sites changed "
                                     "one way, a heavy / light mixing error); --kind tmt: several TMT plexes with a "
-                                    "pooled reference (IRS settings, a pulldown). With FOLDER and --expected: "
+                                    "pooled reference (IRS settings, a pulldown); --kind rollup: peptide tables "
+                                    "rolled up by median polish or MaxLFQ (analysis.rollup). With FOLDER and --expected: "
                                     "compare an analysed mixed-species (human / yeast / E. coli) or spike-in "
                                     "experiment with the expected ratio per species or protein list.")
     bm.add_argument("folder", nargs="?", help="an analysed benchmark experiment (with --expected)")
@@ -1322,7 +1323,7 @@ def main(argv: list[str] | None = None) -> int:
                                                        "expected: {HUMAN: 1, YEAST: 2, ECOLI: 0.25}")
     bm.add_argument("--grid", choices=["quick", "standard"], default="standard",
                     help="simulated: quick (seconds) or standard (about a minute; default)")
-    bm.add_argument("--kind", choices=["dia", "isodtb", "tmt"],
+    bm.add_argument("--kind", choices=["dia", "isodtb", "tmt", "rollup"],
                     help="simulated: the kind of data (default dia: label-free protein intensities; with --like the "
                          "experiment's own kind)")
     bm.add_argument("--like", metavar="FOLDER", help="simulated: add the settings and group sizes of this analysed "

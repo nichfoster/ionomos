@@ -166,6 +166,27 @@ Ionomos does not ship a Spectronaut schema file (`.rs`), because that format
 is Spectronaut's own; once your schema is made, Spectronaut can save it as
 one for the rest of the lab.
 
+## How are peptides combined into one value per protein? {#faq.rollup}
+
+Most engines write a protein table, and Ionomos uses its numbers. A few
+write peptides (or precursors) and leave the protein to Ionomos: Sage's
+`lfq.tsv`, the MSstats format, and the long reports of DIA-NN and Spectronaut.
+`rollup:` under `analysis:` (in `experiment.yaml`, or the lab's settings)
+chooses how:
+
+- `auto` (the default): Sage and the MSstats format use **median polish**
+  (what MSstats does); DIA-NN and Spectronaut keep their own protein
+  quantity (`PG.MaxLFQ`, `PG.Quantity`).
+- `maxlfq`: **MaxLFQ**, the method of MaxQuant, FragPipe's IonQuant and
+  DIA-NN. Each pair of samples is compared on the peptides they share, and
+  the protein's profile is the one that fits those ratios best.
+- `median_polish`: median polish, also for DIA-NN and Spectronaut.
+
+On simulated data the two find about the same hits. MaxLFQ copes better with
+peptides missing in some samples; when a protein's samples share no peptide
+at all, MaxLFQ cannot relate them, and the notes say how many proteins that
+affected. The report's **Data source** says which was used.
+
 ## How do I open the data in FragPipe-Analyst? {#faq.fpa}
 
 In FragPipe-Analyst, upload the quantification table from `fragpipe\` (for

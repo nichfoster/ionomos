@@ -309,3 +309,37 @@ def test_analyze_with_maxlfq_and_the_f_test_switch(tmp_path):
     assert "moderated F-statistic" not in html and "switched off (f_test: off)" in html
     table = next(off.results_dir.glob("*_results.tsv"))
     assert "F_p_adj" not in table.read_text(encoding="utf-8").splitlines()[0]
+
+
+def test_rollup_benchmark_guard():
+    """The roll-up kind of `ionomos benchmark` (D76) on its guard grid: both roll-ups keep the FDP near the nominal
+    5% and find the same share of 2-fold changes. Measured 2026-10-04 (6 seeds, 500 proteins): FDP 1.6-2.9%,
+    sensitivity 66-70%, bias -0.03 to -0.05 log2; the standard grid's numbers are in D76."""
+    from ionomos.downstream import benchmark
+
+    res = benchmark.simulated("guard", kind="rollup", seeds=6)
+    assert res["data"] == "rollup" and len(res["rows"]) == 4
+    assert {r["rollup"] for r in res["rows"]} == {"median_polish", "maxlfq"}
+    for r in res["rows"]:
+        assert r["hits_alpha_only"] >= 150
+        assert r["fdp_alpha_only"] <= 0.085, r
+        assert 0.55 <= r["sensitivity_alpha_only"] <= 0.85, r
+        assert abs(r["fc_bias_changed"]) < 0.15, r
+    by = {(r["rollup"], r["controls"]): r for r in res["rows"]}
+    for c in (3, 2):
+        assert abs(by[("maxlfq", c)]["sensitivity_alpha_only"] - by[("median_polish", c)]["sensitivity_alpha_only"]) \
+            < 0.06
+    assert benchmark.simulated("guard", kind="rollup", seeds=6)["rows"] == res["rows"]
+
+
+def test_rollup_benchmark_writes_its_own_files(tmp_path):
+    from ionomos.downstream import benchmark
+
+    res = benchmark.simulated({"designs": [(3, 3)], "effects": [1.0], "missing": ["typical"],
+                               "settings": ["median polish + perseus (default)", "MaxLFQ + perseus"], "seeds": 1,
+                               "proteins": 200}, kind="rollup")
+    files = benchmark.write_simulated(res, tmp_path)
+    assert [f.name for f in files] == ["benchmark_simulated_rollup.tsv", "benchmark_simulated_rollup.json",
+                                       "benchmark_simulated_rollup.html"]
+    page = files[-1].read_text(encoding="utf-8")
+    assert "MaxLFQ" in page and "simulated peptide data (roll-up)" in page
