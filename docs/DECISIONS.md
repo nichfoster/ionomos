@@ -3083,8 +3083,10 @@ headers; whole analyses of a simulated LFQ-phospho experiment with phospho
 off (identical protein analysis) and on (the planted kinase called, the
 partners found, the figure written); the protein correction against
 `proteincorr.adjust`; the doctor's issues; the report section and its export
-in jsdom. **Not verified**: real data of any kind (no phospho search from the
+in jsdom, and the section, a kinase click, the volcano search it starts and the
+exported `kinase_activity` SVG by eye in Chromium (the desktop app's browser
+pane, a simulated experiment served locally). **Not verified**: real data of any kind (no phospho search from the
 lab; the readers rest on public files and documentation); a real
 PhosphoSitePlus or STRING download (made-up tables in their layouts);
-TMT-Integrator's `min_site_prob` key in a real FragPipe 24 workflow; the
-section in a real browser.
+TMT-Integrator's `min_site_prob` key in a real FragPipe 24 workflow; Firefox,
+Safari, Edge; Windows.
