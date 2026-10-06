@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **"Failed to load Python DLL … python314.dll" after installing or updating**
+  (D81). This happened since 0.1: an update's installer inherited the old
+  app's PyInstaller settings, so the new Ionomos.exe it opened looked for
+  Python in the old app's unpacked `%TEMP%\_MEI…` folder, which was already
+  deleted. The app now sets `PYINSTALLER_RESET_ENVIRONMENT` for every
+  program it starts. The installer sets it too, so updating from an older
+  version is fixed as well. The same reset fixes a watcher started from
+  the app that lost files when the app was closed.
+
 ## [0.18.0] - 2026-10-06
 
 ### Added

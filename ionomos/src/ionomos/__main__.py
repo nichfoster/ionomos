@@ -56,6 +56,19 @@ def _report(exc: BaseException) -> None:
             pass
 
 
+def independent_children() -> None:
+    """Frozen: every program this process starts gets its own Python, never this one's (D81).
+
+    A one-file exe unpacks Python into %TEMP%\\_MEI<n> and tells its children where (_PYI_* variables). A child
+    that is the same exe uses that folder instead of unpacking its own; it is deleted when this process ends. So
+    the installer an update starts (it inherits our environment) opened the new Ionomos.exe after we exited, and
+    that copy looked for python314.dll in a folder that was gone: "Failed to load Python DLL". The watcher started
+    from the app lost its files the same way when the app closed. PyInstaller's PYINSTALLER_RESET_ENVIRONMENT
+    makes each such child unpack its own."""
+    if getattr(sys, "frozen", False):
+        os.environ["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+
+
 def run() -> int:
     from ionomos.cli import main
 
@@ -73,6 +86,7 @@ def run() -> int:
 
 if __name__ == "__main__":
     multiprocessing.freeze_support()
+    independent_children()
     code = run()
     if code != 0 and _launched_by_double_click():
         try:

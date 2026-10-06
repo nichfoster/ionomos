@@ -64,6 +64,19 @@ Filename: "taskkill.exe"; Parameters: "/IM Ionomos.exe /T /F"; Flags: runhidden;
 Filename: "taskkill.exe"; Parameters: "/IM ionomos-cli.exe /T /F"; Flags: runhidden; RunOnceId: "KillCli"
 
 [Code]
+function SetEnvironmentVariable(Name, Value: String): Boolean;
+  external 'SetEnvironmentVariableW@kernel32.dll stdcall';
+
+function InitializeSetup: Boolean;
+begin
+  { An update is started by the old Ionomos.exe and inherits its PyInstaller variables, which point at its
+    unpacked Python in %TEMP%. That folder is gone once the old app exits, so the Ionomos.exe started at the
+    end failed with "Failed to load Python DLL ... python314.dll". Every program started from here unpacks
+    its own (D81). Set here too so an update from an older app is fixed by the new installer. }
+  SetEnvironmentVariable('PYINSTALLER_RESET_ENVIRONMENT', '1');
+  Result := True;
+end;
+
 function TaskExists: Boolean;
 var Code: Integer;
 begin

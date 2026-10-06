@@ -3560,3 +3560,40 @@ counts only, `check-folder`. The window and a drop through
 real drop from Explorer on Windows; a real FragPipe GUI run's
 `log_<date>.txt`; real folders from searches the lab ran by hand (ROADMAP
 Phase 4).
+
+### D81 — Every program the frozen app starts unpacks its own Python
+**2026-10-06.** Since 0.1, installing or updating on the PC ended with
+"Failed to load Python DLL 'C:\\Users\\…\\Temp\\_MEI…\\python314.dll'.
+LoadLibrary: The specified module could not be found." Ionomos.exe is a
+one-file PyInstaller build. It unpacks Python into `%TEMP%\_MEI<n>` and
+puts that folder in its environment (`_PYI_ARCHIVE_FILE`,
+`_PYI_APPLICATION_HOME_DIR`, `_PYI_PARENT_PROCESS_LEVEL`). A child that is
+the same exe reuses the folder instead of unpacking its own, and the folder
+is deleted when the parent exits.
+
+The chain:
+1. The app starts the installer, and the installer inherits the app's
+   environment.
+2. The app exits, and its `_MEI` folder is deleted.
+3. The installer's last step starts the new Ionomos.exe, which inherits
+   those variables.
+4. That Ionomos.exe looks for Python in the deleted folder.
+
+Opening a downloaded installer from the app (`os.startfile`) has the same
+chain. The watcher started from the app (`Ionomos.exe run`, same exe) also
+shared the app's folder, so closing the app could delete files the watcher
+had not loaded yet (the report's assets, the help, extension modules).
+
+1. **`__main__.independent_children()`**: a frozen Ionomos sets
+   `PYINSTALLER_RESET_ENVIRONMENT=1` (PyInstaller ≥ 6.9; the build uses
+   ≥ 6.10) for everything it starts. Each Ionomos child then unpacks its own
+   copy. That costs a few seconds and some MB in `%TEMP%` per watcher or
+   reopen, which is fine for processes that outlive their parent.
+2. **The installer sets it too** (`InitializeSetup`, `SetEnvironmentVariableW`),
+   so the first update from an older app, which still hands over its old
+   environment, is fixed by the new installer.
+
+**Verified**: the bootloader in PyInstaller 6.22 reads these variables
+(its strings); a test that the frozen entry point and the installer set it.
+**Not verified**: an update on the PC (0.18.0 → the next release is the
+test: no dialog at the end).

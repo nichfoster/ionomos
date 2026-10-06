@@ -184,6 +184,11 @@ py -3.14 -c "import tkinter; print('ok')"
   (the FragPipe step that failed and its last lines); `ionomos_run\fragpipe_console.log` has FragPipe's full output and
   `ionomos_run\run_fingerprint.json` a short record of the run to send along. Fix, then
   tab 5 → **Retry a failed job…** (old output is kept as `fragpipe_previous_<time>\`).
+- **"Failed to load Python DLL … \_MEI…\python314.dll"** after installing or
+  updating: click OK. Ionomos is installed and works; open it from the Start
+  menu. The installer's last step started the new Ionomos.exe with the old
+  app's settings. Fixed in 0.18.1 (D81): installers from then on never show it,
+  including when an older Ionomos starts the update.
 - **Stopping/updating Ionomos during a search** kills that FragPipe run; the job
   re-runs from the start when the watcher starts again.
 - **"cannot move … will retry"** in the log: Explorer/antivirus still had a
