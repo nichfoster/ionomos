@@ -226,7 +226,10 @@ class ExperimentEditor:
 
     # ----------------------------------------------------------------- load --
 
-    def load(self, dest: Path, method: str | None, job_id: int | None = None, table: Path | None = None) -> None:
+    def load(self, dest: Path, method: str | None, job_id: int | None = None, table: Path | None = None,
+             then: Callable[[], None] | None = None) -> None:
+        """Read the samples on a thread and show them; then() runs after they are shown (the folder check's
+        'use the guessed conditions' / 'Analyse now')."""
         from ionomos import postprocess
 
         cfg = self._cfg()
@@ -239,12 +242,12 @@ class ExperimentEditor:
                 info, err = postprocess.inspect_folder(dest, cfg, method, table), None
             except Exception as exc:  # noqa: BLE001
                 info, err = None, f"{type(exc).__name__}: {exc}"
-            self.host.post(lambda: self._show(dest, method, job_id, info, err, table))
+            self.host.post(lambda: self._show(dest, method, job_id, info, err, table, then))
 
         threading.Thread(target=go, daemon=True).start()
 
     def _show(self, dest: Path, method: str | None, job_id, info: dict | None, err: str | None,
-              table: Path | None = None) -> None:
+              table: Path | None = None, then: Callable[[], None] | None = None) -> None:
         if err or info is None:
             self.info.configure(text=f"Could not read {dest}: {err}", foreground="#c62828")
             return
@@ -290,9 +293,18 @@ class ExperimentEditor:
         src = Path(info["source"]).name if info.get("source") else "no result table"
         text = (f"{dest.name} — {self.target['method'] or 'unknown method'} · {src} · {info['features']:,} "
                 f"{'sites' if info.get('kind') == 'ratio' else 'features'} · {n} samples in {len(conds)} condition(s)")
-        self.info.configure(text=text, foreground="#333")
+        if not self._samples and info.get("notes"):  # nothing read: say why (e.g. no table of this method)
+            text += "\n" + info["notes"][0]
+        elif info.get("notes") and info["notes"][0].startswith("this folder was filed as"):
+            text += "\nnote: " + info["notes"][0]
+        self.info.configure(text=text, foreground="#333" if self._samples else "#c62828")
         self.show_issues(info.get("issues") or [])
         self._fill()
+        if then is not None:
+            try:
+                then()
+            except Exception:  # noqa: BLE001 - a follow-up must never break the editor
+                log.exception("after loading %s", dest)
 
     def conditions(self) -> list[str]:
         return list(dict.fromkeys(self._cond.get(s["sample"], s["condition"]) for s in self._samples

@@ -190,9 +190,14 @@ def _load_quantities(method: str | None, workdir: Path, results: Path, record: d
         files += site_files
         return _merge_ratio([quant.from_isodtb_sites(p) for p in site_files]), files, notes
     if method == "TMT":
-        ab = _find(workdir, "abundance_gene_MD.tsv", "abundance_protein_MD.tsv", "abundance_*_MD.tsv")
+        from ionomos.fpfolder import TABLES
+
+        ab = _find(workdir, *TABLES["TMT"])  # _MD (the lab's) first; a search normalised otherwise writes _GN / _None
         if ab is None:
-            return None, files, ["no tmt-report/abundance_*_MD.tsv found (did TMT-Integrator run?)"]
+            return None, files, ["no tmt-report/abundance_*.tsv found (did TMT-Integrator run?)"]
+        if not ab.name.endswith("_MD.tsv"):
+            notes.append(f"read {ab.name}: TMT-Integrator was not set to median centring (MD), so its own "
+                         "normalisation is kept")
         ann_path = tmt.write_annotation(ab, results / "experimental_annotation.tsv")
         files.append(ann_path)
         ann = tmt.annotation_rows(read_header(ab))
@@ -339,19 +344,22 @@ def _insights(p, diffs, qcd) -> dict:
 
 def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = None, overrides: dict | None = None,
             record: dict | None = None, context: dict | None = None, mod_mass: str = "561.3387",
-            progress=None, table: Path | None = None) -> Outcome:
+            progress=None, table: Path | None = None, workdir: Path | None = None) -> Outcome:
     """Run every downstream stage for one experiment folder. Never raises.
 
     Each stage is isolated: if QC, enrichment or an export fails, the volcano plots and the report are
     still made; if the statistics fail, a simpler test is tried; if the report fails, a plain fallback
     page lists the volcano plots. Everything that went wrong or needs a decision ends up in
     out.issues (doctor.py), which the worker and the app turn into pop-up windows.
-    progress(text) is called between stages (the app shows it)."""
+    progress(text) is called between stages (the app shows it). workdir: where FragPipe's output is, when it isn't
+    dest/fragpipe or dest itself (a search run outside Ionomos, fpfolder.locate)."""
     from ionomos import __version__
     from ionomos.downstream import doctor, export, fpa, guards, insights, phospho, roles, trust
 
     dest = Path(dest)
-    workdir = dest / "fragpipe" if (dest / "fragpipe").is_dir() else dest
+    if workdir is None:
+        workdir = dest / "fragpipe" if (dest / "fragpipe").is_dir() else dest
+    workdir = Path(workdir)
     results = dest / RESULTS
     out = Outcome(method=method, results_dir=results)
     f = doctor.Findings(workdir=workdir)

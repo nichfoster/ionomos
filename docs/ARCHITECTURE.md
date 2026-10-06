@@ -51,6 +51,9 @@
 | `accuracy.py` | No Tk: `ionomos compare` / `benchmark` as calls with a line callback, their command lines, and the checks before a run; the CLI and the app both use it (D67) | — |
 
 | `experiment_editor.py` | One experiment's analysis choices as a Tk panel (samples, conditions, roles, comparisons, cut-offs, Run, issues); used by tab 7 and the pop-ups | — |
+| `fpfolder.py` | No Tk: what a folder of FragPipe output is before it is analysed (D80): finds the output folder(s) at any depth, reads FragPipe's saved workflow, manifest and log, decides the method from the tables and workflow (not only what the folder was filed as), and lists what is wrong or missing with what to do; `locate` gives `postprocess.prepare` the output folder and FragPipe's manifest for searches run outside Ionomos; `ionomos check-folder` | — |
+| `folder_check.py` | The check window (D80): what was found, Analyse as (recommended), several outputs, every problem with buttons that fix what can be fixed here, then Review samples / Analyse now into the experiment editor | — |
+| `dragdrop.py` | Files and folders dropped from Explorer on the app window (Windows, ctypes `WM_DROPFILES`, no dependency): they open in tab 7, checked first (D80) | — |
 | `attention.py` | Durable "needs a person" queue (`<log_dir>/attention/*.json`): raised by intake, worker, analysis, QC trending (`qc_trend`, a warning: no pop-up unless `qc_trend.popup`); closed when fixed | — |
 | `popups.py` | Pop-up windows + the "needs attention" list, in the app or (app closed) the watcher's own Tk loop; **More help** opens the help page at the item's topic | — |
 | `help/` | The help for users (D46, HELP.md): `*.md` content (getting started, the report, glossary, troubleshooting, never-do, FAQ) parsed and rendered with the stdlib; `report_payload()` for every report, `page()` = `help.html` (`ionomos help`, the app's Help button, pop-ups), `text()` for the terminal, `topic()` / `topic_for_item()` | — |

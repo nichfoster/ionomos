@@ -2,7 +2,10 @@
 The app's Analysis tab (7): analyse one experiment, and the lab's default analysis settings.
 
   Analyse an experiment
-    pick a finished job (or any FragPipe output folder) -> its samples are listed with the
+    pick a finished job, or any FragPipe output folder (Folder…, or dropped on the window) -> the folder is
+    checked first (folder_check.py, D80: what it holds, what to analyse it as, what is missing or wrong, with
+    buttons that fix what can be fixed; a job's folder only opens the window when something needs a look)
+    -> its samples are listed with the
     condition each was given; change a condition, leave samples out, choose the comparisons
     and, for this experiment only, the cut-offs / imputation -> Run analysis -> the report opens.
     Choices are saved in the experiment's experiment.yaml (analysis:), so re-runs and later
@@ -87,7 +90,7 @@ class AnalysisTab:
         p = ttk.Frame(self.nb, padding=10)
         self.nb.add(p, text="Analyse an experiment")
         p.columnconfigure(1, weight=1)
-        p.rowconfigure(1, weight=1)
+        p.rowconfigure(2, weight=1)
         ttk.Label(p, text="Experiment").grid(row=0, column=0, sticky="e", **PAD)
         self.pick = ttk.Combobox(p, state="readonly", width=80)
         self.pick.grid(row=0, column=1, sticky="ew", **PAD)
@@ -101,10 +104,15 @@ class AnalysisTab:
                           config_path=lambda: self.app.config_path, log_dir=self._log_dir,
                           lab_settings=lambda: dict((self.app.data or {}).get("analysis") or {}),
                           status=self.app.set_status)
+        self.drop_hint = ttk.Label(p, text="Folder…: FragPipe's output folder (or the folder above it), from Ionomos "
+                                           "or from a search you ran yourself. It is checked before anything runs.",
+                                   foreground="#666", wraplength=900, justify="left")
+        self.drop_hint.grid(row=1, column=1, columnspan=2, sticky="w", padx=6)
         self.editor = ExperimentEditor(p, host, on_done=lambda out: self.app.refresh_attention())
-        self.editor.frame.grid(row=1, column=0, columnspan=3, sticky="nsew")
+        self.editor.frame.grid(row=2, column=0, columnspan=3, sticky="nsew")
         self.editor.info.configure(text="Pick a finished job, a folder with FragPipe output, or any protein / "
                                         "results table (MaxQuant, Spectronaut, Perseus, limma, Excel, CSV …).")
+        self.check_win = None
 
     def _log_dir(self):
         try:
@@ -133,27 +141,29 @@ class AnalysisTab:
         label = self.pick.get()
         for lab, dest, method, jid in self._jobs:
             if lab == label:
-                self.editor.load(dest, method, jid)
+                self.check(dest, filed=method, job_id=jid, quiet=True, label=False)
                 return
 
     def choose_folder(self):
         d = self.editor.choose_folder()
         if d:
-            self.pick.set(str(d))
-            self.editor.load(d, None)
+            self.check(d)
 
     def choose_table(self):
-        from ionomos.postprocess import table_workspace
-
         f = self.editor.choose_table()
         if f:
-            try:
-                ws = table_workspace(f)
-            except OSError as exc:
-                self.app.set_status(f"cannot create a results folder next to {f.name}: {exc}")
-                return
-            self.pick.set(str(f))
-            self.editor.load(ws, "table", None, table=f)
+            self._load_table(f)
+
+    def _load_table(self, f: Path) -> None:
+        from ionomos.postprocess import table_workspace
+
+        try:
+            ws = table_workspace(f)
+        except OSError as exc:
+            self.app.set_status(f"cannot create a results folder next to {f.name}: {exc}")
+            return
+        self.pick.set(str(f))
+        self.editor.load(ws, "table", None, table=f)
 
     def select_job(self, job) -> None:
         """From the Jobs tab: open this job here."""
@@ -163,13 +173,114 @@ class AnalysisTab:
         for lab, dest, _m, _j in self._jobs:
             if dest == Path(job.dest_dir):
                 self.pick.set(lab)
-        self.editor.load(Path(job.dest_dir), job.method, job.id)
+        self.check(Path(job.dest_dir), filed=job.method, job_id=job.id, quiet=True, label=False)
 
     def open_folder(self, dest: Path, method: str | None = None, job_id: int | None = None) -> None:
         self.app.nb.select(self.frame)
         self.nb.select(0)
-        self.pick.set(str(dest))
-        self.editor.load(Path(dest), method, job_id)
+        self.check(Path(dest), filed=method, job_id=job_id, quiet=True)
+
+    # ------------------------------------------- checking a folder first (D80) --
+
+    def dropped(self, paths: list) -> None:
+        """Files or folders dropped on the app (dragdrop.py): the first one is checked and opened here. A FragPipe
+        file (its workflow, manifest, log or a result table) means its output folder; another table is analysed
+        as a table; a folder is checked."""
+        from ionomos import fpfolder
+        from ionomos.downstream.anytable import TABLE_SUFFIXES
+
+        items = [Path(p) for p in paths if str(p).strip()]
+        if not items:
+            return
+        self.app.nb.select(self.frame)
+        self.nb.select(0)
+        first = items[0]
+        if len(items) > 1:
+            self.app.set_status(f"{len(items)} items dropped: checking the first one, {first.name}")
+        fragpipe_file = first.suffix.lower() in (".workflow", ".fp-manifest") or \
+            fpfolder._match(first.name, "log_*.txt") or \
+            any(fpfolder._match(first.name, pat) for pats in fpfolder.TABLES.values() for pat in pats)
+        if first.is_file() and not fragpipe_file and first.suffix.lower() in (*TABLE_SUFFIXES, ".parquet"):
+            self._load_table(first)
+        elif first.is_file() and not fragpipe_file:
+            self.check(first.parent)
+        else:
+            self.check(first)
+
+    def check_folder(self, picked: Path, method: str | None = None, root: Path | None = None,
+                     filed: str | None = None):
+        """The check itself (any thread): postprocess.check_folder with the lab's config."""
+        from ionomos import postprocess
+
+        return postprocess.check_folder(Path(picked), self._cfg(), method, root, filed)
+
+    def check(self, picked: Path, filed: str | None = None, job_id: int | None = None, quiet: bool = False,
+              label: bool = True) -> None:
+        """Check a folder before analysing it (folder_check.py). Not quiet (a folder picked or dropped): the check
+        window opens. Quiet (a finished job): its samples load, and the window only opens when the folder is not
+        what the job says, holds several outputs, or can't be analysed."""
+        import threading
+
+        picked = Path(picked)
+        if label:
+            self.pick.set(str(picked))
+        if not quiet:
+            self._check_window(picked, filed, job_id)
+            return
+        self.editor.info.configure(text=f"checking {picked} …", foreground="#555")
+
+        def go():
+            try:
+                sc = self.check_folder(picked, filed=filed)
+            except Exception:  # noqa: BLE001 - the job still opens as before
+                log.exception("folder check failed for %s", picked)
+                sc = None
+            self.app.post(lambda: self._quiet_checked(picked, filed, job_id, sc))
+
+        threading.Thread(target=go, daemon=True).start()
+
+    def _quiet_checked(self, picked: Path, filed, job_id, sc) -> None:
+        if sc is None or sc.method is None:
+            self.editor.load(picked, filed, job_id)
+        else:
+            self.editor.load(sc.dest or picked, sc.method, job_id)
+        look = ("FILED_AS_OTHER", "SEVERAL_OUTPUTS", "METHOD_GUESSED")
+        if sc is not None and (sc.blocking or any(f.code in look for f in sc.findings)):
+            self._check_window(picked, filed, job_id, sc)
+
+    def _check_window(self, picked: Path, filed, job_id, scan=None) -> None:
+        from ionomos.folder_check import CheckHost, FolderCheckWindow
+
+        if self.check_win is not None and self.check_win.alive():
+            self.check_win.close()
+        host = CheckHost(post=self.app.post, open_path=lambda x: self.app._open(x), check=self.check_folder,
+                         choose_folder=self.editor.choose_folder,
+                         review=lambda sc, guess: self._use(sc, guess, job_id, run=False),
+                         run=lambda sc, guess: self._use(sc, guess, job_id, run=True))
+        self.check_win = FolderCheckWindow(self.app.root, host, picked, filed=filed, job_id=job_id, scan=scan)
+
+    def _use(self, sc, guess: bool, job_id, run: bool) -> None:
+        """The check window's Review samples / Analyse now: load the folder as checked, then (when asked) take the
+        conditions from the file names and run."""
+        self.app.nb.select(self.frame)
+        self.nb.select(0)
+        self.pick.set(str(sc.dest))
+
+        def then():
+            if guess:
+                self.editor.guess_conditions()
+            if run:
+                self.editor.run()
+
+        self.editor.load(sc.dest, sc.method, job_id, then=then if (guess or run) else None)
+        self.app.set_status(f"{sc.dest.name}: analysing as {sc.method}" if run else
+                            f"{sc.dest.name}: loaded as {sc.method} — check the samples, then Run analysis")
+
+    def drop_enabled(self, on: bool) -> None:
+        if on:
+            self.drop_hint.configure(text="Drop a FragPipe output folder (or the folder above it, or a table) anywhere "
+                                          "on this window, or use Folder… / Table…. Searches you ran yourself work "
+                                          "too: the folder is checked before anything runs.")
 
     def reload_target(self):
         t = self.editor.target

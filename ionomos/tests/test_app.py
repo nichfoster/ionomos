@@ -839,3 +839,43 @@ def test_check_accuracy_page_compares_and_benchmarks_off_the_tk_thread(app, tmp_
     monkeypatch.setattr(messagebox, "showerror", lambda *a, **k: errors.append(a))
     app.v("acc.kind").set("real")
     assert not page.run_benchmark() and "expected-ratios" in errors[-1][1]
+
+
+def test_analysis_tab_checks_a_folder_searched_outside_ionomos(app, tmp_path, monkeypatch):
+    """D80: a DIA search someone ran in FragPipe themselves, in a folder filed as TMT, dropped on the window: the
+    check window says so and recommends DIA; Analyse now runs it with the conditions from FragPipe's manifest. An
+    empty folder can't be analysed and the window says why."""
+    import json
+
+    from tests.test_fpfolder import dia_output
+
+    _lab_app(app, tmp_path)
+    exp = tmp_path / "General" / "Ana" / "HeLa_DIA"
+    dia_output(exp / "fp_out")
+    (exp / "ionomos.json").write_text(json.dumps({"plan": {"folder": {"method": "TMT"}}}), encoding="utf-8")
+    opened = []
+    monkeypatch.setattr(app, "_open", lambda p: opened.append(p))
+    monkeypatch.setattr("ionomos.experiment_editor.messagebox.askyesno", lambda *a, **k: True)
+    tab = app.analysis
+    tab.dropped([str(exp)])
+    win = tab.check_win
+    assert app.nb.select() == str(app.tab_analysis)
+    assert _pump_until(app, lambda: win.scan is not None)
+    assert win.scan.method == "DIA" and win.kind.get().startswith("DIA")
+    assert "Filed as TMT, but this is a DIA search" in win.issues.get("1.0", "end")
+    assert win.run_btn.instate(["!disabled"]) and win.review_btn.instate(["!disabled"])
+    win.analyse()
+    assert not win.alive()
+    ed = tab.editor
+    assert _pump_until(app, lambda: opened, secs=30)
+    assert opened[-1].endswith("report.html") and ed.target["method"] == "DIA"
+    assert len(ed.tree.get_children()) == 6 and ed.conditions() == ["DMSO", "Drug"]
+
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    tab.dropped([str(empty)])
+    win = tab.check_win
+    assert _pump_until(app, lambda: win.scan is not None)
+    assert win.scan.blocking and win.run_btn.instate(["disabled"]) and win.review_btn.instate(["disabled"])
+    assert "No FragPipe results in this folder" in win.issues.get("1.0", "end")
+    win.close()

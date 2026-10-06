@@ -690,7 +690,7 @@ def cmd_analyze(args) -> int:
         extra["enrichment"] = False
     out = postprocess.run_for_folder(dest, cfg, args.method, extra,
                                      progress=(lambda m: print(f"  … {m}", flush=True)) if not args.quiet else None,
-                                     table=table)
+                                     table=table, strict=bool(args.method))
     _print_outcome(out)
     if cfg is not None:
         job_id = int(target) if target.isdigit() else None
@@ -700,6 +700,22 @@ def cmd_analyze(args) -> int:
         if args.open:
             _open_report(out.report)
     return 0 if out.report else 1
+
+
+def cmd_check_folder(args) -> int:
+    """What a folder of FragPipe output holds and what is wrong with it, before analysing it (fpfolder.py, D80)."""
+    from ionomos import postprocess
+
+    cfg = None
+    try:
+        cfg = load(args.config, check_paths=False)
+    except ConfigError:
+        pass
+    sc = postprocess.check_folder(Path(args.folder), cfg, args.method)
+    print(sc.text())
+    if not sc.blocking:
+        print(f"\nready: ionomos analyze \"{sc.dest}\"" + (f" --method {sc.method}" if args.method else ""))
+    return 1 if sc.blocking else 0
 
 
 _EXPORT_SIZES = ("slide169", "slide43", "half", "col1", "col2")  # charts.SIZES without "custom" (a test compares them)
@@ -1228,6 +1244,12 @@ def main(argv: list[str] | None = None) -> int:
     az.add_argument("--quiet", action="store_true", help="no progress lines")
     az.add_argument("--open", action="store_true", help="open the report when done")
     az.set_defaults(fn=cmd_analyze)
+    cf = sub.add_parser("check-folder", help="check a folder of FragPipe output before analysing it: what it is, "
+                                             "what is missing or wrong, and what to do")
+    cf.add_argument("folder", help="the folder FragPipe wrote to, the folder above it, or an experiment folder")
+    cf.add_argument("--method", default=None, choices=["isoDTB", "TMT", "DIA", "DIA-NN", "LFQ"],
+                    help="check it as this kind of search (default: recommended from the workflow and tables)")
+    cf.set_defaults(fn=cmd_check_folder)
     ex = sub.add_parser("export", help="figures for slides (SVG) from a finished analysis, in the export style")
     ex.add_argument("target", help="job id, experiment folder, its results folder, or a report.html")
     ex.add_argument("--preset", choices=list(_EXPORT_SIZES),

@@ -13,6 +13,21 @@ On any computer: `ionomos analyze <folder> --log2fc 0.58 --imputation none`
 (see `ionomos analyze --help`). Lab-wide defaults are on tab 7 → **Lab
 defaults**.
 
+## How do I analyse a search I ran in FragPipe myself? {#faq.own-fragpipe}
+
+App → tab 7 **Analysis** → **Folder…**, or drag the folder from Explorer onto
+the app window. Pick the folder FragPipe wrote to (the one with
+`fragpipe.workflow` and `log_….txt`) or the folder above it. Ionomos checks it
+first. A window shows what it found, what it will analyse it as and why, and
+anything wrong or missing, with buttons that fix what can be fixed there.
+Ionomos reads the kind of search from FragPipe's own files, not from the
+folder's name, so a DIA search in a folder filed as TMT is analysed as DIA.
+FragPipe's manifest gives the conditions; when it names none, they are guessed
+from the file names. **Review samples** lets you check them; **Analyse now**
+runs straight away. The results go in a `results/` folder next to FragPipe's
+output, which is left as it is. On the command line: `ionomos check-folder
+<folder>`, then `ionomos analyze <folder>`.
+
 ## How do I change a sample's condition? {#faq.condition}
 
 In the experiment editor (tab 7, or the pop-up window): double-click the
