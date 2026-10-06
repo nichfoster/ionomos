@@ -689,6 +689,9 @@ Collected from the other docs; resolve before/during Phase 1.
       (Without the line a done job only gets a warning. Once confirmed it could become a failure.)
 - [ ] D59: does FragPipe's `--dry-run` accept the preflight's 64-byte placeholder `.raw`? (From the source it
       doesn't open the file. If it complains: `ionomos preflight --raw <a real file>`.)
+- [ ] D81: the next update on the PC (from 0.18.0) should end with the app reopening and no "Failed to load
+      Python DLL … python314.dll" dialog. Confirm it, and that a watcher started from the app keeps running
+      after the app is closed.
 - [ ] Direction/type of the `Proteomics_File_Sharing` share.
 - [ ] Sleep/power policy and whether Task Scheduler can run at logon for the shared account.
 - [ ] Should results go to C: (fast, 99 GB free) or D: (slow USB, 14 TB free)? Proposal:
