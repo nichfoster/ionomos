@@ -3597,3 +3597,41 @@ had not loaded yet (the report's assets, the help, extension modules).
 (its strings); a test that the frozen entry point and the installer set it.
 **Not verified**: an update on the PC (0.18.0 → the next release is the
 test: no dialog at the end).
+
+### D82 — The drop handler never calls Tk; hard crashes leave a stack
+**2026-10-06.** The first real drop on the PC (0.18.0) froze the app. D80's
+window procedure ran on every drop inside Tk's event loop. There, _tkinter
+holds its Tcl lock and has let go of Python's lock (it runs
+`Tcl_DoOneEvent` between `ENTER_TCL` and `LEAVE_TCL`). The procedure
+called `top.after(...)`, a Tk call that waits for that Tcl lock. The same
+thread already holds it, so the call waited forever. The windnd package,
+which uses the same technique, warns about this in its own way: call nothing
+of tkinter in the handler.
+
+1. **The procedure only queues.** It reads the names with `DragQueryFileW`,
+   puts them in a `queue.SimpleQueue` and returns. A Tk timer (150 ms) takes
+   them out and calls the handler on the Tk thread, as the app's own `post`
+   does for worker threads. A handler that fails is logged; the timer and
+   later drops go on (`dragdrop.Drops`).
+2. **Nothing crosses into Windows.** Every message goes to Tk's own procedure
+   whatever happens in ours. On `WM_NCDESTROY` Tk's procedure is put back, so
+   no message reaches Python code after the window (or Python) is gone.
+3. **`AnalysisTab.dropped` never raises.** These drops get a message saying
+   what to do: a shortcut (`.lnk`), a zip, a path Windows hands over that
+   isn't a file or folder (a library, a phone, a zip's contents, a drive that
+   is gone). Anything else that fails gets an error box that names it and
+   points to Folder…. The app comes to the front, so the check window is
+   seen over Explorer.
+4. **Tested with a real drop.** On Windows CI, `tests/test_app.py` posts the
+   message Explorer sends (`WM_DROPFILES` with a `DROPFILES` block of
+   wide-character names) to the app's window. 0.18.0 would hang in that
+   test. The queue and timer are tested everywhere with a stand-in window.
+5. **`Ionomos-fault.log`.** The frozen exe turns on `faulthandler` into a file
+   next to it. A crash Python can't catch (an access violation, a hang ended
+   by Windows) then leaves every thread's stack instead of nothing, and the
+   diagnostics include the end of it. The file is opened for appending, so
+   it exists, empty, after the first start.
+
+**Not verified**: a drop from Explorer by hand on the PC (the CI test sends
+Explorer's message itself, which is not quite the same as dragging); the
+fault log on a real hard crash.

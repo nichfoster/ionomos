@@ -214,3 +214,36 @@ def test_drops(monkeypatch):
 
     monkeypatch.setattr(dragdrop, "os", _Posix)
     assert dragdrop.enable(object(), lambda paths: None) is False
+
+
+def test_dropped_names_wait_for_the_tk_side():
+    """D82: the window procedure only queues the names (calling Tk from inside it hung the app on the first drop);
+    the Tk side's timer hands them over, and a failing handler stops neither the timer nor later drops."""
+
+    class Widget:
+        def __init__(self):
+            self.timers = []
+
+        def after(self, ms, fn):
+            self.timers.append(fn)
+
+    got = []
+
+    def handler(paths):
+        got.append(paths)
+        if paths == ["bad"]:
+            raise RuntimeError("boom")
+
+    w = Widget()
+    d = dragdrop.Drops(w, handler)
+    d.start()
+    d.put(["C:\\x", "", "C:\\x"])
+    d.put([])            # nothing usable: nothing queued
+    d.put(["bad"])
+    d.put(["D:\\y"])
+    assert got == []     # nothing happens inside the window procedure
+    w.timers.pop(0)()    # the Tk side's timer
+    assert got == [["C:\\x"], ["bad"], ["D:\\y"]] and len(w.timers) == 1  # and it runs again
+    d.stopped = True
+    w.timers.pop(0)()
+    assert w.timers == []

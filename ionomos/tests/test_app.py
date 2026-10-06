@@ -879,3 +879,55 @@ def test_analysis_tab_checks_a_folder_searched_outside_ionomos(app, tmp_path, mo
     assert win.scan.blocking and win.run_btn.instate(["disabled"]) and win.review_btn.instate(["disabled"])
     assert "No FragPipe results in this folder" in win.issues.get("1.0", "end")
     win.close()
+
+
+def _drop_from_explorer(root, paths):
+    """What Explorer sends on a drop: WM_DROPFILES with a DROPFILES block of wide-character names (Windows)."""
+    import ctypes
+    import struct
+    from ctypes import wintypes
+
+    k32, u32 = ctypes.WinDLL("kernel32"), ctypes.WinDLL("user32")
+    k32.GlobalAlloc.argtypes, k32.GlobalAlloc.restype = [wintypes.UINT, ctypes.c_size_t], ctypes.c_void_p
+    k32.GlobalLock.argtypes, k32.GlobalLock.restype = [ctypes.c_void_p], ctypes.c_void_p
+    k32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+    u32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+    u32.PostMessageW.restype = wintypes.BOOL
+    blob = struct.pack("<IiiII", 20, 0, 0, 0, 1) + ("\0".join(str(p) for p in paths) + "\0\0").encode("utf-16-le")
+    h = k32.GlobalAlloc(0x0042, len(blob))  # GMEM_MOVEABLE | GMEM_ZEROINIT; DragFinish frees it
+    ptr = k32.GlobalLock(h)
+    ctypes.memmove(ptr, blob, len(blob))
+    k32.GlobalUnlock(h)
+    assert u32.PostMessageW(root.winfo_id(), 0x0233, h, 0)
+
+
+@pytest.mark.skipif(__import__("os").name != "nt", reason="drops from Explorer are Windows-only")
+def test_a_folder_dropped_from_explorer_opens_the_check(app, tmp_path, monkeypatch):
+    """D82: a real WM_DROPFILES on the window (0.18.0 hung here: it called Tk from inside the window procedure).
+    The folder's check opens; a second drop works too; a path that isn't there is explained, not a crash."""
+    import json
+
+    from tests.test_fpfolder import dia_output
+
+    _lab_app(app, tmp_path)
+    assert getattr(app.root, "_ionomos_drop", None) is not None  # drops are on
+    exp = tmp_path / "General" / "Ana" / "HeLa_DIA"
+    dia_output(exp / "fp_out")
+    (exp / "ionomos.json").write_text(json.dumps({"plan": {"folder": {"method": "TMT"}}}), encoding="utf-8")
+    _drop_from_explorer(app.root, [exp, tmp_path / "second-is-ignored"])
+    assert _pump_until(app, lambda: app.analysis.check_win is not None and app.analysis.check_win.scan is not None)
+    win = app.analysis.check_win
+    assert win.scan.picked == exp and win.scan.method == "DIA"
+    assert app.nb.select() == str(app.tab_analysis)
+    win.close()
+    told = []
+    monkeypatch.setattr("ionomos.analysis_tab.messagebox.showinfo", lambda *a, **k: told.append(a))
+    _drop_from_explorer(app.root, [tmp_path / "gone"])
+    assert _pump_until(app, lambda: told)
+    assert "can't see" in told[0][1]
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    _drop_from_explorer(app.root, [empty])
+    assert _pump_until(app, lambda: app.analysis.check_win is not None and app.analysis.check_win.alive()
+                       and app.analysis.check_win.scan is not None and app.analysis.check_win.scan.picked == empty)
+    app.analysis.check_win.close()

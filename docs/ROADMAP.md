@@ -270,9 +270,10 @@ laid out one folder per TMT plex. **Still not run against a real FragPipe.**
   `ionomos check-folder` does the same check in the terminal.
 
   Still open:
-  - Drag and drop is Windows-only and untested on a real screen: CI runs the
-    window, not a drop from Explorer. Try one on the PC, including with the
-    app started as administrator.
+  - Drag and drop is Windows-only. The first drop on the PC froze 0.18.0
+    (D82, fixed: the handler no longer calls Tk). CI now sends the window
+    Explorer's drop message. Still try a drop by hand on the PC, including
+    with the app started as administrator.
   - FragPipe's own `log_<date>.txt` in a GUI run's output folder: the name
     and that it holds the console lines (failed step, `ALL JOBS DONE`) are
     from FragPipe's source and the fake FragPipe, not yet from a real GUI run.

@@ -189,6 +189,9 @@ py -3.14 -c "import tkinter; print('ok')"
   menu. The installer's last step started the new Ionomos.exe with the old
   app's settings. Fixed in 0.18.1 (D81): installers from then on never show it,
   including when an older Ionomos starts the update.
+- **Ionomos closed by itself** (no message): look at `Ionomos-fault.log` next
+  to `Ionomos.exe`. It holds the stack of every thread at the crash, and
+  **Report a problem…** includes it.
 - **Stopping/updating Ionomos during a search** kills that FragPipe run; the job
   re-runs from the start when the watcher starts again.
 - **"cannot move … will retry"** in the log: Explorer/antivirus still had a

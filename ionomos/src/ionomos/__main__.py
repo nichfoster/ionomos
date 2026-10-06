@@ -69,6 +69,26 @@ def independent_children() -> None:
         os.environ["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
 
 
+FAULT_LOG = "Ionomos-fault.log"
+_fault_file = None
+
+
+def record_hard_crashes() -> None:
+    """Frozen: a crash Python can't catch (an access violation, a hang killed by Windows) writes every thread's
+    stack to Ionomos-fault.log next to the exe, so 'it just closed' leaves something to read (D82; the
+    diagnostics bundle includes its end)."""
+    global _fault_file
+    if not getattr(sys, "frozen", False) or _fault_file is not None:
+        return
+    import faulthandler
+
+    try:
+        _fault_file = open(Path(sys.executable).parent / FAULT_LOG, "a", encoding="utf-8")  # noqa: SIM115 - kept open
+        faulthandler.enable(_fault_file, all_threads=True)
+    except (OSError, RuntimeError):
+        _fault_file = None
+
+
 def run() -> int:
     from ionomos.cli import main
 
@@ -87,6 +107,7 @@ def run() -> int:
 if __name__ == "__main__":
     multiprocessing.freeze_support()
     independent_children()
+    record_hard_crashes()
     code = run()
     if code != 0 and _launched_by_double_click():
         try:
