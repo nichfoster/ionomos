@@ -261,6 +261,24 @@ laid out one folder per TMT plex. **Still not run against a real FragPipe.**
 - Auto-archive finished experiments to `D:\<user>\` after N days.
 - Optional: auto-pull from `C:\Proteomics_File_Sharing` (reversing D3) once
   the convention is trusted.
+- **Searches run outside Ionomos** (a lab member ran FragPipe themselves; a
+  DIA search filed as TMT could not be analysed). → 2026-10-06 (D80): the
+  Analysis tab checks a folder before analysing it. It finds the output at
+  any depth and reads FragPipe's workflow, manifest and log. The method comes
+  from what is there, and a window lists every problem with what to do and
+  buttons to fix it. Folders can be dragged onto the app window, and
+  `ionomos check-folder` does the same check in the terminal.
+
+  Still open:
+  - Drag and drop is Windows-only and untested on a real screen: CI runs the
+    window, not a drop from Explorer. Try one on the PC, including with the
+    app started as administrator.
+  - FragPipe's own `log_<date>.txt` in a GUI run's output folder: the name
+    and that it holds the console lines (failed step, `ALL JOBS DONE`) are
+    from FragPipe's source and the fake FragPipe, not yet from a real GUI run.
+    Check one from a lab member's search.
+  - Collect two or three real folders from searches the lab ran by hand
+    (bundle them), and add their layouts to `tests/test_fpfolder.py`.
 
 ## Phase 5 — Beyond one lab (plan of 2026-09-30, D36)
 

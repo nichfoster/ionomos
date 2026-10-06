@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-06
+
+### Added
+
+- **Analyse FragPipe searches run outside Ionomos, checked first** (D80).
+  The Analysis tab's **Folder…**, and a folder dragged from Explorer onto
+  the app window (Windows), open a check window. It shows:
+  - the FragPipe output it found, at any depth below the picked folder, or
+    above it when a part such as `dia-quant-output/` or a table was picked
+  - FragPipe's saved workflow, manifest, tables and log
+  - what the folder will be analysed as, and why
+  - every problem in plain words with what to do: a step that left no table
+    (and the failed step and likely cause from FragPipe's log), a table cut
+    off or holding only spectral counts, several outputs, no condition
+    names, a read-only folder, raw files that were never searched
+
+  Buttons fix what can be fixed there: analyse as another kind, use another
+  output, take the conditions from the file names, open the log. Then
+  **Review samples** or **Analyse now**. A finished job's folder only opens
+  the window when something needs a look. `fpfolder.py`, `folder_check.py`,
+  `dragdrop.py` (ctypes, no new dependency).
+- **`ionomos check-folder <folder>`**: the same check in the terminal
+  (exit 1 when the folder can't be analysed).
+
+### Fixed
+
+- A folder filed as one method but holding another kind of search is now
+  analysed as what it holds. Before, a DIA search filed as TMT failed with
+  "no tmt-report/abundance_*_MD.tsv found". When the filed method's table is
+  missing and the tables (and the saved workflow, when there is one) clearly
+  show another kind of search, that kind is read and a note says so.
+  `ionomos analyze --method` still reads exactly the method asked for.
+- A folder with no Ionomos record now takes its method from FragPipe's saved
+  workflow before its table names.
+- A FragPipe output in a sub-folder (`<experiment>/fp_out/`) is read from
+  there. FragPipe's own `fragpipe-files.fp-manifest` names the samples and
+  conditions, as Ionomos' manifest does for its own searches.
+- TMT: `abundance_*_GN.tsv` and `abundance_*_None.tsv`, which TMT-Integrator
+  writes when median centring is off, are read (with a note); before, only
+  `_MD` was.
+
 ## [0.17.0] - 2026-10-04
 
 ### Added

@@ -358,6 +358,7 @@ class App:
         self.root.after(600, self._after_update_restart)
         self.root.after(2500, self.check_downloaded_update)
         self._start_popups()
+        self._start_drops()
         log.info("app started: %s, config %s", __import__("ionomos.buildinfo", fromlist=["x"]).one_line(), self.config_path)
 
     def post(self, fn) -> None:
@@ -1768,6 +1769,14 @@ class App:
 
     def analyze_folder(self):
         self.analysis._analyse_folder()
+
+    def _start_drops(self) -> None:
+        """Folders and tables dropped from Explorer anywhere on the window open in the Analysis tab, checked first
+        (dragdrop.py, folder_check.py, D80). Windows only; elsewhere the Folder… button is the way."""
+        from ionomos import dragdrop
+
+        if dragdrop.enable(self.root, self.analysis.dropped):
+            self.analysis.drop_enabled(True)
 
     def _tab_inbox(self):
         frame = ttk.Frame(self.nb, padding=10)

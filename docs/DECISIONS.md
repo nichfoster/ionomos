@@ -3480,3 +3480,83 @@ lab; the readers rest on public files and documentation); a real
 PhosphoSitePlus or STRING download (made-up tables in their layouts);
 TMT-Integrator's `min_site_prob` key in a real FragPipe 24 workflow; Firefox,
 Safari, Edge; Windows.
+
+### D80 — A folder is checked before it is analysed; what it holds beats what it was filed as
+**2026-10-06.** A lab member ran a DIA search in FragPipe themselves. The
+folder had been filed as TMT, so the Analysis tab looked for TMT-Integrator's
+table, found nothing, and could only say "no tmt-report/abundance_*_MD.tsv
+found". The method came from `ionomos.json`, a name someone chose, and the
+tables only counted when nothing was filed (`detect_method`, which also tries
+TMT's file names before DIA's). `fpfolder.py` (no Tk), `folder_check.py`
+(the window), `dragdrop.py`.
+
+1. **Evidence, most trusted first.** The method is decided in this order:
+   - the tables that are there and readable
+   - the workflow FragPipe saved beside them (`fragpipe.workflow`: its
+     `run-*` switches, as `fragpipe.workflow_needs` reads them;
+     `ionquant.use-labeling` separates isoDTB from label-free)
+   - the manifest's data types
+   - what the folder was filed as
+
+   A table only one kind of search writes (isoDTB's label quant, TMT-Integrator's
+   abundance, DIA-NN's pg_matrix) decides on its own. `combined_protein.tsv`
+   does not: FragPipe writes one in DIA and TMT searches too, sometimes with
+   spectral counts only. It counts as label-free only with Intensity columns,
+   and only when nothing else points elsewhere; otherwise the window asks.
+2. **The correction is also made without the window.** `postprocess.prepare`
+   switches when the filed method's table is missing and the evidence is
+   strong. A note goes in the outcome's warnings and in the editor. Analysing
+   as the filed method would fail for certain, so the switch can only turn a
+   failure into a result. `ionomos analyze --method X` is explicit and keeps X
+   (`strict`). An Ionomos job's own folder never changes: its table is there.
+3. **The output can be anywhere below the picked folder** (depth 4, at most
+   4000 folders, so a whole drive picked by mistake can't hang the window).
+   Ionomos' own `ionomos_run/` and `results/` and earlier `_previous_`
+   attempts are skipped. An output folder is one with FragPipe's own files
+   (its workflow, manifest, job file or a `log_*.txt` that mentions
+   FragPipe) or with a table. Each table belongs to the nearest output above
+   it. If the picked folder is part of an output (`dia-quant-output/`, a
+   table), the output above it is used.
+4. **Where results go.** If the picked folder holds exactly one output,
+   `results/` goes in the picked folder (beside the raw files, as for a
+   job). With several outputs it goes in the chosen output, so a re-run
+   finds the same one. `fpfolder.locate` gives `prepare` that output folder
+   as `workdir`, and `analyze()` takes it as a parameter. FragPipe's files
+   are only read.
+5. **FragPipe's manifest names the samples.** A folder with no Ionomos
+   manifest takes FragPipe's `fragpipe-files.fp-manifest` as its plan
+   manifest. That does not apply to TMT, where its experiments are plexes,
+   not conditions. Without experiment names, or with every run its own
+   experiment, the conditions are guessed from the file names
+   (`doctor.suggest_conditions`). The window offers that guess, on by
+   default, and the samples list shows it to check.
+6. **Every problem says what is wrong, what is missing and what to do.**
+   Each finding is error (can't run), input (decide; the recommendation is
+   already chosen), warning or info. Most carry buttons for what can be done
+   in the window: analyse as another kind, use another output, use the
+   guessed conditions, open the log or the folder, choose another folder.
+   The failed step and likely cause come from FragPipe's log with
+   `fragpipe.failed_step` / `explain`, the same reading a job's failure gets.
+   A finished job opens the window only when it is filed as another method,
+   holds several outputs, or can't be analysed. Otherwise it loads as before.
+7. **Drag and drop without a dependency.** Tk has none for files.
+   `tkinterdnd2` would add native binaries to the installer, so on Windows
+   the window accepts files (`DragAcceptFiles`) and its window procedure is
+   wrapped to read `WM_DROPFILES`. `ChangeWindowMessageFilterEx` lets an
+   elevated app still take drops from Explorer. Any failure leaves drops
+   off and Folder… works. Other systems: no drops.
+8. **TMT-Integrator's other normalisations.** `abundance_*_GN.tsv` and
+   `_None.tsv` are read when there is no `_MD`, with a note. A lab member's
+   own TMT search need not use the lab's median centring.
+
+**Verified**: tests on made-up folders in FragPipe 23's layout
+(`tests/test_fpfolder.py`): the DIA-filed-as-TMT case end to end (check,
+`inspect_folder`, a full analysis with the manifest's conditions), an
+explicit `--method` kept, a failed DIA-NN step with its cause from the log,
+raw files only, an empty folder, several outputs, part of an output, an
+Ionomos job folder unchanged, no condition names, TMT `_None`, spectral
+counts only, `check-folder`. The window and a drop through
+`AnalysisTab.dropped` in `tests/test_app.py` (CI only). **Not verified**: a
+real drop from Explorer on Windows; a real FragPipe GUI run's
+`log_<date>.txt`; real folders from searches the lab ran by hand (ROADMAP
+Phase 4).
