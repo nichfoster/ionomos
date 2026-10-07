@@ -3560,3 +3560,78 @@ counts only, `check-folder`. The window and a drop through
 real drop from Explorer on Windows; a real FragPipe GUI run's
 `log_<date>.txt`; real folders from searches the lab ran by hand (ROADMAP
 Phase 4).
+
+### D81 — Every program the frozen app starts unpacks its own Python
+**2026-10-06.** Since 0.1, installing or updating on the PC ended with
+"Failed to load Python DLL 'C:\\Users\\…\\Temp\\_MEI…\\python314.dll'.
+LoadLibrary: The specified module could not be found." Ionomos.exe is a
+one-file PyInstaller build. It unpacks Python into `%TEMP%\_MEI<n>` and
+puts that folder in its environment (`_PYI_ARCHIVE_FILE`,
+`_PYI_APPLICATION_HOME_DIR`, `_PYI_PARENT_PROCESS_LEVEL`). A child that is
+the same exe reuses the folder instead of unpacking its own, and the folder
+is deleted when the parent exits.
+
+The chain:
+1. The app starts the installer, and the installer inherits the app's
+   environment.
+2. The app exits, and its `_MEI` folder is deleted.
+3. The installer's last step starts the new Ionomos.exe, which inherits
+   those variables.
+4. That Ionomos.exe looks for Python in the deleted folder.
+
+Opening a downloaded installer from the app (`os.startfile`) has the same
+chain. The watcher started from the app (`Ionomos.exe run`, same exe) also
+shared the app's folder, so closing the app could delete files the watcher
+had not loaded yet (the report's assets, the help, extension modules).
+
+1. **`__main__.independent_children()`**: a frozen Ionomos sets
+   `PYINSTALLER_RESET_ENVIRONMENT=1` (PyInstaller ≥ 6.9; the build uses
+   ≥ 6.10) for everything it starts. Each Ionomos child then unpacks its own
+   copy. That costs a few seconds and some MB in `%TEMP%` per watcher or
+   reopen, which is fine for processes that outlive their parent.
+2. **The installer sets it too** (`InitializeSetup`, `SetEnvironmentVariableW`),
+   so the first update from an older app, which still hands over its old
+   environment, is fixed by the new installer.
+
+**Verified**: the bootloader in PyInstaller 6.22 reads these variables
+(its strings); a test that the frozen entry point and the installer set it.
+**Not verified**: an update on the PC (0.18.0 → the next release is the
+test: no dialog at the end).
+
+### D82 — The drop handler never calls Tk; hard crashes leave a stack
+**2026-10-06.** The first real drop on the PC (0.18.0) froze the app. D80's
+window procedure ran on every drop inside Tk's event loop. There, _tkinter
+holds its Tcl lock and has let go of Python's lock (it runs
+`Tcl_DoOneEvent` between `ENTER_TCL` and `LEAVE_TCL`). The procedure
+called `top.after(...)`, a Tk call that waits for that Tcl lock. The same
+thread already holds it, so the call waited forever. The windnd package,
+which uses the same technique, warns about this in its own way: call nothing
+of tkinter in the handler.
+
+1. **The procedure only queues.** It reads the names with `DragQueryFileW`,
+   puts them in a `queue.SimpleQueue` and returns. A Tk timer (150 ms) takes
+   them out and calls the handler on the Tk thread, as the app's own `post`
+   does for worker threads. A handler that fails is logged; the timer and
+   later drops go on (`dragdrop.Drops`).
+2. **Nothing crosses into Windows.** Every message goes to Tk's own procedure
+   whatever happens in ours. On `WM_NCDESTROY` Tk's procedure is put back, so
+   no message reaches Python code after the window (or Python) is gone.
+3. **`AnalysisTab.dropped` never raises.** These drops get a message saying
+   what to do: a shortcut (`.lnk`), a zip, a path Windows hands over that
+   isn't a file or folder (a library, a phone, a zip's contents, a drive that
+   is gone). Anything else that fails gets an error box that names it and
+   points to Folder…. The app comes to the front, so the check window is
+   seen over Explorer.
+4. **Tested with a real drop.** On Windows CI, `tests/test_app.py` posts the
+   message Explorer sends (`WM_DROPFILES` with a `DROPFILES` block of
+   wide-character names) to the app's window. 0.18.0 would hang in that
+   test. The queue and timer are tested everywhere with a stand-in window.
+5. **`Ionomos-fault.log`.** The frozen exe turns on `faulthandler` into a file
+   next to it. A crash Python can't catch (an access violation, a hang ended
+   by Windows) then leaves every thread's stack instead of nothing, and the
+   diagnostics include the end of it. The file is opened for appending, so
+   it exists, empty, after the first start.
+
+**Not verified**: a drop from Explorer by hand on the PC (the CI test sends
+Explorer's message itself, which is not quite the same as dragging); the
+fault log on a real hard crash.

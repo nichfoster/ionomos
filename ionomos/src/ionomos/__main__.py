@@ -56,6 +56,39 @@ def _report(exc: BaseException) -> None:
             pass
 
 
+def independent_children() -> None:
+    """Frozen: every program this process starts gets its own Python, never this one's (D81).
+
+    A one-file exe unpacks Python into %TEMP%\\_MEI<n> and tells its children where (_PYI_* variables). A child
+    that is the same exe uses that folder instead of unpacking its own; it is deleted when this process ends. So
+    the installer an update starts (it inherits our environment) opened the new Ionomos.exe after we exited, and
+    that copy looked for python314.dll in a folder that was gone: "Failed to load Python DLL". The watcher started
+    from the app lost its files the same way when the app closed. PyInstaller's PYINSTALLER_RESET_ENVIRONMENT
+    makes each such child unpack its own."""
+    if getattr(sys, "frozen", False):
+        os.environ["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+
+
+FAULT_LOG = "Ionomos-fault.log"
+_fault_file = None
+
+
+def record_hard_crashes() -> None:
+    """Frozen: a crash Python can't catch (an access violation, a hang killed by Windows) writes every thread's
+    stack to Ionomos-fault.log next to the exe, so 'it just closed' leaves something to read (D82; the
+    diagnostics bundle includes its end)."""
+    global _fault_file
+    if not getattr(sys, "frozen", False) or _fault_file is not None:
+        return
+    import faulthandler
+
+    try:
+        _fault_file = open(Path(sys.executable).parent / FAULT_LOG, "a", encoding="utf-8")  # noqa: SIM115 - kept open
+        faulthandler.enable(_fault_file, all_threads=True)
+    except (OSError, RuntimeError):
+        _fault_file = None
+
+
 def run() -> int:
     from ionomos.cli import main
 
@@ -73,6 +106,8 @@ def run() -> int:
 
 if __name__ == "__main__":
     multiprocessing.freeze_support()
+    independent_children()
+    record_hard_crashes()
     code = run()
     if code != 0 and _launched_by_double_click():
         try:

@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-10-06
+
+### Fixed
+
+- **"Failed to load Python DLL … python314.dll" after installing or updating**
+  (D81). This happened since 0.1: an update's installer inherited the old
+  app's PyInstaller settings, so the new Ionomos.exe it opened looked for
+  Python in the old app's unpacked `%TEMP%\_MEI…` folder, which was already
+  deleted. The app now sets `PYINSTALLER_RESET_ENVIRONMENT` for every
+  program it starts. The installer sets it too, so updating from an older
+  version is fixed as well. The same reset fixes a watcher started from
+  the app that lost files when the app was closed.
+- **Dropping a folder on the app froze it** (0.18.0, D82). The drop handler
+  called Tk from inside Windows' message handling, where Tk was already
+  waiting, so the window hung on the first drop. The handler now only puts
+  the dropped names in a queue, and the app's timer opens them. It gives
+  Windows its own handler back when the window closes, and never raises into
+  Windows. A dropped shortcut, zip file, missing drive or anything else that
+  isn't a folder or table gets a message saying what to do instead of an
+  error. The app comes to the front after a drop.
+
+### Added
+
+- **`Ionomos-fault.log`** next to the exe (D82): when the app or the watcher
+  closes in a way Python can't catch, every thread's stack is written there.
+  The diagnostics and **Report a problem…** include its end.
+
 ## [0.18.0] - 2026-10-06
 
 ### Added

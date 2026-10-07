@@ -676,6 +676,10 @@ def diagnostics(config_path: Path, log_lines: int = 150) -> str:
         exe_crash = Path(sys.executable).parent / "Ionomos-crash.txt"
         if exe_crash.is_file():
             section("Ionomos-crash.txt (app start-up crash)", exe_crash.read_text(encoding="utf-8", errors="replace")[-4000:])
+        exe_fault = Path(sys.executable).parent / "Ionomos-fault.log"
+        if exe_fault.is_file() and exe_fault.stat().st_size:
+            section("Ionomos-fault.log (hard crashes: every thread's stack)",
+                    exe_fault.read_text(encoding="utf-8", errors="replace")[-6000:])
     if db:
         backups = sorted((log_dir / "backups").glob("ionomos-*.db")) if log_dir else []
         size = f"{db.stat().st_size / 1e6:.1f} MB" if db.is_file() else "-"

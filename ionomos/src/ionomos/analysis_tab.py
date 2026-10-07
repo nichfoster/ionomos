@@ -29,7 +29,7 @@ from __future__ import annotations
 import logging
 import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog, ttk
+from tkinter import filedialog, messagebox, ttk
 
 from ionomos import forms
 
@@ -185,18 +185,41 @@ class AnalysisTab:
     def dropped(self, paths: list) -> None:
         """Files or folders dropped on the app (dragdrop.py): the first one is checked and opened here. A FragPipe
         file (its workflow, manifest, log or a result table) means its output folder; another table is analysed
-        as a table; a folder is checked."""
+        as a table; a folder is checked. Never raises: whatever was dropped, the app says what it did with it."""
+        try:
+            self._dropped(paths)
+        except Exception as exc:  # noqa: BLE001 - a drop must never take the app down
+            log.exception("dropped %s", paths)
+            messagebox.showerror("Drop", f"Ionomos could not open what was dropped:\n{paths[:1]}\n\n"
+                                         f"{type(exc).__name__}: {exc}\n\nUse Folder… instead.", parent=self.frame)
+
+    def _dropped(self, paths: list) -> None:
         from ionomos import fpfolder
         from ionomos.downstream.anytable import TABLE_SUFFIXES
 
-        items = [Path(p) for p in paths if str(p).strip()]
+        items = [Path(str(p).strip().strip('"')) for p in paths or [] if str(p).strip()]
         if not items:
             return
+        self._raise_window()
         self.app.nb.select(self.frame)
         self.nb.select(0)
         first = items[0]
         if len(items) > 1:
             self.app.set_status(f"{len(items)} items dropped: checking the first one, {first.name}")
+        if first.suffix.lower() == ".lnk":
+            messagebox.showinfo("Drop", f"{first.name} is a shortcut. Drop the folder itself (open the shortcut, "
+                                        "then drag the folder from Explorer's address bar or its parent folder), "
+                                        "or use Folder….", parent=self.frame)
+            return
+        if not first.exists():
+            messagebox.showinfo("Drop", f"Ionomos can't see {first} as a file or folder (a library, a phone, "
+                                        "a zip's contents or a drive that is gone). Drop a folder from a drive, or "
+                                        "use Folder….", parent=self.frame)
+            return
+        if first.is_file() and first.suffix.lower() == ".zip":
+            messagebox.showinfo("Drop", f"{first.name} is a zip file: unzip it first (right-click → Extract all), "
+                                        "then drop the folder.", parent=self.frame)
+            return
         fragpipe_file = first.suffix.lower() in (".workflow", ".fp-manifest") or \
             fpfolder._match(first.name, "log_*.txt") or \
             any(fpfolder._match(first.name, pat) for pats in fpfolder.TABLES.values() for pat in pats)
@@ -206,6 +229,16 @@ class AnalysisTab:
             self.check(first.parent)
         else:
             self.check(first)
+
+    def _raise_window(self) -> None:
+        """A drop from Explorer leaves Explorer in front: bring the app up, so the check window is seen."""
+        try:
+            root = self.app.root
+            root.deiconify()
+            root.lift()
+            root.focus_force()
+        except tk.TclError:
+            pass
 
     def check_folder(self, picked: Path, method: str | None = None, root: Path | None = None,
                      filed: str | None = None):
