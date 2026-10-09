@@ -106,7 +106,9 @@ Analysis tab (0.18.0) then analysed the FragPipe folder (D80).
   (`P02769`, `P00761`). The rule looks for the text "contam", so it removed
   nothing. Bovine serum albumin was then reported under the human gene name
   `ALB`, next to human albumin, and porcine trypsin stayed in the matrix.
-  FragPipe-Analyst uses the same rule and keeps them too. [Open](#open)
+  FragPipe-Analyst uses the same rule and keeps them too. Fixed after 0.18.1
+  (D84): the accessions of the FASTA's `contam_` entries are removed too.
+  [Open](#open) until it is seen on the PC.
 - The empty-vector condition was taken as a control by its name (`EV` is a
   control keyword), with the vehicle as *the* control. So the comparison is
   "empty vector vs vehicle", and proteins enriched by the bait are listed as
@@ -175,7 +177,7 @@ port handles each of these, but no golden pins them.
 | 2026-09-16 | A `config.yaml` that is not UTF-8 (Notepad saving as ANSI turns `—` into byte 0x97) still stops Ionomos 0.18.1 with a bare `UnicodeDecodeError`, not a `ConfigError` saying what to do | Read cp1252 when UTF-8 fails, or say which line and how to save it |
 | Job 1 | Two runs missing from DIA-NN's matrix | Read job 1's console log for the two DMSO files |
 | Job 1 | An explicit `bioreplicate:` in `experiment.yaml` is passed to FragPipe unchecked (14 digits got through on 0.5.1) | Hold the job or refuse the value, as the naming rules do (1–999) |
-| 2026-10-06 | FragPipe's `contam_` prefix is lost in DIA-NN's tables, so contaminants stay and BSA reads as `ALB` | Take the contaminant accessions from the FASTA FragPipe used (or `protein.tsv`) |
+| 2026-10-06 | FragPipe's `contam_` prefix is lost in DIA-NN's tables, so contaminants stay and BSA reads as `ALB` | Fixed in code (D84): the FASTA's `contam_` accessions are removed. Re-analyse the 2026-10-06 folder on the next release; "contaminants" should show −2 or more (P02769, P00761) |
 | 2026-10-06 | An empty-vector control next to the vehicle: bait-enriched proteins read as "down" | Decide how a pull-down's background control is shown (ROADMAP) |
 | 2026-10-06 | FragPipeAnalystR golden doesn't cover a real matrix's shape | Add a case with interleaved columns, a duplicated gene and a blank gene |
 | Job 2 | How it ended | Its `ionomos.json` / `DONE.txt`, `run_fingerprint.json` |

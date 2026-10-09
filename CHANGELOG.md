@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Contaminants are removed from FragPipe DIA searches** (D84). DIA-NN writes the bare
+  accession (`P02769`) in `report.pg_matrix.tsv`, so the `contam_` rule removed nothing:
+  bovine serum albumin was reported as `ALB` next to human albumin, and porcine trypsin
+  stayed (REAL_RUNS.md, 2026-10-06). The analysis now reads the FASTA the search used. It
+  takes `database.db-path` from FragPipe's `fragpipe.workflow`, else `run.fasta` in
+  `ionomos.json`, and removes every protein group that contains one of the FASTA's
+  `contam_` accessions. Groups that also hold another protein are listed in the notes.
+  Without the FASTA, the old rule applies and the notes say the FASTA was not found. The
+  count is the report's "contaminants" step.
+
 ### Documentation
 
 - **`docs/REAL_RUNS.md`: the real runs on the lab PC** (D83). These are the

@@ -821,9 +821,12 @@ Collected from the other docs; resolve before/during Phase 1.
       (REAL_RUNS.md): still `median` on the PC; the composition check passed (0.09 log2 < 0.1), so `auto` would
       have centred too. FragPipe-Analyst's web default is no normalisation, and that alone made one borderline
       protein a hit there and not in Ionomos. Which the lab wants is still the question.
-- [ ] Real runs (REAL_RUNS.md, 2026-10-09): FragPipe's `contam_` prefix does not reach DIA-NN's `Protein.Group`, so
+- [x] Real runs (REAL_RUNS.md, 2026-10-09): FragPipe's `contam_` prefix does not reach DIA-NN's `Protein.Group`, so
       `remove_contaminants` removes nothing from a FragPipe DIA search (BSA is reported as `ALB`, trypsin stays).
       Take the contaminant accessions from the FASTA the search used? FragPipe-Analyst has the same gap.
+      → D84: yes. The FASTA comes from the `fragpipe.workflow` FragPipe leaves (`database.db-path`), else
+      `ionomos.json` `run.fasta`. A group goes when any of its proteins is a `contam_` entry; mixed groups are
+      listed in the notes. Still to confirm on the PC: the 2026-10-06 matrix loses P02769 and P00761.
 - [ ] Real runs: a `config.yaml` saved as ANSI by Notepad (`—` → byte 0x97) still stops Ionomos with a bare
       `UnicodeDecodeError` (LabWatch did on 2026-09-16; 0.18.1 still does). Read cp1252 as a fallback, or say how
       to save the file.

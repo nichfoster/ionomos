@@ -3673,3 +3673,47 @@ bounded; the end-to-end golden is tidier than a real matrix.
 **Not verified**: FragPipe-Analyst's own output for this experiment (not
 kept, settings not written down). The protein was identified by re-running
 Ionomos, not read from FragPipe-Analyst's table.
+
+### D84 — Contaminants are also taken from the search's FASTA; a group with any of them goes
+**2026-10-09.** FragPipe marks its contaminants in the FASTA (`contam_sp|P02769|ALBU_BOVIN`),
+and FragPipe-Analyst's rule removes rows whose protein contains "contam". FragPipe's own
+tables keep the prefix. DIA-NN's `report.pg_matrix.tsv` does not: `Protein.Group` holds
+`P02769`. On the 2026-10-06 FLAG pull-down ([REAL_RUNS.md](REAL_RUNS.md)) nothing was
+removed, bovine serum albumin was reported as `ALB` next to human albumin, and porcine
+trypsin stayed. FragPipe-Analyst has the same gap: the web app greps `Protein.Group`, and
+FragPipeAnalystR's `make_se_from_files` removes contaminants for LFQ tables only.
+
+Now, when the analysis can find the FASTA the search used, the accessions of its
+`contam_` entries count as contaminants as well (`fpa.fasta_contaminants`). Ionomos looks
+in this order:
+
+1. `database.db-path` of the `fragpipe.workflow` FragPipe leaves in its output folder (a
+   FragPipe GUI result, D80), else of the workflow Ionomos gave it;
+2. `run.fasta` in `ionomos.json` (a job Ionomos ran, FragPipe or DIA-NN).
+
+The first file that exists is read. Decoys (`rev_contam_…`) are not entries of their own.
+The text rule still applies on top (`contam` in the id, `contam_` in the label, MaxQuant's
+`CON__`), so FragPipe's own tables and other engines behave as before. When a FASTA is
+named but not found (a result copied off the PC), the text rule is used alone and the
+report says so. The count is the existing "contaminants removed" processing step. Its
+tooltip names the FASTA and how many `contam_` entries it has.
+
+**A group goes when any of its proteins is a contaminant, not only when all are.**
+- It is the rule FragPipe-Analyst already applies to a group that kept the prefix: "contam"
+  anywhere in `P02768;contam_sp|P02769|…` drops the row. The same group should not be
+  kept because DIA-NN dropped the prefix.
+- DIA-NN groups proteins it cannot tell apart by their peptides. The group's quantity then
+  includes the contaminant's signal, so it cannot be read as the other protein's.
+
+The cost is that such a group (human albumin with BSA, say) is removed. The analysis notes
+list these mixed groups (up to five ids and the count), so they can be checked.
+
+Accessions are compared exactly: `P02769-2` is not `P02769`. An accession the FASTA lists
+both as a target and as `contam_` counts as a contaminant, because the FASTA's label is the
+rule. The FASTA is read once per file version; it is cached on path, size and modification
+time.
+
+**Not verified**: on the lab PC's real FASTA and the 2026-10-06 matrix. That run should now
+lose BSA (P02769) and porcine trypsin (P00761). Whether any human protein (keratins,
+albumin) carries a `contam_` entry in that FASTA, and whether DIA-NN put one in the same
+group as a target, was not checked.

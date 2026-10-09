@@ -5,7 +5,8 @@ FragPipeAnalystR (Nesvilab, https://github.com/Nesvilab/FragPipeAnalystR, GPL-3)
 and its web app FragPipe-Analyst (MonashProteomics) process a FragPipe result
 table in this order; so does this module, with their defaults:
 
-    make_se_from_files    zeros -> missing, log2, contaminants removed      (quant.py loaders + remove_contaminants)
+    make_se_from_files    zeros -> missing, log2, contaminants removed      (quant.py loaders + remove_contaminants;
+                                                                           + the FASTA's contam_ accessions, D84)
     global_filter         min % of samples with a value                    filter_missing(global_pct)
     filter_by_condition   min % with a value in at least one condition     filter_missing(condition_pct)
     MD / GN normalization median centring (+ MAD scaling)                  normalize("median" | "gn")
@@ -32,11 +33,13 @@ remembered so the report can show which points were measured.
 """
 from __future__ import annotations
 
+import functools
 import math
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from ionomos.downstream import stats
-from ionomos.downstream.quant import QuantMatrix
+from ionomos.downstream.quant import Feature, QuantMatrix
 from ionomos.downstream.rrandom import RRandom
 
 Matrix = list[list[float | None]]
@@ -115,13 +118,49 @@ def choose_samples(m: QuantMatrix, exclude: list[str] | None = None,
     return out, notes
 
 
-def remove_contaminants(m: QuantMatrix) -> tuple[QuantMatrix, int]:
+def fasta_contaminants(path: str | Path) -> frozenset[str]:
+    """The accessions of a FASTA's contam_ entries, FragPipe's contaminants: '>contam_sp|P02769|ALBU_BOVIN ...' ->
+    P02769. Their decoys (rev_contam_...) are not entries of their own. Raises OSError when it can't be read."""
+    p = Path(path)
+    st = p.stat()
+    return _fasta_contaminants(str(p), st.st_mtime_ns, st.st_size)
+
+
+@functools.lru_cache(maxsize=4)
+def _fasta_contaminants(path: str, _mtime: int, _size: int) -> frozenset[str]:
+    out = set()
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            if line.startswith(">contam_"):
+                acc = _accession(line[1:].split(None, 1)[0])
+                if acc:
+                    out.add(acc)
+    return frozenset(out)
+
+
+def _accession(token: str) -> str:
+    """One protein of a group as an accession: 'contam_sp|P02769|ALBU_BOVIN', 'sp|P02769|ALBU_BOVIN', 'P02769'."""
+    t = token.strip()
+    t = t[len("contam_"):] if t.startswith("contam_") else t
+    parts = t.split("|")
+    return parts[1] if len(parts) >= 3 else t
+
+
+def is_contaminant(f: Feature, accessions: frozenset[str] | set[str] = frozenset()) -> bool:
+    """FragPipe-Analyst's rule (the protein contains "contam": FragPipe's contam_ prefix; MaxQuant's CON__ too), or
+    any protein of the group is one of the FASTA's contaminant `accessions` (D84: DIA-NN drops the prefix)."""
+    if "contam" in f.id or "contam_" in f.label or f.id.startswith("CON__"):
+        return True
+    return bool(accessions) and any(_accession(a) in accessions for a in f.id.split(";"))
+
+
+def remove_contaminants(m: QuantMatrix,
+                        accessions: frozenset[str] | set[str] = frozenset()) -> tuple[QuantMatrix, int]:
     """FragPipe-Analyst: rows whose protein contains "contam" (FragPipe's contam_ prefix) are dropped; MaxQuant's
     CON__ prefix too. FragPipeAnalystR does this for LFQ tables only, the web app also for DIA-NN's Protein.Group;
-    Ionomos for every intensity table. DIA-NN writes the bare accession, so a FragPipe DIA search loses the prefix
-    and nothing is dropped (docs/REAL_RUNS.md)."""
-    keep = [i for i, f in enumerate(m.features)  # FragPipe contam_, MaxQuant CON__
-            if "contam" not in f.id and "contam_" not in f.label and not f.id.startswith("CON__")]
+    Ionomos for every intensity table. DIA-NN writes the bare accession, so a FragPipe DIA search loses the prefix:
+    `accessions` (fasta_contaminants of the search's FASTA) drops a group when any of its proteins is one (D84)."""
+    keep = [i for i, f in enumerate(m.features) if not is_contaminant(f, accessions)]
     if len(keep) == len(m.features):
         return m, 0
     return _copy(m, [m.features[i] for i in keep], [list(m.values[i]) for i in keep]), len(m.features) - len(keep)
@@ -561,9 +600,11 @@ def _impute_knn(vals: Matrix, k: int = 10, rowmax: float = 0.5) -> None:
 def process(m: QuantMatrix, *, exclude: list[str] | None = None, conditions: dict[str, str] | None = None,
             contaminants: bool = True, global_pct: float = 0, condition_pct: float = 0,
             normalization: str = "none", imputation: str = "auto", shift: float = 1.8, scale: float = 0.3,
-            seed: int = 123, ratio_centre: str = "none") -> tuple[Processed, list[str]]:
+            seed: int = 123, ratio_centre: str = "none",
+            contaminant_fasta: tuple[str, frozenset[str]] | None = None) -> tuple[Processed, list[str]]:
     """Every processing step in FragPipe-Analyst's order. Returns (Processed, notes). ratio_centre: site ratio
-    data only (centre_ratios, D70); intensities are normalised by `normalization`."""
+    data only (centre_ratios, D70); intensities are normalised by `normalization`. contaminant_fasta: (the FASTA's
+    name, fasta_contaminants of it), the search's contaminants when its tables lost the contam_ prefix (D84)."""
     notes: list[str] = []
     steps = [{"step": "loaded", "features": len(m.features), "samples": len(m.samples)}]
     m, n = choose_samples(m, exclude, conditions)
@@ -571,9 +612,19 @@ def process(m: QuantMatrix, *, exclude: list[str] | None = None, conditions: dic
     if len(m.samples) != steps[0]["samples"]:
         steps.append({"step": "samples chosen", "features": len(m.features), "samples": len(m.samples)})
     if contaminants and m.kind == "intensity":
-        m, removed = remove_contaminants(m)
+        fasta_name, accessions = contaminant_fasta or ("", frozenset())
+        mixed = [f.id for f in m.features if ";" in f.id and is_contaminant(f, accessions)
+                 and not all(is_contaminant(Feature(a, ""), accessions) for a in f.id.split(";"))]
+        m, removed = remove_contaminants(m, accessions)
         if removed:
-            steps.append({"step": "contaminants removed", "removed": removed, "features": len(m.features)})
+            rule = "names with contam_ or CON__"
+            if fasta_name:
+                rule = f"the {len(accessions):,} contam_ entries of {fasta_name}, or " + rule
+            steps.append({"step": "contaminants removed", "removed": removed, "features": len(m.features),
+                          "rule": rule})
+        if mixed:
+            notes.append(f"contaminants: {len(mixed)} protein group(s) with a contaminant and another protein were "
+                         "removed too: " + ", ".join(mixed[:5]) + (" …" if len(mixed) > 5 else ""))
     before = m
     if (global_pct or condition_pct) and m.kind == "intensity":
         m, removed = filter_missing(m, global_pct, condition_pct)
