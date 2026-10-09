@@ -12,6 +12,16 @@ comes from simulated tables or from reference runs of R packages on simulated
 tables. No mixed-species sample has been run on the lab's instrument yet, and
 no real FragPipe-Analyst, MSstats or Perseus export has been compared.
 
+One real experiment has been checked by hand (2026-10-06, a DIA pull-down,
+[REAL_RUNS.md](REAL_RUNS.md)). It was run on fragpipe-analyst.org and one
+protein was a hit there that was not a hit in Ionomos. Re-running Ionomos
+with the web app's normalisation ("No normalization"; Ionomos had median
+centring) reproduces that one protein. It is a settings difference, not a
+difference in the port. FragPipe-Analyst's own table was not kept, so this
+is a re-run, not an `ionomos compare`. The web app's defaults differ from
+Ionomos's: no missing-value filter, no normalisation, all pairs. **Use
+FragPipe-Analyst's defaults** in the Analysis tab sets the same.
+
 ## What the numbers are checked against
 
 | Part | Checked against | How close | Test |

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+
+- **`docs/REAL_RUNS.md`: the real runs on the lab PC** (D83). These are the
+  two DIA searches of 2026-09-23 (0.5.1, 0.5.3) and the analysis of a
+  FragPipe GUI result on 2026-10-06 (0.18.0), with what went wrong in each
+  and which release fixed it. FIRST_REAL_RUN.md, ROADMAP.md, PROTEOMICS_PC.md,
+  VALIDATION.md and TESTING.md no longer say nothing has run on a real
+  FragPipe. They record what those runs answered: `fragpipe.bat` works, `.raw`
+  works for DIA, FragPipe 24 uses its own DIA-NN 2.3.2, and the PC has .NET 6.
+- **Why fragpipe-analyst.org showed a hit that Ionomos didn't**: its default
+  is no normalisation, and Ionomos centred the medians. With the same
+  setting Ionomos gains exactly that protein. The port was not changed.
+- New open problems in ROADMAP.md:
+  - contaminants are not removed from FragPipe DIA searches, because DIA-NN
+    drops the `contam_` prefix;
+  - a non-UTF-8 `config.yaml` still crashes;
+  - `experiment.yaml` replicate numbers are not bounded;
+  - an empty-vector control reads bait-enriched proteins as "down";
+  - the FragPipeAnalystR golden is tidier than a real matrix.
+
 ## [0.18.1] - 2026-10-06
 
 ### Fixed

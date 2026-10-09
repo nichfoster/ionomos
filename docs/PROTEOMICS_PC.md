@@ -23,18 +23,23 @@ Source: [`reference/pc-inventory/2026-09-15/`](../reference/pc-inventory/2026-09
 
 | Software | Version | Location / notes |
 |---|---|---|
-| FragPipe | **24.0** | `C:\FragPipe\FragPipe-24.0\` — `javaw.exe` running from `…\jre\bin\`, so it has a bundled JRE. Launcher: the first Ionomos report (2026-09-23) saw `bin\FragPipe-24.0.exe`; FragPipe's build also puts the headless launcher `bin\fragpipe.bat` there (D59), **not yet confirmed on the PC** |
+| FragPipe | **24.0** | `C:\FragPipe\FragPipe-24.0\` — `javaw.exe` running from `…\jre\bin\`, so it has a bundled JRE. Launcher: the first Ionomos report (2026-09-23) saw `bin\FragPipe-24.0.exe`; FragPipe's build also puts the headless launcher `bin\fragpipe.bat` there (D59). **Confirmed 2026-09-23**: the setup check found `bin\fragpipe.bat` and two DIA searches ran through it ([REAL_RUNS.md](REAL_RUNS.md)) |
 | FragPipe | 23.1 | `C:\FragPipe\FragPipe-23.1\` |
 | FragPipe | 22.0 | unzipped in Downloads (`FragPipe-jre-22.0\`), has stock `workflows\isoDTB-ABPP.workflow`, MSFragger 4.1, IonQuant 1.10.27 |
-| DIA-NN | 2.3.2 Academia | installed (MSI); path not captured |
+| DIA-NN | 2.3.2 Academia | installed (MSI); path not captured. FragPipe 24.0 also has its own copy, `tools\diann\2.3.2\DiaNN.exe`, and used it with `config_diann` empty (2026-09-23) |
 | Proteome Discoverer | 2.5.0.400 | `C:\Program Files\Thermo\Proteome Discoverer 2.5` |
 | Python | 3.14.5 (user) | `C:\Users\Daniel Nomura\AppData\Local\Python\pythoncore-3.14-64` |
 | Python | 3.9.13 | system-wide; `py` launcher at `C:\Windows\py.exe` |
 | `python` on PATH | — | resolves to the **WindowsApps store stub** (`0.0.0.0`). Do not rely on `python`; use `py -3.14` or the absolute path |
-| Java on PATH | — | **not found**. `fragpipe.bat` needs `JAVA_HOME` or `java` on PATH, so Ionomos sets `JAVA_HOME` to FragPipe's own `jre` (D59) |
+| Java on PATH | — | **not found**. `fragpipe.bat` needs `JAVA_HOME` or `java` on PATH, so Ionomos sets `JAVA_HOME` to FragPipe's own `jre` (D59). Yet on 2026-09-23 (0.5.1, before that) `fragpipe.bat` started FragPipe on Java 17.0.10 by itself; how it found Java is not known |
 | R / Rscript | — | **not installed** → the lab's R scripts are currently run… somewhere else? Or R was removed. Either way: port to Python |
 | git | — | not installed. Deploy by copying / `pip install` from a wheel, or install git |
-| .NET | 10.0 | present. FragPipe prints a ".NET Core Info" line; whether its Thermo reader needs a particular runtime on Windows is open (ROADMAP) |
+| .NET | 10.0, 6.0.20 | 10.0 from the inventory. FragPipe's console printed ".NET Core Info: 6.0.20" (2026-09-23), and its Thermo reader read the `.raw` files |
+
+Seen in the support bundles of 2026-09-23 ([REAL_RUNS.md](REAL_RUNS.md)):
+the startup task was missing in all three (the watcher was running, so it
+was started from the app or by hand); `C:` had 75 GB free at 14:23 and 55 GB at 16:45, after one DIA search
+of six raws and a second one under way.
 
 ## How the lab currently works (inferred)
 
@@ -79,8 +84,10 @@ Source: [`reference/pc-inventory/2026-09-15/`](../reference/pc-inventory/2026-09
 - [ ] Does `C:\Proteomics_File_Sharing` exist; is it a local folder shared out
       over SMB, or a mapped drive from the Eclipse PC? Which direction is the share?
 - [ ] DIA-NN 2.3.2 install path
-- [ ] Where FASTA databases live (probably inside a `fragpipe.workflow` as
-      `database.db-path=…`; grep an existing one)
+- [x] Where FASTA databases live (probably inside a `fragpipe.workflow` as
+      `database.db-path=…`; grep an existing one) → Ionomos' searches use
+      `C:\Fragpipe_Auto\fasta\2026-01-30-decoys-contam-UP000005640_9606.fasta.fas`
+      (human, 20,698 targets, `rev_` decoys, FragPipe's contaminants), 2026-09-23
 - [ ] Whether the account has an unattended-login / Task Scheduler policy
       (the watcher must survive logout/reboot)
 - [ ] Power settings: does the PC sleep? (Would kill long runs.)

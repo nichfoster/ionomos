@@ -350,7 +350,11 @@ python3 make_fpa_inputs.py && Rscript run_fpa_reference.R <R library with limma>
 `run_fpa_reference.R` is FragPipeAnalystR's `manual_impute()` and `test_limma()`
 transcribed to base R + limma. `e2e/` is the real FragPipeAnalystR 1.1.1 run on
 a simulated DIA-NN matrix with the `reproduce_in_R.R` Ionomos writes (how:
-`e2e/README.md`). Installing FragPipeAnalystR into a scratch library:
+`e2e/README.md`). Its matrix is tidier than a real one: samples in sorted
+order, one accession per protein group, unique gene names. A real matrix
+(2026-10-06, [REAL_RUNS.md](REAL_RUNS.md)) has interleaved run columns, a
+gene name used twice and a group without a gene; a golden with that shape is
+still to do. Installing FragPipeAnalystR into a scratch library:
 `BiocManager::install(c("limma", "SummarizedExperiment", "MSnbase", ...))` then
 `remotes::install_github("Nesvilab/FragPipeAnalystR@v1.1.1")` — see its README.
 

@@ -94,6 +94,7 @@ to put it on the PC.
 | [TESTING.md](docs/TESTING.md) | Test suite + testbed on macOS and Windows |
 | [VALIDATION.md](docs/VALIDATION.md) | How accurate the analysis is and how to check it: what it is verified against, `ionomos compare` (against a FragPipe-Analyst, limma, MSstats, Perseus or R result), `ionomos benchmark` (simulated data, or a mixed-species run on the instrument), messy tables, and the "How far to trust this" list |
 | [FIRST_REAL_RUN.md](docs/FIRST_REAL_RUN.md) | The checklist for the first real FragPipe runs on the PC: `ionomos preflight`, a small isoDTB search, what to send back |
+| [REAL_RUNS.md](docs/REAL_RUNS.md) | What has actually run on the PC (searches, analyses, a FragPipe-Analyst comparison), what went wrong, and what each problem became |
 | [QC_TREND.md](docs/QC_TREND.md) | Instrument QC: how runs of the lab's QC standard (HeLa, K562) are recognised, measured, judged (Levey-Jennings, Westgard rules) and shown in `logs/qc_trend.html` |
 | [ENGINES.md](docs/ENGINES.md) | Results from other engines Ionomos can analyse (DIA-NN, MaxQuant, Sage, Spectronaut, AlphaDIA, MSstats / MSstatsTMT format, Proteome Discoverer) and what it reads from each; an SDRF as the design; TMT across plexes |
 

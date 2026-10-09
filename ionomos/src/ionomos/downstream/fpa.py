@@ -117,7 +117,9 @@ def choose_samples(m: QuantMatrix, exclude: list[str] | None = None,
 
 def remove_contaminants(m: QuantMatrix) -> tuple[QuantMatrix, int]:
     """FragPipe-Analyst: rows whose protein contains "contam" (FragPipe's contam_ prefix) are dropped; MaxQuant's
-    CON__ prefix too."""
+    CON__ prefix too. FragPipeAnalystR does this for LFQ tables only, the web app also for DIA-NN's Protein.Group;
+    Ionomos for every intensity table. DIA-NN writes the bare accession, so a FragPipe DIA search loses the prefix
+    and nothing is dropped (docs/REAL_RUNS.md)."""
     keep = [i for i, f in enumerate(m.features)  # FragPipe contam_, MaxQuant CON__
             if "contam" not in f.id and "contam_" not in f.label and not f.id.startswith("CON__")]
     if len(keep) == len(m.features):

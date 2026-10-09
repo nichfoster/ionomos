@@ -155,6 +155,17 @@ Windows) and earlier output that can't be moved aside; a limit on the console
 log; causes for a search ended from outside, a crash, a time limit; drops
 laid out one folder per TMT plex. **Still not run against a real FragPipe.**
 
+2026-10-09: the real runs so far are written up in
+[REAL_RUNS.md](REAL_RUNS.md), from the support bundles of 2026-09-23 and an
+analysis of 2026-10-06. Correction to the two entries above: two DIA
+searches *had* run on the PC on 2026-09-23 (0.5.1 and 0.5.3, through
+`fragpipe.bat --headless`). What has not run on a real FragPipe is the D59
+runner (0.14.0 and later), isoDTB and TMT; the Phase 2 exit test is still
+open. From those runs: FragPipe 24's own DIA-NN is 2.3.2, `.raw` works for
+DIA, and the analysis of a real FragPipe GUI result matched
+FragPipe-Analyst once its normalisation setting was matched. New problems
+found are under "Real runs" in the open questions below.
+
 ## Phase 3 — DIA, then TMT
 
 - DIA: pin workflow, `data_type: DIA`, sort out DIA-NN version/`--config-diann`.
@@ -726,14 +737,18 @@ Collected from the other docs; resolve before/during Phase 1.
 - [ ] D59: FragPipe replaces everything but letters, digits and `_` in experiment names (`EJQ-2-027` →
       `EJQ_2_027`), so its tables and Ionomos' `_sites.tsv` carry the `_` form. Ionomos warns per job. Should
       intake write the `_` form into the manifest from the start?
-- [ ] D59: FragPipe's DIA workflow notes say "For quantification using DIA-NN, Thermo/Sciex DIA files should be in
+- [x] D59: FragPipe's DIA workflow notes say "For quantification using DIA-NN, Thermo/Sciex DIA files should be in
       mzML format". Does the lab's DIA route (bundled DIA-NN 1.8.2 beta 8, or 2.3.2 via `fragpipe.config_diann`)
-      read `.raw` directly on the PC? The first DIA run answers it.
-- [ ] D59: is .NET needed by FragPipe 24 on Windows for `.raw` files? Its documentation only asks for Mono on Linux;
+      read `.raw` directly on the PC? The first DIA run answers it. → 2026-09-23 (REAL_RUNS.md): yes. MSFragger
+      reads the `.raw` files and FragPipe writes the `_uncalibrated.mzML` that DIA-NN reads.
+- [x] D59: is .NET needed by FragPipe 24 on Windows for `.raw` files? Its documentation only asks for Mono on Linux;
       its log prints ".NET Core Info". The PC has .NET 10 only. If a search stops on a .NET message, the hint
-      names the runtime to install.
-- [ ] Does bundled DIA-NN suffice or is `--config-diann` needed for 2.3.2? (FragPipe 24 falls back to its own
+      names the runtime to install. → 2026-09-23: the console printed ".NET Core Info: 6.0.20", so a .NET 6
+      runtime is on the PC after all, and `.raw` files were read.
+- [x] Does bundled DIA-NN suffice or is `--config-diann` needed for 2.3.2? (FragPipe 24 falls back to its own
       `tools\diann\1.8.2_beta_8\windows\DiaNN.exe`; the file to name is `DiaNN.exe`, not `DIA-NN.exe`.)
+      → 2026-09-23: with `config_diann` empty, FragPipe 24.0 on the PC ran DIA-NN 2.3.2
+      (`tools\diann\2.3.2\DiaNN.exe`). Nothing to set.
 - [ ] Confirm the DIA condition codes with the lab: is `C` always "Compound" (not "Control")? Other codes
       in use (`V` vehicle, `T` treated …)? Set `naming.condition_codes` accordingly (D34).
 - [ ] D35 warnings: are the sample-outlier / batch / imputation-mismatch thresholds right on real experiments?
@@ -802,7 +817,26 @@ Collected from the other docs; resolve before/during Phase 1.
       the replicate scatter)? Is a pulldown against empty beads normalised at all in the lab's practice?
       (D66: in simulated TMT the same holds after IRS: median centring shifts a pulldown's unchanged proteins by
       -0.2 to -0.4 log2, 67 % of the calls at adjusted p alone are false, 8.4 % of the hits in the worst case;
-      `auto` keeps them within 0.04.)
+      `auto` keeps them within 0.04.) → 2026-10-06, a real FLAG pull-down with an empty-vector control
+      (REAL_RUNS.md): still `median` on the PC; the composition check passed (0.09 log2 < 0.1), so `auto` would
+      have centred too. FragPipe-Analyst's web default is no normalisation, and that alone made one borderline
+      protein a hit there and not in Ionomos. Which the lab wants is still the question.
+- [ ] Real runs (REAL_RUNS.md, 2026-10-09): FragPipe's `contam_` prefix does not reach DIA-NN's `Protein.Group`, so
+      `remove_contaminants` removes nothing from a FragPipe DIA search (BSA is reported as `ALB`, trypsin stays).
+      Take the contaminant accessions from the FASTA the search used? FragPipe-Analyst has the same gap.
+- [ ] Real runs: a `config.yaml` saved as ANSI by Notepad (`—` → byte 0x97) still stops Ionomos with a bare
+      `UnicodeDecodeError` (LabWatch did on 2026-09-16; 0.18.1 still does). Read cp1252 as a fallback, or say how
+      to save the file.
+- [ ] Real runs: an explicit `bioreplicate:` in `experiment.yaml` reaches FragPipe's manifest unchecked; job 1
+      (0.5.1) sent `20260508180610`, and DIA-NN's matrix lacked exactly those two runs. Bound it to 1–999 as the
+      naming rules do? Confirm the cause from job 1's console log.
+- [ ] Real runs: an empty-vector control next to a vehicle control (a pull-down) gives "EV vs DMSO", where
+      bait-enriched proteins read as *down*. Should a pull-down's background control be the reference, or the
+      comparison be turned round?
+- [ ] Real runs: add a FragPipeAnalystR golden with a real matrix's shape (interleaved run columns, a duplicated
+      gene, a group without a gene). The current one is sorted and tidy (TESTING.md).
+- [ ] Real runs: next time a result is compared with FragPipe-Analyst, keep its downloaded table and settings and
+      run `ionomos compare`; job 2's (2026-09-23) outcome was never reported.
 - [ ] isoDTB normalisation (D66): site ratios are never normalised. A heavy / light mixing error moves every ratio
       of a replicate; in simulation (SD 0.2 log2, i.e. about 15 %) the unchanged sites of an experiment sat 0.07 –
       0.13 log2 off 0 and the FDP at adjusted p ≤ 0.05 reached 10.6 % in a scenario (3 replicates, 5 % of sites

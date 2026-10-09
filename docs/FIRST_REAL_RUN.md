@@ -1,9 +1,12 @@
 # First real runs: the checklist
 
-Nothing in Ionomos has run against a real FragPipe yet. The runner was
-checked against FragPipe's headless tutorial and the source of FragPipe 24.0
-(D59), and the test suite runs it against a fake that copies FragPipe's
-output. This page is what to do on the lab PC, in order, the first time.
+Two DIA searches ran on the PC on 2026-09-23 (0.5.1 and 0.5.3), before
+the runner was checked against FragPipe's headless tutorial and the source
+of FragPipe 24.0 (D59). What they showed, and every real run since, is in
+[REAL_RUNS.md](REAL_RUNS.md). No isoDTB or TMT search, no preflight, and no
+search on 0.14.0 or later (the D59 runner) has been reported yet. The test
+suite runs the runner against a fake that copies FragPipe's output. This
+page is what to do on the lab PC, in order, for each first run.
 It closes [ROADMAP.md](ROADMAP.md) Phase 2. Installing is
 [DEPLOY_WINDOWS.md](DEPLOY_WINDOWS.md); what each method needs is
 [WORKFLOWS.md](WORKFLOWS.md).
@@ -113,8 +116,10 @@ After fixing a cause: **Retry**. The earlier output is kept as
 - [ ] **DIA** (no lab SOP yet): pin the workflow the lab uses, run the
       preflight for it, drop a small folder (`<condition>_<rep>.raw`).
       FragPipe 24 writes DIA-NN's tables to `fragpipe\dia-quant-output\`.
-      If the DIA-NN step fails on `.raw` files, note its message: FragPipe's
-      workflow notes ask for mzML for Thermo DIA.
+      `.raw` works (2026-09-23): MSFragger reads it and FragPipe writes the
+      `_uncalibrated.mzML` DIA-NN reads. The pinned `DIA.workflow` already
+      ran twice ([REAL_RUNS.md](REAL_RUNS.md)); what is left is a search on
+      0.14.0 or later, with its fingerprint.
 - [ ] **TMT**: one plex per experiment, or several plexes each in a folder
       of its own (`<plex>\*.raw`; the folder name is the plex name in
       `experiment.yaml` `tmt: plexes:`). List all channels of the label type
@@ -128,12 +133,20 @@ Send, per search: `run_fingerprint.json`, and for a failure also
 `fragpipe_console.log`. Plus the preflight's output. With those, these
 open questions close:
 
-- [ ] `bin\fragpipe.bat` exists on the PC and starts with FragPipe's own Java.
-- [ ] A headless run prints its console to Ionomos and ends in `ALL JOBS DONE`.
+- [x] `bin\fragpipe.bat` exists on the PC and starts with FragPipe's own Java
+      (2026-09-23: Java 17.0.10, even before Ionomos set `JAVA_HOME`; its
+      tools ran on `FragPipe-24.0\jre\bin\java.exe`).
+- [ ] A headless run prints its console to Ionomos (yes, 2026-09-23) and
+      ends in `ALL JOBS DONE` (not seen yet: the one console in a bundle was
+      taken mid-search).
 - [ ] The dry run works with a placeholder file.
-- [ ] The step names and exit-code lines are as the parsers expect.
+- [ ] The step names and exit-code lines are as the parsers expect. Half
+      seen: `Process '…' finished, exit code: 0` lines and the progress line
+      ("MSFragger (3 step(s) done)") on 2026-09-23; no failed step yet.
 - [ ] isoDTB `_sites.tsv` equals the R output.
-- [ ] Which DIA workflow, which DIA-NN, and whether `.raw` works for DIA.
+- [x] Which DIA workflow, which DIA-NN, and whether `.raw` works for DIA:
+      MSFragger → MSBooster → Percolator → spectral library → DIA-NN 2.3.2;
+      `.raw` works.
 - [ ] How the pop-ups felt; the LOW_SAMPLE threshold; imputation default.
 
 ## What is verified and what is not
@@ -147,5 +160,8 @@ earlier output) and the faults in D69 (hangs, kills, Ionomos itself killed
 and restarted, a full disk, cut-off tables, garbled and huge logs, locked
 or vanished files).
 
-Not verified: anything against a running FragPipe on the PC. That is what
-this page is for.
+Seen on the PC (2026-09-23, 0.5.1 and 0.5.3, [REAL_RUNS.md](REAL_RUNS.md)):
+two DIA searches through `fragpipe.bat --headless`, the console reaching
+Ionomos, FragPipe's Java and tool versions, the DIA output folder. Not
+verified: the D59 runner (0.14.0 and later) against a running FragPipe, a
+failed step, isoDTB, TMT. That is what this page is for.
