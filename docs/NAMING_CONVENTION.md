@@ -61,7 +61,7 @@ outright; **DIA and TMT** also accept a bare stem, so a date-like tail is
 absorbed into the condition/sample name (`DMSO_20260902.raw` → condition
 `DMSO_20260902`, bioreplicate 1 — no phantom number is minted).
 
-The same bound holds wherever a number comes from (D84): `files:` in
+The same bound holds wherever a number comes from (D85): `files:` in
 `experiment.yaml`, the naming window, the naming history and a queued job's
 manifest. FragPipe and DIA-NN keep the replicate in a 32-bit whole number; on
 0.5.1 an Xcalibur time stamp (`20260508180610`) went in as a replicate and

@@ -3680,7 +3680,7 @@ bounded; the end-to-end golden is tidier than a real matrix.
 kept, settings not written down). The protein was identified by re-running
 Ionomos, not read from FragPipe-Analyst's table.
 
-### D84 — Replicate and fraction numbers are 1–999 wherever they come from
+### D85 — Replicate and fraction numbers are 1–999 wherever they come from
 **2026-10-09.** On 2026-09-23 (job 1, 0.5.1, [REAL_RUNS.md](REAL_RUNS.md))
 the naming window wrote Xcalibur's re-acquisition time stamp as the
 replicate: `bioreplicate: 20260508180610` and `20260508204737` went into

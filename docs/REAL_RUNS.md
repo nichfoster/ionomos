@@ -40,7 +40,7 @@ from unpublished experiments stay out of this page.
   timestamp is ignored (D23), and since 0.8.0 replicate tails are 1–999.
   Current naming reads these files as DMSO 1, 2, 3 and MA25 1, 2, 3.
   An explicit `bioreplicate:` in `experiment.yaml` was still passed on
-  unchecked until D84 (after 0.18.1). It is now bounded to 1–999 like a
+  unchecked until D85 (after 0.18.1). It is now bounded to 1–999 like a
   file name's: such a file opens the naming window (or leaves a note), and a
   job already queued with such a number waits until its `experiment.yaml`
   gives the file's replicate.

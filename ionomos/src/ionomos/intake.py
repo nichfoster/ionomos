@@ -307,7 +307,7 @@ def _plan(folder: Path, cfg: Config, ledger: Ledger | None = None) -> Plan:
 
     try:
         ov = load_overrides(folder)
-    except NumberOutOfRange as exc:  # a replicate the window can correct (0.5.1 wrote time stamps, D84)
+    except NumberOutOfRange as exc:  # a replicate the window can correct (0.5.1 wrote time stamps, D85)
         raise IntakeError(f"experiment.yaml: {exc}", Kind.RAWS) from exc
     except OverridesError as exc:
         raise IntakeError(str(exc), Kind.OVERRIDES) from exc
@@ -417,7 +417,7 @@ def _plex_warnings(kind: str, manifest: list[ManifestLine]) -> list[str]:
 
 
 def _without_files(folder: Path) -> Overrides:
-    """experiment.yaml without its files: block (one of its numbers is out of range, D84), or nothing."""
+    """experiment.yaml without its files: block (one of its numbers is out of range, D85), or nothing."""
     import yaml
 
     try:

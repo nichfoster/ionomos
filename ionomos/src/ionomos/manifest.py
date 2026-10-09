@@ -42,7 +42,7 @@ class OverridesError(ValueError):
 
 
 class NumberOutOfRange(OverridesError):
-    """A files: replicate or fraction number outside 1-999 (D84). The naming window can correct it, so intake opens
+    """A files: replicate or fraction number outside 1-999 (D85). The naming window can correct it, so intake opens
     the window for it instead of only leaving a note."""
 
 
@@ -104,7 +104,7 @@ def _int_or_none(v, what: str) -> int | None:
 
 
 def _number_or_none(v, what: str, single_shot: bool = False) -> int | None:
-    """A replicate or fraction number: 1-999 like a file name's (D30, D84), or -1 for "no fraction" when
+    """A replicate or fraction number: 1-999 like a file name's (D30, D85), or -1 for "no fraction" when
     single_shot. Anything else is refused with why: the value would reach FragPipe's manifest."""
     n = _int_or_none(v, what)
     if n is None or number_ok(n) or (single_shot and n == -1):
@@ -217,7 +217,7 @@ def save_overrides(folder: Path, ov: Overrides, replace_analysis: bool = False, 
     the whole block, so a choice taken back in the experiment editor (a role back to automatic, a sample used
     again) is gone from the file too. replace_files: ov.files is the whole files: block (the naming window shows
     every raw, so its answer is the full picture; an old entry it was opened for, such as a replicate outside 1-999,
-    is not merged back in, D84)."""
+    is not merged back in, D85)."""
     p = Path(folder) / EXPERIMENT_YAML
     p.write_text(overrides_text(folder, ov, replace_analysis, replace_files), encoding="utf-8")
     return p

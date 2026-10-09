@@ -105,7 +105,7 @@ def test_explicit_yaml_beats_history(lab):
 
 
 def test_a_learned_replicate_outside_1_to_999_is_not_reused(lab):
-    """0.5.1 could learn Xcalibur's time stamp as a replicate; such an entry is skipped, the others still count (D84)."""
+    """0.5.1 could learn Xcalibur's time stamp as a replicate; such an entry is skipped, the others still count (D85)."""
     cfg = lab['cfg']
     stamped = 'CS_22rv1_FLAG-AR_MA25-10uM_DMSO_1_20260508180610.raw'
     remember(cfg, 'CS_22rv1_FLAG_AR_MA25', 'Chris', 'DIA', [

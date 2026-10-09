@@ -42,7 +42,7 @@ def suggestions(cfg, user, method, filenames):
             for f in record["files"]:
                 value = (f["experiment"], int(f["bioreplicate"]), int(f["fraction"]) if f["fraction"] else -1)
                 if not number_ok(value[1]) or not (value[2] == -1 or number_ok(value[2])):
-                    continue  # learned before replicates were bounded (0.5.1 learned a 14-digit one): not reused, D84
+                    continue  # learned before replicates were bounded (0.5.1 learned a 14-digit one): not reused, D85
                 key = strip_acq_stamp(f["filename"][:-4])
                 exact.setdefault(key, set()).add(value)
                 try:

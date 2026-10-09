@@ -338,7 +338,7 @@ def job_replicates(dest: Path, manifest: list[dict]) -> dict[str, int]:
     """{manifest file: bioreplicate} for FragPipe's manifest. A job filed with a number outside 1-999 (0.5.1 filed
     the Xcalibur time stamp 20260508180610 as one, and DIA-NN's matrix lost those runs) takes the file's
     files.<name>.bioreplicate from the experiment folder's experiment.yaml; without one the job waits (Hold),
-    saying which file and where to fix it, and starts by itself once it is fixed (D84)."""
+    saying which file and where to fix it, and starts by itself once it is fixed (D85)."""
     reps: dict[str, int] = {}
     bad = []
     for m in manifest:

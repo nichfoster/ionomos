@@ -47,7 +47,7 @@ def test_reparse_switches_method():
         ({"files": [DraftFile("a.raw", "", "1", "")]}, "experiment is required"),
         ({"files": [DraftFile("a.raw", "A", "0", "")]}, "replicate must be"),
         ({"files": [DraftFile("a.raw", "A", "1", "x")]}, "fraction must be"),
-        # 0.5.1 filed Xcalibur's re-acquisition time stamp as the replicate (job 1, D84)
+        # 0.5.1 filed Xcalibur's re-acquisition time stamp as the replicate (job 1, D85)
         ({"files": [DraftFile("CS_22rv1_FLAG-AR_MA25-10uM_DMSO_1_20260508180610.raw", "DMSO", "20260508180610", "")]},
          "replicate must be a whole number from 1 to 999"),
         ({"files": [DraftFile("a.raw", "A", "1000", "")]}, "from 1 to 999"),

@@ -38,7 +38,7 @@ from datetime import date
 RAW_SUFFIX = ".raw"
 
 # Replicate and fraction numbers run 1-999 (D30), whoever gives them: a file name, experiment.yaml, the naming
-# window, the naming history or a queued job's manifest (D84). FragPipe and DIA-NN keep the replicate in a 32-bit
+# window, the naming history or a queued job's manifest (D85). FragPipe and DIA-NN keep the replicate in a 32-bit
 # integer: on 0.5.1 an Xcalibur time stamp (20260508180610) went in as a replicate and DIA-NN's matrix lost both runs.
 NUMBER_MIN, NUMBER_MAX = 1, 999
 NUMBER_WHY = ("replicate and fraction numbers run 1-999; a longer number (such as the time stamp Xcalibur adds to a "
@@ -677,7 +677,7 @@ def group_from_parsed(parsed: list[RawName], method: str, allow_uneven: bool = F
     fr: dict[str, dict[int, set[int]]] = defaultdict(lambda: defaultdict(set))
     single: dict[str, set[int]] = defaultdict(set)
     for r in parsed:
-        # parse_raw_name bounds the numbers it reads; overrides and learned names come here too (D84)
+        # parse_raw_name bounds the numbers it reads; overrides and learned names come here too (D85)
         if not number_ok(r.rep):
             raise NamingError(f"{r.filename!r}: replicate {r.rep} is out of range (expected 1–999): {NUMBER_WHY}")
         if r.fraction is not None and not number_ok(r.fraction):

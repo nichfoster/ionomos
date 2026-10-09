@@ -560,7 +560,7 @@ def test_cross_volume_cleanup_persistent_lock_rejects_truthfully(lab, ledger, mo
     assert ledger.list() == []
 
 
-# ------------------------------------------- replicate numbers out of range (D84) --
+# ------------------------------------------- replicate numbers out of range (D85) --
 
 _JOB1 = ["CS_22rv1_FLAG-AR_MA25-10uM_DMSO_1_20260508180610.raw", "CS_22rv1_FLAG-AR_MA25-10uM_DMSO_2_20260508204737.raw",
          "CS_22rv1_FLAG-AR_MA25-10uM_DMSO_3.raw", "CS_22rv1_FLAG-AR_MA25-10uM_MA25_1.raw",

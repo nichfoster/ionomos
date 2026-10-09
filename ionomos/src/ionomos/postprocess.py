@@ -66,7 +66,7 @@ def prepare(dest: Path, cfg, method: str | None = None, extra: dict | None = Non
 
         try:
             current = load_overrides(dest)
-        except OverridesError as exc:  # e.g. a replicate outside 1-999 written by 0.5.1 (D84): say so, don't hide it
+        except OverridesError as exc:  # e.g. a replicate outside 1-999 written by 0.5.1 (D85): say so, don't hide it
             yaml_problem = str(exc)
             raise
         overrides = current.analysis or overrides

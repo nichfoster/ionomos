@@ -58,7 +58,7 @@ def test_the_editor_replaces_the_analysis_block_and_the_review_merges_into_it(tm
         ({"date": "yesterday"}, "YYYY-MM-DD"),
         ({"files": {"a.raw": {"bioreplicate": "two"}}}, "integer"),
         ({"files": {"a.raw": {"what": 1}}}, "unknown key"),
-        # replicate / fraction numbers are bounded like a file name's, 1-999 (D84): job 1 on 0.5.1 wrote these two
+        # replicate / fraction numbers are bounded like a file name's, 1-999 (D85): job 1 on 0.5.1 wrote these two
         ({"files": {"CS_22rv1_FLAG-AR_MA25-10uM_DMSO_1_20260508180610.raw": {"bioreplicate": 20260508180610}}},
          r"files\.CS_22rv1_FLAG-AR_MA25-10uM_DMSO_1_20260508180610\.raw\.bioreplicate is 20260508180610, but it "
          r"must be 1-999: .*DIA-NN drops that run"),
@@ -97,7 +97,7 @@ def test_replicate_and_fraction_bounds_accept(spec, rep, frac):
 
 def test_the_naming_window_answer_replaces_the_files_block(tmp_path):
     """The naming window shows every raw, so its answer is the whole files: block: an entry it was opened for (a
-    replicate outside 1-999 written by 0.5.1) is not merged back in. Other keys are kept (D84)."""
+    replicate outside 1-999 written by 0.5.1) is not merged back in. Other keys are kept (D85)."""
     bad = "CS_22rv1_FLAG-AR_MA25-10uM_DMSO_1_20260508180610.raw"
     (tmp_path / "experiment.yaml").write_text(
         f"notes: keep me\nfiles:\n  {bad}: {{experiment: DMSO, bioreplicate: 20260508180610}}\n", encoding="utf-8")
@@ -141,7 +141,7 @@ def test_apply_file_overrides_rebuilds_layout():
                                          (1, 1000)])
 def test_no_override_puts_a_number_outside_1_to_999_in_the_manifest(rep, frac):
     """However a FileOverride is made (experiment.yaml, the window, the naming history), the layout refuses a
-    number outside 1-999 before it can reach FragPipe's manifest (D84)."""
+    number outside 1-999 before it can reach FragPipe's manifest (D85)."""
     rs = group_raws(["CS_22rv1_FLAG-AR_MA25-10uM_DMSO_1_20260508180610.raw", "CS_22rv1_FLAG-AR_MA25-10uM_DMSO_3.raw"],
                     "DIA")
     ov = Overrides(files={"CS_22rv1_FLAG-AR_MA25-10uM_DMSO_1_20260508180610.raw":
