@@ -558,3 +558,45 @@ def test_cross_volume_cleanup_persistent_lock_rejects_truthfully(lab, ledger, mo
     assert str(dest2) in note
     assert str(d2) in note
     assert ledger.list() == []
+
+
+# ------------------------------------------- replicate numbers out of range (D84) --
+
+_JOB1 = ["CS_22rv1_FLAG-AR_MA25-10uM_DMSO_1_20260508180610.raw", "CS_22rv1_FLAG-AR_MA25-10uM_DMSO_2_20260508204737.raw",
+         "CS_22rv1_FLAG-AR_MA25-10uM_DMSO_3.raw", "CS_22rv1_FLAG-AR_MA25-10uM_MA25_1.raw",
+         "CS_22rv1_FLAG-AR_MA25-10uM_MA25_2.raw", "CS_22rv1_FLAG-AR_MA25-10uM_MA25_3.raw"]
+# what 0.5.1's naming window wrote for job 1 on 2026-09-23 (docs/REAL_RUNS.md): Xcalibur's time stamp as the replicate
+_JOB1_YAML = """method: DIA
+user: Chris
+resolved_by: gui
+files:
+  CS_22rv1_FLAG-AR_MA25-10uM_DMSO_1_20260508180610.raw: {experiment: CS_22rv1_FLAG-AR_MA25-10uM_DMSO, bioreplicate: 20260508180610}
+  CS_22rv1_FLAG-AR_MA25-10uM_DMSO_2_20260508204737.raw: {experiment: CS_22rv1_FLAG-AR_MA25-10uM_DMSO, bioreplicate: 20260508204737}
+"""
+
+
+def test_a_time_stamp_replicate_in_experiment_yaml_opens_the_window_and_the_answer_fixes_it(lab, ledger):
+    d = make_drop(lab["inbox"], "CS_22rv1_FLAG_AR_MA25", _JOB1)
+    (d / "experiment.yaml").write_text(_JOB1_YAML, encoding="utf-8")
+    with pytest.raises(IntakeError) as e:
+        plan(d, lab["cfg"], ledger)
+    assert e.value.kind == Kind.RAWS  # the naming window can correct a replicate number
+    assert "bioreplicate is 20260508180610, but it must be 1-999" in str(e.value)
+    r = _Answer(Overrides(user="Chris", method="DIA"))
+    assert intake(d, lab["cfg"], ledger, resolver=r) == IntakeResult.QUEUED
+    shown = r.drafts[0]
+    assert "1-999" in shown.problem and shown.method == "DIA" and shown.user == "Chris"  # the rest of the file counts
+    assert [f.bioreplicate for f in shown.files] == ["1", "2", "3", "1", "2", "3"]  # as the names read now
+    m = ledger.next_queued().parsed["plan"]["manifest"]
+    assert sorted(x["bioreplicate"] for x in m) == [1, 1, 2, 2, 3, 3]
+    dest = lab["general"] / "Chris" / "CS_22rv1_FLAG_AR_MA25"
+    assert load_overrides(dest).files == {}  # the old entries are not merged back into the answer
+
+
+def test_a_time_stamp_replicate_without_a_window_leaves_the_folder_with_a_note(lab, ledger):
+    d = make_drop(lab["inbox"], "CS_22rv1_FLAG_AR_MA25", _JOB1)
+    (d / "experiment.yaml").write_text(_JOB1_YAML, encoding="utf-8")
+    assert intake(d, lab["cfg"], ledger) == IntakeResult.REJECTED
+    note = (lab["inbox"] / "CS_22rv1_FLAG_AR_MA25.REJECTED.txt").read_text(encoding="utf-8")
+    assert "20260508180610" in note and "1-999" in note and "DIA-NN drops that run" in note
+    assert d.is_dir() and len(list(d.glob("*.raw"))) == 6 and ledger.list() == []  # nothing moved

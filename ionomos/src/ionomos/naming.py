@@ -37,6 +37,24 @@ from datetime import date
 
 RAW_SUFFIX = ".raw"
 
+# Replicate and fraction numbers run 1-999 (D30), whoever gives them: a file name, experiment.yaml, the naming
+# window, the naming history or a queued job's manifest (D84). FragPipe and DIA-NN keep the replicate in a 32-bit
+# integer: on 0.5.1 an Xcalibur time stamp (20260508180610) went in as a replicate and DIA-NN's matrix lost both runs.
+NUMBER_MIN, NUMBER_MAX = 1, 999
+NUMBER_WHY = ("replicate and fraction numbers run 1-999; a longer number (such as the time stamp Xcalibur adds to a "
+              "re-acquired file) does not fit FragPipe's and DIA-NN's whole numbers, and DIA-NN drops that run")
+
+
+def number_ok(value) -> bool:
+    """True for a whole number 1-999 (an int, or digits); False for anything else."""
+    if isinstance(value, bool):
+        return False
+    try:
+        n = int(str(value).strip())
+    except (TypeError, ValueError):
+        return False
+    return NUMBER_MIN <= n <= NUMBER_MAX
+
 # What a sanitised name may contain. FragPipe cannot handle spaces in paths.
 _SAFE = re.compile(r"[^A-Za-z0-9._-]+")
 _TOKEN_SPLIT = re.compile(r"[\s_\-.()\[\]{}+&,;]+")
@@ -623,9 +641,9 @@ def parse_raw_name(filename: str, method: str, codes: dict[str, str] | None = No
             rep = c["rep"]
     # Regex caps digits at three, so only 0 can slip past this — but check
     # anyway so the bound is enforced by value, not regex shape alone.
-    if rep is not None and not 1 <= int(rep) <= 999:
+    if rep is not None and not number_ok(rep):
         raise NamingError(f"{filename!r}: replicate {rep} is out of range (expected 1–999)")
-    if frac is not None and not 1 <= int(frac) <= 999:
+    if frac is not None and not number_ok(frac):
         raise NamingError(f"{filename!r}: fraction {frac} is out of range (expected 1–999)")
     return RawName(
         filename=filename,
@@ -659,6 +677,11 @@ def group_from_parsed(parsed: list[RawName], method: str, allow_uneven: bool = F
     fr: dict[str, dict[int, set[int]]] = defaultdict(lambda: defaultdict(set))
     single: dict[str, set[int]] = defaultdict(set)
     for r in parsed:
+        # parse_raw_name bounds the numbers it reads; overrides and learned names come here too (D84)
+        if not number_ok(r.rep):
+            raise NamingError(f"{r.filename!r}: replicate {r.rep} is out of range (expected 1–999): {NUMBER_WHY}")
+        if r.fraction is not None and not number_ok(r.fraction):
+            raise NamingError(f"{r.filename!r}: fraction {r.fraction} is out of range (expected 1–999): {NUMBER_WHY}")
         key = (r.sample, r.rep, r.fraction)
         if key in seen:
             raise NamingError(

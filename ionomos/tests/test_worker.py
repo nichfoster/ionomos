@@ -538,3 +538,63 @@ def test_fasta_falls_back_to_workflow_database(bed):
 def test_waiting_causes_maps_hold_reasons_to_plain_english(reason, expected):
     """Every hold keyword maps to its human cause; anything else falls back to the raw reason."""
     assert _waiting_causes(reason) == [expected or reason]
+
+
+# ------------------------------------- a queued job with a replicate outside 1-999 (D84) --
+
+
+def _stamp_a_replicate(bed, dest: Path) -> dict:
+    """Make job 1 look like one 0.5.1 queued: Xcalibur's time stamp as a replicate in its plan (docs/REAL_RUNS.md,
+    job 1). Returns the manifest line as it was."""
+    rec = bed["ledger"].get(1).parsed
+    line = dict(rec["plan"]["manifest"][0])
+    rec["plan"]["manifest"][0]["bioreplicate"] = 20260508180610
+    with bed["ledger"]._conn:
+        bed["ledger"]._conn.execute("UPDATE jobs SET parsed_json = ? WHERE id = 1", (json.dumps(rec),))
+    status = _status(dest)
+    status["plan"] = rec["plan"]
+    (dest / "ionomos.json").write_text(json.dumps(status), encoding="utf-8")
+    return line
+
+
+def test_a_queued_job_with_a_time_stamp_replicate_waits_and_starts_once_experiment_yaml_fixes_it(bed):
+    from ionomos.manifest import FileOverride, Overrides, save_overrides
+
+    dest = _queue(bed, "iso_good")
+    line = _stamp_a_replicate(bed, dest)
+    name = Path(line["file"]).name
+    assert not Worker(bed["cfg"], bed["ledger"]).run_once()  # not run, and no crash
+    job = bed["ledger"].get(1)
+    assert job.status == "queued"
+    assert f"replicate number 20260508180610 of {name} is outside 1-999" in job.reason
+    assert "DIA-NN drops that run" in job.reason and "experiment.yaml" in job.reason
+    assert not (dest / fragpipe.RUN_DIR / fragpipe.MANIFEST_NAME).exists()  # FragPipe never saw it
+    assert _waiting_causes(job.reason[len("waiting: "):])[0].startswith("A replicate number in the job's list")
+
+    save_overrides(dest, Overrides(files={name: FileOverride(bioreplicate=line["bioreplicate"])}))
+    assert Worker(bed["cfg"], bed["ledger"]).run_once()
+    assert bed["ledger"].get(1).status == "done", bed["ledger"].get(1).reason
+    manifest = (dest / fragpipe.RUN_DIR / fragpipe.MANIFEST_NAME).read_text(encoding="utf-8")
+    assert "20260508180610" not in manifest
+    assert {int(row.split("\t")[2]) for row in manifest.splitlines()} <= set(range(1, 1000))
+
+
+def test_a_queued_job_whose_experiment_yaml_has_the_time_stamp_too_waits_saying_so(bed):
+    dest = _queue(bed, "iso_good")
+    name = Path(_stamp_a_replicate(bed, dest)["file"]).name
+    (dest / "experiment.yaml").write_text(f"files:\n  {name}: {{bioreplicate: 20260508180610}}\n", encoding="utf-8")
+    assert not Worker(bed["cfg"], bed["ledger"]).run_once()
+    job = bed["ledger"].get(1)
+    assert job.status == "queued"
+    assert "can't be used to fix it" in job.reason
+    assert f"files.{name}.bioreplicate is 20260508180610, but it must be 1-999" in job.reason
+
+
+def test_the_analysis_says_when_experiment_yaml_is_not_used(bed):
+    from ionomos import postprocess
+
+    dest = _queue(bed, "iso_good")
+    name = Path(_status(dest)["plan"]["manifest"][0]["file"]).name
+    (dest / "experiment.yaml").write_text(f"files:\n  {name}: {{bioreplicate: 20260508180610}}\n", encoding="utf-8")
+    notes = postprocess.prepare(dest, bed["cfg"])["notes"]
+    assert any("experiment.yaml was not used" in n and "must be 1-999" in n for n in notes)

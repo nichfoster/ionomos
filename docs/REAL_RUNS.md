@@ -39,6 +39,11 @@ from unpublished experiments stay out of this page.
   `20260508180610` and `20260508204737` for DMSO 1 and 2. Since 0.5.2 the
   timestamp is ignored (D23), and since 0.8.0 replicate tails are 1–999.
   Current naming reads these files as DMSO 1, 2, 3 and MA25 1, 2, 3.
+  An explicit `bioreplicate:` in `experiment.yaml` was still passed on
+  unchecked until D84 (after 0.18.1). It is now bounded to 1–999 like a
+  file name's: such a file opens the naming window (or leaves a note), and a
+  job already queued with such a number waits until its `experiment.yaml`
+  gives the file's replicate.
 - **DIA-NN's `report.pg_matrix.tsv` has 4 run columns, not 6.** The two
   missing runs are exactly the two with the 14-digit replicate number. That
   number does not fit a 32-bit integer. **Not confirmed**: the job's
@@ -190,7 +195,6 @@ port handles each of these, but no golden pins them.
 | 2026-10-06 | A protein measured in only one condition is removed by a global missing-value filter and is then missing from the "only in one condition" table too | Build that table before the filter; warn when a global filter of x % removes features complete in one condition |
 | 2026-10-06 | Leaving samples out (`exclude_samples`) makes the run-order stage fail (`KeyError` on a left-out sample) | Fix `run_order` to use the chosen samples |
 | Job 1 | Two runs missing from DIA-NN's matrix | Read job 1's console log for the two DMSO files |
-| Job 1 | An explicit `bioreplicate:` in `experiment.yaml` is passed to FragPipe unchecked (14 digits got through on 0.5.1) | Hold the job or refuse the value, as the naming rules do (1–999) |
 | 2026-10-06 | FragPipe's `contam_` prefix is lost in DIA-NN's tables, so contaminants stay and BSA reads as `ALB` | Take the contaminant accessions from the FASTA FragPipe used (or `protein.tsv`) |
 | 2026-10-06 | An empty-vector control next to the vehicle: bait-enriched proteins read as "down" | Decide how a pull-down's background control is shown (ROADMAP) |
 | 2026-10-06 | FragPipeAnalystR golden doesn't cover a real matrix's shape | Add a case with interleaved columns, a duplicated gene and a blank gene |

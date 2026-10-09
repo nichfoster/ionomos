@@ -834,9 +834,14 @@ Collected from the other docs; resolve before/during Phase 1.
 - [ ] Real runs: a `config.yaml` saved as ANSI by Notepad (`—` → byte 0x97) still stops Ionomos with a bare
       `UnicodeDecodeError` (LabWatch did on 2026-09-16; 0.18.1 still does). Read cp1252 as a fallback, or say how
       to save the file.
-- [ ] Real runs: an explicit `bioreplicate:` in `experiment.yaml` reaches FragPipe's manifest unchecked; job 1
+- [x] Real runs: an explicit `bioreplicate:` in `experiment.yaml` reaches FragPipe's manifest unchecked; job 1
       (0.5.1) sent `20260508180610`, and DIA-NN's matrix lacked exactly those two runs. Bound it to 1–999 as the
-      naming rules do? Confirm the cause from job 1's console log.
+      naming rules do? → 2026-10-09 (D84): bounded wherever a number comes from (`experiment.yaml`, the naming
+      window, the naming history, a queued job's manifest). Such a file opens the naming window; a queued job
+      waits, naming the file, until `experiment.yaml` gives its replicate.
+- [ ] Real runs: confirm why DIA-NN's matrix lacked job 1's two time-stamped runs from its
+      `ionomos_run\fragpipe_console.log` (what FragPipe did with those manifest lines). D84 assumes the 32-bit
+      overflow; it is not confirmed.
 - [ ] Real runs: an empty-vector control next to a vehicle control (a pull-down) gives "EV vs DMSO", where
       bait-enriched proteins read as *down*. Should a pull-down's background control be the reference, or the
       comparison be turned round?

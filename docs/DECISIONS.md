@@ -3679,3 +3679,51 @@ bounded; the end-to-end golden is tidier than a real matrix.
 **Not verified**: FragPipe-Analyst's own output for this experiment (not
 kept, settings not written down). The protein was identified by re-running
 Ionomos, not read from FragPipe-Analyst's table.
+
+### D84 — Replicate and fraction numbers are 1–999 wherever they come from
+**2026-10-09.** On 2026-09-23 (job 1, 0.5.1, [REAL_RUNS.md](REAL_RUNS.md))
+the naming window wrote Xcalibur's re-acquisition time stamp as the
+replicate: `bioreplicate: 20260508180610` and `20260508204737` went into
+`experiment.yaml` and FragPipe's manifest. DIA-NN's `report.pg_matrix.tsv`
+then lacked exactly those two runs. Fourteen digits do not fit a 32-bit
+integer, which is how FragPipe and DIA-NN keep the number. File names had
+been bounded to 1–999 since 0.8.0 (D30), but `manifest.py` took any integer
+from `files:`. The bound is now the one in `naming.py` (`NUMBER_MIN`,
+`NUMBER_MAX`, `number_ok`), and it is checked at every way in:
+
+1. **`experiment.yaml`.** `files.<name>.bioreplicate` must be 1–999, and
+   `fraction` 1–999 or -1 (single-shot). Anything else raises
+   `NumberOutOfRange` (an `OverridesError`), whose message gives the value,
+   the range and why.
+2. **Intake opens the naming window for it** (`Kind.RAWS`, not
+   `Kind.OVERRIDES`), because the window edits exactly these numbers. The
+   window shows the files as their names read now, and keeps the file's
+   other keys (method, user). Its answer **replaces** the `files:` block
+   (`save_overrides(replace_files=True)`): the window lists every raw, and
+   merging would bring back the entry it was opened for. Other malformed
+   `experiment.yaml` files are still rejected with a note, as before. With no
+   window, a note says the same.
+3. **The naming window** accepts 1–999 only.
+4. **The naming history** skips a learned number outside 1–999 (a 0.5.x
+   history may hold one). The other files of that record still count.
+5. **The layout check** (`group_from_parsed`) refuses a number outside 1–999,
+   so no override, however it was made, reaches a manifest.
+6. **A job already queued** with such a number (its plan is in the ledger and
+   `ionomos.json`) is not crashed and not searched. `fragpipe.check_raws`,
+   shared by every engine, takes the file's `files.<name>.bioreplicate` from
+   the experiment folder's `experiment.yaml`. When there is none, or the file
+   still has the bad number, the job **waits** (`Hold`), naming the file and
+   the `experiment.yaml` to fix. It starts by itself once that is fixed, so
+   nobody edits `ionomos.json`. A hold, not a failure, because the job is
+   right except for one number that a person can give. Only a job with a
+   number out of range reads `experiment.yaml` here; other jobs search
+   exactly as filed.
+7. **A re-analysis** whose `experiment.yaml` can't be read (such as job 1's
+   folder) now adds a report warning saying so. It used the settings saved
+   at intake before as well, but said nothing.
+
+1–999, not "anything below 2³¹": it is the bound people already know from
+file names, and no lab design has a thousand replicates.
+
+**Not verified**: that the 32-bit overflow is why DIA-NN dropped the two
+runs. Job 1's `fragpipe_console.log` should say (ROADMAP.md, Real runs).

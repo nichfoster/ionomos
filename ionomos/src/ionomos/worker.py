@@ -473,6 +473,10 @@ def recover(cfg: Config, ledger: Ledger) -> list[tuple[int, str]]:
 
 def _waiting_causes(reason: str) -> list[str]:
     r = reason.lower()
+    if "replicate number" in r and "1-999" in r:  # first: the experiment's path may say "fragpipe" (D84)
+        return ["A replicate number in the job's list of raw files is outside 1-999 (Ionomos 0.5.1 read Xcalibur's "
+                "time stamp as one). FragPipe and DIA-NN would drop that run: set the file's bioreplicate in the "
+                "experiment folder's experiment.yaml; the search then starts by itself"]
     if "can't be read yet" in r:
         return ["A raw file is still open in another program — Xcalibur still acquiring, a copy still running, or "
                 "antivirus scanning it; the search starts by itself once it can be read"]

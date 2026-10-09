@@ -61,6 +61,20 @@ outright; **DIA and TMT** also accept a bare stem, so a date-like tail is
 absorbed into the condition/sample name (`DMSO_20260902.raw` → condition
 `DMSO_20260902`, bioreplicate 1 — no phantom number is minted).
 
+The same bound holds wherever a number comes from (D84): `files:` in
+`experiment.yaml`, the naming window, the naming history and a queued job's
+manifest. FragPipe and DIA-NN keep the replicate in a 32-bit whole number; on
+0.5.1 an Xcalibur time stamp (`20260508180610`) went in as a replicate and
+DIA-NN's matrix lost both runs that had one. An `experiment.yaml` with such a
+number opens the naming window, which shows the files as their names read
+and explains why; its answer replaces the old `files:` entries. Without a
+window the folder stays in the inbox with a `.REJECTED.txt` note that says the
+same. A job already queued with such a number waits, naming the file, until
+its `files.<name>.bioreplicate` in the experiment folder's `experiment.yaml`
+is 1–999; the search then starts by itself. The naming history skips a
+learned number outside 1–999, and a re-analysis whose `experiment.yaml` can't
+be read says so in the report instead of ignoring it silently.
+
 **Xcalibur timestamps are ignored.** When a file of that name already exists,
 Xcalibur appends `_YYYYMMDDhhmmss` (`X_DMSO_2_20260508204737.raw`). The tail is
 read as if it weren't there (→ DMSO, rep 2); the file keeps its full name. If
@@ -393,7 +407,7 @@ workflow: TMT10-MS3-phospho # file under config workflow_dir
 fasta: human_reviewed_2025-01_decoys.fas
 allow_uneven_fractions: true   # accept reps with different fraction sets
 
-files:                      # per-file overrides (fraction: -1 = single-shot)
+files:                      # per-file overrides; numbers 1–999 (fraction: -1 = single-shot)
   KL6159A_1_1.raw: {experiment: plex1, bioreplicate: 1, fraction: 1}
 
 tmt:                        # TMT only; one block per plex (= experiment name). FragPipe and Sage TMT both use it
