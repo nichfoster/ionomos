@@ -3715,7 +3715,8 @@ from `files:`. The bound is now the one in `naming.py` (`NUMBER_MIN`,
    still has the bad number, the job **waits** (`Hold`), naming the file and
    the `experiment.yaml` to fix. It starts by itself once that is fixed, so
    nobody edits `ionomos.json`. A hold, not a failure, because the job is
-   right except for one number that a person can give. Only a job with a
+   right except for one number that a person can give. The hold has its own
+   help entry (`search.hold-replicate`). Only a job with a
    number out of range reads `experiment.yaml` here; other jobs search
    exactly as filed.
 7. **A re-analysis** whose `experiment.yaml` can't be read (such as job 1's

@@ -144,6 +144,11 @@ file without `_<replicate>_<fraction>`. Rename the file, or type its replicate
 and fraction in the window. `ionomos names test <file.raw>` shows how a name
 is read. See [Name the raw files](#start.files).
 
+The window also opens when `experiment.yaml` gives a replicate or fraction
+outside 1–999, such as the 14-digit time stamp Xcalibur adds to a re-acquired
+file (Ionomos 0.5.1 wrote these). It shows the files as their names read;
+what you confirm there replaces the old numbers.
+
 ## Uneven fractions or duplicate files {#intake.layout}
 
 The replicates don't have the same fractions (for example replicate 3 has no
@@ -308,6 +313,17 @@ attempt is kept as `fragpipe_previous_<time>`. Moving it aside failed because
 a file in it is open in another program (a table open in Excel, Explorer's
 preview pane). Ionomos never writes a new search over it: close the file and
 the search starts by itself.
+
+## A replicate number is out of range {#search.hold-replicate}
+
+The job's list of raw files gives a file a replicate number outside 1–999.
+Ionomos 0.5.1 could take the time stamp Xcalibur adds to a re-acquired file
+(`…_DMSO_1_20260508180610.raw`) as the replicate. FragPipe and DIA-NN can't
+hold a number that long, and DIA-NN leaves that run out of its results, so
+the search waits instead. Open the experiment folder's `experiment.yaml` and
+give the file named in the reason its replicate number, for example
+`files: {X_DMSO_1_20260508180610.raw: {bioreplicate: 1}}` (change the number
+there if the file already has one). The search then starts by itself.
 
 ## A notification did not arrive {#trouble.notify}
 

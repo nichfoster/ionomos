@@ -24,7 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - the naming history skips a learned number outside 1–999;
   - a job already queued with such a number waits (no crash, nothing sent to
     FragPipe), naming the file and the `experiment.yaml` to fix. Once that
-    file gives the replicate, the search starts by itself;
+    file gives the replicate, the search starts by itself. Its help entry is
+    "A replicate number is out of range";
   - a re-analysis whose `experiment.yaml` can't be read says so in the
     report's warnings instead of ignoring the file silently.
 
