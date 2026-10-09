@@ -3635,3 +3635,41 @@ of tkinter in the handler.
 **Not verified**: a drop from Explorer by hand on the PC (the CI test sends
 Explorer's message itself, which is not quite the same as dragging); the
 fault log on a real hard crash.
+
+### D83 — Real runs are logged; a difference from FragPipe-Analyst is first re-run with its settings
+**2026-10-09.** Real runs had happened (two DIA searches on 2026-09-23, an
+analysis of a FragPipe GUI result on 2026-10-06), but the docs still said
+nothing had run on a real FragPipe. [REAL_RUNS.md](REAL_RUNS.md) is now the
+record: one row per real search or analysis that teaches something, what
+went wrong, and which version fixed it or that it is open. Evidence is the
+support bundles and the experiment's own files. The repository is public, so
+protein names and hit lists of unpublished experiments stay out of it.
+
+The 2026-10-06 analysis was run on fragpipe-analyst.org too, and one protein
+was a hit there and not in Ionomos. The port was not changed, because the
+difference was a setting:
+
+1. Ionomos re-run on the run's own matrix gave the identical result.
+2. FragPipe-Analyst's code (the web app and FragPipeAnalystR, read on
+   2026-10-09) does what the port does when the settings match. This covers
+   the filter rules, median centring, Perseus draws in dplyr's sorted sample
+   order with `set.seed(123)`, `test_limma` and `add_rejections`.
+3. The web app's defaults are no filter, **no normalisation** and all pairs.
+   With its normalisation, Ionomos gains exactly that one protein (q 0.069 →
+   0.042; measured in all nine samples, nothing imputed).
+
+So, when a result differs from FragPipe-Analyst: re-run with the Analysis
+tab's **Use FragPipe-Analyst's defaults** (or the web's settings) before
+suspecting the port, and compare whole tables with `ionomos compare`, not
+hit lists by eye.
+
+Found on the way, open in ROADMAP.md: FragPipe's `contam_` prefix does not
+survive into DIA-NN's tables, so contaminants are kept (also by
+FragPipe-Analyst); FragPipeAnalystR's `make_se_from_files` removes
+contaminants for LFQ only, which `fpa.py`'s docstring now says; a
+non-UTF-8 `config.yaml` still crashes; `experiment.yaml` replicates are not
+bounded; the end-to-end golden is tidier than a real matrix.
+
+**Not verified**: FragPipe-Analyst's own output for this experiment (not
+kept, settings not written down). The protein was identified by re-running
+Ionomos, not read from FragPipe-Analyst's table.
