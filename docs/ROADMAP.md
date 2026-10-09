@@ -163,7 +163,7 @@ searches *had* run on the PC on 2026-09-23 (0.5.1 and 0.5.3, through
 runner (0.14.0 and later), isoDTB and TMT; the Phase 2 exit test is still
 open. From those runs: FragPipe 24's own DIA-NN is 2.3.2, `.raw` works for
 DIA, and the analysis of a real FragPipe GUI result matched
-FragPipe-Analyst once its normalisation setting was matched. New problems
+FragPipe-Analyst once its missing-value filter setting was matched. New problems
 found are under "Real runs" in the open questions below.
 
 ## Phase 3 — DIA, then TMT
@@ -819,8 +819,15 @@ Collected from the other docs; resolve before/during Phase 1.
       -0.2 to -0.4 log2, 67 % of the calls at adjusted p alone are false, 8.4 % of the hits in the worst case;
       `auto` keeps them within 0.04.) → 2026-10-06, a real FLAG pull-down with an empty-vector control
       (REAL_RUNS.md): still `median` on the PC; the composition check passed (0.09 log2 < 0.1), so `auto` would
-      have centred too. FragPipe-Analyst's web default is no normalisation, and that alone made one borderline
-      protein a hit there and not in Ionomos. Which the lab wants is still the question.
+      have centred too. (The protein FragPipe-Analyst called a hit and Ionomos did not came from the missing-value
+      filter, not from normalisation: see the next items.) Which the lab wants is still the question.
+- [ ] Real runs (REAL_RUNS.md, 2026-10-06): a global missing-value filter (here ≥ 66 % of all samples, set for this
+      run) removes every protein seen in one condition only, and the "only in one condition" table is built after
+      the filter, so such a protein disappears without a trace. Build that table before the filter, and warn
+      when a global filter removes features complete in one condition? Should the Analysis tab caution against a
+      global filter for pull-downs?
+- [ ] Real runs: leaving samples out (`exclude_samples`) makes the run-order stage fail with a `KeyError` on a
+      left-out sample (found re-running the 2026-10-06 analysis without the empty-vector runs).
 - [ ] Real runs (REAL_RUNS.md, 2026-10-09): FragPipe's `contam_` prefix does not reach DIA-NN's `Protein.Group`, so
       `remove_contaminants` removes nothing from a FragPipe DIA search (BSA is reported as `ALB`, trypsin stays).
       Take the contaminant accessions from the FASTA the search used? FragPipe-Analyst has the same gap.
