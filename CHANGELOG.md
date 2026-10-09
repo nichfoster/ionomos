@@ -16,16 +16,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   VALIDATION.md and TESTING.md no longer say nothing has run on a real
   FragPipe. They record what those runs answered: `fragpipe.bat` works, `.raw`
   works for DIA, FragPipe 24 uses its own DIA-NN 2.3.2, and the PC has .NET 6.
-- **Why fragpipe-analyst.org showed a hit that Ionomos didn't**: its default
-  is no normalisation, and Ionomos centred the medians. With the same
-  setting Ionomos gains exactly that protein. The port was not changed.
+- **Why fragpipe-analyst.org showed a hit that Ionomos didn't**: the protein
+  was measured in one condition only. The Ionomos run's global
+  missing-value filter (≥ 66 % of all samples) removed it, while the web app
+  has no filter by default and imputed its missing values. Without the
+  filter, Ionomos gives 19 of the web's 21 hits, that protein included. The
+  port was not changed. (A first version of this entry blamed the
+  normalisation.)
 - New open problems in ROADMAP.md:
   - contaminants are not removed from FragPipe DIA searches, because DIA-NN
     drops the `contam_` prefix;
   - a non-UTF-8 `config.yaml` still crashes;
   - `experiment.yaml` replicate numbers are not bounded;
   - an empty-vector control reads bait-enriched proteins as "down";
-  - the FragPipeAnalystR golden is tidier than a real matrix.
+  - the FragPipeAnalystR golden is tidier than a real matrix;
+  - a protein seen in one condition only vanishes when a global filter
+    removes it: the "only in one condition" table is built after the filter;
+  - leaving samples out makes the run-order stage fail.
 
 ## [0.18.1] - 2026-10-06
 

@@ -21,7 +21,7 @@ from unpublished experiments stay out of this page.
 | 2026-09-23 15:16 | 0.5.1 | **Job 1**, `CS_22rv1_FLAG_AR_MA25`, DIA, 6 raws | **First real FragPipe search.** Exit 0 after 14 min. DIA-NN's matrix has 4 of the 6 runs; the report had no volcano. [Job 1](#job-1-the-first-real-search) |
 | 2026-09-23 16:40 | 0.5.3 | **Job 2**, the same raws dropped loose again, grouped by Ionomos | Searching when the 16:45 bundle was taken; how it ended was not reported. [Job 2](#job-2-loose-files-grouped) |
 | 2026-10-06 | 0.18.0 | First drop on the app's Analysis tab | The app froze (fixed in 0.18.1, D82) |
-| 2026-10-06 | 0.18.0 | Analysis tab on a FragPipe GUI result (Sheena, a FLAG pull-down, DIA, 9 runs) | Report made. Compared with FragPipe-Analyst: one protein differed, because of a different setting. [The FragPipe-Analyst comparison](#2026-10-06-a-fragpipe-gui-result-analysed-and-compared-with-fragpipe-analyst) |
+| 2026-10-06 | 0.18.0 | Analysis tab on a FragPipe GUI result (Sheena, a FLAG pull-down, DIA, 9 runs) | Report made. Compared with FragPipe-Analyst: a protein seen in one condition only was a hit there and filtered out here (the missing-value filter). [The FragPipe-Analyst comparison](#2026-10-06-a-fragpipe-gui-result-analysed-and-compared-with-fragpipe-analyst) |
 
 ## Job 1: the first real search
 
@@ -115,9 +115,19 @@ Analysis tab (0.18.0) then analysed the FragPipe folder (D80).
 
 ### Why FragPipe-Analyst showed a protein Ionomos didn't
 
-The same `report.pg_matrix.tsv` was run on fragpipe-analyst.org. Its
-settings were not written down, and its results table was not kept. One
-protein appeared as a hit there that was not a hit in Ionomos's report.
+The same `report.pg_matrix.tsv` was run on fragpipe-analyst.org (vehicle vs
+compound; its volcano has 21 hits). The compound-vs-vehicle comparison in
+Ionomos had 17. The protein that caught the eye there was measured in all
+three compound replicates and in none of the six other samples.
+
+**Cause: the missing-value filter.** This Ionomos run asked for values in
+≥ 66 % of *all* samples, which is 6 of 9. A protein seen only in the three
+compound runs has 3 of 9, so it was removed before testing (one of the 154
+the filter removed). The web app's default has no filter. There, the six
+missing values were imputed (Perseus-type, from the low end of each sample),
+and the protein came out at log2FC ≈ 2.9, q ≈ 1e-4: a strong hit whose size
+is set by the imputed values, not by a measurement. It is an on/off
+detection, best read as "seen only with the compound".
 
 What was checked:
 
@@ -138,29 +148,33 @@ What was checked:
    One difference that did not matter here: the web app drops rows with
    "contam" in `Protein.Group`, but FragPipeAnalystR's `make_se_from_files`
    only does that for LFQ, not DIA. No row in this matrix had the prefix.
-3. **The web app's defaults are not this run's settings.** Its defaults are:
-   no missing-value filter (0 / 0), **"No normalization"**, Perseus-type
-   imputation, and all pairs (a control must be typed in). Re-running
-   Ionomos with the web's normalisation (none) and the run's filter, the
-   compound-vs-vehicle comparison gains exactly **one** hit. That protein
-   was measured in all nine samples, so nothing was imputed. With median
-   centring: log2FC 1.26, q 0.069. Without: log2FC 1.30, q 0.042. With all
-   the web defaults: q 0.032. Six other proteins drop below the cut-off
-   without centring, but a difference is noticed by what appears, not by
-   what goes.
+3. **Re-run with the web's filter.** Ionomos with no missing-value filter
+   and median centring gives 20 hits; 19 are among FragPipe-Analyst's 21,
+   including that protein. The other three sit on the cut-offs (q 0.051 and
+   0.055 against 0.05; a log2FC of 1.00 against 1).
+   Where values are imputed, the random draws depend on the sample names
+   (they set the order the samples are drawn in), and the web session's
+   names were not kept. The web's own normalisation default ("No
+   normalization") fits less well (17 shared, 2 extra, 4 missing), so the
+   session most likely used "Median centered".
 
-**Conclusion: a settings difference (normalisation), not an error in the
-port.** Median centring removes loading differences of up to 0.2 log2
-between runs (one compound replicate +0.22, one empty-vector replicate
-−0.20). The protein
-is a borderline change either way. To reproduce a FragPipe-Analyst web
-session, press **Use FragPipe-Analyst's defaults** in the Analysis tab and
-set the control. Or, on the web, choose "Median centered" and the same
-filter percentages. **Not verified**: FragPipe-Analyst's own table. The
-protein was identified by re-running, not read from its output. Next time,
-download FragPipe-Analyst's results table, note its settings, and run
-`ionomos compare <experiment> <table>` ([VALIDATION.md](VALIDATION.md)). That
-lists every difference, not only the one that catches the eye.
+**Conclusion: a settings difference (the missing-value filter), not an
+error in the port.** A global filter of 66 % with three conditions of three
+removes everything seen in only one condition, which in a pull-down or a
+treatment is often the interesting part. Ionomos' own default (0 % of all
+samples, 50 % of one condition) keeps it. It is then tested (q 0.10 with
+median centring: not a hit, because the imputed values vary) and listed
+under "only in one condition". **Also a gap in the
+report:** Ionomos' "only in one condition" table is made after the filter,
+so a protein the filter removes for being in one condition only is not
+listed there either. [Open](#open)
+
+To reproduce a FragPipe-Analyst web session, press **Use FragPipe-Analyst's
+defaults** in the Analysis tab, set the control, and match the web's
+normalisation choice. **Not verified**: FragPipe-Analyst's own table. Its
+volcano's labels were compared, not its numbers. Next time, download its
+results table, note its settings, and run `ionomos compare <experiment>
+<table>` ([VALIDATION.md](VALIDATION.md)).
 
 **A test gap this showed.** The end-to-end FragPipeAnalystR golden
 (`tests/golden/fpa/e2e/`) has its samples in sorted order, one accession per
@@ -173,6 +187,8 @@ port handles each of these, but no golden pins them.
 | Seen | Problem | Next step |
 |---|---|---|
 | 2026-09-16 | A `config.yaml` that is not UTF-8 (Notepad saving as ANSI turns `—` into byte 0x97) still stops Ionomos 0.18.1 with a bare `UnicodeDecodeError`, not a `ConfigError` saying what to do | Read cp1252 when UTF-8 fails, or say which line and how to save it |
+| 2026-10-06 | A protein measured in only one condition is removed by a global missing-value filter and is then missing from the "only in one condition" table too | Build that table before the filter; warn when a global filter of x % removes features complete in one condition |
+| 2026-10-06 | Leaving samples out (`exclude_samples`) makes the run-order stage fail (`KeyError` on a left-out sample) | Fix `run_order` to use the chosen samples |
 | Job 1 | Two runs missing from DIA-NN's matrix | Read job 1's console log for the two DMSO files |
 | Job 1 | An explicit `bioreplicate:` in `experiment.yaml` is passed to FragPipe unchecked (14 digits got through on 0.5.1) | Hold the job or refuse the value, as the naming rules do (1–999) |
 | 2026-10-06 | FragPipe's `contam_` prefix is lost in DIA-NN's tables, so contaminants stay and BSA reads as `ALB` | Take the contaminant accessions from the FASTA FragPipe used (or `protein.tsv`) |

@@ -3654,9 +3654,15 @@ difference was a setting:
    2026-10-09) does what the port does when the settings match. This covers
    the filter rules, median centring, Perseus draws in dplyr's sorted sample
    order with `set.seed(123)`, `test_limma` and `add_rejections`.
-3. The web app's defaults are no filter, **no normalisation** and all pairs.
-   With its normalisation, Ionomos gains exactly that one protein (q 0.069 →
-   0.042; measured in all nine samples, nothing imputed).
+3. The web app's defaults are no filter, no normalisation and all pairs.
+   The protein was measured in the three compound runs only; this run's
+   global filter (≥ 66 % of all samples, so 6 of 9) removed it, while the
+   web imputed its six missing values and called it a strong hit. Without
+   the filter (and with median centring), Ionomos gives 19 of the web's 21
+   hits, that protein included; the other three sit on the cut-offs.
+   (Corrected the same day. The first version of this entry blamed the
+   normalisation and named a different protein, from a guess made before
+   the web's volcano was seen.)
 
 So, when a result differs from FragPipe-Analyst: re-run with the Analysis
 tab's **Use FragPipe-Analyst's defaults** (or the web's settings) before
