@@ -144,6 +144,11 @@ file without `_<replicate>_<fraction>`. Rename the file, or type its replicate
 and fraction in the window. `ionomos names test <file.raw>` shows how a name
 is read. See [Name the raw files](#start.files).
 
+The window also opens when `experiment.yaml` gives a replicate or fraction
+outside 1–999, such as the 14-digit time stamp Xcalibur adds to a re-acquired
+file (Ionomos 0.5.1 wrote these). It shows the files as their names read;
+what you confirm there replaces the old numbers.
+
 ## Uneven fractions or duplicate files {#intake.layout}
 
 The replicates don't have the same fractions (for example replicate 3 has no
@@ -308,6 +313,17 @@ attempt is kept as `fragpipe_previous_<time>`. Moving it aside failed because
 a file in it is open in another program (a table open in Excel, Explorer's
 preview pane). Ionomos never writes a new search over it: close the file and
 the search starts by itself.
+
+## A replicate number is out of range {#search.hold-replicate}
+
+The job's list of raw files gives a file a replicate number outside 1–999.
+Ionomos 0.5.1 could take the time stamp Xcalibur adds to a re-acquired file
+(`…_DMSO_1_20260508180610.raw`) as the replicate. FragPipe and DIA-NN can't
+hold a number that long, and DIA-NN leaves that run out of its results, so
+the search waits instead. Open the experiment folder's `experiment.yaml` and
+give the file named in the reason its replicate number, for example
+`files: {X_DMSO_1_20260508180610.raw: {bioreplicate: 1}}` (change the number
+there if the file already has one). The search then starts by itself.
 
 ## A notification did not arrive {#trouble.notify}
 
@@ -572,6 +588,34 @@ own group. Fix the conditions in the window and **Run analysis**.
 Fewer than 100 features passed the filters, so the statistics and the
 enrichment are weak. Check the identifications per sample in the QC section; a
 small sample amount, a short gradient or a strict filter are the usual causes.
+
+## The filter removed features one condition had in every sample {#issue.FILTER_REMOVES_ONE_CONDITION}
+
+The missing-value filter was set to keep features measured in a share of
+**all** samples (for example 66%). That share counts every condition. With
+three conditions of three samples, a feature seen only in one condition has 3
+of 9 values (33%), so any global filter above that removes it before
+testing, even when that condition had it in every sample. In a pull-down or a
+treatment, that is often the result you are looking for.
+
+The warning says how many were removed, and in which condition. The ones a
+comparison finds are still listed under
+[Only in one condition](#report.onoff), in grey, as "removed by the filter".
+To test them, filter on the conditions instead: 0% of all samples and 50% of
+one condition, which is Ionomos' default. On the Analysis tab that is
+"Measured in ≥ % of all samples" 0 and "… and ≥ % of one condition" 50, or
+in `experiment.yaml`:
+
+```yaml
+analysis:
+  filter_global_pct: 0
+  filter_condition_pct: 50
+```
+
+Then **Run analysis**. Their missing values are then imputed, so their fold
+changes depend on the imputation; read them as "seen only in this
+condition". Keep the global filter if you want a table of features measured
+nearly everywhere.
 
 ## Samples look like outliers {#issue.SAMPLE_OUTLIER}
 

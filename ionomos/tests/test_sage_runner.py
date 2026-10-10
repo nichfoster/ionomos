@@ -298,8 +298,10 @@ def test_two_raw_files_with_one_name_are_refused(bed):
         sage.prepare(job, bed["cfg"])
 
 
-def test_config_and_setup_checklist(tmp_path):
+def test_config_and_setup_checklist(tmp_path, monkeypatch):
     import yaml
+
+    monkeypatch.setattr(sage, "CONVERTER_CANDIDATES", ())  # a PC with C:\ThermoRawFileParser\ would find it
 
     base = yaml.safe_load(testbed.init(tmp_path / "b").read_text(encoding="utf-8"))
     base["methods"]["LFQ"] = {"engine": "sage", "fasta": "human_reviewed_decoys.fas", "data_type": "DDA",

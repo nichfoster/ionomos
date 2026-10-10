@@ -681,9 +681,11 @@ def load_expected(path: str | Path) -> dict:
     """
     import yaml
 
+    from ionomos.config import read_yaml_text
+
     path = Path(path)
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        data = yaml.safe_load(read_yaml_text(path, error=BenchmarkError))
     except (OSError, UnicodeError, yaml.YAMLError) as exc:
         raise BenchmarkError(f"cannot read {path}: {exc}") from exc
     if not isinstance(data, dict) or not isinstance(data.get("expected"), dict) or not data["expected"]:

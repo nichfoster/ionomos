@@ -17,6 +17,8 @@ from pathlib import Path
 
 import yaml
 
+from ionomos.config import read_yaml_text
+
 DEFAULT_ROOT_WIN = "C:/Fragpipe_Auto"
 DEFAULT_USERS_WIN = "C:/Fragpipe_General"
 
@@ -100,7 +102,7 @@ def read_config(path: str | Path) -> dict:
     p = Path(path)
     if not p.is_file():
         return defaults()
-    raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    raw = yaml.safe_load(read_yaml_text(p)) or {}  # cp1252 (Notepad "ANSI") read with a warning, D86
     if not isinstance(raw, dict):
         raw = {}
     if isinstance(raw.get("notify"), dict):

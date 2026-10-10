@@ -292,6 +292,12 @@ also mean "below detection", so confirm them another way. **Mark on the
 volcano** shows where they landed; the table is sorted by how complete the
 group is, then by abundance.
 
+They are counted before the missing-value filter. A filter on all samples
+(for example 66%) removes a feature that only one condition has, and it is
+then not tested. Such a feature is still listed here, in grey, as "removed
+by the filter"; in `presence_absence.tsv` its `removed_by_filter` is
+`TRUE`. See [the filter warning](#issue.FILTER_REMOVES_ONE_CONDITION).
+
 ## Heatmap {#report.heatmap}
 
 The significant features (at the saved cut-offs) in every sample. Each row is

@@ -3654,9 +3654,15 @@ difference was a setting:
    2026-10-09) does what the port does when the settings match. This covers
    the filter rules, median centring, Perseus draws in dplyr's sorted sample
    order with `set.seed(123)`, `test_limma` and `add_rejections`.
-3. The web app's defaults are no filter, **no normalisation** and all pairs.
-   With its normalisation, Ionomos gains exactly that one protein (q 0.069 →
-   0.042; measured in all nine samples, nothing imputed).
+3. The web app's defaults are no filter, no normalisation and all pairs.
+   The protein was measured in the three compound runs only; this run's
+   global filter (≥ 66 % of all samples, so 6 of 9) removed it, while the
+   web imputed its six missing values and called it a strong hit. Without
+   the filter (and with median centring), Ionomos gives 19 of the web's 21
+   hits, that protein included; the other three sit on the cut-offs.
+   (Corrected the same day. The first version of this entry blamed the
+   normalisation and named a different protein, from a guess made before
+   the web's volcano was seen.)
 
 So, when a result differs from FragPipe-Analyst: re-run with the Analysis
 tab's **Use FragPipe-Analyst's defaults** (or the web's settings) before
@@ -3674,7 +3680,163 @@ bounded; the end-to-end golden is tidier than a real matrix.
 kept, settings not written down). The protein was identified by re-running
 Ionomos, not read from FragPipe-Analyst's table.
 
-### D84 — Contaminants are also taken from the search's FASTA; a group with any of them goes
+### D84 — "Only in one condition" is counted before the missing-value filter; a global filter that removes it is a warning
+**2026-10-09.** Two problems from the 2026-10-06 pull-down (DIA, DMSO, FPS
+and EV × 3; [REAL_RUNS.md](REAL_RUNS.md)).
+
+**1. A global filter hid on/off proteins.** With `filter_global_pct: 66`, a
+protein in all three FPS runs and in none of the other six has 3 of 9 values
+(33 %) and was removed before testing. The "only in one condition" list
+(`presence_absence.tsv`, `quality.only_in_one_condition`, the report's
+section) was built from the filtered matrix, so the protein was gone without
+a trace, while fragpipe-analyst.org (no filter by default) called it a hit.
+
+- The on/off features are now found on `Processed.before_filter`: the
+  samples chosen and contaminants removed, but no missing-value filter. Each
+  row is matched back, in order, to the analysed matrix
+  (`insights._kept_rows`). Features still analysed are listed as before, and
+  if the filter removed nothing the list is exactly the old one. Features the
+  filter removed are listed too, marked: `removed_by_filter TRUE` in
+  `presence_absence.tsv`, `quality.only_in_one_condition_filtered_out` in
+  `analysis.json`, and in grey with "removed by the filter" in the report's
+  table (`onoffOut` in the payload) and in its key findings.
+- Their mean is on the analysed scale. Each normalisation in
+  `fpa.normalize_info` is a map `a·x + b` per sample (`gn` scales, the others
+  shift), so it is recovered exactly from two analysed features per sample
+  and applied to the removed rows. Mixing "as loaded" and normalised means
+  in one column would have misordered the list.
+- **`FILTER_REMOVES_ONE_CONDITION`** (warning). This fires when a global
+  filter removes features that a condition of two or more samples had in
+  every sample. It gives how many, per condition, and how many were never
+  seen anywhere else. Such a feature passes any per-condition filter, so the
+  global one removed it. The fix it suggests is 0 % of all samples and 50 %
+  of one condition (Ionomos' default). Also in `analysis.json` as
+  `quality.filter_removed_complete_in_one_condition`.
+- Not changed: the filter itself. A global filter is a legitimate choice for
+  a table of features measured nearly everywhere, and FragPipe-Analyst has
+  the same rule. The person is told what it removed, not overruled.
+
+**2. `exclude_samples` broke the run-order stage.** `KeyError: 'EV_2'` in
+`runorder.sample_files`. When the matrix's runs match the manifest, the
+loader records `meta["manifest_run"]` (sample → run). `fpa.choose_samples`
+copies `meta` unchanged, so the samples left out were still in that map, and
+their raw files were given to a sample that wasn't analysed.
+`runorder._manifest_run` now keeps only the samples analysed. The order is
+then among those samples (1–6 without EV). The fix is in the run-order
+stage, the only reader that indexed by sample. The SDRF reads the loaded
+matrix's map and lists the left-out runs on purpose.
+
+**Not verified**: on the lab's own matrix (the tests rebuild its shape with
+`simulate.dia_pg_matrix`). The 66 % setting came from the person running the
+analysis; whether the Analysis tab should also warn before a global filter is
+set, for pull-downs, is still open (ROADMAP.md).
+
+### D85 — Replicate and fraction numbers are 1–999 wherever they come from
+**2026-10-09.** On 2026-09-23 (job 1, 0.5.1, [REAL_RUNS.md](REAL_RUNS.md))
+the naming window wrote Xcalibur's re-acquisition time stamp as the
+replicate: `bioreplicate: 20260508180610` and `20260508204737` went into
+`experiment.yaml` and FragPipe's manifest. DIA-NN's `report.pg_matrix.tsv`
+then lacked exactly those two runs. Fourteen digits do not fit a 32-bit
+integer, which is how FragPipe and DIA-NN keep the number. File names had
+been bounded to 1–999 since 0.8.0 (D30), but `manifest.py` took any integer
+from `files:`. The bound is now the one in `naming.py` (`NUMBER_MIN`,
+`NUMBER_MAX`, `number_ok`), and it is checked at every way in:
+
+1. **`experiment.yaml`.** `files.<name>.bioreplicate` must be 1–999, and
+   `fraction` 1–999 or -1 (single-shot). Anything else raises
+   `NumberOutOfRange` (an `OverridesError`), whose message gives the value,
+   the range and why.
+2. **Intake opens the naming window for it** (`Kind.RAWS`, not
+   `Kind.OVERRIDES`), because the window edits exactly these numbers. The
+   window shows the files as their names read now, and keeps the file's
+   other keys (method, user). Its answer **replaces** the `files:` block
+   (`save_overrides(replace_files=True)`): the window lists every raw, and
+   merging would bring back the entry it was opened for. Other malformed
+   `experiment.yaml` files are still rejected with a note, as before. With no
+   window, a note says the same.
+3. **The naming window** accepts 1–999 only.
+4. **The naming history** skips a learned number outside 1–999 (a 0.5.x
+   history may hold one). The other files of that record still count.
+5. **The layout check** (`group_from_parsed`) refuses a number outside 1–999,
+   so no override, however it was made, reaches a manifest.
+6. **A job already queued** with such a number (its plan is in the ledger and
+   `ionomos.json`) is not crashed and not searched. `fragpipe.check_raws`,
+   shared by every engine, takes the file's `files.<name>.bioreplicate` from
+   the experiment folder's `experiment.yaml`. When there is none, or the file
+   still has the bad number, the job **waits** (`Hold`), naming the file and
+   the `experiment.yaml` to fix. It starts by itself once that is fixed, so
+   nobody edits `ionomos.json`. A hold, not a failure, because the job is
+   right except for one number that a person can give. The hold has its own
+   help entry (`search.hold-replicate`). Only a job with a
+   number out of range reads `experiment.yaml` here; other jobs search
+   exactly as filed.
+7. **A re-analysis** whose `experiment.yaml` can't be read (such as job 1's
+   folder) now adds a report warning saying so. It used the settings saved
+   at intake before as well, but said nothing.
+
+1–999, not "anything below 2³¹": it is the bound people already know from
+file names, and no lab design has a thousand replicates.
+
+**Not verified**: that the 32-bit overflow is why DIA-NN dropped the two
+runs. Job 1's `fragpipe_console.log` should say (ROADMAP.md, Real runs).
+
+### D86 — Hand-edited YAML that isn't UTF-8 is read as cp1252 with a warning
+**2026-10-09.** On 2026-09-16 LabWatch 0.1.0 stopped on the PC with
+`UnicodeDecodeError … byte 0x97` reading `config.yaml`: Notepad had saved it
+as "ANSI", and the em dash in a comment became cp1252's byte 0x97.
+0.18.1 still did the same, and not only for `config.yaml`: every reader
+of a hand-edited YAML file used `read_text(encoding="utf-8")`
+(REAL_RUNS.md, Open).
+
+Two ways out were weighed: read cp1252 when UTF-8 fails, or refuse with a
+`ConfigError` that says where and how to re-save. Ionomos now reads
+cp1252, with a warning:
+
+1. **The PC's "ANSI" is cp1252**, so the fallback reads such a file as
+   Notepad meant it. A wrong letter in a comment changes nothing, and the
+   values that matter (paths, method keys) are ASCII.
+2. **A refusal stops the watcher**, and drops then pile up in the inbox
+   until somebody edits a file in a way they can't see is wrong. Nothing is
+   lost by reading on: the warning names the file, the first byte that
+   isn't UTF-8 and its line, and how to re-save. For `config.yaml` it goes
+   into `Config.warnings`: the `ionomos` commands print it (`status`
+   included, where LabWatch crashed), and the running watcher logs it when a
+   reload brings it. For the other files it is logged. D69 reads FragPipe's
+   console the same way (UTF-8 when it is, else cp1252).
+3. **A `ConfigError` is left only for what cp1252 can't read** (its five
+   unused bytes 0x81, 0x8D, 0x8F, 0x90, 0x9D, or broken UTF-16). It names
+   both bytes and lines and says how to save as UTF-8. The watcher's live
+   reload keeps the last good config on it; before, the bare
+   `UnicodeDecodeError` escaped `LiveConfig.get`.
+
+All of it is `config.read_yaml_text`: UTF-8 with or without a BOM, UTF-16
+with its BOM (Notepad's "Unicode"), then cp1252. It reads `config.yaml`
+(`load`, `configio.read_config`, the diagnostics' paths and secrets),
+`learned_aliases.yaml`, `experiment.yaml` (`load_overrides`,
+`overrides_text`, the assistant's diff), a benchmark's spec, and the
+support bundle's copies. Two of these mattered beyond a crash:
+
+- **Redaction.** `notify.file_secrets` read a cp1252 config as nothing. A
+  webhook address was then hidden only on a `url:` line, not in the logs or
+  in the short form `teams: <address>`.
+- **The bundle's anonymiser** read it as `{}` too, so the users and aliases
+  of the config went unscrubbed. The bundle's text copy of a YAML file is
+  read the same way as the anonymiser reads it, so a name with `ü` is
+  matched, not left as `Gr�n`.
+
+An `experiment.yaml` that can't be read at all raises `OverridesError`. A
+save merging over it stops, rather than writing a file without what it said.
+An unreadable `learned_aliases.yaml` is skipped when the config loads, as a
+broken one already was. But learning a new alias (the resolver window) no
+longer rewrites it with only the new alias; it is left as it is and the
+failure is logged. That is new for broken YAML too.
+Ionomos writes UTF-8 everywhere, so a file is converted the first time the
+app saves it.
+
+**Not verified**: the warning on the PC itself. That the PC's "ANSI" is
+cp1252 is inferred from the em dash arriving as 0x97 (PROTEOMICS_PC.md does
+not record the code page).
+### D87 — Contaminants are also taken from the search's FASTA; a group with any of them goes
 **2026-10-09.** FragPipe marks its contaminants in the FASTA (`contam_sp|P02769|ALBU_BOVIN`),
 and FragPipe-Analyst's rule removes rows whose protein contains "contam". FragPipe's own
 tables keep the prefix. DIA-NN's `report.pg_matrix.tsv` does not: `Protein.Group` holds

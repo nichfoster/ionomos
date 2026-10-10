@@ -507,7 +507,9 @@ def _raw_paths(config_path: Path) -> dict:
     try:
         import yaml
 
-        raw = yaml.safe_load(Path(config_path).read_text(encoding="utf-8")) or {}
+        from ionomos.config import read_yaml_text
+
+        raw = yaml.safe_load(read_yaml_text(config_path)) or {}
         return {k: Path(v) for k, v in (raw.get("paths") or {}).items() if isinstance(v, str) and v}
     except Exception:  # noqa: BLE001
         return {}

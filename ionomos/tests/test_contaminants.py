@@ -1,4 +1,4 @@
-"""Contaminants from the search's FASTA (D84).
+"""Contaminants from the search's FASTA (D87).
 
 DIA-NN writes bare accessions in Protein.Group (P02769, not contam_sp|P02769|ALBU_BOVIN), so FragPipe-Analyst's
 "contam" rule removes nothing from a FragPipe DIA search (docs/REAL_RUNS.md, 2026-10-06). The accessions of the
@@ -60,7 +60,7 @@ def test_fasta_contaminants_rereads_a_changed_file(tmp_path):
     ("P02769", "ALB", CONTAMS, True),                     # BSA, labelled with the human gene name
     ("P00761", "", CONTAMS, True),                        # porcine trypsin
     ("P02768", "ALB", CONTAMS, False),                    # human albumin stays
-    ("P02768;P02769", "ALB", CONTAMS, True),              # any contaminant in the group: removed (D84)
+    ("P02768;P02769", "ALB", CONTAMS, True),              # any contaminant in the group: removed (D87)
     ("P02769;P02768", "ALB", CONTAMS, True),
     ("P60709", "ACTB", CONTAMS, False),
     ("P02769-2", "ALB", CONTAMS, False),                  # an isoform is not the FASTA's entry

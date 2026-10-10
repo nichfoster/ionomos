@@ -6,7 +6,7 @@ and its web app FragPipe-Analyst (MonashProteomics) process a FragPipe result
 table in this order; so does this module, with their defaults:
 
     make_se_from_files    zeros -> missing, log2, contaminants removed      (quant.py loaders + remove_contaminants;
-                                                                           + the FASTA's contam_ accessions, D84)
+                                                                           + the FASTA's contam_ accessions, D87)
     global_filter         min % of samples with a value                    filter_missing(global_pct)
     filter_by_condition   min % with a value in at least one condition     filter_missing(condition_pct)
     MD / GN normalization median centring (+ MAD scaling)                  normalize("median" | "gn")
@@ -148,7 +148,7 @@ def _accession(token: str) -> str:
 
 def is_contaminant(f: Feature, accessions: frozenset[str] | set[str] = frozenset()) -> bool:
     """FragPipe-Analyst's rule (the protein contains "contam": FragPipe's contam_ prefix; MaxQuant's CON__ too), or
-    any protein of the group is one of the FASTA's contaminant `accessions` (D84: DIA-NN drops the prefix)."""
+    any protein of the group is one of the FASTA's contaminant `accessions` (D87: DIA-NN drops the prefix)."""
     if "contam" in f.id or "contam_" in f.label or f.id.startswith("CON__"):
         return True
     return bool(accessions) and any(_accession(a) in accessions for a in f.id.split(";"))
@@ -159,7 +159,7 @@ def remove_contaminants(m: QuantMatrix,
     """FragPipe-Analyst: rows whose protein contains "contam" (FragPipe's contam_ prefix) are dropped; MaxQuant's
     CON__ prefix too. FragPipeAnalystR does this for LFQ tables only, the web app also for DIA-NN's Protein.Group;
     Ionomos for every intensity table. DIA-NN writes the bare accession, so a FragPipe DIA search loses the prefix:
-    `accessions` (fasta_contaminants of the search's FASTA) drops a group when any of its proteins is one (D84)."""
+    `accessions` (fasta_contaminants of the search's FASTA) drops a group when any of its proteins is one (D87)."""
     keep = [i for i, f in enumerate(m.features) if not is_contaminant(f, accessions)]
     if len(keep) == len(m.features):
         return m, 0
@@ -604,7 +604,7 @@ def process(m: QuantMatrix, *, exclude: list[str] | None = None, conditions: dic
             contaminant_fasta: tuple[str, frozenset[str]] | None = None) -> tuple[Processed, list[str]]:
     """Every processing step in FragPipe-Analyst's order. Returns (Processed, notes). ratio_centre: site ratio
     data only (centre_ratios, D70); intensities are normalised by `normalization`. contaminant_fasta: (the FASTA's
-    name, fasta_contaminants of it), the search's contaminants when its tables lost the contam_ prefix (D84)."""
+    name, fasta_contaminants of it), the search's contaminants when its tables lost the contam_ prefix (D87)."""
     notes: list[str] = []
     steps = [{"step": "loaded", "features": len(m.features), "samples": len(m.samples)}]
     m, n = choose_samples(m, exclude, conditions)

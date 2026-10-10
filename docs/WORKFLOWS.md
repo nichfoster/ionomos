@@ -257,7 +257,7 @@ features × samples matrix of log2 values and runs the same statistics:
 
 - **Pipeline:** FragPipe-Analyst's, ported from FragPipeAnalystR (D24) and
   checked against the real package: contaminants removed (`contam_` in the name, or a
-  `contam_` entry of the search's FASTA, D84) → features kept when
+  `contam_` entry of the search's FASTA, D87) → features kept when
   measured in ≥ 50 % of at least one condition (`filter_condition_pct`;
   FragPipe-Analyst: 0) → normalisation (`normalize`: auto | median | gn | ratio | none; see below) →
   imputation (`imputation: auto` = Perseus-type down-shifted draws for DIA and

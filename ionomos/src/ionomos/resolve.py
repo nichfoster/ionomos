@@ -36,7 +36,7 @@ from pathlib import Path
 from ionomos import tkutil
 from ionomos.intake import Draft, DraftFile, Kind
 from ionomos.manifest import FileOverride, Overrides
-from ionomos.naming import DEFAULT_METHOD_ALIASES, NamingError, parse_raw_name, tokens_of
+from ionomos.naming import DEFAULT_METHOD_ALIASES, NUMBER_WHY, NamingError, number_ok, parse_raw_name, tokens_of
 
 log = logging.getLogger("ionomos.resolve")
 
@@ -289,10 +289,10 @@ def validate(a: Answer, known_methods: list[str], kinds: dict[str, str] | None =
     for f in a.files:
         if not f.experiment.strip():
             return f"{f.filename}: experiment is required"
-        if not f.bioreplicate.strip().isdigit() or int(f.bioreplicate) < 1:
-            return f"{f.filename}: replicate must be a whole number ≥ 1"
-        if f.fraction.strip() and (not f.fraction.strip().isdigit() or int(f.fraction) < 1):
-            return f"{f.filename}: fraction must be a whole number or blank"
+        if not f.bioreplicate.strip().isdigit() or not number_ok(f.bioreplicate):
+            return f"{f.filename}: replicate must be a whole number from 1 to 999 ({NUMBER_WHY})"
+        if f.fraction.strip() and (not f.fraction.strip().isdigit() or not number_ok(f.fraction)):
+            return f"{f.filename}: fraction must be a whole number from 1 to 999, or blank"
         key = (f.experiment.strip(), int(f.bioreplicate), f.fraction.strip())
         if key in seen:
             return f"{f.filename}: duplicates another file's experiment/replicate/fraction"

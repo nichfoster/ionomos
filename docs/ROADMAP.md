@@ -163,7 +163,7 @@ searches *had* run on the PC on 2026-09-23 (0.5.1 and 0.5.3, through
 runner (0.14.0 and later), isoDTB and TMT; the Phase 2 exit test is still
 open. From those runs: FragPipe 24's own DIA-NN is 2.3.2, `.raw` works for
 DIA, and the analysis of a real FragPipe GUI result matched
-FragPipe-Analyst once its normalisation setting was matched. New problems
+FragPipe-Analyst once its missing-value filter setting was matched. New problems
 found are under "Real runs" in the open questions below.
 
 ## Phase 3 — DIA, then TMT
@@ -819,20 +819,38 @@ Collected from the other docs; resolve before/during Phase 1.
       -0.2 to -0.4 log2, 67 % of the calls at adjusted p alone are false, 8.4 % of the hits in the worst case;
       `auto` keeps them within 0.04.) → 2026-10-06, a real FLAG pull-down with an empty-vector control
       (REAL_RUNS.md): still `median` on the PC; the composition check passed (0.09 log2 < 0.1), so `auto` would
-      have centred too. FragPipe-Analyst's web default is no normalisation, and that alone made one borderline
-      protein a hit there and not in Ionomos. Which the lab wants is still the question.
+      have centred too. (The protein FragPipe-Analyst called a hit and Ionomos did not came from the missing-value
+      filter, not from normalisation: see the next items.) Which the lab wants is still the question.
+- [x] Real runs (REAL_RUNS.md, 2026-10-06): a global missing-value filter (here ≥ 66 % of all samples, set for this
+      run) removes every protein seen in one condition only, and the "only in one condition" table is built after
+      the filter, so such a protein disappears without a trace. → 2026-10-09 (D84): the table is built before the
+      filter and marks what the filter removed (`removed_by_filter` in `presence_absence.tsv`, in grey in the
+      report, `only_in_one_condition_filtered_out` in analysis.json); `FILTER_REMOVES_ONE_CONDITION` says how
+      many features complete in a condition a global filter removed and suggests 0 % / 50 %.
+- [ ] Real runs: should the Analysis tab caution against a global filter before the analysis runs (a pull-down,
+      three conditions of three), not only the doctor after it (D84)?
+- [x] Real runs: leaving samples out (`exclude_samples`) makes the run-order stage fail with a `KeyError` on a
+      left-out sample (found re-running the 2026-10-06 analysis without the empty-vector runs). → 2026-10-09
+      (D84): the stage uses only the samples analysed; the manifest map still held the ones left out.
 - [x] Real runs (REAL_RUNS.md, 2026-10-09): FragPipe's `contam_` prefix does not reach DIA-NN's `Protein.Group`, so
       `remove_contaminants` removes nothing from a FragPipe DIA search (BSA is reported as `ALB`, trypsin stays).
       Take the contaminant accessions from the FASTA the search used? FragPipe-Analyst has the same gap.
-      → D84: yes. The FASTA comes from the `fragpipe.workflow` FragPipe leaves (`database.db-path`), else
+      → D87: yes. The FASTA comes from the `fragpipe.workflow` FragPipe leaves (`database.db-path`), else
       `ionomos.json` `run.fasta`. A group goes when any of its proteins is a `contam_` entry; mixed groups are
       listed in the notes. Still to confirm on the PC: the 2026-10-06 matrix loses P02769 and P00761.
-- [ ] Real runs: a `config.yaml` saved as ANSI by Notepad (`—` → byte 0x97) still stops Ionomos with a bare
+- [x] Real runs: a `config.yaml` saved as ANSI by Notepad (`—` → byte 0x97) still stops Ionomos with a bare
       `UnicodeDecodeError` (LabWatch did on 2026-09-16; 0.18.1 still does). Read cp1252 as a fallback, or say how
-      to save the file.
-- [ ] Real runs: an explicit `bioreplicate:` in `experiment.yaml` reaches FragPipe's manifest unchecked; job 1
+      to save the file. → 2026-10-09 (D86): read as cp1252 with a warning naming the file, byte and line; a
+      `ConfigError` saying how to save as UTF-8 only for bytes cp1252 lacks. Same for `experiment.yaml` and the
+      other hand-edited YAML. Still to see: the warning on the PC.
+- [x] Real runs: an explicit `bioreplicate:` in `experiment.yaml` reaches FragPipe's manifest unchecked; job 1
       (0.5.1) sent `20260508180610`, and DIA-NN's matrix lacked exactly those two runs. Bound it to 1–999 as the
-      naming rules do? Confirm the cause from job 1's console log.
+      naming rules do? → 2026-10-09 (D85): bounded wherever a number comes from (`experiment.yaml`, the naming
+      window, the naming history, a queued job's manifest). Such a file opens the naming window; a queued job
+      waits, naming the file, until `experiment.yaml` gives its replicate.
+- [ ] Real runs: confirm why DIA-NN's matrix lacked job 1's two time-stamped runs from its
+      `ionomos_run\fragpipe_console.log` (what FragPipe did with those manifest lines). D85 assumes the 32-bit
+      overflow; it is not confirmed.
 - [ ] Real runs: an empty-vector control next to a vehicle control (a pull-down) gives "EV vs DMSO", where
       bait-enriched proteins read as *down*. Should a pull-down's background control be the reference, or the
       comparison be turned round?
