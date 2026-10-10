@@ -828,7 +828,9 @@ Collected from the other docs; resolve before/during Phase 1.
       report, `only_in_one_condition_filtered_out` in analysis.json); `FILTER_REMOVES_ONE_CONDITION` says how
       many features complete in a condition a global filter removed and suggests 0 % / 50 %.
 - [ ] Real runs: should the Analysis tab caution against a global filter before the analysis runs (a pull-down,
-      three conditions of three), not only the doctor after it (D84)?
+      three conditions of three), not only the doctor after it (D84)? (Sheena, 2026-10-09: with an empty-vector
+      negative control, most proteins are expected to be missing from a third of the samples, so a global
+      filter is wrong for that design; D88 now leaves a sure background out of it.)
 - [x] Real runs: leaving samples out (`exclude_samples`) makes the run-order stage fail with a `KeyError` on a
       left-out sample (found re-running the 2026-10-06 analysis without the empty-vector runs). → 2026-10-09
       (D84): the stage uses only the samples analysed; the manifest map still held the ones left out.
