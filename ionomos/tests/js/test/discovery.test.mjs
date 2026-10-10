@@ -193,6 +193,22 @@ test("only in one condition: listed, badged, and marked from the table", async (
   assert.ok(document.querySelector("#differential-body svg path"), "on/off features get a triangle on the volcano");
 });
 
+test("only in one condition: features the missing-value filter removed are listed in grey, not tested (D84)", async () => {
+  const c = BASE.comps[0];
+  const gone = [["ONLYT", "P99999", "t", 3, 3, 24.1, "seen in the treatment only"]];
+  const data = withData(BASE, { settings: Object.assign({}, BASE.settings, { filter: [66, 50] }),
+    comps: [withData(c, { onoff: [[0, "t", 3, 3]], onoffOut: gone })] });
+  const { document, errors } = await loadReport({ data });
+  const rows = [...document.querySelectorAll("#onoffbody tbody tr")];
+  assert.equal(rows.length, 2);
+  assert.match(rows[1].textContent, /ONLYT.*removed by the filter/);
+  assert.ok(rows[1].classList.contains("muted") && !rows[1].dataset.i, "greyed, and not a link to the volcano");
+  assert.match(document.querySelector("#onoffbody").textContent, /at least 66% of all samples/);
+  assert.match(document.querySelector("#oocomp option").textContent, /\(2\)/);
+  assert.match(document.querySelector("#findings").textContent, /2 only in .*\(1 removed by the missing-value filter, so not tested\)/);
+  assert.deepEqual(errors, []);
+});
+
 test("rank-based enrichment: table, barcode plot, and marking a set on the volcano", async () => {
   const { document } = await loadReport();
   const tab = [...document.querySelectorAll("#enrich .tabs button")].find((b) => /ranked/.test(b.textContent));

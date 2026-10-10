@@ -140,6 +140,51 @@ def test_presence_absence_finds_features_measured_in_one_group_only():
     assert {x["index"] for x in others} == {0, 1}
 
 
+def _three_by_three():
+    """A, B, C x 3 (the 2026-10-06 pull-down's shape) with 20 complete rows, then:
+    on_A  every A, nothing else          (3 of 9: a global 66 % filter removes it)
+    two_B two of three B                 (removed; not on/off, not complete)
+    A_B1  every A and one B              (4 of 9: removed; complete in A, but B has it once)
+    AB    every A and B, no C            (6 of 9 = 67 %: kept; on in A against C)"""
+    samples = [f"{c}_{r}" for c in "ABC" for r in (1, 2, 3)]
+    rng = random.Random(3)
+    rows = [[rng.gauss(22, 1) for _ in samples] for _ in range(20)]
+    rows += [[24.0, 24.2, 23.8] + [None] * 6,
+             [None] * 3 + [21.0, 21.0, None] + [None] * 3,
+             [20.0, 20.4, 20.2, 19.0] + [None] * 5,
+             [23.0] * 6 + [None] * 3]
+    names = [f"G{i}" for i in range(20)] + ["on_A", "two_B", "A_B1", "AB"]
+    feats = [quant.Feature(id=f"P{i}", label=n, description=f"{n} protein") for i, n in enumerate(names)]
+    return quant.QuantMatrix("intensity", "protein", feats, samples, rows, _cond(samples))
+
+
+def test_on_off_is_found_before_the_missing_value_filter():
+    """docs/REAL_RUNS.md 2026-10-06: a protein in every sample of one condition and none of the others was removed
+    by a 66 % global filter and was then missing from 'only in one condition' too (D84)."""
+    from ionomos.downstream import fpa
+
+    m = _three_by_three()
+    p, _notes = fpa.process(m, global_pct=66, condition_pct=50, normalization="median", imputation="none")
+    assert [f.label for f in p.m.features[-1:]] == ["AB"] and len(p.m.features) == 21
+    out = insights.presence_absence_unfiltered(p, "A", "C")
+    got = {(x["feature"].label if x["filtered"] else p.m.features[x["index"]].label): x for x in out}
+    assert set(got) == {"on_A", "A_B1", "AB"}
+    assert got["on_A"]["filtered"] and got["on_A"]["index"] is None and got["on_A"]["detected"] == 3
+    shift = [b - a for a, b in zip(p.normalized_from[0], p.measured[0], strict=True)]  # median centring
+    assert got["on_A"]["mean"] == pytest.approx(sum(v + s for v, s in zip((24.0, 24.2, 23.8), shift[:3], strict=True)) / 3)
+    assert not got["AB"]["filtered"] and got["AB"]["index"] == 20
+    kept = p.measured[20]
+    assert got["AB"]["mean"] == pytest.approx(sum(kept[:3]) / 3)  # the analysed (median-centred) values
+    assert [x["feature"].label if x["filtered"] else "AB" for x in out][0] == "on_A"  # most abundant first
+    assert insights.filter_loss(p, 66) == {"removed": 3, "complete": 2, "only_one": 1, "by_condition": {"A": 2}}
+
+    q, _notes = fpa.process(m, global_pct=0, condition_pct=50, normalization="median", imputation="none")
+    assert insights.filter_loss(q, 0) == {}
+    plain = insights.presence_absence(q.measured, q.m.samples, q.m.condition, "A", "C")
+    assert insights.presence_absence_unfiltered(q, "A", "C") == plain  # nothing filtered: exactly as before
+    assert {q.m.features[x["index"]].label for x in plain} == {"on_A", "A_B1", "AB"}
+
+
 def test_imputation_driven_hits():
     samples = ["A_1", "A_2", "B_1", "B_2"]
     rows = [{"index": 0, "significant": "up"}, {"index": 1, "significant": "up"}, {"index": 2, "significant": ""}]
@@ -223,7 +268,9 @@ def test_loaders_keep_peptide_and_psm_evidence(tmp_path):
 # ------------------------------------------------------------- end to end --
 
 
-def _dia(tmp_path, *, outlier=None, onoff=0, batch=0.0, conds=("DMSO", "Drug"), reps=4, seed=6):
+def _dia(tmp_path, *, outlier=None, onoff=0, batch=0.0, conds=("DMSO", "Drug"), reps=4, seed=6, off=None):
+    """onoff: the first rows are blanked in the conditions `off` (default the first); with `off` given they are
+    measured in every sample of the other conditions."""
     dest = tmp_path / "e"
     runs = [(f"C:\\x\\raw\\{c}_{r}.raw", c) for c in conds for r in range(1, reps + 1)]
     pg = dest / "fragpipe/diann-output/report.pg_matrix.tsv"
@@ -235,9 +282,14 @@ def _dia(tmp_path, *, outlier=None, onoff=0, batch=0.0, conds=("DMSO", "Drug"), 
     out = [lines[0]]
     for n, line in enumerate(lines[1:]):
         v = line.split("\t")
-        if n < onoff:
+        if n < onoff and off is None:
             for c, r in ((conds[0], r) for r in range(1, reps + 1)):
                 v[col[f"C:\\x\\raw\\{c}_{r}.raw"]] = ""
+        elif n < onoff:
+            for c in conds:
+                for r in range(1, reps + 1):
+                    k = col[f"C:\\x\\raw\\{c}_{r}.raw"]
+                    v[k] = "" if c in off else (v[k] or "1000000.0")
         for h, k in col.items():
             if not h.endswith(".raw") or not v[k]:
                 continue
@@ -312,6 +364,55 @@ def test_outlier_on_off_and_gene_sets_reach_every_output(tmp_path):
     for section in ("id='onoff'", "id='findings'", "id='search'", "id='optpanel'"):
         assert section in html
     assert "rank-sum" in html.lower() or "Wilcoxon" in html  # the methods paragraph describes the new test
+
+
+PULLDOWN = ("DMSO", "FPS", "EV")
+
+
+def test_a_global_filter_no_longer_hides_proteins_seen_in_one_condition(tmp_path):
+    """The 2026-10-06 pull-down (docs/REAL_RUNS.md): three conditions of three and filter_global_pct 66. Proteins
+    in every FPS sample and no other are removed before testing; they stay in presence_absence.tsv, analysis.json
+    and the report, marked, and the doctor says what the filter did (D84)."""
+    dest, rec, _ = _dia(tmp_path, conds=PULLDOWN, reps=3, onoff=3, off=("DMSO", "EV"))
+    planted = ["ACTB", "GAPDH", "PKM"]
+    out = downstream.analyze(dest, "DIA", {"enrichment": False, "filter_global_pct": 66}, record=rec)
+    issue = next(i for i in out.issues if i.code == "FILTER_REMOVES_ONE_CONDITION")
+    assert issue.severity == "warning" and issue.data["by_condition"]["FPS"] >= 3 and issue.data["only_one"] >= 3
+    assert "at least 66% of all samples" in issue.message and "FPS" in issue.message
+    assert any("0% of all samples and 50% of one condition" in x for x in issue.fixes)
+
+    results = dest / "results"
+    lines = (results / "presence_absence.tsv").read_text(encoding="utf-8").splitlines()
+    rows = [dict(zip(lines[0].split("\t"), line.split("\t"), strict=True)) for line in lines[1:]]
+    mine = {r["label"]: r for r in rows if r["comparison"] == "FPS vs DMSO" and r["label"] in planted}
+    assert set(mine) == set(planted)
+    assert all(r["only_in"] == "FPS" and r["detected"] == "3" and r["removed_by_filter"] == "TRUE"
+               for r in mine.values())
+    tested = (results / "protein_results.tsv").read_text(encoding="utf-8")
+    assert not any(f"\t{g}\t" in tested for g in planted)  # really not tested
+
+    q = json.loads((results / "analysis.json").read_text(encoding="utf-8"))["quality"]
+    assert q["only_in_one_condition_filtered_out"]["FPS vs DMSO"] >= 3
+    assert q["only_in_one_condition"]["FPS vs DMSO"] >= q["only_in_one_condition_filtered_out"]["FPS vs DMSO"]
+    assert q["filter_removed_complete_in_one_condition"]["by_condition"]["FPS"] >= 3
+
+    d = _payload(out.report.read_text(encoding="utf-8"))
+    comp = next(c for c in d["comps"] if c["name"] == "FPS vs DMSO")
+    gone = {x[0]: x for x in comp["onoffOut"]}
+    assert set(planted) <= set(gone) and all(gone[g][2] == "t" and gone[g][3:5] == [3, 3] for g in planted)
+    assert not set(planted) & {d["f"]["label"][x[0]] for x in comp["onoff"]}
+    assert d["settings"]["filter"] == [66, 50]
+    assert "issue.FILTER_REMOVES_ONE_CONDITION" in {x["id"] for x in d["help"]["issues"]}
+
+    # Ionomos' default filter (0 % of all samples, 50 % of one condition) keeps and tests them, and stays quiet
+    out = downstream.analyze(dest, "DIA", {"enrichment": False}, record=rec)
+    assert "FILTER_REMOVES_ONE_CONDITION" not in {i.code for i in out.issues}
+    d = _payload(out.report.read_text(encoding="utf-8"))
+    comp = next(c for c in d["comps"] if c["name"] == "FPS vs DMSO")
+    assert "onoffOut" not in comp and set(planted) <= {d["f"]["label"][x[0]] for x in comp["onoff"]}
+    q = json.loads((results / "analysis.json").read_text(encoding="utf-8"))["quality"]
+    assert q["only_in_one_condition_filtered_out"]["FPS vs DMSO"] == 0
+    assert q["filter_removed_complete_in_one_condition"] is None
 
 
 def test_replicate_batch_is_reported(tmp_path):

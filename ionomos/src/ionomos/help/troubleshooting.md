@@ -589,6 +589,34 @@ Fewer than 100 features passed the filters, so the statistics and the
 enrichment are weak. Check the identifications per sample in the QC section; a
 small sample amount, a short gradient or a strict filter are the usual causes.
 
+## The filter removed features one condition had in every sample {#issue.FILTER_REMOVES_ONE_CONDITION}
+
+The missing-value filter was set to keep features measured in a share of
+**all** samples (for example 66%). That share counts every condition. With
+three conditions of three samples, a feature seen only in one condition has 3
+of 9 values (33%), so any global filter above that removes it before
+testing, even when that condition had it in every sample. In a pull-down or a
+treatment, that is often the result you are looking for.
+
+The warning says how many were removed, and in which condition. The ones a
+comparison finds are still listed under
+[Only in one condition](#report.onoff), in grey, as "removed by the filter".
+To test them, filter on the conditions instead: 0% of all samples and 50% of
+one condition, which is Ionomos' default. On the Analysis tab that is
+"Measured in ≥ % of all samples" 0 and "… and ≥ % of one condition" 50, or
+in `experiment.yaml`:
+
+```yaml
+analysis:
+  filter_global_pct: 0
+  filter_condition_pct: 50
+```
+
+Then **Run analysis**. Their missing values are then imputed, so their fold
+changes depend on the imputation; read them as "seen only in this
+condition". Keep the global filter if you want a table of features measured
+nearly everywhere.
+
 ## Samples look like outliers {#issue.SAMPLE_OUTLIER}
 
 The [sample scorecard](#qc.card) flagged these samples on two or more

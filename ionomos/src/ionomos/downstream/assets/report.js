@@ -384,10 +384,11 @@
       const up = topHits(c, "up", 5), dn = topHits(c, "down", 5);
       if (up.length) s += " Strongest up: " + geneLinks(up) + ".";
       if (dn.length) s += " Down: " + geneLinks(dn) + ".";
-      const oo = c.onoff || [];
-      if (oo.length) {
-        const t = oo.filter((x) => x[1] === "t").length, cc = oo.length - t;
-        s += " <a href='#onoff' class='oo' data-ci='" + k + "'>" + (t ? t + " only in " + esc(c.t1) : "") + (t && cc ? ", " : "") + (cc ? cc + " only in " + esc(c.t2 === "others" ? "the others" : c.t2) : "") + "</a>.";
+      const oo = c.onoff || [], ooOut = c.onoffOut || [];
+      if (oo.length || ooOut.length) {
+        const t = oo.filter((x) => x[1] === "t").length + ooOut.filter((x) => x[2] === "t").length, cc = oo.length + ooOut.length - t;
+        s += " <a href='#onoff' class='oo' data-ci='" + k + "'>" + (t ? t + " only in " + esc(c.t1) : "") + (t && cc ? ", " : "") + (cc ? cc + " only in " + esc(c.t2 === "others" ? "the others" : c.t2) : "") + "</a>" +
+          (ooOut.length ? " (" + ooOut.length + " removed by the missing-value filter, so not tested)" : "") + ".";
       }
       const gs = D.gsea.filter((b) => b.comparison === c.name).flatMap((b) => b.terms.filter((t) => t.q <= 0.05).map((t) => Object.assign({ lib: b.library }, t)));
       gs.sort((a, b) => a.p - b.p);
@@ -1120,9 +1121,10 @@
     onoffCi = Math.min(onoffCi, D.comps.length - 1);
     const c = D.comps[onoffCi];
     const items = c.onoff || [];
-    let h = "<div class='row'><label class='ctl'>Comparison <select id='oocomp'>" + D.comps.map((x, k) => "<option value='" + k + "'" + (k === onoffCi ? " selected" : "") + ">" + esc(x.name) + " (" + (x.onoff || []).length + ")</option>").join("") + "</select></label>" +
-      (items.length ? " <button id='oomark'>Mark on the volcano</button> <button id='oocopy'>Copy names</button>" : "") + "</div>";
-    if (!items.length) h += "<div class='empty'>" + (c.t2 ? "No " + esc(D.levelWord) + " is measured in one group and missing from the other." : "Not for ratio-vs-0 comparisons.") + "</div>";
+    const gone = c.onoffOut || []; // removed by the missing-value filter before testing: [label, id, t|c, n, of, mean, desc]
+    let h = "<div class='row'><label class='ctl'>Comparison <select id='oocomp'>" + D.comps.map((x, k) => "<option value='" + k + "'" + (k === onoffCi ? " selected" : "") + ">" + esc(x.name) + " (" + ((x.onoff || []).length + (x.onoffOut || []).length) + ")</option>").join("") + "</select></label>" +
+      (items.length ? " <button id='oomark'>Mark on the volcano</button>" : "") + (items.length || gone.length ? " <button id='oocopy'>Copy names</button>" : "") + "</div>";
+    if (!items.length && !gone.length) h += "<div class='empty'>" + (c.t2 ? "No " + esc(D.levelWord) + " is measured in one group and missing from the other." : "Not for ratio-vs-0 comparisons.") + "</div>";
     else {
       h += "<div class='tablewrap' style='max-height:440px'><table><thead><tr><th>Gene</th><th>ID</th><th>only in</th><th>measured</th><th>mean log2</th>" + (D.f.pep ? "<th>" + esc(D.evidence) + "</th>" : "") + "<th>volcano</th><th>Description</th></tr></thead><tbody>";
       items.forEach((x) => {
@@ -1133,14 +1135,20 @@
         h += "<tr data-i='" + i + "'><td>" + esc(D.f.label[i] || "") + "</td><td>" + esc((D.f.id[i] || "").slice(0, 30)) + "</td><td><span class='badge oo'>" + esc(grp) + "</span></td><td class='n'>" + x[2] + " / " + x[3] + "</td><td class='n'>" + fmt(mean) + "</td>" +
           (D.f.pep ? "<td class='n'>" + (D.f.pep[i] == null ? "" : D.f.pep[i]) + "</td>" : "") + "<td>" + (c.fc[i] == null ? "<span class='muted'>not tested</span>" : (s ? '<span class="dot ' + s + '"></span> ' : "") + fmt(c.fc[i]) + (impDriven(c)[i] ? " <span class='muted'>(imputed)</span>" : "")) + "</td><td class='desc'>" + esc((D.f.desc[i] || "").slice(0, 100)) + "</td></tr>";
       });
+      gone.forEach((x) => {
+        const grp = x[2] === "t" ? c.t1 : c.t2 === "others" ? "others" : c.t2;
+        h += "<tr class='muted' title='Removed by the missing-value filter before testing'><td>" + esc(x[0] || "") + "</td><td>" + esc((x[1] || "").slice(0, 30)) + "</td><td><span class='badge oo'>" + esc(grp) + "</span></td><td class='n'>" + x[3] + " / " + x[4] + "</td><td class='n'>" + fmt(x[5]) + "</td>" +
+          (D.f.pep ? "<td></td>" : "") + "<td>removed by the filter</td><td class='desc'>" + esc(x[6] || "") + "</td></tr>";
+      });
       h += "</tbody></table></div><p class='muted'>Sorted by how complete the group is, then by abundance: an abundant protein that is never seen in the other group is the strongest case.</p>";
+      if (gone.length) h += "<p class='muted'>" + gone.length + " of these " + (gone.length === 1 ? "was" : "were") + " removed by the missing-value filter (values in at least " + ((D.settings.filter || [])[0] || 0) + "% of all samples) before testing, so " + (gone.length === 1 ? "it is" : "they are") + " not on the volcano or in the results table. A filter on all samples removes what one condition alone has: 0% of all samples and 50% of one condition keeps " + (gone.length === 1 ? "it" : "them") + ".</p>";
     }
     host.innerHTML = h;
     $("#oocomp").onchange = (e) => { onoffCi = +e.target.value; renderOnOff(); };
     const mk = $("#oomark");
     if (mk) mk.onclick = () => { ST.ci = onoffCi; syncControls(); renderDiff(); setHighlight(new Set(items.map((x) => x[0])), "only in one condition"); goTo("differential"); };
     const cp = $("#oocopy");
-    if (cp) cp.onclick = () => copyText(items.map((x) => nameOf(x[0])).join("\n"));
+    if (cp) cp.onclick = () => copyText(items.map((x) => nameOf(x[0])).concat(gone.map((x) => x[0] || x[1])).join("\n"));
     $$("tbody tr[data-i]", host).forEach((tr) => (tr.onclick = () => { ST.ci = onoffCi; syncControls(); renderDiff(); setFocus(+tr.dataset.i); goTo("differential"); }));
   }
 
