@@ -15,7 +15,7 @@ from unpublished experiments stay out of this page.
 
 | Date | Version | What ran | Outcome |
 |---|---|---|---|
-| 2026-09-16 | LabWatch 0.1.0 | `labwatch status --all` on the PC's testbed config | Crashed: `UnicodeDecodeError … byte 0x97`. [Open](#open) |
+| 2026-09-16 | LabWatch 0.1.0 | `labwatch status --all` on the PC's testbed config | Crashed: `UnicodeDecodeError … byte 0x97`. Read with a warning since D86 ([Open](#open)) |
 | 2026-09-23 14:23 | 0.5.0 | First install, setup checklist | No DIA or isoDTB workflow pinned yet. FragPipe copies, `Fasta-files`, `New folder` and `QC` were listed as users (fixed in 0.5.1) |
 | 2026-09-23 15:05 | 0.5.1 | Chris's 7 `.raw` files dropped loose in the inbox | Ignored (fixed in 0.5.2, D23) |
 | 2026-09-23 15:16 | 0.5.1 | **Job 1**, `CS_22rv1_FLAG_AR_MA25`, DIA, 6 raws | **First real FragPipe search.** Exit 0 after 14 min. DIA-NN's matrix has 4 of the 6 runs; the report had no volcano. [Job 1](#job-1-the-first-real-search) |
@@ -192,7 +192,7 @@ port handles each of these, but no golden pins them.
 
 | Seen | Problem | Next step |
 |---|---|---|
-| 2026-09-16 | A `config.yaml` that is not UTF-8 (Notepad saving as ANSI turns `—` into byte 0x97) still stops Ionomos 0.18.1 with a bare `UnicodeDecodeError`, not a `ConfigError` saying what to do | Read cp1252 when UTF-8 fails, or say which line and how to save it |
+| 2026-09-16 | A `config.yaml` that is not UTF-8 (Notepad saving as ANSI turns `—` into byte 0x97) still stops Ionomos 0.18.1 with a bare `UnicodeDecodeError`, not a `ConfigError` saying what to do | **Fixed, unreleased (D86)**: read as cp1252 with a warning naming the file, byte and line; `experiment.yaml` too. Confirm the warning on the PC, then remove this row |
 | 2026-10-06 | A global filter removes what one condition alone has, before testing | Fixed in D84: listed (marked) under "only in one condition", and the `FILTER_REMOVES_ONE_CONDITION` warning. Open: should the Analysis tab caution before the run? |
 | Job 1 | Two runs missing from DIA-NN's matrix | Read job 1's console log for the two DMSO files |
 | Job 1 | An explicit `bioreplicate:` in `experiment.yaml` is passed to FragPipe unchecked (14 digits got through on 0.5.1) | Hold the job or refuse the value, as the naming rules do (1–999) |
