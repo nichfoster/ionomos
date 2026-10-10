@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Two tests failed on a Windows PC that CI doesn't look like.** Neither
+  was a bug in Ionomos.
+  - The stress run's 161-character drop name doesn't fit in Windows' 260
+    characters under a deep folder when long paths are off. With pytest's
+    temp folder the drop couldn't even be made. `ionomos testbed stress` now
+    cuts drop names to what fits there and says so in its report; with long
+    paths on (as on CI) nothing changes.
+  - The Sage setup checklist test found a real ThermoRawFileParser in
+    `C:\ThermoRawFileParser\`. It no longer looks there.
+- **`ionomos testbed stress` left its temp folder behind on Windows.** The
+  ledger connections were never closed, and Windows can't remove an open
+  `ionomos.db`.
+
 ### Documentation
 
 - **`docs/REAL_RUNS.md`: the real runs on the lab PC** (D83). These are the
