@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     paths on (as on CI) nothing changes.
   - The Sage setup checklist test found a real ThermoRawFileParser in
     `C:\ThermoRawFileParser\`. It no longer looks there.
+- **The assistant's time to first token was measured to ~16 ms on Windows**
+  with Python before 3.13, whose `time.monotonic()` ticks that coarsely. A
+  0.2 s wait read as 0.188 s, which failed a test on CI's Python 3.12. It
+  is now measured with `time.perf_counter()`.
 - **`ionomos testbed stress` left its temp folder behind on Windows.** The
   ledger connections were never closed, and Windows can't remove an open
   `ionomos.db`.
