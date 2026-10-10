@@ -821,13 +821,17 @@ Collected from the other docs; resolve before/during Phase 1.
       (REAL_RUNS.md): still `median` on the PC; the composition check passed (0.09 log2 < 0.1), so `auto` would
       have centred too. (The protein FragPipe-Analyst called a hit and Ionomos did not came from the missing-value
       filter, not from normalisation: see the next items.) Which the lab wants is still the question.
-- [ ] Real runs (REAL_RUNS.md, 2026-10-06): a global missing-value filter (here ≥ 66 % of all samples, set for this
+- [x] Real runs (REAL_RUNS.md, 2026-10-06): a global missing-value filter (here ≥ 66 % of all samples, set for this
       run) removes every protein seen in one condition only, and the "only in one condition" table is built after
-      the filter, so such a protein disappears without a trace. Build that table before the filter, and warn
-      when a global filter removes features complete in one condition? Should the Analysis tab caution against a
-      global filter for pull-downs?
-- [ ] Real runs: leaving samples out (`exclude_samples`) makes the run-order stage fail with a `KeyError` on a
-      left-out sample (found re-running the 2026-10-06 analysis without the empty-vector runs).
+      the filter, so such a protein disappears without a trace. → 2026-10-09 (D84): the table is built before the
+      filter and marks what the filter removed (`removed_by_filter` in `presence_absence.tsv`, in grey in the
+      report, `only_in_one_condition_filtered_out` in analysis.json); `FILTER_REMOVES_ONE_CONDITION` says how
+      many features complete in a condition a global filter removed and suggests 0 % / 50 %.
+- [ ] Real runs: should the Analysis tab caution against a global filter before the analysis runs (a pull-down,
+      three conditions of three), not only the doctor after it (D84)?
+- [x] Real runs: leaving samples out (`exclude_samples`) makes the run-order stage fail with a `KeyError` on a
+      left-out sample (found re-running the 2026-10-06 analysis without the empty-vector runs). → 2026-10-09
+      (D84): the stage uses only the samples analysed; the manifest map still held the ones left out.
 - [ ] Real runs (REAL_RUNS.md, 2026-10-09): FragPipe's `contam_` prefix does not reach DIA-NN's `Protein.Group`, so
       `remove_contaminants` removes nothing from a FragPipe DIA search (BSA is reported as `ALB`, trypsin stays).
       Take the contaminant accessions from the FASTA the search used? FragPipe-Analyst has the same gap.

@@ -18,7 +18,8 @@ Layout it reads and writes (inside the experiment folder):
                                     lab's export style: volcano, PCA, heatmap, correlation, and the dose-
                                     response, time-course and liganded-site figures (slides.py, D62, D68)
       sample_qc.tsv                 the per-sample scorecard (insights.py)
-      presence_absence.tsv          features measured in one group and never in the other
+      presence_absence.tsv          features measured in one group and never in the other (counted before the
+                                    missing-value filter; removed_by_filter marks what it took out, D84)
       gene_set_ranks.tsv            rank-based gene-set test on every protein (enrichment on)
       dose_response.tsv             a titration (4+ doses): a fitted curve per feature, pEC50, F, p, class
       time_course.tsv               a time course (3+ time points): change over time (F), trend, class, pattern
@@ -319,8 +320,9 @@ def _rank_enrichment(diffs, p, libs, limit: int = 40) -> list[dict]:
                         "adjusted": resid is not None, "terms": terms})
     return out
 
-def _insights(p, diffs, qcd) -> dict:
-    """Deeper QC and discovery (insights.py) for the report, the doctor and analysis.json."""
+def _insights(p, diffs, qcd, settings=None) -> dict:
+    """Deeper QC and discovery (insights.py) for the report, the doctor and analysis.json. The on/off features
+    are found before the missing-value filter, so one the filter removed is still listed (marked, D84)."""
     from ionomos.downstream import insights
 
     m = p.m
@@ -337,9 +339,12 @@ def _insights(p, diffs, qcd) -> dict:
     for d in diffs:
         out["phist"][d.name] = insights.p_histogram([r["pvalue"] for r in d.rows])
         if d.confidence != "none":
-            out["onoff"][d.name] = insights.presence_absence(p.measured, m.samples, m.condition, d.treatment, d.control)
+            out["onoff"][d.name] = insights.presence_absence_unfiltered(p, d.treatment, d.control)
         out["imputation_driven"][d.name] = insights.imputation_driven(p.imputed, m.samples, m.condition, d) \
             if p.n_imputed else []
+    loss = insights.filter_loss(p, getattr(settings, "filter_global_pct", 0) or 0)
+    if loss:
+        out["filter_loss"] = loss
     return out
 
 def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = None, overrides: dict | None = None,
@@ -626,7 +631,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
             say("quality control (PCA, correlation, missing values)")
             qcd = stage("qc", _qc, processed, diffs, settings) or {}
             say("sample scorecard, batch and missingness checks, on/off features, power")
-            insight = stage("insights", _insights, processed, diffs, qcd) or {}
+            insight = stage("insights", _insights, processed, diffs, qcd, settings) or {}
             for name, fn, arg in (("sample_qc.tsv", export.sample_qc_table, insight.get("scorecard")),
                                   ("presence_absence.tsv", export.presence_absence_table,
                                    (processed, insight["onoff"]) if any((insight.get("onoff") or {}).values()) else None)):
@@ -1002,6 +1007,10 @@ def _quality_summary(insight: dict) -> dict:
         "pi0": {k: v.get("pi0") for k, v in (insight.get("phist") or {}).items()},
         "p_value_shape": {k: v.get("shape") for k, v in (insight.get("phist") or {}).items()},
         "only_in_one_condition": {k: len(v) for k, v in (insight.get("onoff") or {}).items()},
+        # of those, removed by the missing-value filter before testing (D84)
+        "only_in_one_condition_filtered_out": {k: sum(1 for x in v if x.get("filtered"))
+                                               for k, v in (insight.get("onoff") or {}).items()},
+        "filter_removed_complete_in_one_condition": insight.get("filter_loss") or None,
         "imputation_driven_hits": {k: len(v) for k, v in (insight.get("imputation_driven") or {}).items()},
         # the smallest |log2FC| a typical feature shows with 80 % power, with the samples each comparison has
         "detectable_log2fc": {c["name"]: {"samples": c["n"], **{f"p{a}": (r or {}).get("q50")

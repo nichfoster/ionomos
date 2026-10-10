@@ -104,14 +104,18 @@ def sample_qc_table(path: Path, card: list[dict]) -> Path:
 
 
 def presence_absence_table(path: Path, arg) -> Path:
+    """removed_by_filter TRUE: the missing-value filter took the feature out before testing (D84). mean_log2 is
+    on the analysed (normalised) scale either way."""
     p, onoff = arg
     m = p.m
-    header = ["comparison", "only_in", "id", "label", "description", "detected", "of", "mean_log2"]
+    header = ["comparison", "only_in", "id", "label", "description", "detected", "of", "mean_log2",
+              "removed_by_filter"]
     rows = []
     for comp, items in onoff.items():
         for x in items:
-            f = m.features[x["index"]]
-            rows.append([comp, x["group"], f.id, f.label, f.description, x["detected"], x["of"], x["mean"]])
+            f = x["feature"] if x.get("filtered") else m.features[x["index"]]
+            rows.append([comp, x["group"], f.id, f.label, f.description, x["detected"], x["of"], x["mean"],
+                         "TRUE" if x.get("filtered") else "FALSE"])
     return write_tsv(path, header, rows)
 
 

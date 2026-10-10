@@ -3680,6 +3680,57 @@ bounded; the end-to-end golden is tidier than a real matrix.
 kept, settings not written down). The protein was identified by re-running
 Ionomos, not read from FragPipe-Analyst's table.
 
+### D84 — "Only in one condition" is counted before the missing-value filter; a global filter that removes it is a warning
+**2026-10-09.** Two problems from the 2026-10-06 pull-down (DIA, DMSO, FPS
+and EV × 3; [REAL_RUNS.md](REAL_RUNS.md)).
+
+**1. A global filter hid on/off proteins.** With `filter_global_pct: 66`, a
+protein in all three FPS runs and in none of the other six has 3 of 9 values
+(33 %) and was removed before testing. The "only in one condition" list
+(`presence_absence.tsv`, `quality.only_in_one_condition`, the report's
+section) was built from the filtered matrix, so the protein was gone without
+a trace, while fragpipe-analyst.org (no filter by default) called it a hit.
+
+- The on/off features are now found on `Processed.before_filter`: the
+  samples chosen and contaminants removed, but no missing-value filter. Each
+  row is matched back, in order, to the analysed matrix
+  (`insights._kept_rows`). Features still analysed are listed as before, and
+  if the filter removed nothing the list is exactly the old one. Features the
+  filter removed are listed too, marked: `removed_by_filter TRUE` in
+  `presence_absence.tsv`, `quality.only_in_one_condition_filtered_out` in
+  `analysis.json`, and in grey with "removed by the filter" in the report's
+  table (`onoffOut` in the payload) and in its key findings.
+- Their mean is on the analysed scale. Each normalisation in
+  `fpa.normalize_info` is a map `a·x + b` per sample (`gn` scales, the others
+  shift), so it is recovered exactly from two analysed features per sample
+  and applied to the removed rows. Mixing "as loaded" and normalised means
+  in one column would have misordered the list.
+- **`FILTER_REMOVES_ONE_CONDITION`** (warning). This fires when a global
+  filter removes features that a condition of two or more samples had in
+  every sample. It gives how many, per condition, and how many were never
+  seen anywhere else. Such a feature passes any per-condition filter, so the
+  global one removed it. The fix it suggests is 0 % of all samples and 50 %
+  of one condition (Ionomos' default). Also in `analysis.json` as
+  `quality.filter_removed_complete_in_one_condition`.
+- Not changed: the filter itself. A global filter is a legitimate choice for
+  a table of features measured nearly everywhere, and FragPipe-Analyst has
+  the same rule. The person is told what it removed, not overruled.
+
+**2. `exclude_samples` broke the run-order stage.** `KeyError: 'EV_2'` in
+`runorder.sample_files`. When the matrix's runs match the manifest, the
+loader records `meta["manifest_run"]` (sample → run). `fpa.choose_samples`
+copies `meta` unchanged, so the samples left out were still in that map, and
+their raw files were given to a sample that wasn't analysed.
+`runorder._manifest_run` now keeps only the samples analysed. The order is
+then among those samples (1–6 without EV). The fix is in the run-order
+stage, the only reader that indexed by sample. The SDRF reads the loaded
+matrix's map and lists the left-out runs on purpose.
+
+**Not verified**: on the lab's own matrix (the tests rebuild its shape with
+`simulate.dia_pg_matrix`). The 66 % setting came from the person running the
+analysis; whether the Analysis tab should also warn before a global filter is
+set, for pull-downs, is still open (ROADMAP.md).
+
 ### D86 — Hand-edited YAML that isn't UTF-8 is read as cp1252 with a warning
 **2026-10-09.** On 2026-09-16 LabWatch 0.1.0 stopped on the PC with
 `UnicodeDecodeError … byte 0x97` reading `config.yaml`: Notepad had saved it
