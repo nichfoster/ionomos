@@ -499,11 +499,13 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
                  [[x.id, x.label, x.description, *vals] for x, vals in zip(m.features, m.values, strict=True)]):
             out.files.append(files_mx)
         say("filtering, normalising, imputing")
+        contam = (stage("contaminants", _contaminant_fasta, record, workdir, notes)
+                  if settings.remove_contaminants and m.kind == "intensity" else None)
         res = stage("process", fpa.process, m, exclude=settings.exclude_samples, conditions=settings.sample_conditions,
                     contaminants=settings.remove_contaminants, global_pct=settings.filter_global_pct,
                     condition_pct=settings.filter_condition_pct, normalization=settings.normalize,
                     imputation=settings.imputation, shift=settings.impute_shift, scale=settings.impute_scale,
-                    seed=settings.seed, ratio_centre=settings.ratio_centre)
+                    seed=settings.seed, ratio_centre=settings.ratio_centre, contaminant_fasta=contam)
         if res is None:  # fall back to the data as loaded, so there are still statistics and a volcano
             notes.append("processing failed; statistics use the values as loaded (no filtering or imputation)")
             res = stage("process-fallback", fpa.process, m, exclude=settings.exclude_samples,
@@ -969,6 +971,27 @@ def _design_summary(m, settings) -> dict:
     if over:
         out["overridden_by_sample_conditions"] = over
     return out
+
+
+def _contaminant_fasta(record, workdir: Path, notes: list[str]) -> tuple[str, frozenset[str]] | None:
+    """(name, contam_ accessions) of the FASTA the search used, D87: database.db-path of the workflow FragPipe left
+    in its output folder (else the one Ionomos gave it), then ionomos.json's run.fasta. None when there is none or
+    it can't be read (then only the contam_ / CON__ names count, with a note when a FASTA was named)."""
+    from ionomos.downstream import fpa, sdrf
+
+    props, _wf = sdrf.workflow(record, workdir)
+    named = [x for x in dict.fromkeys((props.get("database.db-path", "").strip(),
+                                       str(((record or {}).get("run") or {}).get("fasta") or "").strip())) if x]
+    for db in named:
+        try:
+            if Path(db).is_file():
+                return sdrf._basename(db), fpa.fasta_contaminants(db)
+        except OSError as exc:
+            log.warning("cannot read the FASTA %s for its contaminants: %s", db, exc)
+    if named:
+        notes.append(f"contaminants: the search's FASTA {sdrf._basename(named[0])} was not found, so only proteins "
+                     "named contam_ or CON__ were removed (DIA-NN's tables drop the contam_ prefix)")
+    return None
 
 
 def _sdrf(method, dest: Path, workdir: Path, record, m, processed, settings, version: str, results: Path,

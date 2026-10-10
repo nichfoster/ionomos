@@ -55,6 +55,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   then left in the logs, and in the config itself when written the short way
   (`teams: <address>`); `url:` and `password:` lines were hidden anyway. The
   users and aliases listed only in the config were not anonymised.
+- **Contaminants are removed from FragPipe DIA searches** (D87). DIA-NN writes the bare
+  accession (`P02769`) in `report.pg_matrix.tsv`, so the `contam_` rule removed nothing:
+  bovine serum albumin was reported as `ALB` next to human albumin, and porcine trypsin
+  stayed (REAL_RUNS.md, 2026-10-06). The analysis now reads the FASTA the search used. It
+  takes `database.db-path` from FragPipe's `fragpipe.workflow`, else `run.fasta` in
+  `ionomos.json`, and removes every protein group that contains one of the FASTA's
+  `contam_` accessions. Groups that also hold another protein are listed in the notes.
+  Without the FASTA, the old rule applies and the notes say the FASTA was not found. The
+  count is the report's "contaminants" step.
 - **Two tests failed on a Windows PC that CI doesn't look like.** Neither
   was a bug in Ionomos.
   - The stress run's 161-character drop name doesn't fit in Windows' 260

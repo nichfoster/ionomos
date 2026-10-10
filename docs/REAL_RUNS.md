@@ -111,7 +111,9 @@ Analysis tab (0.18.0) then analysed the FragPipe folder (D80).
   (`P02769`, `P00761`). The rule looks for the text "contam", so it removed
   nothing. Bovine serum albumin was then reported under the human gene name
   `ALB`, next to human albumin, and porcine trypsin stayed in the matrix.
-  FragPipe-Analyst uses the same rule and keeps them too. [Open](#open)
+  FragPipe-Analyst uses the same rule and keeps them too. Fixed after 0.18.1
+  (D87): the accessions of the FASTA's `contam_` entries are removed too.
+  [Open](#open) until it is seen on the PC.
 - The empty-vector condition was taken as a control by its name (`EV` is a
   control keyword), with the vehicle as *the* control. So the comparison is
   "empty vector vs vehicle", and proteins enriched by the bait are listed as
@@ -200,7 +202,7 @@ port handles each of these, but no golden pins them.
 | 2026-09-16 | A `config.yaml` that is not UTF-8 (Notepad saving as ANSI turns `—` into byte 0x97) still stops Ionomos 0.18.1 with a bare `UnicodeDecodeError`, not a `ConfigError` saying what to do | **Fixed, unreleased (D86)**: read as cp1252 with a warning naming the file, byte and line; `experiment.yaml` too. Confirm the warning on the PC, then remove this row |
 | 2026-10-06 | A global filter removes what one condition alone has, before testing | Fixed in D84: listed (marked) under "only in one condition", and the `FILTER_REMOVES_ONE_CONDITION` warning. Open: should the Analysis tab caution before the run? |
 | Job 1 | Two runs missing from DIA-NN's matrix | Read job 1's console log for the two DMSO files |
-| 2026-10-06 | FragPipe's `contam_` prefix is lost in DIA-NN's tables, so contaminants stay and BSA reads as `ALB` | Take the contaminant accessions from the FASTA FragPipe used (or `protein.tsv`) |
+| 2026-10-06 | FragPipe's `contam_` prefix is lost in DIA-NN's tables, so contaminants stay and BSA reads as `ALB` | Fixed in code (D87): the FASTA's `contam_` accessions are removed. Re-analyse the 2026-10-06 folder on the next release; "contaminants" should show −2 or more (P02769, P00761) |
 | 2026-10-06 | An empty-vector control next to the vehicle: bait-enriched proteins read as "down" | Decide how a pull-down's background control is shown (ROADMAP) |
 | 2026-10-06 | FragPipeAnalystR golden doesn't cover a real matrix's shape | Add a case with interleaved columns, a duplicated gene and a blank gene |
 | Job 2 | How it ended | Its `ionomos.json` / `DONE.txt`, `run_fingerprint.json` |

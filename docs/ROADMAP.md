@@ -832,9 +832,12 @@ Collected from the other docs; resolve before/during Phase 1.
 - [x] Real runs: leaving samples out (`exclude_samples`) makes the run-order stage fail with a `KeyError` on a
       left-out sample (found re-running the 2026-10-06 analysis without the empty-vector runs). → 2026-10-09
       (D84): the stage uses only the samples analysed; the manifest map still held the ones left out.
-- [ ] Real runs (REAL_RUNS.md, 2026-10-09): FragPipe's `contam_` prefix does not reach DIA-NN's `Protein.Group`, so
+- [x] Real runs (REAL_RUNS.md, 2026-10-09): FragPipe's `contam_` prefix does not reach DIA-NN's `Protein.Group`, so
       `remove_contaminants` removes nothing from a FragPipe DIA search (BSA is reported as `ALB`, trypsin stays).
       Take the contaminant accessions from the FASTA the search used? FragPipe-Analyst has the same gap.
+      → D87: yes. The FASTA comes from the `fragpipe.workflow` FragPipe leaves (`database.db-path`), else
+      `ionomos.json` `run.fasta`. A group goes when any of its proteins is a `contam_` entry; mixed groups are
+      listed in the notes. Still to confirm on the PC: the 2026-10-06 matrix loses P02769 and P00761.
 - [x] Real runs: a `config.yaml` saved as ANSI by Notepad (`—` → byte 0x97) still stops Ionomos with a bare
       `UnicodeDecodeError` (LabWatch did on 2026-09-16; 0.18.1 still does). Read cp1252 as a fallback, or say how
       to save the file. → 2026-10-09 (D86): read as cp1252 with a warning naming the file, byte and line; a

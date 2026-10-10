@@ -239,7 +239,9 @@ normalises on the features that stay stable instead
 
 Proteins that get into every sample from outside the experiment: keratins
 from skin and dust, trypsin, serum albumin. The FASTA marks them (`contam_`),
-and the analysis removes them by default.
+and the analysis removes them by default. DIA-NN's tables lose that mark, so
+the analysis also reads the search's FASTA (named in FragPipe's workflow) and
+removes every protein group that contains one of its `contam_` proteins.
 
 ## CV (coefficient of variation) {#glossary.cv}
 
