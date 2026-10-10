@@ -825,7 +825,8 @@ Collected from the other docs; resolve before/during Phase 1.
       run) removes every protein seen in one condition only, and the "only in one condition" table is built after
       the filter, so such a protein disappears without a trace. Build that table before the filter, and warn
       when a global filter removes features complete in one condition? Should the Analysis tab caution against a
-      global filter for pull-downs?
+      global filter for pull-downs? (Sheena, 2026-10-09: with an empty-vector negative control, most proteins are
+      expected to be missing from a third of the samples, so a global filter is wrong for that design.)
 - [ ] Real runs: leaving samples out (`exclude_samples`) makes the run-order stage fail with a `KeyError` on a
       left-out sample (found re-running the 2026-10-06 analysis without the empty-vector runs).
 - [ ] Real runs (REAL_RUNS.md, 2026-10-09): FragPipe's `contam_` prefix does not reach DIA-NN's `Protein.Group`, so

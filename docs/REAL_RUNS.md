@@ -161,7 +161,11 @@ What was checked:
 **Conclusion: a settings difference (the missing-value filter), not an
 error in the port.** A global filter of 66 % with three conditions of three
 removes everything seen in only one condition, which in a pull-down or a
-treatment is often the interesting part. Ionomos' own default (0 % of all
+treatment is often the interesting part. Sheena, 2026-10-09: the three
+empty-vector runs are the negative control of the FLAG IP, there to show
+the bait is enriched; they see little beyond what sticks to the beads, so
+many proteins are *expected* to be missing from them, and she would not
+use a global filter on this design. Ionomos' own default (0 % of all
 samples, 50 % of one condition) keeps it. It is then tested (q 0.10 with
 median centring: not a hit, because the imputed values vary) and listed
 under "only in one condition". **Also a gap in the
