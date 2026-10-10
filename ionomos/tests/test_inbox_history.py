@@ -102,3 +102,15 @@ def test_explicit_yaml_beats_history(lab):
     folder = make_drop(lab['inbox'], 'EJQ_DIA_next', ['vehicle_2.raw'])
     save_overrides(folder, Overrides(files={'vehicle_2.raw': FileOverride('Control', 2, -1)}))
     assert plan(folder, lab['cfg']).manifest[0].experiment == 'Control'
+
+
+def test_a_learned_replicate_outside_1_to_999_is_not_reused(lab):
+    """0.5.1 could learn Xcalibur's time stamp as a replicate; such an entry is skipped, the others still count (D85)."""
+    cfg = lab['cfg']
+    stamped = 'CS_22rv1_FLAG-AR_MA25-10uM_DMSO_1_20260508180610.raw'
+    remember(cfg, 'CS_22rv1_FLAG_AR_MA25', 'Chris', 'DIA', [
+        DraftFile(stamped, 'CS_22rv1_FLAG-AR_MA25-10uM_DMSO', '20260508180610', ''),
+        DraftFile('CS_22rv1_FLAG-AR_MA25-10uM_MA25_1.raw', 'MA25', '1', '')])
+    got = suggestions(cfg, 'Chris', 'DIA', [stamped, 'CS_22rv1_FLAG-AR_MA25-10uM_MA25_1.raw'])
+    assert stamped not in got
+    assert got['CS_22rv1_FLAG-AR_MA25-10uM_MA25_1.raw'].experiment == 'MA25'

@@ -12,7 +12,7 @@ decision made once is remembered if the folder is re-dropped.
     fasta: human_2025-01_decoys.fas
     allow_uneven_fractions: false    # accept reps with different fraction sets
     files:                           # per-file overrides; keys are file names as dropped
-      KL6159A_1_1.raw: {experiment: plex1, bioreplicate: 1, fraction: 1}
+      KL6159A_1_1.raw: {experiment: plex1, bioreplicate: 1, fraction: 1}   # numbers 1-999; fraction -1 = none
     tmt:
       tag: TMT-10
       channels: {126: DMSO_126, 127N: DMSO_127N, ...}     # one plex
@@ -29,7 +29,7 @@ from pathlib import Path
 import yaml
 
 from ionomos.config import read_yaml_text
-from ionomos.naming import NamingError, RawName, RawSet
+from ionomos.naming import NUMBER_WHY, NamingError, RawName, RawSet, number_ok
 
 EXPERIMENT_YAML = "experiment.yaml"
 
@@ -40,6 +40,11 @@ _FILE_KEYS = {"experiment", "bioreplicate", "fraction"}
 
 class OverridesError(ValueError):
     """experiment.yaml is malformed. User-facing message."""
+
+
+class NumberOutOfRange(OverridesError):
+    """A files: replicate or fraction number outside 1-999 (D85). The naming window can correct it, so intake opens
+    the window for it instead of only leaving a note."""
 
 
 @dataclass
@@ -99,6 +104,17 @@ def _int_or_none(v, what: str) -> int | None:
         raise OverridesError(f"{what} must be an integer, got {v!r}") from None
 
 
+def _number_or_none(v, what: str, single_shot: bool = False) -> int | None:
+    """A replicate or fraction number: 1-999 like a file name's (D30, D85), or -1 for "no fraction" when
+    single_shot. Anything else is refused with why: the value would reach FragPipe's manifest."""
+    n = _int_or_none(v, what)
+    if n is None or number_ok(n) or (single_shot and n == -1):
+        return n
+    allowed = "1-999, or -1 for a single-shot file" if single_shot else "1-999"
+    raise NumberOutOfRange(f"{what} is {n}, but it must be {allowed}: {NUMBER_WHY}. Set it to the file's "
+                         f"{'fraction' if single_shot else 'replicate'} number (1, 2, 3 ...)")
+
+
 def _require_path_safe(value: str, what: str) -> str:
     """Reject path-like values and sanitize the rest — nothing read from
     experiment.yaml ever reaches a path join raw (audit L1). Path-like values
@@ -153,8 +169,8 @@ def parse_overrides(data: dict | None) -> Overrides:
         experiment = str(spec["experiment"]) if spec.get("experiment") else None
         ov.files[str(name)] = FileOverride(
             experiment=_require_path_safe(experiment, f"files.{name}.experiment") if experiment else None,
-            bioreplicate=_int_or_none(spec.get("bioreplicate"), f"files.{name}.bioreplicate"),
-            fraction=_int_or_none(spec.get("fraction"), f"files.{name}.fraction"),
+            bioreplicate=_number_or_none(spec.get("bioreplicate"), f"files.{name}.bioreplicate"),
+            fraction=_number_or_none(spec.get("fraction"), f"files.{name}.fraction", single_shot=True),
         )
 
     an = data.get("analysis") or {}
@@ -196,17 +212,19 @@ def load_overrides(folder: Path) -> Overrides:
     return parse_overrides(data)
 
 
-def save_overrides(folder: Path, ov: Overrides, replace_analysis: bool = False) -> Path:
+def save_overrides(folder: Path, ov: Overrides, replace_analysis: bool = False, replace_files: bool = False) -> Path:
     """Write experiment.yaml (merging over an existing one, new values win). The analysis: block is merged key by
     key too (the review window's control keeps saved comparisons), unless replace_analysis: then ov.analysis is
     the whole block, so a choice taken back in the experiment editor (a role back to automatic, a sample used
-    again) is gone from the file too."""
+    again) is gone from the file too. replace_files: ov.files is the whole files: block (the naming window shows
+    every raw, so its answer is the full picture; an old entry it was opened for, such as a replicate outside 1-999,
+    is not merged back in, D85)."""
     p = Path(folder) / EXPERIMENT_YAML
-    p.write_text(overrides_text(folder, ov, replace_analysis), encoding="utf-8")
+    p.write_text(overrides_text(folder, ov, replace_analysis, replace_files), encoding="utf-8")
     return p
 
 
-def overrides_text(folder: Path, ov: Overrides, replace_analysis: bool = False) -> str:
+def overrides_text(folder: Path, ov: Overrides, replace_analysis: bool = False, replace_files: bool = False) -> str:
     """What save_overrides would write to <folder>/experiment.yaml, without writing it (the assistant's proposals
     show the difference before anything is saved, D75)."""
     p = Path(folder) / EXPERIMENT_YAML
@@ -217,8 +235,13 @@ def overrides_text(folder: Path, ov: Overrides, replace_analysis: bool = False) 
         except yaml.YAMLError:
             existing = {}
     merged = {**existing, **ov.to_dict()}
-    if "files" in existing and ov.files:
-        merged["files"] = {**existing.get("files", {}), **ov.to_dict()["files"]}
+    if replace_files:
+        if ov.files:
+            merged["files"] = ov.to_dict()["files"]
+        else:
+            merged.pop("files", None)
+    elif isinstance(existing.get("files"), dict) and ov.files:
+        merged["files"] = {**existing["files"], **ov.to_dict()["files"]}
     if replace_analysis:
         if ov.analysis:
             merged["analysis"] = dict(ov.analysis)

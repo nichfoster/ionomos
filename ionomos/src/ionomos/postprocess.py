@@ -60,10 +60,15 @@ def prepare(dest: Path, cfg, method: str | None = None, extra: dict | None = Non
     filed = ((record.get("plan") or {}).get("folder") or {}).get("method")  # the lab's key for this experiment
     method = method or filed
     overrides = ((record.get("plan") or {}).get("overrides") or {}).get("analysis") or {}
+    yaml_problem = ""
     try:  # an experiment.yaml edited after intake (e.g. new comparisons) wins
-        from ionomos.manifest import load_overrides
+        from ionomos.manifest import OverridesError, load_overrides
 
-        current = load_overrides(dest)
+        try:
+            current = load_overrides(dest)
+        except OverridesError as exc:  # e.g. a replicate outside 1-999 written by 0.5.1 (D85): say so, don't hide it
+            yaml_problem = str(exc)
+            raise
         overrides = current.analysis or overrides
         tmt = current.tmt or ((record.get("plan") or {}).get("overrides") or {}).get("tmt") or {}
         if isinstance(tmt, dict) and tmt.get("reference_channel") not in (None, "") and \
@@ -95,6 +100,9 @@ def prepare(dest: Path, cfg, method: str | None = None, extra: dict | None = Non
     if method in methods:
         mod_mass = str(methods[method].extra.get("isodtb_mod_mass", mod_mass))
     notes: list[str] = []
+    if yaml_problem:
+        notes.append(f"experiment.yaml was not used ({yaml_problem}); the analysis used the settings saved when the "
+                     f"experiment was filed")
     workdir = dest / "fragpipe" if (dest / "fragpipe").is_dir() else dest
     try:
         workdir, output = fpfolder.locate(dest)

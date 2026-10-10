@@ -840,9 +840,14 @@ Collected from the other docs; resolve before/during Phase 1.
       to save the file. → 2026-10-09 (D86): read as cp1252 with a warning naming the file, byte and line; a
       `ConfigError` saying how to save as UTF-8 only for bytes cp1252 lacks. Same for `experiment.yaml` and the
       other hand-edited YAML. Still to see: the warning on the PC.
-- [ ] Real runs: an explicit `bioreplicate:` in `experiment.yaml` reaches FragPipe's manifest unchecked; job 1
+- [x] Real runs: an explicit `bioreplicate:` in `experiment.yaml` reaches FragPipe's manifest unchecked; job 1
       (0.5.1) sent `20260508180610`, and DIA-NN's matrix lacked exactly those two runs. Bound it to 1–999 as the
-      naming rules do? Confirm the cause from job 1's console log.
+      naming rules do? → 2026-10-09 (D85): bounded wherever a number comes from (`experiment.yaml`, the naming
+      window, the naming history, a queued job's manifest). Such a file opens the naming window; a queued job
+      waits, naming the file, until `experiment.yaml` gives its replicate.
+- [ ] Real runs: confirm why DIA-NN's matrix lacked job 1's two time-stamped runs from its
+      `ionomos_run\fragpipe_console.log` (what FragPipe did with those manifest lines). D85 assumes the 32-bit
+      overflow; it is not confirmed.
 - [ ] Real runs: an empty-vector control next to a vehicle control (a pull-down) gives "EV vs DMSO", where
       bait-enriched proteins read as *down*. Should a pull-down's background control be the reference, or the
       comparison be turned round?

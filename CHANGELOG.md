@@ -21,6 +21,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `exclude_samples: [EV_1, EV_2, EV_3]` stopped it with `KeyError: 'EV_2'`,
   because the manifest's map of samples to runs still held the samples left
   out.
+- **A replicate or fraction number outside 1–999 no longer reaches FragPipe**
+  (D85). On 0.5.1 the naming window wrote Xcalibur's time stamp
+  (`20260508180610`) as a replicate into `experiment.yaml` and FragPipe's
+  manifest, and DIA-NN's matrix lacked both runs that had one: the number
+  does not fit a 32-bit integer. File names were bounded to 1–999 in 0.8.0;
+  now everything else is too:
+  - `files.<name>.bioreplicate` / `fraction` in `experiment.yaml` is refused
+    with a message saying why (fraction `-1` still means single-shot). Such a
+    file in the inbox opens the naming window, which shows the files as their
+    names read; its answer replaces the old `files:` block. Without a window,
+    the folder stays in the inbox with a note;
+  - the naming window accepts 1–999 only;
+  - the naming history skips a learned number outside 1–999;
+  - a job already queued with such a number waits (no crash, nothing sent to
+    FragPipe), naming the file and the `experiment.yaml` to fix. Once that
+    file gives the replicate, the search starts by itself. Its help entry is
+    "A replicate number is out of range";
+  - a re-analysis whose `experiment.yaml` can't be read says so in the
+    report's warnings instead of ignoring the file silently.
 - **A `config.yaml` saved in Notepad as "ANSI" no longer stops Ionomos**
   (D86). This had happened since LabWatch (2026-09-16 on the PC): an em dash
   in a comment became byte 0x97, and Ionomos stopped with a bare
@@ -80,7 +99,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New open problems in ROADMAP.md:
   - contaminants are not removed from FragPipe DIA searches, because DIA-NN
     drops the `contam_` prefix;
-  - `experiment.yaml` replicate numbers are not bounded;
+  - `experiment.yaml` replicate numbers are not bounded (fixed above, D85);
   - an empty-vector control reads bait-enriched proteins as "down";
   - the FragPipeAnalystR golden is tidier than a real matrix.
 
