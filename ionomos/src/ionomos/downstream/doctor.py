@@ -689,6 +689,28 @@ def _insight_checks(f: Findings, p, add) -> None:
                   ["Replicates prepared, digested or acquired on different days / columns",
                    "Instrument drift over a long queue"],
                   fixes, {**batch, "blocked": blocked}))
+    loss = ins.get("filter_loss") or {}
+    s = f.settings
+    if loss.get("complete") and s is not None and getattr(s, "filter_global_pct", 0):
+        n, only = loss["complete"], loss.get("only_one", 0)
+        where = ", ".join(f"{c} {k}" for c, k in sorted(loss.get("by_condition", {}).items(), key=lambda t: -t[1]))
+        cp = getattr(s, "filter_condition_pct", 0) or 0
+        add(Issue("FILTER_REMOVES_ONE_CONDITION", "warning",
+                  f"The missing-value filter removed {n} feature(s) measured in every sample of a condition",
+                  f"The filter keeps features with values in at least {s.filter_global_pct:g}% of all samples"
+                  + (f" (and {cp:g}% of one condition)" if cp else "") + f". It removed {n} that a condition had in "
+                  f"every sample ({where})"
+                  + (f"; {only} of them were never measured in any other condition, the clearest on/off changes"
+                     if only else "") + ". They were not tested. Those found by a comparison are still listed "
+                  "under 'Only in one condition', marked as removed by the filter.",
+                  ["A filter on all samples counts every condition: with three conditions of three, a feature seen "
+                   "in one condition only has 3 of 9 values (33%) and fails any filter above that",
+                   "In a pull-down or a treatment, what one condition alone has is often the result"],
+                  ["Filter on the conditions instead: 0% of all samples and 50% of one condition (Ionomos' default). "
+                   "On the Analysis tab, 'Measured in ≥ % of all samples' 0 and '… and ≥ % of one condition' 50; "
+                   "or filter_global_pct: 0 and filter_condition_pct: 50 under analysis:. Then Run analysis",
+                   "Keep the global filter if the aim is a table of features measured nearly everywhere"],
+                  {"global_pct": s.filter_global_pct, "condition_pct": cp, **loss}))
     miss = ins.get("missingness") or {}
     if (p is not None and p.imputation in LEFT_CENSORED and miss.get("verdict") == "random"
             and p.n_imputed > 0.05 * max(1, len(p.m.values) * len(p.m.samples))):

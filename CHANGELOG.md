@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A protein seen in one condition only no longer vanishes when a global
+  missing-value filter removes it** (D84). With `filter_global_pct: 66` and
+  three conditions of three, a protein in every FPS run and no other was
+  removed before testing. It was also missing from "only in one condition",
+  which was built after the filter. That list is now built before the
+  filter, and what the filter removed is marked: `removed_by_filter` in
+  `presence_absence.tsv`, in grey in the report's table and key findings,
+  and `only_in_one_condition_filtered_out` in `analysis.json`.
+- **Leaving samples out no longer breaks the run-order stage** (D84).
+  `exclude_samples: [EV_1, EV_2, EV_3]` stopped it with `KeyError: 'EV_2'`,
+  because the manifest's map of samples to runs still held the samples left
+  out.
+
+### Added
+
+- **`FILTER_REMOVES_ONE_CONDITION`** (D84): a warning when a filter on all
+  samples removes features that a condition had in every sample. It says
+  how many, in which condition, and how many were seen nowhere else. It
+  suggests 0 % of all samples and 50 % of one condition (Ionomos' default).
+  It is in the report, the attention list and the help.
+
 ### Documentation
 
 - **`docs/REAL_RUNS.md`: the real runs on the lab PC** (D83). These are the
@@ -29,10 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - a non-UTF-8 `config.yaml` still crashes;
   - `experiment.yaml` replicate numbers are not bounded;
   - an empty-vector control reads bait-enriched proteins as "down";
-  - the FragPipeAnalystR golden is tidier than a real matrix;
-  - a protein seen in one condition only vanishes when a global filter
-    removes it: the "only in one condition" table is built after the filter;
-  - leaving samples out makes the run-order stage fail.
+  - the FragPipeAnalystR golden is tidier than a real matrix.
 
 ## [0.18.1] - 2026-10-06
 
