@@ -64,7 +64,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New open problems in ROADMAP.md:
   - contaminants are not removed from FragPipe DIA searches, because DIA-NN
     drops the `contam_` prefix;
-  - a non-UTF-8 `config.yaml` still crashes;
   - `experiment.yaml` replicate numbers are not bounded;
   - an empty-vector control reads bait-enriched proteins as "down";
   - the FragPipeAnalystR golden is tidier than a real matrix.
