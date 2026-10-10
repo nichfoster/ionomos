@@ -28,6 +28,7 @@ from pathlib import Path
 
 import yaml
 
+from ionomos.config import read_yaml_text
 from ionomos.naming import NUMBER_WHY, NamingError, RawName, RawSet, number_ok
 
 EXPERIMENT_YAML = "experiment.yaml"
@@ -205,7 +206,7 @@ def load_overrides(folder: Path) -> Overrides:
     if not p.is_file():
         return Overrides()
     try:
-        data = yaml.safe_load(p.read_text(encoding="utf-8"))
+        data = yaml.safe_load(read_yaml_text(p, error=OverridesError))
     except yaml.YAMLError as exc:
         raise OverridesError(f"{EXPERIMENT_YAML} is not valid YAML: {exc}") from exc
     return parse_overrides(data)
@@ -230,7 +231,7 @@ def overrides_text(folder: Path, ov: Overrides, replace_analysis: bool = False, 
     existing: dict = {}
     if p.is_file():
         try:
-            existing = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+            existing = yaml.safe_load(read_yaml_text(p, error=OverridesError)) or {}  # unreadable: raise, keep it
         except yaml.YAMLError:
             existing = {}
     merged = {**existing, **ov.to_dict()}

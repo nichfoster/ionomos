@@ -831,9 +831,11 @@ Collected from the other docs; resolve before/during Phase 1.
 - [ ] Real runs (REAL_RUNS.md, 2026-10-09): FragPipe's `contam_` prefix does not reach DIA-NN's `Protein.Group`, so
       `remove_contaminants` removes nothing from a FragPipe DIA search (BSA is reported as `ALB`, trypsin stays).
       Take the contaminant accessions from the FASTA the search used? FragPipe-Analyst has the same gap.
-- [ ] Real runs: a `config.yaml` saved as ANSI by Notepad (`—` → byte 0x97) still stops Ionomos with a bare
+- [x] Real runs: a `config.yaml` saved as ANSI by Notepad (`—` → byte 0x97) still stops Ionomos with a bare
       `UnicodeDecodeError` (LabWatch did on 2026-09-16; 0.18.1 still does). Read cp1252 as a fallback, or say how
-      to save the file.
+      to save the file. → 2026-10-09 (D86): read as cp1252 with a warning naming the file, byte and line; a
+      `ConfigError` saying how to save as UTF-8 only for bytes cp1252 lacks. Same for `experiment.yaml` and the
+      other hand-edited YAML. Still to see: the warning on the PC.
 - [x] Real runs: an explicit `bioreplicate:` in `experiment.yaml` reaches FragPipe's manifest unchecked; job 1
       (0.5.1) sent `20260508180610`, and DIA-NN's matrix lacked exactly those two runs. Bound it to 1–999 as the
       naming rules do? → 2026-10-09 (D85): bounded wherever a number comes from (`experiment.yaml`, the naming

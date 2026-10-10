@@ -420,8 +420,10 @@ def _without_files(folder: Path) -> Overrides:
     """experiment.yaml without its files: block (one of its numbers is out of range, D85), or nothing."""
     import yaml
 
+    from ionomos.config import read_yaml_text
+
     try:
-        data = yaml.safe_load((Path(folder) / EXPERIMENT_YAML).read_text(encoding="utf-8")) or {}
+        data = yaml.safe_load(read_yaml_text(Path(folder) / EXPERIMENT_YAML, error=OverridesError)) or {}
         return parse_overrides({k: v for k, v in data.items() if k != "files"})
     except (OSError, ValueError, AttributeError, yaml.YAMLError):  # OverridesError is a ValueError
         return Overrides()
