@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A `config.yaml` saved in Notepad as "ANSI" no longer stops Ionomos**
+  (D86). This had happened since LabWatch (2026-09-16 on the PC): an em dash
+  in a comment became byte 0x97, and Ionomos stopped with a bare
+  `UnicodeDecodeError`. Such a file is now read as Windows-1252, with a
+  warning that names the file, the byte and its line, and says how to save
+  it as UTF-8. A UTF-8 file with a BOM and a UTF-16 file ("Unicode" in
+  Notepad) are read as well. A byte Windows-1252 doesn't have either stops
+  with a config error saying the same. The same goes for `experiment.yaml`,
+  learned aliases and benchmark specs. A running watcher keeps its settings
+  on such an error instead of failing.
+- **A support bundle or diagnostics from an "ANSI" config missed what it
+  should hide** (D86). They read the file as empty. A webhook address was
+  then left in the logs, and in the config itself when written the short way
+  (`teams: <address>`); `url:` and `password:` lines were hidden anyway. The
+  users and aliases listed only in the config were not anonymised.
+
 ### Documentation
 
 - **`docs/REAL_RUNS.md`: the real runs on the lab PC** (D83). These are the

@@ -3679,3 +3679,60 @@ bounded; the end-to-end golden is tidier than a real matrix.
 **Not verified**: FragPipe-Analyst's own output for this experiment (not
 kept, settings not written down). The protein was identified by re-running
 Ionomos, not read from FragPipe-Analyst's table.
+
+### D86 — Hand-edited YAML that isn't UTF-8 is read as cp1252 with a warning
+**2026-10-09.** On 2026-09-16 LabWatch 0.1.0 stopped on the PC with
+`UnicodeDecodeError … byte 0x97` reading `config.yaml`: Notepad had saved it
+as "ANSI", and the em dash in a comment became cp1252's byte 0x97.
+0.18.1 still did the same, and not only for `config.yaml`: every reader
+of a hand-edited YAML file used `read_text(encoding="utf-8")`
+(REAL_RUNS.md, Open).
+
+Two ways out were weighed: read cp1252 when UTF-8 fails, or refuse with a
+`ConfigError` that says where and how to re-save. Ionomos now reads
+cp1252, with a warning:
+
+1. **The PC's "ANSI" is cp1252**, so the fallback reads such a file as
+   Notepad meant it. A wrong letter in a comment changes nothing, and the
+   values that matter (paths, method keys) are ASCII.
+2. **A refusal stops the watcher**, and drops then pile up in the inbox
+   until somebody edits a file in a way they can't see is wrong. Nothing is
+   lost by reading on: the warning names the file, the first byte that
+   isn't UTF-8 and its line, and how to re-save. For `config.yaml` it goes
+   into `Config.warnings`: the `ionomos` commands print it (`status`
+   included, where LabWatch crashed), and the running watcher logs it when a
+   reload brings it. For the other files it is logged. D69 reads FragPipe's
+   console the same way (UTF-8 when it is, else cp1252).
+3. **A `ConfigError` is left only for what cp1252 can't read** (its five
+   unused bytes 0x81, 0x8D, 0x8F, 0x90, 0x9D, or broken UTF-16). It names
+   both bytes and lines and says how to save as UTF-8. The watcher's live
+   reload keeps the last good config on it; before, the bare
+   `UnicodeDecodeError` escaped `LiveConfig.get`.
+
+All of it is `config.read_yaml_text`: UTF-8 with or without a BOM, UTF-16
+with its BOM (Notepad's "Unicode"), then cp1252. It reads `config.yaml`
+(`load`, `configio.read_config`, the diagnostics' paths and secrets),
+`learned_aliases.yaml`, `experiment.yaml` (`load_overrides`,
+`overrides_text`, the assistant's diff), a benchmark's spec, and the
+support bundle's copies. Two of these mattered beyond a crash:
+
+- **Redaction.** `notify.file_secrets` read a cp1252 config as nothing. A
+  webhook address was then hidden only on a `url:` line, not in the logs or
+  in the short form `teams: <address>`.
+- **The bundle's anonymiser** read it as `{}` too, so the users and aliases
+  of the config went unscrubbed. The bundle's text copy of a YAML file is
+  read the same way as the anonymiser reads it, so a name with `ü` is
+  matched, not left as `Gr�n`.
+
+An `experiment.yaml` that can't be read at all raises `OverridesError`. A
+save merging over it stops, rather than writing a file without what it said.
+An unreadable `learned_aliases.yaml` is skipped when the config loads, as a
+broken one already was. But learning a new alias (the resolver window) no
+longer rewrites it with only the new alias; it is left as it is and the
+failure is logged. That is new for broken YAML too.
+Ionomos writes UTF-8 everywhere, so a file is converted the first time the
+app saves it.
+
+**Not verified**: the warning on the PC itself. That the PC's "ANSI" is
+cp1252 is inferred from the em dash arriving as 0x97 (PROTEOMICS_PC.md does
+not record the code page).
