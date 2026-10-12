@@ -7,9 +7,88 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A protein seen in one condition only no longer vanishes when a global
+  missing-value filter removes it** (D84). With `filter_global_pct: 66` and
+  three conditions of three, a protein in every FPS run and no other was
+  removed before testing. It was also missing from "only in one condition",
+  which was built after the filter. That list is now built before the
+  filter, and what the filter removed is marked: `removed_by_filter` in
+  `presence_absence.tsv`, in grey in the report's table and key findings,
+  and `only_in_one_condition_filtered_out` in `analysis.json`.
+- **Leaving samples out no longer breaks the run-order stage** (D84).
+  `exclude_samples: [EV_1, EV_2, EV_3]` stopped it with `KeyError: 'EV_2'`,
+  because the manifest's map of samples to runs still held the samples left
+  out.
+- **A replicate or fraction number outside 1–999 no longer reaches FragPipe**
+  (D85). On 0.5.1 the naming window wrote Xcalibur's time stamp
+  (`20260508180610`) as a replicate into `experiment.yaml` and FragPipe's
+  manifest, and DIA-NN's matrix lacked both runs that had one: the number
+  does not fit a 32-bit integer. File names were bounded to 1–999 in 0.8.0;
+  now everything else is too:
+  - `files.<name>.bioreplicate` / `fraction` in `experiment.yaml` is refused
+    with a message saying why (fraction `-1` still means single-shot). Such a
+    file in the inbox opens the naming window, which shows the files as their
+    names read; its answer replaces the old `files:` block. Without a window,
+    the folder stays in the inbox with a note;
+  - the naming window accepts 1–999 only;
+  - the naming history skips a learned number outside 1–999;
+  - a job already queued with such a number waits (no crash, nothing sent to
+    FragPipe), naming the file and the `experiment.yaml` to fix. Once that
+    file gives the replicate, the search starts by itself. Its help entry is
+    "A replicate number is out of range";
+  - a re-analysis whose `experiment.yaml` can't be read says so in the
+    report's warnings instead of ignoring the file silently.
+- **A `config.yaml` saved in Notepad as "ANSI" no longer stops Ionomos**
+  (D86). This had happened since LabWatch (2026-09-16 on the PC): an em dash
+  in a comment became byte 0x97, and Ionomos stopped with a bare
+  `UnicodeDecodeError`. Such a file is now read as Windows-1252, with a
+  warning that names the file, the byte and its line, and says how to save
+  it as UTF-8. A UTF-8 file with a BOM and a UTF-16 file ("Unicode" in
+  Notepad) are read as well. A byte Windows-1252 doesn't have either stops
+  with a config error saying the same. The same goes for `experiment.yaml`,
+  learned aliases and benchmark specs. A running watcher keeps its settings
+  on such an error instead of failing.
+- **A support bundle or diagnostics from an "ANSI" config missed what it
+  should hide** (D86). They read the file as empty. A webhook address was
+  then left in the logs, and in the config itself when written the short way
+  (`teams: <address>`); `url:` and `password:` lines were hidden anyway. The
+  users and aliases listed only in the config were not anonymised.
+- **Contaminants are removed from FragPipe DIA searches** (D87). DIA-NN writes the bare
+  accession (`P02769`) in `report.pg_matrix.tsv`, so the `contam_` rule removed nothing:
+  bovine serum albumin was reported as `ALB` next to human albumin, and porcine trypsin
+  stayed (REAL_RUNS.md, 2026-10-06). The analysis now reads the FASTA the search used. It
+  takes `database.db-path` from FragPipe's `fragpipe.workflow`, else `run.fasta` in
+  `ionomos.json`, and removes every protein group that contains one of the FASTA's
+  `contam_` accessions. Groups that also hold another protein are listed in the notes.
+  Without the FASTA, the old rule applies and the notes say the FASTA was not found. The
+  count is the report's "contaminants" step.
+- **Two tests failed on a Windows PC that CI doesn't look like.** Neither
+  was a bug in Ionomos.
+  - The stress run's 161-character drop name doesn't fit in Windows' 260
+    characters under a deep folder when long paths are off. With pytest's
+    temp folder the drop couldn't even be made. `ionomos testbed stress` now
+    cuts drop names to what fits there and says so in its report; with long
+    paths on (as on CI) nothing changes.
+  - The Sage setup checklist test found a real ThermoRawFileParser in
+    `C:\ThermoRawFileParser\`. It no longer looks there.
+- **The assistant's time to first token was measured to ~16 ms on Windows**
+  with Python before 3.13, whose `time.monotonic()` ticks that coarsely. A
+  0.2 s wait read as 0.188 s, which failed a test on CI's Python 3.12. It
+  is now measured with `time.perf_counter()`.
+- **`ionomos testbed stress` left its temp folder behind on Windows.** The
+  ledger connections were never closed, and Windows can't remove an open
+  `ionomos.db`.
+
 ### Added
 
-- **Pull-downs with a negative control** (D84). A condition named as an
+- **`FILTER_REMOVES_ONE_CONDITION`** (D84): a warning when a filter on all
+  samples removes features that a condition had in every sample. It says
+  how many, in which condition, and how many were seen nowhere else. It
+  suggests 0 % of all samples and 50 % of one condition (Ionomos' default).
+  It is in the report, the attention list and the help.
+- **Pull-downs with a negative control** (D88). A condition named as an
   empty vector, beads only, IgG or an untagged bait (`EV`, `empty`, `beads`,
   `IgG` …) is the pull-down's *background* when its samples also miss
   clearly more proteins than the others (then it is sure), or the
@@ -46,13 +125,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New open problems in ROADMAP.md:
   - contaminants are not removed from FragPipe DIA searches, because DIA-NN
     drops the `contam_` prefix;
-  - a non-UTF-8 `config.yaml` still crashes;
-  - `experiment.yaml` replicate numbers are not bounded;
+  - `experiment.yaml` replicate numbers are not bounded (fixed above, D85);
   - an empty-vector control reads bait-enriched proteins as "down";
-  - the FragPipeAnalystR golden is tidier than a real matrix;
-  - a protein seen in one condition only vanishes when a global filter
-    removes it: the "only in one condition" table is built after the filter;
-  - leaving samples out makes the run-order stage fail.
+  - the FragPipeAnalystR golden is tidier than a real matrix.
 
 ## [0.18.1] - 2026-10-06
 

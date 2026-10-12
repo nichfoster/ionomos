@@ -66,6 +66,7 @@ HOLD_TOPICS = (
     (r"raw file\(s\) can't be read yet", "search.hold-raw-locked"),
     (r"has a space in its path", "search.hold-spaces"),
     (r"can't be moved aside", "search.hold-previous-output"),
+    (r"replicate number", "search.hold-replicate"),
 )
 
 

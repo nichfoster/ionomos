@@ -414,6 +414,36 @@ def test_end_to_end_blocks_are_a_warning(tmp_path):
     assert _payload(out)["qc"]["run"]["confound"]["flag"] is True
 
 
+def test_samples_left_out_are_left_out_of_the_run_order(tmp_path):
+    """2026-10-06 (docs/REAL_RUNS.md): re-running the pull-down without the empty-vector runs failed in this stage
+    with KeyError 'EV_2'. The quant table matched every run to the manifest (meta "manifest_run"), and the
+    samples left out were still in that map (D84)."""
+    d = tmp_path / "pulldown"
+    runs = [(f"/x/{c}_{r}.raw", c) for c in ("DMSO", "FPS", "EV") for r in (1, 2, 3)]
+    simulate.dia_pg_matrix(d / "fragpipe" / "report.pg_matrix.tsv", runs, seed=6, n_proteins=120)
+    order = [Path(r).stem for r, _c in runs]
+    random.Random(5).shuffle(order)
+    for k, stem in enumerate(order):
+        write_raw(d / "raw" / f"{stem}.raw", T0 + timedelta(minutes=70 * k))
+    record = {"plan": {"manifest": [{"file": f"raw/{Path(r).name}", "experiment": c, "bioreplicate": int(r[-5])}
+                                    for r, c in runs]}}
+    left_out = ["EV_1", "EV_2", "EV_3"]
+    out = downstream.analyze(d, "DIA", analysis_cfg={"enrichment": False, "exclude_samples": left_out},
+                             record=record)
+    assert "CRASH_RUN_ORDER" not in {i.code for i in out.issues}
+    s = out.summary["run_order"]
+    kept = [x for x in order if x not in left_out]
+    assert s["ran"] and [x["sample"] for x in s["samples"]] == kept and [x["order"] for x in s["samples"]] == [
+        1, 2, 3, 4, 5, 6]  # the order among the samples analysed, not the run's position among all nine
+    assert all(x["files"] == 1 for x in s["samples"])
+
+    pm = QuantMatrix("intensity", "protein", [], ["A_1", "A_2"], [], {"A_1": "A", "A_2": "A"},
+                     meta={"manifest_run": {"A_1": "A_1", "A_2": "A_2", "B_1": "B_1"}})
+    rec = {"plan": {"manifest": [{"file": f"raw/{s}.raw", "experiment": s[0], "bioreplicate": int(s[-1])}
+                                 for s in ("A_1", "A_2", "B_1")]}}
+    assert runorder.sample_files(pm, rec, tmp_path) == {"A_1": ["raw/A_1.raw"], "A_2": ["raw/A_2.raw"]}
+
+
 def test_without_raw_files_there_is_no_tab_and_a_crash_costs_nothing(tmp_path, monkeypatch):
     d = tmp_path / "plain"
     simulate.dia_pg_matrix(d / "fragpipe" / "report.pg_matrix.tsv", [(f"/x/{c}_{r}.raw", c) for c in ("A", "B")

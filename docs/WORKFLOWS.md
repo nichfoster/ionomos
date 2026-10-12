@@ -256,7 +256,8 @@ features × samples matrix of log2 values and runs the same statistics:
   unenriched proteome of the same treatment.
 
 - **Pipeline:** FragPipe-Analyst's, ported from FragPipeAnalystR (D24) and
-  checked against the real package: contaminants removed → features kept when
+  checked against the real package: contaminants removed (`contam_` in the name, or a
+  `contam_` entry of the search's FASTA, D87) → features kept when
   measured in ≥ 50 % of at least one condition (`filter_condition_pct`;
   FragPipe-Analyst: 0) → normalisation (`normalize`: auto | median | gn | ratio | none; see below) →
   imputation (`imputation: auto` = Perseus-type down-shifted draws for DIA and
@@ -270,7 +271,7 @@ features × samples matrix of log2 values and runs the same statistics:
   ratios vs 0 (moderated one-sample test).
 - **Roles** (`downstream/roles.py`, D61). Each condition is a control, a
   compound, a competition (probe plus competitor), a pooled reference, a
-  QC standard or a pull-down's background (negative control, D84), read from
+  QC standard or a pull-down's background (negative control, D88), read from
   its name, from `analysis.roles`, or from an SDRF's
   `characteristics[role]` column. With a competition condition the default
   comparisons are compound vs control, competition vs its compound and
@@ -379,7 +380,7 @@ features × samples matrix of log2 values and runs the same statistics:
   | SMALL_GROUP | decide | a group is too small and not even a fold change could be computed |
   | ROLES_UNSURE | decide | a condition's role can't be told from its name (`Probe_pre`, `Probe_10x`), or a competition can't be linked to one compound; the guess is used meanwhile (D61) |
   | COMPETITION_DESIGN | note | read as a competition experiment: the roles and comparisons chosen, and how to change them (D61) |
-  | PULLDOWN_DESIGN | note | read as a pull-down with a negative control (empty vector, beads, IgG): the comparisons against it, the filter and normalisation that leave it apart, and how to change it (D84) |
+  | PULLDOWN_DESIGN | note | read as a pull-down with a negative control (empty vector, beads, IgG): the comparisons against it, the filter and normalisation that leave it apart, and how to change it (D88) |
   | LOW_CONFIDENCE | note | a group has one sample (or fewer than `min_valid`): tested anyway, p borrowed from the replicated groups (D32) |
   | FOLD_CHANGE_ONLY | note | no replicates anywhere (1 vs 1, one isoDTB replicate, a table without p): fold change only |
   | LOW_SAMPLE | decide | a sample has < 40 % of the median identifications (failed injection?) |
@@ -497,7 +498,7 @@ compound named by the rest of it (or the only compound).
   of the name is another condition (`Probe_pre` next to `Probe`); the
   analysis runs on that reading and asks (`ROLES_UNSURE`).
 
-**Pull-downs with a negative control** (`downstream/roles.py`, D84). An IP
+**Pull-downs with a negative control** (`downstream/roles.py`, D88). An IP
 with an empty vector, beads only, IgG or an untagged bait next to the
 pull-downs: that condition is the *background*. Its name has `EV`, `empty`,
 `emptyvector`, `vector`, `beads`, `IgG`, `isotype`, `untagged`, `nobait` or

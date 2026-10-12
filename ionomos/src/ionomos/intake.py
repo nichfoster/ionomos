@@ -37,10 +37,13 @@ from ionomos import __version__
 from ionomos.config import Config
 from ionomos.ledger import Job, Ledger, now_iso
 from ionomos.manifest import (
+    EXPERIMENT_YAML,
+    NumberOutOfRange,
     Overrides,
     OverridesError,
     apply_file_overrides,
     load_overrides,
+    parse_overrides,
     save_overrides,
 )
 from ionomos.naming import (
@@ -304,6 +307,8 @@ def _plan(folder: Path, cfg: Config, ledger: Ledger | None = None) -> Plan:
 
     try:
         ov = load_overrides(folder)
+    except NumberOutOfRange as exc:  # a replicate the window can correct (0.5.1 wrote time stamps, D85)
+        raise IntakeError(f"experiment.yaml: {exc}", Kind.RAWS) from exc
     except OverridesError as exc:
         raise IntakeError(str(exc), Kind.OVERRIDES) from exc
 
@@ -411,12 +416,27 @@ def _plex_warnings(kind: str, manifest: list[ManifestLine]) -> list[str]:
 # ------------------------------------------------------------------ draft --
 
 
+def _without_files(folder: Path) -> Overrides:
+    """experiment.yaml without its files: block (one of its numbers is out of range, D85), or nothing."""
+    import yaml
+
+    from ionomos.config import read_yaml_text
+
+    try:
+        data = yaml.safe_load(read_yaml_text(Path(folder) / EXPERIMENT_YAML, error=OverridesError)) or {}
+        return parse_overrides({k: v for k, v in data.items() if k != "files"})
+    except (OSError, ValueError, AttributeError, yaml.YAMLError):  # OverridesError is a ValueError
+        return Overrides()
+
+
 def draft(folder: Path, cfg: Config, error: IntakeError | None = None, review: bool = False) -> Draft:
     """What we *think* the folder means, with blanks where we failed. For the GUI.
     review: nothing failed; the window shows the reading so a person can confirm or correct it."""
     folder = Path(folder)
     try:
         ov = load_overrides(folder)
+    except NumberOutOfRange:  # the window shows the files as their names read; the rest of the file still counts
+        ov = _without_files(folder)
     except OverridesError:
         ov = Overrides()
     subdirs: dict[str, str] = {}
@@ -454,7 +474,7 @@ def draft(folder: Path, cfg: Config, error: IntakeError | None = None, review: b
                 df.error = str(exc)
         if f in subdirs and method in cfg.methods and cfg.kind(method) == "TMT":
             df.experiment = _safe(subdirs[f], "plex")  # one folder per plex: the folder is the plex (D69)
-        fo = ov.files.get(f)
+        fo = ov.files.get(f) or ov.files.get(_safe(f[: -len(RAW_SUFFIX)]) + RAW_SUFFIX)  # as apply_file_overrides
         if fo:
             df.experiment = fo.experiment or df.experiment
             if fo.bioreplicate is not None:
@@ -723,7 +743,7 @@ def _ask(folder: Path, cfg: Config, ledger: Ledger, resolver: Resolver, exc: Int
                      "see the window again")
         return IntakeResult.REJECTED
     ov.resolved_by = ov.resolved_by or "gui"
-    save_overrides(folder, ov)
+    save_overrides(folder, ov, replace_files=True)  # the window showed every raw: its answer is the files: block
     try:
         p = plan(folder, cfg, ledger)
     except IntakeError as exc2:

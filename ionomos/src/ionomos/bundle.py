@@ -1371,9 +1371,10 @@ def learn(plan: Plan, freeze: bool = True) -> Anonymiser:
     import yaml
 
     from ionomos import service
+    from ionomos.config import read_yaml_text
 
     try:
-        raw = yaml.safe_load(plan.config_path.read_text(encoding="utf-8")) or {}
+        raw = yaml.safe_load(read_yaml_text(plan.config_path)) or {}
     except Exception:  # noqa: BLE001 - a broken config still gets a bundle
         raw = {}
     raw = raw if isinstance(raw, dict) else {}
@@ -1400,7 +1401,7 @@ def learn(plan: Plan, freeze: bool = True) -> Anonymiser:
     paths = service._raw_paths(plan.config_path)
     learned = users.get("learned_aliases_file") or (plan.config_path.parent / "learned_aliases.yaml")
     try:
-        more = yaml.safe_load(Path(learned).read_text(encoding="utf-8")) or {}
+        more = yaml.safe_load(read_yaml_text(learned)) or {}
         for user, al in (more.items() if isinstance(more, dict) else ()):
             anon.add_user(user, al if isinstance(al, list) else [al])
     except Exception:  # noqa: BLE001
@@ -1479,7 +1480,7 @@ def learn(plan: Plan, freeze: bool = True) -> Anonymiser:
             anon.add_user(job.dest.parent.name)
         _learn_record(anon, job.record, job.names)
         try:
-            ov = yaml.safe_load((job.dest / EXPERIMENT_YAML).read_text(encoding="utf-8")) or {}
+            ov = yaml.safe_load(read_yaml_text(job.dest / EXPERIMENT_YAML)) or {}
             _learn_overrides(anon, ov if isinstance(ov, dict) else {}, job.names)
         except Exception:  # noqa: BLE001
             pass
@@ -1574,8 +1575,17 @@ def _lines(it: Item, anon: Anonymiser | None, hide: list[str]) -> Iterator[str]:
         return
     src = _long(it.src)
     if it.mode in ("config", "json", "yaml"):
-        with open(src, encoding="utf-8", errors="replace") as f:
-            text = f.read()
+        text = None
+        if it.mode != "json":  # a cp1252 file reads as learn() read it, so the names it found are scrubbed (D86)
+            from ionomos.config import read_yaml_text
+
+            try:
+                text = read_yaml_text(src)
+            except Exception:  # noqa: BLE001 - fall back to the lossy read below
+                text = None
+        if text is None:
+            with open(src, encoding="utf-8", errors="replace") as f:
+                text = f.read()
         if it.mode == "config":
             text = notify.redact_config_text(text, hide)
         elif anon is not None:
@@ -2318,12 +2328,14 @@ def _unpacked_config(dest: Path, notes: list[str]) -> Path | None:
     <dest>/_lab, so analysing here uses the lab's choices and touches nothing else. None if it will not load."""
     import yaml
 
+    from ionomos.config import read_yaml_text
+
     src = dest / EXTRAS_DIR / "config.yaml"
     if not src.is_file():
         notes.append("no config.yaml in the bundle: analyse without --config (Ionomos' default settings)")
         return None
     try:
-        raw = yaml.safe_load(src.read_text(encoding="utf-8").replace(": ***", ': "***"'))
+        raw = yaml.safe_load(read_yaml_text(src).replace(": ***", ': "***"'))
         if not isinstance(raw, dict):
             raise ValueError("not a mapping")
         lab = dest / LAB_DIR

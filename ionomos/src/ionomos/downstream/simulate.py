@@ -11,7 +11,7 @@ Column names and layouts follow the real files:
     roles   competition_pg_matrix / competition_tmt     (a competition experiment with unequal groups: DMSO n=2,
                                                          Probe n=4, Probe_Comp n=4; specific and unspecific binders)
             pulldown_pg_matrix                          (a pull-down with an empty-vector negative control: the
-                                                         interactors absent from it, a compound moving some, D84)
+                                                         interactors absent from it, a compound moving some, D88)
     benchmark (benchmark.py, D66):
             isodtb_ratios                               (label quant with per-site truth, changes one way or both,
                                                          a mixing error per replicate)
@@ -360,7 +360,7 @@ def competition_pg_matrix(path: Path, sizes: dict[str, int] | None = None, seed:
 def pulldown_design(sizes: dict[str, int] | None = None, n: int = 600, interactors: int = 60, changed: int = 10,
                     effect: float = 1.5, bait: str = "BAIT", control: str = "DMSO", compound: str = "Drug",
                     background: str = "EV") -> tuple[dict[str, int], list[str], dict, dict, dict]:
-    """A pull-down (IP) with a negative control, as in the lab's FLAG IPs (D84): the bait and its interactors are
+    """A pull-down (IP) with a negative control, as in the lab's FLAG IPs (D88): the bait and its interactors are
     measured in every pull-down (control and compound) and in no background sample (empty vector); everything
     else sticks to the beads and is measured everywhere. The compound moves `changed` interactors (half up, half
     down) by `effect` log2 against the control. Returns (sizes, genes, planted, absent, truth) for dia_pg_matrix;

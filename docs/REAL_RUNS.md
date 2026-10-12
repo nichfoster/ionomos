@@ -15,7 +15,7 @@ from unpublished experiments stay out of this page.
 
 | Date | Version | What ran | Outcome |
 |---|---|---|---|
-| 2026-09-16 | LabWatch 0.1.0 | `labwatch status --all` on the PC's testbed config | Crashed: `UnicodeDecodeError … byte 0x97`. [Open](#open) |
+| 2026-09-16 | LabWatch 0.1.0 | `labwatch status --all` on the PC's testbed config | Crashed: `UnicodeDecodeError … byte 0x97`. Read with a warning since D86 ([Open](#open)) |
 | 2026-09-23 14:23 | 0.5.0 | First install, setup checklist | No DIA or isoDTB workflow pinned yet. FragPipe copies, `Fasta-files`, `New folder` and `QC` were listed as users (fixed in 0.5.1) |
 | 2026-09-23 15:05 | 0.5.1 | Chris's 7 `.raw` files dropped loose in the inbox | Ignored (fixed in 0.5.2, D23) |
 | 2026-09-23 15:16 | 0.5.1 | **Job 1**, `CS_22rv1_FLAG_AR_MA25`, DIA, 6 raws | **First real FragPipe search.** Exit 0 after 14 min. DIA-NN's matrix has 4 of the 6 runs; the report had no volcano. [Job 1](#job-1-the-first-real-search) |
@@ -39,6 +39,11 @@ from unpublished experiments stay out of this page.
   `20260508180610` and `20260508204737` for DMSO 1 and 2. Since 0.5.2 the
   timestamp is ignored (D23), and since 0.8.0 replicate tails are 1–999.
   Current naming reads these files as DMSO 1, 2, 3 and MA25 1, 2, 3.
+  An explicit `bioreplicate:` in `experiment.yaml` was still passed on
+  unchecked until D85 (after 0.18.1). It is now bounded to 1–999 like a
+  file name's: such a file opens the naming window (or leaves a note), and a
+  job already queued with such a number waits until its `experiment.yaml`
+  gives the file's replicate.
 - **DIA-NN's `report.pg_matrix.tsv` has 4 run columns, not 6.** The two
   missing runs are exactly the two with the 14-digit replicate number. That
   number does not fit a 32-bit integer. **Not confirmed**: the job's
@@ -106,16 +111,22 @@ Analysis tab (0.18.0) then analysed the FragPipe folder (D80).
   (`P02769`, `P00761`). The rule looks for the text "contam", so it removed
   nothing. Bovine serum albumin was then reported under the human gene name
   `ALB`, next to human albumin, and porcine trypsin stayed in the matrix.
-  FragPipe-Analyst uses the same rule and keeps them too. [Open](#open)
+  FragPipe-Analyst uses the same rule and keeps them too. Fixed after 0.18.1
+  (D87): the accessions of the FASTA's `contam_` entries are removed too.
+  [Open](#open) until it is seen on the PC.
 - The empty-vector condition was taken as a control by its name (`EV` is a
   control keyword), with the vehicle as *the* control. So the comparison is
   "empty vector vs vehicle", and proteins enriched by the bait are listed as
   *down*. The numbers are correct; the direction is easy to misread for a
-  pull-down. Since D84 (unreleased) such a condition is a pull-down's
+  pull-down. Since D88 (unreleased) such a condition is a pull-down's
   *background*: on this matrix it is read from its name and the data, the
   comparisons become `FPS vs DMSO`, `DMSO vs EV` and `FPS vs EV` (153
   proteins up in `DMSO vs EV`), and the EV samples are left out of the
   global filter and normalised apart.
+- **Leaving the empty-vector runs out failed a stage.** Re-run with
+  `exclude_samples: [EV_1, EV_2, EV_3]`, the run-order stage stopped with
+  `KeyError: 'EV_2'`. The manifest's map of samples to runs still held the
+  samples left out. Fixed (D84).
 
 ### Why FragPipe-Analyst showed a protein Ionomos didn't
 
@@ -169,9 +180,11 @@ treatment is often the interesting part. Ionomos' own default (0 % of all
 samples, 50 % of one condition) keeps it. It is then tested (q 0.10 with
 median centring: not a hit, because the imputed values vary) and listed
 under "only in one condition". **Also a gap in the
-report:** Ionomos' "only in one condition" table is made after the filter,
-so a protein the filter removes for being in one condition only is not
-listed there either. [Open](#open)
+report:** Ionomos' "only in one condition" table was made after the filter,
+so a protein the filter removed for being in one condition only was not
+listed there either. Fixed (D84): the table is made before the filter and
+marks what the filter removed, and the doctor warns when a global filter
+removes features that a condition had in every sample.
 
 To reproduce a FragPipe-Analyst web session, press **Use FragPipe-Analyst's
 defaults** in the Analysis tab, set the control, and match the web's
@@ -190,12 +203,10 @@ port handles each of these, but no golden pins them.
 
 | Seen | Problem | Next step |
 |---|---|---|
-| 2026-09-16 | A `config.yaml` that is not UTF-8 (Notepad saving as ANSI turns `—` into byte 0x97) still stops Ionomos 0.18.1 with a bare `UnicodeDecodeError`, not a `ConfigError` saying what to do | Read cp1252 when UTF-8 fails, or say which line and how to save it |
-| 2026-10-06 | A protein measured in only one condition is removed by a global missing-value filter and is then missing from the "only in one condition" table too | Build that table before the filter; warn when a global filter of x % removes features complete in one condition |
-| 2026-10-06 | Leaving samples out (`exclude_samples`) makes the run-order stage fail (`KeyError` on a left-out sample) | Fix `run_order` to use the chosen samples |
+| 2026-09-16 | A `config.yaml` that is not UTF-8 (Notepad saving as ANSI turns `—` into byte 0x97) still stops Ionomos 0.18.1 with a bare `UnicodeDecodeError`, not a `ConfigError` saying what to do | **Fixed, unreleased (D86)**: read as cp1252 with a warning naming the file, byte and line; `experiment.yaml` too. Confirm the warning on the PC, then remove this row |
+| 2026-10-06 | A global filter removes what one condition alone has, before testing | Fixed in D84: listed (marked) under "only in one condition", and the `FILTER_REMOVES_ONE_CONDITION` warning. Open: should the Analysis tab caution before the run? |
 | Job 1 | Two runs missing from DIA-NN's matrix | Read job 1's console log for the two DMSO files |
-| Job 1 | An explicit `bioreplicate:` in `experiment.yaml` is passed to FragPipe unchecked (14 digits got through on 0.5.1) | Hold the job or refuse the value, as the naming rules do (1–999) |
-| 2026-10-06 | FragPipe's `contam_` prefix is lost in DIA-NN's tables, so contaminants stay and BSA reads as `ALB` | Take the contaminant accessions from the FASTA FragPipe used (or `protein.tsv`) |
-| 2026-10-06 | An empty-vector control next to the vehicle: bait-enriched proteins read as "down" | Done in D84 (unreleased): the `background` role; the lab confirms its words and thresholds (ROADMAP) |
+| 2026-10-06 | FragPipe's `contam_` prefix is lost in DIA-NN's tables, so contaminants stay and BSA reads as `ALB` | Fixed in code (D87): the FASTA's `contam_` accessions are removed. Re-analyse the 2026-10-06 folder on the next release; "contaminants" should show −2 or more (P02769, P00761) |
+| 2026-10-06 | An empty-vector control next to the vehicle: bait-enriched proteins read as "down" | Done in D88 (unreleased): the `background` role; the lab confirms its words and thresholds (ROADMAP) |
 | 2026-10-06 | FragPipeAnalystR golden doesn't cover a real matrix's shape | Add a case with interleaved columns, a duplicated gene and a blank gene |
 | Job 2 | How it ended | Its `ionomos.json` / `DONE.txt`, `run_fingerprint.json` |

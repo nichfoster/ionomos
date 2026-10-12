@@ -246,9 +246,17 @@ def _folder_lines(dest: Path) -> list[tuple[str, str, int | None]]:
     return out
 
 
+def _manifest_run(pm) -> dict[str, str]:
+    """{sample: the manifest run it was read from}, for pm's samples only. The quant table's meta keeps every run
+    it loaded, the samples left out on the Analysis tab included (fpa.choose_samples does not touch meta)."""
+    keep = set(pm.samples)
+    return {s: stem for s, stem in (pm.meta.get("manifest_run") or {}).items() if s in keep}
+
+
 def sample_files(pm, record: dict | None, dest: Path) -> dict[str, list[str]]:
     """{sample: its raw files (relative to dest)}: the ionomos.json manifest, else the raw files in the folder,
-    matched to the samples by the quant table's run names, <experiment>_<replicate>, or the file's own name."""
+    matched to the samples by the quant table's run names, <experiment>_<replicate>, or the file's own name.
+    Only pm's samples: the raw files of samples left out (exclude_samples) belong to none."""
     samples = list(pm.samples)
     out: dict[str, list[str]] = {s: [] for s in samples}
     lines = [(str(x.get("file", "")), str(x.get("experiment", "")), x.get("bioreplicate"))
@@ -257,7 +265,7 @@ def sample_files(pm, record: dict | None, dest: Path) -> dict[str, list[str]]:
         lines = _folder_lines(Path(dest))
     stems = {run_stem(f): f for f, _e, _r in lines}
     by_stem: dict[str, str] = {}
-    for s, stem in (pm.meta.get("manifest_run") or {}).items():
+    for s, stem in _manifest_run(pm).items():
         by_stem.setdefault(str(stem), s)
     for s in samples:  # a column named after its raw file (DIA-NN, a path)
         col = (getattr(pm, "columns", None) or {}).get(s) or ""
@@ -357,7 +365,7 @@ def run(pm, record: dict | None, dest: Path, scorecard: list[dict] | None = None
     for fs in files.values():
         for f in fs:
             shared[f] = shared.get(f, 0) + 1
-    for stem in (pm.meta.get("manifest_run") or {}).values():
+    for stem in _manifest_run(pm).values():
         shared[f"run:{stem}"] = shared.get(f"run:{stem}", 0) + 1
     if getattr(pm, "exp", "") == "TMT" or any(k > 1 for k in shared.values()):
         res.reason = ("the samples share raw files (labelled channels, such as TMT, are acquired together), so a "

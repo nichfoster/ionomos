@@ -37,7 +37,15 @@ from pathlib import Path
 
 from ionomos.config import Config
 from ionomos.ledger import Job
-from ionomos.manifest import OverridesError, fp_manifest_text, parse_overrides, tmt_annotation_files
+from ionomos.manifest import (
+    EXPERIMENT_YAML,
+    OverridesError,
+    fp_manifest_text,
+    load_overrides,
+    parse_overrides,
+    tmt_annotation_files,
+)
+from ionomos.naming import NUMBER_WHY, NamingError, number_ok, sanitize
 
 RUN_DIR = "ionomos_run"  # == names.RUN_DIR; old jobs may have labwatch_run/ (names.run_dir finds it)
 WORKDIR = "fragpipe"
@@ -326,6 +334,49 @@ def annotation_problems(per_exp: dict[str, str], label_type: str = "") -> list[s
 # ---------------------------------------------------------------- prepare --
 
 
+def job_replicates(dest: Path, manifest: list[dict]) -> dict[str, int]:
+    """{manifest file: bioreplicate} for FragPipe's manifest. A job filed with a number outside 1-999 (0.5.1 filed
+    the Xcalibur time stamp 20260508180610 as one, and DIA-NN's matrix lost those runs) takes the file's
+    files.<name>.bioreplicate from the experiment folder's experiment.yaml; without one the job waits (Hold),
+    saying which file and where to fix it, and starts by itself once it is fixed (D85)."""
+    reps: dict[str, int] = {}
+    bad = []
+    for m in manifest:
+        if number_ok(m.get("bioreplicate")):
+            reps[m["file"]] = int(str(m["bioreplicate"]).strip())
+        else:
+            bad.append(m)
+    if not bad:
+        return reps
+    yaml_path = Path(dest) / EXPERIMENT_YAML
+    try:
+        fixes = load_overrides(dest).files
+    except OverridesError as exc:
+        raise Hold(f"replicate number out of range; {yaml_path} can't be used to fix it: {exc}") from None
+
+    def key(name: str) -> str:
+        try:
+            return sanitize(name[:-4] if name.lower().endswith(".raw") else name).lower()
+        except NamingError:
+            return name.lower()
+
+    by_name = {key(name): fo.bioreplicate for name, fo in fixes.items() if fo.bioreplicate is not None}
+    still = []
+    for m in bad:
+        n = by_name.get(key(Path(m["file"]).name))
+        if n is None:
+            still.append(m)
+        else:
+            reps[m["file"]] = n
+    if still:
+        name = Path(still[0]["file"]).name
+        more = f" (and {len(still) - 1} more file(s))" if len(still) > 1 else ""
+        raise Hold(f"replicate number {still[0].get('bioreplicate')!r} of {name}{more} is outside 1-999: {NUMBER_WHY}. "
+                   f"Give the file's replicate number in {yaml_path} (files: {name}: {{bioreplicate: <1-999>}}); "
+                   f"the search then starts by itself")
+    return reps
+
+
 def check_raws(dest: Path, plan: dict, cfg: Config) -> list[tuple[str, str, int, str]]:
     """The job's raw files as (path, experiment, bioreplicate, data type), checked: all there, none empty,
     enough disk space. Raises JobError / Hold. Shared by every engine's runner."""
@@ -333,9 +384,11 @@ def check_raws(dest: Path, plan: dict, cfg: Config) -> list[tuple[str, str, int,
     missing = []
     empty = []
     sizes: dict[str, int] = {}
-    for m in plan.get("manifest") or []:
+    manifest = plan.get("manifest") or []
+    reps = job_replicates(dest, manifest)
+    for m in manifest:
         raw = dest / m["file"]
-        lines.append((str(raw), str(m["experiment"]), int(m["bioreplicate"]), str(m["data_type"])))
+        lines.append((str(raw), str(m["experiment"]), reps[m["file"]], str(m["data_type"])))
         if not raw.is_file():
             missing.append(m["file"])
             continue

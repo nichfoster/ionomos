@@ -200,10 +200,14 @@ py -3.14 -c "import tkinter; print('ok')"
   The startup task must be *interactive* (the app installs it that way). If
   someone changed it to "run whether user is logged on or not", reinstall from tab 5.
 - **PC sleeps mid-run.** Settings → System → Power → Sleep: Never (plugged in).
-- **`UnicodeDecodeError … byte 0x97`** when reading a config. A file was written
-  in Windows-1252 (e.g. by an old build, or by Notepad "ANSI"). Re-save it as
-  UTF-8 (Notepad → Save as → Encoding: UTF-8) or delete and recreate it
-  (testbed: **Reset**/re-**Create testbed**). Builds from 0.1.1 always write UTF-8.
+- **"… is not UTF-8 (byte 0x97 on line 3); read it as Windows-1252"** for
+  `config.yaml` or an `experiment.yaml`. The file was saved in Notepad as
+  "ANSI" (or by a build before 0.1.1). Ionomos reads it anyway (D86); re-save
+  it as UTF-8 (Notepad → Save as → Encoding: UTF-8) to make the note go away.
+  Saving from the app's settings writes UTF-8 too. If it says "not
+  Windows-1252 either", the file stops Ionomos until it is re-saved that way.
+  Versions up to 0.18.1 stopped with a bare `UnicodeDecodeError … byte 0x97`
+  instead.
 - **"contains a space" on Check.** Every path in the config must be space-free
   (FragPipe). Don't put the testbed or the install under `C:\Users\<First Last>\…`;
   use `C:\ionomos-testbed` / `C:\Fragpipe_Auto`.

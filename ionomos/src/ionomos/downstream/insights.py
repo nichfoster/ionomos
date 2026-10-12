@@ -11,6 +11,9 @@ done every time and turned into numbers the report and the doctor can use.
     p_histogram()          p-value histogram, its shape and Storey's pi0 (the share of features that don't change)
     presence_absence()     "on/off" features: measured in most replicates of one group and never in the other,
                            the hits a t-test can't see (MS-DAP's differential detection, simplified)
+    presence_absence_unfiltered()  the same on the samples before the missing-value filter: a feature the filter
+                           removed is still listed, marked "filtered" (D84)
+    filter_loss()          features in every sample of a condition that a global missing-value filter removed (D84)
     imputation_driven()    hits whose significance rests on imputed values (at least half of a group imputed)
     power()                minimum detectable log2 fold change against replicates per group, from this
                            experiment's own variance (limma's prior when available); and for each comparison
@@ -374,6 +377,95 @@ def presence_absence(measured: Matrix, samples: list[str], condition: dict[str, 
                             "detected": n_on, "of": size, "mean": sum(obs) / len(obs)})
     out.sort(key=lambda x: (-x["detected"] / x["of"], -x["mean"]))
     return out
+
+
+def _kept_rows(before, m) -> dict[int, int] | None:
+    """{row of the matrix before the missing-value filter: its row in the analysed matrix}. The analysed rows are
+    the earlier ones in the same order, fewer (filtered, or with no value at all). None if they don't line up."""
+    out, k = {}, 0
+    for i, f in enumerate(before.features):
+        if k < len(m.features) and (m.features[k] is f or (m.features[k].id, m.features[k].label) == (f.id, f.label)):
+            out[i] = k
+            k += 1
+    return out if k == len(m.features) else None
+
+
+def _sample_maps(p) -> list[tuple[float, float]]:
+    """Each sample's normalisation as (a, b): analysed = a * loaded + b. Every method in fpa.normalize_info is
+    such a map per sample (a shift; gn also scales), so two analysed features with different values recover it
+    exactly. (1, 0) when nothing tells."""
+    pre, post = p.normalized_from, p.measured
+    out = []
+    for j in range(len(p.m.samples)):
+        pts = sorted({(r[j], q[j]) for r, q in zip(pre or [], post or [], strict=False)
+                      if r[j] is not None and q[j] is not None})
+        if not pts:
+            out.append((1.0, 0.0))
+            continue
+        (x0, y0), (x1, y1) = pts[0], pts[-1]
+        a = (y1 - y0) / (x1 - x0) if x1 - x0 > 1e-9 else 1.0
+        out.append((a, y0 - a * x0))
+    return out
+
+
+def presence_absence_unfiltered(p, treatment: str, control: str | None) -> list[dict]:
+    """presence_absence() on the samples chosen, before the missing-value filter (Processed.before_filter), so a
+    feature measured in one condition only stays listed when a global filter removed it (docs/REAL_RUNS.md,
+    2026-10-06). An analysed feature has its row in p.m as "index"; a filtered one has "index" None, "filtered"
+    True and its "feature". The mean is on the analysed scale for both: a filtered feature's values are put
+    through its samples' normalisation (_sample_maps), which it was removed before."""
+    m, before = p.m, p.before_filter
+    rows = _kept_rows(before, m) if before is not None and before.samples == m.samples else None
+    if rows is None or len(rows) == len(before.features):
+        return presence_absence(p.measured, m.samples, m.condition, treatment, control)
+    maps = _sample_maps(p)
+    scaled = [[None if v is None else a * v + b for v, (a, b) in zip(r, maps, strict=True)] for r in before.values]
+    found = presence_absence(scaled, m.samples, m.condition, treatment, control)
+    on_treatment = [j for j, s in enumerate(m.samples) if m.condition[s] == treatment]
+    on_control = [j for j, s in enumerate(m.samples) if (m.condition[s] != treatment if control == "others"
+                                                          else m.condition[s] == control)]
+    for x in found:
+        i = x.pop("index")
+        k = rows.get(i)
+        x["index"], x["filtered"] = k, k is None
+        if k is None:
+            x["feature"] = before.features[i]
+        else:
+            idx = on_treatment if x["only_in"] == "treatment" else on_control
+            obs = [p.measured[k][j] for j in idx if p.measured[k][j] is not None]
+            x["mean"] = sum(obs) / len(obs)
+    found.sort(key=lambda x: (-x["detected"] / x["of"], -x["mean"]))
+    return found
+
+
+def filter_loss(p, global_pct: float) -> dict:
+    """What a global missing-value filter (FragPipe-Analyst's global_filter) removed that a condition had in every
+    sample: {"removed", "complete" (complete in a condition of 2+ samples), "only_one" (of those, complete in one
+    condition and never measured in another), "by_condition": {condition: n}}. {} when no global filter ran or
+    none of the features it removed was complete in a condition. Such a feature passes any per-condition filter,
+    so the global one removed it. With three conditions of three, a global filter above 3 of 9 (33 %) removes
+    everything seen in one condition only (docs/REAL_RUNS.md, 2026-10-06)."""
+    before = getattr(p, "before_filter", None)
+    if not global_pct or before is None or before.kind != "intensity":
+        return {}
+    rows = _kept_rows(before, p.m)
+    if rows is None:
+        return {}
+    groups = {c: idx for c, idx in _groups(before.samples, before.condition).items() if len(idx) >= 2}
+    out = {"removed": 0, "complete": 0, "only_one": 0, "by_condition": {}}
+    for i, r in enumerate(before.values):
+        if i in rows or all(v is None for v in r):
+            continue
+        out["removed"] += 1
+        full = [c for c, idx in groups.items() if all(r[j] is not None for j in idx)]
+        if not full:
+            continue
+        out["complete"] += 1
+        for c in full:
+            out["by_condition"][c] = out["by_condition"].get(c, 0) + 1
+        if len(full) == 1 and not any(v is not None for j, v in enumerate(r) if j not in groups[full[0]]):
+            out["only_one"] += 1
+    return out if out["complete"] else {}
 
 
 # ------------------------------------------------------- imputation-driven hits --

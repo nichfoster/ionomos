@@ -58,6 +58,18 @@ def test_the_editor_replaces_the_analysis_block_and_the_review_merges_into_it(tm
         ({"date": "yesterday"}, "YYYY-MM-DD"),
         ({"files": {"a.raw": {"bioreplicate": "two"}}}, "integer"),
         ({"files": {"a.raw": {"what": 1}}}, "unknown key"),
+        # replicate / fraction numbers are bounded like a file name's, 1-999 (D85): job 1 on 0.5.1 wrote these two
+        ({"files": {"CS_22rv1_FLAG-AR_MA25-10uM_DMSO_1_20260508180610.raw": {"bioreplicate": 20260508180610}}},
+         r"files\.CS_22rv1_FLAG-AR_MA25-10uM_DMSO_1_20260508180610\.raw\.bioreplicate is 20260508180610, but it "
+         r"must be 1-999: .*DIA-NN drops that run"),
+        ({"files": {"DMSO_2_20260508204737.raw": {"bioreplicate": "20260508204737"}}}, "must be 1-999"),
+        ({"files": {"a.raw": {"bioreplicate": 2 ** 31}}}, "must be 1-999"),
+        ({"files": {"a.raw": {"bioreplicate": 1000}}}, "must be 1-999"),
+        ({"files": {"a.raw": {"bioreplicate": 0}}}, "must be 1-999"),
+        ({"files": {"a.raw": {"bioreplicate": -1}}}, "must be 1-999"),  # -1 only means "no fraction"
+        ({"files": {"a.raw": {"fraction": 0}}}, "1-999, or -1 for a single-shot file"),
+        ({"files": {"a.raw": {"fraction": -2}}}, "1-999, or -1"),
+        ({"files": {"a.raw": {"fraction": 1000}}}, "1-999, or -1"),
         ({"files": "a.raw"}, "mapping"),
         ({"tmt": {"tag": "TMT-10"}}, "channels"),
         ({"tmt": {"plexes": {"p1": {}}}}, "channels"),
@@ -71,6 +83,31 @@ def test_the_editor_replaces_the_analysis_block_and_the_review_merges_into_it(tm
 def test_bad_overrides(data, msg):
     with pytest.raises(OverridesError, match=msg):
         parse_overrides(data)
+
+
+@pytest.mark.parametrize(("spec", "rep", "frac"), [
+    ({"bioreplicate": 1}, 1, None), ({"bioreplicate": 999}, 999, None), ({"bioreplicate": "3"}, 3, None),
+    ({"fraction": 1}, None, 1), ({"fraction": 999}, None, 999), ({"fraction": -1}, None, -1),
+    ({"bioreplicate": "", "fraction": ""}, None, None),
+])
+def test_replicate_and_fraction_bounds_accept(spec, rep, frac):
+    fo = parse_overrides({"files": {"a.raw": spec}}).files["a.raw"]
+    assert (fo.bioreplicate, fo.fraction) == (rep, frac)
+
+
+def test_the_naming_window_answer_replaces_the_files_block(tmp_path):
+    """The naming window shows every raw, so its answer is the whole files: block: an entry it was opened for (a
+    replicate outside 1-999 written by 0.5.1) is not merged back in. Other keys are kept (D85)."""
+    bad = "CS_22rv1_FLAG-AR_MA25-10uM_DMSO_1_20260508180610.raw"
+    (tmp_path / "experiment.yaml").write_text(
+        f"notes: keep me\nfiles:\n  {bad}: {{experiment: DMSO, bioreplicate: 20260508180610}}\n", encoding="utf-8")
+    with pytest.raises(OverridesError, match="must be 1-999"):
+        load_overrides(tmp_path)
+    save_overrides(tmp_path, Overrides(user="Chris", files={"x.raw": FileOverride(experiment="X")}), replace_files=True)
+    back = load_overrides(tmp_path)
+    assert set(back.files) == {"x.raw"} and back.notes == "keep me" and back.user == "Chris"
+    save_overrides(tmp_path, Overrides(user="Chris"), replace_files=True)
+    assert load_overrides(tmp_path).files == {}
 
 
 def test_absent_file_is_empty(tmp_path):
@@ -98,6 +135,19 @@ def test_apply_file_overrides_rebuilds_layout():
         apply_file_overrides(rs, Overrides(files={"ghost.raw": FileOverride(experiment="x")}))
     with pytest.raises(OverridesError, match="two files resolve"):
         apply_file_overrides(rs, Overrides(files={"Drug_1.raw": FileOverride(experiment="DMSO", bioreplicate=1)}))
+
+
+@pytest.mark.parametrize(("rep", "frac"), [(20260508180610, None), (20260508204737, None), (1000, None), (0, None),
+                                         (1, 1000)])
+def test_no_override_puts_a_number_outside_1_to_999_in_the_manifest(rep, frac):
+    """However a FileOverride is made (experiment.yaml, the window, the naming history), the layout refuses a
+    number outside 1-999 before it can reach FragPipe's manifest (D85)."""
+    rs = group_raws(["CS_22rv1_FLAG-AR_MA25-10uM_DMSO_1_20260508180610.raw", "CS_22rv1_FLAG-AR_MA25-10uM_DMSO_3.raw"],
+                    "DIA")
+    ov = Overrides(files={"CS_22rv1_FLAG-AR_MA25-10uM_DMSO_1_20260508180610.raw":
+                          FileOverride(bioreplicate=rep, fraction=frac)})
+    with pytest.raises(OverridesError, match="out of range .*expected 1–999"):
+        apply_file_overrides(rs, ov)
 
 
 def test_fp_manifest_text():

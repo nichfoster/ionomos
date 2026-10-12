@@ -1,4 +1,4 @@
-"""A pull-down's negative control (roles.py "background", D84): read from the name together with the data or the
+"""A pull-down's negative control (roles.py "background", D88): read from the name together with the data or the
 experiment's name, never from the name alone; left out of the global missing-value rule; normalised apart from
 the pull-downs; every pull-down compared against it. On simulated pull-downs with known truth
 (simulate.pulldown_pg_matrix). The real case that asked for it (a FLAG IP with an empty-vector control,

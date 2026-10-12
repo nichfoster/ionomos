@@ -1,5 +1,6 @@
 """
-Configuration loading and validation. Nothing else in the package reads YAML.
+Configuration loading and validation. Hand-edited YAML files (this one, experiment.yaml, learned aliases)
+are read through `read_yaml_text`, which takes Notepad's "ANSI" as well as UTF-8 (D86).
 
     cfg = load("C:/Fragpipe_Auto/config.yaml")            # validates paths exist
     cfg = load(path, check_paths=False)                    # for dry-run / tests
@@ -40,6 +41,45 @@ DEFAULT_USER_IGNORE = ("FragPipe*", "Fasta*", "New folder*", "~*")
 
 class ConfigError(ValueError):
     """config.yaml is missing, malformed, or points at things that don't exist."""
+
+
+_SAVE_AS_UTF8 = "In Notepad: File > Save as, set Encoding to UTF-8, Save."
+
+
+def _byte_at(data: bytes, i: int) -> str:
+    line = data.count(b"\n", 0, i) + 1
+    return f"byte 0x{data[i]:02X} on line {line}"
+
+
+def read_yaml_text(path: str | Path, error: type[Exception] = ConfigError, warnings: list[str] | None = None) -> str:
+    """Text of a hand-edited YAML file (config.yaml, experiment.yaml, learned aliases), D86. UTF-8, with or without
+    a BOM; UTF-16 with its BOM (Notepad's "Unicode"). Anything else is read as cp1252, what Notepad saves as "ANSI"
+    on the lab PC (an em dash is byte 0x97), with a warning naming the file: appended to `warnings`, else logged.
+    A byte cp1252 doesn't have either raises `error` naming the byte, its line and how to save as UTF-8."""
+    p = Path(path)
+    data = p.read_bytes()
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        try:
+            return data.decode("utf-16")
+        except UnicodeDecodeError as exc:
+            raise error(f"{p} starts like UTF-16 but isn't: {exc.reason}. {_SAVE_AS_UTF8}") from None
+    try:
+        return data.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        first = exc
+    where = _byte_at(data, first.start)
+    try:
+        text = data.decode("cp1252")
+    except UnicodeDecodeError as exc:
+        raise error(f"{p} is not UTF-8 ({where}) and not Windows-1252 either ({_byte_at(data, exc.start)}). "
+                    f"{_SAVE_AS_UTF8}") from None
+    msg = (f"{p} is not UTF-8 ({where}); read it as Windows-1252, Notepad's \"ANSI\". Save it as UTF-8 to make "
+           f"sure every character is read as meant. {_SAVE_AS_UTF8}")
+    if warnings is None:
+        log.warning("%s", msg)
+    else:
+        warnings.append(msg)
+    return text
 
 
 @dataclass(frozen=True)
@@ -179,8 +219,9 @@ def load(path: str | Path, check_paths: bool = True) -> Config:
     p = Path(path)
     if not p.is_file():
         raise ConfigError(f"config file not found: {p}")
+    encoding_warnings: list[str] = []
     try:
-        raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+        raw = yaml.safe_load(read_yaml_text(p, warnings=encoding_warnings)) or {}
     except yaml.YAMLError as exc:
         raise ConfigError(f"could not parse {p}: {exc}") from exc
     if not isinstance(raw, dict):
@@ -188,7 +229,7 @@ def load(path: str | Path, check_paths: bool = True) -> Config:
 
     _SPACE_WARNINGS.clear()
     paths = {k: _path("paths", k, _get(raw, "paths", k, required=True)) for k in _REQUIRED_PATHS}
-    space_warnings = list(_SPACE_WARNINGS)
+    space_warnings = encoding_warnings + _SPACE_WARNINGS
 
     methods_raw = raw.get("methods")
     if not isinstance(methods_raw, dict) or not methods_raw:
@@ -388,12 +429,16 @@ def _assistant(raw) -> dict:
         raise ConfigError(f"assistant.{exc}" if not str(exc).startswith("must") else f"assistant: {exc}") from None
 
 
-def _read_learned(path: Path) -> dict[str, list[str]]:
+def _read_learned(path: Path, strict: bool = False) -> dict[str, list[str]]:
+    """Learned aliases; {} when unreadable, or ConfigError if `strict` (before the file is rewritten: never over
+    aliases it couldn't read)."""
     if not path.is_file():
         return {}
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    except yaml.YAMLError:
+        data = yaml.safe_load(read_yaml_text(path)) or {}
+    except (yaml.YAMLError, ConfigError) as exc:
+        if strict:
+            raise ConfigError(f"{path} can't be read, so it is left as it is: {exc}") from None
         return {}
     return {str(k): [str(a) for a in (v or [])] for k, v in data.items()} if isinstance(data, dict) else {}
 
@@ -434,13 +479,16 @@ class LiveConfig:
             log.warning("inbox / database / log folder changed in config.yaml: restart the watcher to use them")
             new = replace(new, inbox=self._cfg.inbox, database=self._cfg.database, log_dir=self._cfg.log_dir)
         log.info("config.yaml changed: reloaded (users, aliases, methods, naming, analysis)")
+        for w in dict.fromkeys(new.warnings):
+            if w not in self._cfg.warnings:  # e.g. saved as ANSI this time (D86)
+                log.warning("config: %s", w)
         self._cfg, self._stamp, self._bad = new, stamp, None
         return new
 
 
 def remember_alias(cfg: Config, user: str, alias: str) -> None:
     """Persist 'alias means user' (from the GUI) so future drops resolve without asking."""
-    data = _read_learned(cfg.learned_aliases_file)
+    data = _read_learned(cfg.learned_aliases_file, strict=True)
     data.setdefault(user, [])
     if alias not in data[user]:
         data[user].append(alias)

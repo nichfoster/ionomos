@@ -17,6 +17,8 @@ from pathlib import Path
 
 import yaml
 
+from ionomos.config import read_yaml_text
+
 DEFAULT_ROOT_WIN = "C:/Fragpipe_Auto"
 DEFAULT_USERS_WIN = "C:/Fragpipe_General"
 
@@ -100,7 +102,7 @@ def read_config(path: str | Path) -> dict:
     p = Path(path)
     if not p.is_file():
         return defaults()
-    raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    raw = yaml.safe_load(read_yaml_text(p)) or {}  # cp1252 (Notepad "ANSI") read with a warning, D86
     if not isinstance(raw, dict):
         raw = {}
     if isinstance(raw.get("notify"), dict):
@@ -229,7 +231,7 @@ def dump_config(d: dict) -> str:
     a(f"  competition_keywords: {_y(list(an.get('competition_keywords') or []))}   # a word of a condition name that "
       "means 'plus a competitor' (Probe_Comp): its comparisons follow the design")
     for k in ("competition_keywords_weak", "background_keywords", "role_comparisons",
-              "small_group_min_valid"):  # roles: D61, D84
+              "small_group_min_valid"):  # roles: D61, D88
         if an.get(k) not in (None, ""):
             a(f"  {k}: {_y(list(an[k]) if isinstance(an[k], (list, tuple)) else an[k])}")
     if isinstance(an.get("roles"), dict) and an["roles"]:

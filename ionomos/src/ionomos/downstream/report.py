@@ -94,7 +94,7 @@ def payload(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: li
         "v": [], "imp": None, "comps": [], "notes": notes, "files": files,
         "settings": {"log2fc": s.log2fc, "alpha": s.alpha, "use_adjusted": s.use_adjusted, "top_labels": s.top_labels,
                      "normalize": (p.normalization.get("used") if p and p.normalization else None) or s.normalize,
-                     "test": s.test},
+                     "test": s.test, "filter": [s.filter_global_pct, s.filter_condition_pct]},
         "imputationLabel": fpa.IMPUTATION_LABELS.get(p.imputation, "") if p else "",
         "qc": {}, "enr": [], "enrNote": "", "gsea": [], "evidence": "", "rep": [],
         "dose": dose or {"ran": False, "found": False, "reason": "No dose-response curves were fitted."},
@@ -147,12 +147,17 @@ def payload(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: li
             for k, i in enumerate(order, 1):
                 cols["a"][i] = k
         ph = (insight.get("phist") or {}).get(dr.name) or {}
+        found = (insight.get("onoff") or {}).get(dr.name, [])
         onoff = [[x["index"], "t" if x["only_in"] == "treatment" else "c", x["detected"], x["of"]]
-                 for x in (insight.get("onoff") or {}).get(dr.name, [])]
+                 for x in found if not x.get("filtered")]
+        # removed by the missing-value filter before testing (D84): not in the matrix, so named here
+        gone = [[x["feature"].label, x["feature"].id, "t" if x["only_in"] == "treatment" else "c", x["detected"],
+                 x["of"], _r(x["mean"], 4), (x["feature"].description or "")[:100]] for x in found if x.get("filtered")]
         d["comps"].append({"name": dr.name, "slug": dr.slug(), "t1": dr.treatment, "t2": dr.control,
                            "conf": dr.confidence, "confNote": dr.confidence_note, "aRank": rank, **cols,
                            "size": list(dr.groups), "kind": dr.role,
-                           "pi0": _r(ph.get("pi0"), 3), "pshape": ph.get("shape", ""), "onoff": onoff})
+                           "pi0": _r(ph.get("pi0"), 3), "pshape": ph.get("shape", ""), "onoff": onoff,
+                           **({"onoffOut": gone} if gone else {})})
     ft = ctx.get("ftest")
     if ft is not None and len(ft.q) == n:  # the moderated F (3+ conditions): "any change" tile + table column
         d["F"] = {"f": [_r(x, 4) for x in ft.f], "p": [_r(x, 8) for x in ft.p], "q": [_r(x, 8) for x in ft.q],
@@ -796,7 +801,8 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
     if not ratio:
         b.append("<section id='onoff'><h2>Only in one condition</h2><p class='sub'>Measured in at least 75% (and at "
                  "least two) of one group's samples and in none of the other: often the strongest biology, and "
-                 "invisible to a t-test without imputation. Missing can also mean below detection, so confirm them.</p>"
+                 "invisible to a t-test without imputation. Missing can also mean below detection, so confirm them. "
+                 "Counted before the missing-value filter: one the filter removed is listed in grey, not tested.</p>"
                  "<div id='onoffbody'></div></section>")
     b.append("<section id='heat'><h2>Heatmap of significant features</h2><p class='sub'>Each row centred on its "
              "mean, so colour shows where a feature is high or low across samples.</p>"

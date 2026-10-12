@@ -18,7 +18,8 @@ Layout it reads and writes (inside the experiment folder):
                                     lab's export style: volcano, PCA, heatmap, correlation, and the dose-
                                     response, time-course and liganded-site figures (slides.py, D62, D68)
       sample_qc.tsv                 the per-sample scorecard (insights.py)
-      presence_absence.tsv          features measured in one group and never in the other
+      presence_absence.tsv          features measured in one group and never in the other (counted before the
+                                    missing-value filter; removed_by_filter marks what it took out, D84)
       gene_set_ranks.tsv            rank-based gene-set test on every protein (enrichment on)
       dose_response.tsv             a titration (4+ doses): a fitted curve per feature, pEC50, F, p, class
       time_course.tsv               a time course (3+ time points): change over time (F), trend, class, pattern
@@ -319,8 +320,9 @@ def _rank_enrichment(diffs, p, libs, limit: int = 40) -> list[dict]:
                         "adjusted": resid is not None, "terms": terms})
     return out
 
-def _insights(p, diffs, qcd) -> dict:
-    """Deeper QC and discovery (insights.py) for the report, the doctor and analysis.json."""
+def _insights(p, diffs, qcd, settings=None) -> dict:
+    """Deeper QC and discovery (insights.py) for the report, the doctor and analysis.json. The on/off features
+    are found before the missing-value filter, so one the filter removed is still listed (marked, D84)."""
     from ionomos.downstream import insights
 
     m = p.m
@@ -337,13 +339,16 @@ def _insights(p, diffs, qcd) -> dict:
     for d in diffs:
         out["phist"][d.name] = insights.p_histogram([r["pvalue"] for r in d.rows])
         if d.confidence != "none":
-            out["onoff"][d.name] = insights.presence_absence(p.measured, m.samples, m.condition, d.treatment, d.control)
+            out["onoff"][d.name] = insights.presence_absence_unfiltered(p, d.treatment, d.control)
         out["imputation_driven"][d.name] = insights.imputation_driven(p.imputed, m.samples, m.condition, d) \
             if p.n_imputed else []
+    loss = insights.filter_loss(p, getattr(settings, "filter_global_pct", 0) or 0)
+    if loss:
+        out["filter_loss"] = loss
     return out
 
 def _background(m, settings, dest: Path) -> list[str]:
-    """The conditions that are a pull-down's negative control (roles.py, D84), read before processing: the
+    """The conditions that are a pull-down's negative control (roles.py, D88), read before processing: the
     filter and the normalisation treat their samples apart. The evidence goes in m.meta["background"], where
     roles.plan() finds it again on the processed matrix."""
     from ionomos.downstream import fpa, roles
@@ -511,11 +516,14 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
             out.files.append(files_mx)
         say("filtering, normalising, imputing")
         background = stage("roles", _background, m, settings, dest) or []
+        contam = (stage("contaminants", _contaminant_fasta, record, workdir, notes)
+                  if settings.remove_contaminants and m.kind == "intensity" else None)
         res = stage("process", fpa.process, m, exclude=settings.exclude_samples, conditions=settings.sample_conditions,
                     contaminants=settings.remove_contaminants, global_pct=settings.filter_global_pct,
                     condition_pct=settings.filter_condition_pct, normalization=settings.normalize,
                     imputation=settings.imputation, shift=settings.impute_shift, scale=settings.impute_scale,
-                    seed=settings.seed, ratio_centre=settings.ratio_centre, background=background)
+                    seed=settings.seed, ratio_centre=settings.ratio_centre, background=background,
+                    contaminant_fasta=contam)
         if res is None:  # fall back to the data as loaded, so there are still statistics and a volcano
             notes.append("processing failed; statistics use the values as loaded (no filtering or imputation)")
             m.meta.pop("background", None)
@@ -646,7 +654,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
             say("quality control (PCA, correlation, missing values)")
             qcd = stage("qc", _qc, processed, diffs, settings) or {}
             say("sample scorecard, batch and missingness checks, on/off features, power")
-            insight = stage("insights", _insights, processed, diffs, qcd) or {}
+            insight = stage("insights", _insights, processed, diffs, qcd, settings) or {}
             for name, fn, arg in (("sample_qc.tsv", export.sample_qc_table, insight.get("scorecard")),
                                   ("presence_absence.tsv", export.presence_absence_table,
                                    (processed, insight["onoff"]) if any((insight.get("onoff") or {}).values()) else None)):
@@ -986,6 +994,27 @@ def _design_summary(m, settings) -> dict:
     return out
 
 
+def _contaminant_fasta(record, workdir: Path, notes: list[str]) -> tuple[str, frozenset[str]] | None:
+    """(name, contam_ accessions) of the FASTA the search used, D87: database.db-path of the workflow FragPipe left
+    in its output folder (else the one Ionomos gave it), then ionomos.json's run.fasta. None when there is none or
+    it can't be read (then only the contam_ / CON__ names count, with a note when a FASTA was named)."""
+    from ionomos.downstream import fpa, sdrf
+
+    props, _wf = sdrf.workflow(record, workdir)
+    named = [x for x in dict.fromkeys((props.get("database.db-path", "").strip(),
+                                       str(((record or {}).get("run") or {}).get("fasta") or "").strip())) if x]
+    for db in named:
+        try:
+            if Path(db).is_file():
+                return sdrf._basename(db), fpa.fasta_contaminants(db)
+        except OSError as exc:
+            log.warning("cannot read the FASTA %s for its contaminants: %s", db, exc)
+    if named:
+        notes.append(f"contaminants: the search's FASTA {sdrf._basename(named[0])} was not found, so only proteins "
+                     "named contam_ or CON__ were removed (DIA-NN's tables drop the contam_ prefix)")
+    return None
+
+
 def _sdrf(method, dest: Path, workdir: Path, record, m, processed, settings, version: str, results: Path,
           out: Outcome) -> dict:
     """results/sdrf.tsv (SDRF-Proteomics sample metadata) and its analysis.json entry."""
@@ -1022,6 +1051,10 @@ def _quality_summary(insight: dict) -> dict:
         "pi0": {k: v.get("pi0") for k, v in (insight.get("phist") or {}).items()},
         "p_value_shape": {k: v.get("shape") for k, v in (insight.get("phist") or {}).items()},
         "only_in_one_condition": {k: len(v) for k, v in (insight.get("onoff") or {}).items()},
+        # of those, removed by the missing-value filter before testing (D84)
+        "only_in_one_condition_filtered_out": {k: sum(1 for x in v if x.get("filtered"))
+                                               for k, v in (insight.get("onoff") or {}).items()},
+        "filter_removed_complete_in_one_condition": insight.get("filter_loss") or None,
         "imputation_driven_hits": {k: len(v) for k, v in (insight.get("imputation_driven") or {}).items()},
         # the smallest |log2FC| a typical feature shows with 80 % power, with the samples each comparison has
         "detectable_log2fc": {c["name"]: {"samples": c["n"], **{f"p{a}": (r or {}).get("q50")

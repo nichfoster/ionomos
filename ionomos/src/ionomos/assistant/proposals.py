@@ -163,6 +163,7 @@ def _analysis_change(ctx, job, tool: str, arguments: dict, mutate, title: str, w
     """A proposal that changes the analysis: block: mutate(block, samples, conditions) changes a copy in place."""
     import copy
 
+    from ionomos.config import read_yaml_text
     from ionomos.downstream.analysis import AnalysisError, settings_from
     from ionomos.manifest import EXPERIMENT_YAML, overrides_text
 
@@ -179,8 +180,8 @@ def _analysis_change(ctx, job, tool: str, arguments: dict, mutate, title: str, w
         raise Refused(f"the analysis would not accept that: {clean(exc, 240)}") from None
     sha = file_digest(dest)
     try:
-        old = (dest / EXPERIMENT_YAML).read_text(encoding="utf-8")
-    except OSError:
+        old = read_yaml_text(dest / EXPERIMENT_YAML)
+    except (OSError, ValueError):
         old = ""
     ov.analysis = after
     new = overrides_text(dest, ov, replace_analysis=True)

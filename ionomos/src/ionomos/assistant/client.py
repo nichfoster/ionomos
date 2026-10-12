@@ -109,7 +109,7 @@ def chat(settings: dict, messages: list[dict], tools: list[dict], transport: Tra
         raise NotLocal(problem)
     url = str(settings["base_url"]).rstrip("/") + "/chat/completions"
     headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
-    started = time.monotonic()
+    started = time.perf_counter()  # not monotonic(): on Windows before 3.13 that ticks every ~16 ms
     lines, size = [], 0
     reply = Reply()
     try:
@@ -120,7 +120,7 @@ def chat(settings: dict, messages: list[dict], tools: list[dict], transport: Tra
                 raise ChatError("the model's reply is too large")
             lines.append(raw)
             if reply.ttft is None and _first_token(raw):
-                reply.ttft = round(time.monotonic() - started, 3)
+                reply.ttft = round(time.perf_counter() - started, 3)
     except ChatError:
         raise
     except (OSError, ValueError) as exc:

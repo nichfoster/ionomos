@@ -49,6 +49,19 @@ WEIRD_NAMES = [
     "EJQ_isoDTB_" + "x" * 150, "!!!###$$$", "EJQ.isoDTB.dots.everywhere.", "con", "EJQ_isoDTB_(1)[2]{3}",
     "Isaac_DIA_semi;colon,comma", "EJQ_TMT_O'Brien", "EJQ  isoDTB  double  spaces", "-EJQ_isoDTB-",
 ]
+BELOW = 80  # characters under an experiment folder: raw files, a/b/c nesting, Ionomos' and FragPipe's own folders
+
+
+def _name_room(roots: list[Path]) -> int | None:
+    """How long a drop's name may be under these folders when Windows stops at 260 characters (long paths off),
+    else None. The 161-character weird name is cut to that, so it can still be staged, copied in and filed."""
+    if os.name != "nt":
+        return None
+    from ionomos.preflight import _long_paths_enabled
+
+    if _long_paths_enabled() is not False:
+        return None
+    return max(40, 259 - max(len(str(r)) for r in roots) - 1 - BELOW)
 
 
 class _Counter(logging.Handler):
@@ -68,6 +81,7 @@ class Report:
     seconds: float = 0.0
     errors_logged: int = 0
     criticals: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -78,6 +92,7 @@ class Report:
                  + ", ".join(f"{k}={v}" for k, v in sorted(self.outcomes.items())),
                  f"log: {self.errors_logged} error record(s) (expected: failed searches, rejected garbage), "
                  f"{len(self.criticals)} critical"]
+        lines += [f"note: {n}" for n in self.notes]
         if self.violations:
             lines.append(f"VIOLATIONS ({len(self.violations)}):")
             lines += [f"  - {v}" for v in self.violations]
@@ -116,8 +131,9 @@ FAULTS = ("oom", "killed", "disk-full", "raw-vanished", "garbled-log", "empty-ta
           "truncated-psm", "no-done-line", "step-fail-exit0", "cancel-exit0")
 
 
-def _make_drop(staging: Path, i: int, rng: random.Random, used: set[str]) -> tuple[Path, str]:
-    """Build one drop in `staging`; returns (folder, kind)."""
+def _make_drop(staging: Path, i: int, rng: random.Random, used: set[str],
+               room: int | None = None) -> tuple[Path, str]:
+    """Build one drop in `staging`; returns (folder, kind). `room`: the longest name that fits (see _name_room)."""
     unusable = False
     kind = rng.choices(
         ["iso", "dia", "tmt", "weird", "noraws", "empty_raw", "deep", "badtail", "fail", "dup", "loose", "fault"],
@@ -128,7 +144,8 @@ def _make_drop(staging: Path, i: int, rng: random.Random, used: set[str]) -> tup
     if kind == "dup" and used:
         name = rng.choice(sorted(used))
     elif kind == "weird":
-        name = rng.choice(WEIRD_NAMES) + (f"_{i}" if rng.random() < 0.7 else "")
+        pick = rng.choice(WEIRD_NAMES)
+        name = (pick[:room - 4] if room else pick) + (f"_{i}" if rng.random() < 0.7 else "")
         if rng.random() < 0.15:
             name = rng.choice(["🧪🧪", "()", "!!!", "—"])  # nothing usable at all
             unusable = True
@@ -200,10 +217,21 @@ def run(n: int = 60, seed: int = 1, root: Path | None = None, keep: bool = False
     staging = root / "staging"
 
     used: set[str] = set()
-    drops = [_make_drop(staging, i, rng, used) for i in range(n)]
+    room = _name_room([staging / "000", cfg.inbox, cfg.users_root / "Isaac"])
+    if room:
+        rep.notes.append(f"Windows long paths are off: drop names cut to {room} characters to fit under {root}")
+    drops = [_make_drop(staging, i, rng, used, room) for i in range(n)]
     rep.drops = {f"{f.parent.name}/{f.name}": k for f, k in drops}
 
-    wat = Watcher(cfg.inbox, lambda f: intake(f, cfg, Ledger(cfg.database)), poll_seconds=0.1,
+    def take(folder: Path):
+        # closed here: a log record's traceback can keep it alive, and an open ionomos.db can't be removed on Windows
+        led = Ledger(cfg.database)
+        try:
+            return intake(folder, cfg, led)
+        finally:
+            led.close()
+
+    wat = Watcher(cfg.inbox, take, poll_seconds=0.1,
                   stable_seconds=0.6, min_raw_files=1, retry_seconds=0.5)
     workers: list[Worker] = []
     threads: list[threading.Thread] = []
@@ -330,6 +358,8 @@ def run(n: int = 60, seed: int = 1, root: Path | None = None, keep: bool = False
         w.stop()
     for t in (wt, *threads):
         t.join(timeout=30)
+    for w in workers:
+        w.ledger.close()
     rep.seconds = time.monotonic() - t0
     logging.getLogger("ionomos").removeHandler(counter)
 

@@ -250,7 +250,9 @@ def file_secrets(config_path: Path | str) -> list[str]:
     try:
         import yaml
 
-        return raw_secrets(yaml.safe_load(Path(config_path).read_text(encoding="utf-8")))
+        from ionomos.config import read_yaml_text
+
+        return raw_secrets(yaml.safe_load(read_yaml_text(config_path)))
     except Exception:  # noqa: BLE001 - redaction must never crash diagnostics
         return []
 

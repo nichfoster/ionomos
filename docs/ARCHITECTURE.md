@@ -444,7 +444,10 @@ through CSS and is what the fallback page embeds.
 
 The insights stage writes `sample_qc.tsv`, `presence_absence.tsv` and
 `gene_set_ranks.tsv`, adds a `quality` block to `analysis.json`, and feeds
-the doctor's warnings (`SAMPLE_OUTLIER`, `BATCH_SUSPECT`, …). Like QC, it is
+the doctor's warnings (`SAMPLE_OUTLIER`, `BATCH_SUSPECT`,
+`FILTER_REMOVES_ONE_CONDITION`, …). Features measured in one condition only
+are counted on `Processed.before_filter`, so the missing-value filter can't
+hide them; those it removed are marked (D84). Like QC, it is
 isolated: if it crashes, the volcano plots and the report are still made.
 
 Settings: `config.yaml analysis:` (lab defaults, Analysis tab → Lab defaults)

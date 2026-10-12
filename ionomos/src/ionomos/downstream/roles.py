@@ -13,7 +13,7 @@ A chemoproteomics experiment is not a flat list of conditions. Each condition ha
                   linked to the compound it competes ("competition of Probe")
     reference     a pooled / bridge channel (plex.py's words: pool, bridge, reference, norm)
     qc            a QC standard run with the samples (QC, HeLa, K562, standard, blank)
-    background    the negative control of a pull-down (empty vector, beads only, IgG, untagged bait), D84. Its
+    background    the negative control of a pull-down (empty vector, beads only, IgG, untagged bait), D88. Its
                   samples see little beyond what sticks to the beads, so most proteins are expected to be missing
                   there: the missing-value filter does not count them, the samples are normalised among themselves
                   (never against the pull-downs), and every other condition is compared against it (IP vs
@@ -83,7 +83,7 @@ DEFAULT_COMPETITION_KEYWORDS = ("comp", "competition", "competitor", "competed",
 DEFAULT_COMPETITION_KEYWORDS_WEAK = ("pre", "pretreat", "pretreated", "pretreatment", "block", "blocked", "blocking",
                                      "cold")
 QC_WORDS = ("qc", "hela", "k562", "standard", "std", "blank")
-# the negative control of a pull-down (D84). A whole token of the condition name; on its own it is not enough
+# the negative control of a pull-down (D88). A whole token of the condition name; on its own it is not enough
 # (an empty vector is also the plain control of an over-expression), see background_evidence
 DEFAULT_BACKGROUND_KEYWORDS = ("ev", "empty", "emptyvector", "vector", "beads", "bead", "beadsonly", "igg", "isotype",
                                "untagged", "nobait", "mockip")
@@ -240,7 +240,7 @@ def _median(xs: list[float]) -> float:
 
 def background_evidence(m, s, name: str = "", conditions: list[str] | None = None) -> dict:
     """Which conditions are the background (negative control) of a pull-down, from the data and the experiment's
-    name (D84). m: the QuantMatrix as loaded (intensities); name: the experiment folder's name.
+    name (D88). m: the QuantMatrix as loaded (intensities); name: the experiment folder's name.
 
     A condition is a background when its name has a background word (background_keywords: EV, empty, beads,
     IgG ...) AND either its samples miss clearly more features than the others (the data) or the experiment's

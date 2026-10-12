@@ -619,7 +619,9 @@ class App:
             try:
                 import yaml
 
-                d = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+                from ionomos.config import read_yaml_text
+
+                d = yaml.safe_load(read_yaml_text(p)) or {}
                 txt = "   ".join(f"{u}: {', '.join(a)}" for u, a in d.items())
             except Exception:
                 txt = "(unreadable)"
