@@ -73,6 +73,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     paths on (as on CI) nothing changes.
   - The Sage setup checklist test found a real ThermoRawFileParser in
     `C:\ThermoRawFileParser\`. It no longer looks there.
+- **Diagnostics and a search's run fingerprint no longer fail when Windows
+  won't say its version.** Python's `platform.platform()` asks WMI, and
+  (on 3.12 at least) raises `KeyError: 'BuildType'` when WMI answers with
+  fields missing, now and then; "Copy diagnostics" then copied nothing (seen
+  on CI). The version now reads "OS version unknown" with the error instead.
 - **The assistant's time to first token was measured to ~16 ms on Windows**
   with Python before 3.13, whose `time.monotonic()` ticks that coarsely. A
   0.2 s wait read as 0.188 s, which failed a test on CI's Python 3.12. It

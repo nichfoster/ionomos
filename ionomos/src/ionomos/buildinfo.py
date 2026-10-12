@@ -41,6 +41,18 @@ def info() -> dict:
     return d
 
 
+def platform_text(terse: bool = False) -> str:
+    """platform.platform() that never raises. On Windows it asks WMI, and CPython (3.12 at least) raises KeyError
+    ('BuildType') when WMI answers with fields missing, now and then (CI, 2026-10-12): a report must not fail on
+    that."""
+    import platform
+
+    try:
+        return platform.platform(terse=terse)
+    except Exception as e:  # noqa: BLE001 - any failure of the OS query
+        return f"{sys.platform} (OS version unknown: {type(e).__name__} {e})"
+
+
 def one_line() -> str:
     d = info()
     extra = ", ".join(x for x in (f"build {d['commit']}" if d["commit"] else "", d["built"], d["kind"]) if x)
