@@ -837,9 +837,18 @@ Collected from the other docs; resolve before/during Phase 1.
 - [ ] Real runs: an explicit `bioreplicate:` in `experiment.yaml` reaches FragPipe's manifest unchecked; job 1
       (0.5.1) sent `20260508180610`, and DIA-NN's matrix lacked exactly those two runs. Bound it to 1–999 as the
       naming rules do? Confirm the cause from job 1's console log.
-- [ ] Real runs: an empty-vector control next to a vehicle control (a pull-down) gives "EV vs DMSO", where
+- [x] Real runs: an empty-vector control next to a vehicle control (a pull-down) gives "EV vs DMSO", where
       bait-enriched proteins read as *down*. Should a pull-down's background control be the reference, or the
-      comparison be turned round?
+      comparison be turned round? → 2026-10-09 (D84): a `background` role. Read from the name (EV, empty,
+      beads, IgG ...) when the data (its samples miss clearly more proteins) or the folder's name (IP, pulldown,
+      BioID ...) agree; every pull-down is compared against it (up = pulled down), it is left out of the global filter and
+      normalised apart from the pull-downs. **Still for the lab**: (1) the words (`background_keywords`) and
+      the folder words; (2) the data thresholds (1.5 times the missing values and 3 points more, and 10 proteins
+      measured everywhere else and nowhere in it), set from one real IP (EV 11 % missing against 5 %, 31 such
+      proteins); (3) whether the pull-downs should be normalised among themselves (now) or not at all; (4)
+      whether a protein in all pull-down replicates and in no background one should get its own "specific"
+      list, as the competition design has; (5) whether to compare the treated pull-down with the background
+      too (now yes: `Drug vs EV`).
 - [ ] Real runs: add a FragPipeAnalystR golden with a real matrix's shape (interleaved run columns, a duplicated
       gene, a group without a gene). The current one is sorted and tidy (TESTING.md).
 - [ ] Real runs: next time a result is compared with FragPipe-Analyst, keep its downloaded table and settings and

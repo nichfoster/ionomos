@@ -356,7 +356,8 @@ class ExperimentEditor:
             except AnalysisError as exc2:
                 return roles.RolePreview(error=str(exc2))
         view = roles.preview(self.sizes(), s, self._roles, info.get("kind") or "intensity", info.get("exp") or "",
-                             info.get("sdrf_roles"), info.get("sdrf_file") or "")
+                             info.get("sdrf_roles"), info.get("sdrf_file") or "", Path(self.target["dest"]).name,
+                             info.get("background"))
         if err:
             view.error, view.comparisons, view.uneven, view.notes = err, [], [], []
         return view

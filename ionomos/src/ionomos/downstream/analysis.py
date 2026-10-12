@@ -15,6 +15,9 @@ experiment.yaml `analysis:` block:
       competition_keywords: [comp, competition, competitor, excess]   # a token of the name that means "plus a
                                   #   competitor"; competition_keywords_weak (pre, block ...) count only next to
                                   #   the compound's own condition
+      background_keywords: [EV, empty, beads, IgG, untagged]   # a token of the name that may mean the negative
+                                  #   control of a pull-down; taken when the data or the experiment's name agree
+                                  #   (roles.background_evidence, D84), or set roles: {EV: background}
       role_comparisons: true      # false: the roles are shown, the comparisons are every condition vs the control
       comparisons: ["Drug vs DMSO"]   # explicit list; wins over de_type
       log2fc: 1.0                 # |log2 fold change| threshold (FragPipe-Analyst "lfc")
@@ -120,7 +123,11 @@ from dataclasses import dataclass, field, fields, replace
 from ionomos.downstream import fpa, stats
 from ionomos.downstream.enrich import DEFAULT_LIBRARIES, LIBRARIES
 from ionomos.downstream.quant import QuantMatrix
-from ionomos.downstream.roles import DEFAULT_COMPETITION_KEYWORDS, DEFAULT_COMPETITION_KEYWORDS_WEAK
+from ionomos.downstream.roles import (
+    DEFAULT_BACKGROUND_KEYWORDS,
+    DEFAULT_COMPETITION_KEYWORDS,
+    DEFAULT_COMPETITION_KEYWORDS_WEAK,
+)
 
 DEFAULT_CONTROL_KEYWORDS = ("DMSO", "vehicle", "veh", "ctrl", "control", "mock", "untreated", "NT", "WT", "EV",
                             "scr", "scramble", "siNT", "PBS")
@@ -141,6 +148,7 @@ class Settings:
     roles: dict[str, str] = field(default_factory=dict)   # condition -> control | compound | competition of X | ...
     competition_keywords: tuple[str, ...] = DEFAULT_COMPETITION_KEYWORDS
     competition_keywords_weak: tuple[str, ...] = DEFAULT_COMPETITION_KEYWORDS_WEAK
+    background_keywords: tuple[str, ...] = DEFAULT_BACKGROUND_KEYWORDS   # D84
     role_comparisons: bool = True
     min_valid: int = 2
     small_group_min_valid: str = "half"  # half | same: what the smaller group of an unbalanced comparison needs
@@ -355,7 +363,8 @@ def settings_from(*layers: dict | None) -> Settings:
                         raise AnalysisError("imputation must be one of " + ", ".join(fpa.IMPUTATION_METHODS))
                 elif k == "comparisons":
                     v = [parse_comparison(c) for c in (v if isinstance(v, list) else [v])]
-                elif k in ("control_keywords", "competition_keywords", "competition_keywords_weak"):
+                elif k in ("control_keywords", "competition_keywords", "competition_keywords_weak",
+                           "background_keywords"):
                     v = tuple(_list(v))
                 elif k == "roles":
                     v = {**s.roles, **_roles(v)}  # an experiment's roles add to / override the lab's

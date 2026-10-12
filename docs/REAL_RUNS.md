@@ -111,7 +111,11 @@ Analysis tab (0.18.0) then analysed the FragPipe folder (D80).
   control keyword), with the vehicle as *the* control. So the comparison is
   "empty vector vs vehicle", and proteins enriched by the bait are listed as
   *down*. The numbers are correct; the direction is easy to misread for a
-  pull-down. [Open](#open)
+  pull-down. Since D84 (unreleased) such a condition is a pull-down's
+  *background*: on this matrix it is read from its name and the data, the
+  comparisons become `FPS vs DMSO`, `DMSO vs EV` and `FPS vs EV` (153
+  proteins up in `DMSO vs EV`), and the EV samples are left out of the
+  global filter and normalised apart.
 
 ### Why FragPipe-Analyst showed a protein Ionomos didn't
 
@@ -192,6 +196,6 @@ port handles each of these, but no golden pins them.
 | Job 1 | Two runs missing from DIA-NN's matrix | Read job 1's console log for the two DMSO files |
 | Job 1 | An explicit `bioreplicate:` in `experiment.yaml` is passed to FragPipe unchecked (14 digits got through on 0.5.1) | Hold the job or refuse the value, as the naming rules do (1–999) |
 | 2026-10-06 | FragPipe's `contam_` prefix is lost in DIA-NN's tables, so contaminants stay and BSA reads as `ALB` | Take the contaminant accessions from the FASTA FragPipe used (or `protein.tsv`) |
-| 2026-10-06 | An empty-vector control next to the vehicle: bait-enriched proteins read as "down" | Decide how a pull-down's background control is shown (ROADMAP) |
+| 2026-10-06 | An empty-vector control next to the vehicle: bait-enriched proteins read as "down" | Done in D84 (unreleased): the `background` role; the lab confirms its words and thresholds (ROADMAP) |
 | 2026-10-06 | FragPipeAnalystR golden doesn't cover a real matrix's shape | Add a case with interleaved columns, a duplicated gene and a blank gene |
 | Job 2 | How it ended | Its `ionomos.json` / `DONE.txt`, `run_fingerprint.json` |

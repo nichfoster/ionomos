@@ -26,7 +26,8 @@ of each compound); that is fine, see [Power](#qc.power).
 
 What a condition is in the experiment: a [control](#glossary.control), a
 [compound](#glossary.compound), a [competition](#glossary.competition), a
-pooled reference, or a QC standard. Ionomos reads the roles from the
+pooled reference, a QC standard, or the background (negative control) of a
+pull-down ([more](#issue.PULLDOWN_DESIGN)). Ionomos reads the roles from the
 condition names and shows them under Methods → Settings used, in the
 experiment editor and in the review window. Change them there
 ([How?](#faq.roles)), or with `roles:` under `analysis:` in `experiment.yaml`, for example
@@ -37,8 +38,8 @@ With a competition among them, the comparisons follow the roles
 ## Compound {#glossary.compound}
 
 A condition treated with a probe or a drug alone. Every condition that is
-not a control, a competition, a pooled reference or a QC standard is a
-compound. Compared with the control it shows what the compound enriches or
+not a control, a competition, a pooled reference, a QC standard or a
+pull-down's background is a compound. Compared with the control it shows what the compound enriches or
 engages.
 
 ## Competition {#glossary.competition}

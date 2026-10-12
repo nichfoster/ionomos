@@ -635,9 +635,30 @@ def _role_checks(f: Findings, add) -> None:
                    "There are several compounds, and the competition's name doesn't say which one it competes"],
                   how, {"roles": {c: r.text() for c, r in plan.roles.items()}, "questions": list(plan.questions),
                         "conditions": list(plan.roles)}))
-    if plan.active:
-        kinds = {"enrichment": "what the compound enriches", "competition": "what the competitor takes off",
-                 "remaining": "what is left with the competitor"}
+    kinds = {"enrichment": "what the compound enriches", "competition": "what the competitor takes off",
+             "remaining": "what is left with the competitor", "treatment": "what the compound changes",
+             "background": "enrichment over the negative control"}
+    bgs = [c for c, r in plan.roles.items() if r.role == "background"]
+    if plan.active and bgs:
+        unsure = [c for c in bgs if not plan.roles[c].sure]
+        add(Issue("PULLDOWN_DESIGN", "warning", "Read as a pull-down with a negative control",
+                  f"Roles: {listed}. Compared: "
+                  + "; ".join(f"{t} vs {c} ({kinds.get(plan.kinds.get((t, c)), 'comparison')})"
+                              for t, c in plan.comparisons)
+                  + ("" if not plan.skipped else ". Not compared: " + "; ".join(f"{w} ({y})" for w, y in plan.skipped))
+                  + (f". {', '.join(c for c in bgs if c not in unsure)}: not counted by the missing-value filter "
+                     "across all samples, and normalised among themselves, not against the pull-downs"
+                     if len(unsure) < len(bgs) else "")
+                  + ("" if not unsure else f". {', '.join(unsure)}: read from the names alone (the data didn't show "
+                     "it), so compared against but filtered and normalised with the others; check it"),
+                  ["A condition's name says it is an empty vector, beads only, IgG or an untagged bait (EV, empty, "
+                   "beads, IgG ...), and its samples miss clearly more proteins than the others or the experiment's "
+                   "name says pull-down (IP, FLAG, BioID ...); or analysis.roles says so"],
+                  ["Nothing to do if the roles are right"] + how[:2]
+                  + ["If it is the plain control of an over-expression, choose control for it"],
+                  {"roles": {c: r.text() for c, r in plan.roles.items()},
+                   "comparisons": [f"{t} vs {c}" for t, c in plan.comparisons], "background": bgs}))
+    if plan.active and plan.competitions:
         add(Issue("COMPETITION_DESIGN", "warning", "Read as a competition experiment",
                   f"Roles: {listed}. Compared: "
                   + "; ".join(f"{t} vs {c} ({kinds.get(plan.kinds.get((t, c)), 'comparison')})"

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Pull-downs with a negative control** (D84). A condition named as an
+  empty vector, beads only, IgG or an untagged bait (`EV`, `empty`, `beads`,
+  `IgG` …) is the pull-down's *background* when its samples also miss
+  clearly more proteins than the others (then it is sure), or the
+  experiment folder's name says pull-down (`IP`, `pulldown`, `BioID` …).
+  Then:
+  - every pull-down is compared against it (`DMSO vs EV`, `Drug vs EV`), so
+    what the bait pulls down reads as *up*; the background is no longer
+    compared with the control (`EV vs DMSO`);
+  - when sure, the missing-value filter across all samples doesn't count
+    its samples, and it is normalised among its own samples, the pull-downs
+    among theirs.
+
+  The name alone is not enough (an empty vector is also the plain control
+  of an over-expression); a note says so. New role `background` in
+  `analysis.roles` and the Roles list; `background_keywords` setting; report
+  note `PULLDOWN_DESIGN`; `simulate.pulldown_pg_matrix` for tests.
+
 ### Documentation
 
 - **`docs/REAL_RUNS.md`: the real runs on the lab PC** (D83). These are the

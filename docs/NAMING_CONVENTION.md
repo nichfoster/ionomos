@@ -437,7 +437,8 @@ analysis:                   # results/report.html for this experiment (lab defau
   roles:                    # what each condition is (D61); default: read from the names. A competition (probe +
     DMSO: control           #   competitor) changes the default comparisons: compound vs control, competition
     Probe: compound         #   vs its compound, competition vs control, and adds results/specific_targets.tsv
-    Probe_Comp: competition of Probe   # also: reference (a pool), qc (a QC standard)
+    Probe_Comp: competition of Probe   # also: reference (a pool), qc (a QC standard), background (a
+                            #   pull-down's negative control: EV, beads, IgG; D84)
   liganded_ratio: 4         # isoDTB: the competition ratio R that calls a cysteine liganded (D52) ...
   liganded_min_replicates: 2   # ... in at least this many replicates
   liganded_direction: high  # high: R = heavy / light (treated sample = light tag) | low: the other way round
@@ -500,6 +501,7 @@ changes; this is about the condition part of a name.
 | `Comp` (one compound in the experiment) | competition of that compound |
 | `Pool`, `Bridge`, `Reference`, `Norm` | reference |
 | `QC`, `HeLa`, `K562`, `Standard`, `Blank` | qc |
+| `EV`, `empty`, `EmptyVector`, `beads`, `IgG`, `untagged` … in a pull-down (its samples miss clearly more proteins, or the folder name says `IP`, `pulldown`, `BioID` …) | background (D84) |
 | anything else | compound |
 
 A TMT condition is one word (the part before the first `_` of

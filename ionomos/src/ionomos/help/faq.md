@@ -57,7 +57,8 @@ line: `--control DMSO`, `--compare "Drug vs DMSO"`, `--de-type all`.
 In the experiment editor (tab 7, or the pop-up window), **Roles** lists each
 condition with its number of samples and its [role](#glossary.role): control,
 compound, [competition](#glossary.competition) of a compound, pool /
-reference, or QC standard, and where the role came from (usually the name).
+reference, QC standard, or background (a pull-down's negative control), and
+where the role came from (usually the name).
 Select a condition and pick another role in the list; **automatic** goes back
 to what the name says. The review window before filing has the same list
 for DIA and label-free drops.
@@ -408,7 +409,7 @@ off"), the assistant can propose one of these changes, one per question:
 - one analysis setting: imputation, normalisation, p ≤, |log2FC| ≥, the
   control, what is compared, or the comparisons
 - a condition's role (control, compound, competition of a compound, pool /
-  reference, QC standard, or automatic)
+  reference, QC standard, background, or automatic)
 
 A window opens. Its text is written by Ionomos, not by the assistant: the
 job, what **Confirm** does, and for an analysis change the lines of

@@ -130,18 +130,22 @@ def remove_contaminants(m: QuantMatrix) -> tuple[QuantMatrix, int]:
 # ---------------------------------------------------------------- filtering --
 
 
-def filter_missing(m: QuantMatrix, global_pct: float = 0, condition_pct: float = 0) -> tuple[QuantMatrix, int]:
+def filter_missing(m: QuantMatrix, global_pct: float = 0, condition_pct: float = 0,
+                   background: list[str] | tuple[str, ...] = ()) -> tuple[QuantMatrix, int]:
     """FragPipe-Analyst's global_filter + filter_by_condition (a step with 0 % is skipped, as there).
 
     global_pct:    keep rows with a value in at least this % of all samples
     condition_pct: keep rows with a value in at least this % of the samples of at least one condition
+    background:    conditions that are a pull-down's negative control (roles.py, D84): the global rule counts
+                   only the other samples, as most features are expected to be missing from these
     """
-    n = len(m.samples)
+    glob = [j for j, s in enumerate(m.samples) if m.condition[s] not in background] or list(range(len(m.samples)))
+    n = len(glob)
     groups = [[j for j, s in enumerate(m.samples) if m.condition[s] == c] for c in m.conditions]
     keep = []
     for i, row in enumerate(m.values):
         present = [v is not None for v in row]
-        if global_pct and n and sum(present) / n < global_pct / 100 - 1e-12:
+        if global_pct and n and sum(present[j] for j in glob) / n < global_pct / 100 - 1e-12:
             continue
         if condition_pct and not any(g and sum(present[j] for j in g) / len(g) >= condition_pct / 100 - 1e-12
                                      for g in groups):
@@ -328,6 +332,36 @@ def normalize_info(m: QuantMatrix, method: str) -> tuple[QuantMatrix, dict]:
 def normalize(m: QuantMatrix, method: str) -> QuantMatrix:
     """normalize_info() without the info."""
     return normalize_info(m, method)[0]
+
+
+def normalize_apart(m: QuantMatrix, method: str, background: list[str] | tuple[str, ...] = ()) -> tuple[QuantMatrix, dict]:
+    """normalize_info() with a pull-down's background (negative control) samples apart (D84). The pull-downs are
+    normalised among themselves (the method asked, with its composition check on them alone), the background
+    samples among themselves (the same kind: median centring, or median + MAD for gn), never one group against
+    the other: a background sample holds little beyond what sticks to the beads, so its median is not the
+    pull-downs' median and centring them together would move every enrichment over background. Each group keeps
+    its own level (the median of its sample medians). Without background samples, or with only background
+    samples: normalize_info()."""
+    bg = [j for j, s in enumerate(m.samples) if m.condition[s] in background]
+    ip = [j for j in range(len(m.samples)) if j not in bg]
+    if not bg or not ip or method == "none" or m.kind != "intensity":
+        return normalize_info(m, method)
+
+    def part(ix: list[int]) -> QuantMatrix:
+        return _copy(m, values=[[row[j] for j in ix] for row in m.values], samples=[m.samples[j] for j in ix],
+                     condition={m.samples[j]: m.condition[m.samples[j]] for j in ix})
+
+    m_ip, info = normalize_info(part(ip), method)
+    bg_method = "gn" if info["used"] == "gn" else ("median" if info["used"] != "none" else "none")
+    m_bg, info_bg = normalize_info(part(bg), bg_method)
+    cols: dict[int, list] = {}
+    for sub_m, ix in ((m_ip, ip), (m_bg, bg)):
+        for k, j in enumerate(ix):
+            cols[j] = [row[k] for row in sub_m.values]
+    values = [[cols[j][i] for j in range(len(m.samples))] for i in range(len(m.values))]
+    info["background"] = {"conditions": sorted({m.condition[m.samples[j]] for j in bg}),
+                          "samples": [m.samples[j] for j in bg], "used": info_bg["used"]}
+    return _copy(m, values=values), info
 
 
 def stable_centre(cols: list[list[float | None]]) -> list[dict]:
@@ -561,9 +595,12 @@ def _impute_knn(vals: Matrix, k: int = 10, rowmax: float = 0.5) -> None:
 def process(m: QuantMatrix, *, exclude: list[str] | None = None, conditions: dict[str, str] | None = None,
             contaminants: bool = True, global_pct: float = 0, condition_pct: float = 0,
             normalization: str = "none", imputation: str = "auto", shift: float = 1.8, scale: float = 0.3,
-            seed: int = 123, ratio_centre: str = "none") -> tuple[Processed, list[str]]:
+            seed: int = 123, ratio_centre: str = "none",
+            background: list[str] | tuple[str, ...] = ()) -> tuple[Processed, list[str]]:
     """Every processing step in FragPipe-Analyst's order. Returns (Processed, notes). ratio_centre: site ratio
-    data only (centre_ratios, D70); intensities are normalised by `normalization`."""
+    data only (centre_ratios, D70); intensities are normalised by `normalization`. background: the conditions that
+    are a pull-down's negative control (roles.background_evidence, D84): left out of the global missing-value rule
+    and normalised apart from the pull-downs."""
     notes: list[str] = []
     steps = [{"step": "loaded", "features": len(m.features), "samples": len(m.samples)}]
     m, n = choose_samples(m, exclude, conditions)
@@ -575,19 +612,23 @@ def process(m: QuantMatrix, *, exclude: list[str] | None = None, conditions: dic
         if removed:
             steps.append({"step": "contaminants removed", "removed": removed, "features": len(m.features)})
     before = m
+    background = [c for c in (background or ()) if c in m.conditions]
     if (global_pct or condition_pct) and m.kind == "intensity":
-        m, removed = filter_missing(m, global_pct, condition_pct)
+        m, removed = filter_missing(m, global_pct, condition_pct, background)
         what = []
         if global_pct:
-            what.append(f"≥{global_pct:g}% of all samples")
+            what.append(f"≥{global_pct:g}% of all samples" +
+                        (f" but the background ({', '.join(background)})" if background else ""))
         if condition_pct:
             what.append(f"≥{condition_pct:g}% of the samples of at least one condition")
         steps.append({"step": "missing-value filter", "rule": "values in " + " and ".join(what),
                       "removed": removed, "features": len(m.features)})
     pre_norm = [list(r) for r in m.values]
-    m, norm = normalize_info(m, normalization)
+    m, norm = normalize_apart(m, normalization, background) if background else normalize_info(m, normalization)
     if norm["used"] != "none":
-        steps.append({"step": "normalisation", "method": NORMALIZATION_LABELS[norm["used"]], "features": len(m.features)})
+        steps.append({"step": "normalisation", "method": NORMALIZATION_LABELS[norm["used"]] +
+                      (f"; the background ({', '.join(norm['background']['conditions'])}) apart"
+                       if norm.get("background") else ""), "features": len(m.features)})
     comp = norm.get("composition") or {}
     if norm["asked"] == "auto" and norm["used"] == "ratio":
         notes.append(f"normalisation: median centring would have shifted {comp['between'][0]} against "

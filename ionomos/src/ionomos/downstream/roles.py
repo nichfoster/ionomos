@@ -13,13 +13,20 @@ A chemoproteomics experiment is not a flat list of conditions. Each condition ha
                   linked to the compound it competes ("competition of Probe")
     reference     a pooled / bridge channel (plex.py's words: pool, bridge, reference, norm)
     qc            a QC standard run with the samples (QC, HeLa, K562, standard, blank)
+    background    the negative control of a pull-down (empty vector, beads only, IgG, untagged bait), D84. Its
+                  samples see little beyond what sticks to the beads, so most proteins are expected to be missing
+                  there: the missing-value filter does not count them, the samples are normalised among themselves
+                  (never against the pull-downs), and every other condition is compared against it (IP vs
+                  background, so enriched reads as up)
 
 Where a role comes from, highest first:
     analysis.roles          {DMSO: control, Probe: compound, Probe_Comp: competition of Probe} in experiment.yaml
                             or config.yaml
     analysis.control        names the control
     an SDRF column          characteristics[role] (or [sample role], comment[role]) of an SDRF in the folder
-    the condition's name    control_keywords, then reference and QC words, then competition_keywords
+    the condition's name    background_keywords (EV, empty, beads, IgG ...) when the data or the experiment's
+                            name agree (background_evidence), then control_keywords, then reference and QC
+                            words, then competition_keywords
                             (a whole token of the name: `_ - . + space` and a lower-to-upper step split it);
                             competition_keywords_weak (pre, block, 10x ...) count only when the rest of the
                             name is another condition, and are asked about
@@ -58,14 +65,16 @@ import math
 import re
 from dataclasses import dataclass, field
 
-ROLES = ("control", "compound", "competition", "reference", "qc")
+ROLES = ("control", "compound", "competition", "reference", "qc", "background")
 ROLE_WORDS = {"control": "control", "vehicle": "control", "ctrl": "control",
               "compound": "compound", "treatment": "compound", "treated": "compound", "probe": "compound",
               "drug": "compound",
               "competition": "competition", "competitor": "competition", "competed": "competition",
               "comp": "competition",
               "reference": "reference", "pool": "reference", "pooled": "reference", "bridge": "reference",
-              "qc": "qc", "standard": "qc", "qc standard": "qc"}
+              "qc": "qc", "standard": "qc", "qc standard": "qc",
+              "background": "background", "negative control": "background", "background control": "background",
+              "bead control": "background", "beads": "background", "empty vector": "background"}
 # a whole token of the condition name. "Comp" is the lab's own (reference/pc-inventory: KL6283A_TMTPD_Comp_KL6159A)
 DEFAULT_COMPETITION_KEYWORDS = ("comp", "competition", "competitor", "competed", "compete", "competing", "excess")
 # words that also mean other things (pre / post, a blocking step, a 10x dose): they make a competition only when
@@ -74,9 +83,26 @@ DEFAULT_COMPETITION_KEYWORDS = ("comp", "competition", "competitor", "competed",
 DEFAULT_COMPETITION_KEYWORDS_WEAK = ("pre", "pretreat", "pretreated", "pretreatment", "block", "blocked", "blocking",
                                      "cold")
 QC_WORDS = ("qc", "hela", "k562", "standard", "std", "blank")
+# the negative control of a pull-down (D84). A whole token of the condition name; on its own it is not enough
+# (an empty vector is also the plain control of an over-expression), see background_evidence
+DEFAULT_BACKGROUND_KEYWORDS = ("ev", "empty", "emptyvector", "vector", "beads", "bead", "beadsonly", "igg", "isotype",
+                               "untagged", "nobait", "mockip")
+# a whole token of the experiment's (folder's) name that says it is a pull-down. Only words that mean nothing
+# else: a tag (FLAG, HA, GFP, Myc) is also on over-expression constructs, and "SiHa" splits into "si" + "ha"
+PULLDOWN_WORDS = ("ip", "coip", "ipms", "pulldown", "apms", "bioid", "turboid", "apex", "immunoprecipitation")
+# background_evidence: the data say a condition is a background when its samples miss clearly more features than
+# the others (median per sample: at least BG_MISSING_RATIO times as many, and BG_MISSING_POINTS more) AND at
+# least BG_ABSENT_MIN features (and BG_ABSENT_SHARE of all) are measured in every other sample and in none of
+# its, three times more than for any other condition. A low-loaded control of a proteome misses more features
+# too, but they are the faint ones, not a set measured everywhere else
+BG_MISSING_RATIO = 1.5
+BG_MISSING_POINTS = 0.03
+BG_ABSENT_MIN = 10
+BG_ABSENT_SHARE = 0.005
 KINDS = {"enrichment": "compound vs control: enrichment / engagement",
          "competition": "competition vs its compound: what the competitor displaces",
-         "remaining": "competition vs control: what is left with the competitor"}
+         "remaining": "competition vs control: what is left with the competitor",
+         "background": "pull-down vs background: enrichment over the negative control"}
 SPECIFIC_COLUMNS = ["compound", "competition", "control", "id", "label", "description", "call",
                     "enrichment_log2fc", "enrichment_p", "enrichment_padj",
                     "competition_log2fc", "competition_p", "competition_padj", "competed_pct",
@@ -142,6 +168,7 @@ class Role:
     competitor: str = ""      # competition: what is left of the name (the competitor), when it says
     sure: bool = True         # False: a weak keyword, or a competition that couldn't be linked
     n: int = 0                # samples
+    hint: str = ""            # a role it may have instead (a background word without the evidence), in words
 
     def text(self) -> str:
         return format_role(self.role, self.of)
@@ -205,8 +232,105 @@ def _keyword(toks: list[str], words) -> str | None:
     return next((t for t in toks if t in low), None)
 
 
+def _median(xs: list[float]) -> float:
+    xs = sorted(xs)
+    k = len(xs)
+    return (xs[k // 2] if k % 2 else (xs[k // 2 - 1] + xs[k // 2]) / 2) if k else math.nan
+
+
+def background_evidence(m, s, name: str = "", conditions: list[str] | None = None) -> dict:
+    """Which conditions are the background (negative control) of a pull-down, from the data and the experiment's
+    name (D84). m: the QuantMatrix as loaded (intensities); name: the experiment folder's name.
+
+    A condition is a background when its name has a background word (background_keywords: EV, empty, beads,
+    IgG ...) AND either its samples miss clearly more features than the others (the data) or the experiment's
+    name says pull-down (PULLDOWN_WORDS: IP, FLAG, pulldown, BioID ...). A word alone is not enough: an empty
+    vector is also the plain control of an over-expression, where nothing is expected to be missing. The data
+    alone is not enough either (a failed condition misses features too): it is then only suggested, and only in
+    an experiment whose name says pull-down. With the name and the experiment's name only, it is taken but not
+    sure: the comparisons follow, the filter and the normalisation don't (analyze() uses only sure ones).
+    m=None: the names only (the review window, before the search).
+
+    Returns {"conditions": {condition: {"use", "sure", "source", "word", "data", "pulldown", "why_not"}},
+    "suggested": {condition: why}}; analyze() keeps it in m.meta["background"] for infer()."""
+    out: dict = {"conditions": {}, "suggested": {}}
+    words = tuple(getattr(s, "background_keywords", DEFAULT_BACKGROUND_KEYWORDS))
+    whole = {str(w).lower() for w in words}
+    pull = next((t for t in tokens(name) if t in PULLDOWN_WORDS), "") if name else ""
+    if m is None or getattr(m, "kind", "intensity") != "intensity" or not m.samples or not m.values:
+        for c in (conditions or []) if m is None else []:
+            word = _keyword(tokens(c, whole), words)
+            if word and pull:
+                out["conditions"][c] = {"use": True, "sure": False, "word": word, "data": "", "pulldown": pull,
+                                        "source": f"name ('{word}') in a pull-down ('{pull}' in the experiment's "
+                                                  "name)", "why_not": ""}
+        return out
+    conds = m.conditions
+    if len(conds) < 2:
+        return out
+    n = len(m.values)
+    miss = [sum(row[j] is None for row in m.values) / n for j in range(len(m.samples))]
+    idx = {c: [j for j, x in enumerate(m.samples) if m.condition[x] == c] for c in conds}
+    absent = {}
+    for c in conds:
+        mine = idx[c]
+        rest = [j for j in range(len(m.samples)) if j not in mine]
+        absent[c] = sum(1 for row in m.values if all(row[j] is None for j in mine)
+                        and all(row[j] is not None for j in rest)) if rest else 0
+    labels: dict[str, int] = {}
+    for i, f in enumerate(m.features):
+        labels.setdefault(str(f.label).lower(), i)
+
+    def data_says(c: str) -> tuple[str, str]:
+        """(why, when both signals agree; the one that does, when only one)."""
+        rest = [j for j in range(len(m.samples)) if j not in idx[c]]
+        if not rest:
+            return "", ""
+        mc, mo = _median([miss[j] for j in idx[c]]), _median([miss[j] for j in rest])
+        why = []
+        if mc >= BG_MISSING_RATIO * mo and mc - mo >= BG_MISSING_POINTS:
+            why.append(f"its samples miss {100 * mc:.0f} % of the features, the others {100 * mo:.0f} %")
+        second = max([absent[x] for x in conds if x != c] or [0])
+        if absent[c] >= max(BG_ABSENT_MIN, BG_ABSENT_SHARE * n) and absent[c] >= 3 * max(second, 1):
+            why.append(f"{absent[c]:,} features are measured in every other sample and in none of its")
+        if len(why) < 2:
+            return "", "; ".join(why)
+        for t in tokens(name) if name else []:  # the bait, when the experiment's name names a protein here
+            i = labels.get(t)
+            if i is None or t in PULLDOWN_WORDS or len(t) < 3:
+                continue
+            row = m.values[i]
+            here = [row[j] for j in idx[c] if row[j] is not None]
+            there = [row[j] for j in rest if row[j] is not None]
+            if there:
+                if here:
+                    gap = sum(there) / len(there) - sum(here) / len(here)
+                    why.append(f"the bait {m.features[i].label} is {gap:.1f} log2 lower there")
+                else:
+                    why.append(f"the bait {m.features[i].label} is not measured there")
+            break
+        return "; ".join(why), ""
+
+    for c in conds:
+        word = _keyword(tokens(c, whole), words)
+        data, partly = data_says(c)
+        if word:
+            use = bool(data or pull)
+            src = f"name ('{word}')"
+            if data:
+                src += " and the data"
+            elif pull:
+                src += f" in a pull-down ('{pull}' in the experiment's name)"
+            out["conditions"][c] = {
+                "use": use, "sure": bool(data), "source": src, "word": word, "data": data, "pulldown": pull,
+                "why_not": "" if use or not partly else f"only part of the data says so ({partly})"}
+        elif data and pull:
+            out["suggested"][c] = data
+    return out
+
+
 def infer(conditions: list[str], s, sizes: dict[str, int] | None = None, sources: dict[str, str] | None = None,
-          kind: str = "intensity") -> Plan:
+          kind: str = "intensity", evidence: dict | None = None) -> Plan:
     """Roles for these conditions. s: analysis.Settings. sources: {condition: where its analysis.roles entry came
     from} (analyze() merges an SDRF's roles into the settings and says so here)."""
     from ionomos.downstream import analysis
@@ -215,6 +339,7 @@ def infer(conditions: list[str], s, sizes: dict[str, int] | None = None, sources
     plan = Plan()
     sizes = sizes or {}
     sources = sources or {}
+    evidence = evidence or {}
     if kind == "ratio":  # isoDTB: each condition is a compound competing with the probe; the vehicle is the other tag
         plan.by_construction = True
         plan.inactive = "site ratio data: every condition is tested against 0 (the vehicle is the other isotopic tag)"
@@ -230,8 +355,14 @@ def infer(conditions: list[str], s, sizes: dict[str, int] | None = None, sources
                               f"(conditions: {', '.join(conditions)})")
             continue
         given[c] = parse_role(text)
+    named = str(s.control or "").strip().lower()
+    bg_words = tuple(getattr(s, "background_keywords", DEFAULT_BACKGROUND_KEYWORDS))
+    background: dict[str, dict] = {}   # read as a background from the name and the data / the experiment's name
+    for c, e in (evidence.get("conditions") or {}).items():
+        if c in conditions and c not in given and c.lower() != named and e.get("use"):
+            background[c] = e
     try:
-        control = analysis.find_control(conditions, s)
+        control = analysis.find_control([c for c in conditions if c not in background], s)
     except analysis.AnalysisError:
         control = None  # choose_comparisons reports a control that isn't a condition
     strong = tuple(getattr(s, "competition_keywords", DEFAULT_COMPETITION_KEYWORDS))
@@ -252,6 +383,9 @@ def infer(conditions: list[str], s, sizes: dict[str, int] | None = None, sources
             plan.roles[c] = Role(c, role, sources.get(c, "analysis.roles"), n=sizes.get(c, 0))
             if of:
                 plan.roles[c].of = of
+        elif c in background:
+            plan.roles[c] = Role(c, "background", background[c]["source"], sure=background[c]["sure"],
+                                 n=sizes.get(c, 0))
         elif c == control:
             plan.roles[c] = Role(c, "control", "analysis.control" if s.control else "name (control_keywords)",
                                  n=sizes.get(c, 0))
@@ -270,6 +404,19 @@ def infer(conditions: list[str], s, sizes: dict[str, int] | None = None, sources
     if control is None:
         control = next((c for c, r in plan.roles.items() if r.role == "control"), None)
     plan.control = control
+    for c, r in plan.roles.items():  # a background word that wasn't taken: say what it would take
+        word = _keyword(tokens(c, {str(w).lower() for w in bg_words}), bg_words)
+        if word and r.role in ("control", "compound") and c not in given:
+            e = (evidence.get("conditions") or {}).get(c)
+            r.hint = (f"'{word}' in the name: if {c} is the negative control of a pull-down (empty vector, beads, "
+                      f"IgG), choose background")
+            if e and e.get("why_not"):
+                plan.notes.append(f"{c} has '{word}' in its name but was not read as a pull-down background: "
+                                  f"{e['why_not']}. If it is one, set analysis.roles {{{c}: background}}")
+    for c, why in (evidence.get("suggested") or {}).items():
+        if c in plan.roles and plan.roles[c].role != "background" and c not in given:
+            plan.notes.append(f"{c} looks like the background (negative control) of this pull-down ({why}). If it "
+                              f"is, set analysis.roles {{{c}: background}}")
     # competitions named by a keyword, linked to the compound they compete
     for c, (kw, is_weak) in found.items():
         compounds = [x for x, r in plan.roles.items() if r.role == "compound" and x not in found]
@@ -332,17 +479,19 @@ def _link(rest: list[str], compounds: list[str], whole=()) -> tuple[str, str]:
 def plan(m, s) -> Plan:
     """infer() for a QuantMatrix, plus the default comparisons when they follow the roles."""
     conds = m.conditions
-    out = infer(conds, s, {c: len(m.samples_of(c)) for c in conds}, (m.meta or {}).get("role_sources"), m.kind)
+    out = infer(conds, s, {c: len(m.samples_of(c)) for c in conds}, (m.meta or {}).get("role_sources"), m.kind,
+                (m.meta or {}).get("background"))
     if out.by_construction:
         return out
     comps = [c for c in out.competitions]
+    bgs = [c for c, r in out.roles.items() if r.role == "background"]
     if s.comparisons:
         out.inactive = "explicit analysis.comparisons are used"
     elif s.de_type != "control":
         out.inactive = f"de_type: {s.de_type} is used"
     elif not getattr(s, "role_comparisons", True):
         out.inactive = "role_comparisons: false"
-    elif not comps:
+    elif not comps and not bgs:
         out.inactive = "no competition condition: every condition is compared with the control"
     elif len(conds) < 2:
         out.inactive = "only one condition"
@@ -361,7 +510,7 @@ def plan(m, s) -> Plan:
         if r.role != "compound":
             continue
         if ctrl:
-            add(c, ctrl, "enrichment")
+            add(c, ctrl, "enrichment" if comps else "treatment")
         for k in comps:
             if out.roles[k].of == c:
                 add(k, c, "competition")
@@ -378,22 +527,32 @@ def plan(m, s) -> Plan:
     explicit = bool(s.control) and ctrl is not None  # analysis.control: every condition is still compared with it
     for c in conds:
         r = out.roles[c]
-        if explicit and c != ctrl:
+        if r.role == "background":
+            if ctrl:
+                out.skipped.append((f"{c} vs {ctrl}", "a background (negative control): the pull-downs are "
+                                                      "compared against it instead"))
+        elif explicit and c != ctrl:
             add(c, ctrl, "")
         elif r.role == "control" and c != ctrl:
             out.skipped.append((f"{c} vs {ctrl}", "both are controls"))
         elif r.role in ("reference", "qc"):
             out.skipped.append((c, f"a {'pooled reference' if r.role == 'reference' else 'QC standard'}, not a "
                                    "treatment"))
-        elif r.role == "compound" and not ctrl and not any(t == c or k == c for t, k in out.comparisons):
+        elif (r.role == "compound" and not ctrl and not bgs
+              and not any(t == c or k == c for t, k in out.comparisons)):
             out.skipped.append((c, "no control and no competition to compare it with"))
+    for b in bgs:  # every pull-down against each background: enriched over the negative control reads as up
+        for c in conds:
+            if out.roles[c].role in ("control", "compound", "competition"):
+                add(c, b, "background")
     if not out.comparisons:
         out.active = False
         out.inactive = "the roles give no comparison: every condition is compared with the control"
         out.kinds, out.triples, out.skipped = {}, [], []
         return out
     out.active = True
-    out.notes.append("competition experiment: " + out.describe() + ". Comparisons follow the design: "
+    out.notes.append(("competition experiment: " if comps else "pull-down with a background (negative control): ")
+                     + out.describe() + ". Comparisons follow the design: "
                      + ", ".join(f"{t} vs {c}" for t, c in out.comparisons)
                      + ". Change the roles with analysis.roles, or list comparisons: yourself.")
     for what, why in out.skipped:
@@ -511,10 +670,12 @@ def report_payload(plan_: Plan | None, results: list[Specific], diffs: list) -> 
 
 
 ROLE_SHOWN = {"control": "control", "compound": "compound", "competition": "competition",
-              "reference": "pool / reference", "qc": "QC standard"}
+              "reference": "pool / reference", "qc": "QC standard", "background": "background (negative control)"}
 KIND_SHOWN = {"enrichment": "enrichment: what {t} pulls down over the control",
               "competition": "competition: what the competitor takes off (down = competed off)",
-              "remaining": "what is left with the competitor"}
+              "remaining": "what is left with the competitor",
+              "treatment": "what {t} changes in the pull-down",
+              "background": "enrichment over background: what {t} pulls down above the negative control"}
 
 
 def role_label(role: str, of: str = "") -> str:
@@ -538,7 +699,7 @@ class RoleRow:
     @property
     def confirmable(self) -> bool:
         """The guess can be kept as it is (a weak keyword's competition of X); an unlinked competition can't."""
-        return bool(self.confirm) and " of " in self.role
+        return bool(self.confirm) and (" of " in self.role or self.role == "background")
 
 
 @dataclass
@@ -588,6 +749,9 @@ def _source_words(r: Role, mine: bool) -> str:
 def _confirm_words(r: Role) -> str:
     if r.sure:
         return ""
+    if r.role == "background":
+        return (f"read as the negative control of a pull-down from its {r.source}; the data didn't check it: "
+                "confirm it, or choose control")
     kw = r.source[6:-1] if r.source.startswith("name (") else ""
     if r.of and kw:
         return (f"read as {r.of} plus a competitor because of '{kw}' in the name, which can also mean a dose or a "
@@ -602,7 +766,7 @@ def role_choices(view: RolePreview, condition: str) -> list[tuple[str, str]]:
     out += [(f"competition of {r.condition}", f"competition of {r.condition}") for r in view.rows
             if r.condition != condition and r.role == "compound"]
     out += [("competition (compound from the name)", "competition"), ("pool / reference", "reference"),
-            ("QC standard", "qc")]
+            ("QC standard", "qc"), ("background (negative control)", "background")]
     if row and row.set_here and row.role not in {v for _s, v in out}:
         out.insert(1, (row.label, row.role))
     return out
@@ -624,12 +788,15 @@ def keep_roles(overrides: dict | None, conditions: list[str]) -> dict[str, str]:
 
 
 def preview(sizes: dict[str, int], s, overrides: dict | None = None, kind: str = "intensity", exp: str = "",
-            sdrf_roles: dict | None = None, sdrf_file: str = "") -> RolePreview:
+            sdrf_roles: dict | None = None, sdrf_file: str = "", name: str = "",
+            background: dict | None = None) -> RolePreview:
     """What the experiment editor and the review window show (D65): each condition's role, the comparisons the
     analysis will run, and what uneven groups mean, without data. sizes: {condition: samples}, in order.
     s: analysis.Settings without this experiment's roles (the lab's and the experiment's other choices).
     overrides: this experiment's analysis.roles. exp: the data type (TMT is not imputed by default).
     sdrf_roles: roles an SDRF in the folder gives (sdrfdesign: m.meta["roles"]); analysis.roles wins over them.
+    name: the experiment folder's name; background: background_evidence() of the data when there is data (the
+    editor), else it is read from the names and `name` alone (the review window, before the search).
     The comparisons come from analysis.choose_comparisons on an empty matrix of these sizes, so they are the
     ones the analysis will make."""
     from dataclasses import replace
@@ -646,9 +813,12 @@ def preview(sizes: dict[str, int], s, overrides: dict | None = None, kind: str =
     except RoleError as exc:
         out.error, mine = f"roles: {exc}", {}
 
+    evidence = background if background is not None else background_evidence(None, s, name, list(n))
+
     def matrix() -> QuantMatrix:
         samples = [f"{c}#{i}" for c, k in n.items() for i in range(1, k + 1)]
         meta = {"roles": dict(sdrf_roles), "sdrf": {"file": sdrf_file or "the SDRF"}} if sdrf_roles else {}
+        meta["background"] = evidence
         return QuantMatrix(kind, "protein", [], samples, [], {x: x.rsplit("#", 1)[0] for x in samples}, exp=exp,
                            meta=meta)
 
@@ -697,6 +867,7 @@ def preview(sizes: dict[str, int], s, overrides: dict | None = None, kind: str =
             out.notes.append(f"The roles don't choose the comparisons: {design.inactive}")
         out.notes += cnotes
     out.notes += [x for x in design.notes if x.startswith("analysis.roles names")]
+    out.notes += [f"{r.condition}: {r.hint}" for r in design.roles.values() if r.hint and r.condition.lower() not in low]
     return out
 
 
