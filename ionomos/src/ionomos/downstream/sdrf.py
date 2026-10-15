@@ -32,7 +32,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PureWindowsPath
 
 from ionomos.downstream.quant import RAW_EXTS, run_stem
-from ionomos.downstream.tables import write_tsv
+from ionomos.downstream.tables import decode, write_tsv
 
 SPEC_VERSION = "v1.1.0"
 TEMPLATE = "ms-proteomics v1.1.0"
@@ -355,7 +355,7 @@ def runs_from_folder(dest: Path, method: str) -> list[Run]:
 def _read_annotation(path: Path) -> dict[str, str]:
     out = {}
     try:
-        text = path.read_text(encoding="utf-8-sig", errors="replace")
+        text = decode(path.read_bytes())[0]  # also an annotation.txt saved from Excel as UTF-16 or cp1252
     except OSError:
         return out
     for ln in text.splitlines():
@@ -614,7 +614,7 @@ def _number(rows: list[Row]) -> None:
         if r.rep == "pooled" or r.source in given:
             continue
         taken = used[(r.condition.lower(), r.group)]
-        want = int(r.rep) if str(r.rep).isdigit() and int(r.rep) > 0 else 1
+        want = int(r.rep) if str(r.rep).isdecimal() and int(r.rep) > 0 else 1
         if want in taken:
             moved.append(r)
             continue

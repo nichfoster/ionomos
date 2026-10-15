@@ -24,7 +24,7 @@ from pathlib import Path
 from xml.etree import ElementTree as ET
 
 from ionomos.downstream.quant import Feature, QuantMatrix, run_stem
-from ionomos.downstream.tables import NA_STRINGS, num
+from ionomos.downstream.tables import NA_STRINGS, decode, num, unquote
 
 TABLE_SUFFIXES = (".tsv", ".csv", ".txt", ".xlsx", ".tab")
 SKIP_DIRS = {"results", "ionomos_run", "__MACOSX"}
@@ -126,6 +126,36 @@ def _number_format(grid: list[list[str]], notes: list[str], name: str) -> None:
                      "points; the ones with commas were not read. Export the table with one number format")
 
 
+_EU_THOUSANDS = re.compile(r"^-?\d{1,3}(?:\.\d{3})+,\d+$")
+
+
+def _european(c: str) -> str:
+    """A number as a semicolon file writes it: '1,5' -> '1.5', '1.234.567,8' -> '1234567.8' (a decimal comma with
+    dots between the thousands; '1.234' alone stays as it is)."""
+    if _EU_THOUSANDS.match(c):
+        return c.replace(".", "").replace(",", ".")
+    return re.sub(r"^(-?\d+),(\d+)$", r"\1.\2", c)
+
+
+def _parse(text: str, delim: str, name: str, said: list[str]) -> list[list[str]]:
+    """Rows of a delimited text, quotes read as csv reads them. A quote that is never closed makes csv read the rest
+    of the file as one cell: then the text is read again with quotes as plain characters, whichever reading keeps
+    more rows the width of the header."""
+    grid = list(csv.reader(io.StringIO(text, newline=""), delimiter=delim))
+    if not any("\n" in c or "\r" in c for r in grid for c in r):
+        return grid
+    plain = list(csv.reader(io.StringIO(text, newline=""), delimiter=delim, quoting=csv.QUOTE_NONE))
+
+    def fits(g: list[list[str]]) -> int:
+        return sum(1 for r in g[1:] if g and len(r) == len(g[0]))
+
+    if fits(plain) > fits(grid):
+        said.append(f"{name}: a double quote that is never closed would have joined rows together, so quotes were "
+                    "read as ordinary characters")
+        return [[unquote(c) for c in r] for r in plain]
+    return grid
+
+
 def read_table(path: str | Path, notes: list[str] | None = None) -> tuple[list[str], list[list[str]]]:
     """(header, rows) from a text or .xlsx table. Header cells are stripped; rows are padded to the header.
     notes: a list to add to. With it, decimal commas / thousands separators are also read in tab and comma
@@ -134,24 +164,38 @@ def read_table(path: str | Path, notes: list[str] | None = None) -> tuple[list[s
     delim = ""
     if path.stat().st_size > MAX_BYTES:
         raise TableError(f"{path.name} is larger than {MAX_BYTES // 2**20} MB")
+    said: list[str] = []
     if path.suffix.lower() == ".xlsx":
         grid = _xlsx(path)
     else:
         raw = path.read_bytes()
-        text = raw.decode("utf-8-sig", errors="replace") if not raw.startswith((b"\xff\xfe", b"\xfe\xff")) \
-            else raw.decode("utf-16")
+        text, encoding = decode(raw)
+        if encoding == "cp1252":
+            said.append(f"{path.name} is not UTF-8 text; it was read as Windows text (cp1252)")
+        if "\x00" in text:
+            said.append(f"{path.name} holds {text.count(chr(0)):,} NUL byte(s), which no table export writes: the "
+                        "file may be damaged (a copy or download that did not finish). Export it again if numbers "
+                        "look wrong")
         first = next((ln for ln in text.splitlines() if ln.strip()), "")
         delim = max(("\t", ",", ";"), key=first.count) if first else "\t"
         if "\t" in first and path.suffix.lower() in (".tsv", ".txt", ".tab"):  # a tab file whose headers hold
             delim = "\t"  # commas: Proteome Discoverer's 'Abundance: F1: 126, Sample, DMSO'
-        grid = list(csv.reader(io.StringIO(text, newline=""), delimiter=delim))
-        if delim == ";":  # European exports: 1,5 means 1.5
-            grid = [grid[0]] + [[re.sub(r"^(-?\d+),(\d+)$", r"\1.\2", c.strip()) for c in r] for r in grid[1:]]
+        grid = _parse(text, delim, path.name, said)
+        if delim == ";":  # European exports: 1,5 means 1.5, and 1.234.567,8 is 1234567.8
+            grid = [grid[0]] + [[_european(c.strip()) for c in r] for r in grid[1:]] if grid else grid
+        if (len(grid) > 2 and text and not text.endswith(("\n", "\r")) and len(grid[-1]) < len(grid[0])
+                and any(c.strip() for c in grid[-1])):
+            grid.pop()  # the last line was cut off mid-row (an export or copy that stopped)
+            said.append(f"{path.name} ends in the middle of a row (no line break after the last line, and fewer cells "
+                        "than the header): the file looks cut off, so that row was left out. Copy or export it again")
     grid = [r for r in grid if any(c.strip() for c in r)]
     if not grid:
-        raise TableError(f"{path.name} is empty")
+        raise TableError(f"{path.name} is empty" + (": 0 bytes. The program that wrote it may have stopped, or the "
+                                                    "copy did not finish; export or copy it again"
+                                                    if path.stat().st_size == 0 else ""))
     header = [h.strip() for h in grid[0]]
     if notes is not None:
+        notes += said
         if delim and delim != ";":
             _number_format(grid, notes, path.name)
         short = sum(1 for r in grid[1:] if len(r) < len(header))
@@ -475,7 +519,7 @@ def load(path: str | Path) -> QuantMatrix:
         samples.append(s)
         cond[s] = s
         tail = s.rsplit("_", 1)[-1]
-        if tail.isdigit():
+        if tail.isdecimal():
             reps[s] = int(tail)
     cond = suggest_conditions(samples)  # 20260101_DMSO_1 / 20260101_Drug_2 -> DMSO / Drug
     notes.append(f"{len(samples)} sample column(s) found by {how}: " + ", ".join(cols[:8]) + ("…" if len(cols) > 8 else ""))
