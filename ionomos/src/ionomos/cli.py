@@ -5,6 +5,8 @@ Command line.
     ionomos setup    [--config PATH]              setup wizard / control panel (tkinter)
     ionomos run      [--config PATH] [--no-gui]   watcher + intake, forever (worker: Phase 2)
     ionomos check    [--config PATH]              doctor: config, paths, users, GUI, ledger
+    ionomos doctor   [--config PATH]              check everything: setup, FragPipe (not started), the workflow
+                                                   library, health, what needs you (the Setup tab's list)
     ionomos status   [--config PATH] [--all]      jobs from the ledger
     ionomos dry-run  FOLDER [--config PATH]       parse + validate + show the plan; touches nothing
     ionomos names test NAME... [--method M]       how folder / .raw names are read with this config (naming:)
@@ -459,6 +461,18 @@ def cmd_check(args) -> int:
     row(True if st == "ready" else None, "assistant", why if st != "not_set_up" else f"not set up: {why}")
     print("\nall good" if ok_all else "\nfix the ✗ items above")
     return 0 if ok_all else 1
+
+
+def cmd_doctor(args) -> int:
+    """Check everything (checks.py, docs/UI.md S3.1): setup, FragPipe without starting it, the workflow library,
+    health and what needs a person, as the app's Setup tab shows it. 1 when anything is broken (✗)."""
+    from ionomos import checks
+
+    print(f"ionomos {__version__}  check everything  config: {args.config}\n")
+    rows = checks.everything(Path(args.config))
+    print(checks.text(rows))
+    print("\n" + checks.summary(rows))
+    return 1 if any(r.status == "fail" for r in rows) else 0
 
 
 def cmd_preflight(args) -> int:
@@ -1265,6 +1279,8 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--no-gui", action="store_true", help="never open the resolver window")
     r.set_defaults(fn=cmd_run)
     sub.add_parser("check", help="verify config, folders, users, GUI").set_defaults(fn=cmd_check)
+    sub.add_parser("doctor", help="check everything: setup, FragPipe (no start), the workflow library, health, "
+                                  "what needs you").set_defaults(fn=cmd_doctor)
     pf = sub.add_parser("preflight", help="check FragPipe without a search: starts it for --help and a dry run "
                                           "of each method")
     pf.add_argument("--method", action="append", help="only this method (repeatable)")

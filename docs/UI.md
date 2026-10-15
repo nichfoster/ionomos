@@ -56,26 +56,28 @@ look; an item that would change it is out of scope.
 
 ## Inventory
 
-### Tabs (left to right, as built)
+### Tabs (left to right, since D95: Daily · Setting up · Help; `uinav.TABS`)
 
 | Tab | What it is for | Daily for |
 |---|---|---|
-| **Today** (new, this branch) | What needs you, watcher + queue line, the checklist's one line, recent jobs with Open report / Open folder / Re-run analysis / Analysis options… / Show in Jobs | everyone |
-| **✓ Setup** | The live checklist (`setupcheck.run`), Auto-setup, a Fix button per open item | PC keeper |
-| **1 Folders** | Paths (inbox, users, workflows, FASTA, logs, ledger, FragPipe), Quick fill, Create all, Find FragPipe | PC keeper, once |
-| **2 Users** | User folders and their initials, learned aliases, the catch-all user | PC keeper |
-| **3 Methods** | Methods (keywords, workflow, FASTA, data type, post-processing), Import workflow…, Test names…, and the library panel (Find on this PC…, Download from UniProt…, Add decoys and contaminants…, Check for updates) | PC keeper |
-| **4 Advanced** | Watcher timings, FragPipe threads/RAM/timeout/disk, the resolver window and pop-ups switch, learned aliases file, config file (open, logs, reset, restore) | PC keeper |
-| **5 Run & Test** | Watcher start/stop and status, diagnostics, Retry / Open job by number, startup task, updates or the development-install box, the testbed, an output pane | PC keeper |
-| **Inbox** | What is in the inbox now; Delete moves an item to the removed-items folder | lab member, PC keeper |
-| **6 Jobs** | Every job (status, time, what FragPipe is doing), Find (new), details and the likely cause of a failure, Open report / folder / log, Re-run analysis, Analysis options…, Retry, Cancel, Copy details, Zip; Pause searches, Instrument QC, Check FragPipe install | everyone |
-| **7 Analysis** | Sub-tabs: Analyse an experiment (the experiment editor), Lab defaults, Figure style, Check accuracy | re-analysing |
-| **8 Notifications** | Teams / Slack / webhook / email when a search ends | PC keeper |
-| **Help** | Keyboard shortcuts (new), the full help page button, the set-up text | PC keeper |
+| **Today** | What needs you, watcher + queue line, the checks' one line ("Checks: N problems"), recent jobs with Open report / Open folder / Re-run analysis / Analysis options… / Show in Jobs | everyone |
+| **Inbox** | What is in the inbox now (the path, "empty" or "N items waiting"; read on a thread while shown); Delete moves an item to the removed-items folder | lab member, PC keeper |
+| **Jobs** | Every job (status, time, what FragPipe is doing), Find, details and the likely cause of a failure, Open report / folder / log, Re-run analysis, Analysis options…, Retry, Cancel, Copy details, Zip; Pause searches, Instrument QC, Check FragPipe install (the full preflight, minutes) | everyone |
+| **Analysis** | Sub-tabs: Analyse an experiment (the experiment editor, its buttons on top), Lab defaults, Figure style, Check accuracy | re-analysing |
+| **✓ Setup** | Check everything (`checks.everything`: setup, FragPipe from disk, the library, health, what needs you), Auto-setup, a Fix button per open item; the list scrolls | PC keeper |
+| **Folders** | Paths (inbox, users, workflows, FASTA, logs, ledger, FragPipe), Quick fill, Create all, Find FragPipe | PC keeper, once |
+| **Users** | User folders and their initials, learned aliases, the catch-all user | PC keeper |
+| **Methods** | Methods (keywords, workflow, FASTA, data type, post-processing), Import workflow…, Test names…, and the library panel (Find on this PC…, Download from UniProt…, Add decoys and contaminants…, Check for updates) | PC keeper |
+| **Advanced** | Watcher timings and FragPipe threads/RAM/timeout/disk (checked as you type), the resolver window and pop-ups switch, learned aliases file, config file (open, logs, reset, Undo last save, Restore a previous config…) | PC keeper |
+| **Run & Test** | Watcher page: start/stop and status, diagnostics, startup task, updates; Testing page: the testbed, the development-install box; an output pane under both | PC keeper |
+| **Notifications** | Teams / Slack / webhook / email when a search ends | PC keeper |
+| **Help** | Keyboard shortcuts, the full help page button, the set-up text | PC keeper |
 
-Bottom bar: config path, Change…, the status line, Help, Report a problem…,
+Bottom bar: config path, Change…, the status line, the busy indicator
+("working: …" + progress bar while something runs), Help, Report a problem…,
 **⚠ N need attention** (when there is something), Update to x.y.z (when there
-is one), Reload, Save, Save & Check; below it the build line.
+is one), Reload, Save, Save & Check; below it the build line and the
+watcher / FragPipe strip.
 
 ### Windows and dialogs
 
@@ -89,12 +91,15 @@ is one), Reload, Save, Save & Check; below it the build line.
 | Report a problem | bottom bar, pop-up, Jobs → Zip… | `bundle_dialog.py` | `test_app.py` |
 | Check the folder before analysing | Analysis → Folder…, a drop on the window | `folder_check.py` | `test_app.py` (through the Analysis tab) |
 | Find on this PC / Choose… / proposals / Download / Prepare | Methods tab | `library_tab.py` | `test_library_tab.py` (Download and Prepare: not driven) |
-| Test your names | Methods → Test names… | `app.py` | none |
-| Job number prompt | Run & Test → Retry a failed job… / Open job folder… | `app._pick_job` (simpledialog) | none |
+| Test your names | Methods → Test names… | `app.test_names` | `test_app.py`, the smoke test |
+| Restore a previous config | Advanced → Restore a previous config… | `app._pick_backup` | `test_app.py`, the smoke test |
+| Save: what will change | Save, Ctrl+S | `app._confirm_changes` | `test_app.py`, the smoke test |
 | Change condition prompt | experiment editor | `experiment_editor.py` (simpledialog) | `test_app.py` |
-| Colour picker | Figure style → Pick… | `tkinter.colorchooser` | none (D67) |
+| Colour picker | Figure style → Pick… | `tkinter.colorchooser` | `test_app.py` (patched) |
 | Error box | any callback that raises | `app._on_tk_error` | `test_app.py` |
-| ~58 message boxes in `app.py` alone | confirmations, "select a job first", errors | `tkinter.messagebox` | some |
+| every `messagebox.showerror` | errors | `tkinter.messagebox` | `test_ui_words.py` (the text names the next step) |
+
+(The job-number prompts of Run & Test are gone, S1.9.)
 
 ## What we saw (2026-10-15, Windows 11, 3840×2160 at 150 %, testbed with 4 jobs)
 
@@ -465,12 +470,40 @@ branch `feat/tmt-library` in this change.
 - **Tests**: is one.
 - **Size**: S.
 
-## Done in this change, and how it was checked
+## Done, and how it was checked
 
-S1.1–S1.5 and the fixes in S1.3 are in `app.py`, `uinav.py`, `names.py`
+**Slice 1 (D93)**: S1.1–S1.5 and the fixes in S1.3 are in `app.py`, `uinav.py`, `names.py`
 (`UI_STATE_FILE`), `help/faq.md` (`faq.app`), `deploy/ionomos.spec`.
 `tests/test_ui_nav.py` checks the logic everywhere; its window test runs
 in CI like `tests/test_app.py` and was run once locally with the window
 hidden. The app was opened on a testbed and photographed at 150 % scaling at
 its natural size and at 1366×768: the Today tab and the bottom bar look like
 the rest of the app.
+
+**Slices 1 (rest) to 4 (D95, issues #114–#132), all done**, with these notes:
+
+| Item | Where | Note |
+|---|---|---|
+| S1.6 tabs grouped, no numbers | `uinav.TABS`, `App._order_tabs`, every help text | no separators in the tab row (ttk has none); the grouping is the order. `test_no_text_names_a_tab_by_number` |
+| S1.7 status strip | `App.strip_lbl`, `uinav.watcher_status` | the same text as Run & Test, in its colour |
+| S1.8 scrolling | `tkutil.ScrolledFrame`: the Setup list, the analysis pop-up's editor; the editor's action row on top | the main experiment editor on the Analysis tab does not scroll: its buttons are now above the fold |
+| S1.9 Run & Test split | `App.run_nb`: Watcher / Testing pages | `retry_job`, `open_job`, `_pick_job` removed |
+| S1.10 text units | `tkutil.text_size`, `fit_window`; popups, folder check, library dialogs, Test names, the pickers | the analysis pop-up is capped at 150×44 characters and scrolls inside |
+| S2.1 what to do | every `showerror` in the Tk modules; `App.fail(title, what, how, topic)` | `tests/test_ui_words.py` reads the source (no display) |
+| S2.2 off the Tk thread | `run_bg` / threads for the import, the QC page, Reset testbed, Quit, Update, the status tick, the log follow, the Inbox scan | `test_slow_work_never_blocks_the_tk_thread` |
+| S2.3 busy indicator | `App.run_bg`, `busy_lbl` + `busy_bar` | |
+| S2.4 undo | `undo_last_save`, `restore_config(path)`, `_pick_backup`; `configio.backups`, `latest_backup`, `backup_time` | backups within one second get `-2`, `-3` |
+| S2.5 what changed | `configio.diff_words`, `App.save(confirm=True)`, `_confirm_changes` | only the Save button and Ctrl+S ask |
+| S2.6 unsaved guard | `App.dirty`, `_guard_unsaved`, the title's dot | |
+| S3.1 Check everything | `checks.py`, the Setup tab, `ionomos doctor` | no Stop for the full preflight yet (open) |
+| S3.2 quick check on start | `refresh_setup` at start, Today's Checks line | |
+| S3.3 fields as you type | `forms.check_setting`, the Advanced tab's `num()` | paths already had dots |
+| S4.1 harness | `tests/tkharness.py`, fixtures `hidden_app`, `no_dialogs`, `tk_errors`; docs/TESTING.md | |
+| S4.2 smoke test | `tests/test_ui_smoke.py` | the assistant's proposal dialog is not in it (its own tests cover it) |
+| S4.3 untested windows | `tests/test_app.py` (Test names, Change…, startup task, Reset testbed, colour picker), the smoke test (Download, Prepare) | |
+| S4.4 screenshots | `scripts/screenshots.py`; the Windows CI job uploads `ui-screenshots-3.14` | run here twice: 32 PNGs |
+| S4.5 layout at 1366×768 | `test_main_buttons_are_on_screen_at_1366x768` | the root is mapped fully transparent for the measurement |
+
+Checked: ruff; the no-Tk tests everywhere; every GUI test file run once locally with the windows hidden
+(`tests.tkharness.hide_all_windows`), CI runs them for real. Not looked at by a person on screen since slice 1:
+the screenshots CI uploads are for that.

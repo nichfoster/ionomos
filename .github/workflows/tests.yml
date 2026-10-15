@@ -35,6 +35,18 @@ jobs:
       - run: python -m pytest ionomos -v --durations=20 -rs
         env:
           IONOMOS_OFFLINE: "1"
+      # A PNG of every tab, Analysis sub-tab and window, natural size and 1366x768 (docs/UI.md S4.4), for a person
+      # to look at: Actions run -> Artifacts -> ui-screenshots-3.14. Taken when the tests fail too; never fails the run.
+      - if: ${{ !cancelled() && runner.os == 'Windows' && matrix.python == '3.14' }}
+        run: python scripts/screenshots.py --out screenshots
+        continue-on-error: true
+        timeout-minutes: 5
+      - if: ${{ !cancelled() && runner.os == 'Windows' && matrix.python == '3.14' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-screenshots-${{ matrix.python }}
+          path: screenshots
+          if-no-files-found: ignore
       # JS harness for the report front end (dev-only; jsdom). Same job so a
       # front-end regression fails the same red run on both OSes.
       - uses: actions/setup-node@v4

@@ -16,7 +16,7 @@ Work as the shared lab account. `ionomos-cli.exe` is in `C:\Ionomos`.
 ## 1. Before any data (15 min)
 
 - [ ] **Update Ionomos** (bottom bar → **Update to x.y.z**).
-- [ ] **Launcher**: tab 1 → **Find FragPipe** → **Save**. It must end in
+- [ ] **Launcher**: **Folders** → **Find FragPipe** → **Save**. It must end in
       `bin\fragpipe.bat`. If `C:\FragPipe\FragPipe-24.0\bin\` has only
       `FragPipe-24.0.exe`, stop and note it: Ionomos will not run the
       `.exe` (it opens FragPipe's window and returns at once).
@@ -24,10 +24,10 @@ Work as the shared lab account. `ionomos-cli.exe` is in `C:\Ionomos`.
       its Config tab shows MSFragger, IonQuant and (for DIA) DIA-NN and
       Python as found. A headless run reads those settings from
       `C:\FragPipe\FragPipe-24.0\cache`.
-- [ ] **Workflow + FASTA per method**: tab 3 → **Import workflow…** → the
+- [ ] **Workflow + FASTA per method**: **Methods** → **Import workflow…** → the
       `fragpipe.workflow` of a GUI run that worked. The FASTA must have
       decoys (about half its entries start with `rev_`).
-- [ ] **Preflight**: tab 6 → **Check FragPipe install**, or
+- [ ] **Preflight**: **Jobs** → **Check FragPipe install**, or
 
       ```powershell
       C:\Ionomos\ionomos-cli.exe preflight
@@ -40,7 +40,7 @@ Work as the shared lab account. `ionomos-cli.exe` is in `C:\Ionomos`.
       |---|---|
       | FragPipe starts | The launcher is not `fragpipe.bat`, or Java was not found. The line says which. |
       | MSFragger / IonQuant / Thermo .raw reader | FragPipe window → Config → **Download / Update**. |
-      | FragPipe settings | FragPipe's window was never used with this installation: open it once, or set *Tools folder* (tab 4). |
+      | FragPipe settings | FragPipe's window was never used with this installation: open it once, or set *Tools folder* (Advanced tab). |
       | `<method>`: tools it runs | The workflow runs a tool that is not installed. |
       | `<method>`: FASTA | No decoys, or not about half. Database tab → **Add decoys**, once. |
       | `<method>`: FragPipe dry run | FragPipe itself refused: the line quotes its message and gives the log. If it complains about the placeholder file, run `preflight --raw C:\path\to\one.raw`. |
@@ -50,17 +50,17 @@ Work as the shared lab account. `ionomos-cli.exe` is in `C:\Ionomos`.
       its last line under `C:\Fragpipe_Auto\logs\preflight\`). It is the
       first real evidence of how FragPipe answers.
 - [ ] Disk: at least twice the raw folder's size free on C:. Sleep: Never.
-- [ ] **Watcher running** (tab 5), startup task installed.
+- [ ] **Watcher running** (Run & Test tab), startup task installed.
 
 ## 2. First search: isoDTB, small
 
-- [ ] Tab 4 → *Run FragPipe automatically* **on** → **Save**. (Anything
-      already queued starts too: tab 6 → **Pause searches** first if needed.)
+- [ ] **Advanced** → *Run FragPipe automatically* **on** → **Save**. (Anything
+      already queued starts too: **Jobs** → **Pause searches** first if needed.)
 - [ ] Drop a **small** isoDTB folder (one replicate, 2-3 fractions), named
       `YYYYMMDD_<initials>_isoDTB_<what>`, raws `<sample>_<rep>_<fraction>.raw`.
       `ionomos-cli.exe dry-run "C:\path\to\folder"` shows how it is read
       without moving anything.
-- [ ] Accept the review window. Watch tab 6: the job's line should move
+- [ ] Accept the review window. Watch the Jobs tab: the job's line should move
       through FragPipe's steps ("MSFragger (4 of 31 step(s) done)").
 
 **Done looks like**: `DONE.txt` next to the raws; `fragpipe\` with
@@ -81,13 +81,13 @@ or press **Report a problem…**, which bundles them.
 | Job stays "waiting: …" | Not started; the reason names what is missing. Fix it, the job starts by itself. |
 | FAILED within seconds, reason starts "FragPipe exited with code 1" | FragPipe refused before any step. The reason quotes its ERROR line; the preflight's dry run should have shown the same. |
 | FAILED, "FragPipe step X failed (exit code N); it said: …" | A tool stopped. The quoted lines are that tool's last words. |
-| FAILED, "exited 0 but wrote nothing" | The launcher returned without running FragPipe. Check tab 1 says `fragpipe.bat`. |
+| FAILED, "exited 0 but wrote nothing" | The launcher returned without running FragPipe. Check the Folders tab says `fragpipe.bat`. |
 | DONE with the note "no 'ALL JOBS DONE' line" | FragPipe's end marker was not in the console Ionomos captured. Send the fingerprint: this decides whether the marker can be required. |
 | Pop-up "The SDRF doesn't describe these runs" | Since 0.14.0 FragPipe's own `fragpipe\sdrf.tsv` is skipped, so this should not appear for it. If it does, the real file differs from what was assumed: send a bundle. |
 | The progress line never changes from "starting" | The console is empty or in a shape Ionomos doesn't know: send `fragpipe_console.log`. |
 | FAILED, "ended from outside" or "stopped in the middle of a step without saying why" | Something ended FragPipe (Task Manager, sleep, sign-out, Windows out of memory). Note what happened on the PC at that time. |
 | FAILED, "result table … not written to the end" or "has only its header line" | The table was cut off (disk full?) or the search found nothing. Send the fingerprint: its `outputs` lists the table sizes. |
-| FAILED, "exited 0 without its 'ALL JOBS DONE' line and without any of its result tables" | FragPipe said it succeeded but left nothing. Check tab 1 says `fragpipe.bat`; send the console log. |
+| FAILED, "exited 0 without its 'ALL JOBS DONE' line and without any of its result tables" | FragPipe said it succeeded but left nothing. Check the Folders tab says `fragpipe.bat`; send the console log. |
 | Waiting, "raw file(s) can't be read yet" | A raw file is still open (Xcalibur still acquiring it, a copy still running). It starts by itself when the file is free; if it never does, note which program held it. |
 | Odd letters (`Ã¼`, `�`) in `FAILED.txt` | FragPipe's tools wrote another code page than the one assumed (cp1252): send the console log. |
 

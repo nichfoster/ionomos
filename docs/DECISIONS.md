@@ -4217,3 +4217,50 @@ issues against shipped code. Most are plain fixes (CHANGELOG, Fixed); four chang
 test_fragpipe_real.py, test_faults.py, test_failsafes.py, test_anytable.py, test_config.py, test_setup.py,
 test_configio.py, test_app.py). **Not verified**: a real 260+ character drop on the lab PC with long paths off
 (the tests stub the Windows gate), and a real FragPipe log on such a path.
+
+### D95 — The app is robust for daily driving: nothing slow on the Tk thread, Save explains itself, one checks list; windows are tested hidden
+**2026-10-15.** Slices 2–4 of docs/UI.md (issues #114–#132), after D93's slice 1. The rules below are what changed;
+the look stays (D93).
+
+1. **Tabs are grouped and unnumbered**: Today · Inbox · Jobs · Analysis, then Setup · Folders · Users · Methods ·
+   Advanced · Run & Test · Notifications, then Help (`uinav.TABS`; the app builds its tabs in any order and
+   `App._order_tabs` puts them in this one with these labels). Every text names a tab by name; a test fails on
+   "tab 3". Ctrl+<n> is the n-th tab of the row, so the numbers in the help are the keyboard's, not the tab's.
+2. **Nothing slow runs on the Tk thread.** Disks, FragPipe, the ledger, the lock file, schtasks and the network
+   are read on worker threads and come back through `App.post`; the 2 s ticks (status, inbox, log follow) read on
+   a thread and draw on the Tk thread, and the Inbox only while its tab is shown. `uinav.watcher_status` and
+   `uinav.inbox_listing` hold that logic without Tk.
+3. **One busy indicator, one rule.** `App.run_bg(label, fn, done, key=, button=)` is the one way to start work
+   from a click: the bottom bar says what runs, the button is disabled, and the same key cannot start twice
+   (D67's "a second click is refused", in one place). The 1.5 s log follow is a plain thread, not run_bg: a tick
+   is not work the indicator should show.
+4. **Save explains itself and can be undone.** Save computes `configio.diff_words(file, window)` first; nothing
+   changed writes nothing; the Save button and Ctrl+S show the changes in words and Cancel goes back
+   (programmatic saves — Auto-setup, a checklist Fix — do not ask: the click already said "do it"). Every Save
+   keeps the version before it, never two Saves in one backup name; Undo last save loads the newest backup into
+   the window and Save makes it active. "Don't ask for one change" is a UI preference in `ionomos-ui.json`
+   (D93.4), never in config.yaml.
+5. **Unsaved changes are never lost silently.** `App.dirty()` compares the window with the file as last read or
+   written (no disk read: the dict last loaded is the base); the title shows a dot; Quit, Reload and Change… ask
+   Save / Discard / Cancel.
+6. **Every error box says what to do** (D46), checked by reading the source: `tests/test_ui_words.py` parses
+   every `messagebox.showerror` and requires one of `uinav.ACTION_WORDS` in its literal text. A message built
+   from a variable alone fails the test: the step must be in the source.
+7. **One checks list, no Tk** (`checks.everything`): the setup checklist, `preflight.run(start=False)`,
+   `library.update_check`, health and the attention list, each source guarded so one that breaks is one ✗ row.
+   Rows the setup list already has are left out of the other sources. `Row.action` names what the app can do;
+   actions are tab keys, never positions. `ionomos doctor` prints the same list. The full preflight (FragPipe
+   started, dry runs; minutes) stays a separate button on Jobs, once at a time; it has no Stop yet.
+8. **Windows are sized in text units** (`tkutil.text_size`, `fit_window`): a column is n characters wide at any
+   display scaling, and every window is clamped to the screen. A window whose content is taller than a laptop
+   screen (the analysis pop-up's editor) scrolls inside (`tkutil.ScrolledFrame`) and is capped at 44 lines.
+9. **GUI tests run hidden.** `tests/tkharness.hide_all_windows` withdraws every Toplevel and makes showing a
+   window a no-op; dialogs are recorded (`NoDialogs`), Tk errors captured (`TkErrors`). The smoke test opens
+   every window of the inventory with fake data and checks it fits 1366×768 at the font's size; the layout test
+   maps the root fully transparent at 1366×768 and checks the main buttons are inside the window. The gating
+   stays as in D93: CI always, locally only with IONOMOS_GUI_TESTS=1 (even hidden, a bug would show a window).
+
+**Verified**: ruff clean; the no-Tk suites everywhere; every GUI test file run once locally with the windows
+hidden (260 tests; the resolver and review tests that drive a window with synthetic key events cannot run hidden
+and are CI's); `scripts/screenshots.py` run twice here (32 PNGs). **Not verified**: the lab PC's own screen;
+a lab member using Undo / the checks list; a Stop for the full preflight.

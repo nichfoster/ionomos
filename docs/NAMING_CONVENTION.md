@@ -418,7 +418,7 @@ tmt:                        # TMT only: the channel map (every key below, under 
     127C: Drug_1_127C
   reference_channel: 126    # the pooled / bridge channel that joins several plexes (IRS; = analysis.tmt_reference)
 
-analysis:                   # results/report.html for this experiment (lab defaults: app tab 7)
+analysis:                   # results/report.html for this experiment (lab defaults: the app's Analysis tab)
   comparisons: ["Drug vs DMSO", "Drug2 vs DMSO"]   # treatment vs control; default: all vs the control
   control: DMSO             # default: recognised by name (DMSO, vehicle, ctrl, WT, ...)
   log2fc: 1                 # also: alpha, use_adjusted, min_valid, normalize, test, top_labels

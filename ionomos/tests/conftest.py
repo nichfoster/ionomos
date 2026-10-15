@@ -120,6 +120,48 @@ def make_tk_root(attempts: int = 4, first_delay: float = 0.25):
             delay *= 2
 
 
+# ----------------------------------------------- hidden-window UI tests (tests/tkharness.py, docs/UI.md S4.1) --
+
+
+@pytest.fixture
+def no_dialogs(monkeypatch):
+    """Every messagebox / simpledialog / filedialog / colorchooser call recorded instead of shown (a NoDialogs,
+    not strict: set ``no_dialogs.strict = True`` to fail at the first one nobody expected)."""
+    from tests.tkharness import NoDialogs
+
+    yield NoDialogs(monkeypatch=monkeypatch).start()
+
+
+@pytest.fixture
+def hidden_app(tmp_path, monkeypatch, no_dialogs):
+    """The app on a withdrawn root, every window it opens withdrawn, its dialogs recorded (no_dialogs: a native
+    message box cannot be hidden and would wait for a click). Skips where gui_tests() says no (CI runs it)."""
+    ok, why = gui_tests()
+    if not ok:
+        pytest.skip(f"no GUI: {why}")
+    from tests.tkharness import destroy_app, make_app
+
+    app = make_app(tmp_path, monkeypatch)
+    try:
+        yield app
+    finally:
+        destroy_app(app)
+
+
+@pytest.fixture
+def tk_errors(hidden_app):
+    """Exceptions from the hidden app's Tk callbacks and App.post callbacks; the test fails at teardown if any
+    is left (``tk_errors.clear()`` after checking one the test meant to cause)."""
+    from tests.tkharness import TkErrors
+
+    errors = TkErrors(hidden_app).install()
+    try:
+        yield errors
+        errors.assert_none()
+    finally:
+        errors.uninstall()
+
+
 @pytest.fixture(autouse=True)
 def _collect_garbage_on_the_main_thread():
     """Tk objects a test leaves behind are collected here, on the main thread, not later on a

@@ -191,7 +191,7 @@ found are under "Real runs" in the open questions below.
     failed / held, off by default, under `notify:` in `config.yaml`;
     `ionomos notify-test`. Not checked against a real Teams / Slack / SMTP
     server yet. Open: per-user recipients (each person told about their
-    own jobs). → 2026-10-02 (D67): the app's **8 Notifications** tab, with
+    own jobs). → 2026-10-02 (D67): the app's **Notifications** tab, with
     Send test and masked secrets; not yet seen on screen
   - log rotation: was there (5 MB, 5 files); now also safe when Windows
     refuses the rename
@@ -341,14 +341,17 @@ decoys and contaminants…, Check for updates) and a first-setup proposal
 for daily driving.** A Today tab (what needs you, the watcher and queue, the
 setup line, the last jobs with Open report / Re-run analysis), the window size
 and last tab remembered, F1 and keyboard shortcuts, a Find box on Jobs, the
-bottom bar always on screen (#109–#113 done). The rest of the plan is issues
-#114–#132 in four slices: navigation (regrouping the tabs — decide first, it
-touches help text), robustness (every failure says what to do, nothing slow on
-the Tk thread, a busy indicator, undo the last Save, what changed before Save,
-an unsaved-changes guard), checks (one "Check everything" list with Fix
-buttons), testing (a hidden-window harness, a smoke test of every tab and
-dialog, a small-screen layout test). The look stays: plain ttk, no new theme,
-icons or colours.
+bottom bar always on screen (#109–#113 done). The rest of the plan, issues
+#114–#132 in four slices, is done (D95): the tabs regrouped Daily / Setup /
+Help without numbers, a status strip, scrolling lists, Run & Test split;
+every failure says what to do, nothing slow on the Tk thread, one busy
+indicator, Undo last save, what changed before Save, an unsaved-changes guard;
+one "Check everything" list with Fix buttons (`ionomos doctor`) and a quick
+check on start; a hidden-window harness, a smoke test of every tab and window,
+a small-screen layout test and screenshots from CI. The look stays: plain ttk,
+no new theme, icons or colours. Open: a Stop button for the full FragPipe
+preflight (it has no cancellation yet), the assistant's proposal dialog in the
+smoke test (it has its own tests), and a look at the lab PC's own screen.
 
 ## Phase 5 — Beyond one lab (plan of 2026-09-30, D36)
 

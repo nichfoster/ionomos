@@ -361,7 +361,7 @@ def test_setup_check_item_reads_the_last_scan_only(pc, monkeypatch):
     item = setupcheck.library_item(pc["cfg"])
     assert item.key == "library" and item.title == "Workflows and FASTAs"
     assert item.status == "warn" and item.detail.startswith("3 pinned, flags: ✗ FASTA_NO_DECOYS")
-    assert item.action == "open_tab:3" and "as of the scan of" in item.detail
+    assert item.action == "open_tab:methods" and "as of the scan of" in item.detail
 
 
 def test_setup_checklist_has_the_library_item(lab):

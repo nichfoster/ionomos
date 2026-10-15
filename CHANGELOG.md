@@ -9,6 +9,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The app, slices 2–4 of docs/UI.md (D95): robust for daily driving, and tested with hidden windows.**
+  - The tabs are grouped **Today · Inbox · Jobs · Analysis | Setup · Folders · Users · Methods · Advanced ·
+    Run & Test · Notifications | Help** and lose their numbers; every help text, checklist line and hint names
+    a tab by name (a test fails on "tab 3"). Ctrl+1 … Ctrl+9 jump to the tab in that position. (#114)
+  - The line under the bottom bar shows the watcher's state and the FragPipe queue on every tab. (#115)
+  - The Setup list scrolls on a laptop; the experiment editor's Run analysis / Save choices / Open report row
+    is at its top, and the editor scrolls inside the analysis pop-ups. (#116)
+  - Run & Test has a Watcher page and a Testing page (the testbed, the development-install box); the job-number
+    prompts (Retry a failed job…, Open job folder…) are gone — the Jobs tab does both on a selected row — and
+    there is one Stop watcher; Save & Check lives in the bottom bar only. (#117)
+  - Pop-up windows size themselves in text units (`tkutil.text_size`, `fit_window`) and are clamped to the
+    screen, so columns are not cut at 150 % scaling. (#118)
+  - Every error box says what to do next (D46); `tests/test_ui_words.py` reads every `showerror` in the Tk
+    modules and fails when one names what happened but not the next step. (#119)
+  - Nothing slow runs on the Tk thread: Import workflow's FASTA copy, the Instrument QC page, Reset testbed,
+    waiting for the watcher to stop (Quit, Update), the 2 s status tick's ledger and lock-file reads, the log
+    follow and the Inbox scan (now only while the Inbox tab is shown, with the path and "empty" said) run on
+    worker threads and come back through `App.post`. (#120)
+  - One busy indicator: `App.run_bg(label, fn, done)` shows "working: …" with a progress bar in the bottom bar,
+    disables the button that started the work and refuses a second start of the same work (D67's rule in one
+    place). Used by the checks, Check FragPipe install, Re-run analysis, Import workflow, the QC page,
+    diagnostics, the bundle and updates. (#121)
+  - **Undo last save** (Advanced → Config file) brings the newest `config-backups/` copy back into the window;
+    Restore a previous config… lists every backup with its time and what differs from the active config. Two
+    Saves in one second no longer overwrite the same backup. (#122)
+  - Save shows **what will change**, in words (`configio.diff_words`: "FragPipe → Threads: 24 → 28"), and Cancel
+    writes nothing; nothing changed = nothing written; a tick skips the window for a single changed setting
+    (remembered in `ionomos-ui.json`). (#123)
+  - Unsaved changes are not lost silently: a dot in the title, and Quit, Reload and Change… ask Save / Discard /
+    Cancel. (#124)
+  - **Check everything** (the Setup tab, `ionomos doctor`): one list from the setup checklist, FragPipe read from
+    disk (no start), the workflow library's update check, health (crash reports, log errors, disk) and what needs
+    you (open items, paused searches), each row with what to do and a Fix button where the app can do it
+    (`checks.py`, no Tk). The full preflight with dry runs stays Jobs → Check FragPipe install. (#125)
+  - The quick check runs when the app opens; Today's line says "Checks: N problems". (#126)
+  - Number fields on Advanced show the Folders tab's ● dot and the problem in the hint while a value is one the
+    loader refuses (`forms.check_setting`). (#127)
+  - `tests/tkharness.py`: hidden-window tests (every Toplevel withdrawn, dialogs recorded, Tk errors captured;
+    fixtures `hidden_app`, `no_dialogs`, `tk_errors`). (#128)
+  - `tests/test_ui_smoke.py`: every tab refreshed with F5 and F1, every window of the inventory opened with fake
+    data and checked to fit a 1366×768 screen (#129); the untested windows got tests (Test names, Change…,
+    Download and Prepare dialogs, the colour picker, the startup-task buttons, Reset testbed) (#130);
+    `scripts/screenshots.py` saves a PNG of every tab and window at the natural size and at 1366×768, and
+    Windows CI uploads them as an artifact (#131); a layout test checks the main buttons are inside the window at
+    1366×768 (#132).
 - **The workflow and FASTA library: `ionomos library`** (D89, docs/LIBRARY.md).
   The PC holds well over a hundred FragPipe workflows (one in every output
   folder on `D:\`, custom ones such as `fragpipe_pax8.workflow`, the stock ones

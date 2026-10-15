@@ -5,7 +5,7 @@ while it waits for you: see [What Ionomos will never do](#safety).
 
 ## Nothing happens after a drop {#trouble.nothing}
 
-- Is the watcher running? The app's Run & Test tab (tab 5) shows its status.
+- Is the watcher running? The app's Run & Test tab shows its status.
 - The folder needs at least one `.raw` file and must stop changing for about
   a minute. A copy that is still going is not taken in yet.
 - A review window may be waiting for you, perhaps behind another window.
@@ -187,27 +187,27 @@ fixed. See [A search is waiting](#attention.search_waiting).
 
 ## FragPipe launcher not found {#search.hold-launcher}
 
-Ionomos can't find FragPipe. App → tab 1 Folders → **Find FragPipe**, or set
+Ionomos can't find FragPipe. App → **Folders** → **Find FragPipe**, or set
 `fragpipe_exe` in the settings. FragPipe must not be under a path with spaces.
 
 ## The launcher is FragPipe's window program {#search.hold-launcher-window}
 
-The launcher set on tab 1 is FragPipe's `.exe` (for example
+The launcher set on the Folders tab is FragPipe's `.exe` (for example
 `bin\FragPipe-24.0.exe`), and there is no `fragpipe.bat` next to it. The
 `.exe` opens FragPipe's window and returns at once, so Ionomos could not
 follow a search started with it. FragPipe 23 and 24 install `fragpipe.bat`
 in the same `bin` folder; Ionomos uses it by itself when it is there. If it
-is missing, reinstall FragPipe, then tab 1 → **Find FragPipe**.
+is missing, reinstall FragPipe, then **Folders** → **Find FragPipe**.
 
 ## Workflow file missing {#search.hold-workflow}
 
-The method's FragPipe workflow isn't in the workflows folder. App → tab 3
-Methods → **Import workflow…** and pick a `.workflow` file (for example the
+The method's FragPipe workflow isn't in the workflows folder. App →
+**Methods** → **Import workflow…** and pick a `.workflow` file (for example the
 `fragpipe.workflow` inside a search that worked).
 
 ## FASTA missing {#search.hold-fasta}
 
-The method's protein database isn't set or was moved. App → tab 3 Methods: pick
+The method's protein database isn't set or was moved. App → **Methods**: pick
 the FASTA. It must contain decoys (`rev_` entries); **Check FragPipe install**
 on the Jobs tab checks that (see [decoys](#search.hold-decoys)).
 
@@ -218,7 +218,7 @@ no decoys, or when decoys are not about half of its entries (40-60 %). A
 decoy is an entry whose name starts with the workflow's decoy tag, usually
 `rev_`. In FragPipe's window: Database tab → **Add decoys** (once, on a
 FASTA without any), copy the new file into the FASTA folder and pick it for
-the method on tab 3. The search then starts by itself. The usual mistakes
+the method on the Methods tab. The search then starts by itself. The usual mistakes
 are a FASTA straight from UniProt (no decoys) and decoys added twice.
 
 ## Low disk space {#search.hold-disk}
@@ -285,7 +285,7 @@ reads Sage's `.tsv` tables, so take that option out.
 ## The method is no longer set up {#search.hold-method}
 
 The experiment's method was removed from the settings after it was queued.
-Add the method back (tab 3 Methods), or change the experiment's method.
+Add the method back (Methods tab), or change the experiment's method.
 
 ## A raw file can't be read yet {#search.hold-raw-locked}
 
@@ -301,7 +301,7 @@ can be read. If it never does, check the file's permissions in Explorer
 
 FragPipe can't use a path with a space in it, so the search waits instead of
 failing half-way. The reason names the path: usually a FASTA whose file name
-has a space (pick or rename it on tab 3 Methods) or a FragPipe or tools
+has a space (pick or rename it on the Methods tab) or a FragPipe or tools
 folder under one (move it, for example to `C:\FragPipe`). Experiment folders
 and raw file names never have spaces: Ionomos takes them out when it files a
 drop.
@@ -332,7 +332,7 @@ once in the log ("could not notify by ..."). The search itself is not
 affected: its status, `DONE.txt` / `FAILED.txt` and the report are written
 before the message is sent.
 
-Press **Send test** on the app's **8 Notifications** tab, or run
+Press **Send test** on the app's **Notifications** tab, or run
 `ionomos notify-test`. It sends a test message to every channel and says
 what happened to each:
 
@@ -396,7 +396,7 @@ pop-up. After fixing the cause, press **Retry**; the earlier output is kept.
   wrote its table, usually because the disk filled up. Free space, then
   Retry.
 - **No 'ALL JOBS DONE' line and no result tables**: FragPipe said it
-  succeeded but did not finish. Retry; if it repeats, check that tab 1 names
+  succeeded but did not finish. Retry; if it repeats, check that the Folders tab names
   `fragpipe.bat`.
 - **A raw file disappeared while FragPipe searched it**: it was moved,
   renamed or deleted during the search. Put it back, then Retry.
@@ -438,7 +438,7 @@ Ionomos. **Re-run analysis** once; if it fails again, **Report a problem…**
 The table exists but holds nothing to analyse. For isoDTB this usually means
 the label mass in the workflow differs from the one Ionomos looks for, or the
 search found no labelled peptides. For a table you gave it, it isn't one row
-per protein with a numeric column per sample. Check the workflow (tab 3) and
+per protein with a numeric column per sample. Check the workflow (Methods tab) and
 Retry, or export the table again.
 
 ## No result table {#issue.NO_TABLE}
@@ -522,7 +522,7 @@ No condition looks like a control (DMSO, vehicle, WT, …), so Ionomos used its
 best guess. Every volcano plot is "condition vs control", so please confirm:
 pick the control in the window and **Run analysis**. The choice is remembered
 for the experiment. A control name the lab always uses can be added to the
-control keywords (tab 7 Analysis → Lab defaults).
+control keywords (Analysis tab → Lab defaults).
 
 ## Check the roles of the conditions {#issue.ROLES_UNSURE}
 
@@ -537,7 +537,7 @@ here it is not sure. The message says which condition and why:
   several and its name doesn't say which. It was then only compared with the
   control.
 
-Open the experiment editor (the pop-up window's button, or tab 7 Analysis):
+Open the experiment editor (the pop-up window's button, or the Analysis tab):
 under **Roles** the condition is marked **?**. Press **Confirm** if the guess
 is right, or pick its role in the list, then **Run analysis**
 ([How?](#faq.roles)). A condition that is not a competition gets `compound`.

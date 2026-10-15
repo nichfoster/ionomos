@@ -228,7 +228,8 @@ class AccuracyPage:
             messagebox.showinfo(title, "A check is still running; wait for it to finish.")
             return True
         if problems:
-            messagebox.showerror(title, "\n".join(f"• {p}" for p in problems))
+            messagebox.showerror(title, "\n".join(f"• {p}" for p in problems)
+                                 + "\n\n→ Fix the fields named above, then try again.")
             return True
         return False
 
