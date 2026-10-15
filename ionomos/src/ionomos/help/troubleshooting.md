@@ -1339,6 +1339,10 @@ Less than 90 % of the proteins come from one organism. That is right for a
 mixed-species benchmark (human, yeast and E. coli together) and wrong for an
 ordinary experiment: use a FASTA of your organism alone.
 
+When most headers name no organism at all (GENCODE or Ensembl FASTAs, like
+the human one that comes with FragPipe), the library says *organism unknown*
+instead of naming the organism of the few that do (often the contaminants).
+
 ## Most of the FASTA is unreviewed UniProt {#library.fasta_unreviewed}
 
 Most entries start `tr|` (TrEMBL, not checked by a curator). The lab's

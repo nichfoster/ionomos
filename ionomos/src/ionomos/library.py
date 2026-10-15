@@ -158,6 +158,8 @@ class FastaInfo:
     fragpipe_style: bool = False
     fingerprint: str = ""
     complete: bool = True                     # False: the time ran out before the end of the file
+    ox_share: float = 0.0                     # share of the proteins whose header names an organism (OX=)
+    reader: int = 0                           # FASTA_READER that read it; an older reading is read again
     summary: str = ""
     source: str = "other"                     # pinned | cache | other
     error: str = ""
@@ -700,6 +702,8 @@ _ISOFORM = re.compile(rb"^(?:sp|tr)\|[A-Za-z0-9]+-\d+\|")
 _NAME_DATE = re.compile(r"^(\d{4}-\d{2}-\d{2})")
 _PROTEOME = re.compile(r"(UP\d{9})(?:_(\d+))?")
 _FP_STYLE = re.compile(r"^\d{4}-\d{2}-\d{2}-(?:td-|decoys-)(?:[a-z]+-)*UP\d{9}(?:_\d+)?\.fasta\.fas$", re.I)
+FASTA_READER = 2                                     # 2: organism and reviewed share judged on every protein (#151)
+ORGANISM_MIN_SHARE = 0.5                             # the organism is named only when this share of proteins says it
 SPECIES_WORDS = {"9606": "Human", "10090": "Mouse", "10116": "Rat", "559292": "Yeast", "4932": "Yeast",
                  "83333": "E. coli", "562": "E. coli", "7227": "Fly", "6239": "Worm", "7955": "Zebrafish",
                  "3702": "Arabidopsis", "9913": "Cow", "9823": "Pig", "9031": "Chicken"}
@@ -810,16 +814,20 @@ def describe_fasta(path: str | Path, ctx: Context | None = None, *, stop: thread
     info.contaminants, info.reviewed, info.unreviewed, info.isoforms = contam, reviewed, unreviewed, isoforms
     info.species = [[ox, species_name.get(ox, ""), n] for ox, n in species.most_common(8)]
     total = sum(species.values())
-    if total:
+    info.ox_share = total / info.proteins if info.proteins else 0.0
+    if total and info.ox_share >= ORGANISM_MIN_SHARE:
         ox, n = species.most_common(1)[0]
         info.top_species = SPECIES_WORDS.get(ox) or species_name.get(ox) or f"taxon {ox}"
         info.top_share = n / total
         info.taxon = info.taxon or ox
-    elif info.taxon:
+    elif info.taxon:   # from the file name (UP000005640_9606)
         info.top_species = SPECIES_WORDS.get(info.taxon, f"taxon {info.taxon}")
+    # else: most targets name no organism (GENCODE / Ensembl / smORF headers carry no OX=): the few that do, often
+    # its contaminants, don't say what the file is (#151)
     if entries == 0 and info.complete:
         info.error = "no protein entries (no line starts with '>'): not a FASTA"
     info.fingerprint = _fingerprint(p, info.size, entries) if info.complete else ""
+    info.reader = FASTA_READER
     info.summary = _fasta_summary(info)
     if info.complete and not info.error:
         _FASTA_CACHE[key] = FastaInfo.from_dict(info.as_dict())
@@ -847,15 +855,23 @@ def _mix_words(info: FastaInfo) -> str:
                       for o, n, c in info.species[:3])
 
 
+def _mostly_not_uniprot(info: FastaInfo) -> bool:
+    """Fewer than half of the proteins have UniProt headers (sp| / tr|): their reviewed share says little."""
+    return (info.reviewed + info.unreviewed) < 0.5 * info.proteins
+
+
 def _fasta_summary(info: FastaInfo) -> str:
     if info.error:
         return f"{info.name}: {info.error}."
-    who = info.top_species or "Unknown organism"
-    if len(info.species) > 1 and info.top_share < 0.9:
+    who = info.top_species or ("Organism unknown (most headers name none: no OX=)" if info.species
+                               else "Unknown organism")
+    if info.top_species and len(info.species) > 1 and info.top_share < 0.9:
         who = "Mixed: " + _mix_words(info)
     uni = info.reviewed + info.unreviewed
     if uni == 0:
         src = "not UniProt-style headers"
+    elif _mostly_not_uniprot(info):
+        src = f"mostly not UniProt-style headers ({uni:,} UniProt-style)"
     elif info.unreviewed == 0:
         src = "reviewed UniProt"
     elif info.reviewed == 0:
@@ -914,10 +930,10 @@ def fasta_flags(info: FastaInfo, ctx: Context | None = None) -> list[Flag]:
         add("FASTA_NO_CONTAMINANTS", "warn", f"{info.name} has no contaminant entries (contam_ / CON__)",
             "Keratins, trypsin and BSA then end up as hits of your organism. Make the FASTA with contaminants "
             "(FragPipe's Database tab: Add contaminants).")
-    if len(info.species) > 1 and info.top_share < 0.9:
+    if info.top_species and len(info.species) > 1 and info.top_share < 0.9:
         add("FASTA_MIXED_SPECIES", "warn", f"{info.name} mixes organisms: {_mix_words(info)}",
             "Fine on purpose (a mixed-species benchmark); otherwise use a FASTA of your organism alone.")
-    if info.unreviewed > info.reviewed and info.unreviewed:
+    if info.unreviewed > info.reviewed and info.unreviewed > 0.5 * info.proteins:
         add("FASTA_UNREVIEWED", "warn", f"Most entries of {info.name} are unreviewed UniProt (tr|, TrEMBL)",
             "The lab's searches use reviewed (Swiss-Prot) proteomes; unreviewed entries make the search slower and "
             "the protein groups larger. Use a reviewed FASTA unless you need TrEMBL.")
@@ -1152,7 +1168,7 @@ def scan(roots: list[str | Path] | None = None, *, cfg=None, ctx: Context | None
         roots = default_roots(cfg) if cfg is not None else []
     if previous is not None:
         for f in previous.fastas:
-            if f.complete and not f.error and f.fingerprint:
+            if f.complete and not f.error and f.fingerprint and f.reader >= FASTA_READER:
                 _FASTA_CACHE.setdefault((_key(f.path), f.mtime, f.size), f)
     started = time.monotonic()
     deadline = started + limit
@@ -1489,9 +1505,11 @@ def recommend_fastas(catalog: Catalog, taxon: str | None = None, kind: str | Non
         rep = members[0]
         score, reasons = 0.0, []
         if taxon:
-            if rep.taxon == str(taxon) or (rep.species and rep.species[0][0] == str(taxon)):
+            if rep.taxon == str(taxon) or (rep.top_species and rep.species and rep.species[0][0] == str(taxon)):
                 score += 15
                 reasons.append(f"{rep.top_species or 'the organism'} as asked")
+            elif not rep.top_species:
+                reasons.append("its organism can't be read from its headers (no OX=) or its name")
             else:
                 score -= 30
                 reasons.append(f"another organism ({rep.top_species or 'unknown'})")

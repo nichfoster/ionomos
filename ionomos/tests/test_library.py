@@ -396,6 +396,48 @@ def test_mixed_species_summary(tmp_path):
     assert [s[0] for s in info.species] == ["9606", "559292", "83333"]
 
 
+def gencode_fasta(path: Path, targets: int = 60, bovine: int = 6) -> Path:
+    """Like FragPipe 24.0's own 2024-08-05-decoys-Gencode_v42...FragPipe.2.fasta.fas: GENCODE / Ensembl and smORF
+    targets without OX=, a few UniProt-style bovine contaminants that are not prefixed contam_, rev_ decoys."""
+    entries = []
+    for i in range(targets):
+        if i % 3:
+            entries.append(f"ENSP{i:011d}.5|ENST{i:011d}.6|ENSG{i:011d}.12|ARF{i}-201|ARF{i}|GN=ARF{i}|")
+        else:
+            entries.append(f"A1BG_19:58858248-5885838{i}:-|GN=A1BG|smORF_v4|")
+    for i in range(bovine):
+        db = "sp" if i % 2 else "tr"
+        entries.append(f"{db}|A0JN6{i}|CE12{i}_BOVIN Centrosomal OS=Bos taurus OX=9913 GN=C{i} PE=1 SV=1")
+    lines = [f">{h}\nMKVLAAGIVGLLLACSTNPK" for h in entries] + [f">rev_{h}\nKPNTSCALLLGVIGAALVKM" for h in entries]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+def test_organism_is_not_named_from_a_few_headers(tmp_path):
+    """#151: the organism comes from the targets, and only when most of them name one: FragPipe's human GENCODE
+    FASTA is not 'Cow, 59 % unreviewed UniProt' because of its contaminants' OX=9913."""
+    p = gencode_fasta(tmp_path / "2024-08-05-decoys-Gencode_v42.basicPCnr.602contams.FragPipe.2.fasta.fas")
+    info = library.describe_fasta(p, Context(today=date(2026, 10, 14)))
+    assert (info.targets, info.decoys) == (66, 66)
+    assert info.top_species == "" and info.taxon == "" and info.ox_share < 0.5
+    assert "Cow" not in info.summary and info.summary.startswith("Organism unknown")
+    assert "mostly not UniProt-style headers (6 UniProt-style)" in info.summary
+    codes = {f.code for f in info.flags}
+    assert not codes & {"FASTA_UNREVIEWED", "FASTA_MIXED_SPECIES"}, info.flags
+    cat = library.Catalog(fastas=[info])
+    cand = library.recommend_fastas(cat, taxon="9606")[0]
+    assert not any("another organism" in r for r in cand.reasons) and any("can't be read" in r for r in cand.reasons)
+    # a UniProt FASTA with a few headers lacking OX= is still named
+    named = library.describe_fasta(make_fasta(tmp_path / "h.fasta", human=12, contam=2))
+    assert named.top_species == "Human" and named.ox_share == 1.0
+    # an older reading (before the fix) in a catalog is read again, not lent
+    old = library.FastaInfo.from_dict({**info.as_dict(), "reader": 0, "top_species": "Cow"})
+    library._FASTA_CACHE.clear()
+    cat = library.scan([tmp_path], previous=library.Catalog(fastas=[old]))
+    assert cat.find(p).top_species == ""
+
+
 @pytest.mark.parametrize("crlf, trailing", [(False, True), (True, True), (False, False), (True, False)])
 @pytest.mark.parametrize("chunk", [1, 2, 3, 7, 64, 1 << 20])
 def test_headers_survive_any_chunk_boundary(tmp_path, monkeypatch, chunk, crlf, trailing):

@@ -166,15 +166,23 @@ finished searches instead of as rival workflows.
 `describe_fasta(path) -> FastaInfo`. The file is read as bytes in 8 MB chunks;
 only header lines are looked at, so a 1 GB file is never decoded or split
 into lines. The result is cached by (path, modification time, size), in memory
-and, through the catalog, across scans. A reading that ran out of time or was
+and, through the catalog, across scans (a reading made by an older Ionomos,
+`reader` below `FASTA_READER`, is read again). A reading that ran out of time or was
 stopped says so (`complete: false`) and is not cached.
 
 - entries, decoys and targets; the **decoy prefix is detected**, not assumed:
   the most common of `rev_`, `DECOY_`, `REV_`, `decoy_`;
 - contaminants: targets starting `contam_` (FragPipe) or `CON__` (MaxQuant);
 - organisms from `OX=` / `OS=` of the targets that are not contaminants, the
-  top one and its share;
+  top one and its share. The organism is named only when at least half of
+  the proteins carry an `OX=`; otherwise (GENCODE / Ensembl / smORF headers,
+  as in FragPipe's own `…Gencode_v42…FragPipe.2.fasta.fas`, whose few
+  UniProt-style headers are its bovine contaminants) it is *organism
+  unknown*, unless the name says it (`UP000005640_9606`), and ranking neither
+  rewards nor punishes it for the organism;
 - reviewed (`sp|`) and unreviewed (`tr|`) entries, isoforms (`sp|P12345-2|`);
+  when fewer than half of the proteins have UniProt headers, the summary says
+  *mostly not UniProt-style headers* instead of a reviewed share;
 - from the name: the date FragPipe / Philosopher put first
   (`YYYY-MM-DD-decoys-…`), the UniProt proteome and taxon
   (`UP000005640_9606`), and whether the name has FragPipe's form
@@ -213,8 +221,8 @@ a code in `library.py` has no entry or is missing here.
 | `FASTA_DECOY_SHARE` | error (info at ≥ 1 GB) | decoys outside 40–60 % of entries (`fragpipe.decoy_problem`'s rule) | add decoys once, to a file without any |
 | `FASTA_DECOY_TAG` | info | decoys not `rev_` | the workflow's decoy tag must match |
 | `FASTA_NO_CONTAMINANTS` | warn | no `contam_` / `CON__` entries | make it with Add contaminants |
-| `FASTA_MIXED_SPECIES` | warn | the top organism under 90 % of the proteins | fine for a benchmark; else one organism |
-| `FASTA_UNREVIEWED` | warn | more unreviewed (`tr`) than reviewed (`sp`) entries | use a reviewed proteome |
+| `FASTA_MIXED_SPECIES` | warn | the top organism under 90 % of the proteins that name one (only when the organism is known) | fine for a benchmark; else one organism |
+| `FASTA_UNREVIEWED` | warn | more unreviewed (`tr`) than reviewed (`sp`) entries, and they are over half of the proteins | use a reviewed proteome |
 | `FASTA_OLD` | warn | the date in its name is over 12 months ago | make a new one for new projects |
 | `FASTA_DUPLICATE` | info | the same fingerprint at another path | keep the one in the FASTA folder |
 | `PINNED_MISSING` | error | `check`: a method's workflow / FASTA is not in its folder | `recommend --apply` |
@@ -234,7 +242,7 @@ pinned one; +2 stock; −40 per error flag, −3 per warning. Files that are no
 longer on disk are left out. These weights are Ionomos' choice; they order,
 the reasons explain.
 
-`recommend_fastas(catalog, taxon)`: +15 the organism asked for (−30 another),
+`recommend_fastas(catalog, taxon)`: +15 the organism asked for (−30 another, 0 when its organism is unknown),
 3 per finished search that used it (by path, else by file name), +10 usable
 decoys, +3 contaminants, +2 reviewed, up to +3 for a recent date, +4 already in
 the FASTA folder, and the same flag penalties. `auto_assign` asks for the
