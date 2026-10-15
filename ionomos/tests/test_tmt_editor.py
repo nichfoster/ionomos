@@ -150,6 +150,17 @@ def test_label_type_change_keeps_shared_channels_and_warns_against_the_workflow(
     assert cm.label_warning() == "" and cm.maps()["plexA"]["127C"] == "NA"  # gone with TMT-6, not brought back
 
 
+def test_an_itraq_map_stays_itraq():
+    """#154: the editor turned an iTRAQ-4 map into TMT-10 (its label type was unknown, so the default won)."""
+    block = {"tag": "iTRAQ-4", "channels": {114: "DMSO_1_114", 115: "DMSO_1_115", 116: "Drug_1_116", 117: "NA"}}
+    cm = ChannelMap.from_block(block, ["KL7001"], workflow_label="iTRAQ-4")
+    assert cm.label == "iTRAQ-4" and [r.channel for r in cm.plexes["KL7001"]] == ["114", "115", "116", "117"]
+    assert cm.block()["tag"] == "iTRAQ-4" and not cm.changed() and cm.errors() == []
+    assert cm.summary()[0] == "iTRAQ-4 (iTRAQ, 4 channels), as the workflow"
+    other = ChannelMap.from_block({"tag": "DiLeu-12", "channels": {"115a": "A_1_115a"}}, ["p"])
+    assert other.label == "DiLeu-12" and other.block()["tag"] == "DiLeu-12"   # FragPipe's, passed on
+
+
 def test_validation_is_tmtkits_word_for_word():
     cm = _bridge()
     cm.set_name("plexB", "127N", "DMSO_1_127N")  # the same name in two plexes

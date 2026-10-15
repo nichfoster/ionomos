@@ -481,7 +481,7 @@ block).
 
 | Key | What | |
 |---|---|---|
-| `tag` | the kit: `TMT-6`, `TMT-10`, `TMT-11`, `TMT-16` (TMTpro), `TMT-18` (also `TMT10`, `TMTpro`, `TMTpro-18`) | must be the workflow's label type (`tmtintegrator.channel_num`), or the job fails before the search saying which to change; optional (the workflow's is used) |
+| `tag` | the kit, as FragPipe names it: `TMT-6`, `TMT-10`, `TMT-11`, `TMT-16` (TMTpro), `TMT-18`, `TMT-35`, `TMT-2`, `TMT-0`, `iTRAQ-4`, `iTRAQ-8`, `iodoTMT-6` (also `TMT10`, `TMTpro`, `TMTpro-18`, `iTRAQ4plex`); FragPipe's sCLIP-6, IBT-16, DiLeu-12, DiLeu-1, DeAla-13 and Trp-2 are accepted and passed on unchecked | must be the workflow's label type (`tmtintegrator.channel_num`), or the job fails before the search saying which to change; optional (the workflow's is used); a name FragPipe does not know is refused at intake |
 | `channels` | `{channel: sample name}` for one plex, or the same names for every plex | **every** channel of the kit, `NA` for an unused one; a name has no spaces and is used once; keep the channel in the name (`DMSO_1_126`); listed in any order (Ionomos writes them in the kit's) |
 | `plexes` | `{plex: {channels: {...}, reference: 126}}`, the plex being its folder (`<plex>\*.raw`) or its file name before `_TMT_F<n>` | every plex of the drop needs an entry; names unique across plexes (`DMSO_1_126`, `DMSO_2_126`) |
 | `reference_channel` | the bridge / pool channel (or sample name) in every plex; a list for several | joins the plexes (IRS, D48; the same as `analysis.tmt_reference`); a plex's own `reference:` wins |
@@ -530,6 +530,15 @@ tmt:
   channels: {126: DMSO_1_126, 127N: DMSO_1_127N, 127C: DMSO_1_127C, 128N: DMSO_1_128N, 128C: Drug_1_128C,
              129N: Drug_1_129N, 129C: Drug_1_129C, 130N: Drug_1_130N, 130C: NA, 131N: NA, 131C: NA,
              132N: NA, 132C: NA, 133N: NA, 133C: NA, 134N: NA}
+```
+
+iTRAQ 4-plex with FragPipe's stock `iTRAQ4` workflow:
+
+```yaml
+workflow: iTRAQ4.workflow
+tmt:
+  tag: iTRAQ-4
+  channels: {114: DMSO_1_114, 115: DMSO_1_115, 116: Drug_1_116, 117: Drug_1_117}
 ```
 
 With the workflow's *Define reference: Reference sample* (`add_Ref=-1`),

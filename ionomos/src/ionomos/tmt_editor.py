@@ -378,8 +378,8 @@ class ChannelMap:
 
 
 def _label_name(text: str) -> str:
-    lt = tmtkit.label_type(text)
-    return lt.name if lt else ""
+    """FragPipe's name for the label type (#154: an iTRAQ-4 map stays iTRAQ-4, never the default TMT-10)."""
+    return tmtkit.fragpipe_label(text)
 
 
 def _label_for_count(n: int) -> str:
@@ -490,7 +490,7 @@ class TmtEditorFrame:
         ttk.Label(top, text="Label type").pack(side="left")
         self.label_v = tkutil.StringVar(value=model.label)
         self.label_cb = ttk.Combobox(top, textvariable=self.label_v, values=list(tmtkit.LABEL_TYPES),
-                                     state="readonly", width=8)
+                                     state="readonly", width=10)
         self.label_cb.pack(side="left", padx=4)
         self.label_cb.bind("<<ComboboxSelected>>", lambda _e: self._label_chosen())
         self.read_btn = ttk.Button(top, text="Read annotation.txt from the folder", command=self.read)

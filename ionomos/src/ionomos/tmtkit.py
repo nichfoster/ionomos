@@ -7,7 +7,8 @@ intake.py (what a drop's own annotation.txt says), the fake FragPipe and the tes
 (wave 2) the Tk channel editor.
 
     LABEL_TYPES                                  {"TMT-10": LabelType(...), ...}: FragPipe's names (QuantLabel.java)
-    label_type("TMTpro-16") -> LabelType | None  any spelling: TMT10, tmt-10, Tmt16 (Sage), TMTpro, 16
+    label_type("TMTpro-16") -> LabelType | None  any spelling: TMT10, tmt-10, Tmt16 (Sage), TMTpro, 16, iTRAQ4plex
+    fragpipe_label("dileu12") -> "DiLeu-12"     FragPipe's name for any label type it knows ("" = none)
     read_annotation(path) -> [(channel, name)]   a FragPipe annotation file, as FragPipe reads it (raises TmtError)
     annotation_text(channels) -> str             "<channel>\\t<name>\\n" per channel, in the order given
     parse_sample_name("DMSO_1_126")              -> SampleName(condition="DMSO", plex=1, channel="126")
@@ -44,8 +45,8 @@ import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-TMT_MASS = 229.1629      # TMT 0/2/6/10/11-plex reagent, monoisotopic (FragPipe's workflows: 229.16293)
-TMTPRO_MASS = 304.2071   # TMTpro 16/18-plex (FragPipe's workflows: 304.20715)
+TMT_MASS = 229.1629      # TMT 6/10/11-plex reagent, monoisotopic (FragPipe's workflows: 229.16293)
+TMTPRO_MASS = 304.2071   # TMTpro 16/18/35-plex (FragPipe's workflows: 304.20715)
 MASS_TOL = 0.01
 
 
@@ -59,7 +60,7 @@ class LabelType:
     reagent: str                 # TMT | TMTpro
     mass: float                  # the label's mass on K and the peptide N-terminus
     channels: tuple[str, ...]    # in FragPipe's order (QuantLabel.java), which is the reporter-ion order
-    sage: str                    # Sage's quant.tmt kit
+    sage: str = ""               # Sage's quant.tmt kit ("" = Sage has none)
 
     @property
     def n(self) -> int:
@@ -68,18 +69,30 @@ class LabelType:
 
 _TMT10 = ("126", "127N", "127C", "128N", "128C", "129N", "129C", "130N", "130C", "131N")
 _PRO = (*_TMT10, "131C", "132N", "132C", "133N", "133C", "134N", "134C", "135N")
+_PRO_D = ("127D", "128ND", "128CD", "129ND", "129CD", "130ND", "130CD", "131ND", "131CD", "132ND", "132CD", "133ND",
+          "133CD", "134ND", "134CD", "135ND", "135CD")   # TMTpro-35's deuterated channels
+# FragPipe 24's QuantLabel.java (LABELS and labelModMap), checked against the 24.0 source on 2026-10-15: the name
+# (tmtintegrator.channel_num), the channels in its order and the label's mass. The lab's kits come first (a count of
+# channels picks them before the others); TESTED are searched end to end with the fake FragPipe (#154).
 LABEL_TYPES: dict[str, LabelType] = {
     "TMT-6": LabelType("TMT-6", "TMT", TMT_MASS, ("126", "127N", "128C", "129N", "130C", "131N"), "Tmt6"),
     "TMT-10": LabelType("TMT-10", "TMT", TMT_MASS, _TMT10, "Tmt10"),
     "TMT-11": LabelType("TMT-11", "TMT", TMT_MASS, (*_TMT10, "131C"), "Tmt11"),
     "TMT-16": LabelType("TMT-16", "TMTpro", TMTPRO_MASS, _PRO[:16], "Tmt16"),
     "TMT-18": LabelType("TMT-18", "TMTpro", TMTPRO_MASS, _PRO, "Tmt18"),
+    "TMT-35": LabelType("TMT-35", "TMTpro", TMTPRO_MASS, (*_PRO, *_PRO_D)),
+    "TMT-2": LabelType("TMT-2", "TMT", 225.1558, ("126", "127C")),
+    "TMT-0": LabelType("TMT-0", "TMT", 224.1525, ("126",)),
+    "iTRAQ-4": LabelType("iTRAQ-4", "iTRAQ", 144.1021, ("114", "115", "116", "117")),
+    "iTRAQ-8": LabelType("iTRAQ-8", "iTRAQ", 304.2054, ("113", "114", "115", "116", "117", "118", "119", "121")),
+    "iodoTMT-6": LabelType("iodoTMT-6", "iodoTMT", 329.2266, ("126", "127", "128", "129", "130", "131")),
 }
-# FragPipe knows these too (QuantLabel.java); Ionomos does not plan them (no lab use, different chemistry)
-OTHER_FRAGPIPE_LABELS = ("TMT-0", "TMT-2", "TMT-35", "iodoTMT-6", "iTRAQ-4", "iTRAQ-8", "sCLIP-6", "IBT-16",
-                         "DiLeu-12", "DeAla-13", "Trp-2")
-CHANNEL_RE = re.compile(r"^(\d{3})([NC]?)$", re.I)
-_CHANNEL_TOKEN = re.compile(r"^\d{3}[NCnc]?$")
+TESTED = ("TMT-6", "TMT-10", "TMT-11", "TMT-16", "TMT-18", "iTRAQ-4")   # searched end to end with the fake FragPipe
+# FragPipe knows these too (QuantLabel.java) but their channels are not TMT-like (115a, 302O, 597): a tag: or a
+# workflow naming one is accepted and the map passed on, checked for FragPipe's own rules only (TMT_LABEL_UNKNOWN)
+OTHER_FRAGPIPE_LABELS = ("sCLIP-6", "IBT-16", "DiLeu-12", "DiLeu-1", "DeAla-13", "Trp-2")
+CHANNEL_RE = re.compile(r"^(\d{3})(ND|CD|[NCD]?)$", re.I)
+_CHANNEL_TOKEN = re.compile(r"^\d{3}(?:ND|CD|[NCD])?$", re.I)
 LAB_NAME = re.compile(r"^[A-Za-z0-9]+_1_\d{3}[A-Z]?$")   # the lab's R script keeps only these (downstream/tmt.py)
 REFERENCE_WORDS = re.compile(r"(?i)(?:^|[_\-\s.])(?:pool(?:ed)?|bridge|ref(?:erence)?|norm|irs)(?:$|[_\-\s.\d])")
 TMT_KEYS = ("tag", "channels", "plexes", "reference_channel")
@@ -89,24 +102,42 @@ NO_MAP = ("TMT job without a tmt: channel map in experiment.yaml; FragPipe will 
 
 
 def known_tags() -> str:
-    return ", ".join(LABEL_TYPES) + " (TMTpro-16 = TMT-16, TMTpro-18 = TMT-18)"
+    return (", ".join(LABEL_TYPES) + " (TMTpro-16 = TMT-16, TMTpro-18 = TMT-18); FragPipe's "
+            + ", ".join(OTHER_FRAGPIPE_LABELS) + " are passed on unchecked")
+
+
+def _squash(text) -> str:
+    return re.sub(r"[\s_\-]+", "", str(text or "")).lower().replace("plex", "")
 
 
 def label_type(text) -> LabelType | None:
     """FragPipe's label type for any common spelling: 'TMT-10', 'TMT10', 'tmt10plex', 'Tmt16' (Sage), 'TMTpro'
-    (16), 'TMTpro-18', '18'. None when it is no TMT label Ionomos plans."""
-    s = re.sub(r"[\s_\-]+", "", str(text or "")).lower().replace("plex", "")
+    (16), 'TMTpro-18', '18', 'iTRAQ4plex', 'itraq-8', 'TMT-35', 'iodoTMT-6'. None when Ionomos does not know its
+    channels (FragPipe's sCLIP, IBT, DiLeu ...: fragpipe_label)."""
+    s = _squash(text)
     if not s:
         return None
+    for prefix, name in (("itraq", "iTRAQ-{}"), ("iodotmt", "iodoTMT-{}")):
+        if s.startswith(prefix):
+            return LABEL_TYPES.get(name.format(s[len(prefix):]))
     if s.startswith("tmtpro"):
         s = "tmt" + (s[6:] or "16")
     m = re.fullmatch(r"(?:tmt)?(\d+)", s)
     return LABEL_TYPES.get(f"TMT-{m.group(1)}") if m else None
 
 
+def fragpipe_label(text) -> str:
+    """FragPipe's own name for any label type it knows (QuantLabel.java), in any spelling label_type takes; '' when
+    FragPipe has no such label type."""
+    lt = label_type(text)
+    if lt:
+        return lt.name
+    return next((n for n in OTHER_FRAGPIPE_LABELS if _squash(n) == _squash(text)), "") if _squash(text) else ""
+
+
 def channel_key(ch) -> str:
-    """126 / '127n' / 'TMT127N' / '127N ' -> '127N'; '' when it is no channel."""
-    m = re.search(r"(\d{3})\s*([NC]?)\s*$", str(ch if ch is not None else "").strip(), re.I)
+    """126 / '127n' / 'TMT127N' / '127N ' -> '127N'; TMT-35's '128nd' -> '128ND'; '' when it is no channel."""
+    m = re.search(r"(\d{3})\s*(ND|CD|[NCD]?)\s*$", str(ch if ch is not None else "").strip(), re.I)
     return (m.group(1) + m.group(2).upper()) if m else ""
 
 
@@ -248,8 +279,8 @@ def check_block(tmt) -> list[str]:
     bad = sorted(set(map(str, tmt)) - set(TMT_KEYS))
     if bad:
         out.append(f"tmt: unknown key(s) {', '.join(bad)} (known: {', '.join(TMT_KEYS)})")
-    if tmt.get("tag") not in (None, "") and label_type(tmt["tag"]) is None:
-        out.append(f"tmt: tag {tmt['tag']!r} is not a label type Ionomos knows; use one of {known_tags()} "
+    if tmt.get("tag") not in (None, "") and not fragpipe_label(tmt["tag"]):
+        out.append(f"tmt: tag {tmt['tag']!r} is not a label type FragPipe knows; use one of {known_tags()} "
                    f"(the workflow's Quant (Isobaric) tab, 'label type')")
     if "channels" in tmt and "plexes" in tmt:
         out.append("tmt: give either channels: (one plex, or the same map for every plex) or plexes:, not both")
@@ -664,22 +695,25 @@ def plan(dest: Path, overrides, workflow_props: dict | None, raws, raw_dir: Path
 
     wf = props.get("tmtintegrator.channel_num", "").strip()
     wf_lt, tag_lt = label_type(wf), label_type(tmt.get("tag"))
+    wf_name, tag_name = fragpipe_label(wf) or wf, fragpipe_label(tmt.get("tag"))
     wfname = f"workflow {workflow_name}" if workflow_name else "the workflow"
-    if wf and tag_lt and wf_lt and wf_lt.name != tag_lt.name:
+    if wf and tag_name and _squash(wf_name) != _squash(tag_name):   # by FragPipe's name, any label type (#154)
         tp.flags.append(Flag("TMT_TAG_MISMATCH", "error", f"experiment.yaml says tag: {tmt.get('tag')} but {wfname} "
                              f"is set to {wf} (tmtintegrator.channel_num)",
-                             f"if the samples are {wf_lt.name}, change tag: to {wf_lt.name}; if they are "
-                             f"{tag_lt.name}, name a {tag_lt.name} workflow with workflow: in experiment.yaml "
-                             f"(FragPipe ships TMT10-MS3, TMT16, TMT18-Astral ...)", source="TMT"))
-    if wf and not wf_lt:
-        tp.flags.append(Flag("TMT_LABEL_UNKNOWN", "warn", f"{wfname} is set to label type {wf}, which Ionomos does "
-                             f"not check (it plans {', '.join(LABEL_TYPES)})", "the map is passed on as it is"))
+                             f"if the samples are {wf_name}, change tag: to {wf_name}; if they are "
+                             f"{tag_name}, name a {tag_name} workflow with workflow: in experiment.yaml "
+                             f"(FragPipe ships TMT10-MS3, TMT16, TMT18-Astral, iTRAQ4, TMT35 ...)", source="TMT"))
     if not wf and props:
         tp.flags.append(Flag("TMT_LABEL_UNSET", "warn", f"{wfname} sets no label type (tmtintegrator.channel_num)",
                              "set it in FragPipe's Quant (Isobaric) tab and save the workflow"))
-    lt = wf_lt or tag_lt
-    tp.label = lt.name if lt else (wf or "")
-    tp.label_from = "workflow" if wf else ("experiment.yaml" if tag_lt else "")
+    lt = wf_lt or (None if wf else tag_lt)
+    tp.label = lt.name if lt else (wf_name or tag_name or "")
+    tp.label_from = "workflow" if wf else ("experiment.yaml" if tag_name else "")
+    if tp.label and not lt:
+        where = wfname if wf else "experiment.yaml's tag:"
+        tp.flags.append(Flag("TMT_LABEL_UNKNOWN", "warn", f"{where} is set to label type {tp.label}, whose channels "
+                             f"Ionomos does not know (it checks {', '.join(LABEL_TYPES)})",
+                             "the map is passed on as it is, checked only for FragPipe's own rules"))
 
     lines = _lines(raws, dest)
     experiments = sorted({e for _p, e, _r in lines})
@@ -865,8 +899,11 @@ def suggest_channels(label: str, conditions: list[str], replicates: int | list[i
     Raises TmtError, one sentence, when they do not fit the kit: no condition, a condition named twice, fewer than 1
     replicate, a reference channel the kit does not have or named twice, more samples than channels."""
     lt = label_type(label)
+    if lt is None and fragpipe_label(label):
+        raise TmtError(f"Ionomos does not know the channels of {fragpipe_label(label)}, so it can't suggest a map; "
+                       f"write channels: by hand with FragPipe's channel names")
     if lt is None:
-        raise TmtError(f"{label!r} is not a label type Ionomos knows; use one of {known_tags()}")
+        raise TmtError(f"{label!r} is not a label type FragPipe knows; use one of {known_tags()}")
     conds = [str(c).strip() for c in conditions if str(c).strip()]
     if not conds:
         raise TmtError("name at least one condition (e.g. DMSO, Drug)")
@@ -898,7 +935,7 @@ def suggest_channels(label: str, conditions: list[str], replicates: int | list[i
         raise TmtError(f"replicates: at least 1 per condition ({few[0][0]} has {few[0][1]})")
     raw_refs = [x for r in _refs(reference) for x in re.split(r"[,;\s]+", r) if x]   # "126,127N" is two
     unknown = [r for r in raw_refs if channel_key(r) not in lt.channels
-               or not re.fullmatch(r"(?:tmt)?\d{3}[nc]?", r, re.I)]
+               or not re.fullmatch(r"(?:tmt|itraq)?\d{3}(?:nd|cd|[ncd])?", r, re.I)]
     if unknown:
         raise TmtError(f"reference {', '.join(unknown)} is not a channel of {lt.name} ({' '.join(lt.channels)})")
     refs = [channel_key(r) for r in raw_refs]
@@ -926,8 +963,7 @@ def suggest_channels(label: str, conditions: list[str], replicates: int | list[i
 
 def to_overrides_block(maps: dict[str, dict[str, str]] | dict[str, str], label: str = "", reference=None) -> dict:
     """{plex: {channel: name}} (or one {channel: name}) -> the dict for experiment.yaml `tmt:`."""
-    lt = label_type(label)
-    block: dict = {"tag": lt.name} if lt else {}
+    block: dict = {"tag": fragpipe_label(label)} if fragpipe_label(label) else {}
     if maps and all(isinstance(v, dict) for v in maps.values()):
         if len(maps) == 1:
             block["channels"] = dict(next(iter(maps.values())))
@@ -1086,7 +1122,8 @@ def add_parser(sub):
     an.add_argument("--method", default=None, help=method_help)
     an.add_argument("--write", action="store_true", help="write each annotation.txt that is not there yet")
     sg = s.add_parser("suggest", help="a tmt: block for experiment.yaml from a few answers")
-    sg.add_argument("--tag", required=True, help="the label type: TMT-6, TMT-10, TMT-11, TMT-16, TMT-18")
+    sg.add_argument("--tag", required=True, help="the label type: TMT-6, TMT-10, TMT-11, TMT-16, TMT-18, TMT-35, "
+                                                 "iTRAQ-4, iTRAQ-8 ... (FragPipe's names)")
     sg.add_argument("--conditions", required=True, help="comma-separated, e.g. DMSO,Drug")
     sg.add_argument("--replicates", default="3", help="channels per condition: one number or one per condition (3,4)")
     sg.add_argument("--reference", default="", help="the bridge / pool channel(s), e.g. 126")

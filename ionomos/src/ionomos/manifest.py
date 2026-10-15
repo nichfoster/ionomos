@@ -18,7 +18,7 @@ decision made once is remembered if the folder is re-dropped.
       channels: {126: DMSO_126, 127N: DMSO_127N, ...}     # one plex
       # or, several plexes:  plexes: {plex1: {channels: {...}}, plex2: {...}}
       reference_channel: 126         # the pooled / bridge channel for IRS across plexes (= analysis.tmt_reference)
-      # tag: TMT-6 | TMT-10 | TMT-11 | TMT-16 | TMT-18 (tmtkit.LABEL_TYPES); a plex in plexes: may set its own reference:
+      # tag: FragPipe's label type, TMT-10 | TMT-16 | iTRAQ-4 ... (tmtkit.LABEL_TYPES); a plex may set its reference:
     notes: free text
 """
 from __future__ import annotations

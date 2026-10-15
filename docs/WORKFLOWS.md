@@ -198,11 +198,28 @@ mzML (the SOP, by hand in FragPipe's window), and compare PSMs, proteins and
 | `TMT-11` | TMT 11-plex | TMT-10 + 131C | 229.1629 |
 | `TMT-16` | TMTpro 16-plex | TMT-11 + 132N 132C 133N 133C 134N | 304.2071 |
 | `TMT-18` | TMTpro 18-plex | TMT-16 + 134C 135N | 304.2071 |
+| `TMT-35` | TMTpro 35-plex | TMT-18 + 127D 128ND 128CD 129ND 129CD 130ND 130CD 131ND 131CD 132ND 132CD 133ND 133CD 134ND 134CD 135ND 135CD | 304.2071 |
+| `TMT-2` | TMT duplex | 126 127C | 225.1558 |
+| `TMT-0` | TMTzero | 126 | 224.1525 |
+| `iTRAQ-4` | iTRAQ 4-plex | 114 115 116 117 | 144.1021 |
+| `iTRAQ-8` | iTRAQ 8-plex | 113 114 115 116 117 118 119 121 | 304.2054 |
+| `iodoTMT-6` | iodoTMT 6-plex | 126 127 128 129 130 131 | 329.2266 |
 
-`tag:` accepts any common spelling (`TMT10`, `tmt-10`, `TMTpro`, `TMTpro-18`,
-Sage's `Tmt16`). FragPipe also knows TMT-0, TMT-2, TMT-35, iodoTMT, iTRAQ,
-DiLeu and others; Ionomos passes a map for those on unchecked
-(`TMT_LABEL_UNKNOWN`). Masses are the stock workflows' (229.16293, 304.20715).
+The list is FragPipe 24.0's `QuantLabel` (`LABELS`, `labelModMap`, checked
+against the source on 2026-10-15; #154). `tag:` accepts any common spelling
+(`TMT10`, `tmt-10`, `TMTpro`, `TMTpro-18`, Sage's `Tmt16`, `iTRAQ4plex`,
+`itraq-8`). Every label type in the table is checked the same way (channels,
+count, order, the tag against the workflow's `channel_num`). **Searched end to
+end with the fake FragPipe** (`tmtkit.TESTED`, `tests/test_tmtkit.py`): TMT-6,
+TMT-10, TMT-11, TMT-16, TMT-18 and iTRAQ-4 (FragPipe's stock `iTRAQ4.workflow`);
+TMT-35, TMT-2, TMT-0, iTRAQ-8 and iodoTMT-6 are checked and planned by the
+same code but have no testbed scenario. FragPipe's other label types (sCLIP-6,
+IBT-16, DiLeu-12, DiLeu-1, DeAla-13, Trp-2: `tmtkit.OTHER_FRAGPIPE_LABELS`)
+are accepted in `tag:` and **passed on**: the map is written as given and
+checked for FragPipe's own rules only (`TMT_LABEL_UNKNOWN`), and the tag is
+still compared with the workflow's label type by name. A `tag:` FragPipe does
+not know is refused at intake (`TMT_BLOCK`). Masses are the stock workflows'
+(229.16293, 304.20715).
 
 ### The channel map: where it comes from
 

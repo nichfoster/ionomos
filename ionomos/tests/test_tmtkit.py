@@ -35,8 +35,9 @@ GOOD = _map(["DMSO", "DMSO", "DMSO", "Drug", "Drug", "Drug"])
 
 @pytest.mark.parametrize(("text", "name"), [
     ("TMT-10", "TMT-10"), ("TMT10", "TMT-10"), ("tmt10plex", "TMT-10"), ("Tmt16", "TMT-16"), ("TMTpro", "TMT-16"),
-    ("TMTpro-18", "TMT-18"), ("tmtpro 16", "TMT-16"), ("11", "TMT-11"), ("TMT-6", "TMT-6"), ("TMT-35", None),
-    ("iTRAQ-8", None), ("", None), (None, None), ("TMT-12", None),
+    ("TMTpro-18", "TMT-18"), ("tmtpro 16", "TMT-16"), ("11", "TMT-11"), ("TMT-6", "TMT-6"), ("TMT-35", "TMT-35"),
+    ("iTRAQ-8", "iTRAQ-8"), ("", None), (None, None), ("TMT-12", None), ("iTRAQ4plex", "iTRAQ-4"),
+    ("itraq-8", "iTRAQ-8"), ("iodoTMT-6", "iodoTMT-6"), ("TMT2", "TMT-2"), ("DiLeu-12", None), ("iTRAQ-6", None),
 ])
 def test_label_types_any_spelling(text, name):
     lt = tmtkit.label_type(text)
@@ -44,15 +45,91 @@ def test_label_types_any_spelling(text, name):
 
 
 def test_label_types_match_fragpipe():
-    """QuantLabel.java (FragPipe 24): the channels in the kit's order; TMT-6 is 126 127N 128C 129N 130C 131N."""
+    """QuantLabel.java (FragPipe 24.0, LABELS and labelModMap): the channels in the kit's order, the masses."""
     lts = tmtkit.LABEL_TYPES
-    assert [lt.n for lt in lts.values()] == [6, 10, 11, 16, 18]
+    assert [lt.n for lt in lts.values()][:5] == [6, 10, 11, 16, 18]   # the lab's kits first
     assert lts["TMT-6"].channels == ("126", "127N", "128C", "129N", "130C", "131N")
     assert lts["TMT-18"].channels[-3:] == ("134N", "134C", "135N") and lts["TMT-16"].channels == lts["TMT-18"].channels[:16]
-    assert {lt.mass for lt in lts.values()} == {tmtkit.TMT_MASS, tmtkit.TMTPRO_MASS} == {229.1629, 304.2071}
-    assert [lt.reagent for lt in lts.values()] == ["TMT", "TMT", "TMT", "TMTpro", "TMTpro"]
+    assert lts["TMT-35"].n == 35 and lts["TMT-35"].channels[:18] == lts["TMT-18"].channels
+    assert lts["TMT-35"].channels[18:21] == ("127D", "128ND", "128CD") and lts["TMT-35"].channels[-1] == "135CD"
+    assert lts["iTRAQ-4"].channels == ("114", "115", "116", "117")
+    assert lts["iTRAQ-8"].channels == ("113", "114", "115", "116", "117", "118", "119", "121")
+    assert lts["TMT-2"].channels == ("126", "127C") and lts["TMT-0"].channels == ("126",)
+    assert {k: v.mass for k, v in lts.items()} == {
+        "TMT-6": 229.1629, "TMT-10": 229.1629, "TMT-11": 229.1629, "TMT-16": 304.2071, "TMT-18": 304.2071,
+        "TMT-35": 304.2071, "TMT-2": 225.1558, "TMT-0": 224.1525, "iTRAQ-4": 144.1021, "iTRAQ-8": 304.2054,
+        "iodoTMT-6": 329.2266}
+    assert [lt.reagent for lt in lts.values()][:5] == ["TMT", "TMT", "TMT", "TMTpro", "TMTpro"]
+    assert set(tmtkit.TESTED) <= set(lts) and not set(tmtkit.OTHER_FRAGPIPE_LABELS) & set(lts)
     from ionomos import fake_fragpipe
     assert fake_fragpipe.TMT_CHANNELS == {k: v.channels for k, v in lts.items()}  # one source
+
+
+@pytest.mark.parametrize(("ch", "key"), [
+    ("126", "126"), ("127n", "127N"), ("TMT127N", "127N"), ("128nd", "128ND"), ("135CD", "135CD"),
+    ("127D", "127D"), ("114", "114"), ("115a", ""), ("x", ""),
+])
+def test_channel_keys(ch, key):
+    assert tmtkit.channel_key(ch) == key
+
+
+def test_fragpipes_other_label_types_are_passed_on(tmp_path):
+    """#154: a tag FragPipe knows but Ionomos has no channels for is accepted and checked by FragPipe's rules only;
+    the tag is compared with the workflow's label by name."""
+    assert tmtkit.fragpipe_label("dileu12") == "DiLeu-12" and tmtkit.fragpipe_label("TMT-12") == ""
+    assert tmtkit.check_block({"tag": "DiLeu-12", "channels": {"115a": "A_1_115a"}}) == []
+    dest = tmp_path / "x"
+    dest.mkdir()
+    lines = [(dest / "A_F1.raw", "A", 1, "DDA")]
+    ch = {c: f"A_1_{c}" for c in ("115a", "115b", "116a", "116b", "116c", "117a", "117b", "117c", "118a", "118b",
+                                  "118c", "118d")}
+    tp = tmtkit.plan(dest, {"tmt": {"tag": "DiLeu-12", "channels": ch}}, {"tmtintegrator.channel_num": "DiLeu-12"},
+                     lines)
+    assert tp.errors() == [] and tp.label == "DiLeu-12" and "TMT_LABEL_UNKNOWN" in _codes(tp.flags)
+    assert tp.annotations["annotation.txt"].splitlines()[0] == "115a\tA_1_115a"
+    tp = tmtkit.plan(dest, {"tmt": {"tag": "DiLeu-12", "channels": ch}}, PROPS10, lines)
+    assert [f.code for f in tp.errors()][0] == "TMT_TAG_MISMATCH"
+    assert "change tag: to TMT-10; if they are DiLeu-12, name a DiLeu-12 workflow" in tp.error_text()
+    tp = tmtkit.plan(dest, {"tmt": {"tag": "DiLeu-12", "channels": dict(list(ch.items())[:3])}},
+                     {"tmtintegrator.channel_num": "DiLeu-12"}, lines)
+    assert "TMT_CHANNEL_COUNT" in _codes(tp.errors())   # FragPipe's own rule: the count from the name
+
+
+@pytest.mark.parametrize(("tag", "channels", "wf"), [
+    ("iTRAQ-4", {"114": "A_1_114", "115": "A_1_115", "116": "B_1_116", "117": "B_1_117"}, "iTRAQ-4"),
+    ("TMT-35", None, "TMT-35"),
+    ("TMT-2", {"126": "A_1_126", "127C": "B_1_127C"}, "TMT-2"),
+])
+def test_stock_itraq_and_tmt35_maps_are_planned(tmp_path, tag, channels, wf):
+    """#154: FragPipe 24's stock iTRAQ4.workflow (channel_num=iTRAQ-4) and TMT35.workflow were refused at intake."""
+    channels = channels or tmtkit.suggest_channels(tag, ["A", "B"], 10, "126")
+    assert parse_overrides({"tmt": {"tag": tag, "channels": channels}}).tmt["tag"] == tag
+    dest = tmp_path / "x"
+    dest.mkdir()
+    tp = tmtkit.plan(dest, {"tmt": {"tag": tag, "channels": channels}}, {"tmtintegrator.channel_num": wf},
+                     [(dest / "A_F1.raw", "A", 1, "DDA")])
+    assert tp.errors() == [] and tp.label == wf and "TMT_LABEL_UNKNOWN" not in _codes(tp.flags)
+    assert tp.annotations["annotation.txt"] == tmtkit.annotation_text(channels)
+    tp = tmtkit.plan(dest, {"tmt": {"tag": tag, "channels": channels}}, PROPS10, [(dest / "A_F1.raw", "A", 1, "DDA")])
+    assert "TMT_TAG_MISMATCH" in _codes(tp.errors())
+    bad = dict(channels) | {"131C": "C_1_131C"} if wf != "TMT-35" else {**channels, "999": "C_1_999"}
+    tp = tmtkit.plan(dest, {"tmt": {"tag": tag, "channels": bad}}, {"tmtintegrator.channel_num": wf},
+                     [(dest / "A_F1.raw", "A", 1, "DDA")])
+    assert "TMT_UNKNOWN_CHANNEL" in _codes(tp.errors())
+
+
+def test_suggest_and_block_keep_fragpipes_label_names(capsys):
+    """#154: `tmt suggest --tag iTRAQ-4` / `TMT-35` were refused; the editor turned an iTRAQ map into TMT-10."""
+    m = tmtkit.suggest_channels("itraq4plex", ["DMSO", "Drug"], 2)
+    assert m == {"114": "DMSO_1_114", "115": "DMSO_1_115", "116": "Drug_1_116", "117": "Drug_1_117"}
+    assert tmtkit.suggest_channels("TMT-35", ["A"], 2, "128ND")["128ND"] == "Pool_1_128ND"
+    assert tmtkit.to_overrides_block(m, "iTRAQ4")["tag"] == "iTRAQ-4"
+    assert tmtkit.to_overrides_block({"115a": "x"}, "DiLeu-12")["tag"] == "DiLeu-12"
+    assert cli.main(["tmt", "suggest", "--tag", "iTRAQ-4", "--conditions", "DMSO,Drug", "--replicates", "2"]) == 0
+    block = yaml.safe_load(capsys.readouterr().out.split("\n", 1)[1])["tmt"]
+    assert block["tag"] == "iTRAQ-4" and list(block["channels"]) == ["114", "115", "116", "117"]
+    assert cli.main(["tmt", "suggest", "--tag", "TMT-35", "--conditions", "A,B", "--replicates", "17"]) == 0
+    capsys.readouterr()
 
 
 @pytest.mark.parametrize(("name", "cond", "plex", "ch", "lab"), [
@@ -240,14 +317,14 @@ def test_plan_bioreplicate_and_unknown_label(tmp_path):
     dest = tmp_path / "x"
     dest.mkdir()
     lines = [(dest / "A_F1.raw", "A", 2, "DDA")]
-    tp = tmtkit.plan(dest, {"tmt": {"channels": GOOD}}, {"tmtintegrator.channel_num": "iTRAQ-8"}, lines)
+    tp = tmtkit.plan(dest, {"tmt": {"channels": GOOD}}, {"tmtintegrator.channel_num": "DiLeu-12"}, lines)
     assert {"TMT_BIOREPLICATE", "TMT_LABEL_UNKNOWN"} <= set(_codes(tp.flags))
     tp = tmtkit.plan(dest, {"tmt": {"channels": GOOD}}, {"x": "1"}, lines)
     assert "TMT_LABEL_UNSET" in _codes(tp.flags)
 
 
 @pytest.mark.parametrize(("block", "match"), [
-    ({"tag": "TMT-12", "channels": GOOD}, "tag 'TMT-12' is not a label type Ionomos knows; use one of TMT-6"),
+    ({"tag": "TMT-12", "channels": GOOD}, "tag 'TMT-12' is not a label type FragPipe knows; use one of TMT-6"),
     ({"channels": GOOD, "plex": 1}, r"unknown key\(s\) plex"),
     ({"channels": GOOD, "plexes": {"a": {"channels": GOOD}}}, "either channels"),
     ({"plexes": {"a": {"channels": {}}}}, "plex 'a' needs a non-empty channels mapping"),
@@ -355,7 +432,8 @@ def test_suggest_refuses_answers_that_make_no_map(args, words):
     (["--conditions", ","], "name at least one condition"),
     (["--replicates", "x"], "--replicates x: give a whole number"),
     (["--replicates", ","], "--replicates is empty"),
-    (["--tag", "TMT-35"], "'TMT-35' is not a label type Ionomos knows"),
+    (["--tag", "TMT-12"], "'TMT-12' is not a label type FragPipe knows"),
+    (["--tag", "DiLeu-12"], "Ionomos does not know the channels of DiLeu-12, so it can't suggest a map"),
     (["--plexes", "a,a"], "plex a is named twice in --plexes"),
     (["--replicates", "6"], "and 10 samples fit"),
 ])
@@ -503,6 +581,32 @@ def test_a_fake_ref_tag_rule_is_fragpipes(bed, tmp_path):
     with pytest.raises(fragpipe.JobError, match=re.escape("has no sample name containing the workflow's Ref sample "
                                                           "tag 'Bridge'")):
         fragpipe.prepare(job, bed["cfg"])
+
+
+def test_an_itraq4_drop_is_taken_in_and_searched(bed):
+    """#154: a drop with tag: iTRAQ-4 and FragPipe's stock iTRAQ4.workflow was REJECTED at intake. Now intake takes
+    it, the annotation is written in iTRAQ's channels and the fake FragPipe searches it (TESTED)."""
+    (bed["cfg"].workflow_dir / "iTRAQ4.workflow").write_text(testbed.workflow_text("TMT", "iTRAQ-4"),
+                                                              encoding="utf-8", newline="\n")
+    drop = bed["root"] / "Fragpipe_Auto" / "inbox" / "20260301_Aman_TMT_KL7001-itraq"
+    drop.mkdir()
+    for i in (1, 2):
+        (drop / f"KL7001_TMT_F{i}.raw").write_bytes(b"RAW" * 400)
+    ch = {"114": "DMSO_1_114", "115": "DMSO_1_115", "116": "Drug_1_116", "117": "Drug_1_117"}
+    (drop / "experiment.yaml").write_text(yaml.safe_dump({"workflow": "iTRAQ4", "tmt": {"tag": "iTRAQ-4",
+                                                                                        "channels": ch}}),
+                                          encoding="utf-8")
+    assert intake(drop, bed["cfg"], bed["ledger"]).value == "queued"
+    job = bed["ledger"].list()[-1]
+    Worker(bed["cfg"], bed["ledger"]).run_once()
+    job = bed["ledger"].get(job.id)
+    assert job.status == "done", job.reason
+    dest = Path(job.dest_dir)
+    assert (dest / "annotation.txt").read_text(encoding="utf-8") == tmtkit.annotation_text(ch)
+    rec = json.loads((dest / names.STATUS_FILE).read_text(encoding="utf-8"))
+    assert rec["plan"]["tmt"]["label"] == "iTRAQ-4" and rec["run"]["tmt_map"]["tmt"]["tag"] == "iTRAQ-4"
+    a = json.loads((dest / "results" / "analysis.json").read_text(encoding="utf-8"))
+    assert set(a["samples"].values()) == {"DMSO", "Drug"}
 
 
 def test_a_retry_uses_the_fixed_experiment_yaml_not_intakes_map(bed):
