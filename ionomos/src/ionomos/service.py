@@ -36,19 +36,26 @@ def appdata_dir() -> Path:
 
 
 def remembered_config_path() -> Path | None:
-    """The config the app last saved: Ionomos's pointer, else the one LabWatch left behind."""
-    cands = [appdata_dir() / "config_path.txt"]
-    cands += [_appdata_base() / old / "config_path.txt" for old in names.LEGACY_APPDATA_DIRS]
+    """The config the app last saved: Ionomos's pointer, else the one LabWatch left behind. Every command asks
+    this before it starts (the default of --config), so it never raises: an app-data folder that can't be made
+    or read, or a pointer file that isn't text, counts as no pointer."""
+    base = _appdata_base()
+    cands = [base / (APP_NAME if os.name == "nt" else names.SLUG) / "config_path.txt"]
+    cands += [base / old / "config_path.txt" for old in names.LEGACY_APPDATA_DIRS]
     for p in cands:
-        if p.is_file():
-            s = p.read_text(encoding="utf-8").strip()
-            if s:
-                return Path(s)
+        try:
+            s = p.read_text(encoding="utf-8").strip() if p.is_file() else ""
+        except (OSError, UnicodeDecodeError):
+            continue
+        if s and "\0" not in s:
+            return Path(s)
     return None
 
 
 def remember_config_path(path: Path) -> None:
-    (appdata_dir() / "config_path.txt").write_text(str(Path(path).resolve()), encoding="utf-8")
+    from ionomos.config import write_text_atomic
+
+    write_text_atomic(appdata_dir() / "config_path.txt", str(Path(path).resolve()))
 
 
 def default_config_path() -> Path:
@@ -304,26 +311,41 @@ def kill_pid(pid: int) -> None:
 # ------------------------------------------------------- task scheduler ----
 
 
+def _schtasks(*args: str, timeout: float = 30) -> tuple[int, str]:
+    """Run schtasks.exe: (exit code, output). A PC without it (removed, not on PATH, a locked-down image) or with
+    the Task Scheduler service hung gives (-1, why) instead of an exception, so a check or a diagnostics report
+    never dies on it."""
+    try:
+        r = subprocess.run(["schtasks", *args], capture_output=True, text=True, creationflags=_creationflags(),
+                           timeout=timeout, errors="replace")
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return -1, f"schtasks could not be run: {exc}"
+    return r.returncode, (r.stdout or "") + (r.stderr or "")
+
+
 def _task_exists(name: str) -> bool:
-    r = subprocess.run(["schtasks", "/Query", "/TN", name], capture_output=True, text=True,
-                       creationflags=_creationflags())
-    return r.returncode == 0
+    return _schtasks("/Query", "/TN", name)[0] == 0
 
 
 def task_status() -> str:
-    """'installed' | 'legacy' (only the old LabWatch task) | 'missing' | 'n/a' (non-Windows)."""
+    """'installed' | 'legacy' (only the old LabWatch task) | 'missing' | 'unavailable' (schtasks can't be run, or
+    the Task Scheduler doesn't answer: nothing can be installed) | 'n/a' (non-Windows)."""
     if os.name != "nt":
         return "n/a"
     if _task_exists(TASK_NAME):
         return "installed"
-    return "legacy" if any(_task_exists(t) for t in names.LEGACY_TASKS) else "missing"
+    if any(_task_exists(t) for t in names.LEGACY_TASKS):
+        return "legacy"
+    # not found: is it really missing, or is the Task Scheduler itself not there? (its message depends on the
+    # Windows language, so ask for the whole list: that fails only when the service can't be asked)
+    return "missing" if _schtasks("/Query", "/FO", "CSV", "/NH")[0] == 0 else "unavailable"
 
 
 def remove_legacy_tasks() -> None:
     if os.name != "nt":
         return
     for t in names.LEGACY_TASKS:
-        subprocess.run(["schtasks", "/Delete", "/TN", t, "/F"], capture_output=True, creationflags=_creationflags())
+        _schtasks("/Delete", "/TN", t, "/F")
 
 
 def install_task(config: Path) -> tuple[bool, str]:
@@ -336,26 +358,24 @@ def install_task(config: Path) -> tuple[bool, str]:
     remove_legacy_tasks()
     cmd = " ".join(f'"{c}"' if " " in c else c for c in [*ionomos_command(), "--config", str(config), "run"])
     user = f"{os.environ.get('USERDOMAIN', '')}\\{os.environ.get('USERNAME', '')}".strip("\\")
-    r = subprocess.run(["schtasks", "/Create", "/TN", TASK_NAME, "/TR", cmd, "/SC", "ONLOGON", "/RU", user,
-                        "/IT", "/RL", "LIMITED", "/F"], capture_output=True, text=True, creationflags=_creationflags())
-    return r.returncode == 0, (r.stdout or "") + (r.stderr or "")
+    code, out = _schtasks("/Create", "/TN", TASK_NAME, "/TR", cmd, "/SC", "ONLOGON", "/RU", user, "/IT", "/RL", "LIMITED",
+                          "/F")
+    return code == 0, out
 
 
 def remove_task() -> tuple[bool, str]:
     if os.name != "nt":
         return False, "n/a"
     remove_legacy_tasks()
-    r = subprocess.run(["schtasks", "/Delete", "/TN", TASK_NAME, "/F"], capture_output=True, text=True,
-                       creationflags=_creationflags())
-    return r.returncode == 0, (r.stdout or "") + (r.stderr or "")
+    code, out = _schtasks("/Delete", "/TN", TASK_NAME, "/F")
+    return code == 0, out
 
 
 def run_task() -> tuple[bool, str]:
     if os.name != "nt":
         return False, "n/a"
-    r = subprocess.run(["schtasks", "/Run", "/TN", TASK_NAME], capture_output=True, text=True,
-                       creationflags=_creationflags())
-    return r.returncode == 0, (r.stdout or "") + (r.stderr or "")
+    code, out = _schtasks("/Run", "/TN", TASK_NAME)
+    return code == 0, out
 
 
 # ------------------------------------------------------------- desktop ----

@@ -75,6 +75,19 @@ Command line.
 
 --config defaults to $IONOMOS_CONFIG, then the path last saved by the app (LabWatch-era paths too),
 then ./config.yaml (next to the exe when frozen).
+
+Exit codes, the same for every subcommand (tests/test_cli_contract.py checks each one):
+    0    done; for a check, nothing is wrong. Cancelling a job that has already ended is 0 too.
+    1    it ran, and the answer is no: a check found a problem (check, preflight, check-folder, names test,
+         notify-test ...), the job, attention item or help topic named isn't there, the job's state doesn't
+         allow it (retry of a job that didn't fail, repair-ledger while the watcher runs), the job ledger can't
+         be read (run: ionomos repair-ledger), or the work itself failed (an analysis, a download)
+    2    nothing was done: wrong usage or a value the command doesn't take, a config.yaml it needs can't be
+         read (the message names the file, the line of the key and the fix), or a folder or file it was given
+         isn't there or can't be written
+    3    run only: another watcher is already running for this setup
+    70   Ionomos itself crashed (the ionomos exe, python -m ionomos): the traceback is in Ionomos-crash.txt
+    130  stopped with Ctrl-C
 """
 from __future__ import annotations
 
@@ -82,6 +95,7 @@ import argparse
 import logging
 import os
 import signal
+import sqlite3
 import sys
 import threading
 import time
@@ -181,15 +195,19 @@ def cmd_run(args) -> int:
     from ionomos import health
 
     cfg = _load(args, check_paths=True)
-    _setup_logging(cfg.log_dir, args.verbose)
-    health.install_excepthooks(cfg.log_dir)
     lock = health.InstanceLock(cfg.log_dir)
     try:
+        _setup_logging(cfg.log_dir, args.verbose)
+        health.install_excepthooks(cfg.log_dir)
         lock.acquire()
     except health.AlreadyRunning as exc:
         log.error("%s", exc)
         print(str(exc), file=sys.stderr)
         return 3
+    except OSError as exc:  # a log folder this Windows account can't write (or a full disk): nothing started
+        print(f"the watcher can't use its log folder (paths.log_dir = {cfg.log_dir}): {exc}. Pick a folder this "
+              f"account can write to (app: tab 1), or give it write access; nothing was started.", file=sys.stderr)
+        return 2
     log.info("ionomos %s starting (config %s, pid %d)", __version__, cfg.config_path, os.getpid())
     ledger = _open_ledger(cfg)
     from ionomos.worker import recover
@@ -365,21 +383,33 @@ def cmd_check(args) -> int:
         cfg = load(args.config, check_paths=False)
     except ConfigError as exc:
         row(False, "config", str(exc))
-        return 1
+        return 2
     row(True, "config parses")
     for name in ("inbox", "users_root", "workflow_dir", "fasta_dir", "log_dir"):
         p = getattr(cfg, name)
         row(p.is_dir(), f"paths.{name}", str(p))
     row(cfg.database.parent.is_dir(), "paths.database (parent)", str(cfg.database))
+    # what the app's checklist finds, found the same way (setupcheck): folders it can't write, an unsafe layout
+    from ionomos import setupcheck
+
+    for name in ("inbox", "users_root", "workflow_dir", "fasta_dir", "log_dir"):
+        p = getattr(cfg, name)
+        ok, why = setupcheck.writable(p) if p.is_dir() else (True, "")
+        if not ok:
+            row(False, f"paths.{name}", f"{why}: pick a folder this Windows account can write to")
+    probs, warns = setupcheck.layout_findings({k: str(getattr(cfg, k)) for k in
+                                               ("inbox", "users_root", "fragpipe_exe", "workflow_dir", "fasta_dir",
+                                                "database", "log_dir")}, cfg.default_user)
+    for text in probs:
+        row(False, "folder layout", text + " (the watcher refuses to start)")
+    for text in warns:
+        row(None, "folder layout", text)
     from ionomos import fragpipe, health
     from ionomos import ledger as ledger_mod
     from ionomos.worker import paused
 
-    free = health.disk_free_gb(cfg.users_root)
-    if free is not None:
-        low = free < max(cfg.min_free_gb, 1)
-        row(None if low else True, "disk free (data drive)",
-            f"{free:.0f} GB" + (f"  — below fragpipe.min_free_gb {cfg.min_free_gb:g}: searches will wait" if low else ""))
+    st, detail, fix = setupcheck.disk_finding(cfg)
+    row(True if st == "ok" else None, "disk free (data drive)", detail + (f" — {fix}" if fix else ""))
     for ok, label, detail in fragpipe.install_report(cfg):
         row(None if ok is False else ok,
             f"FragPipe {label}" if not label.startswith("FragPipe") else label,
@@ -394,7 +424,8 @@ def cmd_check(args) -> int:
     users = cfg.known_users()
     row(bool(users), "users", ", ".join(users) if users else "none — create folders under users_root")
     for u, als in cfg.user_aliases.items():
-        row(u in users, f"  alias {', '.join(als)}", f"-> {u}" + ("" if u in users else "  (no such user folder!)"))
+        row(True if u in users else None, f"  alias {', '.join(als)}",  # a warning, as in the app's checklist
+            f"-> {u}" + ("" if u in users else "  (no such user folder: add it, or remove these initials)"))
     for k in cfg.methods:
         for i, (ok, text) in enumerate(fragpipe.describe_method(cfg, k)):
             row(None if ok is False else ok, f"methods.{k}" if i == 0 else "",
@@ -421,6 +452,9 @@ def cmd_check(args) -> int:
     hb, healthy = health.heartbeat_summary(cfg.log_dir)
     row(True if running and healthy else None, "watcher",
         f"running (pid {health.holder_pid(cfg.log_dir) or '?'}); {hb}" if running else "not running")
+    if os.name == "nt":
+        st, detail, fix = setupcheck.task_finding()
+        row(True if st == "ok" else None, "starts at logon", detail + (f" — {fix}" if fix else ""))
     crashes = health.recent_crashes(cfg.log_dir, 1)
     if crashes:
         row(None, "last crash report", str(crashes[-1]))
@@ -441,7 +475,7 @@ def cmd_preflight(args) -> int:
         cfg = load(args.config, check_paths=False)
     except ConfigError as exc:
         print(f" ✗ config  {exc}")
-        return 1
+        return 2
     if not args.static:
         print("starting FragPipe for --help" + ("" if args.no_dry_run else " and one dry run per method")
               + " (no search; this can take a few minutes)…", flush=True)
@@ -678,8 +712,8 @@ def cmd_analyze(args) -> int:
             return 2
         job = Ledger(cfg.database).get(int(target))
         if job is None:
-            print(f"no job {target}", file=sys.stderr)
-            return 2
+            print(f"no job {target} (ionomos status --all lists them)", file=sys.stderr)
+            return 1
         dest = Path(job.dest_dir)
     else:
         dest = Path(target)
@@ -773,8 +807,8 @@ def cmd_export(args) -> int:
             return 2
         job = Ledger(cfg.database).get(int(target))
         if job is None:
-            print(f"no job {target}", file=sys.stderr)
-            return 2
+            print(f"no job {target} (ionomos status --all lists them)", file=sys.stderr)
+            return 1
         target = job.dest_dir
     flags = {"size": args.preset, "width": args.width, "height": args.height, "unit": args.unit,
              "font_pt": args.font_pt, "font_family": args.font_family, "palette": args.palette, "up": args.up,
@@ -1109,8 +1143,10 @@ def cmd_cancel(args) -> int:
     from ionomos.worker import request_cancel
 
     cfg = _load(args, check_paths=False)
-    print(request_cancel(Ledger(cfg.database), args.job_id))
-    return 0
+    msg = request_cancel(Ledger(cfg.database), args.job_id)
+    ok = not msg.startswith(("no job", "could not"))  # a script can tell (#143), like retry
+    print(msg, file=sys.stdout if ok else sys.stderr)
+    return 0 if ok else 1
 
 
 def cmd_pause(args) -> int:
@@ -1177,15 +1213,13 @@ def cmd_testbed(args) -> int:
 # ------------------------------------------------------------------- main --
 
 
-def main(argv: list[str] | None = None) -> int:
-    # Windows pipes/consoles default to cp1252; check/status print ✓ ✗ ↳.
-    for stream in (sys.stdout, sys.stderr):
-        if hasattr(stream, "reconfigure"):
-            stream.reconfigure(encoding="utf-8", errors="replace")
+def build_parser() -> argparse.ArgumentParser:
+    """Every subcommand and option (tests walk it: each has a help text, each honours the exit codes)."""
     ap = argparse.ArgumentParser(prog="ionomos", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--config", default=str(default_config_path()))
-    ap.add_argument("-v", "--verbose", action="store_true")
+    ap.add_argument("--config", default=str(default_config_path()),
+                    help="the config.yaml to use (default: see the end of the text above)")
+    ap.add_argument("-v", "--verbose", action="store_true", help="detailed (debug) messages")
     ap.add_argument("--version", action="store_true", help="print the version and build, then exit")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
@@ -1206,7 +1240,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--all", action="store_true", help="include done jobs")
     s.set_defaults(fn=cmd_status)
     d = sub.add_parser("dry-run", help="show what would happen to a folder; touches nothing")
-    d.add_argument("folder")
+    d.add_argument("folder", help="a drop folder (in the inbox or anywhere): how it would be read and filed")
     d.set_defaults(fn=cmd_dry_run)
     nm = sub.add_parser("names", help="check how folder and .raw names are read with this config")
     nms = nm.add_subparsers(dest="names_cmd", required=True)
@@ -1217,7 +1251,7 @@ def main(argv: list[str] | None = None) -> int:
     nt.add_argument("--method", help="read .raw names as this method (default: from the folder or file name)")
     nt.set_defaults(fn=cmd_names)
     rt = sub.add_parser("retry", help="re-queue a failed job")
-    rt.add_argument("job_id", type=int)
+    rt.add_argument("job_id", type=int, help="the job's number (ionomos status lists them)")
     rt.set_defaults(fn=cmd_retry)
     dg = sub.add_parser("diagnose", help="print + save a diagnostics report")
     dg.add_argument("--zip", nargs="?", const="auto", metavar="PATH",
@@ -1257,17 +1291,23 @@ def main(argv: list[str] | None = None) -> int:
     az.add_argument("--compare", action="append", metavar="'A vs B'", help="comparison; repeatable")
     az.add_argument("--log2fc", type=float, help="fold-change threshold (log2)")
     az.add_argument("--alpha", type=float, help="significance threshold")
-    az.add_argument("--test", choices=["limma", "moderated", "welch", "student"])
+    az.add_argument("--test", choices=["limma", "moderated", "welch", "student"],
+                    help="the statistical test (default: analysis.test, limma)")
     az.add_argument("--de-type", dest="de_type", choices=["control", "all", "others"],
                     help="each condition vs the control | every pair | each vs the rest")
-    az.add_argument("--imputation", choices=["auto", "none", "perseus", "min", "zero", "mindet", "minprob", "knn"])
-    az.add_argument("--normalize", choices=["median", "gn", "none"])
+    az.add_argument("--imputation", choices=["auto", "none", "perseus", "min", "zero", "mindet", "minprob", "knn"],
+                    help="how missing values are filled in (default: analysis.imputation, auto)")
+    az.add_argument("--normalize", choices=["auto", "median", "gn", "ratio", "none"],
+                    help="auto (median, or ratio when median centring shifts the conditions against each other), "
+                         "median, gn, ratio, or none: every value analysis.normalize takes")
     az.add_argument("--filter-condition-pct", dest="filter_condition_pct", type=float,
                     help="keep features measured in >= this %% of one condition (default 50)")
-    az.add_argument("--filter-global-pct", dest="filter_global_pct", type=float)
+    az.add_argument("--filter-global-pct", dest="filter_global_pct", type=float,
+                    help="keep features measured in >= this %% of all samples (default 0)")
     az.add_argument("--exclude", action="append", metavar="SAMPLE", help="leave a sample out; repeatable")
     az.add_argument("--no-enrichment", action="store_true", help="skip gene-set enrichment")
-    az.add_argument("--min-valid", dest="min_valid", type=int)
+    az.add_argument("--min-valid", dest="min_valid", type=int,
+                    help="measured values per group needed when nothing is imputed (default 2)")
     az.add_argument("--raw-p", action="store_true", help="apply alpha to raw p-values instead of adjusted p")
     az.add_argument("--quiet", action="store_true", help="no progress lines")
     az.add_argument("--open", action="store_true", help="open the report when done")
@@ -1284,15 +1324,16 @@ def main(argv: list[str] | None = None) -> int:
                     help="size: 16:9 slide (1280x720 px), 4:3 slide, half a slide, journal column (85 mm), "
                          "two columns (180 mm). Default: the lab's analysis.export, else slide169")
     ex.add_argument("--width", type=float, help="a custom width (with --height; --unit px or mm)")
-    ex.add_argument("--height", type=float)
-    ex.add_argument("--unit", choices=["px", "mm"])
+    ex.add_argument("--height", type=float, help="a custom height (with --width)")
+    ex.add_argument("--unit", choices=["px", "mm"], help="the unit of --width and --height (default px)")
     ex.add_argument("--font-pt", dest="font_pt", type=float, help="text size in points in the finished figure")
     ex.add_argument("--font-family", dest="font_family", help="font name, e.g. Arial or 'Times New Roman'")
-    ex.add_argument("--palette", choices=["default", "colorblind", "grey", "custom"])
+    ex.add_argument("--palette", choices=["default", "colorblind", "grey", "custom"],
+                    help="the colours of up / down / unchanged (custom: with --up, --down, --neutral)")
     ex.add_argument("--up", help="colour of up hits with --palette custom, e.g. '#d55e00'")
-    ex.add_argument("--down")
-    ex.add_argument("--neutral")
-    ex.add_argument("--background", choices=["light", "dark", "transparent"])
+    ex.add_argument("--down", help="colour of down hits with --palette custom")
+    ex.add_argument("--neutral", help="colour of the rest with --palette custom")
+    ex.add_argument("--background", choices=["light", "dark", "transparent"], help="the figure's background")
     ex.add_argument("--line-scale", dest="line_scale", type=float, help="line width as a multiple (default 1)")
     ex.add_argument("--point-scale", dest="point_scale", type=float, help="point size as a multiple (default 1)")
     ex.add_argument("--labels", type=int, metavar="N", help="name the N most significant hits (0: none)")
@@ -1412,7 +1453,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="no model: a scripted one on 127.0.0.1 checks the runner and the fixture states here")
     ae.set_defaults(fn=cmd_ask_eval)
     at = sub.add_parser("attention", help="what needs a person (analysis decisions, failed searches, ...)")
-    at.add_argument("action", nargs="?", choices=["list", "show", "dismiss"], default="list")
+    at.add_argument("action", nargs="?", choices=["list", "show", "dismiss"], default="list",
+                    help="list (default), show ITEM, or dismiss ITEM")
     at.add_argument("item", nargs="?", help="item id (from the list)")
     at.set_defaults(fn=cmd_attention)
     qt = sub.add_parser("qc-trend", help="instrument QC: trend the QC-standard runs (HeLa, K562 ...) in logs/qc_trend.html")
@@ -1421,14 +1463,14 @@ def main(argv: list[str] | None = None) -> int:
     qt.add_argument("--open", action="store_true", help="open the page when done")
     qt.set_defaults(fn=cmd_qc_trend)
     cn = sub.add_parser("cancel", help="cancel a queued or running job")
-    cn.add_argument("job_id", type=int)
+    cn.add_argument("job_id", type=int, help="the job's number (ionomos status lists them)")
     cn.set_defaults(fn=cmd_cancel)
     sub.add_parser("pause", help="start no new FragPipe searches").set_defaults(fn=cmd_pause)
     sub.add_parser("resume", help="undo pause").set_defaults(fn=cmd_pause)
     sub.add_parser("notify-test", help="send a test message to the channels in config.yaml notify:").set_defaults(
         fn=cmd_notify_test)
     rl = sub.add_parser("repair-ledger", help="rebuild the job ledger from the experiment folders")
-    rl.add_argument("--force", action="store_true")
+    rl.add_argument("--force", action="store_true", help="rebuild even when the ledger reads fine (it is kept aside)")
     rl.set_defaults(fn=cmd_repair_ledger)
     sub.add_parser("update", help="git pull + reinstall (dev install only)").set_defaults(fn=cmd_update)
 
@@ -1441,7 +1483,15 @@ def main(argv: list[str] | None = None) -> int:
     from ionomos import tmtkit
 
     tmtkit.add_parser(sub)  # `ionomos tmt plan | annotation | suggest | qc` (D91); sets its own fn (tmtkit.main)
+    return ap
 
+
+def main(argv: list[str] | None = None) -> int:
+    # Windows pipes/consoles default to cp1252; check/status print ✓ ✗ ↳.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+    ap = build_parser()
     argv = sys.argv[1:] if argv is None else argv
     if "--version" in argv[:2]:
         from ionomos.buildinfo import one_line
@@ -1482,7 +1532,22 @@ def main(argv: list[str] | None = None) -> int:
         argv = ["setup"]
     args = ap.parse_args(argv)
     args.config_given = any(a == "--config" or a.startswith("--config=") for a in argv)
-    return args.fn(args)
+    try:
+        return args.fn(args)
+    except SystemExit as exc:  # _load's exit 2 (the message is printed): a code, also to a caller of main()
+        if isinstance(exc.code, int):
+            return exc.code
+        raise
+    except sqlite3.DatabaseError as exc:  # the job ledger is damaged (a disk error, a copy taken mid-write)
+        db = None
+        try:
+            db = load(args.config, check_paths=False).database
+        except Exception:  # noqa: BLE001 - the message works without the path
+            pass
+        print(f"the job ledger {db or '(paths.database)'} can't be read ({exc}). Nothing was changed. "
+              "Stop the watcher, then `ionomos repair-ledger` rebuilds it from the experiment folders "
+              "(the damaged file is kept).", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

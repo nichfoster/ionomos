@@ -40,7 +40,12 @@ DEFAULT_USER_IGNORE = ("FragPipe*", "Fasta*", "New folder*", "~*")
 
 
 class ConfigError(ValueError):
-    """config.yaml is missing, malformed, or points at things that don't exist."""
+    """config.yaml is missing, malformed, or points at things that don't exist. `key` is the dotted key at fault
+    when the raiser knows it; `load` puts the file and that key's line in front of the message (_located)."""
+
+    def __init__(self, message: str = "", key: str | None = None):
+        super().__init__(message)
+        self.key = key
 
 
 _SAVE_AS_UTF8 = "In Notepad: File > Save as, set Encoding to UTF-8, Save."
@@ -189,17 +194,79 @@ def not_a_user(name: str, patterns: tuple[str, ...] = DEFAULT_USER_IGNORE) -> st
 _REQUIRED_PATHS = ("inbox", "users_root", "fragpipe_exe", "workflow_dir", "fasta_dir", "database", "log_dir")
 
 
-def _get(d: dict, section: str, key: str, default=None, required=False):
+_EXAMPLE = "docs/ARCHITECTURE.md has a complete example, and the app's Save writes every key"
+
+
+def _section(d: dict, section: str, what: str = "", where: str = "") -> dict:
+    """A section of config.yaml as a dict: {} when absent or empty, ConfigError when it is something else.
+    `where`: the dotted name of `d` itself when it is a section too (users -> users.aliases)."""
     sec = d.get(section)
+    if sec is None:
+        return {}
     if not isinstance(sec, dict):
-        if required:
-            raise ConfigError(f"missing section '{section}:'")
-        return default
+        key = f"{where}.{section}" if where else section
+        raise ConfigError(f"'{key}:' must be a mapping: settings indented under it, one 'key: value' per line"
+                          + (f" ({what})" if what else "") + f", not {_kind(sec)}", key=key)
+    return sec
+
+
+def _kind(v) -> str:
+    return {list: "a list", str: f"the text {v!r}", bool: f"{v}", int: f"the number {v}",
+            float: f"the number {v}"}.get(type(v), type(v).__name__)
+
+
+def _get(d: dict, section: str, key: str, default=None, required=False):
+    if required and d.get(section) is None:
+        raise ConfigError(f"missing section '{section}:'; add it ({_EXAMPLE})", key=section)
+    sec = _section(d, section)
     if key not in sec:
         if required:
-            raise ConfigError(f"missing '{section}.{key}'")
+            raise ConfigError(f"missing '{section}.{key}': add '{key}:' under '{section}:' ({_EXAMPLE})",
+                              key=section)
         return default
     return sec[key]
+
+
+def _number(d: dict, section: str, key: str, default, kind=float, empty=None, positive: bool = False):
+    """A number setting: int or float, never negative (`positive`: above 0), finite; empty = `empty` if given, else
+    the default. A wrong value names the key and what it takes instead of int()'s bare ValueError."""
+    import math
+
+    v = _get(d, section, key, default)
+    if v is None:
+        v = default if empty is None else empty
+    where = f"{section}.{key}"
+    what = (f"a whole number, e.g. {default}" if kind is int else f"a number, e.g. {default}")
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        raise ConfigError(f"'{where}' must be {what}, not {_kind(v)}", key=where)
+    if not math.isfinite(v) or v < 0 or (positive and v == 0):
+        raise ConfigError(f"'{where}' must be {'above' if positive else 'at least'} 0, not {v}; e.g. {default}",
+                          key=where)
+    if kind is int and v != int(v):
+        raise ConfigError(f"'{where}' must be {what}, not {v}", key=where)
+    return kind(v)
+
+
+def _flag(d: dict, section: str, key: str, default: bool) -> bool:
+    """true / false (yes / no / on / off in YAML). A quoted 'false' is text, and bool('false') is True: refused."""
+    v = _get(d, section, key, default)
+    if v is None:
+        return default
+    if isinstance(v, bool) or (isinstance(v, int) and v in (0, 1)):
+        return bool(v)
+    raise ConfigError(f"'{section}.{key}' must be true or false (without quotes), not {_kind(v)}",
+                      key=f"{section}.{key}")
+
+
+def _texts(v, where: str) -> list[str]:
+    """A list of names; one name alone is a list of one ("IJ" is ['IJ'], never ['I', 'J'])."""
+    if v is None:
+        return []
+    if isinstance(v, (str, int, float)) and not isinstance(v, bool):
+        return [str(v)] if str(v) else []
+    if isinstance(v, (list, tuple)):
+        return [str(x) for x in v if x is not None]  # a blank one is left for the checks to name
+    raise ConfigError(f"'{where}' must be a list of names, e.g. [IJ, IJD], not {_kind(v)}", key=where)
 
 
 _SPACE_WARNINGS: list[str] = []
@@ -207,19 +274,85 @@ _SPACE_WARNINGS: list[str] = []
 
 def _path(section: str, key: str, value) -> Path:
     if not isinstance(value, str) or not value.strip():
-        raise ConfigError(f"'{section}.{key}' must be a non-empty path string")
+        raise ConfigError(f"'{section}.{key}' must be a folder or file path, e.g. C:/Fragpipe_Auto/inbox "
+                          f"(forward slashes are fine), not {_kind(value) if value is not None else 'empty'}",
+                          key=f"{section}.{key}")
     if " " in value:
-        msg = f"'{section}.{key}' contains a space ({value!r}); FragPipe cannot handle that"
+        msg = (f"'{section}.{key}' contains a space ({value!r}); FragPipe cannot handle that: pick a folder whose "
+               f"path has no spaces")
         if os.name == "nt":
-            raise ConfigError(msg)
+            raise ConfigError(msg, key=f"{section}.{key}")
         _SPACE_WARNINGS.append(msg + " (tolerated off-Windows for testing)")
     return Path(value)
 
 
 def load(path: str | Path, check_paths: bool = True) -> Config:
+    """config.yaml, validated. Every ConfigError names the file and, when the key at fault is in it, its line:
+    `C:/Fragpipe_Auto/config.yaml, line 14: 'watcher.poll_seconds' must be above 0, not 0; e.g. 10`."""
+    try:
+        return _load(path, check_paths)
+    except ConfigError as exc:
+        exc.args = (_located(Path(path), exc),)
+        raise
+
+
+# the sections of config.yaml, for finding the key a message is about (_key_in)
+_SECTIONS = ("paths", "watcher", "fragpipe", "gui", "naming", "analysis", "qc_trend", "notify", "library", "assistant",
+             "users", "methods")
+_KEY_RE = re.compile(r"(?<![\w.])(" + "|".join(_SECTIONS) + r")((?:\.[^\s.:'\",()\[\]{}]+)*)")
+
+
+def _key_in(message: str) -> str | None:
+    """The dotted key a message names first ('methods.DIA.fasta', 'analysis.normalise'), or None."""
+    m = re.match(r"(\w+): unknown [\w ]*?setting '([^']+)'", message)  # analysis: unknown analysis setting 'x'
+    if m and m.group(1) in _SECTIONS:
+        return f"{m.group(1)}.{m.group(2)}"
+    m = _KEY_RE.search(message)
+    return (m.group(1) + m.group(2)) if m else None
+
+
+def key_line(path: Path, key: str) -> int | None:
+    """1-based line of a dotted key in a YAML file (the deepest part of it that is there), or None."""
+    try:
+        node = yaml.compose(read_yaml_text(path, warnings=[]))
+    except Exception:  # noqa: BLE001 - a file that doesn't parse has no lines to point at
+        return None
+    line = None
+    for part in key.split("."):
+        if not isinstance(node, yaml.MappingNode):
+            break
+        hit = next(((k, v) for k, v in node.value if isinstance(k, yaml.ScalarNode) and str(k.value) == part), None)
+        if hit is None:
+            break
+        line, node = hit[0].start_mark.line + 1, hit[1]
+    return line
+
+
+def _located(p: Path, exc: ConfigError) -> str:
+    """The message with the file in front, and the line of the key it is about."""
+    msg = str(exc)
+    if str(p) in msg:  # not found, could not parse, not UTF-8: these name the file already
+        return msg
+    if p.name.startswith("."):  # the app's probe of unsaved settings (.config.checking.yaml): not the person's file
+        return msg
+    if "\n  - " in msg:  # config problems: one per line, each with its own line
+        head, *items = msg.split("\n  - ")
+        out = []
+        for it in items:
+            k = _key_in(it.split(":", 1)[0])
+            n = key_line(p, k) if k else None
+            out.append(f"{it} (line {n})" if n else it)
+        return f"{p}: {head}\n  - " + "\n  - ".join(out)
+    k = exc.key or _key_in(msg)
+    n = key_line(p, k) if k else None
+    return f"{p}" + (f", line {n}" if n else "") + f": {msg}"
+
+
+def _load(path: str | Path, check_paths: bool = True) -> Config:
     p = Path(path)
     if not p.is_file():
-        raise ConfigError(f"config file not found: {p}")
+        raise ConfigError(f"config file not found: {p}. Create one with the app (ionomos setup) or `ionomos init`, "
+                          f"or give the right one with --config")
     encoding_warnings: list[str] = []
     try:
         raw = yaml.safe_load(read_yaml_text(p, warnings=encoding_warnings)) or {}
@@ -234,33 +367,43 @@ def load(path: str | Path, check_paths: bool = True) -> Config:
 
     methods_raw = raw.get("methods")
     if not isinstance(methods_raw, dict) or not methods_raw:
-        raise ConfigError("'methods:' must list at least one method")
+        raise ConfigError("'methods:' must list at least one method, e.g. DIA: {workflow: DIA.workflow, "
+                          "fasta: human_reviewed_decoys.fas, data_type: DIA}", key="methods")
     methods: dict[str, MethodConfig] = {}
     for key, m in methods_raw.items():
+        key = str(key)
         if not isinstance(m, dict):
-            raise ConfigError(f"'methods.{key}' must be a mapping")
+            raise ConfigError(f"'methods.{key}' must be a mapping: workflow, fasta, data_type (DDA or DIA) and "
+                              f"aliases indented under it, not {_kind(m)}", key=f"methods.{key}")
         engine = str(m.get("engine") or "fragpipe").lower()
         if engine not in ("fragpipe", "diann", "maxquant", "sage"):
-            raise ConfigError(f"'methods.{key}.engine' must be fragpipe, diann, maxquant or sage")
+            raise ConfigError(f"'methods.{key}.engine' must be fragpipe, diann, maxquant or sage, not {_kind(m['engine'])}",
+                              key=f"methods.{key}.engine")
         for req in (("workflow", "fasta", "data_type") if engine == "fragpipe" else ("fasta", "data_type")):
             if not m.get(req):
-                raise ConfigError(f"'methods.{key}.{req}' is required")
+                raise ConfigError(f"'methods.{key}.{req}' is required: add '{req}:' under methods.{key} "
+                                  f"({'the .workflow file in paths.workflow_dir' if req == 'workflow' else 'the FASTA in paths.fasta_dir' if req == 'fasta' else 'DDA or DIA'})",
+                                  key=f"methods.{key}")
         if m["data_type"] not in ("DDA", "DIA"):
-            raise ConfigError(f"'methods.{key}.data_type' must be DDA or DIA")
+            raise ConfigError(f"'methods.{key}.data_type' must be DDA or DIA (in capitals), not {_kind(m['data_type'])}",
+                              key=f"methods.{key}.data_type")
         if engine == "diann" and m["data_type"] != "DIA":
-            raise ConfigError(f"'methods.{key}': DIA-NN (engine: diann) needs data_type DIA")
+            raise ConfigError(f"'methods.{key}': DIA-NN (engine: diann) needs data_type DIA",
+                              key=f"methods.{key}.data_type")
         if engine == "maxquant" and m["data_type"] != "DDA":
-            raise ConfigError(f"'methods.{key}': MaxQuant (engine: maxquant) needs data_type DDA")
+            raise ConfigError(f"'methods.{key}': MaxQuant (engine: maxquant) needs data_type DDA",
+                              key=f"methods.{key}.data_type")
         if engine == "sage" and m["data_type"] != "DDA":
-            raise ConfigError(f"'methods.{key}': Sage (engine: sage) needs data_type DDA")
-        aliases = m.get("aliases") or DEFAULT_METHOD_ALIASES.get(key) or [key.lower()]
+            raise ConfigError(f"'methods.{key}': Sage (engine: sage) needs data_type DDA", key=f"methods.{key}.data_type")
+        aliases = (_texts(m.get("aliases"), f"methods.{key}.aliases") or DEFAULT_METHOD_ALIASES.get(key)
+                   or [key.lower()])
         extra = {k: v for k, v in m.items() if k not in ("workflow", "fasta", "data_type", "postprocess", "aliases")}
         methods[key] = MethodConfig(
             key=key,
             workflow=str(m.get("workflow") or ""),
             fasta=str(m["fasta"]),
             data_type=m["data_type"],
-            postprocess=tuple(m.get("postprocess") or ()),
+            postprocess=tuple(_texts(m.get("postprocess"), f"methods.{key}.postprocess")),
             aliases=tuple(str(a) for a in aliases),
             extra=extra,
         )
@@ -269,13 +412,19 @@ def load(path: str | Path, check_paths: bool = True) -> Config:
     except NamingError as exc:
         raise ConfigError(f"methods: {exc}") from None
 
-    users = raw.get("users") or {}
-    user_aliases = {str(k): [str(a) for a in (v or [])] for k, v in (users.get("aliases") or {}).items()}
-    learned_file = Path(users.get("learned_aliases_file") or (p.parent / "learned_aliases.yaml"))
+    users = dict(_section(raw, "users", "aliases, default, learned_aliases_file, ignore"))
+    aliases_raw = _section(users, "aliases", "a user folder name, then its initials: Isaac: [IJ, IJD]", "users")
+    user_aliases = {str(k): _texts(v, f"users.aliases.{k}") for k, v in aliases_raw.items()}
+    if users.get("ignore") is not None:
+        users["ignore"] = _texts(users["ignore"], "users.ignore")
+    learned = users.get("learned_aliases_file")
+    if learned is not None and not isinstance(learned, str):
+        raise ConfigError(f"'users.learned_aliases_file' must be a file path, not {_kind(learned)}",
+                          key="users.learned_aliases_file")
+    learned_file = Path(learned or (p.parent / "learned_aliases.yaml"))
     for k, v in _read_learned(learned_file).items():
         user_aliases.setdefault(k, [])
         user_aliases[k] += [a for a in v if a not in user_aliases[k]]
-    gui = raw.get("gui") or {}
     naming = raw.get("naming") or {}
     if not isinstance(naming, dict):
         raise ConfigError("'naming:' must be a mapping (condition_codes, date_formats, methods)")
@@ -299,15 +448,15 @@ def load(path: str | Path, check_paths: bool = True) -> Config:
 
     cfg = Config(
         **paths,
-        poll_seconds=float(_get(raw, "watcher", "poll_seconds", 10)),
-        stable_seconds=float(_get(raw, "watcher", "stable_seconds", 60)),
-        min_raw_files=int(_get(raw, "watcher", "min_raw_files", 1)),
-        group_loose_files=bool(_get(raw, "watcher", "group_loose_files", True)),
-        auto_run=bool(_get(raw, "fragpipe", "auto_run", True)),
-        threads=int(_get(raw, "fragpipe", "threads", 8)),
-        ram_gb=int(_get(raw, "fragpipe", "ram_gb", 16)),
-        timeout_minutes=int(_get(raw, "fragpipe", "timeout_minutes", 240)),
-        min_free_gb=float(_get(raw, "fragpipe", "min_free_gb", 20) or 0),
+        poll_seconds=_number(raw, "watcher", "poll_seconds", 10, positive=True),  # 0 would scan the inbox non-stop
+        stable_seconds=_number(raw, "watcher", "stable_seconds", 60),
+        min_raw_files=_number(raw, "watcher", "min_raw_files", 1, int),
+        group_loose_files=_flag(raw, "watcher", "group_loose_files", True),
+        auto_run=_flag(raw, "fragpipe", "auto_run", True),
+        threads=_number(raw, "fragpipe", "threads", 8, int),
+        ram_gb=_number(raw, "fragpipe", "ram_gb", 16, int),
+        timeout_minutes=_number(raw, "fragpipe", "timeout_minutes", 240, int),
+        min_free_gb=_number(raw, "fragpipe", "min_free_gb", 20, empty=0),
         config_tools_folder=str(_get(raw, "fragpipe", "config_tools_folder", "") or ""),
         config_diann=str(_get(raw, "fragpipe", "config_diann", "") or ""),
         config_python=str(_get(raw, "fragpipe", "config_python", "") or ""),
@@ -315,10 +464,10 @@ def load(path: str | Path, check_paths: bool = True) -> Config:
         user_aliases=user_aliases,
         default_user=str(users.get("default") or ""),
         learned_aliases_file=learned_file,
-        gui_enabled=bool(gui.get("enabled", True)),
-        gui_timeout_seconds=float(gui.get("timeout_minutes", 0) or 0) * 60,
-        gui_popups=bool(gui.get("popups", True)),
-        review_drops=bool(gui.get("review_drops", True)),
+        gui_enabled=_flag(raw, "gui", "enabled", True),
+        gui_timeout_seconds=_number(raw, "gui", "timeout_minutes", 0) * 60,
+        gui_popups=_flag(raw, "gui", "popups", True),
+        review_drops=_flag(raw, "gui", "review_drops", True),
         condition_codes=codes,
         file_rules=file_rules,
         date_formats=date_formats,
@@ -452,7 +601,17 @@ def _read_learned(path: Path, strict: bool = False) -> dict[str, list[str]]:
         if strict:
             raise ConfigError(f"{path} can't be read, so it is left as it is: {exc}") from None
         return {}
-    return {str(k): [str(a) for a in (v or [])] for k, v in data.items()} if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        return {}
+    out = {}
+    for k, v in data.items():  # a hand edit `nich: NF` is one alias, never 'N' and 'F'
+        try:
+            out[str(k)] = _texts(v, f"{path.name}: {k}")
+        except ConfigError:
+            if strict:
+                raise ConfigError(f"{path} can't be read, so it is left as it is: {k}: must be a list of "
+                                  f"initials, e.g. {k}: [NF]") from None
+    return out
 
 
 class LiveConfig:
@@ -505,13 +664,31 @@ def remember_alias(cfg: Config, user: str, alias: str) -> None:
     if alias not in data[user]:
         data[user].append(alias)
     cfg.learned_aliases_file.parent.mkdir(parents=True, exist_ok=True)
-    cfg.learned_aliases_file.write_text(
-        "# Aliases learned from the ionomos resolver window. user: [alias, ...]\n" + yaml.safe_dump(data),
-        encoding="utf-8",
-    )
+    write_text_atomic(cfg.learned_aliases_file,
+                      "# Aliases learned from the ionomos resolver window. user: [alias, ...]\n" + yaml.safe_dump(data))
     cfg.user_aliases.setdefault(user, [])
     if alias not in cfg.user_aliases[user]:
         cfg.user_aliases[user].append(alias)
+
+
+def write_text_atomic(path: Path, text: str) -> None:
+    """Replace a settings file all at once: the text goes to <name>.tmp, is flushed to the disk, then takes the
+    file's place. A crash, a full disk or a power cut while writing leaves the previous file as it was (the .tmp
+    is removed when the write fails, and overwritten by the next one if the process died)."""
+    path = Path(path)
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 def _norm(p: Path) -> Path:

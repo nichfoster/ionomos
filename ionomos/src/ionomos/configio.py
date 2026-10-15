@@ -149,6 +149,8 @@ def _normalise(d: dict) -> dict:
         for k, v in d[sec].items():
             if v is None:
                 d[sec][k] = ""
+    if d["analysis"].get("sdrf", {}) is None:  # the writer's 'sdrf:' heading with nothing under it
+        del d["analysis"]["sdrf"]
     return d
 
 
@@ -172,12 +174,14 @@ def dump_config(d: dict) -> str:
     a(f"  fasta_dir:    {_y(p['fasta_dir'])}")
     a(f"  database:     {_y(p['database'])}   # SQLite job ledger")
     a(f"  log_dir:      {_y(p['log_dir'])}")
+    _rest(a, p, _PATHS)
     a("")
     a("watcher:")
     a(f"  poll_seconds: {_y(w['poll_seconds'])}   # how often the inbox is scanned")
     a(f"  stable_seconds: {_y(w['stable_seconds'])}   # tree must be unchanged this long before intake")
     a(f"  min_raw_files: {_y(w['min_raw_files'])}   # folders with fewer .raw files are left alone")
     a(f"  group_loose_files: {_y(bool(w.get('group_loose_files', True)))}   # .raw files dropped without a folder get one")
+    _rest(a, w, ("poll_seconds", "stable_seconds", "min_raw_files", "group_loose_files"))
     a("")
     a("fragpipe:")
     a(f"  auto_run: {_y(bool(f.get('auto_run', True)))}   # run FragPipe on queued jobs automatically")
@@ -188,6 +192,8 @@ def dump_config(d: dict) -> str:
     a(f"  config_tools_folder: {_y(f.get('config_tools_folder', '') or '')}   # only if FragPipe can't find its tools")
     a(f"  config_diann: {_y(f.get('config_diann', '') or '')}   # DIA only, path to DiaNN.exe if needed")
     a(f"  config_python: {_y(f.get('config_python', '') or '')}   # only if FragPipe can't find its Python (spectral library)")
+    _rest(a, f, ("auto_run", "threads", "ram_gb", "timeout_minutes", "min_free_gb", "config_tools_folder", "config_diann",
+                 "config_python"))
     a("")
     a("gui:")
     a(f"  enabled: {_y(bool(g.get('enabled', True)))}   # the naming window (problems, and reviews below)")
@@ -195,6 +201,7 @@ def dump_config(d: dict) -> str:
       "control) before filing")
     a(f"  timeout_minutes: {_y(g.get('timeout_minutes', 0))}   # 0 = wait for a person; N = a review files as read")
     a(f"  popups: {_y(bool(g.get('popups', True)))}   # windows when an analysis needs a decision or a search fails")
+    _rest(a, g, ("enabled", "review_drops", "timeout_minutes", "popups"))
     a("")
     codes = (d.get("naming") or {}).get("condition_codes")
     codes = codes if isinstance(codes, dict) else {"D": "DMSO", "C": "Compound"}
@@ -214,6 +221,7 @@ def dump_config(d: dict) -> str:
                     a(f"      {_y(str(k))}: {_y(v)}")
             else:
                 a(f"    {_y(str(key))}: {_y(spec)}")
+    _rest(a, nm, ("condition_codes", "date_formats", "methods"))
     a("")
     an = d.get("analysis") or {}
     a("analysis:   # statistics + volcano plots + report after each search (per experiment: experiment.yaml analysis:)")
@@ -238,8 +246,7 @@ def dump_config(d: dict) -> str:
     a(f"  control_keywords: {_y(list(an.get('control_keywords') or []))}   # how the control condition is recognised")
     a(f"  competition_keywords: {_y(list(an.get('competition_keywords') or []))}   # a word of a condition name that "
       "means 'plus a competitor' (Probe_Comp): its comparisons follow the design")
-    for k in ("competition_keywords_weak", "background_keywords", "role_comparisons",
-              "small_group_min_valid"):  # roles: D61, D88
+    for k in _AN_LISTS:
         if an.get(k) not in (None, ""):
             a(f"  {k}: {_y(list(an[k]) if isinstance(an[k], (list, tuple)) else an[k])}")
     if isinstance(an.get("roles"), dict) and an["roles"]:
@@ -247,20 +254,7 @@ def dump_config(d: dict) -> str:
           "(usually per experiment, in experiment.yaml)")
         for k, v in an["roles"].items():
             a(f"    {_y(str(k))}: {_y(v)}")
-    for k in ("impute_shift", "impute_scale", "seed", "pca_features", "heatmap_max", "control", "variance_prior",
-              "block", "block_from", "covariates",  # DEqMS and the design (downstream/design.py)
-              "dose_response", "dose_min_doses", "dose_alpha", "dose_fc_lim", "dose_unit",  # dose-response: D44
-              "liganded", "liganded_ratio", "liganded_min_replicates", "liganded_direction",  # cys.py: D52
-              "site_annotation",
-              "time_course", "time_min_points", "time_unit",  # time courses: D53
-              "time_model", "time_spline_df",  # spline time courses: D77
-              "psm_qc",  # search quality per run: D55
-              "phospho", "phospho_min_localization", "phospho_localization_per_sample", "phospho_table",  # D79
-              "kinase_substrates", "ksea_min_substrates", "ksea_networkin", "ksea_networkin_score", "ksea_organism",
-              "ksea_match", "string_network", "string_min_score",
-              "f_test", "rollup",  # the F-test switch and the protein roll-up: D76
-              "irs", "tmt_reference",  # several TMT plexes on one scale (plex.py): D48, D71
-              "tmt_min_labelling", "tmt_min_purity"):  # the TMT QC's limits (tmtqc.py): D91
+    for k in _AN_SCALARS:
         if an.get(k) not in (None, ""):
             a(f"  {k}: {_y(an[k])}")
     if isinstance(an.get("times"), dict) and an["times"]:
@@ -271,6 +265,8 @@ def dump_config(d: dict) -> str:
         a("  doses:   # condition -> dose (usually per experiment, in experiment.yaml)")
         for k, v in an["doses"].items():
             a(f"    {_y(str(k))}: {_y(v)}")
+    _rest(a, an, (*_AN_WRITTEN, *_AN_LISTS, *_AN_SCALARS, "sdrf", "export",
+                  *(k for k in ("roles", "times", "doses") if isinstance(an.get(k), dict))))
     meta = an.get("sdrf") if isinstance(an.get("sdrf"), dict) else {}
     a("  sdrf:   # results/sdrf.tsv sample metadata: instrument, organism (default: from the FASTA), organism_part, "
       "cell_type, disease, cleavage_agent (default: from the workflow)")
@@ -300,6 +296,8 @@ def dump_config(d: dict) -> str:
     a(f"  popup: {_y(bool(q.get('popup', False)))}   # true: a broken rule opens a window (default: the attention list only)")
     if q.get("max_file_mb") not in (None, ""):
         a(f"  max_file_mb: {_y(q['max_file_mb'])}   # larger tables are skipped")
+    _rest(a, q, ("enabled", "match", "exclude", "methods", "instrument", "baseline_runs", "baseline_from", "baseline_to",
+                 "popup", "max_file_mb"))
     a("")
     lib = d.get("library") if isinstance(d.get("library"), dict) else {}
     a("library:   # where `ionomos library scan` looks for FragPipe workflows and FASTAs (docs/LIBRARY.md)")
@@ -363,11 +361,16 @@ def dump_config(d: dict) -> str:
     a(f"  default: {_y(u.get('default', '') or '')}   # e.g. \"_unsorted\" to accept unknown users")
     a(f"  learned_aliases_file: {_y(u.get('learned_aliases_file', ''))}")
     a(f"  ignore: {_y(list(u.get('ignore') or []))}   # users_root subfolders that aren't people (FragPipe copies, FASTA folders)")
+    _rest(a, u, ("aliases", "default", "learned_aliases_file", "ignore"))
     a("")
     a("methods:   # key = canonical name; aliases are matched in folder/file names")
     for key, m in d["methods"].items():
         a(f"  {_y(key)}:")
-        a(f"    aliases: {_y(list(m.get('aliases') or [key.lower()]))}")
+        from ionomos.naming import DEFAULT_METHOD_ALIASES
+
+        # no aliases of its own: the ones the loader gives it (iso-dtb, iso_dtb for isoDTB), not just the key, so a
+        # Save never narrows what folder names mean this method
+        a(f"    aliases: {_y(list(m.get('aliases') or DEFAULT_METHOD_ALIASES.get(key) or [key.lower()]))}")
         a(f"    workflow: {_y(m.get('workflow', ''))}")
         a(f"    fasta: {_y(m.get('fasta', ''))}")
         a(f"    data_type: {_y(m.get('data_type', 'DDA'))}")
@@ -376,7 +379,49 @@ def dump_config(d: dict) -> str:
             if k not in ("aliases", "workflow", "fasta", "data_type", "postprocess"):
                 a(f"    {_y(k)}: {_y(v)}")
     a("")
+    other = {k: v for k, v in d.items() if k not in _SECTIONS}
+    if other:  # a section Ionomos doesn't know (a typo such as notifyy:) is kept, so the loader can name it
+        a("# not a section Ionomos knows; kept as it was so that `ionomos check` can name it")
+        for k, v in other.items():
+            a(f"{_y(str(k))}: {_y(v)}")
+        a("")
     return "\n".join(L)
+
+
+_PATHS = ("inbox", "users_root", "fragpipe_exe", "workflow_dir", "fasta_dir", "database", "log_dir")
+_SECTIONS = ("paths", "watcher", "fragpipe", "gui", "naming", "analysis", "qc_trend", "library", "notify", "assistant",
+             "users", "methods")
+# analysis keys the writer always writes; then those written when set (lists, then single values). Anything else
+# a lab has in analysis: is written back as it was (_rest), so a Save never drops a setting the loader takes.
+_AN_WRITTEN = ("enabled", "test", "de_type", "log2fc", "alpha", "use_adjusted", "remove_contaminants",
+               "filter_global_pct", "filter_condition_pct", "normalize", "imputation", "min_valid", "enrichment",
+               "enrichment_libraries", "enrichment_gmt", "top_labels", "control_keywords", "competition_keywords")
+_AN_LISTS = ("competition_keywords_weak", "background_keywords", "role_comparisons",
+             "small_group_min_valid")  # roles: D61, D88
+_AN_SCALARS = ("impute_shift", "impute_scale", "seed", "pca_features", "heatmap_max", "control", "variance_prior",
+               "block", "block_from", "covariates",  # DEqMS and the design (downstream/design.py)
+               "dose_response", "dose_min_doses", "dose_alpha", "dose_fc_lim", "dose_unit",  # dose-response: D44
+               "liganded", "liganded_ratio", "liganded_min_replicates", "liganded_direction",  # cys.py: D52
+               "site_annotation",
+               "time_course", "time_min_points", "time_unit",  # time courses: D53
+               "time_model", "time_spline_df",  # spline time courses: D77
+               "psm_qc",  # search quality per run: D55
+               "phospho", "phospho_min_localization", "phospho_localization_per_sample", "phospho_table",  # D79
+               "kinase_substrates", "ksea_min_substrates", "ksea_networkin", "ksea_networkin_score", "ksea_organism",
+               "ksea_match", "string_network", "string_min_score",
+               "f_test", "rollup",  # the F-test switch and the protein roll-up: D76
+               "irs", "tmt_reference",  # several TMT plexes on one scale (plex.py): D48, D71
+               "tmt_min_labelling", "tmt_min_purity")  # the TMT QC's limits (tmtqc.py): D91
+
+
+def _rest(a, sec, done) -> None:
+    """The keys of a section the writer has no line of its own for (a setting set by hand, a typo), written back as
+    they were (D67): a Save never drops a value, and a typo stays where the loader names it."""
+    if not isinstance(sec, dict):
+        return
+    for k, v in sec.items():
+        if k not in done:
+            a(f"  {_y(str(k))}: {_y(v)}")
 
 
 # analysis.export keys the writer always shows, with their default and what they take (downstream/charts.py)
@@ -404,8 +449,14 @@ def backup_config(path: str | Path, keep: int = 30) -> Path | None:
         return None
     d = p.parent / BACKUP_DIR
     d.mkdir(exist_ok=True)
-    dest = d / f"config-{datetime.datetime.now():%Y%m%d-%H%M%S}.yaml"
-    dest.write_bytes(p.read_bytes())
+    stem = f"config-{datetime.datetime.now():%Y%m%d-%H%M%S}"
+    dest, n = d / f"{stem}.yaml", 1
+    while dest.exists():  # two saves in one second: the first one's backup is the version before both, keep it
+        n += 1
+        dest = d / f"{stem}-{n}.yaml"
+    data = p.read_bytes()
+    with open(dest, "xb") as fh:
+        fh.write(data)
     for old in sorted(d.glob("config-*.yaml"))[:-keep]:
         try:
             old.unlink()
@@ -415,15 +466,18 @@ def backup_config(path: str | Path, keep: int = 30) -> Path | None:
 
 
 def write_config(path: str | Path, d: dict, backup: bool = True) -> Path:
-    """Atomically write config.yaml; the previous version goes to config-backups/ first."""
+    """Atomically write config.yaml; the previous version goes to config-backups/ first. The text is made before
+    anything is touched, and a crash or a full disk while writing leaves the previous config.yaml as it was
+    (config.write_text_atomic)."""
+    from ionomos.config import write_text_atomic
+
     p = Path(path)
+    text = dump_config(d)
     p.parent.mkdir(parents=True, exist_ok=True)
     if backup:
         try:
             backup_config(p)
         except OSError:
             pass  # a failed backup must not block saving
-    tmp = p.with_suffix(".yaml.tmp")
-    tmp.write_text(dump_config(d), encoding="utf-8")
-    os.replace(tmp, p)
+    write_text_atomic(p, text)
     return p

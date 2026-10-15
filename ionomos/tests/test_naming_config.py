@@ -368,7 +368,7 @@ def test_bad_rules_are_config_errors(lab, rule, match):
     d = dict(lab["cfg_dict"], naming={"methods": {"DIA": rule}})
     with pytest.raises(ConfigError, match=re.escape(match)) as exc:
         load(_write(lab["cfg_path"], d))
-    assert str(exc.value).startswith("naming.methods.DIA")
+    assert ": naming.methods.DIA" in str(exc.value)  # after the file and the line (config.load)
 
 
 @pytest.mark.parametrize(("naming", "methods_extra", "match"), [

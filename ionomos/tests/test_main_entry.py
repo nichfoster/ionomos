@@ -21,7 +21,7 @@ def test_crash_is_reported_and_saved(tmp_path, monkeypatch):
 def test_normal_exit_codes_pass_through(tmp_path):
     r = subprocess.run([sys.executable, "-m", "ionomos", "--config", str(tmp_path / "none.yaml"), "check"],
                        cwd=tmp_path, capture_output=True, text=True, timeout=120)
-    assert r.returncode == 1 and "config file not found" in r.stdout
+    assert r.returncode == 2 and "config file not found" in r.stdout  # cli.py: an unreadable config is 2
     assert not (tmp_path / "Ionomos-crash.txt").exists()
     r = subprocess.run([sys.executable, "-m", "ionomos", "--version"], capture_output=True, text=True, timeout=120)
     assert r.returncode == 0 and "Ionomos" in r.stdout
