@@ -653,7 +653,12 @@ def cmd_init(args) -> int:
     cfg_path = Path(args.config if args.config_given else Path(root) / "config.yaml")
     if cfg_path.is_file() and not args.force:
         print(f"{cfg_path} already exists; keeping it (use --force to start from defaults).")
-        data = configio.read_config(cfg_path)
+        try:
+            data = configio.read_config(cfg_path)
+        except ConfigError as exc:
+            print(f"{exc}\nFix that line, or `ionomos init --force` to start from defaults (a backup is kept).",
+                  file=sys.stderr)
+            return 1
     else:
         data = configio.defaults(root, users)
         found = fragpipe.detect_launcher()

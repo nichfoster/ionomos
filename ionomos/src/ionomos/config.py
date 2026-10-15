@@ -51,6 +51,15 @@ def _byte_at(data: bytes, i: int) -> str:
     return f"byte 0x{data[i]:02X} on line {line}"
 
 
+def parse_error(path: Path, exc: Exception) -> str:
+    """One line for a YAML error in a hand-edited file: the line and column first (#136), then what the parser saw."""
+    mark = getattr(exc, "context_mark", None) or getattr(exc, "problem_mark", None)  # where the construct began
+    where = f"line {mark.line + 1}, column {mark.column + 1}" if mark is not None else "no line given"
+    what = " ".join(f"{getattr(exc, 'context', None) or ''} {getattr(exc, 'problem', None) or ''}".split()) \
+        or " ".join(str(exc).split())
+    return f"could not parse {path}: {where}: {what}"
+
+
 def read_yaml_text(path: str | Path, error: type[Exception] = ConfigError, warnings: list[str] | None = None) -> str:
     """Text of a hand-edited YAML file (config.yaml, experiment.yaml, learned aliases), D86. UTF-8, with or without
     a BOM; UTF-16 with its BOM (Notepad's "Unicode"). Anything else is read as cp1252, what Notepad saves as "ANSI"
@@ -224,7 +233,7 @@ def load(path: str | Path, check_paths: bool = True) -> Config:
     try:
         raw = yaml.safe_load(read_yaml_text(p, warnings=encoding_warnings)) or {}
     except yaml.YAMLError as exc:
-        raise ConfigError(f"could not parse {p}: {exc}") from exc
+        raise ConfigError(parse_error(p, exc)) from exc
     if not isinstance(raw, dict):
         raise ConfigError(f"{p} must be a YAML mapping")
 

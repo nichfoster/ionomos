@@ -203,6 +203,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or `settings: Ionomos' defaults (â€¦ not used: --config applies it)`. Only the
   lab's own experiments raise attention items. `check-folder` follows the
   same rule.
+- **The app no longer dies at start when config.yaml has a YAML slip** (an
+  unclosed bracket from hand editing, #136). `configio.read_config` turns the
+  parser's error into the same `could not parse <file>: line N, column M: â€¦`
+  message `ionomos check` prints; the app opens on the defaults with that
+  message in the status bar and the first checklist item, the file untouched,
+  and a dialog offers **Restore a previous configâ€¦** when config-backups/ has
+  one (else says to fix the line and press Reload). Start watcher, Reload,
+  the config switcher and `ionomos init` say the same instead of a traceback,
+  and any other error while the app starts is shown in a dialog before the
+  windowed exe exits.
 - On a small screen (1366×768) the bottom bar — Save, Help, Report a problem, the ⚠ badge — disappeared; it is now
   packed before the tabs, and its buttons before the config path. (#111)
 - 4 Advanced: the hint "Needs the watcher to run in the logged-in session" covered the "Pop up a window when
