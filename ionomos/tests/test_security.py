@@ -9,6 +9,7 @@ import json
 import os
 import shutil
 import threading
+import types
 import warnings
 import zipfile
 from pathlib import Path
@@ -390,3 +391,108 @@ def test_the_startup_task_is_not_installed_with_a_percent_in_its_command(tmp_pat
     ok, _msg = service.install_task(tmp_path / "R&D" / "config.yaml")  # no shell between Task Scheduler and Ionomos
     create = [c for c in calls if c[:2] == ["schtasks", "/Create"]]
     assert ok and len(create) == 1 and str(tmp_path / "R&D" / "config.yaml") in create[0][create[0].index("/TR") + 1]
+
+
+# ------------------------------------------------------------- the library scan ----
+
+UNC_DBS = ["\\\\\\\\attacker.invalid\\\\share\\\\x.fas",  # as FragPipe writes it (Java properties escape \\)
+           "//attacker.invalid/share/x.fas", "\\\\\\\\?\\\\UNC\\\\attacker.invalid\\\\share\\\\x.fas"]
+
+
+@pytest.fixture
+def spy_paths(monkeypatch):
+    """Every path Path.is_file / is_dir / stat is asked about, by any code, during the test."""
+    asked: list[str] = []
+    for name in ("is_file", "is_dir", "stat"):
+        real = getattr(Path, name)
+
+        def spy(self, *a, _real=real, **k):
+            asked.append(str(self))
+            return _real(self, *a, **k)
+
+        monkeypatch.setattr(Path, name, spy)
+    return asked
+
+
+def _attacker(asked: list[str]) -> list[str]:
+    return [p for p in asked if "attacker" in p]
+
+
+@pytest.mark.parametrize("db", UNC_DBS)
+def test_a_scan_never_opens_a_network_path_written_in_a_file_it_finds(tmp_path, spy_paths, db):
+    """A .workflow (or FragPipe's fragpipe-ui.cache) in someone's drop names \\\\attacker\\share\\x.fas: opening it
+    would make Windows sign in to that server with the account Ionomos runs as. The scan reports it unread."""
+    from ionomos import library
+
+    root = tmp_path / "users" / "EJQ" / "drop"
+    root.mkdir(parents=True)
+    (root / "evil.workflow").write_text(f"msfragger.run-msfragger=true\ndatabase.db-path={db}\n", encoding="utf-8")
+    (root / library.UI_CACHE).write_text(f"database.db-path={db}\nworkflow.workflow-option=x\n", encoding="utf-8")
+    cat = library.scan([tmp_path / "users"], time_limit_s=30)
+    assert _attacker(spy_paths) == []
+    (wf,) = cat.workflows
+    assert library.is_network_path(wf.database) and not wf.database_exists
+    flag = next(f for f in wf.flags if f.code == "WF_DATABASE_MISSING")
+    assert "another computer" in flag.text and cat.fastas == []
+
+
+def test_adopting_such_a_workflow_copies_no_fasta_from_the_network(tmp_path, spy_paths):
+    from ionomos import library
+
+    src = tmp_path / "evil.workflow"
+    src.write_text("msfragger.run-msfragger=true\ndatabase.db-path=//attacker.invalid/share/x.fas\n", encoding="utf-8")
+    cfg = types.SimpleNamespace(workflow_dir=tmp_path / "workflows", fasta_dir=tmp_path / "fasta",
+                                log_dir=tmp_path / "logs")
+    for d in (cfg.workflow_dir, cfg.fasta_dir, cfg.log_dir):
+        d.mkdir()
+    out = library.adopt(src, "LFQ", cfg)
+    assert _attacker(spy_paths) == [] and out["fasta"] == ""
+    assert any("another computer" in n for n in out["notes"])
+
+
+@pytest.mark.parametrize("p, network", [("\\\\server\\share\\x", True), ("//server/share", True),
+                                        ("\\\\?\\UNC\\server\\share", True), ("\\\\.\\pipe\\x", True),
+                                        ("\\\\?\\C:\\very\\long\\path", False), ("C:/Fragpipe_Auto/fasta", False),
+                                        ("/Users/lab/fasta", False), ("relative/x.fas", False)])
+def test_what_counts_as_a_network_path(p, network):
+    from ionomos import library
+
+    assert library.is_network_path(p) is network
+
+
+@pytest.fixture
+def dead_share(monkeypatch):
+    """Path.is_dir of \\\\deadserver\\... blocks the way Windows does for a server that is off (about 20 s), until
+    the test ends."""
+    release = threading.Event()
+    real = Path.is_dir
+
+    def is_dir(self, *a, **k):
+        if "deadserver" in str(self):
+            release.wait(60)
+            return False
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(Path, "is_dir", is_dir)
+    yield "\\\\deadserver\\share\\fasta"
+    release.set()
+
+
+def test_a_scan_root_on_a_server_that_does_not_answer_is_skipped_in_seconds(tmp_path, monkeypatch, dead_share):
+    import time
+
+    from ionomos import library
+
+    monkeypatch.setattr(library, "ROOT_ANSWER_S", 0.3)
+    (tmp_path / "wf").mkdir()
+    (tmp_path / "wf" / "a.workflow").write_text("msfragger.run-msfragger=true\n", encoding="utf-8")
+    t = time.monotonic()
+    cat = library.scan([dead_share, tmp_path / "wf"], time_limit_s=60)
+    assert time.monotonic() - t < 5
+    assert len(cat.workflows) == 1 and any("did not answer" in n and "deadserver" in n for n in cat.notes)
+    cfg = types.SimpleNamespace(workflow_dir=tmp_path / "wf", fasta_dir=tmp_path / "nofasta", users_root=tmp_path,
+                                fragpipe_exe=tmp_path / "none.bat", library={"roots": [dead_share]})
+    monkeypatch.setattr(library, "install_roots", lambda cfg=None: [])
+    t = time.monotonic()
+    roots = library.default_roots(cfg)
+    assert time.monotonic() - t < 5 and Path(dead_share) not in roots and tmp_path / "wf" in roots

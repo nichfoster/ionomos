@@ -1404,6 +1404,16 @@ def read_properties(text: str) -> dict[str, str]:
     return out
 
 
+def is_network_path(p: str | Path) -> bool:
+    """A UNC path (\\\\server\\share, //server/share, \\\\?\\UNC\\...): opening it makes Windows connect to that server
+    and offer the account's sign-in to it, so a path read from a file (a workflow's database.db-path) is never
+    opened when it is one. A \\\\?\\C:\\ long path is local."""
+    s = str(p).replace("/", "\\")
+    if s.startswith("\\\\?\\") and not s[4:8].upper().startswith("UNC\\"):
+        return False
+    return s.startswith("\\\\")
+
+
 def inspect_workflow(path: Path) -> dict:
     """{'database', 'database_exists', 'settings': {label: value}, 'decoy_tag'} for a .workflow file."""
     try:
@@ -1413,7 +1423,7 @@ def inspect_workflow(path: Path) -> dict:
     db = props.get("database.db-path", "")
     return {
         "database": db,
-        "database_exists": bool(db) and Path(db).is_file(),
+        "database_exists": bool(db) and not is_network_path(db) and Path(db).is_file(),
         "decoy_tag": props.get("database.decoy-tag", "rev_") or "rev_",
         "settings": {label: props[k] for k, label in WORKFLOW_KEYS if k in props and props[k] != ""},
     }
@@ -1572,7 +1582,10 @@ def import_workflow(src: Path, method: str, workflow_dir: Path, fasta_dir: Path)
     info = inspect_workflow(dest)
     fasta_name = ""
     db = info.get("database") or ""
-    if db and Path(db).is_file():
+    if db and is_network_path(db):
+        notes.append(f"the workflow's database {db} is on another computer: not copied (Ionomos does not open a "
+                     f"network path a file names) — copy it into {fasta_dir} yourself, or pick a FASTA for {method}")
+    elif db and Path(db).is_file():
         fasta_dir.mkdir(parents=True, exist_ok=True)
         target = fasta_dir / Path(db).name
         if not target.exists():
