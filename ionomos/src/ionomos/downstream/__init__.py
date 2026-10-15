@@ -71,6 +71,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import traceback
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -491,6 +492,9 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
         say("plotting the results in " + m.meta.get("table", "the table"))
         for d in stage("statistics", analysis.precomputed_diffs, m, settings) or []:
             diffs.append(d)
+            fit = fit_file_stem(results, d)
+            if fit:
+                notes.append(fit)
             tsv = results / f"{d.slug()}_differential.tsv"
             if stage("tables", write_tsv, tsv, analysis.DIFF_COLUMNS, d.rows):
                 out.files.append(tsv)
@@ -605,6 +609,9 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
                                  f"measured values in {small} ({min(d.groups)} samples against {max(d.groups)}); "
                                  "their n is in the table. small_group_min_valid: same leaves them untested.")
                 diffs.append(d)
+                fit = fit_file_stem(results, d)
+                if fit:
+                    notes.append(fit)
                 tsv = results / f"{d.slug()}_differential.tsv"
                 if stage("tables", write_tsv, tsv, analysis.DIFF_COLUMNS, d.rows):
                     out.files.append(tsv)
@@ -887,6 +894,9 @@ def _protein_correction(p, diffs, settings, results: Path, out: Outcome, dest: P
         res = proteincorr.run(p, diffs, settings, proteome)
         cols = analysis.DIFF_COLUMNS + proteincorr.CORRECTION_COLUMNS
     for d, c in zip(res.diffs, [x for x in res.summary["conditions"] if x.get("proteome_comparison")], strict=True):
+        fit = fit_file_stem(results, d)
+        if fit:
+            res.notes.append(fit)
         tsv = write_tsv(results / f"{d.slug()}_differential.tsv", cols, d.rows)
         out.files.append(tsv)
         c["table"] = f"{RESULTS}/{tsv.name}"
@@ -1111,6 +1121,43 @@ def _static_figures(results: Path, ctx: dict, m, processed, diffs, settings, qcd
     style = charts.style_from(settings.export, lenient=True)
     return slides.write(results / slides.FOLDER, d, style, style["figures"],
                         f"Ionomos {ctx.get('version', '')}".strip())
+
+PATH_BUDGET = 250  # the longest path a comparison's files may take (Windows stops at 260 with long paths off)
+_LONGEST_SUFFIX = len("figures/volcano_") + len(".svg.tmp")  # the most a file name adds around the stem
+
+
+def fit_file_stem(results: Path, d) -> str | None:
+    """Give a comparison a file stem whose paths stay under Windows' limit (#140). A DIA condition carries the
+    experiment prefix ('L7355qyk_Aman_DIA_55qyk_Drug'), so '<cond>_vs_<cond>_differential.tsv' held it twice on
+    top of the experiment folder, and the tables and volcano plots went missing on long names. When the full
+    name would pass the budget, the part both conditions share is dropped and a short hash of the comparison's
+    name keeps the stem unique; a note says so. Returns the note, or None when the full name fits."""
+    import hashlib
+
+    full = d.full_slug()
+    room = PATH_BUDGET - len(str(results)) - 1 - _LONGEST_SUFFIX
+    if len(full) <= room:
+        d.file_stem = ""
+        return None
+    digest = hashlib.sha1(d.name.encode("utf-8")).hexdigest()[:6]
+    t, c = str(d.treatment), str(d.control or "")
+    shared = ""
+    if c:
+        a, b = t.split("_"), c.split("_")
+        n = 0
+        while n < min(len(a), len(b)) - 1 and a[n] == b[n]:
+            n += 1
+        shared = "_".join(a[:n]) + ("_" if n else "")
+    short = full[len(shared):] if shared and full.startswith(shared) else full
+    short = short.replace(f"_{shared}", "_", 1) if shared and f"_{shared}" in short else short
+    stem = f"{short}-{digest}"
+    if len(stem) > room:
+        stem = f"{short[:max(8, room - 7)].rstrip('_-')}-{digest}"
+    d.file_stem = re.sub(r"[^A-Za-z0-9._-]+", "_", stem).strip("_")
+    what = f"the part the condition names share ({shared.rstrip('_')}) dropped" if shared else "the name cut"
+    return (f"{d.name}: its result files are named {d.file_stem}_differential.tsv and volcano_{d.file_stem}.svg "
+            f"({what}, a short hash added), so their paths stay under {PATH_BUDGET} characters")
+
 
 def _write_volcano(results: Path, d, stage) -> Path | None:
     """Every comparison gets a volcano file, checked after writing; an empty comparison gets an empty plot."""

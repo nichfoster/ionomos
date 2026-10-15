@@ -713,6 +713,7 @@ class DiffResult:
     role: str = ""                # roles.KINDS: enrichment | competition | remaining ("" = no competition design)
     relaxed: int = 0              # features tested with fewer than min_valid values in the smaller group
     correction: dict = field(default_factory=dict)   # a site comparison corrected for protein abundance (D70)
+    file_stem: str = ""           # the file names' stem when the full name would pass Windows' path limit (#140)
 
     @property
     def up(self) -> int:
@@ -727,6 +728,9 @@ class DiffResult:
         return sum(1 for r in self.rows if r["pvalue"] is not None and not math.isnan(r["pvalue"]))
 
     def slug(self) -> str:
+        return self.file_stem or self.full_slug()
+
+    def full_slug(self) -> str:
         return re.sub(r"[^A-Za-z0-9._-]+", "_", self.name).strip("_") or "comparison"
 
 def comparison_name(treatment: str, control: str | None) -> str:

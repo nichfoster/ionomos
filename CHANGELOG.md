@@ -219,6 +219,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rightly found nothing. The key's words are now fragments: found inside the
   names they belong to, and on their own only when distinct (KL6159A), so
   `inspect` agrees with the leak check on the same zip.
+- **Per-comparison result files no longer repeat the experiment prefix past
+  Windows' path limit** (#140). By the DIA file rule each condition carries
+  the experiment prefix, so `<cond>_vs_<cond>_differential.tsv` and
+  `volcano_<cond>_vs_<cond>.svg` held it twice on top of the experiment
+  folder, and in a deep folder the tables and volcano plots went missing
+  while the job stayed `done`. When a comparison's full file name would take
+  its paths past 250 characters, the part both condition names share is
+  dropped and a short hash of the comparison's name keeps the stem unique
+  (`Drug_vs_DMSO-3f2a9c_differential.tsv`); a note in the analysis says so,
+  and analysis.json, the report and the figures use the same stem.
 - **A search that fails on a path longer than Windows allows is explained as
   that, not as "ended from outside, nothing in the search failed: Retry"**
   (#138). A missing-file error (Java's FileNotFoundException or
