@@ -767,40 +767,11 @@ SPECIES_WORDS = {"9606": "Human", "10090": "Mouse", "10116": "Rat", "559292": "Y
 
 def _headers(fh, stop: threading.Event | None, deadline: float | None):
     """Every header line (without '>') of a FASTA opened in binary mode, read in big chunks: a 1 GB file is
-    never decoded or split into lines. Raises TimeoutError when stopped or out of time."""
-    carry = b"\n"
-    skipping = False   # inside a header line longer than MAX_HEADER, already given: drop it up to its end
-    while True:
-        if (stop is not None and stop.is_set()) or (deadline is not None and time.monotonic() > deadline):
-            raise TimeoutError
-        chunk = fh.read(CHUNK)
-        if not chunk:
-            break
-        if skipping:
-            k = chunk.find(b"\n")
-            if k < 0:
-                continue
-            chunk, carry, skipping = chunk[k:], b"", False
-        buf = carry + chunk
-        pos = 0
-        carry = b""
-        while True:
-            i = buf.find(b"\n>", pos)
-            if i < 0:   # only a line break at the very end can start a header in the next chunk (#156: was the
-                carry = b"\n" if buf.endswith(b"\n") else b""   # whole buffer, quadratic without line breaks)
-                break
-            j = buf.find(b"\n", i + 1)
-            if j < 0:
-                if len(buf) - i > MAX_HEADER:
-                    yield buf[i + 2:i + 2 + MAX_HEADER].rstrip(b"\r")
-                    skipping = True
-                else:
-                    carry = buf[i:]
-                break
-            yield buf[i + 2:j].rstrip(b"\r")
-            pos = j
-    if carry.startswith(b"\n>"):
-        yield carry[2:].rstrip(b"\r\n")
+    never decoded or split into lines. Raises TimeoutError when stopped or out of time. `fastasource.fasta_headers`:
+    a UTF-8 byte-order mark skipped, linear time and bounded memory on a file without line breaks."""
+    from ionomos.fastasource import fasta_headers
+
+    yield from fasta_headers(fh, stop, deadline, chunk=CHUNK)
 
 
 def _fingerprint(p: Path, size: int, entries: int) -> str:

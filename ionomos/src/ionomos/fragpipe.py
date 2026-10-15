@@ -1312,15 +1312,16 @@ def fasta_info(path: Path, decoy_tag: str = "rev_") -> dict:
     key = (str(p), st.st_mtime, st.st_size)
     if key in _FASTA_CACHE:
         return _FASTA_CACHE[key]
+    from ionomos.fastasource import fasta_headers  # BOM skipped; linear on a file without line breaks
+
     entries = decoys = 0
-    tag = b">" + decoy_tag.encode()
+    tag = decoy_tag.encode()
     try:
         with open(p, "rb") as fh:
-            for line in fh:
-                if line.startswith(b">"):
-                    entries += 1
-                    if line.startswith(tag):
-                        decoys += 1
+            for h in fasta_headers(fh):
+                entries += 1
+                if h.startswith(tag):
+                    decoys += 1
     except OSError as exc:
         return {"entries": 0, "decoys": 0, "gb": 0.0, "error": str(exc)}
     info = {"entries": entries, "decoys": decoys, "gb": st.st_size / 1e9}
