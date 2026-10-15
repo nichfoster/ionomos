@@ -46,11 +46,16 @@ from unpublished experiments stay out of this page.
   gives the file's replicate.
 - **DIA-NN's `report.pg_matrix.tsv` has 4 run columns, not 6.** The two
   missing runs are exactly the two with the 14-digit replicate number. That
-  number does not fit a 32-bit integer. **Not confirmed**: the job's
+  number does not fit a 32-bit integer. **FragPipe's source explains it**
+  (round 4, 2026-10-15): `TabWorkflow.manifestLoad` reads the bioreplicate
+  with `Integer.parseInt`, and a line it refuses is left out with one ERROR
+  line, "Manifest file contained some badly formatted lines", while the run
+  goes on with the other four files (exit code 0). The testbed's fake now
+  does the same. **Still to confirm** in the job's
   `ionomos_run\fragpipe_console.log`
-  (`C:\Fragpipe_Auto_Users\Chris\CS_22rv1_FLAG_AR_MA25\`) should say what
-  FragPipe did with those two lines of the manifest. Job 2 (replicates 1 and
-  2) passed all six raws to MSFragger.
+  (`C:\Fragpipe_Auto_Users\Chris\CS_22rv1_FLAG_AR_MA25\`): that ERROR line
+  with the two DMSO lines. Job 2 (replicates 1 and 2) passed all six raws to
+  MSFragger.
 - 0.5.1 looked for DIA-NN's tables in `diann-output\`. FragPipe 24 writes
   them to `dia-quant-output\`, so the job ended `done` with the warning "none
   of the expected DIA outputs found". Fixed on 2026-09-23 (the DIA output
@@ -209,7 +214,7 @@ port handles each of these, but no golden pins them.
 |---|---|---|
 | 2026-09-16 | A `config.yaml` that is not UTF-8 (Notepad saving as ANSI turns `—` into byte 0x97) still stops Ionomos 0.18.1 with a bare `UnicodeDecodeError`, not a `ConfigError` saying what to do | **Fixed, unreleased (D86)**: read as cp1252 with a warning naming the file, byte and line; `experiment.yaml` too. Confirm the warning on the PC, then remove this row |
 | 2026-10-06 | A global filter removes what one condition alone has, before testing | Fixed in D84: listed (marked) under "only in one condition", and the `FILTER_REMOVES_ONE_CONDITION` warning. Open: should the Analysis tab caution before the run? |
-| Job 1 | Two runs missing from DIA-NN's matrix | Read job 1's console log for the two DMSO files |
+| Job 1 | Two runs missing from DIA-NN's matrix | Explained by FragPipe's source (a bioreplicate beyond Java's int drops the manifest line). Read job 1's console log for the "badly formatted lines" ERROR line, then remove this row |
 | 2026-10-06 | FragPipe's `contam_` prefix is lost in DIA-NN's tables, so contaminants stay and BSA reads as `ALB` | Fixed in code (D87): the FASTA's `contam_` accessions are removed. Re-analyse the 2026-10-06 folder on the next release; "contaminants" should show −2 or more (P02769, P00761) |
 | 2026-10-06 | An empty-vector control next to the vehicle: bait-enriched proteins read as "down" | Done in D88 (unreleased): the `background` role; the lab confirms its words and thresholds (ROADMAP) |
 | 2026-10-06 | FragPipeAnalystR golden doesn't cover a real matrix's shape | Add a case with interleaved columns, a duplicated gene and a blank gene |
