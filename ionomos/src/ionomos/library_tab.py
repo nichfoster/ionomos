@@ -147,14 +147,14 @@ def _ranked(by_path: dict, extra: Callable) -> Callable:
 
 
 def candidate_rows(catalog, kind: str, *, what: str = "both", show_all: bool = False, installed_version: str = "",
-                   pinned=None, taxon: str | None = None) -> list[Row]:
+                   pinned=None, taxon: str | None = None, prefer: str = "") -> list[Row]:
     """The table of the Find on this PC dialog. By default the candidates library.recommend ranks for the method's
     kind (one per set of settings, no file with an error) and every usable FASTA (recommend_fastas), best first.
     `show_all`: every workflow and FASTA of the catalog, recommended ones first, then the rest (other kinds, files
     with problems, copies) by name. `what`: 'both' | 'workflow' | 'fasta'."""
     rows: list[Row] = []
     if what in ("both", "workflow"):
-        cands = library.recommend(catalog, kind, installed_version, pinned)
+        cands = library.recommend(catalog, kind, installed_version, pinned, prefer)
         if show_all:
             by_path = {library._key(c.info.path): c for c in cands}
             ws = sorted(catalog.workflows, key=_ranked(by_path, lambda w: (w.kind.lower() != kind.lower(),)))
@@ -335,12 +335,16 @@ def proposal_text(p) -> str:
     return "\n".join(out)
 
 
-def proposals_summary(proposals: list) -> str:
+def proposals_summary(proposals: list, notes: list[str] = ()) -> str:
+    """The Review proposals window's status: how many, and what was not proposed and why (auto_assign's notes:
+    candidates that tie, none found)."""
+    why_not = "".join(f" Not proposed: {n}." for n in notes)
     if not proposals:
-        return ("Nothing to propose: every method's workflow and FASTA is usable, or nothing better was found on "
-                "this PC (Find on this PC… lists everything).")
+        return ("Nothing to propose" + (":" + why_not if notes else
+                ": every method's workflow and FASTA is usable, or nothing better was found on this PC (Find on "
+                "this PC… lists everything)."))
     return (f"{len(proposals)} proposal(s). Nothing is changed until you press Apply; config.yaml is backed up "
-            f"first.")
+            f"first.{why_not}")
 
 
 def run_scan(cfg, *, progress: Callable[[str], None] | None = None,
@@ -737,7 +741,8 @@ class LibraryDialog(_Window):
         pinned = self.catalog.find(wf) if wf else None
         taxon = method_taxon(self.catalog, fa, Path(paths["fasta_dir"]) if paths.get("fasta_dir") else None)
         rows = candidate_rows(self.catalog, self.kind or "other", what=self._what(), show_all=self.show_all.get(),
-                              installed_version=self.installed, pinned=pinned, taxon=taxon)
+                              installed_version=self.installed, pinned=pinned, taxon=taxon,
+                              prefer=str(m.get("workflow") or ""))
         self.rows = filter_rows(rows, self.filter.get())
         self.tree.delete(*self.tree.get_children())
         for i, r in enumerate(self.rows):
@@ -856,20 +861,22 @@ class ProposalDialog(_Window):
                     cat, saved = run_scan(cfg, progress=lambda t: self.post(lambda t=t: self.status.configure(text=t)),
                                           stop=ev)
                 inst = library.installed_version(cfg)
-                props = library.auto_assign(d, cat, inst)
+                notes: list[str] = []
+                props = library.auto_assign(d, cat, inst, notes)
             except Exception as exc:  # noqa: BLE001 - shown in the window
                 log.exception("library proposals failed")
                 self.post(lambda exc=exc: self.status.configure(text=f"Could not make proposals: {exc}",
                                                                 foreground=COLORS["error"]))
                 return
-            self.post(lambda: self._show(cat, props, saved))
+            self.post(lambda: self._show(cat, props, saved, notes))
 
         _thread(work)
 
-    def _show(self, cat, props: list, saved: str) -> None:
+    def _show(self, cat, props: list, saved: str, notes: list[str] = ()) -> None:
         self.stop_btn.configure(state="disabled")
         self.catalog, self.proposals = cat, props
-        self.status.configure(text=f"{catalog_line(cat)} {proposals_summary(props)}" + (f" ({saved})" if saved else ""))
+        self.status.configure(text=f"{catalog_line(cat)} {proposals_summary(props, notes)}"
+                                   + (f" ({saved})" if saved else ""))
         self.tree.delete(*self.tree.get_children())
         for i, p in enumerate(props):
             self.tree.insert("", "end", iid=str(i), values=proposal_values(p))

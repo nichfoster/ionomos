@@ -275,6 +275,82 @@ def test_describe_workflow_in_plain_words(tmp_path, kind, want_kind, traits, set
     assert library.WorkflowInfo.from_dict(json.loads(json.dumps(info.as_dict()))).summary == info.summary
 
 
+# FragPipe 24.0's stock MS1-labelled workflows: ionquant.light / .heavy and the label mods as they ship (abridged)
+LABELLED_STOCK = {
+    "SILAC3": ("SILAC", {"ionquant__light": "K0;R0", "ionquant__medium": "K4.025107;R6.020129",
+                         "ionquant__heavy": "K8.014199;R10.008269", "msfragger__table__var_mods":
+                         "15.9949,M,true,2; 4.025107,K,true,3; 6.020129,R,true,3; 8.014199,K,true,3; "
+                         "10.008269,R,true,3"}),
+    "SILAC3-phospho": ("SILAC", {"ionquant__light": "K0;R0", "ionquant__heavy": "K8.014199;R10.008269",
+                                 "msfragger__table__var_mods": "15.9949,M,true,2; 79.96633,STY,true,2; "
+                                                               "8.014199,K,true,3; 10.008269,R,true,3"}),
+    "chemprot-ABPP-ipIAA": ("ipIAA", {"ionquant__light": "C463.2366", "ionquant__heavy": "C467.2529",
+                                      "msfragger__table__var_mods": "15.9949,M,true,3; 463.2366,C,true,3; "
+                                                                    "467.2529,C,true,3; 57.02146,C,true,3"}),
+    "chemprot-ABPP-isoTOP": ("isoTOP", {"ionquant__light": "C464.28596", "ionquant__heavy": "C470.29977",
+                                        "msfragger__table__var_mods": "15.9949,M,true,2; 464.28595,C,true,2; "
+                                                                      "470.29977,C,true,2"}),
+    "chemprot-PAL": ("PAL", {"ionquant__light": "*436.2256", "ionquant__heavy": "*442.2633",
+                             "msfragger__table__var_mods": "15.9949,M,true,2; 57.02146,C,true,3"}),
+    "chemprot-ABPP-isoDTB": ("isoDTB", {}),
+}
+
+
+@pytest.mark.parametrize("name", sorted(LABELLED_STOCK))
+def test_ms1_labelled_workflows_are_told_apart(tmp_path, name):
+    """#148: SILAC, PAL, isoTOP and ipIAA use IonQuant's labelling like isoDTB but are not isoDTB."""
+    kind, over = LABELLED_STOCK[name]
+    info = library.describe_workflow(write_wf(tmp_path / f"{name}.workflow", "isoDTB", **over))
+    assert info.kind == kind, info.summary
+    assert ("isoDTB" in info.summary) is (kind == "isoDTB"), info.summary
+    if kind == "SILAC":
+        assert "SILAC" in info.summary and "cysteine" not in info.summary
+    assert kind in library.KINDS
+
+
+def test_stock_ties_are_never_broken_by_file_name(tmp_path):
+    """#148: with a method's workflow missing, every stock workflow of the kind scores the same; the proposal is
+    FragPipe's own workflow for the experiment (or the one the method names), never the first path among equals,
+    and when the score can't tell them apart nothing is proposed and the notes say why."""
+    inst = tmp_path / "FragPipe-24.0"
+    (inst / "bin").mkdir(parents=True)
+    (inst / "bin" / "fragpipe.bat").write_text("x")
+    wfs = inst / "workflows"
+    for name, (_kind, over) in LABELLED_STOCK.items():
+        write_wf(wfs / f"{name}.workflow", "isoDTB", **over)
+    for name, label in (("Nonspecific-HLA-TMT10", "TMT-10"), ("TMT10-MS3", "TMT-10"), ("TMT10", "TMT-10"),
+                        ("TMT16", "TMT-16"), ("TMT10-acetyl", "TMT-10")):
+        write_wf(wfs / f"{name}.workflow", "TMT", tmtintegrator__channel_num=label, msfragger__misc__tag=name)
+    for name in ("DIA_DIA-Umpire_SpecLib_Quant", "DIA_SpecLib_Quant", "DIA_SpecLib_Quant_diaPASEF"):
+        write_wf(wfs / f"{name}.workflow", "DIA", msfragger__misc__tag=name)
+    ctx = Context(install_roots=[inst], installed_version="24.0")
+    cat = library.Catalog(workflows=[library.describe_workflow(p, ctx) for p in sorted(wfs.glob("*.workflow"))])
+    assert {w.source for w in cat.workflows} == {"stock"}
+    library.judge_catalog(cat, ctx)
+    empty = tmp_path / "Fragpipe_Auto" / "workflows"
+    empty.mkdir(parents=True)
+    d = {"paths": {"workflow_dir": str(empty), "fasta_dir": str(empty)},
+         "methods": {"isoDTB": {"workflow": "isoDTB.workflow"}, "TMT": {"workflow": "TMT.workflow"},
+                     "TMTpro": {"workflow": "TMT16.workflow"}, "DIA": {"workflow": "DIA.workflow"}},
+         "naming": {"methods": {"TMTpro": {"like": "TMT"}}}}
+    notes = []
+    got = {(p.method, p.what): p.candidate.info.name for p in library.auto_assign(d, cat, "24.0", notes)}
+    assert got[("isoDTB", "workflow")] == "chemprot-ABPP-isoDTB.workflow"
+    assert got[("TMT", "workflow")] == "TMT10-MS3.workflow"
+    assert got[("TMTpro", "workflow")] == "TMT16.workflow"          # the name the method asks for
+    assert got[("DIA", "workflow")] == "DIA_SpecLib_Quant.workflow"
+    best = library.recommend(cat, "TMT", "24.0")[0]
+    assert any("FragPipe's own TMT10-MS3" in r for r in best.reasons)
+    # no canonical one: the TMT ones that are left tie -> nothing proposed, and the note says why
+    for name in ("TMT10-MS3", "TMT10", "TMT16"):
+        cat.workflows = [w for w in cat.workflows if w.name != f"{name}.workflow"]
+    notes = []
+    props = library.auto_assign(d, cat, "24.0", notes)
+    assert ("TMT", "workflow") not in {(p.method, p.what) for p in props}
+    note = next(n for n in notes if n.startswith("TMT: "))
+    assert "fit equally well" in note and "Nonspecific-HLA-TMT10.workflow" in note and "adopt" in note
+
+
 def test_tmt_phospho_stays_tmt_and_says_phospho(tmp_path):
     p = write_wf(tmp_path / "TMT10-phospho.workflow", "TMT",
                  msfragger__table__var_mods="15.9949,M,true,3; 79.96633,STY,true,3; 229.16293,n^,true,1")

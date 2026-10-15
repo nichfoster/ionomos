@@ -59,7 +59,17 @@ SKIP_NAMES = {"$recycle.bin", "system volume information", ".venv", "venv", "nod
 INSTALL_SKIP = {"jre", "lib", "tools", "python", "ext", "fonts", "images", "jobs"}   # inside a FragPipe install
 INSTALL_GLOBS = ("C:/FragPipe/*", "C:/FragPipe*", "~/Downloads/FragPipe*")
 SEVERITIES = ("error", "warn", "info")
-KINDS = ("isoDTB", "TMT", "DIA", "LFQ", "phospho", "open", "other")
+KINDS = ("isoDTB", "TMT", "DIA", "LFQ", "SILAC", "isoTOP", "ipIAA", "PAL", "labelled", "phospho", "open", "other")
+# MS1-labelled workflows (ionquant.use-labeling) by the light / heavy masses FragPipe 24.0's stock workflows set in
+# ionquant.light / .heavy (chemprot-ABPP-isoDTB, -isoTOP, -ipIAA, chemprot-PAL); K/R labels are SILAC (SILAC3)
+LABEL_KINDS = (("isoDTB", (561.3387, 567.3462)), ("isoTOP", (464.28596, 470.29977)), ("ipIAA", (463.2366, 467.2529)),
+               ("PAL", (436.2256, 442.2633)))
+LABELLED_KINDS = ("isoDTB", "SILAC", "isoTOP", "ipIAA", "PAL", "labelled")
+# FragPipe's own stock workflow for a method kind, the usual one first (#148): a tie between stock workflows of the
+# kind is broken by this, never by the file name
+CANONICAL_STOCK = {"isoDTB": ("chemprot-ABPP-isoDTB", "isoDTB-ABPP"), "TMT": ("TMT10-MS3", "TMT10", "TMT16"),
+                   "DIA": ("DIA_SpecLib_Quant",), "LFQ": ("LFQ-MBR",)}
+TIE = 0.5                                            # candidates closer than this are a tie: nothing is proposed
 
 
 class LibraryError(ValueError):
@@ -336,7 +346,8 @@ MOD_NAMES = (
     (229.16293, "TMT"), (304.20715, "TMTpro"), (561.3387, "isoDTB light"), (567.3462, "isoDTB heavy"),
     (-17.0265, "pyro-glu"), (-18.0106, "pyro-glu"), (114.04293, "GG (ubiquitin)"), (0.98402, "deamidation"),
     (144.10207, "iTRAQ-4"), (28.0313, "dimethyl"), (14.01565, "methyl"), (8.0142, "Lys8 (SILAC)"),
-    (10.00827, "Arg10 (SILAC)"),
+    (10.00827, "Arg10 (SILAC)"), (4.025107, "Lys4 (SILAC)"), (6.020129, "Arg6 (SILAC)"),
+    (464.28596, "isoTOP light"), (470.29977, "isoTOP heavy"), (463.2366, "ipIAA light"), (467.2529, "ipIAA heavy"),
 )
 _SITES = {"[^": "protein N-term", "n^": "peptide N-term", "c^": "peptide C-term", "]^": "protein C-term",
           "n-term peptide": "peptide N-term", "c-term peptide": "peptide C-term",
@@ -372,8 +383,30 @@ def parse_mods(value: str, fixed: bool = False) -> list[tuple[float, str, bool]]
     return out
 
 
+def _label_kind(props: dict, var: list) -> str:
+    """What an MS1-labelled workflow (ionquant.use-labeling) labels, from ionquant.light / .medium / .heavy
+    ('C561.3387', 'K0;R0', 'K8.014199;R10.008269', '*436.2256'): isoDTB / isoTOP / ipIAA / PAL by their masses,
+    SILAC for labels on K and R only; without labels set, an isoDTB mass among the variable mods; else labelled."""
+    masses, sites = [], set()
+    for key in ("ionquant.light", "ionquant.medium", "ionquant.heavy"):
+        for part in re.split(r"[;,\s]+", props.get(key, "")):
+            m = re.match(r"^([A-Za-z*\[\]^]*)(-?\d+(?:\.\d+)?)$", part.strip())
+            if m:
+                sites.add(m.group(1).upper())
+                masses.append(float(m.group(2)))
+    for kind, label in LABEL_KINDS:
+        if any(abs(x - y) < 0.002 for x in masses for y in label):
+            return kind
+    if sites and sites <= {"K", "R"}:
+        return "SILAC"
+    if not masses and any(abs(m - x) < 0.002 for m, _s, _e in var for x in (561.3387, 567.3462)):
+        return "isoDTB"
+    return "labelled"
+
+
 def workflow_kind(props: dict) -> tuple[str, list[str]]:
-    """(kind, traits) of a workflow. Kind: fpfolder.workflow_kind's isoDTB / TMT / DIA / LFQ, then an isoDTB label
+    """(kind, traits) of a workflow. Kind: fpfolder.workflow_kind's TMT / DIA / LFQ, or for MS1-labelled
+    quantification which label (isoDTB, SILAC, isoTOP, ipIAA, PAL, else labelled: _label_kind), then an isoDTB label
     in the variable mods, then open / mass-offset (a wide precursor window in Da, or mass offsets), then phospho
     (79.9663 on STY switched on), else other."""
     from ionomos.fpfolder import workflow_kind as quant_kind
@@ -391,10 +424,12 @@ def workflow_kind(props: dict) -> tuple[str, list[str]]:
     if (offsets and offsets not in ("0", "0.0")) or props.get("msfragger.mass_offsets_detailed", "").strip():
         traits.append("mass-offset")
     base = quant_kind(props)
+    if base == "isoDTB":   # fpfolder: MS1 quant with labelling on, whatever the label (#148)
+        base = _label_kind(props, var)
     if base in (None, "LFQ") and any(abs(m - x) < 0.002 for m, _s, _e in var for x in (561.3387, 567.3462)):
         base = "isoDTB" if base == "LFQ" else base
         traits.append("isoDTB label")
-    if base in ("isoDTB", "TMT", "DIA"):
+    if base in ("TMT", "DIA", *LABELLED_KINDS):
         return base, traits
     if "open" in traits or "mass-offset" in traits:
         return "open", traits
@@ -513,9 +548,15 @@ def _kind_words(info: WorkflowInfo, props: dict) -> str:
         lt = info.label_type or "TMT (label type not set)"
         ms3 = " MS3" if "ms3" in info.name.lower() or "MS3" in info.description else ""
         return f"A {lt}{ms3} search with TMT-Integrator"
-    if info.kind == "isoDTB":
+    if info.kind in LABELLED_KINDS:
         mbr = st.get("match-between-runs")
-        return "An isoDTB search (light/heavy labelled cysteines, IonQuant)" + (f", MBR {mbr}" if mbr else "")
+        what = {"isoDTB": "An isoDTB search (light/heavy labelled cysteines, IonQuant)",
+                "SILAC": "A SILAC search (heavy lysine and arginine, IonQuant)",
+                "isoTOP": "An isoTOP-ABPP search (light/heavy TEV tags on cysteines, IonQuant)",
+                "ipIAA": "An ipIAA search (light/heavy isopropyl iodoacetamide on cysteines, IonQuant)",
+                "PAL": "A photoaffinity labelling (PAL) search (light/heavy probe, IonQuant)",
+                }.get(info.kind, "A light/heavy labelled search (IonQuant)")
+        return what + (f", MBR {mbr}" if mbr else "")
     if info.kind == "DIA":
         lib = " with a spectral library from MSFragger" if "spectral library" in st else ""
         return f"A DIA search with DIA-NN{lib}"
@@ -1498,21 +1539,38 @@ def _penalty(flags: list[Flag]) -> tuple[float, list[str]]:
     return -40.0 * len(errs) - 3.0 * len(warns), words
 
 
+def _stem(name: str) -> str:
+    return name[:-len(WORKFLOW_SUFFIX)] if name.lower().endswith(WORKFLOW_SUFFIX) else name
+
+
+def canonical_rank(name: str, kind: str, prefer: str = "") -> int | None:
+    """0 for the stock workflow FragPipe names for this kind of experiment (or the one the method asks for by name,
+    `prefer`), 1, 2 ... for the next ones (CANONICAL_STOCK); None for any other."""
+    names = ([_stem(prefer)] if prefer else []) + list(CANONICAL_STOCK.get(kind, ()))
+    stem = _stem(name).lower()
+    return next((i for i, n in enumerate(names) if n.lower() == stem), None)
+
+
 def recommend(catalog: Catalog, kind: str, installed_version: str = "",
-              pinned: WorkflowInfo | None = None) -> list[Candidate]:
+              pinned: WorkflowInfo | None = None, prefer: str = "") -> list[Candidate]:
     """Workflows of this kind, one candidate per set of settings (the same settings under several names count
     once), best first. The score and its reasons, in words: finished searches that used the settings, the
-    FragPipe version it was saved with against the installed one, whether its FASTA exists, pinned / stock."""
+    FragPipe version it was saved with against the installed one, whether its FASTA exists, pinned / stock, and
+    whether it is FragPipe's own stock workflow for this kind (CANONICAL_STOCK; `prefer`: the workflow name the
+    method asks for). Candidates of equal score are in no meaningful order: auto_assign proposes none of them."""
     inst = _ver(installed_version)
     groups = _groups([w for w in catalog.workflows if w.kind.lower() == kind.lower() and not w.error
                       and Path(w.path).is_file()])   # a catalog can be older than the disk
     out: list[Candidate] = []
     for members in groups.values():
         order = {"pinned": 0, "stock": 1, "run": 2, "cache": 3, "other": 4}
+        def newest(w):   # the newest FragPipe version first, then the newest file (#156)
+            v = _ver(w.saved_with) or (-1, -1)
+            return (-v[0], -v[1], -w.mtime)
         if pinned is not None:
-            members.sort(key=lambda w: (_key(w.path) != _key(pinned.path), order.get(w.source, 9), -w.mtime))
+            members.sort(key=lambda w: (_key(w.path) != _key(pinned.path), order.get(w.source, 9), *newest(w)))
         else:
-            members.sort(key=lambda w: (order.get(w.source, 9), -w.mtime))
+            members.sort(key=lambda w: (order.get(w.source, 9), *newest(w)))
         rep = members[0]
         score, reasons = 0.0, []
         runs = [w for w in members if w.finished]
@@ -1548,6 +1606,14 @@ def recommend(catalog: Catalog, kind: str, installed_version: str = "",
         if any(w.source == "stock" for w in members):
             score += 2
             reasons.append("a stock workflow of the FragPipe installation")
+            ranks = [(r, w) for w in members if w.source == "stock"
+                     for r in [canonical_rank(w.name, kind, prefer)] if r is not None]
+            if ranks:
+                r, w = min(ranks, key=lambda x: x[0])
+                score += max(4.0 - r, 1.0)
+                reasons.append(f"FragPipe's own {_stem(w.name)}, "
+                               + ("the workflow name the method asks for" if prefer and r == 0
+                                  else f"the usual stock workflow for {kind}"))
         flags = [f for f in rep.flags if f.code not in ("WF_NO_RUNS",)]
         pen, words = _penalty(flags)
         score += pen
@@ -1638,10 +1704,30 @@ def _lab_taxon(catalog: Catalog, fasta_dir: Path | None) -> str | None:
     return best[0][0] if best and best[0][1] else None
 
 
-def auto_assign(cfg_dict: dict, catalog: Catalog, installed_version: str = "") -> list[Proposal]:
+def _clear_best(cands: list[Candidate]) -> tuple[Candidate | None, list[Candidate]]:
+    """(the best candidate, []) when it is clearly ahead; (None, the tied ones) when the score can't tell (#148)."""
+    if not cands:
+        return None, []
+    tied = [c for c in cands if cands[0].score - c.score < TIE]
+    return (cands[0], []) if len(tied) == 1 else (None, tied)
+
+
+def _tie_note(key: str, what: str, tied: list[Candidate], kind: str) -> str:
+    names = ", ".join(c.info.name for c in tied[:4]) + (f" and {len(tied) - 4} more" if len(tied) > 4 else "")
+    how = (f"`ionomos library list workflows --kind {kind}`" if what == "workflow"
+           else "`ionomos library list fastas`")
+    return (f"{key}: {len(tied)} {what}s fit equally well ({names}); none is proposed, so as not to pick by file "
+            f"name. Pick one: {how}, then `ionomos library adopt PATH --method {key}` (or Find on this PC… in the "
+            f"Methods tab)")
+
+
+def auto_assign(cfg_dict: dict, catalog: Catalog, installed_version: str = "",
+                notes: list[str] | None = None) -> list[Proposal]:
     """For every FragPipe method whose workflow or FASTA is missing or has an error, the best candidate.
-    A method whose files are fine is left alone. Nothing is changed: the caller applies the proposals
+    A method whose files are fine is left alone. When candidates tie (the score can't tell them apart) or there is
+    none, nothing is proposed and `notes` says why. Nothing is changed: the caller applies the proposals
     (apply_proposals, then configio.write_config, which keeps a backup)."""
+    notes = [] if notes is None else notes
     paths = cfg_dict.get("paths") or {}
     wf_dir = Path(paths["workflow_dir"]) if paths.get("workflow_dir") else None
     fa_dir = Path(paths["fasta_dir"]) if paths.get("fasta_dir") else None
@@ -1666,10 +1752,16 @@ def auto_assign(cfg_dict: dict, catalog: Catalog, installed_version: str = "") -
                 if errs:
                     why = errs[0].text
             if why:
-                cands = [c for c in recommend(catalog, kind, installed_version)
+                cands = [c for c in recommend(catalog, kind, installed_version, prefer=name)
                          if not any(f.severity == "error" for f in c.flags)]
-                if cands:
-                    out.append(Proposal(key, "workflow", name, why, cands[0]))
+                best, tied = _clear_best(cands)
+                if best is not None:
+                    out.append(Proposal(key, "workflow", name, why, best))
+                elif tied:
+                    notes.append(_tie_note(key, "workflow", tied, kind))
+                else:
+                    notes.append(f"{key}: no {kind} workflow without a problem was found on this PC; nothing "
+                                 f"proposed (Find on this PC… lists every workflow)")
         fname = str(m.get("fasta") or "")
         current_fa = _pinned_file(fa_dir, fname) if (fa_dir and fname) else None
         why = ""
@@ -1683,8 +1775,14 @@ def auto_assign(cfg_dict: dict, catalog: Catalog, installed_version: str = "") -
         if why:
             cands = [c for c in recommend_fastas(catalog, taxon, kind)
                      if not any(f.severity == "error" for f in c.flags)]
-            if cands:
-                out.append(Proposal(key, "fasta", fname, why, cands[0]))
+            best, tied = _clear_best(cands)
+            if best is not None:
+                out.append(Proposal(key, "fasta", fname, why, best))
+            elif tied:
+                notes.append(_tie_note(key, "FASTA", tied, kind))
+            else:
+                notes.append(f"{key}: no usable FASTA was found on this PC; nothing proposed (Download from UniProt… "
+                             f"or `ionomos fasta download` makes one)")
     return out
 
 
@@ -1848,7 +1946,10 @@ def update_check(catalog: Catalog, cfg, installed_version: str = "") -> list[Fla
             else:
                 info = describe_workflow(wf, ctx, evidence=False)
                 saved = _ver(info.saved_with)
-                for s in catalog.workflows:
+                order = sorted(catalog.workflows, key=lambda s: (
+                    canonical_rank(s.name, info.kind, m.workflow) is None, canonical_rank(s.name, info.kind,
+                                                                                          m.workflow) or 0, s.name))
+                for s in order:
                     sv = _ver(s.saved_with)
                     if s.source == "stock" and s.kind == info.kind and sv and saved and sv > saved \
                             and (not _ver(installed_version) or sv[0] == _ver(installed_version)[0]):
@@ -2128,13 +2229,15 @@ def _cli_recommend(args, cfg, cat: Catalog) -> int:
     for key in cfg.methods:
         kind = cfg.kind(key)
         pin = cat.find(ctx.pinned[kind]) if kind in ctx.pinned else None
-        report[key] = {"kind": kind, "workflows": recommend(cat, kind, inst, pin)[:3],
+        report[key] = {"kind": kind, "workflows": recommend(cat, kind, inst, pin, cfg.methods[key].workflow)[:3],
                        "fastas": recommend_fastas(cat, taxon, kind)[:3]}
-    proposals = auto_assign(d, cat, inst)
+    notes: list[str] = []
+    proposals = auto_assign(d, cat, inst, notes)
     if args.json:
         print(json.dumps({"methods": {k: {"kind": v["kind"], "workflows": [c.as_dict() for c in v["workflows"]],
                                           "fastas": [c.as_dict() for c in v["fastas"]]} for k, v in report.items()},
-                          "proposals": [p.as_dict() for p in proposals]}, indent=1, ensure_ascii=False))
+                          "proposals": [p.as_dict() for p in proposals], "not_proposed": notes},
+                         indent=1, ensure_ascii=False))
     else:
         for key, v in report.items():
             print(f"{key} ({v['kind']}):")
@@ -2148,8 +2251,12 @@ def _cli_recommend(args, cfg, cat: Catalog) -> int:
             print("Proposed (methods whose files are missing or broken):")
             for p in proposals:
                 print(f"  {p.text()}")
-        else:
+        elif not notes:
             print("Every method's workflow and FASTA is there and usable: nothing proposed.")
+        if notes:
+            print("Not proposed:")
+            for n in notes:
+                print(f"  {n}")
     if args.apply and proposals:
         lines = apply_proposals(cfg, d, proposals, cat)
         _write_cfg(cfg, d)

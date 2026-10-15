@@ -189,6 +189,10 @@ def test_proposals_are_listed_with_reasons_and_nothing_is_applied(pc):
     assert "1 proposal(s)" in library_tab.proposals_summary(props)
     assert "Nothing to propose" in library_tab.proposals_summary([])
     assert sorted(p.name for p in (pc["auto"] / "workflows").iterdir()) == before
+    # #148: what was not proposed (a tie) is said in the window's status
+    tie = "TMT: 2 workflows fit equally well (a, b); none is proposed"
+    assert f"Not proposed: {tie}" in library_tab.proposals_summary([], [tie])
+    assert f"Not proposed: {tie}" in library_tab.proposals_summary(props, [tie])
 
 
 # ------------------------------------------------------------------ workers --

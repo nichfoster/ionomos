@@ -119,10 +119,15 @@ with source `cache`.
 
 **Kind** (`kind`, plus `traits`): first what it quantifies, from its `run-*`
 switches as `fpfolder.workflow_kind` reads them — TMT-Integrator on → `TMT`;
-DIA-NN on → `DIA`; MS1 quant (`quantitation.run-label-free-quant`) with
-`ionquant.use-labeling` → `isoDTB`, without → `LFQ`. An isoDTB light/heavy
-mass (561.3387 / 567.3462) among the enabled variable mods also makes it
-`isoDTB` (trait `isoDTB label`). If none of isoDTB / TMT / DIA: a precursor
+DIA-NN on → `DIA`; MS1 quant (`quantitation.run-label-free-quant`) without
+`ionquant.use-labeling` → `LFQ`; with it, the label (`ionquant.light` /
+`.medium` / `.heavy`, as FragPipe 24.0's stock workflows set them) says which:
+561.3387 / 567.3462 → `isoDTB` (chemprot-ABPP-isoDTB), 464.286 / 470.300 →
+`isoTOP`, 463.237 / 467.253 → `ipIAA`, 436.226 / 442.263 → `PAL` (chemprot-PAL),
+labels on K and R only → `SILAC` (SILAC3), none of these → `labelled`
+(without labels set, an isoDTB mass among the variable mods → `isoDTB`). An
+isoDTB light/heavy mass among the enabled variable mods of a label-free
+workflow also makes it `isoDTB` (trait `isoDTB label`). If none of isoDTB / TMT / DIA: a precursor
 window in Da at least 50 wide (`msfragger.precursor_mass_units=0`, Open:
 −150 to 500) or mass offsets (`msfragger.mass_offsets` other than 0, or
 `mass_offsets_detailed`) → `open` (trait `open` or `mass-offset`);
@@ -144,6 +149,9 @@ channel whose name contains `tmtintegrator.ref_tag`), group-by, protein
 normalisation, minimum purity; MS1 quant on/off/labelled; match-between-runs;
 DIA-NN; spectral library; Percolator / PeptideProphet; protein FDR from
 `phi-report.filter`.
+
+SILAC, isoTOP, ipIAA and PAL are their own kinds, so a stock SILAC3 is never a
+candidate for the isoDTB method and is never called an isoDTB search.
 
 **Summary**, e.g. *"A TMT-10 MS3 search with TMT-Integrator: carbamidomethyl
 C, TMT K fixed; oxidation M, acetyl protein N-term, TMT peptide N-term
@@ -248,11 +256,17 @@ content hash (its representative: the method's current file, else pinned,
 stock, the newest run), best first, with the reasons in words, e.g. *"used in
 6 finished search(es), the latest 2026-08-17; saved with the installed FragPipe
 24.0; its FASTA exists"*. Points: 4 per finished search (at most 10 counted);
-+10 saved with the installed major version, −3 per major version older, −8
-newer; +5 its FASTA exists; +6 it is the method's current workflow, +3 another
-pinned one; +2 stock; −40 per error flag, −3 per warning. Files that are no
-longer on disk are left out. These weights are Ionomos' choice; they order,
-the reasons explain.
++10 saved with the installed major version (the newest version among the copies
+with the same settings; that copy represents them), −3 per major version older,
+−8 newer; +5 its FASTA exists; +6 it is the method's current workflow, +3 another
+pinned one; +2 stock; FragPipe's own stock workflow for the kind
+(`CANONICAL_STOCK`: isoDTB → `chemprot-ABPP-isoDTB` (22.0: `isoDTB-ABPP`), TMT →
+`TMT10-MS3`, `TMT10`, `TMT16`, DIA → `DIA_SpecLib_Quant`, LFQ → `LFQ-MBR`) +4 for
+the first, +3, +2 for the next; the stock workflow whose name the method's
+`workflow:` asks for (e.g. `TMT16.workflow`) counts as the first; −40 per error
+flag, −3 per warning. Files that are no longer on disk are left out. These
+weights are Ionomos' choice; they order, the reasons explain. Candidates within
+0.5 points of each other (`TIE`) are a tie: their order means nothing.
 
 `recommend_fastas(catalog, taxon)`: +15 the organism asked for (−30 another, 0 when its organism is unknown),
 3 per finished search that used it (by path, else by file name), +10 usable
@@ -261,9 +275,13 @@ the FASTA folder, and the same flag penalties. `auto_assign` asks for the
 organism of the FASTAs already in the FASTA folder, else of those finished
 searches used.
 
-`auto_assign(cfg_dict, catalog, installed_version) -> [Proposal]` proposes the
+`auto_assign(cfg_dict, catalog, installed_version, notes) -> [Proposal]` proposes the
 best candidate without an error for every method whose workflow (FragPipe
-methods) or FASTA is missing or has an error, and for nothing else.
+methods) or FASTA is missing or has an error, and for nothing else. When the
+best candidates tie, it proposes none of them (never the first file name among
+equals) and `notes` says so with the tied names and how to pick one; also when
+nothing usable was found. `recommend` prints them under *Not proposed*, the
+app's Review proposals… in its status line.
 `apply_proposals` adopts them and edits the dict; the caller writes it.
 
 ## Adopting
