@@ -21,13 +21,11 @@ Academia and an Enterprise edition. Ionomos only starts the executable it is poi
 """
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 
 from ionomos.config import Config
-from ionomos.fragpipe import Hold, JobError, RunSpec, _find_file, check_raws
+from ionomos.fragpipe import Hold, JobError, RunSpec, _find_file, check_raws, move_aside
 from ionomos.ledger import Job
 
 WORKDIR = "diann"
@@ -161,10 +159,7 @@ def prepare(job: Job, cfg: Config) -> DiannSpec:
 def write_inputs(spec: DiannSpec) -> str | None:
     """ionomos_run/diann.cfg and an empty diann/ folder; an old diann/ is kept, renamed, never deleted."""
     spec.run_dir.mkdir(parents=True, exist_ok=True)
-    moved = None
-    if spec.workdir.exists() and any(spec.workdir.iterdir()):
-        moved = f"{WORKDIR}_previous_{datetime.now():%Y%m%d-%H%M%S}"
-        os.replace(spec.workdir, spec.dest / moved)
+    moved = move_aside(spec.workdir)
     spec.workdir.mkdir(exist_ok=True)
     spec.workflow.write_text("\n".join(spec.cfg_lines()) + "\n", encoding="utf-8", newline="\n")
     return moved

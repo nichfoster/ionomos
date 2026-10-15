@@ -58,7 +58,7 @@ HOLD_TOPICS = (
     (r"DIA-NN not found", "search.hold-diann"),
     (r"spectral library", "search.hold-library"),
     (r"MaxQuant not found", "search.hold-maxquant"),
-    (r"mqpar .* not in", "search.hold-mqpar"),
+    (r"mqpar .* (not in|can't be used)", "search.hold-mqpar"),
     (r"Sage not found", "search.hold-sage"),
     (r"raw file converter not found", "search.hold-converter"),
     (r"Sage settings", "search.hold-sage-config"),
