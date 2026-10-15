@@ -3,7 +3,9 @@ Build Ionomos.exe + ionomos-cli.exe on Windows with PyInstaller, then a release 
     powershell -ExecutionPolicy Bypass -File deploy\build_exe.ps1
 Needs Python 3.11+ (py launcher) with tcl/tk. Output: dist\Ionomos-<version>-windows\ and .zip
 Run this once on any Windows machine (can be the lab PC itself); copy the zip anywhere.
+-NoInstaller: stop after the zip (no Inno Setup, and no winget/choco install of it when it is missing).
 #>
+param([switch]$NoInstaller)
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location $repo
@@ -17,12 +19,16 @@ $vpy = "ionomos\.venv-build\Scripts\python.exe"
 & $vpy -m pip install -q -e ".\ionomos[dev]"
 $ver = & $vpy -c "import ionomos; print(ionomos.__version__)"
 # stamp the build: commit + date end up in `--version`, the app's footer and every problem report
-$commit = (git rev-parse --short HEAD 2>$null); if (-not $commit) { $commit = "unknown" }
+$commit = $null; try { $commit = (git rev-parse --short HEAD 2>$null) } catch {}  # no .git (a source zip): Stop would end the build
+if (-not $commit) { $commit = "unknown" }
 $built = Get-Date -Format "yyyy-MM-dd"
 Set-Content -Path "ionomos\src\ionomos\_build.py" -Encoding UTF8 -Value "COMMIT = `"$commit`"`nBUILT = `"$built`""
 Write-Host "==> PyInstaller (ionomos $ver, build $commit)"
 & $vpy -m PyInstaller --noconfirm --clean --distpath dist\exe --workpath build\pyi deploy\ionomos.spec
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
+# every module and data file of the package is inside both exes (a missing one fails on the lab PC, not here)
+& $vpy deploy\check_frozen.py dist\exe\Ionomos.exe dist\exe\ionomos-cli.exe
+if ($LASTEXITCODE -ne 0) { Remove-Item "ionomos\src\ionomos\_build.py" -ErrorAction SilentlyContinue; throw "the frozen exe lacks part of the ionomos package (see above)" }
 $out = "dist\Ionomos-$ver-windows"
 if (Test-Path $out) { Remove-Item $out -Recurse -Force }
 New-Item -ItemType Directory -Path $out | Out-Null
@@ -42,6 +48,7 @@ Write-Host "==> $out.zip"
 Get-ChildItem $out
 
 # ---- the installer (Inno Setup 6) -> dist\Ionomos-Setup-<ver>.exe
+if ($NoInstaller) { Remove-Item "ionomos\src\ionomos\_build.py" -ErrorAction SilentlyContinue; Write-Host "==> -NoInstaller: no Setup exe"; exit 0 }
 $iscc = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
           "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $iscc) {

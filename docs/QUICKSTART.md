@@ -48,6 +48,21 @@ found it:
 Every number is invented; the demo gene sets are simplified, not curated
 pathways.
 
+**Then real data (1 minute, needs the internet once):**
+
+```bash
+ionomos example --open
+```
+
+This downloads the example datasets of FragPipe-Analyst's own paper from
+Zenodo (20.9 MB, CC BY 4.0) and checks them against the published
+checksums. It writes `./ionomos_example/` with three real experiments: a
+label-free cyclin D1 pull-down, and kidney tumour against normal tissue
+measured by DIA and by TMT. Each one is analysed. Each folder's `README.txt`
+says what its report should show. Without internet, the message names the
+URL; download the file by hand and run `ionomos example --zip <file>`.
+[EXAMPLE.md](EXAMPLE.md) walks through the three reports.
+
 ## 3. Your own data (5 minutes)
 
 ```bash

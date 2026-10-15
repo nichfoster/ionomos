@@ -84,6 +84,7 @@ lab: [docs/ROADMAP.md](docs/ROADMAP.md).
 | [ASSISTANT.md](docs/ASSISTANT.md) | The local assistant (`ionomos ask`): what it reads, how answers are checked against their sources, how to set it up, and what is and is not tested yet |
 | [VISION.md](docs/VISION.md) | What Ionomos is for and who it is for, its principles (with decision numbers), what it is not, how it compares with FragPipe-Analyst, MSstats, Perseus and others, the road to publishing, and what v1.0 means |
 | [QUICKSTART.md](docs/QUICKSTART.md) | **New here?** `pip install ionomos`, `ionomos demo`, then `ionomos analyze` on your own table: what it reads and what the report shows |
+| [EXAMPLE.md](docs/EXAMPLE.md) | The real-data example (`ionomos example`): FragPipe-Analyst's published LFQ, DIA and TMT datasets downloaded from Zenodo (CC BY 4.0) and analysed; a walk through the three reports, and what Ionomos does differently |
 | [SCOPE.md](docs/SCOPE.md) | Problem statement, in/out of scope today and what moved, users, constraints, and the v1 lab plan it started from |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, data flow, job state machine, on-disk layout |
 | [NAMING_CONVENTION.md](docs/NAMING_CONVENTION.md) | The folder/file naming spec users must follow + the optional `experiment.yaml` |
@@ -108,6 +109,7 @@ lab: [docs/ROADMAP.md](docs/ROADMAP.md).
 ```bash
 pip install ionomos        # until it is on PyPI: pip install "git+https://github.com/nichfoster/ionomos#subdirectory=ionomos"
 ionomos demo --open        # a simulated experiment and its report, offline
+ionomos example --open     # real published data (20.9 MB download): label-free, DIA and TMT reports
 ionomos analyze path/to/your/table.tsv --open
 ionomos compare path/to/experiment old_result.tsv   # does it agree with your other analysis?
 ionomos benchmark --grid quick     # sensitivity and false discoveries on simulated data

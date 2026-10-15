@@ -175,7 +175,7 @@ In order. ROADMAP 5D has each step with an owner.
   `results/` and the fields of `analysis.json`. Python module internals are
   not an API. A key or option that goes away warns for at least one minor
   release first. The LabWatch-era names keep working (D21).
-- **Python versions:** those CI runs (today 3.11, 3.12 and 3.14) on Windows
+- **Python versions:** those CI runs (today 3.11 to 3.14) on Windows
   and Linux; the package is also tried on macOS on each tag.
 - **Results don't change silently.** A change in a default or a numerical
   method that changes results is a minor version at least, has a CHANGELOG

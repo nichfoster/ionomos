@@ -277,7 +277,9 @@ def from_tmt_abundance(path: Path, annotation: list[dict] | None = None) -> Quan
     cols = [h for h in header[start:] if h not in _TMT_META]
     cols = [c for c in cols if sum(num(r.get(c)) is not None for r in rows[:200]) > 0] or cols
     cond = {c: (by_sample[c]["condition"] if c in by_sample else condition_of(c)) for c in cols}
-    feats = [Feature(id=r.get("Index") or r.get("ProteinID", ""), label=r.get("Index") or r.get("Gene") or "",
+    # the gene tables: Index is the gene, ProteinID the accession; the protein tables: Index is the accession and
+    # Gene the gene, which is the label (the volcano's names, enrichment by gene symbol)
+    feats = [Feature(id=r.get("Index") or r.get("ProteinID", ""), label=r.get("Gene") or r.get("Index") or "",
                      description=r.get("ProteinID", ""), peptides=_count(r.get("NumberPSM"))) for r in rows]
     vals = [[num(r.get(c)) for c in cols] for r in rows]
     reps = {}

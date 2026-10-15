@@ -27,6 +27,9 @@ Command line.
                                                    correlation, dose-response, time course, liganded sites), in the
                                                    lab's export style (analysis.export); PNG with a renderer (D68)
     ionomos demo     [FOLDER] [--open]            a simulated experiment + its report (offline, no lab setup)
+    ionomos example  [FOLDER] [--dataset apms|dia|tmt] [--zip PATH] [--list] [--open]
+                                                   real published data (FragPipe-Analyst's examples, Zenodo, CC BY
+                                                   4.0) downloaded, checked and analysed: LFQ, DIA, TMT (example.py)
     ionomos compare  FOLDER REFERENCE [--by id|gene] [--open]
                                                    an Ionomos analysis against a reference result of the same experiment
                                                    (another Ionomos run, FragPipe-Analyst, limma, MSstats, Perseus, R):
@@ -1310,6 +1313,9 @@ def main(argv: list[str] | None = None) -> int:
     dm.add_argument("--quiet", action="store_true", help="no progress lines")
     dm.add_argument("--open", action="store_true", help="open the report when done")
     dm.set_defaults(fn=cmd_demo)
+    from ionomos import example
+
+    example.add_parser(sub)  # `ionomos example`: real published data, downloaded (docs/EXAMPLE.md); sets its own fn
     cp = sub.add_parser("compare", help="compare an Ionomos analysis with a reference result for the same experiment",
                         description="Compare an Ionomos analysis with another result for the same experiment: "
                                     "features matched by ID or gene, agreement of log2 fold changes (Pearson, "

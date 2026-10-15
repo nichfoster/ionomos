@@ -37,7 +37,7 @@ a = Analysis(
                    "ionomos.notify", "ionomos.downstream.compare", "ionomos.downstream.benchmark",
                    "ionomos.downstream.phospho",  # opt-in phosphosites, KSEA, STRING (D79)
                    "ionomos.library", "ionomos.fastasource", "ionomos.library_tab",  # D89, D90 (Methods tab)
-                   "ionomos.tmtkit", "ionomos.tmt_editor",  # D91: the TMT channel editor (imported on demand)
+                   "ionomos.tmtkit", "ionomos.tmt_editor", "ionomos.downstream.tmtqc",  # D91: TMT editor, TMT QC
                    "ionomos.uinav",  # the Today tab, keys, the remembered window (docs/UI.md)
                    "tkinter.colorchooser"],
     hookspath=[],

@@ -33,8 +33,9 @@ cd ionomos/tests/js && npm ci && npm test                         # the report's
 fake FragPipe, the testbed, the stress run) and
 [docs/DEV_LOOP.md](docs/DEV_LOOP.md) the Mac ↔ GitHub ↔ PC loop. Tests that
 open real Tk windows skip locally and run in CI; set `IONOMOS_GUI_TESTS=1`
-only if you want windows over your screen. CI runs Python 3.11, 3.12 and 3.14
-on Linux and Windows.
+only if you want windows over your screen. CI runs Python 3.11 to 3.14 on
+Linux and 3.12 and 3.14 on Windows, and builds and installs the wheel on every
+push.
 
 ## The rules
 

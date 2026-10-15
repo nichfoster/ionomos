@@ -186,8 +186,17 @@ cd /tmp && /tmp/fresh/bin/ionomos demo --open      # from a folder that is not t
 hand): builds, `twine check`, installs the wheel into a fresh venv on Windows,
 macOS and Linux (Python 3.11 and 3.14) and the sdist on Linux, and runs
 `ionomos demo` and `ionomos analyze` from them. It uploads to PyPI only once
-the maintainer has set up trusted publishing (the steps are at the top of the
-workflow file).
+the maintainer has set up trusted publishing (DEV_LOOP.md, "Releasing").
+The `package` job of `tests.yml` runs a shorter version on every push: build,
+`twine check --strict`, the wheel holds every module and data file of the
+package and nothing else, the sdist holds no tests (`ionomos/MANIFEST.in`),
+then the wheel alone in a fresh venv: `--version`, `demo`, `analyze`, `export
+--list`, `help`, `spectronaut-columns`, `library|fasta|tmt --help`.
+
+The exe gets the same kind of check at build time: `deploy/check_frozen.py`
+(run by `build_exe.ps1` and `build_app_mac.sh`) fails the build when a module
+or data file of the package is not inside the exe, the way a module reached
+only by name, or a new data folder missing from the spec's `datas`, would be.
 
 ## Stress testing
 

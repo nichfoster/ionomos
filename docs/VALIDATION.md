@@ -117,6 +117,23 @@ renamed, rewritten in each layout), so the right verdict is known. **Not
 tested on a real export of any of these tools**: the column layouts are the
 documented ones.
 
+### Real published data: `ionomos example` (no comparison possible yet)
+
+`ionomos example` ([EXAMPLE.md](EXAMPLE.md)) analyses the published inputs of
+FragPipe-Analyst's own tutorials (Zenodo 13147961, CC BY 4.0): an AP-MS
+label-free pull-down, and ccRCC tumour against normal tissue by DIA and by
+TMT. **There is no real-data row for it in the table above, and no verdict.**
+FragPipe-Analyst's results for these data are not published anywhere we
+could find (2026-10-15): not in the Zenodo record, the tutorial pages or
+FragPipeAnalystR's vignettes. Those show plots, and they name markers without
+numbers. R is not on the machine where the example was built, so
+FragPipeAnalystR was not run on it either. What can be said, and nothing more:
+the proteins the tutorials and vignettes name go the same way in Ionomos
+(cyclin D1's CDK partners up in the pull-down; CA9 and AHNAK2 up, NDUFV2,
+PIGR and SFRP1 down in tumours, by DIA and by TMT). That is a sanity check,
+not a validation. EXAMPLE.md says how to make the comparison with
+`ionomos compare` once someone has FragPipe-Analyst's table for these data.
+
 ## Accuracy against known truth: `ionomos benchmark`
 
 ### Simulated data

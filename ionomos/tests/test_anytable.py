@@ -100,6 +100,20 @@ def test_maxquant_protein_groups(tmp_path):
     _volcanos_ok(ws, out)
 
 
+def test_a_diann_pg_matrix_on_its_own_counts_only_the_runs_as_samples(tmp_path):
+    """`ionomos analyze report.pg_matrix.tsv`: DIA-NN 1.9+ writes N.Sequences and N.Proteotypic.Sequences (whole
+    numbers per protein) before the runs; read as samples they made two one-sample conditions (found by running
+    the installed wheel on the demo's table, 0.18.1)."""
+    rng = random.Random(2)
+    h = ["Protein.Group", "Protein.Ids", "Protein.Names", "Genes", "First.Protein.Description", "N.Sequences",
+         "N.Proteotypic.Sequences", *["C:\\raw\\" + f"{c}_{r}.raw" for c, r in SAMPLES]]
+    rows = [[f"P{k}", f"P{k}", f"{g}_HUMAN", g, f"{g} protein", 3 + k % 9, 2 + k % 7,
+             *[round(_intensity(rng, c, g)) for c, _ in SAMPLES]] for k, g in enumerate(GENES)]
+    ws, out = _analyze(_write(tmp_path / "report.pg_matrix.tsv", h, rows))
+    assert sorted(out.summary["samples"]) == sorted(f"{c}_{r}" for c, r in SAMPLES)
+    assert set(out.summary["samples"].values()) == {"DMSO", "Drug"}
+    _recovers_planted_hits(out)
+
 def test_semicolon_csv_with_decimal_commas_and_quotes(tmp_path):
     rng = random.Random(2)
     h = ["Accession", "Gene", *[f"{c}_{r}" for c, r in SAMPLES]]

@@ -179,7 +179,7 @@ _DESC_NAMES = ["description", "protein names", "protein description", "first.pro
 _NOT_SAMPLE = re.compile(
     r"(^|[ ._])(n\.|#|count|counts|coverage|mw|mol\.? weight|mass|length|score|q[ ._-]?value|pep|posterior|"
     r"peptides?|razor|unique|msms|ms/ms|fdr|p[ ._-]?val(ue)?|pval|adj|fold|log2fc|logfc|t$|position|start|end|"
-    r"index|rank|charge|rt|retention|seq|sequence|best|number|numberpsm|maxpepprob|referenceintensity|"
+    r"index|rank|charge|rt|retention|seq|sequences?|proteotypic|best|number|numberpsm|maxpepprob|referenceintensity|"
     r"combined|total|spectral|ibaq)([ ._]|$)", re.I)
 # sample-column families, most specific first: (regex on the header, group 1 = sample name)
 _FAMILIES = [
