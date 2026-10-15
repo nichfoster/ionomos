@@ -599,7 +599,7 @@ def test_a_python_tag_in_config_or_experiment_yaml_runs_nothing(lab, tag, tmp_pa
     cfg_path.write_text(cfg_path.read_text(encoding="utf-8") + f"\nevil: {tag}\n", encoding="utf-8")
     with pytest.raises(ConfigError, match="could not parse"):
         load(cfg_path)
-    with pytest.raises(yaml.constructor.ConstructorError, match="python"):  # the app's settings reader
+    with pytest.raises(ConfigError, match="could not parse"):  # the app's settings reader names the file (#136)
         configio.read_config(cfg_path)
     drop = tmp_path / "drop"
     drop.mkdir()
