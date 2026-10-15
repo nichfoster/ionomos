@@ -494,7 +494,10 @@ is the day it was made.
 - **A FASTA you already have** (from UniProt, without decoys):
   `ionomos fasta prepare <file>` writes a new file beside it with decoys and
   contaminants. A file that already has decoys is refused, because decoys
-  added twice stop the search ([why](#search.hold-decoys)).
+  added twice stop the search ([why](#search.hold-decoys)). A file saved
+  from Notepad or Excel as "UTF-8 with BOM" is fine; one with text before
+  its first `>` header is refused with the line to fix, because that text
+  would cost the first protein.
 
 Nothing is overwritten: a name that is taken gets `-2`. A new FASTA changes
 the results, so keep the old file for experiments already searched with it
