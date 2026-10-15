@@ -208,13 +208,13 @@ def _codes(flags):
     ({"p1": {ch: f"KL6159A_{ch}" for ch in TMT10}}, "TMT-10", {}, ["TMT_NAME_PATTERN"]),
     ({"p1": _map(["Pool", "DMSO", "Drug", "DMSO", "Drug"], plex=1),
       "p2": _map(["DMSO", "Drug", "Pool", "DMSO", "Drug"], plex=2)}, "TMT-10", {"reference": ["126"]},
-     ["TMT_NAME_PATTERN", "TMT_REFERENCE_MISSING"]),  # the R script keeps plex 1 only: Pool_2_126 is a pattern note
+     ["TMT_REFERENCE_MISSING"]),  # #155: with several plexes condition_2_channel is kept (no pattern note)
     ({"p1": _map(["Pool", "DMSO", "Drug", "DMSO", "Drug"], plex=1),
       "p2": _map(["", "Drug", "Pool", "DMSO", "Drug"], plex=2)}, "TMT-10", {"reference": ["126"]},
-     ["TMT_NAME_PATTERN", "TMT_REFERENCE_MISSING"]),
+     ["TMT_REFERENCE_MISSING"]),
     ({"p1": _map(["Pool", "DMSO", "Drug", "DMSO", "Drug"], plex=1),
       "p2": _map(["Pool", "DMSO", "Drug", "DMSO", "Drug"], plex=2)}, "TMT-10", {"reference": ["126"]},
-     ["TMT_NAME_PATTERN"]),
+     []),
 ])
 def test_validate(maps, label, kw, codes):
     assert _codes(tmtkit.validate(maps, label, **kw)) == codes
@@ -558,6 +558,45 @@ def test_two_plexes_with_a_bridge(bed):
     a = json.loads((dest / "results" / "analysis.json").read_text(encoding="utf-8"))
     compared = [c["name"] for c in a["comparisons"]]
     assert compared == ["Drug vs DMSO"], compared
+
+
+def test_two_plexes_annotation_files_keep_the_plex(bed):
+    """#155: the FragPipe-Analyst annotation said plex 1 with an empty channel for every sample and repeated
+    replicate numbers; the lab's annotation file (the R script keeps `_1_` only) dropped plex 2."""
+    from ionomos.downstream.tables import read_tsv
+
+    dest, job, _rec = _run(bed, "tmt_bridge")
+    assert job.status == "done", job.reason
+    head, rows = read_tsv(dest / "results" / "fragpipe-analyst" / "experiment_annotation.tsv")
+    assert head == ["plex", "channel", "sample", "sample_name", "condition", "replicate"]
+    got = {r["sample"]: (r["plex"], r["channel"]) for r in rows}
+    assert got["Pool_1_126"] == ("1", "126") and got["DMSO_2_127N"] == ("2", "127N"), got
+    assert all(r["sample"].split("_")[1] == r["plex"] and r["sample"].endswith("_" + r["channel"]) for r in rows)
+    pairs = [(r["condition"], r["replicate"]) for r in rows]
+    assert len(pairs) == len(set(pairs)), pairs   # a replicate number once per condition
+    head, lab = read_tsv(dest / "results" / "experimental_annotation.tsv")
+    assert {r["plex"] for r in lab} == {"1", "2"} and len(lab) == len(rows)
+    assert {r["sample_name"] for r in lab} == {r["sample"] for r in lab}   # unique: the plex is kept in the name
+    drug = [r["replicate"] for r in lab if r["condition"] == "Drug"]
+    assert drug == [str(k) for k in range(1, len(drug) + 1)]
+
+
+def test_the_lab_annotation_port_multi_plex_extension():
+    """#155: one plex -> the R script's file byte for byte (tests/test_downstream.py, the golden); several plexes ->
+    condition_<k>_channel kept for every k, plex = k, the whole name as sample_name, replicates running on."""
+    from ionomos.downstream import tmt
+
+    header = ["Index", "Pool_1_126", "DMSO_1_127N", "DMSO_1_127C", "Pool_2_126", "DMSO_2_127N", "odd-name_2_128N"]
+    one = tmt.annotation_rows(header)
+    assert [r["sample"] for r in one] == ["Pool_1_126", "DMSO_1_127N", "DMSO_1_127C"]
+    assert one[1]["sample_name"] == "DMSO_127N"
+    many = tmt.annotation_rows(header, multiplex=True)
+    assert [(r["plex"], r["sample_name"], r["replicate"]) for r in many] == [
+        ("1", "Pool_1_126", 1), ("1", "DMSO_1_127N", 1), ("1", "DMSO_1_127C", 2), ("2", "Pool_2_126", 2),
+        ("2", "DMSO_2_127N", 3)]
+    plex, ch = tmt.plexes_and_channels(["Pool_1_126", "X", "C3L-00004_T"],
+                                       {"plexA": {"126": "Pool_1_126"}, "plexB": {"127N": "C3L-00004_T"}})
+    assert plex == {"Pool_1_126": "plexA", "C3L-00004_T": "plexB"} and ch["C3L-00004_T"] == "127N"
 
 
 def test_the_fake_writes_tmt_integrators_tables(bed):

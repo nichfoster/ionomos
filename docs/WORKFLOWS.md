@@ -387,7 +387,8 @@ there), then any other abundance table. Layout (FragPipe's output guide):
 `Index, NumberPSM, ProteinID | Gene, MaxPepProb, ReferenceIntensity`, a
 column per sample. The sample names are the annotation's; conditions come
 from the R script's `experimental_annotation.tsv` when the names follow
-`condition_1_channel`, else the text before the first `_`. Peptide tables are
+`condition_1_channel` (`condition_<plex>_channel` with several plexes), else
+the text before the first `_`. Peptide tables are
 not analysed; single-site tables go through `analysis.phospho` (ENGINES.md).
 
 ### Confirmed and assumed
@@ -429,9 +430,23 @@ with 8 fractions takes (`timeout_minutes`).
 - Writes `experimental_annotation.tsv`.
 - Note the regex assumes plex index `1` and a single-token condition. Real
   headers look like `DMSO_1_126`.
-- **Ported** (`ionomos/downstream/tmt.py`), byte-identical to the R script.
+- **Ported** (`ionomos/downstream/tmt.py`), byte-identical to the R script
+  for a search with one plex (`tests/golden/R_experimental_annotation.tsv`).
   When names don't follow the pattern the file is empty (as in R); the report
   then takes the condition from the text before the first `_` and says so.
+- **Multi-plex extension** (#155; the R script would keep plex 1 only): when
+  the search had several plexes (FragPipe experiments), names
+  `condition_<k>_channel` are kept for every plex number `k` (what
+  `ionomos tmt suggest --plexes` and the channel editor write), `plex` is `k`,
+  `sample_name` is the whole name (dropping `_<k>_` would give
+  `DMSO_1_127N` and `DMSO_2_127N` the same name) and `replicate` runs on
+  within a condition across the plexes, so no number repeats. `TMT_NAME_PATTERN`
+  then asks for `condition_plex_channel`, which also satisfies
+  `TMT_DUPLICATE_NAME`.
+- **FragPipe-Analyst's** `results/fragpipe-analyst/experiment_annotation.tsv`
+  carries each sample's plex (1, 2 … in the plexes' order) and channel, from
+  the channel maps FragPipe used (annotation files / `experiment.yaml`, else
+  the name), and replicate numbers used once per condition.
 
 ## DIA
 

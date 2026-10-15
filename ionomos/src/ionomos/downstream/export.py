@@ -203,8 +203,20 @@ def fragpipe_analyst(folder: Path, m_loaded, p: fpa.Processed, diffs: list[DiffR
         count[cond[x]] = count.get(cond[x], 0) + 1
         rep[x] = m_loaded.replicate.get(x) or count[cond[x]]
     if m_loaded.exp == "TMT":
+        # each sample's plex (1, 2 ... in the plexes' order) and channel, and a replicate number used once within a
+        # condition across the plexes (#155: every row said plex 1, no channel, and plex 2 repeated replicate 2)
         header = ["plex", "channel", "sample", "sample_name", "condition", "replicate"]
-        rows = [[1, "", m_loaded.columns[x], x, cond[x], rep[x]] for x in samples]
+        plex_of = {x: str(p) for x, p in (m_loaded.meta.get("plex") or {}).items()}
+        names = sorted({plex_of[x] for x in samples if x in plex_of}, key=lambda p: (not p.isdigit(), p.zfill(9)))
+        number = {p: (p if all(n.isdigit() for n in names) else str(k)) for k, p in enumerate(names, start=1)}
+        if len({(cond[x], rep[x]) for x in samples}) < len(samples):
+            count = {}
+            for x in samples:
+                count[cond[x]] = count.get(cond[x], 0) + 1
+                rep[x] = count[cond[x]]
+        channel = m_loaded.meta.get("channel") or {}
+        rows = [[number.get(plex_of.get(x), "1"), channel.get(x, ""), m_loaded.columns[x], x, cond[x], rep[x]]
+                for x in samples]
     elif m_loaded.exp == "DIA":
         header = ["file", "sample", "sample_name", "condition", "replicate"]
         rows = [[m_loaded.columns[x], x, x, cond[x], rep[x]] for x in samples]

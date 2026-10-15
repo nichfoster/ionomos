@@ -94,6 +94,7 @@ OTHER_FRAGPIPE_LABELS = ("sCLIP-6", "IBT-16", "DiLeu-12", "DiLeu-1", "DeAla-13",
 CHANNEL_RE = re.compile(r"^(\d{3})(ND|CD|[NCD]?)$", re.I)
 _CHANNEL_TOKEN = re.compile(r"^\d{3}(?:ND|CD|[NCD])?$", re.I)
 LAB_NAME = re.compile(r"^[A-Za-z0-9]+_1_\d{3}[A-Z]?$")   # the lab's R script keeps only these (downstream/tmt.py)
+LAB_NAME_PLEXES = re.compile(r"^[A-Za-z0-9]+_\d+_\d{3}[A-Z]?$")   # ... and with several plexes Ionomos' port (#155)
 REFERENCE_WORDS = re.compile(r"(?i)(?:^|[_\-\s.])(?:pool(?:ed)?|bridge|ref(?:erence)?|norm|irs)(?:$|[_\-\s.\d])")
 TMT_KEYS = ("tag", "channels", "plexes", "reference_channel")
 PLEX_KEYS = ("channels", "reference")
@@ -446,18 +447,23 @@ def validate(channels_by_plex: dict[str, dict[str, str]], label_type_name: str =
                                 "(the SOP: 'Keep the 126, 127N, etc. description for each channel')", plex, source))
             if p and not is_reference_name(name, ref_tag):
                 conds[p.condition] = conds.get(p.condition, 0) + 1
-            if not LAB_NAME.match(name):
+            if not (LAB_NAME if len(channels_by_plex) == 1 else LAB_NAME_PLEXES).match(name):
                 unlike.append(name)
     single = sorted(c for c, n in conds.items() if n == 1)
     if single and len(conds) > 1:
         out.append(Flag("TMT_ONE_CHANNEL", "warn", f"condition {', '.join(single[:5])} "
                         f"{'has' if len(single) == 1 else 'have'} one channel only: it is compared anyway, labelled "
                         f"low confidence (D32)", "add replicate channels if the experiment has them", source=source))
-    if unlike:
+    if unlike and len(channels_by_plex) == 1:
         out.append(Flag("TMT_NAME_PATTERN", "info", f"{len(unlike)} name(s) do not follow condition_1_channel "
                         f"(e.g. {unlike[0]}): the lab's annotation script leaves them out, and the report takes "
                         f"the condition from the text before the first '_'", "name channels like DMSO_1_126",
                         source=source))
+    elif unlike:   # several plexes: Ionomos' annotation file keeps condition_<plex>_channel (#155)
+        out.append(Flag("TMT_NAME_PATTERN", "info", f"{len(unlike)} name(s) do not follow condition_plex_channel "
+                        f"(e.g. {unlike[0]}): experimental_annotation.tsv leaves them out, and the report takes "
+                        f"the condition from the text before the first '_'",
+                        "name channels like DMSO_1_126 in plex 1, DMSO_2_126 in plex 2", source=source))
     if len(channels_by_plex) > 1:
         refs = reference if isinstance(reference, dict) else {p: list(reference or []) for p in channels_by_plex}
         anyref = any(refs.values())

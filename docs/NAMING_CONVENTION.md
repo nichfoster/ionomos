@@ -488,8 +488,9 @@ block).
 
 Names follow `condition_plex_channel`: the condition is one word (the text
 before the first `_`), the plex a number, the channel the reporter. The lab's
-annotation script keeps only `condition_1_channel`; other names still work in
-the report (a note says so). `ionomos tmt suggest` writes the block from a few
+annotation script keeps only `condition_1_channel`; with several plexes
+Ionomos' port also keeps `condition_2_channel` … (WORKFLOWS.md, "Multi-plex
+extension"); other names still work in the report (a note says so). `ionomos tmt suggest` writes the block from a few
 answers; `ionomos tmt plan <folder>` shows what will be used. The **TMT
 channels** grid in the review window and on the Analysis tab (`tmt_editor.py`)
 writes the same block (the reference channel as `reference_channel`, or a
