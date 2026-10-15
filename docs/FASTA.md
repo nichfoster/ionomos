@@ -35,12 +35,13 @@ stale; this module does both.
 | `ionomos fasta search human` | UniProt's reference proteomes for a word, a Latin name, a taxon (`9606`) or an id: id, organism, taxon, number of entries. `--all` includes non-reference proteomes |
 | `ionomos fasta download UP000005640` | Downloads the reviewed entries (`--unreviewed` for all, `--isoforms` to add isoforms) as `UP000005640_9606.fasta`, then prepares it (below) into `<date>-decoys-reviewed-contam-UP000005640_9606.fasta.fas`. Default folder: `fasta_dir` from config.yaml; `--dest DIR` otherwise. `--raw-only` stops after the download |
 | `ionomos fasta prepare FILE` | Adds decoys and contaminants to a FASTA without decoys: a new file beside it (or in `--dest`). `--no-contam`, `--contam FILE` (your own list), `--no-philosopher`, `--decoy-tag` |
-| `ionomos fasta release [FASTA …]` | UniProt's current release, and for each FASTA (default: those in `fasta_dir`) how old it is against it |
+| `ionomos fasta release [FASTA …]` | UniProt's current release, and for each FASTA (default: those in `fasta_dir`; a folder stands for the FASTAs in it) how old it is against it. A path that doesn't exist is said so, and the exit code is 1 |
 | `ionomos fasta stock-workflows 24.0 [--get NAME --dest DIR]` | FragPipe's stock workflows of a release, from its source on GitHub; `--get` saves one |
 
 All of them take `--json`. Nothing is ever overwritten: a file is written as `<name>.part` and renamed, and a name
-that is taken gets `-2`, `-3`, …. The source FASTA is never changed. A path with a space gets a note (FragPipe
-can't use it).
+that is taken gets `-2`, `-3`, …. The source FASTA is never changed. A destination folder with a space gets a note
+(FragPipe can't use it) that suggests `fasta_dir` from config.yaml; spaces in the source's *name* become `_` in the
+new file's name (`my human.fasta` → `<date>-decoys-contam-my_human.fasta.fas`), with a note.
 
 ### Download (`download_proteome`)
 

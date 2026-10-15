@@ -442,8 +442,8 @@ def _commit(part: Path, final: Path) -> Path:
 
 def download_proteome(proteome_id: str, dest_dir: Path, *, reviewed: bool = True, isoforms: bool = False,
                       taxon: str | None = None, progress: Progress | None = None,
-                      stop: threading.Event | None = None, timeout: float = 60, time_limit_s: float = 3600
-                      ) -> DownloadResult:
+                      stop: threading.Event | None = None, timeout: float = 60, time_limit_s: float = 3600,
+                      fasta_dir: Path | None = None) -> DownloadResult:
     """Download a UniProt proteome as a plain FASTA, the way Philosopher's `database --id` asks UniProt for it.
 
     Two requests: UniProt's count for the query (size=0: the release and X-Total-Results), then the entries
@@ -462,8 +462,8 @@ def download_proteome(proteome_id: str, dest_dir: Path, *, reviewed: bool = True
         return res
     dest_dir = Path(dest_dir)
     if " " in str(dest_dir):
-        res.notes.append(f"{dest_dir} has a space in it; FragPipe can't use a FASTA there. Pick a folder like "
-                         f"C:/Fragpipe_Auto/fasta")
+        res.notes.append(f"{dest_dir} has a space in it; FragPipe can't use a FASTA there. Pick "
+                         f"{_folder_hint(fasta_dir)}")
     query = _uniprot_query(pid, reviewed)
     iso = "true" if isoforms else "false"
     count_url = _uniprot_url("search", query, format="fasta", includeIsoform=iso, size="0")
@@ -972,8 +972,8 @@ def prepare_for_fragpipe(src: Path, dest_dir: Path | None = None, *, decoy_tag: 
                          contaminants: Path | str | None = "auto", contaminant_candidates: Iterable[Path] = (),
                          philosopher: Path | None = None, date: Date | None = None, tags: Iterable[str] = (),
                          progress: Progress | None = None, stop: threading.Event | None = None,
-                         timeout: float = 30, philosopher_timeout_s: float = PHILOSOPHER_TIMEOUT_S
-                         ) -> PrepareResult:
+                         timeout: float = 30, philosopher_timeout_s: float = PHILOSOPHER_TIMEOUT_S,
+                         fasta_dir: Path | None = None) -> PrepareResult:
     """A FASTA without decoys -> a new FragPipe-ready one beside it (or in `dest_dir`): the targets, contaminants
     as `contam_…` entries, and a reversed `rev_…` decoy of each (half the entries), named as FragPipe names it.
 
@@ -989,7 +989,8 @@ def prepare_for_fragpipe(src: Path, dest_dir: Path | None = None, *, decoy_tag: 
 
     A leading UTF-8 byte-order mark is skipped by both methods (Philosopher is given a copy without it), so the
     result is the one the file saved without it gives. Text before the first header is refused (it would cost the
-    first protein)."""
+    first protein). Spaces in the source's name become '_' in the result's (FragPipe refuses them); `fasta_dir`
+    (config.yaml's) is the folder a note suggests when `dest_dir` has a space."""
     from ionomos import fragpipe
 
     src = Path(src)
@@ -1002,8 +1003,8 @@ def prepare_for_fragpipe(src: Path, dest_dir: Path | None = None, *, decoy_tag: 
         return res
     dest_dir = Path(dest_dir) if dest_dir else src.parent
     if " " in str(dest_dir):
-        res.notes.append(f"{dest_dir} has a space in it; FragPipe can't use a FASTA there. Move the result to a "
-                         f"folder like C:/Fragpipe_Auto/fasta")
+        res.notes.append(f"{dest_dir} has a space in it; FragPipe can't use a FASTA there. Move the result to "
+                         f"{_folder_hint(fasta_dir)}")
     try:
         before = _scan(src, decoy_tag)
         with open(src, "rb") as fh:
@@ -1042,9 +1043,14 @@ def prepare_for_fragpipe(src: Path, dest_dir: Path | None = None, *, decoy_tag: 
             return res
     want_contam = contaminants is not None
     tags = list(tags)
+    base = src.name
+    if any(c.isspace() for c in base):
+        base = re.sub(r"\s+", "_", base.strip())
+        res.notes.append(f"'{src.name}' has spaces in its name, which FragPipe refuses in a FASTA path: the new "
+                         f"file is named after '{base}' instead")
 
     def name_for(contam: bool) -> str:
-        return fragpipe_fasta_name(src.name, day=date, decoys=True, contam=contam, tags=tags)
+        return fragpipe_fasta_name(base, day=date, decoys=True, contam=contam, tags=tags)
 
     final_name = name_for(want_contam)
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -1094,6 +1100,12 @@ def prepare_for_fragpipe(src: Path, dest_dir: Path | None = None, *, decoy_tag: 
         res.error = f"the new file would not pass FragPipe's check: {problem}"
     _say(progress, f"saved {res.path.name}")
     return res
+
+
+def _folder_hint(fasta_dir: Path | None) -> str:
+    if fasta_dir is not None and " " not in str(fasta_dir):
+        return f"fasta_dir ({fasta_dir})"
+    return "a folder without spaces, like C:/Fragpipe_Auto/fasta"
 
 
 def _without_bom(src: Path, folder: Path) -> Path:
@@ -1309,7 +1321,7 @@ def add_parser(sub):
     pr.add_argument("--decoy-tag", default="rev_", help="decoy prefix (default rev_, as FragPipe)")
     _contam_args(pr)
     r = fs.add_parser("release", help="UniProt's current release, and how old FASTAs are against it")
-    r.add_argument("fastas", nargs="*", help="FASTA files (default: those in fasta_dir)")
+    r.add_argument("fastas", nargs="*", help="FASTA files or folders of them (default: those in fasta_dir)")
     w = fs.add_parser("stock-workflows", help="list (or --get one of) FragPipe's stock workflows of a release")
     w.add_argument("version", help="FragPipe version, e.g. 24.0")
     w.add_argument("--get", metavar="NAME", help="download this workflow (never over an existing file)")
@@ -1356,6 +1368,28 @@ def _fasta_files(folder: Path) -> list[Path]:
         return []
 
 
+def _release_files(given: list[str], cfg) -> tuple[list[Path], list[Path], list[Path]]:
+    """(FASTA files, paths that don't exist, folders without FASTAs) for `fasta release`: a folder stands for its
+    FASTAs; nothing given, the FASTAs in fasta_dir."""
+    if not given:
+        return (_fasta_files(cfg.fasta_dir) if cfg else []), [], []
+    files: list[Path] = []
+    missing: list[Path] = []
+    empty: list[Path] = []
+    for g in given:
+        f = Path(g)
+        if f.is_dir():
+            found = _fasta_files(f)
+            files += found
+            if not found:
+                empty.append(f)
+        elif f.is_file():
+            files.append(f)
+        else:
+            missing.append(f)
+    return files, missing, empty
+
+
 def _philosopher_for(cfg) -> Path | None:
     roots = []
     if cfg is not None:
@@ -1393,17 +1427,23 @@ def run_cli(args) -> int:
         notes: list[str] = []
         rel = uniprot_release(notes=notes)
         cfg = _config(args)
-        files = [Path(f) for f in args.fastas] or (_fasta_files(cfg.fasta_dir) if cfg else [])
+        files, missing, empty = _release_files(args.fastas, cfg)
+        ok = rel is not None and not missing
         if as_json:
-            print(json.dumps({"release": rel, "notes": notes,
+            print(json.dumps({"release": rel, "notes": notes, "missing": [str(f) for f in missing],
                               "files": {str(f): staleness(f.name, rel) for f in files}}, indent=2))
-            return 0 if rel else 1
+            return 0 if ok else 1
         print(f"UniProt: {rel['release']} ({rel['date']})" if rel else f"UniProt: unknown. {notes[0] if notes else ''}")
         for f in files:
             print(f"{f.name}: {staleness(f.name, rel)}")
-        if not files:
+        for f in missing:
+            print(f"{f}: no such file or folder; check the path (with no FASTA given, the FASTAs in fasta_dir are "
+                  f"checked)")
+        for d in empty:
+            print(f"{d}: no FASTA files (.fas, .fasta, .fa) in this folder")
+        if not args.fastas and not files:
             print("(no FASTA files given, and no fasta_dir in config.yaml)")
-        return 0 if rel else 1
+        return 0 if ok else 1
     if cmd == "stock-workflows":
         if args.get:
             if not args.dest:
@@ -1437,7 +1477,8 @@ def run_cli(args) -> int:
         src = Path(args.fasta)
         res = prepare_for_fragpipe(src, Path(args.dest) if args.dest else None, decoy_tag=args.decoy_tag,
                                    contaminants=contaminants, contaminant_candidates=cands, philosopher=phil,
-                                   progress=None if as_json else _cli_progress())
+                                   progress=None if as_json else _cli_progress(),
+                                   fasta_dir=cfg.fasta_dir if cfg is not None else None)
         return _print_prepared(res, as_json=as_json)
     # download
     if args.dest:
@@ -1448,8 +1489,9 @@ def run_cli(args) -> int:
         print("no config.yaml to take fasta_dir from: say where with --dest DIR (a folder without spaces)",
               file=sys.stderr)
         return 2
+    fasta_dir = cfg.fasta_dir if cfg is not None else None
     got = download_proteome(args.proteome, dest, reviewed=not args.unreviewed, isoforms=args.isoforms,
-                            progress=_cli_progress())
+                            progress=_cli_progress(), fasta_dir=fasta_dir)
     if not got.ok:
         if as_json:
             print(json.dumps({"download": got.as_dict()}, indent=2))
@@ -1467,7 +1509,7 @@ def run_cli(args) -> int:
         return 0
     tags = (["reviewed"] if got.reviewed else []) + (["isoforms"] if got.isoforms else [])
     res = prepare_for_fragpipe(got.path, dest, contaminants=contaminants, contaminant_candidates=cands,
-                               philosopher=phil, tags=tags, progress=_cli_progress())
+                               philosopher=phil, tags=tags, progress=_cli_progress(), fasta_dir=fasta_dir)
     if as_json:
         print(json.dumps({"download": got.as_dict(), "prepared": res.as_dict()}, indent=2))
         return 0 if res.ok else 1

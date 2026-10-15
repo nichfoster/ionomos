@@ -550,7 +550,8 @@ def test_cli_prepare_and_release_offline(tmp_path, monkeypatch, capsys):
     assert "-decoys-UP000005640_9606.fasta.fas: 6 entries = 3 proteins + 0 contaminants" in out
     assert cli.main(nocfg + ["fasta", "prepare", str(src), "--no-contam", "--no-philosopher", "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["decoy_share"] == 0.5
-    assert cli.main(nocfg + ["fasta", "release", "2026-01-30-decoys-contam-x.fas"]) == 1
+    made = _src(tmp_path, name="2026-01-30-decoys-contam-x.fas")
+    assert cli.main(nocfg + ["fasta", "release", str(made)]) == 1
     out = capsys.readouterr().out
     assert "UniProt: unknown" in out and "made 2026-01-30" in out
 
@@ -744,3 +745,38 @@ def test_a_200_mb_file_without_line_breaks_is_read_in_linear_time(tmp_path, monk
     assert len(heads) == 1 and len(heads[0]) == fastasource.HEADER_MAX and heads[0].startswith(b"sp|P1|A ")
     assert peak < 16 * fastasource.CHUNK, f"bounded memory: a few chunks, not the file ({peak / 1e6:.0f} MB)"
     assert time.monotonic() - started < 15, "linear: a few seconds for 200 MB, not minutes"
+
+
+def test_spaces_in_the_source_name_never_reach_the_new_name(tmp_path, monkeypatch):
+    """#156 item 7: 'name with space.fasta' gave '…-decoys-contam-name with space.fasta.fas', which FragPipe refuses."""
+    monkeypatch.setenv("IONOMOS_OFFLINE", "1")
+    src = _src(tmp_path, name="name with  space.fasta")
+    res = fastasource.prepare_for_fragpipe(src, tmp_path / "out", contaminants=None, date=date(2026, 10, 15))
+    assert res.ok and res.path.name == "2026-10-15-decoys-name_with_space.fasta.fas"
+    assert any("spaces in its name" in n and "name_with_space.fasta" in n for n in res.notes)
+    spaced = tmp_path / "my fastas"
+    res = fastasource.prepare_for_fragpipe(src, spaced, contaminants=None, fasta_dir=tmp_path / "fasta")
+    assert res.ok and any(f"fasta_dir ({tmp_path / 'fasta'})" in n for n in res.notes)
+    res = fastasource.prepare_for_fragpipe(src, spaced, contaminants=None)
+    assert any("a folder without spaces" in n for n in res.notes)
+
+
+def test_cli_release_says_when_a_fasta_is_not_there(tmp_path, monkeypatch, capsys):
+    """#156 item 6: `fasta release C:\\nope.fas` said the name has no date, exit 0."""
+    monkeypatch.setenv("IONOMOS_OFFLINE", "1")
+    nocfg = ["--config", str(tmp_path / "no-config.yaml")]
+    monkeypatch.setattr(fastasource, "uniprot_release", lambda **k: {"release": "2026_03", "date": "2026-09-02"})
+    nope = tmp_path / "nope.fas"
+    assert cli.main(nocfg + ["fasta", "release", str(nope)]) == 1
+    out = capsys.readouterr().out
+    assert f"{nope}: no such file" in out and "no date" not in out
+    folder = tmp_path / "fasta"
+    folder.mkdir()
+    _src(folder, name="2026-01-30-decoys-contam-UP000005640_9606.fasta.fas")
+    assert cli.main(nocfg + ["fasta", "release", str(folder)]) == 0
+    assert "2026-01-30-decoys-contam-UP000005640_9606.fasta.fas: made 2026-01-30" in capsys.readouterr().out
+    assert cli.main(nocfg + ["fasta", "release", str(tmp_path / "empty"), "--json"]) == 1
+    assert json.loads(capsys.readouterr().out)["missing"] == [str(tmp_path / "empty")]
+    (tmp_path / "empty").mkdir()
+    assert cli.main(nocfg + ["fasta", "release", str(tmp_path / "empty")]) == 0
+    assert "no FASTA files" in capsys.readouterr().out
