@@ -612,7 +612,7 @@ class RunResult:
 
 def _popen_kwargs() -> dict:
     if os.name == "nt":
-        flags = subprocess.CREATE_NEW_PROCESS_GROUP | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "CREATE_NO_WINDOW", 0)
         return {"creationflags": flags}
     return {"start_new_session": True}
 

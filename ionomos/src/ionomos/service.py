@@ -144,8 +144,8 @@ def ionomos_command(console: bool = False) -> list[str]:
 
 
 def _creationflags() -> int:
-    if os.name == "nt":
-        return subprocess.CREATE_NEW_PROCESS_GROUP | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    if os.name == "nt":  # getattr: tests stand in a Windows `os` on Linux, whose subprocess has no such flags
+        return getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "CREATE_NO_WINDOW", 0)
     return 0
 
 
