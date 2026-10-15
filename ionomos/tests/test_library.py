@@ -871,7 +871,7 @@ def test_a_configured_root_that_does_not_exist_is_said(pc, capsys):
     cfg = load(pc["cfg_path"], check_paths=False)
     notes = []
     assert gone not in library.default_roots(cfg, notes)
-    assert notes and str(gone) in notes[0] and "library.roots" in notes[0] and "does not exist" in notes[0]
+    assert notes and str(gone) in notes[0] and "library: roots" in notes[0] and "does not exist" in notes[0]
     assert any(str(gone) in n for n in library.scan(cfg=cfg).notes)
     assert cli.main(["--config", str(pc["cfg_path"]), "library", "scan", "--root", str(pc["d"])]) == 0
     assert f"note: {gone} does not exist" in capsys.readouterr().out

@@ -598,7 +598,8 @@ _UTF16_BOMS = (b"\xff\xfe", b"\xfe\xff")
 HEADER_MAX = 1 << 16  # a header is read up to this many bytes (a real one is under 1 kB): bounded memory on any file
 
 
-def fasta_headers(fh, stop: threading.Event | None = None, deadline: float | None = None, *, chunk: int = CHUNK):
+def fasta_headers(fh, stop: threading.Event | None = None, deadline: float | None = None, *, chunk: int = CHUNK,
+                  max_header: int = HEADER_MAX):
     """Every header line (without '>', without its line end) of a FASTA opened in binary mode, read in chunks of
     `chunk` bytes: never split into lines or decoded, a leading UTF-8 byte-order mark skipped, linear time and
     bounded memory on any file (one with no line break at all, a header of a gigabyte: at most `HEADER_MAX` bytes of
@@ -620,8 +621,8 @@ def fasta_headers(fh, stop: threading.Event | None = None, deadline: float | Non
                 pos = len(BOM)
         if head is not None:
             j = buf.find(b"\n")
-            if len(head) < HEADER_MAX:
-                head += buf[:min(n if j < 0 else j, HEADER_MAX - len(head))]
+            if len(head) < max_header:
+                head += buf[:min(n if j < 0 else j, max_header - len(head))]
             if j < 0:
                 continue
             yield bytes(head).rstrip(b"\r")
@@ -636,7 +637,7 @@ def fasta_headers(fh, stop: threading.Event | None = None, deadline: float | Non
                 start = i + 2
             j = buf.find(b"\n", start)
             if j < 0:
-                head = bytearray(buf[start:start + HEADER_MAX])
+                head = bytearray(buf[start:start + max_header])
                 break
             yield buf[start:min(j, start + HEADER_MAX)].rstrip(b"\r")
             pos, at_start = j + 1, True

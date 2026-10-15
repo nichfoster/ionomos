@@ -771,7 +771,7 @@ def _headers(fh, stop: threading.Event | None, deadline: float | None):
     a UTF-8 byte-order mark skipped, linear time and bounded memory on a file without line breaks."""
     from ionomos.fastasource import fasta_headers
 
-    yield from fasta_headers(fh, stop, deadline, chunk=CHUNK)
+    yield from fasta_headers(fh, stop, deadline, chunk=CHUNK, max_header=MAX_HEADER)
 
 
 def _fingerprint(p: Path, size: int, entries: int) -> str:
@@ -1124,7 +1124,7 @@ def default_roots(cfg, missing: list[str] | None = None) -> list[Path]:
     named = [(Path(cfg.workflow_dir), "paths.workflow_dir"), (Path(cfg.fasta_dir), "paths.fasta_dir")]
     named += [(p, "") for p in install_roots(cfg)]
     named += [(Path(cfg.users_root), "paths.users_root")]
-    named += [(Path(os.path.expanduser(r)), "library.roots") for r in _settings(cfg)["roots"]]
+    named += [(Path(os.path.expanduser(r)), "library: roots") for r in _settings(cfg)["roots"]]
     seen, out = set(), []
     for p, where in named:
         try:
