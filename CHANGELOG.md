@@ -219,6 +219,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rightly found nothing. The key's words are now fragments: found inside the
   names they belong to, and on their own only when distinct (KL6159A), so
   `inspect` agrees with the leak check on the same zip.
+- **`ionomos analyze --normalize` takes `auto` and `ratio`** (#133), the values
+  the doctor's own advice tells a command-line user to set; it refused them
+  with "invalid choice". Every value `analysis.normalize` takes is accepted.
 - **Per-comparison result files no longer repeat the experiment prefix past
   Windows' path limit** (#140). By the DIA file rule each condition carries
   the experiment prefix, so `<cond>_vs_<cond>_differential.tsv` and

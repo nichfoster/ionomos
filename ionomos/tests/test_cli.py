@@ -126,3 +126,14 @@ def test_testbed_init_warns_when_the_folder_leaves_no_room_for_long_paths(tmp_pa
     assert testbed.path_room_note(Path("C:/bed")) is None
     monkeypatch.setattr(preflight, "_long_paths_enabled", lambda: True)
     assert testbed.path_room_note(deep) is None
+
+
+def test_analyze_normalize_takes_every_value_the_setting_takes(tmp_path, capsys):
+    """#133: the doctor's advice says to set auto or ratio, which --normalize refused."""
+    from ionomos.downstream import fpa
+
+    table = _fc_table(tmp_path)
+    for value in fpa.NORMALIZATION_METHODS:
+        assert main(["analyze", str(table), "--quiet", "--no-enrichment", "--normalize", value]) == 0, value
+    assert set(fpa.NORMALIZATION_METHODS) == {"auto", "median", "gn", "ratio", "none"}
+    capsys.readouterr()

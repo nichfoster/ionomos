@@ -1283,7 +1283,9 @@ def main(argv: list[str] | None = None) -> int:
     az.add_argument("--de-type", dest="de_type", choices=["control", "all", "others"],
                     help="each condition vs the control | every pair | each vs the rest")
     az.add_argument("--imputation", choices=["auto", "none", "perseus", "min", "zero", "mindet", "minprob", "knn"])
-    az.add_argument("--normalize", choices=["median", "gn", "none"])
+    az.add_argument("--normalize", choices=["auto", "median", "gn", "ratio", "none"],
+                    help="auto (median, or ratio when median centring shifts the conditions against each other), "
+                         "median, gn, ratio, or none: every value analysis.normalize takes")
     az.add_argument("--filter-condition-pct", dest="filter_condition_pct", type=float,
                     help="keep features measured in >= this %% of one condition (default 50)")
     az.add_argument("--filter-global-pct", dest="filter_global_pct", type=float)
