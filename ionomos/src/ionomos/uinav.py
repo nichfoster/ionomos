@@ -27,7 +27,7 @@ from pathlib import Path
 from ionomos import names
 
 # Every tab's stable key (what ionomos-ui.json remembers; never its position, which can change), the name a
-# person sees, and the help entry F1 opens there. Order = the order of the tab row (S1.6, D94): the daily tabs
+# person sees, and the help entry F1 opens there. Order = the order of the tab row (S1.6, D95): the daily tabs
 # first (Today, Inbox, Jobs, Analysis), then setting up (Setup … Notifications), then Help. No numbers: the help
 # names tabs by name.
 TABS: tuple[tuple[str, str, str], ...] = (

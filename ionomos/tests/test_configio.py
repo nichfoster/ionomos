@@ -175,3 +175,17 @@ def test_backups_newest_first_with_their_times(tmp_path):
     assert configio.read_config(p.parent / "config-backups" / names[1])["fragpipe"]["threads"] == 2
     assert configio.backup_time(names[1]) == datetime.datetime(2003, 10, 14, 17, 59, 59)
     assert configio.backup_time("config.yaml") is None and configio.backup_time("config-2026-x.yaml") is None
+
+def test_a_file_that_does_not_parse_names_the_line(tmp_path):
+    """#136: the app, setupcheck and `ionomos init` read config.yaml through read_config; a hand-editing slip
+    must be a ConfigError with the line, the same message `ionomos check` prints, never a crash."""
+    from ionomos.config import ConfigError
+
+    p = tmp_path / "broken.yaml"
+    p.write_text("paths:\n  inbox: [unclosed\n", encoding="utf-8")
+    with pytest.raises(ConfigError) as ei:
+        configio.read_config(p)
+    assert str(ei.value).startswith(f"could not parse {p}: line 2, column 10")
+    with pytest.raises(ConfigError) as ei2:
+        load(p, check_paths=False)
+    assert str(ei2.value) == str(ei.value)

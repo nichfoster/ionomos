@@ -38,7 +38,7 @@ def test_the_tab_list_matches_the_tabs_the_app_builds():
 
 
 def test_tabs_are_grouped_daily_setup_help_without_numbers():
-    """S1.6 (D94): Today · Inbox · Jobs · Analysis, then the set-up tabs, then Help; no label starts with a digit."""
+    """S1.6 (D95): Today · Inbox · Jobs · Analysis, then the set-up tabs, then Help; no label starts with a digit."""
     assert uinav.TAB_KEYS[:4] == uinav.TAB_GROUPS["daily"] and uinav.TAB_KEYS[-1] == "help"
     assert sum(len(v) for v in uinav.TAB_GROUPS.values()) == len(uinav.TABS)
     assert set(sum(uinav.TAB_GROUPS.values(), ())) == set(uinav.TAB_KEYS)

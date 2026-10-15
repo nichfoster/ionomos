@@ -4186,7 +4186,39 @@ locally hidden); `tests/test_app.py`'s first-screen assertion now says "the Setu
 photographed on a testbed at its natural size and at 1366×768. **Not verified**: the PC's own screen and
 scaling; a lab member using Today; Ctrl+<n> on a non-US keyboard layout.
 
-### D94 — The app is robust for daily driving: nothing slow on the Tk thread, Save explains itself, one checks list; windows are tested hidden
+### D94 — What the end-to-end test of 2026-10-15 changed as rules (#133–#143)
+**2026-10-15.** A testing agent drove every CLI command, the testbed, the watcher and the report and filed eleven
+issues against shipped code. Most are plain fixes (CHANGELOG, Fixed); four changed a rule.
+
+1. **The lab config applies to the lab's experiments, or when it is named** (#134). `ionomos analyze` and
+   `check-folder` on a folder or table use the config found on the PC (`C:\Fragpipe_Auto\config.yaml`,
+   the remembered path) only when the target is a job id or lies under the lab's `users_root`, or when
+   `--config` / `IONOMOS_CONFIG` names it; any other folder or table gets Ionomos' defaults, and the output
+   says which (`settings: …`). Only the lab's own experiments raise attention items. QUICKSTART's promise
+   ("it only writes in that results folder") held for a pip user's table before only when no lab config sat on
+   the PC.
+2. **A path Windows cannot open is not transient** (#139, #138). With long paths off, a FileNotFoundError on a
+   path of 260+ characters means the path, not a moment: intake rejects once (a note, or an attention item
+   when the note's own path is too long) and the watcher reports an inbox entry it cannot stat once and closes
+   the item when it leaves; a rejection without a note waits for the folder to change. A search log naming a
+   missing file at a 240+ character path is explained as the path limit, and a log that ends in an error
+   Ionomos does not know is never called "ended from outside, nothing in the search failed".
+3. **Result file names are budgeted, not derived blindly** (#140). A comparison's files use its full slug
+   while every path stays under 250 characters; past that, the part both condition names share is dropped and
+   a six-character hash of the comparison name keeps the stem unique (`DiffResult.file_stem`; `slug()` returns
+   it everywhere, so tables, volcano plots, figures, analysis.json and the report agree). The analysis notes
+   the renaming.
+4. **An unknown key in config.yaml is a warning, never an error** (#137): `Config.unknown_keys`, printed by
+   `ionomos check` and shown by the checklist, with the nearest known key. An error would stop an older config
+   with a retired key from loading; a silent drop was what the issue found. `analysis:`, `naming:`, `notify:`
+   and `methods:` keep their own stricter checks.
+
+**Verified**: a regression test per issue (tests/test_cli.py, test_bundle.py, test_watcher.py, test_intake.py,
+test_fragpipe_real.py, test_faults.py, test_failsafes.py, test_anytable.py, test_config.py, test_setup.py,
+test_configio.py, test_app.py). **Not verified**: a real 260+ character drop on the lab PC with long paths off
+(the tests stub the Windows gate), and a real FragPipe log on such a path.
+
+### D95 — The app is robust for daily driving: nothing slow on the Tk thread, Save explains itself, one checks list; windows are tested hidden
 **2026-10-15.** Slices 2–4 of docs/UI.md (issues #114–#132), after D93's slice 1. The rules below are what changed;
 the look stays (D93).
 

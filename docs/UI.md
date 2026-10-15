@@ -56,7 +56,7 @@ look; an item that would change it is out of scope.
 
 ## Inventory
 
-### Tabs (left to right, since D94: Daily · Setting up · Help; `uinav.TABS`)
+### Tabs (left to right, since D95: Daily · Setting up · Help; `uinav.TABS`)
 
 | Tab | What it is for | Daily for |
 |---|---|---|
@@ -480,7 +480,7 @@ hidden. The app was opened on a testbed and photographed at 150 % scaling at
 its natural size and at 1366×768: the Today tab and the bottom bar look like
 the rest of the app.
 
-**Slices 1 (rest) to 4 (D94, issues #114–#132), all done**, with these notes:
+**Slices 1 (rest) to 4 (D95, issues #114–#132), all done**, with these notes:
 
 | Item | Where | Note |
 |---|---|---|

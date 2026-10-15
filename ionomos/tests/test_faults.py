@@ -207,6 +207,11 @@ def test_tables_that_were_not_written_to_the_end(tmp_path):
     (0xC000013A, "", "ended by Ctrl+C or the console window closing"),
     (0xC0000005, "", "crashed with an access violation"),
     (1, "MSFragger [Work dir: C:\\x]\nChecking database...\n", "stopped in the middle of a step without saying why"),
+    # #138: a traceback no rule knows is not "ended from outside, nothing in the search failed"
+    (1, "MSFragger [Work dir: C:\\x]\nTraceback (most recent call last):\n  File \"x.py\", line 1\n"
+        "ZeroDivisionError: division by zero\n", "stopped after an error that Ionomos does not recognise"),
+    (1, "MSFragger [Work dir: C:\\x]\n2026-10-01 14:03:11,532 ERROR - something new\n",
+     "stopped after an error that Ionomos does not recognise"),
     (1, "2026-10-01 14:03:11,532 ERROR - No decoys found in the FASTA file.\n", ""),
     (1, "", ""),
 ])

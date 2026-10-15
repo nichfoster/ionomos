@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **The app, slices 2–4 of docs/UI.md (D94): robust for daily driving, and tested with hidden windows.**
+- **The app, slices 2–4 of docs/UI.md (D95): robust for daily driving, and tested with hidden windows.**
   - The tabs are grouped **Today · Inbox · Jobs · Analysis | Setup · Folders · Users · Methods · Advanced ·
     Run & Test · Notifications | Help** and lose their numbers; every help text, checklist line and hint names
     a tab by name (a test fails on "tab 3"). Ctrl+1 … Ctrl+9 jump to the tab in that position. (#114)
@@ -239,6 +239,114 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`ionomos analyze` on a scratch table no longer picks up the lab's
+  config.yaml that happens to sit on the PC**, nor posts the table's problems
+  to the lab's attention list (#134). The lab's settings apply to a job id, to
+  a folder or table under the lab's users folder, and to anything when
+  `--config` or `IONOMOS_CONFIG` names the config; any other folder or table
+  gets Ionomos' defaults. The output now says which: `settings: C:\Fragpipe_Auto\config.yaml`
+  or `settings: Ionomos' defaults (… not used: --config applies it)`. Only the
+  lab's own experiments raise attention items. `check-folder` follows the
+  same rule.
+- **An anonymised bundle no longer keeps a name that follows a JSON `\uXXXX`
+  escape** (#135). attention.py writes its items with ASCII escapes, so the
+  curly quotes around a rejected drop's name became `\u201c…\u201d` and the
+  name followed the letters `u201c`: the scrubber saw one word, and the leak
+  check (which uses the same search) missed it, so a bundle said "none found"
+  while its attention items held the user's initials and experiment names.
+  A `\uXXXX` escape is now a name boundary for the scrubber, the leak check,
+  `bundle inspect` and `bundle translate`.
+- **`ionomos bundle inspect` no longer reports ordinary words (run, then,
+  own, txt) as real names** (#142). It registered every entry of the key
+  file's `names` group (the words of experiment names, which the bundle
+  replaces only inside those names) as a name of its own, and found "run"
+  in every workflow and "txt" in every file list; the bundle's own check had
+  rightly found nothing. The key's words are now fragments: found inside the
+  names they belong to, and on their own only when distinct (KL6159A), so
+  `inspect` agrees with the leak check on the same zip.
+- **An unknown key in config.yaml is reported, with the nearest known one**
+  (#137). `watcher.poll_secnds`, `fragpipe.thread`, `timout_minutes` or a
+  `notifyy:` section were silently ignored while `ionomos check` said all
+  good and the PC ran with the defaults. `check` now prints a `!` line for
+  each ("watcher.poll_secnds: unknown setting, did you mean poll_seconds?
+  (ignored)"), the app's checklist marks Settings saved as a warning, and
+  `Config.unknown_keys` holds them; a warning, not an error, so an older
+  config with a retired key still loads. `paths`, `watcher`, `fragpipe`,
+  `gui`, `users`, `qc_trend`, `library` and the top-level sections are
+  checked; `analysis`, `naming`, `notify` and `methods` check their own.
+- **CLI polish** (#143): a fold-change-only comparison (1 vs 1 sample) prints
+  "34 up, 34 down by fold change alone (no replicates to test)" instead of "of
+  0 tested"; `ionomos cancel` of a missing job exits 1 (as `retry` does) and
+  `ionomos analyze` exits 1 when the report says the analysis failed (an
+  unusable table), so a script can tell; `ionomos check` shows a workflow's
+  label type only when TMT-Integrator runs (every stock workflow carries
+  `tmtintegrator.channel_num`, so isoDTB and DIA read as "TMT-6");
+  `ionomos dry-run` no longer promises the resolver window when
+  `gui.enabled` is off; `repair-ledger --force` on a healthy ledger keeps
+  the old file as `.before-rebuild-<time>`, not `.broken-`; `ionomos compare`
+  matches Ionomos' own `DrugA_vs_DMSO_differential.tsv` by name; and the
+  static volcano SVG draws every significant point but at most ~20,000
+  non-significant ones (an even sample, said in the figure), so a 200k-row
+  table no longer makes a 37 MB file that PowerPoint cannot open (the report
+  still draws everything).
+- **`check-folder` on a table file checks that file, and a folder of several
+  tables says which one was read** (#141). `check-folder a_small.tsv` used to
+  check the parent folder and recommend `analyze <folder>`, which writes
+  elsewhere than `analyze a_small.tsv` does; now it describes the file (a
+  results table or a table of quantities, rows, samples or comparisons), its
+  `<name>_ionomos/results` folder and the command for that file. When a
+  folder holds more than one usable table, `analyze` notes "read b_main.tsv;
+  also here: a_small.tsv. Name the file to analyse it instead", and
+  `check-folder` (and the app's check window) list them under "Also here".
+- **`ionomos analyze --normalize` takes `auto` and `ratio`** (#133), the values
+  the doctor's own advice tells a command-line user to set; it refused them
+  with "invalid choice". Every value `analysis.normalize` takes is accepted.
+- **Per-comparison result files no longer repeat the experiment prefix past
+  Windows' path limit** (#140). By the DIA file rule each condition carries
+  the experiment prefix, so `<cond>_vs_<cond>_differential.tsv` and
+  `volcano_<cond>_vs_<cond>.svg` held it twice on top of the experiment
+  folder, and in a deep folder the tables and volcano plots went missing
+  while the job stayed `done`. When a comparison's full file name would take
+  its paths past 250 characters, the part both condition names share is
+  dropped and a short hash of the comparison's name keeps the stem unique
+  (`Drug_vs_DMSO-3f2a9c_differential.tsv`); a note in the analysis says so,
+  and analysis.json, the report and the figures use the same stem.
+- **A search that fails on a path longer than Windows allows is explained as
+  that, not as "ended from outside, nothing in the search failed: Retry"**
+  (#138). A missing-file error (Java's FileNotFoundException or
+  NoSuchFileException, Python's FileNotFoundError) naming a path of 240+
+  characters gets "A path got longer than Windows allows (260 characters with
+  long paths off): shorten the experiment folder and raw file names, or move
+  the users folder nearer the drive root". And a log that ends in a traceback
+  or an ERROR line Ionomos does not know is no longer read as "stopped in the
+  middle of a step without saying why" (which led to "ended from outside"):
+  it says the search stopped on an error Ionomos does not recognise and
+  points at the log's last lines. `ionomos testbed init` warns when Windows
+  long paths are off and its folder is so deep that the samples' searches
+  would pass 260 characters.
+- **A drop whose path is longer than Windows allows is rejected once, not
+  ignored or retried for ever** (#139). With long paths off, a folder of 260+
+  characters cannot be stat'ed, so the watcher skipped it in silence on every
+  poll; a folder whose files were too long was retried every 15 s as a
+  "transient problem", because the rejection note's temp name was itself too
+  long and the FileNotFoundError looked transient. Now: the watcher says once
+  in the log and as a needs-attention item that the folder cannot be opened
+  (closed when it leaves the inbox); intake reads a FileNotFoundError on a
+  path of 260+ characters as "This path is N characters long; Windows allows
+  259 here" and rejects with a note, or with an attention item when even the
+  note's path would be too long; the note's temp name is shortened when the
+  note's own is near the limit; a rejection without a note waits for the
+  folder to change instead of being offered again every poll.
+- **The app no longer dies at start when config.yaml has a YAML slip** (an
+  unclosed bracket from hand editing, #136). `configio.read_config` turns the
+  parser's error into the same `could not parse <file>: line N, column M: …`
+  message `ionomos check` prints; the app opens on the defaults with that
+  message in the status bar and the first checklist item, the file untouched,
+  and a dialog offers **Restore a previous config…** when config-backups/ has
+  one (else says to fix the line and press Reload). Start watcher, Reload,
+  the config switcher and `ionomos init` say the same instead of a traceback,
+  and any other error while the app starts is shown in a dialog before the
+  windowed exe exits.
 - On a small screen (1366×768) the bottom bar — Save, Help, Report a problem, the ⚠ badge — disappeared; it is now
   packed before the tabs, and its buttons before the config path. (#111)
 - 4 Advanced: the hint "Needs the watcher to run in the logged-in session" covered the "Pop up a window when

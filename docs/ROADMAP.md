@@ -342,7 +342,7 @@ for daily driving.** A Today tab (what needs you, the watcher and queue, the
 setup line, the last jobs with Open report / Re-run analysis), the window size
 and last tab remembered, F1 and keyboard shortcuts, a Find box on Jobs, the
 bottom bar always on screen (#109–#113 done). The rest of the plan, issues
-#114–#132 in four slices, is done (D94): the tabs regrouped Daily / Setup /
+#114–#132 in four slices, is done (D95): the tabs regrouped Daily / Setup /
 Help without numbers, a status strip, scrolling lists, Run & Test split;
 every failure says what to do, nothing slow on the Tk thread, one busy
 indicator, Undo last save, what changed before Save, an unsaved-changes guard;

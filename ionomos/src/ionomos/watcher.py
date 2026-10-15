@@ -39,7 +39,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from ionomos.intake import IntakeResult, note_path
+from ionomos.intake import IntakeResult, note_path, path_too_long
 from ionomos.naming import RAW_SUFFIX
 
 log = logging.getLogger("ionomos.watcher")
@@ -76,6 +76,7 @@ class _Pending:
     stable_since: float  # monotonic
     announced: bool = False  # logged "waiting for raws" once
     rejected: bool = False  # note written; wait for a change or note deletion
+    noteless: bool = False  # rejected without a note (its path too long, #139): wait for a change only
     retry_at: float | None = None  # monotonic time before which we don't re-offer
     retry_delay: float = 0.0
 
@@ -91,8 +92,11 @@ class Watcher:
         retry_seconds: float = 15,
         heartbeat=None,
         group_loose: bool = True,
+        log_dir: Path | None = None,
     ):
         self.inbox = Path(inbox)
+        self.log_dir = Path(log_dir) if log_dir else None  # for the needs-attention item of a folder it cannot open
+        self._too_long: set[str] = set()  # inbox entries Windows cannot open, each said once (#139)
         self.on_stable = on_stable
         self.poll_seconds = poll_seconds
         self.stable_seconds = stable_seconds
@@ -130,9 +134,10 @@ class Watcher:
                 log.exception("could not group loose files; will look again next poll")
 
         present: set[Path] = set()
-        for entry in sorted(self.inbox.iterdir()):
+        entries = sorted(self.inbox.iterdir())
+        for entry in entries:
             try:
-                if _ignored(entry.name) or not entry.is_dir():
+                if _ignored(entry.name) or self._unreachable(entry) or not entry.is_dir():
                     continue
                 present.add(entry)
                 if self._evaluate(entry, now):
@@ -143,7 +148,48 @@ class Watcher:
         # forget folders that disappeared (user pulled it back out, or we moved it)
         for gone in [p for p in self._pending if p not in present]:
             del self._pending[gone]
+        self._forget_unreachable({e.name for e in entries})
         return handed
+
+    def _unreachable(self, entry: Path) -> bool:
+        """An inbox entry Windows cannot open because of its length (#139): said once in the log and, with a log
+        folder, as a needs-attention item, instead of being skipped in silence for ever. True to leave it."""
+        if entry.name in self._too_long:
+            return True
+        why = path_too_long(entry)
+        if why is None:
+            return False
+        self._too_long.add(entry.name)
+        log.warning("cannot read %s: %s", entry.name, why)
+        if self.log_dir is not None:
+            try:
+                from ionomos import attention
+
+                attention.raise_item(
+                    self.log_dir, "intake_rejected", f"Couldn't take in “{entry.name}”",
+                    f"{why} The folder was left in the inbox as it is.", key=f"intake:{entry.name}",
+                    severity="error", dest=entry,
+                    causes=["The folder's path is longer than Windows allows"],
+                    fixes=["Rename the folder to something shorter (Explorer can); Ionomos then sees it"],
+                    data={"folder": str(entry)})
+            except Exception:  # noqa: BLE001 - telling a person must never stop the watcher
+                log.exception("could not record %s for the app", entry.name)
+        return True
+
+    def _forget_unreachable(self, names: set[str]) -> None:
+        """A too-long entry that left the inbox (renamed, pulled out): its item is closed."""
+        for name in [n for n in self._too_long if n not in names]:
+            self._too_long.discard(name)
+            if self.log_dir is None:
+                continue
+            try:
+                from ionomos import attention
+
+                for it in attention.items(self.log_dir):
+                    if it.key == f"intake:{name}":
+                        attention.resolve(self.log_dir, it.id)
+            except Exception:  # noqa: BLE001
+                log.exception("could not close the item of %s", name)
 
     def _handle_loose(self, now: float) -> None:
         from ionomos import loose
@@ -189,7 +235,7 @@ class Watcher:
         if (now - pend.stable_since) < self.stable_seconds:
             return False
         if pend.rejected:
-            if note_path(folder).exists():
+            if pend.noteless or note_path(folder).exists():
                 return False
             log.info("rejection note for %s was removed; trying again", folder.name)
             pend.rejected = False
@@ -217,6 +263,7 @@ class Watcher:
             self._pending.pop(folder, None)  # it was moved; a reappearance is a new drop
         elif result == IntakeResult.REJECTED:
             pend.rejected = True
+            pend.noteless = not note_path(folder).exists()  # no note could be written (#139): wait for a change
         else:  # RETRY with exponential backoff, capped at 5 min
             pend.retry_delay = min(max(self.retry_seconds, pend.retry_delay * 2), 300)
             pend.retry_at = now + pend.retry_delay

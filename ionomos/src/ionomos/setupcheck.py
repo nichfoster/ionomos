@@ -60,10 +60,22 @@ def run(config_path: Path, data: dict | None = None, probe_watcher: bool = True)
     from ionomos.config import ConfigError, layout_problems, load
 
     config_path = Path(config_path)
-    d = data if data is not None else configio.read_config(config_path)
+    broken = None  # the saved file does not parse (#136): the checks run on the defaults and say so first
+    if data is not None:
+        d = data
+    else:
+        try:
+            d = configio.read_config(config_path)
+        except ConfigError as exc:
+            broken, d = str(exc), configio.defaults()
     p = {k: Path(v) for k, v in d["paths"].items() if v}
     items: list[Item] = []
     add = items.append
+    if broken:
+        add(Item("config", "Settings saved", "fail", broken,
+                 "The file was left as it is. Fix that line in a text editor and press Reload, or Advanced -> "
+                 f"Restore a previous config ({configio.BACKUP_DIR}/ next to it), then Save. The checks below "
+                 "use the default settings until then.", "open_tab:4"))
 
     # 1. folders exist and are writable
     missing, unwritable = [], []
@@ -134,10 +146,16 @@ def run(config_path: Path, data: dict | None = None, probe_watcher: bool = True)
     cfg = None
     if not saved:
         add(Item("config", "Settings saved", "todo", f"{config_path} doesn't exist yet", "Press Save.", "save"))
+    elif broken:
+        pass  # said first, above
     else:
         try:
             cfg = load(config_path, check_paths=True)
-            add(Item("config", "Settings saved", "ok", str(config_path)))
+            if cfg.unknown_keys:  # an unknown key (a typo) is ignored, so the lab PC runs with the default (#137)
+                add(Item("config", "Settings saved", "warn", "; ".join(cfg.unknown_keys),
+                         "Fix the key in config.yaml (a text editor), then Reload."))
+            else:
+                add(Item("config", "Settings saved", "ok", str(config_path)))
         except ConfigError as exc:
             add(Item("config", "Settings saved", "fail", str(exc).replace("\n", " "), "Fix it, then Save.", "save"))
             try:
