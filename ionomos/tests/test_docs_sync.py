@@ -164,14 +164,16 @@ USER_MAPS = {("naming", "condition_codes"), ("naming", "methods"), ("users", "al
 
 
 def _optional_analysis_keys() -> list[str]:
-    """The `for k in (...)` key tuples in dump_config: keys written only when set."""
+    """The analysis keys dump_config writes only when set: configio's own tuples (`_AN_LISTS`, `_AN_SCALARS`),
+    plus any `for k in (...)` key tuple still inside dump_config."""
+    keys = [*getattr(configio, "_AN_LISTS", ()), *getattr(configio, "_AN_SCALARS", ())]
     tree = ast.parse(inspect.getsource(configio.dump_config))
-    keys = []
     for node in ast.walk(tree):
         if isinstance(node, ast.For) and isinstance(node.iter, ast.Tuple):
             vals = [e.value for e in node.iter.elts if isinstance(e, ast.Constant) and isinstance(e.value, str)]
             if vals and len(vals) == len(node.iter.elts) and all(re.fullmatch(r"[a-z_]+", v) for v in vals):
                 keys += vals
+    assert "tmt_min_purity" in keys, "configio's optional analysis keys were not found: update this helper"
     return keys
 
 
