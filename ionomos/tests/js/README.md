@@ -79,13 +79,36 @@ VirtualConsole; tests assert the list stays empty.
   every help link resolving in the page, escaped issue titles and codes, and
   a report without a help payload.
 
+- `test/hostile.test.mjs` — payloads report.js was not made for: zero
+  comparisons, one sample, one feature, 100,000 features × 50 samples, names
+  with quotes, `<`, `&`, unicode and 300 characters, every optional key
+  missing, the v0.18 payload shape, the TMT section with no plexes or no
+  signal, values past 2^53 (an axis that used to loop forever) and a dose
+  series of 150,000 curves (`Math.min(...)` runs out of stack).
+- `test/searchjunk.test.mjs` — the search grammar fed junk: blanks and
+  separators, lone operators, `/re/g` and `/re/y`, runs of `*`, 10,000
+  characters, markup, a 5,000-name list, unicode; a search that finds nothing
+  says so.
+- `test/keyboard.test.mjs` — keyboard and screen-reader basics: the QC and
+  enrichment tabs as tab lists (arrows, Home, End), the keyboard staying on a
+  tab, select, pager or column header whose section is drawn again, every
+  **?** and its panel (Escape and × give the keyboard back), the export dialog
+  keeping the keyboard and returning it, the file pickers reachable by Tab,
+  `aria-pressed` on the two-way switches, a name on every chart.
+- `test/exportall.test.mjs` — every export button: SVG and PNG under every
+  chart on every QC tab and section, the dialog's buttons and every figure in
+  its list, CSV, copy, .gmt, the zips, and safe file names from hostile names.
+
 ## Running
 
 ```bash
 cd ionomos/tests/js
 npm install          # jsdom only (dev dependency; committed package-lock.json)
-npm test             # or: node --test test/
+npm test             # or: node --test (from this folder; Node 20 and 22 alike)
 ```
+
+`node --test test/` worked on Node 20 only: Node 22 reads the argument as a
+file name and runs nothing. With no argument both find `test/*.test.mjs`.
 
 CI (`.github/workflows/tests.yml`) runs `npm ci` and `npm test` on both Ubuntu
 and Windows alongside the Python suite.
