@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from ionomos import configio, fragpipe, health, service, testbed
+from ionomos import configio, fragpipe, health, names, service, testbed
 from ionomos import ledger as ledger_mod
 from ionomos.config import load
 from ionomos.intake import intake
@@ -552,6 +552,28 @@ def test_diagnostics_report_and_zip(bed, monkeypatch):
     assert not any(n.endswith(".raw") for n in names)
     rec = json.loads(zipfile.ZipFile(z).read(next(n for n in names if n.endswith("ionomos.json"))))
     assert rec["status"] == "failed"
+
+
+def test_an_os_query_that_fails_leaves_diagnostics_and_fingerprint_whole(bed, monkeypatch):
+    """CPython's platform.platform() raises KeyError('BuildType') on Windows when WMI answers with fields missing
+    (CI, 2026-10-12): the diagnostics and the run fingerprint say the version is unknown instead of failing."""
+    import platform
+
+    from ionomos.buildinfo import platform_text
+
+    def broken(*a, **k):
+        raise KeyError("BuildType")
+
+    monkeypatch.setattr(platform, "platform", broken)
+    assert platform_text().startswith(sys.platform) and "KeyError" in platform_text(terse=True)
+    _queue(bed)
+    Worker(bed["cfg"], bed["ledger"]).run_once()
+    job = bed["ledger"].list()[0]
+    assert job.status == "done"
+    fp = json.loads(names.fingerprint_path(Path(job.dest_dir)).read_text(encoding="utf-8"))
+    assert "OS version unknown" in fp["platform"]["system"]
+    text = service.diagnostics(bed["cfg_path"])
+    assert "OS version unknown" in text and "=== check" in text
 
 
 def test_status_shows_progress_and_pause(bed, capsys):

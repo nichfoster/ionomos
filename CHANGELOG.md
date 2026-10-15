@@ -73,6 +73,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     paths on (as on CI) nothing changes.
   - The Sage setup checklist test found a real ThermoRawFileParser in
     `C:\ThermoRawFileParser\`. It no longer looks there.
+- **Diagnostics and a search's run fingerprint no longer fail when Windows
+  won't say its version.** Python's `platform.platform()` asks WMI, and
+  (on 3.12 at least) raises `KeyError: 'BuildType'` when WMI answers with
+  fields missing, now and then; "Copy diagnostics" then copied nothing (seen
+  on CI). The version now reads "OS version unknown" with the error instead.
 - **The assistant's time to first token was measured to ~16 ms on Windows**
   with Python before 3.13, whose `time.monotonic()` ticks that coarsely. A
   0.2 s wait read as 0.188 s, which failed a test on CI's Python 3.12. It
@@ -88,6 +93,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   how many, in which condition, and how many were seen nowhere else. It
   suggests 0 % of all samples and 50 % of one condition (Ionomos' default).
   It is in the report, the attention list and the help.
+- **Pull-downs with a negative control** (D88). A condition named as an
+  empty vector, beads only, IgG or an untagged bait (`EV`, `empty`, `beads`,
+  `IgG` …) is the pull-down's *background* when its samples also miss
+  clearly more proteins than the others (then it is sure), or the
+  experiment folder's name says pull-down (`IP`, `pulldown`, `BioID` …).
+  Then:
+  - every pull-down is compared against it (`DMSO vs EV`, `Drug vs EV`), so
+    what the bait pulls down reads as *up*; the background is no longer
+    compared with the control (`EV vs DMSO`);
+  - when sure, the missing-value filter across all samples doesn't count
+    its samples, and it is normalised among its own samples, the pull-downs
+    among theirs.
+
+  The name alone is not enough (an empty vector is also the plain control
+  of an over-expression); a note says so. New role `background` in
+  `analysis.roles` and the Roles list; `background_keywords` setting; report
+  note `PULLDOWN_DESIGN`; `simulate.pulldown_pg_matrix` for tests.
 
 ### Documentation
 

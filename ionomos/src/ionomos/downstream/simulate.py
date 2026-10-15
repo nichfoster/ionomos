@@ -10,6 +10,8 @@ Column names and layouts follow the real files:
                                                          log-logistic curves with known pEC50s, flat and noisy features)
     roles   competition_pg_matrix / competition_tmt     (a competition experiment with unequal groups: DMSO n=2,
                                                          Probe n=4, Probe_Comp n=4; specific and unspecific binders)
+            pulldown_pg_matrix                          (a pull-down with an empty-vector negative control: the
+                                                         interactors absent from it, a compound moving some, D88)
     benchmark (benchmark.py, D66):
             isodtb_ratios                               (label quant with per-site truth, changes one way or both,
                                                          a mixing error per replicate)
@@ -352,6 +354,32 @@ def competition_pg_matrix(path: Path, sizes: dict[str, int] | None = None, seed:
     sizes, genes, planted, truth = competition_design(sizes, n, **kw)
     runs = [(f"C:\\raw\\{c}_{r}.raw", c) for c, k in sizes.items() for r in range(1, k + 1)]
     dia_pg_matrix(path, runs, seed=seed, n_proteins=n, changed_fraction=0.0, genes=genes, planted=planted)
+    return truth
+
+
+def pulldown_design(sizes: dict[str, int] | None = None, n: int = 600, interactors: int = 60, changed: int = 10,
+                    effect: float = 1.5, bait: str = "BAIT", control: str = "DMSO", compound: str = "Drug",
+                    background: str = "EV") -> tuple[dict[str, int], list[str], dict, dict, dict]:
+    """A pull-down (IP) with a negative control, as in the lab's FLAG IPs (D88): the bait and its interactors are
+    measured in every pull-down (control and compound) and in no background sample (empty vector); everything
+    else sticks to the beads and is measured everywhere. The compound moves `changed` interactors (half up, half
+    down) by `effect` log2 against the control. Returns (sizes, genes, planted, absent, truth) for dia_pg_matrix;
+    truth["interactors"]: the bait and its interactors, truth["drug"]: {gene: +1 / -1}."""
+    sizes = sizes or {control: 3, compound: 3, background: 3}
+    genes = [bait] + [f"INT{i}" for i in range(interactors - 1)] + [f"BEAD{i}" for i in range(n - interactors)]
+    moved = genes[1:1 + changed]
+    drug = {g: (1 if k % 2 == 0 else -1) for k, g in enumerate(moved)}
+    planted = {compound: {g: d * effect for g, d in drug.items()}}
+    absent = {background: genes[:interactors]}
+    return sizes, genes, planted, absent, {"interactors": set(genes[:interactors]), "drug": drug}
+
+
+def pulldown_pg_matrix(path: Path, sizes: dict[str, int] | None = None, seed: int = 1, n: int = 600, **kw) -> dict:
+    """A DIA-NN report.pg_matrix.tsv of pulldown_design (runs named <condition>_<rep>.raw). Returns the truth."""
+    sizes, genes, planted, absent, truth = pulldown_design(sizes, n, **kw)
+    runs = [(f"C:\\raw\\{c}_{r}.raw", c) for c, k in sizes.items() for r in range(1, k + 1)]
+    dia_pg_matrix(path, runs, seed=seed, n_proteins=n, changed_fraction=0.0, genes=genes, planted=planted,
+                  absent=absent)
     return truth
 
 

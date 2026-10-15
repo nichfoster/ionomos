@@ -3879,3 +3879,64 @@ time.
 lose BSA (P02769) and porcine trypsin (P00761). Whether any human protein (keratins,
 albumin) carries a `contam_` entry in that FASTA, and whether DIA-NN put one in the same
 group as a target, was not checked.
+
+### D88 — A pull-down's negative control is a role: compared against, filtered and normalised apart
+**2026-10-09.** A FLAG IP on the PC (REAL_RUNS.md, 2026-10-06) had three
+conditions: vehicle and compound pull-downs, and an empty vector (EV) as the
+negative control. Ionomos read EV as a second control (it is a control
+keyword), compared "EV vs DMSO" so everything the bait pulls down read as
+*down*, let a filter across all samples remove proteins absent from EV (which
+is the point of EV), and median-centred EV against the pull-downs. Sheena:
+in EV "the only things you'd see are proteins that non-specifically bind to
+beads", so most proteins are expected to be missing there.
+
+1. **A role, `background`**, beside control, compound, competition, reference
+   and QC. Written `background`, `negative control`, `bead control`,
+   `beads` or `empty vector` in `analysis.roles`; offered in the Roles list.
+2. **Read from the name and something else.** A word of the condition name
+   (`background_keywords`: ev, empty, emptyvector, vector, beads, bead,
+   beadsonly, igg, isotype, untagged, nobait, mockip) is not enough: an empty
+   vector is also the plain control of an over-expression, where nothing is
+   expected to go missing. It also needs the data (its samples' median share
+   of missing values at least 1.5 times the others' and 3 points more, *and*
+   at least 10 features, and 0.5 %, measured in every other sample and in
+   none of its, three times more than for any other condition: a low-loaded
+   control of a proteome passes the first, not the second) or the experiment
+   folder's name (IP, coIP, IPMS, pulldown, APMS, BioID, TurboID, APEX,
+   immunoprecipitation; not a tag such as FLAG, HA, GFP or Myc, which
+   over-expression constructs carry, and "SiHa" splits into "si" + "ha").
+   With the folder's name only it is taken but unsure: compared against, not
+   processed apart. With the data only it is suggested in a note, never
+   taken. A word that is not taken gets a hint under the Roles list (not a
+   "?"), and a note only when part of the data agree. `analysis.roles` and
+   `analysis.control` win. The review window reads the folder's name, the
+   experiment editor the data too, so both show what the analysis will do.
+3. **Comparisons.** Every pull-down (control, compound, competition) against
+   each background, kind `background`, so enriched reads as up. Compound vs
+   control stays (kind `treatment` when there is no competition). The
+   background is never compared with the control.
+4. **Filter** (a sure background: the data agree, or the settings say so).
+   The rule "in ≥ x % of all samples" counts the other samples only. The
+   rule "in ≥ x % of one condition" is unchanged.
+5. **Normalisation apart** (`fpa.normalize_apart`, a sure background). The pull-downs are
+   normalised among themselves with the method asked (and `auto`'s
+   composition check on them alone); the background samples among
+   themselves (median centring, or GN for GN). Each group keeps its own level,
+   so the difference between the pull-downs and the background is not moved
+   by centring two different kinds of sample on one median.
+
+The thresholds are choices, set from the one real IP (EV missed 11 % of the
+proteins against 5 %; 31 proteins were in all six pull-downs and no EV run)
+and checked on simulated pull-downs (`simulate.pulldown_pg_matrix`: 60
+interactors absent from EV; ≥ 75 % of them found up over the background, ≤ 1 %
+of the bead binders called). On the real IP: EV read as background from its
+name and the data; `FPS vs DMSO`, `DMSO vs EV` (153 up), `FPS vs EV`.
+
+**Not decided here**: a filter across all samples still removes a protein
+seen in one pull-down condition only (the compound's own, as in the IP);
+making that visible is separate work. **Not verified**: any other pull-down
+than this one, an IgG or beads-only control, a BioID or TurboID design. The
+lab's confirmation of the words, the thresholds and the normalisation is in
+ROADMAP.md. A second agent reviewed the change before the PR; its findings
+(tag words in folder names, a "?" on every EV control, notes on plain
+proteomes, the preview not matching the analysis) are fixed above.

@@ -828,7 +828,9 @@ Collected from the other docs; resolve before/during Phase 1.
       report, `only_in_one_condition_filtered_out` in analysis.json); `FILTER_REMOVES_ONE_CONDITION` says how
       many features complete in a condition a global filter removed and suggests 0 % / 50 %.
 - [ ] Real runs: should the Analysis tab caution against a global filter before the analysis runs (a pull-down,
-      three conditions of three), not only the doctor after it (D84)?
+      three conditions of three), not only the doctor after it (D84)? (Sheena, 2026-10-09: with an empty-vector
+      negative control, most proteins are expected to be missing from a third of the samples, so a global
+      filter is wrong for that design; D88 now leaves a sure background out of it.)
 - [x] Real runs: leaving samples out (`exclude_samples`) makes the run-order stage fail with a `KeyError` on a
       left-out sample (found re-running the 2026-10-06 analysis without the empty-vector runs). → 2026-10-09
       (D84): the stage uses only the samples analysed; the manifest map still held the ones left out.
@@ -851,9 +853,18 @@ Collected from the other docs; resolve before/during Phase 1.
 - [ ] Real runs: confirm why DIA-NN's matrix lacked job 1's two time-stamped runs from its
       `ionomos_run\fragpipe_console.log` (what FragPipe did with those manifest lines). D85 assumes the 32-bit
       overflow; it is not confirmed.
-- [ ] Real runs: an empty-vector control next to a vehicle control (a pull-down) gives "EV vs DMSO", where
+- [x] Real runs: an empty-vector control next to a vehicle control (a pull-down) gives "EV vs DMSO", where
       bait-enriched proteins read as *down*. Should a pull-down's background control be the reference, or the
-      comparison be turned round?
+      comparison be turned round? → 2026-10-09 (D88): a `background` role. Read from the name (EV, empty,
+      beads, IgG ...) when the data (its samples miss clearly more proteins) or the folder's name (IP, pulldown,
+      BioID ...) agree; every pull-down is compared against it (up = pulled down), it is left out of the global filter and
+      normalised apart from the pull-downs. **Still for the lab**: (1) the words (`background_keywords`) and
+      the folder words; (2) the data thresholds (1.5 times the missing values and 3 points more, and 10 proteins
+      measured everywhere else and nowhere in it), set from one real IP (EV 11 % missing against 5 %, 31 such
+      proteins); (3) whether the pull-downs should be normalised among themselves (now) or not at all; (4)
+      whether a protein in all pull-down replicates and in no background one should get its own "specific"
+      list, as the competition design has; (5) whether to compare the treated pull-down with the background
+      too (now yes: `Drug vs EV`).
 - [ ] Real runs: add a FragPipeAnalystR golden with a real matrix's shape (interleaved run columns, a duplicated
       gene, a group without a gene). The current one is sorted and tidy (TESTING.md).
 - [ ] Real runs: next time a result is compared with FragPipe-Analyst, keep its downloaded table and settings and

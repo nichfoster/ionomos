@@ -562,6 +562,29 @@ If a role is wrong, change it under **Roles** in the experiment editor
 (see [Check the roles](#issue.ROLES_UNSURE)). For the old behaviour, every
 condition against the control, set `role_comparisons: false`.
 
+## Read as a pull-down with a negative control {#issue.PULLDOWN_DESIGN}
+
+A note, not a problem. One condition is the negative control of a pull-down:
+an empty vector, beads only, IgG or an untagged bait (`EV`, `empty`, `beads`,
+`IgG` in its name). Ionomos takes the name only when its samples also miss
+clearly more proteins than the others, or the experiment's name says
+pull-down (`IP`, `coIP`, `pulldown`, `BioID` ...). Then:
+
+- every other condition is compared against it (`DMSO vs EV`), so what the
+  bait pulls down reads as **up**;
+- the treated pull-downs are still compared with their control
+  (`Drug vs DMSO`), but the negative control is not compared with the control;
+- when its samples do miss more proteins: the missing-value filter across
+  all samples doesn't count them, as most proteins are expected to be
+  missing there, and they are normalised among themselves, not against the
+  pull-downs. Read from the names alone, it is compared against but
+  processed with the others, and the note says to check it.
+
+If the condition is the plain control of an over-expression, not of a
+pull-down, choose **control** for it under **Roles** in the experiment editor
+([How?](#faq.roles)), or set `roles: {EV: control}` under `analysis:` in
+`experiment.yaml`.
+
 ## A sample has far fewer identifications {#issue.LOW_SAMPLE}
 
 One sample has less than 40% of the typical number of identifications: a

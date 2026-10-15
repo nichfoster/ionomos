@@ -347,6 +347,22 @@ def _insights(p, diffs, qcd, settings=None) -> dict:
         out["filter_loss"] = loss
     return out
 
+def _background(m, settings, dest: Path) -> list[str]:
+    """The conditions that are a pull-down's negative control (roles.py, D88), read before processing: the
+    filter and the normalisation treat their samples apart. The evidence goes in m.meta["background"], where
+    roles.plan() finds it again on the processed matrix."""
+    from ionomos.downstream import fpa, roles
+
+    if m.kind != "intensity":
+        return []
+    chosen, _ = fpa.choose_samples(m, settings.exclude_samples, settings.sample_conditions)
+    m.meta["background"] = roles.background_evidence(chosen, settings, Path(dest).name)
+    found = roles.infer(chosen.conditions, settings, kind=chosen.kind, evidence=m.meta["background"])
+    # only a sure one changes the processing: the data agree, or analysis.roles / an SDRF says so. One read from
+    # the names alone is compared against, but filtered and normalised with the others
+    return [c for c, r in found.roles.items() if r.role == "background" and r.sure]
+
+
 def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = None, overrides: dict | None = None,
             record: dict | None = None, context: dict | None = None, mod_mass: str = "561.3387",
             progress=None, table: Path | None = None, workdir: Path | None = None) -> Outcome:
@@ -499,15 +515,18 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
                  [[x.id, x.label, x.description, *vals] for x, vals in zip(m.features, m.values, strict=True)]):
             out.files.append(files_mx)
         say("filtering, normalising, imputing")
+        background = stage("roles", _background, m, settings, dest) or []
         contam = (stage("contaminants", _contaminant_fasta, record, workdir, notes)
                   if settings.remove_contaminants and m.kind == "intensity" else None)
         res = stage("process", fpa.process, m, exclude=settings.exclude_samples, conditions=settings.sample_conditions,
                     contaminants=settings.remove_contaminants, global_pct=settings.filter_global_pct,
                     condition_pct=settings.filter_condition_pct, normalization=settings.normalize,
                     imputation=settings.imputation, shift=settings.impute_shift, scale=settings.impute_scale,
-                    seed=settings.seed, ratio_centre=settings.ratio_centre, contaminant_fasta=contam)
+                    seed=settings.seed, ratio_centre=settings.ratio_centre, background=background,
+                    contaminant_fasta=contam)
         if res is None:  # fall back to the data as loaded, so there are still statistics and a volcano
             notes.append("processing failed; statistics use the values as loaded (no filtering or imputation)")
+            m.meta.pop("background", None)
             res = stage("process-fallback", fpa.process, m, exclude=settings.exclude_samples,
                         conditions=settings.sample_conditions, imputation="none")
         if res is not None:
@@ -534,6 +553,8 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
         design_plan = stage("roles", roles.plan, pm, settings if not f.comparison_error else fallback)
         f.roles = design_plan
         by_roles = design_plan is not None and design_plan.active
+        if design_plan is not None and not by_roles:  # a background word or a background-like condition not taken
+            notes += [x for x in design_plan.notes if "background" in x and x not in notes]
         if (pm.kind == "intensity" and len(pm.conditions) >= 2 and not settings.comparisons and not settings.control
                 and settings.de_type == "control" and not by_roles
                 and analysis.find_control(pm.conditions, settings) is None):
