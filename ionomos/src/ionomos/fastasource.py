@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import gzip
 import io
+import itertools
 import json
 import os
 import re
@@ -594,32 +595,109 @@ def fragpipe_fasta_name(src_name: str, *, day: Date | None = None, decoys: bool 
 
 BOM = b"\xef\xbb\xbf"  # UTF-8 byte-order mark: Notepad's and Excel's "UTF-8 with BOM" put it before the first '>'
 _UTF16_BOMS = (b"\xff\xfe", b"\xfe\xff")
+HEADER_MAX = 1 << 16  # a header is read up to this many bytes (a real one is under 1 kB): bounded memory on any file
 
 
-def _lines(fh):
-    """The lines of a file opened in binary mode, a leading UTF-8 byte-order mark skipped."""
+def fasta_headers(fh, stop: threading.Event | None = None, deadline: float | None = None, *, chunk: int = CHUNK):
+    """Every header line (without '>', without its line end) of a FASTA opened in binary mode, read in chunks of
+    `chunk` bytes: never split into lines or decoded, a leading UTF-8 byte-order mark skipped, linear time and
+    bounded memory on any file (one with no line break at all, a header of a gigabyte: at most `HEADER_MAX` bytes of
+    a header are kept). Raises TimeoutError when `stop` is set or `deadline` (time.monotonic()) has passed.
+    The one header reader of `_scan`, `library.describe_fasta` and `fragpipe.fasta_info`."""
+    head: bytearray | None = None  # a header that runs on into the next chunk
+    at_start = True                # the next byte read begins a line
     first = True
-    for line in fh:
+    while True:
+        if (stop is not None and stop.is_set()) or (deadline is not None and time.monotonic() > deadline):
+            raise TimeoutError
+        buf = fh.read(max(chunk, len(BOM)) if first else chunk)
+        if not buf:
+            break
+        pos, n = 0, len(buf)
         if first:
             first = False
-            line = line[len(BOM):] if line.startswith(BOM) else line
-        yield line
+            if buf.startswith(BOM):
+                pos = len(BOM)
+        if head is not None:
+            j = buf.find(b"\n")
+            if len(head) < HEADER_MAX:
+                head += buf[:min(n if j < 0 else j, HEADER_MAX - len(head))]
+            if j < 0:
+                continue
+            yield bytes(head).rstrip(b"\r")
+            head, pos, at_start = None, j + 1, True
+        while pos < n:
+            if at_start and buf[pos] == 0x3E:  # '>' at the start of a line
+                start = pos + 1
+            else:
+                i = buf.find(b"\n>", pos)
+                if i < 0:
+                    break
+                start = i + 2
+            j = buf.find(b"\n", start)
+            if j < 0:
+                head = bytearray(buf[start:start + HEADER_MAX])
+                break
+            yield buf[start:min(j, start + HEADER_MAX)].rstrip(b"\r")
+            pos, at_start = j + 1, True
+        if head is None and pos < n:
+            at_start = buf.endswith(b"\n")  # only one byte is carried over, never the chunk
+    if head is not None:
+        yield bytes(head).rstrip(b"\r")
+
+
+def _read_entries(fh, keep: Callable[[bytes], bool] | None = None) -> list[tuple[bytes, bytes]]:
+    """[(header without '>', sequence)] the way Philosopher reads a FASTA (fas.ParseFile2): tabs in a header become
+    spaces, sequence lines are stripped and joined, line ends may be \\n or \\r\\n; a leading UTF-8 byte-order mark is
+    skipped. Read in pieces of at most CHUNK bytes: text that belongs to no kept entry (before the first header, or
+    in an entry turned down by `keep(header)`, which sees at most the first HEADER_MAX bytes of the header) is never
+    held in memory, so a file without line breaks costs no more than its reading."""
+    out: list[tuple[bytes, bytearray]] = []
+    seq: bytearray | None = None   # the sequence of the entry being kept
+    line: bytearray | None = None  # the line being gathered: a header, or a sequence line of a kept entry
+    header = False
+    decided = True                 # whether `keep` has had its say on the header being gathered
+    at_start = True
+    first = fh.readline(max(CHUNK, len(BOM)))
+    first = first[len(BOM):] if first.startswith(BOM) else first
+    for piece in itertools.chain([first] if first else [], iter(lambda: fh.readline(CHUNK), b"")):
+        if at_start:
+            header = piece.startswith(b">")
+            decided = keep is None or not header
+            if header:
+                seq = None
+            line = bytearray() if header or seq is not None else None
+        if line is not None:
+            line += piece
+        at_start = piece.endswith(b"\n")
+        if not decided and (at_start or len(line) > HEADER_MAX):
+            decided = True
+            if not keep(bytes(line[1:HEADER_MAX + 1]).rstrip(b"\r\n")):
+                line = None
+        if at_start and line is not None:
+            seq = _end_line(out, seq, line, header)
+            line = None
+    if line is not None and not decided:
+        line = line if keep(bytes(line[1:HEADER_MAX + 1]).rstrip(b"\r\n")) else None
+    if line is not None:
+        _end_line(out, seq, line, header)
+    return [(h, bytes(s)) for h, s in out]
+
+
+def _end_line(out: list, seq: bytearray | None, line: bytearray, header: bool) -> bytearray | None:
+    if header:
+        out.append((bytes(line).rstrip(b"\r\n")[1:].replace(b"\t", b" "), bytearray()))
+        return out[-1][1]
+    seq.extend(line.strip())
+    return seq
 
 
 def read_fasta(path: Path) -> list[tuple[bytes, bytes]]:
-    """[(header without '>', sequence)] the way Philosopher reads a FASTA (fas.ParseFile2): tabs in a header become
-    spaces, sequence lines are stripped and joined, line ends may be \\n or \\r\\n; a leading UTF-8 byte-order mark is
-    skipped. Text before the first header belongs to no entry and is not returned: `prepare_for_fragpipe` refuses
-    such a file first (`text_before_first_header`)."""
-    out: list[tuple[bytes, bytearray]] = []
+    """[(header without '>', sequence)] the way Philosopher reads a FASTA (`_read_entries`). Text before the first
+    header belongs to no entry and is not returned: `prepare_for_fragpipe` refuses such a file first
+    (`text_before_first_header`)."""
     with open(path, "rb") as fh:
-        for line in _lines(fh):
-            line = line.rstrip(b"\r\n")
-            if line.startswith(b">"):
-                out.append((line[1:].replace(b"\t", b" "), bytearray()))
-            elif out:
-                out[-1][1].extend(line.strip())
-    return [(h, bytes(s)) for h, s in out]
+        return _read_entries(fh)
 
 
 def text_before_first_header(path: Path) -> tuple[int, str]:
@@ -716,36 +794,25 @@ def _write_fasta(entries: list[tuple[bytes, bytes]], part: Path) -> None:
 
 
 def _scan(path: Path, decoy_tag: str) -> dict:
-    """Entries, decoys and contaminants of a FASTA, reading only the headers."""
+    """Entries, decoys and contaminants of a FASTA, reading only the headers (`fasta_headers`)."""
     entries = decoys = contam = 0
-    tag, con = b">" + decoy_tag.encode(), b">" + CONTAM_PREFIX.encode()
+    tag, con = decoy_tag.encode(), CONTAM_PREFIX.encode()
     with open(path, "rb") as fh:
-        for line in _lines(fh):
-            if line.startswith(b">"):
-                entries += 1
-                if line.startswith(tag):
-                    decoys += 1
-                elif line.startswith(con):
-                    contam += 1
+        for h in fasta_headers(fh):
+            entries += 1
+            if h.startswith(tag):
+                decoys += 1
+            elif h.startswith(con):
+                contam += 1
     return {"entries": entries, "decoys": decoys, "contaminants": contam}
 
 
 def contaminants_from_fasta(path: Path, prefix: str = CONTAM_PREFIX, decoy_tag: str = "rev_"
                             ) -> list[tuple[bytes, bytes]]:
     """The `contam_` entries of an existing FragPipe FASTA, without the prefix (decoys of them are skipped)."""
-    p = b">" + prefix.encode()
-    out: list[tuple[bytes, bytearray]] = []
-    keep = False
+    p = prefix.encode()
     with open(path, "rb") as fh:  # streamed: only the contam_ entries of a big FASTA are kept
-        for line in _lines(fh):
-            line = line.rstrip(b"\r\n")
-            if line.startswith(b">"):
-                keep = line.startswith(p)
-                if keep:
-                    out.append((line[len(p):].replace(b"\t", b" "), bytearray()))
-            elif keep:
-                out[-1][1].extend(line.strip())
-    return [(h, bytes(s)) for h, s in out]
+        return [(h[len(p):], s) for h, s in _read_entries(fh, keep=lambda start: start.startswith(p))]
 
 
 def _download_bytes(url: str, timeout: float, stop: threading.Event | None, limit: int = 50 << 20) -> bytes:

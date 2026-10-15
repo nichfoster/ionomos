@@ -576,6 +576,54 @@ def test_no_network_at_import(monkeypatch):
 BOM = b"\xef\xbb\xbf"
 
 
+def _ref_headers(data: bytes) -> list[bytes]:
+    """The headers by the plainest reading there is (split on \\n): what `fasta_headers` must give in any chunks."""
+    data = data[len(BOM):] if data.startswith(BOM) else data
+    return [ln[1:].rstrip(b"\r") for ln in data.split(b"\n") if ln.startswith(b">")]
+
+
+def _ref_entries(data: bytes) -> list[tuple[bytes, bytes]]:
+    """The reader before round 4 (whole lines), with the BOM skipped: what `_read_entries` must give in any pieces."""
+    data = data[len(BOM):] if data.startswith(BOM) else data
+    out: list[tuple[bytes, bytearray]] = []
+    for line in io.BytesIO(data):
+        line = line.rstrip(b"\r\n")
+        if line.startswith(b">"):
+            out.append((line[1:].replace(b"\t", b" "), bytearray()))
+        elif out:
+            out[-1][1].extend(line.strip())
+    return [(h, bytes(s)) for h, s in out]
+
+
+def _random_fastas(n: int = 250):
+    import random
+
+    rnd = random.Random(152156)
+    atoms = [b">", b"\n", b"\r\n", b"\r", b"MKT", b"A", b" ", b"\t", b"sp|P1|X", b"contam_", b"\n>", b"\n\n"]
+    cases = [b"", BOM, BOM + b">", b">", b"\n", BOM + b"\n>a\nMK", b">a", b">a\r\n", HUMAN, BOM + HUMAN,
+             HUMAN.replace(b"\n", b"\r\n"), HUMAN.rstrip(b"\n"), b"junk\n" + HUMAN, b"MK>notaheader\n>h\nMK\n"]
+    for _ in range(n):
+        body = b"".join(rnd.choice(atoms) for _ in range(rnd.randint(0, 40)))
+        cases.append((BOM if rnd.random() < 0.3 else b"") + body)
+    return cases
+
+
+@pytest.mark.parametrize("chunk", [1, 2, 3, 5, 8, 64, 1 << 16])
+def test_fasta_headers_match_a_line_by_line_reading_in_any_chunks(chunk):
+    for data in _random_fastas():
+        assert list(fastasource.fasta_headers(io.BytesIO(data), chunk=chunk)) == _ref_headers(data), (chunk, data)
+
+
+@pytest.mark.parametrize("chunk", [1, 2, 3, 5, 8, 64])
+def test_read_entries_match_the_whole_line_reader_in_any_pieces(chunk, monkeypatch):
+    monkeypatch.setattr(fastasource, "CHUNK", chunk)
+    for data in _random_fastas():
+        assert fastasource._read_entries(io.BytesIO(data)) == _ref_entries(data), (chunk, data)
+    keep = fastasource._read_entries(io.BytesIO(b">contam_a x\nMK\nTT\n>b\nQQ\n>contam_c\nW"),
+                                     keep=lambda start: start.startswith(b"contam_"))
+    assert keep == [(b"contam_a x", b"MKTT"), (b"contam_c", b"W")]
+
+
 def test_a_bom_fasta_keeps_its_first_protein_in_python(tmp_path, monkeypatch):
     """#152: the Python way read b'\\xef\\xbb\\xbf>sp|P68871…' as text before the first header and dropped it."""
     monkeypatch.setenv("IONOMOS_OFFLINE", "1")
@@ -660,3 +708,39 @@ def test_a_go_crash_report_is_said_in_words(tmp_path):
     assert "panic: runtime error" in text and "Philosopher crashed" in text
     log.write_text("ERRO[0000] something went wrong\n")
     assert fastasource._last_lines(log) == "ERRO[0000] something went wrong"
+
+
+def _zero_file(path: Path, size: int, head: bytes = b"") -> Path:
+    """`size` bytes, no line break: `head`, then zeros (sparse where the file system allows; written in no time)."""
+    with open(path, "wb") as fh:
+        fh.write(head)
+        fh.truncate(size)
+    return path
+
+
+def test_a_200_mb_file_without_line_breaks_is_read_in_linear_time(tmp_path, monkeypatch):
+    """#156 item 5: a file with no line break used to be kept whole between chunks (quadratic; 60 s for 1 GB)."""
+    import time
+    import tracemalloc
+
+    monkeypatch.setenv("IONOMOS_OFFLINE", "1")
+    zeros = _zero_file(tmp_path / "zeros.fasta", 200 << 20)
+    one_header = _zero_file(tmp_path / "header.fasta", 200 << 20, b">sp|P1|A ")
+    started = time.monotonic()
+    tracemalloc.start()
+    try:
+        assert fastasource._scan(zeros, "rev_") == {"entries": 0, "decoys": 0, "contaminants": 0}
+        assert fragpipe.fasta_info(zeros)["entries"] == 0
+        assert fastasource.contaminants_from_fasta(zeros) == []
+        assert fastasource.text_before_first_header(zeros)[0] == 1
+        res = fastasource.prepare_for_fragpipe(zeros, tmp_path / "out")
+        with open(one_header, "rb") as fh:
+            heads = list(fastasource.fasta_headers(fh))
+        assert fastasource.contaminants_from_fasta(one_header) == []
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert not res.ok and "no FASTA entries" in res.error
+    assert len(heads) == 1 and len(heads[0]) == fastasource.HEADER_MAX and heads[0].startswith(b"sp|P1|A ")
+    assert peak < 16 * fastasource.CHUNK, f"bounded memory: a few chunks, not the file ({peak / 1e6:.0f} MB)"
+    assert time.monotonic() - started < 15, "linear: a few seconds for 200 MB, not minutes"

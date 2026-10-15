@@ -111,8 +111,19 @@ mark before the first header are fine. A source of 1 GB or more gets a note. The
 `fragpipe.decoy_problem` (the same 40–60 % rule as the search) and the counts are in the result: entries, targets,
 decoys, contaminants, decoy share.
 
-Every FASTA reader of the library and the search checks (`library.describe_fasta`, `fragpipe.fasta_info`) skips a
-leading UTF-8 byte-order mark too, so a file saved with one is counted in full.
+### Reading a FASTA
+
+Every reader of a FASTA here skips a leading UTF-8 byte-order mark (so a file saved with one is counted in full)
+and reads in bounded pieces, so a file of any size, including one without a single line break (a zero-filled or
+binary file named `.fasta`), is read in linear time and with the memory of a few chunks (#156: a 1 GB zero-filled
+file took 60 s and its size in memory):
+
+- `fastasource.fasta_headers(fh, stop, deadline, chunk=…)`: the headers only, found with a byte search in big
+  chunks and never split into lines; at most `HEADER_MAX` (64 kB) of one header is kept. It is the one header
+  reader of `prepare_for_fragpipe`'s counts, `library.describe_fasta` (the library and `ionomos library show`) and
+  `fragpipe.fasta_info` (`decoy_problem`, the fingerprint and the fake FragPipe);
+- `fastasource.read_fasta` / `contaminants_from_fasta`: the entries, Philosopher's way, read in pieces of 64 kB;
+  text that belongs to no kept entry is never held.
 
 ### Release and staleness
 

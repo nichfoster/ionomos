@@ -892,3 +892,28 @@ def test_a_fasta_with_a_byte_order_mark_counts_its_first_protein(tmp_path):
     assert (b.entries, b.targets, b.proteins, b.summary) == (a.entries, a.targets, a.proteins, a.summary)
     with open(bom, "rb") as fh:
         assert next(library._headers(fh, None, None)).startswith(b"sp|P00000|")
+
+
+def test_a_200_mb_file_without_line_breaks_is_read_in_linear_time(tmp_path):
+    """#156 item 5: `_headers` kept the whole buffer when a chunk had no line break: 60 s for a 1 GB zero-filled
+    file (the carry grew to the file's size). Now a chunk with no header costs one search and carries one byte."""
+    import time
+    import tracemalloc
+
+    zeros, header = tmp_path / "zeros.fasta", tmp_path / "header.fasta"
+    for p, head in ((zeros, b""), (header, b">sp|P1|A_HUMAN A OS=Homo sapiens OX=9606 ")):
+        with open(p, "wb") as fh:
+            fh.write(head)
+            fh.truncate(200 << 20)  # zeros, no line break (sparse where the file system allows)
+    started = time.monotonic()
+    tracemalloc.start()
+    try:
+        info = library.describe_fasta(zeros)
+        one = library.describe_fasta(header)
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert info.entries == 0 and "not a FASTA" in info.error
+    assert (one.entries, one.reviewed) == (1, 1) and one.taxon == "9606"
+    assert peak < 6 * library.CHUNK, f"bounded memory: a few chunks, not the file ({peak / 1e6:.0f} MB)"
+    assert time.monotonic() - started < 15, "linear: a few seconds for 200 MB, not minutes"
