@@ -200,15 +200,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a folder or table under the lab's users folder, and to anything when
   `--config` or `IONOMOS_CONFIG` names the config; any other folder or table
   gets Ionomos' defaults. The output now says which: `settings: C:\Fragpipe_Auto\config.yaml`
-  or `settings: Ionomos' defaults (â€¦ not used: --config applies it)`. Only the
+  or `settings: Ionomos' defaults (… not used: --config applies it)`. Only the
   lab's own experiments raise attention items. `check-folder` follows the
   same rule.
+- **An anonymised bundle no longer keeps a name that follows a JSON `\uXXXX`
+  escape** (#135). attention.py writes its items with ASCII escapes, so the
+  curly quotes around a rejected drop's name became `\u201c…\u201d` and the
+  name followed the letters `u201c`: the scrubber saw one word, and the leak
+  check (which uses the same search) missed it, so a bundle said "none found"
+  while its attention items held the user's initials and experiment names.
+  A `\uXXXX` escape is now a name boundary for the scrubber, the leak check,
+  `bundle inspect` and `bundle translate`.
 - **The app no longer dies at start when config.yaml has a YAML slip** (an
   unclosed bracket from hand editing, #136). `configio.read_config` turns the
-  parser's error into the same `could not parse <file>: line N, column M: â€¦`
+  parser's error into the same `could not parse <file>: line N, column M: …`
   message `ionomos check` prints; the app opens on the defaults with that
   message in the status bar and the first checklist item, the file untouched,
-  and a dialog offers **Restore a previous configâ€¦** when config-backups/ has
+  and a dialog offers **Restore a previous config…** when config-backups/ has
   one (else says to fix the line and press Reload). Start watcher, Reload,
   the config switcher and `ionomos init` say the same instead of a traceback,
   and any other error while the app starts is shown in a dialog before the

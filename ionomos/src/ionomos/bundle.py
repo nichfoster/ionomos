@@ -250,6 +250,8 @@ def _parquet_lines(src: Path, every: int = 1) -> Iterator[str]:
 
 _TOKEN = re.compile(r"[^\W_]+")
 _CHUNK = re.compile(r"[\w\-]*[^\W\d_][\w\-]*")  # a run of name characters holding at least one letter
+_JSON_ESCAPE = re.compile(r"(\\u[0-9a-fA-F]{4})")
+_BOUNDARY = r"(?:(?<![^\W_])|(?<=\\u[0-9a-fA-F]{4}))"  # a name starts after a non-name character or a JSON escape  # JSON's ASCII escape of a curly quote, an en dash, a µ (#135)
 _CHUNK_ONLY = re.compile(r"[\w\-]+")
 _SEP = re.compile(r"([_\-]+)")
 _NUMERIC = re.compile(r"\d+[^\W\d_]{0,5}")       # 027, 1uM, 3h, 30min, 9plex, 127N
@@ -596,7 +598,7 @@ class Anonymiser:
             self._odd_repl = {cf: (p or self.name(orig)) for cf, (p, orig) in self._odd.items()}
             self._odd_repl = {cf: r for cf, r in self._odd_repl.items() if r.casefold() != cf}
             alts = sorted(self._odd_repl, key=len, reverse=True)
-            self._odd_rx = re.compile(r"(?<![^\W_])(?:" + "|".join(re.escape(a) for a in alts) + r")(?![^\W_])",
+            self._odd_rx = re.compile(_BOUNDARY + "(?:" + "|".join(re.escape(a) for a in alts) + r")(?![^\W_])",
                                       re.IGNORECASE) if alts else None
         return self._odd_rx if self._odd else None
 
@@ -716,7 +718,10 @@ class Anonymiser:
             if ".raw" in low or ".mzml" in low or ".wiff" in low:
                 for m in _RAWFILE.finditer(s):
                     self._meet(m.group(1))
-        return _CHUNK.sub(lambda m: self._walk(m.group(), found), s)
+        walk = lambda m: self._walk(m.group(), found)  # noqa: E731
+        if "\\u" in s:  # a JSON file's \u201c before a name (#135): the escape is a boundary, not the name's first letters
+            return "".join(p if i % 2 else _CHUNK.sub(walk, p) for i, p in enumerate(_JSON_ESCAPE.split(s)))
+        return _CHUNK.sub(walk, s)
 
     def text(self, s: str) -> str:
         """`s` with every known name, e-mail address and IP address replaced."""
@@ -2380,7 +2385,7 @@ def translator(key_path: Path) -> Callable[[str], str]:
     if not back:
         return lambda text: text
     alts = sorted(back, key=len, reverse=True)
-    rx = re.compile(r"(?<![^\W_])(?:" + "|".join(re.escape(a) for a in alts) + r")(?![^\W_])", re.IGNORECASE)
+    rx = re.compile(_BOUNDARY + "(?:" + "|".join(re.escape(a) for a in alts) + r")(?![^\W_])", re.IGNORECASE)
     return lambda text: rx.sub(lambda m: back[m.group().casefold()], text)
 
 
