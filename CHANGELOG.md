@@ -219,6 +219,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rightly found nothing. The key's words are now fragments: found inside the
   names they belong to, and on their own only when distinct (KL6159A), so
   `inspect` agrees with the leak check on the same zip.
+- **CLI polish** (#143): a fold-change-only comparison (1 vs 1 sample) prints
+  "34 up, 34 down by fold change alone (no replicates to test)" instead of "of
+  0 tested"; `ionomos cancel` of a missing job exits 1 (as `retry` does) and
+  `ionomos analyze` exits 1 when the report says the analysis failed (an
+  unusable table), so a script can tell; `ionomos check` shows a workflow's
+  label type only when TMT-Integrator runs (every stock workflow carries
+  `tmtintegrator.channel_num`, so isoDTB and DIA read as "TMT-6");
+  `ionomos dry-run` no longer promises the resolver window when
+  `gui.enabled` is off; `repair-ledger --force` on a healthy ledger keeps
+  the old file as `.before-rebuild-<time>`, not `.broken-`; `ionomos compare`
+  matches Ionomos' own `DrugA_vs_DMSO_differential.tsv` by name; and the
+  static volcano SVG draws every significant point but at most ~20,000
+  non-significant ones (an even sample, said in the figure), so a 200k-row
+  table no longer makes a 37 MB file that PowerPoint cannot open (the report
+  still draws everything).
 - **`check-folder` on a table file checks that file, and a folder of several
   tables says which one was read** (#141). `check-folder a_small.tsv` used to
   check the parent folder and recommend `analyze <folder>`, which writes

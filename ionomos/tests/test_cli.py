@@ -162,3 +162,33 @@ def test_check_folder_on_a_table_checks_that_file_and_a_folder_of_tables_names_t
     bad.write_text("just\tsome\ntext\there\n", encoding="utf-8")
     assert main(["check-folder", str(bad)]) == 1
     assert "Ionomos recognises" in capsys.readouterr().out
+
+
+def test_dry_run_does_not_promise_a_window_when_the_gui_is_off(lab, tmp_path, capsys):
+    """#143: with gui.enabled false the watcher rejects with a note; dry-run said a window would open."""
+    import yaml
+
+    bad = make_drop(lab["inbox"], "nobody_isoDTB", ["S_1_1.raw"])
+    assert main(["--config", str(lab["cfg_path"]), "dry-run", str(bad)]) == 1
+    assert "the resolver window would open" in capsys.readouterr().out
+    d = dict(lab["cfg_dict"])
+    d["gui"] = {"enabled": False}
+    off = tmp_path / "off.yaml"
+    off.write_text(yaml.safe_dump(d), encoding="utf-8")
+    assert main(["--config", str(off), "dry-run", str(bad)]) == 1
+    out = capsys.readouterr().out
+    assert "gui.enabled is off" in out and "would open" not in out
+
+
+def test_fold_change_only_and_unusable_tables_say_so_and_exit_1(tmp_path, capsys):
+    """#143: 1 vs 1 sample printed '34 up, 34 down of 0 tested'; an unusable table exited 0."""
+    rows = ["Gene\tDMSO_1\tDrug_1"] + [f"G{i}\t{1000 + i}\t{(1000 + i) * (8 if i < 5 else 1)}" for i in range(40)]
+    one = tmp_path / "one.tsv"
+    one.write_text(chr(10).join(rows) + chr(10), encoding="utf-8")
+    assert main(["analyze", str(one), "--quiet", "--no-enrichment"]) == 0
+    out = capsys.readouterr().out
+    assert "of 0 tested" not in out and "by fold change alone" in out and "[FOLD CHANGE ONLY]" in out
+    empty = tmp_path / "empty.tsv"
+    empty.write_text("a\tb" + chr(10), encoding="utf-8")
+    assert main(["analyze", str(empty), "--quiet", "--no-enrichment"]) == 1
+    assert "[error]" in capsys.readouterr().out

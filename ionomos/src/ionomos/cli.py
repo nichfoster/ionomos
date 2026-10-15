@@ -521,8 +521,9 @@ def cmd_dry_run(args) -> int:
         p = plan(folder, cfg, ledger)
     except IntakeError as exc:
         fixable = exc.kind.value in ("user", "method", "raws", "layout")
-        print(f"WOULD REJECT: {folder.name}\n  reason: {exc}\n  kind  : {exc.kind.value}"
-              + ("  (the resolver window would open for this)" if fixable else ""))
+        window = ("  (the resolver window would open for this)" if cfg.gui_enabled  # only when it is on (#143)
+                  else "  (gui.enabled is off: the watcher would reject it with a note)")
+        print(f"WOULD REJECT: {folder.name}\n  reason: {exc}\n  kind  : {exc.kind.value}" + (window if fixable else ""))
         return 1
     f = p.folder
     print(f"WOULD ACCEPT: {f.original}")
@@ -750,7 +751,8 @@ def cmd_analyze(args) -> int:
         print(f"report: {out.report}")
         if args.open:
             _open_report(out.report)
-    return 0 if out.report else 1
+    # a report that says the analysis failed (an unusable table) is still exit 1, so a script can tell (#143)
+    return 0 if out.report and out.summary.get("state") != "failed" else 1
 
 
 def cmd_check_folder(args) -> int:
@@ -918,7 +920,9 @@ def _print_outcome(out) -> None:
     print(f"method: {out.method or 'unknown'}")
     for c in out.summary.get("comparisons", []):
         conf = {"low": "  [LOW CONFIDENCE]", "none": "  [FOLD CHANGE ONLY]"}.get(c.get("confidence"), "")
-        print(f"  {c['name']}: {c['up']} up, {c['down']} down of {c['tested']} tested  ({c['table']}){conf}")
+        counted = (f"of {c['tested']} tested" if c.get("tested") or c.get("confidence") != "none"
+                   else "by fold change alone (no replicates to test)")  # not "of 0 tested" (#143)
+        print(f"  {c['name']}: {c['up']} up, {c['down']} down {counted}  ({c['table']}){conf}")
         q = out.summary.get("quality") or {}
         more = []
         if (q.get("only_in_one_condition") or {}).get(c["name"]):
@@ -1176,8 +1180,10 @@ def cmd_cancel(args) -> int:
     from ionomos.worker import request_cancel
 
     cfg = _load(args, check_paths=False)
-    print(request_cancel(Ledger(cfg.database), args.job_id))
-    return 0
+    msg = request_cancel(Ledger(cfg.database), args.job_id)
+    ok = not msg.startswith(("no job", "could not"))  # a script can tell (#143), like retry
+    print(msg, file=sys.stdout if ok else sys.stderr)
+    return 0 if ok else 1
 
 
 def cmd_pause(args) -> int:
@@ -1214,7 +1220,7 @@ def cmd_repair_ledger(args) -> int:
     if state == "ok" and not args.force:
         print("ledger is fine; nothing to do (use --force to rebuild anyway)")
         return 0
-    moved, n = ledger_mod.rebuild_from_status_files(cfg.database, cfg.users_root)
+    moved, n = ledger_mod.rebuild_from_status_files(cfg.database, cfg.users_root, healthy=state == "ok")
     print(f"ledger rebuilt from the experiment folders: {n} job(s)" + (f"; old file kept as {moved}" if moved else ""))
     return 0
 

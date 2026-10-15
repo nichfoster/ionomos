@@ -1403,11 +1403,15 @@ def inspect_workflow(path: Path) -> dict:
     except OSError as exc:
         return {"error": str(exc)}
     db = props.get("database.db-path", "")
+    # every stock workflow carries tmtintegrator.channel_num: the label type is a fact only when TMT-Integrator
+    # runs, else an isoDTB or DIA workflow reads as "label type=TMT-6" (#143)
+    tmt_on = props.get("tmtintegrator.run-tmtintegrator", "").strip().lower() == "true"
     return {
         "database": db,
         "database_exists": bool(db) and Path(db).is_file(),
         "decoy_tag": props.get("database.decoy-tag", "rev_") or "rev_",
-        "settings": {label: props[k] for k, label in WORKFLOW_KEYS if k in props and props[k] != ""},
+        "settings": {label: props[k] for k, label in WORKFLOW_KEYS
+                     if k in props and props[k] != "" and (tmt_on or k != "tmtintegrator.channel_num")},
     }
 
 

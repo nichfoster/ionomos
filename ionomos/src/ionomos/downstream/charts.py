@@ -199,6 +199,23 @@ def fold_change_plot(d: DiffResult, standalone: bool = False, width: int = 760, 
                 standalone)
 
 
+MAX_POINTS = 20_000  # a 200k-feature table made a 37 MB volcano SVG that PowerPoint will not open (#143)
+
+
+def thin_points(pts: list[dict]) -> tuple[list[dict], str]:
+    """Every significant point and an even sample of the non-significant ones when there are more than
+    MAX_POINTS, with the words that say so (the static SVG is for slides; the report draws everything)."""
+    if len(pts) <= MAX_POINTS:
+        return pts, ""
+    sig = [r for r in pts if r["significant"]]
+    rest = [r for r in pts if not r["significant"]]
+    step = max(1, -(-len(rest) // max(MAX_POINTS - len(sig), 1000)))
+    kept = rest[::step]
+    note = (f"{len(kept):,} of {len(rest):,} non-significant points drawn (every {step}th); "
+            f"all {len(sig):,} significant ones")
+    return sig + kept, note
+
+
 def volcano(d: DiffResult, standalone: bool = False, width: int = 760, height: int = 520) -> str:
     if getattr(d, "confidence", "") == "none":
         return fold_change_plot(d, standalone, width, height)
@@ -206,6 +223,7 @@ def volcano(d: DiffResult, standalone: bool = False, width: int = 760, height: i
     ml, mr, mt, mb = 64, 24, 40, 52
     pw, ph = width - ml - mr, height - mt - mb
     pts = [r for r in d.rows if r["pvalue"] is not None and r["log2fc"] is not None and math.isfinite(r["log2fc"])]
+    pts, thinned = thin_points(pts)
     ys = [-math.log10(r["pvalue"]) for r in pts if r["pvalue"] > 0]
     ycap = (max(ys) if ys else 1) + 0.5
     xmax = max([abs(r["log2fc"]) for r in pts] + [s.log2fc + 0.5, 1.0]) * 1.05
@@ -240,6 +258,8 @@ def volcano(d: DiffResult, standalone: bool = False, width: int = 760, height: i
     xlabel = (f"log2 fold change ({escape(d.treatment)} / {escape(d.control)})" if d.control
               else "log2 ratio heavy / light")
     b.append(f'<text class="atitle" x="{ml + pw / 2}" y="{height - 12}" text-anchor="middle">{xlabel}</text>')
+    if thinned:
+        b.append(f'<text class="tick" x="{ml + pw}" y="{mt - 6}" text-anchor="end">{escape(thinned)}</text>')
     b.append(f'<text class="atitle" transform="translate(16 {mt + ph / 2}) rotate(-90)" text-anchor="middle">'
              f'−log10 p-value</text>')
 
