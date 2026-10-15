@@ -153,7 +153,14 @@ diff -r lab_results work/exp001/results     # the .tsv files should be identical
 ```
 
 `unpack` checks every file against the SHA-256 in `BUNDLE.json` and never
-writes over anything. With the bundled config the lab's `analysis:` defaults
+writes over anything. It reads the zip as someone else's file: a member
+whose name would land outside `work/` (`..`, a drive, an absolute or UNC
+path, a colon, a Windows device name such as `CON`) is left out and listed,
+as is a job whose folder name in `BUNDLE.json` is not one plain name; a zip
+bomb (a member over 1 GB that deflated more than 100:1) or a bundle bigger
+than the disk's free space is refused before anything is written; and the
+unpacked `config.yaml` keeps no notify, assistant or library block and no
+engine program path of the sender's (docs/SECURITY_NOTES.md). With the bundled config the lab's `analysis:` defaults
 and method definitions apply; without `--config`, Ionomos' defaults do. The
 re-run matches the lab's tables byte for byte when the same Ionomos version
 is used and the bundle says "analysis can be repeated: yes". It can differ
