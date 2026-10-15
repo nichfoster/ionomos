@@ -19,7 +19,7 @@ ionomos library scan [--root DIR ...] [--only] [--replace] [--depth N] [--time S
 ionomos library list [workflows|fastas] [--kind TMT] [--flags] [--json]
 ionomos library show PATH [--json]
 ionomos library recommend [--apply] [--json]
-ionomos library adopt PATH --method KEY [--with-fasta] [--no-config]
+ionomos library adopt PATH --method KEY [--with-fasta] [--no-config] [--force]
 ionomos library check [--json]
 ```
 
@@ -49,7 +49,14 @@ ionomos library check [--json]
 - **adopt** copies a workflow into the workflows folder as `<method>.workflow`
   (or a FASTA into the FASTA folder) and sets it for the method in
   `config.yaml`. The method keeps its FASTA unless that is missing or
-  `--with-fasta` is given. `--no-config` only copies.
+  `--with-fasta` is given. `--no-config` only copies, under a name no method
+  of the saved config.yaml uses (`TMT-2.workflow` when `TMT.workflow` is what
+  the method searches with), so the next search is not changed behind the
+  config's back. A workflow of another kind than the method's
+  (`WF_KIND_MISMATCH`: a DIA workflow for TMT) or a file with a ✗ mark (a FASTA
+  without decoys, a TMT workflow without a label type, a decoy tag that does
+  not match its FASTA) is refused, nothing copied, with each reason and its
+  fix; `--force` adopts it anyway (`library.adopt_problems`).
 - **check** compares each method's pinned files with what the PC has: a stock
   workflow of the same kind saved with a newer FragPipe, an old FASTA, a newer
   FASTA of the same proteome, a pinned file that is gone. It changes nothing;
@@ -234,6 +241,7 @@ a code in `library.py` has no entry or is missing here.
 | `WF_LABEL_TYPE_UNSET` | error | TMT-Integrator on, no `tmtintegrator.channel_num` | set the label type in FragPipe |
 | `WF_DECOY_TAG_MISMATCH` | error | its decoy tag differs from its FASTA's decoy prefix | set the tag to the FASTA's prefix |
 | `WF_NO_RUNS` | info | a run folder with no readable table, or settings no finished search used | prefer one that has produced results |
+| `WF_KIND_MISMATCH` | error | `adopt` / Use for: the workflow's kind is not the method's | pick one of the method's kind; `--force` if meant |
 | `WF_DIFFERS_FROM_PINNED` | info | same kind as a method's pinned workflow, other settings (listed) | check each difference is meant |
 | `FASTA_UNREADABLE` | error | can't be opened, or no `>` line | pick another |
 | `FASTA_SPACE_IN_PATH` | warn | a space in its path | adopt it (copied without spaces) |
@@ -292,7 +300,11 @@ app's Review proposals… in its status line.
   `fragpipe.import_workflow`, so a pinned file it replaces is kept as
   `<name>.bak-<time>`; the method key is made FragPipe-safe (letters, digits,
   `.`, `_`, `-`) for the file name; adopting the same workflow again copies
-  nothing;
+  nothing. `avoid` (`live_workflows`: the files the saved config.yaml's
+  methods search with) is never replaced: the copy then gets `<method>-2.workflow`
+  (`-3` …). The CLI passes the other methods' files (all of them with
+  `--no-config`); the app's **Use for <method>** passes all of them, so the
+  watcher's next search changes only when **Save** writes the new name;
 - its FASTA, when it exists outside `fasta_dir`, is copied in first
   (`adopt_fasta`) and the copy's `database.db-path` points at it;
 - `adopt_fasta` names the copy without spaces; a file of the same content
@@ -388,8 +400,10 @@ summary, marks ✗ ! ·, why recommended); **Show all** adds every other file
 (other kinds, files with an error, copies), a filter box narrows by words.
 The details pane shows the summary, the settings, what its search left and
 every flag with its fix. **Use for <method>** copies the file in (`adopt` /
-`adopt_fasta`, on a worker thread), puts it in the method's box and applies
-the method; **Save** keeps it. **Open folder** opens the file's folder. A
+`adopt_fasta`, on a worker thread) under a name the saved config does not use
+yet, puts it in the method's box and applies the method; **Save** keeps it. A
+workflow of another kind or a file with a ✗ mark asks first (*Use it anyway?*,
+default No), with each reason and its fix. **Open folder** opens the file's folder. A
 **Choose…** button beside the workflow and the FASTA box opens the same window
 showing only workflows or only FASTAs. Under the buttons, the method's FASTA
 is described in words (`describe_fasta`, off the Tk thread, a newer choice

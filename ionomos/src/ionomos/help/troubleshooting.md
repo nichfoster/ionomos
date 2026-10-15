@@ -1285,6 +1285,17 @@ its FASTA uses another. FragPipe would find no decoys and stop. Set the decoy
 tag on FragPipe's Database tab to the FASTA's prefix, or use a FASTA made by
 FragPipe, then save the workflow again.
 
+## The workflow is of another kind than the method {#library.wf_kind_mismatch}
+
+You asked to adopt, for example, a DIA workflow (DIA-NN, no TMT-Integrator)
+for the TMT method. Every search of that method would then be a DIA search.
+`ionomos library adopt` refuses it and copies nothing; the app's **Use for
+<method>** asks first. Pick a workflow of the method's kind (`ionomos library
+recommend` lists them, best first). If it really is meant (a method you are
+changing on purpose), `--force` adopts it anyway; the app's **Yes** does the
+same. A FASTA or workflow with a ✗ mark (no decoys, no label type, a decoy tag
+that doesn't match) is refused the same way.
+
 ## No finished search used these settings {#library.wf_no_runs}
 
 Either the search in that folder left no result table (it failed, was

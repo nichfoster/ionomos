@@ -358,11 +358,23 @@ def run_scan(cfg, *, progress: Callable[[str], None] | None = None,
     return library.save_scan(cfg, cat, prev, ctx=ctx)
 
 
-def adopt_row(row: Row, method: str, cfg, catalog=None) -> dict:
-    """Copy the row's file into the pinned folders for `method` (library.adopt / adopt_fasta). Returns
+def use_problems(row: Row, kind: str) -> str:
+    """Why Use for <method> should ask first (library.adopt_problems: a workflow of another kind than the method's,
+    a file with an error mark such as a FASTA without decoys), as the question's text; '' = nothing to ask (#150)."""
+    flags = library.adopt_problems(row.info, kind) if row.info is not None else []
+    if not flags:
+        return ""
+    lines = [f"{row.name} has a problem for this method:", ""] + flag_lines(flags, "") + [
+        "", "Use it anyway? (No leaves everything as it is.)"]
+    return "\n".join(lines)
+
+
+def adopt_row(row: Row, method: str, cfg, catalog=None, avoid: set[str] | None = None) -> dict:
+    """Copy the row's file into the pinned folders for `method` (library.adopt / adopt_fasta). `avoid`: the workflow
+    files the saved config's methods search with (library.live_workflows), never replaced before Save. Returns
     {'workflow': name or None, 'fasta': name or '', 'notes': [...]}; the caller sets them in the form."""
     if row.type == "workflow":
-        res = library.adopt(row.info, method, cfg, catalog)
+        res = library.adopt(row.info, method, cfg, catalog, avoid=avoid)
         return {"workflow": res["workflow"], "fasta": res.get("fasta") or "", "notes": list(res["notes"])}
     res = library.adopt_fasta(row.info, cfg, catalog)
     return {"workflow": None, "fasta": res["fasta"], "notes": list(res["notes"])}
@@ -780,13 +792,19 @@ class LibraryDialog(_Window):
             messagebox.showinfo("Use", f"The Methods form now shows another method. Select {self.method} again "
                                        f"and reopen this window.", parent=self.win)
             return
+        ask = use_problems(r, self.kind)
+        if ask and not messagebox.askyesno(f"Use for {self.method}?", ask, icon="warning", default="no",
+                                           parent=self.win):
+            return
         self.use_btn.configure(state="disabled")
         self.status.configure(text=f"copying {r.name} into the pinned folder…")
         cfg, cat, method = self.cfg, self.catalog, self.method
+        # the files the watcher searches with now (the saved config.yaml): Use copies beside them, Save switches
+        avoid = library.live_workflows(getattr(self.app, "config_path", None) or "")
 
         def work():
             try:
-                res = adopt_row(r, method, cfg, cat)
+                res = adopt_row(r, method, cfg, cat, avoid)
             except (OSError, ValueError) as exc:
                 self.post(lambda exc=exc: (self.status.configure(text=f"Not copied: {exc}",
                                                                  foreground=COLORS["error"]),

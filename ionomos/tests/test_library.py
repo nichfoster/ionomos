@@ -1060,6 +1060,69 @@ def test_cli(pc, capsys):
     assert cli.main(["--config", cfg, "library", "show", str(pc["root"] / "nothing.workflow")]) == 1
 
 
+def test_adopt_no_config_never_changes_the_live_workflow(pc, capsys):
+    """#150 (1): --no-config copies under a name no method uses, so the method's next search is unchanged."""
+    cfg = str(pc["cfg_path"])
+    d = configio.read_config(pc["cfg_path"])
+    d["methods"]["TMT"]["workflow"] = "TMT.workflow"         # the copy's own name is the live one
+    configio.write_config(pc["cfg_path"], d, backup=False)
+    write_wf(pc["auto"] / "workflows" / "TMT.workflow", "TMT", tmtintegrator__groupby="1")
+    live, before = pc["auto"] / "workflows" / "TMT.workflow", (pc["auto"] / "workflows" / "TMT.workflow").read_bytes()
+    cfg_before = pc["cfg_path"].read_text(encoding="utf-8")
+    assert cli.main(["--config", cfg, "library", "adopt", str(pc["pax8"]), "--method", "TMT", "--no-config"]) == 0
+    out = capsys.readouterr().out
+    assert live.read_bytes() == before, "the method's live workflow is never replaced by --no-config"
+    assert (pc["auto"] / "workflows" / "TMT-2.workflow").is_file()
+    assert "copied as TMT-2.workflow" in out and "TMT still uses TMT.workflow" in out
+    assert pc["cfg_path"].read_text(encoding="utf-8") == cfg_before
+    assert not list((pc["auto"] / "workflows").glob("TMT.workflow.bak-*"))
+    # without --no-config the method's own file is replaced (kept as .bak) and config.yaml says so
+    assert cli.main(["--config", cfg, "library", "adopt", str(pc["pax8"]), "--method", "TMT"]) == 0
+    capsys.readouterr()
+    assert list((pc["auto"] / "workflows").glob("TMT.workflow.bak-*"))
+    # another method's live file is never replaced either: isoDTB searches with DIA.workflow here
+    d = configio.read_config(pc["cfg_path"])
+    d["methods"]["isoDTB"]["workflow"] = "DIA.workflow"
+    configio.write_config(pc["cfg_path"], d, backup=False)
+    dia = (pc["auto"] / "workflows" / "DIA.workflow").read_bytes()
+    stock = pc["fp"] / "workflows" / "DIA_SpecLib_Quant.workflow"
+    assert cli.main(["--config", cfg, "library", "adopt", str(stock), "--method", "DIA"]) == 0
+    capsys.readouterr()
+    assert (pc["auto"] / "workflows" / "DIA.workflow").read_bytes() == dia
+    assert load(cfg, check_paths=False).methods["DIA"].workflow == "DIA-2.workflow"
+
+
+def test_adopt_refuses_another_kind_or_an_error_mark_unless_forced(pc, capsys):
+    """#150 (2, 3): a DIA workflow for TMT, or a FASTA without decoys, is refused with the reason (nothing copied,
+    config.yaml unchanged); --force adopts it."""
+    cfg = str(pc["cfg_path"])
+    dia = pc["fp"] / "workflows" / "DIA_SpecLib_Quant.workflow"
+    wf_dir = pc["auto"] / "workflows"
+    files, text = sorted(p.name for p in wf_dir.iterdir()), pc["cfg_path"].read_text(encoding="utf-8")
+    assert cli.main(["--config", cfg, "library", "adopt", str(dia), "--method", "TMT"]) == 1
+    err = capsys.readouterr().err
+    assert "[WF_KIND_MISMATCH]" in err and "is a DIA workflow" in err and "not a TMT one" in err and "--force" in err
+    assert sorted(p.name for p in wf_dir.iterdir()) == files and pc["cfg_path"].read_text(encoding="utf-8") == text
+    nodecoys = make_fasta(pc["root"] / "dbs" / "nodecoys.fasta", decoy=None)
+    assert cli.main(["--config", cfg, "library", "adopt", str(nodecoys), "--method", "DIA"]) == 1
+    err = capsys.readouterr().err
+    assert "[FASTA_NO_DECOYS]" in err and "Make a FASTA with decoys" in err
+    assert not (pc["auto"] / "fasta" / "nodecoys.fasta").exists()
+    assert cli.main(["--config", cfg, "library", "adopt", str(nodecoys), "--method", "DIA", "--force"]) == 0
+    assert "adopted although: [FASTA_NO_DECOYS]" in capsys.readouterr().out
+    assert load(cfg, check_paths=False).methods["DIA"].fasta == "nodecoys.fasta"
+    assert cli.main(["--config", cfg, "library", "adopt", str(dia), "--method", "TMT", "--force"]) == 0
+    capsys.readouterr()
+    assert load(cfg, check_paths=False).methods["TMT"].workflow == "TMT.workflow"
+    # a workflow whose decoy tag does not match its FASTA
+    decoy = make_fasta(pc["root"] / "dbs" / "decoy_tagged.fasta", decoy="DECOY_")
+    bad = write_wf(pc["root"] / "w" / "tag.workflow", "TMT", db=decoy)
+    flags = library.adopt_problems(library.describe_workflow(bad), "TMT")
+    assert [f.code for f in flags] == ["WF_DECOY_TAG_MISMATCH"]
+    assert library.adopt_problems(library.describe_workflow(pc["pax8"]), "TMT") == []
+    assert cli.main(["--config", cfg, "library", "adopt", str(pc["root"] / "nope.workflow"), "--method", "TMT"]) == 1
+
+
 def test_adopt_keeps_the_learned_aliases_beside_the_config(pc, capsys):
     """#149: a config without learned_aliases_file reads it beside config.yaml; saving it through adopt (configio
     fills in every default) must not re-point it at the default root C:/Fragpipe_Auto."""

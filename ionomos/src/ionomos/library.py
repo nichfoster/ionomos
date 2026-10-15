@@ -1857,10 +1857,60 @@ def adopt_fasta(info: FastaInfo | str | Path, cfg, catalog: Catalog | None = Non
     return {"fasta": target.name, "path": str(target), "copied": copied, "notes": notes}
 
 
-def adopt(info: WorkflowInfo | str | Path, method: str, cfg, catalog: Catalog | None = None) -> dict:
+def _wf_name(name: str) -> str:
+    n = Path(str(name or "").strip()).name
+    return (n if not n or n.lower().endswith(WORKFLOW_SUFFIX) else n + WORKFLOW_SUFFIX).lower()
+
+
+def live_workflows(cfg_or_path, but: str | None = None) -> set[str]:
+    """The workflow file names (lower case) the methods of the SAVED config.yaml use, which the watcher searches
+    with: a copy must not replace one before the config says so (#150). `cfg_or_path`: a Config read from disk or
+    the config.yaml path; `but`: leave out this method's own file (its config is written right after)."""
+    if isinstance(cfg_or_path, (str, Path)):
+        path = Path(cfg_or_path)
+        if not path.is_file():
+            return set()
+        from ionomos import configio
+
+        try:
+            methods = configio.read_config(path).get("methods") or {}
+        except Exception:  # noqa: BLE001 - unreadable: nothing to protect that we can name
+            return set()
+        names = {k: str((m or {}).get("workflow") or "") for k, m in methods.items() if isinstance(m, dict)}
+    else:
+        names = {k: str(m.workflow or "") for k, m in cfg_or_path.methods.items()}
+    return {_wf_name(n) for k, n in names.items() if n and k != but} - {""}
+
+
+def adopt_problems(info: WorkflowInfo | FastaInfo, method_kind: str = "", ctx: Context | None = None) -> list[Flag]:
+    """Why a file should not be adopted for a method without a second thought (#150): a workflow of another kind
+    than the method's (WF_KIND_MISMATCH), and every error flag the file carries (FASTA_NO_DECOYS,
+    FASTA_DECOY_SHARE, WF_LABEL_TYPE_UNSET, WF_TOOL_MISSING ...), for a workflow also WF_DECOY_TAG_MISMATCH against
+    the FASTA it was saved with. [] = fine. The CLI refuses without --force, the app asks."""
+    out = [f for f in info.flags if f.severity == "error"]
+    if isinstance(info, WorkflowInfo) and not info.error:
+        if method_kind in KINDS and info.kind != method_kind:
+            out.insert(0, Flag("WF_KIND_MISMATCH", "error", f"{info.name} is a {info.kind} workflow "
+                               f"({info.summary.split(':')[0].rstrip('.')}), not a {method_kind} one",
+                               f"Pick a {method_kind} workflow (`ionomos library recommend` lists them; Find on this "
+                               f"PC… in the app), or adopt it anyway if this is meant (--force).", info.path))
+        if info.database_exists and not any(f.code == "WF_DECOY_TAG_MISMATCH" for f in out):
+            fa = describe_fasta(info.database, ctx)
+            if fa.decoy_tag and fa.decoy_tag != info.decoy_tag:
+                out.append(Flag("WF_DECOY_TAG_MISMATCH", "error", f"The workflow's decoy tag is '{info.decoy_tag}', "
+                                f"but the decoys of {fa.name} start with '{fa.decoy_tag}'", "FragPipe would find no "
+                                "decoys and stop. Set the decoy tag on FragPipe's Database tab to match the FASTA, "
+                                "then save the workflow again.", info.path))
+    return out
+
+
+def adopt(info: WorkflowInfo | str | Path, method: str, cfg, catalog: Catalog | None = None, *,
+          avoid: set[str] | None = None) -> dict:
     """Copy a workflow into workflow_dir as <method>.workflow (a FragPipe-safe name), the way
-    fragpipe.import_workflow does: the pinned file it replaces is kept as .bak-<time>. Its FASTA is copied into
-    fasta_dir too when it exists and is elsewhere (adopt_fasta), and the copy's database.db-path points at it.
+    fragpipe.import_workflow does: the pinned file it replaces is kept as .bak-<time>. `avoid`: file names (any
+    case) never to replace, the files the saved config's methods search with (live_workflows): then the copy gets
+    a name of its own (<method>-2.workflow ...). Its FASTA is copied into fasta_dir too when it exists and is
+    elsewhere (adopt_fasta), and the copy's database.db-path points at it.
     Changes no setting: returns {'workflow', 'fasta', 'notes', 'origin'} for the caller to put in config.yaml."""
     if not isinstance(info, WorkflowInfo):
         info = describe_workflow(info, evidence=False)
@@ -1881,7 +1931,13 @@ def adopt(info: WorkflowInfo | str | Path, method: str, cfg, catalog: Catalog | 
         fasta_name = res["fasta"]
         text = fragpipe.patch_workflow(text, fasta_dir / fasta_name)
     dest = workflow_dir / f"{stem}{WORKFLOW_SUFFIX}"
-    if dest.is_file() and dest.read_bytes().decode("utf-8", errors="replace") == text:
+    same = dest.is_file() and dest.read_bytes().decode("utf-8", errors="replace") == text
+    if not same and dest.exists() and dest.name.lower() in {a.lower() for a in (avoid or ())}:
+        live = dest.name
+        dest = _free_name(workflow_dir, dest.name)
+        stem = dest.name[:-len(WORKFLOW_SUFFIX)]
+        notes.append(f"{live} is what a method searches with now, so it is left as it is; the copy is {dest.name}")
+    if same:
         out = {"workflow": dest.name, "fasta": fasta_name or (Path(db).name if db and _inside(db, fasta_dir) else ""),
                "notes": notes + [f"{dest.name} already holds exactly this workflow; nothing copied"],
                "origin": str(src)}
@@ -1891,7 +1947,7 @@ def adopt(info: WorkflowInfo | str | Path, method: str, cfg, catalog: Catalog | 
         staged.write_text(text, encoding="utf-8", newline="")
         res = fragpipe.import_workflow(staged, stem, workflow_dir, fasta_dir)
     notes += res["notes"]
-    if stem != method:
+    if stem != method and stem == safe_name(method):
         notes.append(f"saved as {dest.name} (FragPipe-safe name for method {method})")
     notes.append(f"copied from {src}")
     _record(catalog, cfg, {"type": "workflow", "method": method, "origin": str(src), "copy": str(dest),
@@ -1997,7 +2053,8 @@ Find, understand and adopt FragPipe workflows and FASTAs on this PC (docs/LIBRAR
   ionomos library recommend [--apply]         the best candidates per method; --apply copies them in and
                                               updates config.yaml (backed up first) for methods whose files
                                               are missing or broken
-  ionomos library adopt PATH --method KEY     copy a workflow (and its FASTA) into the pinned folders and use it
+  ionomos library adopt PATH --method KEY [--no-config] [--force]
+                                              copy a workflow (and its FASTA) into the pinned folders and use it
   ionomos library check                       newer stock workflows, old or superseded FASTAs
 """
 
@@ -2034,7 +2091,10 @@ def add_parser(sub):
     ad.add_argument("--method", required=True)
     ad.add_argument("--with-fasta", action="store_true", help="also switch the method to the workflow's own FASTA "
                     "(default: only when the method's FASTA is missing)")
-    ad.add_argument("--no-config", action="store_true", help="copy only; leave config.yaml as it is")
+    ad.add_argument("--no-config", action="store_true", help="copy only, under a name no method uses; leave "
+                    "config.yaml as it is")
+    ad.add_argument("--force", action="store_true", help="adopt even a workflow of another kind than the method's, "
+                    "or a file with an error mark (a FASTA without decoys ...)")
     ck = ls.add_parser("check", help="newer stock workflows, old or superseded FASTAs (changes nothing)")
     ck.add_argument("--json", action="store_true")
     return p
@@ -2275,16 +2335,38 @@ def _cli_adopt(args, cfg) -> int:
         print(f"no method {args.method!r} in config.yaml (methods: {', '.join(cfg.methods)})", file=sys.stderr)
         return 2
     p = Path(args.path)
-    if not p.name.lower().endswith(WORKFLOW_SUFFIX):
-        res = adopt_fasta(p, cfg)
+    if not p.is_file():
+        print(f"{p} is not a file on this PC", file=sys.stderr)
+        return 1
+    is_wf = p.name.lower().endswith(WORKFLOW_SUFFIX)
+    ctx = context_from(cfg)
+    info = describe_workflow(p, ctx, evidence=False) if is_wf else describe_fasta(p, ctx)
+    problems = adopt_problems(info, cfg.kind(args.method), ctx)
+    if problems and not args.force:   # #150: never a DIA workflow for TMT or a FASTA FragPipe refuses, silently
+        print(f"not adopted for {args.method}: nothing copied, config.yaml not changed", file=sys.stderr)
+        for f in problems:
+            print(f"  ✗ [{f.code}] {f.text}", file=sys.stderr)
+            print(f"      → {f.fix}", file=sys.stderr)
+        print("  (--force adopts it anyway)", file=sys.stderr)
+        return 1
+    for f in problems:
+        print(f"  adopted although: [{f.code}] {f.text}")
+    current = getattr(cfg.methods[args.method], "workflow" if is_wf else "fasta", "") or ""
+    if not is_wf:
+        res = adopt_fasta(info, cfg)
         field_, value = "fasta", res["fasta"]
     else:
-        res = adopt(p, args.method, cfg)
+        res = adopt(info, args.method, cfg, avoid=live_workflows(cfg, None if args.no_config else args.method))
         field_, value = "workflow", res["workflow"]
     for n in res["notes"]:
         print(f"  {n}")
     if args.no_config:
-        print(f"copied; config.yaml not changed (set {args.method}.{field_} to {value} to use it)")
+        if value == current:
+            print(f"copied; config.yaml not changed: {args.method} uses {value}, which already held exactly this file")
+        else:
+            print(f"copied as {value}; config.yaml not changed: {args.method} still uses {current or '(nothing)'}. To "
+                  f"use the copy, run this again without --no-config, or set methods: {args.method}: {field_}: "
+                  f"{value} in config.yaml (the app's Methods tab)")
         return 0
     d = configio.read_config(cfg.config_path)
     m = d["methods"][args.method]
