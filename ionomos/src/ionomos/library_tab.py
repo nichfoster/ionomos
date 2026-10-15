@@ -147,7 +147,7 @@ def _ranked(by_path: dict, extra: Callable) -> Callable:
 
 
 def candidate_rows(catalog, kind: str, *, what: str = "both", show_all: bool = False, installed_version: str = "",
-                   pinned=None, taxon: str | None = None, prefer: str = "") -> list[Row]:
+                   pinned=None, taxon: str | None = None, prefer: str = "", taxon_from: str = "") -> list[Row]:
     """The table of the Find on this PC dialog. By default the candidates library.recommend ranks for the method's
     kind (one per set of settings, no file with an error) and every usable FASTA (recommend_fastas), best first.
     `show_all`: every workflow and FASTA of the catalog, recommended ones first, then the rest (other kinds, files
@@ -162,7 +162,7 @@ def candidate_rows(catalog, kind: str, *, what: str = "both", show_all: bool = F
         else:
             rows += [_row(c.info, c) for c in cands]
     if what in ("both", "fasta"):
-        cands = library.recommend_fastas(catalog, taxon, kind)
+        cands = library.recommend_fastas(catalog, taxon, kind, taxon_from)
         if show_all:
             by_path = {library._key(c.info.path): c for c in cands}
             fs = sorted(catalog.fastas, key=_ranked(by_path, lambda f: ()))
@@ -223,14 +223,20 @@ def filter_rows(rows: list[Row], text: str) -> list[Row]:
     return [r for r in rows if all(w in f"{r.kind} {r.name} {r.where} {r.summary}".lower() for w in words)]
 
 
-def method_taxon(catalog, fasta_path: Path | None, fasta_dir: Path | None) -> str | None:
-    """The organism to rank FASTAs for: the method's current FASTA's, else the commonest in the FASTA folder."""
+def method_taxon_from(catalog, fasta_path: Path | None, fasta_dir: Path | None) -> tuple[str | None, str]:
+    """(the organism to rank FASTAs for, where it came from in words): the method's current FASTA's, else the
+    commonest in the FASTA folder; (None, '') when neither says."""
     if fasta_path is not None:
         cur = catalog.find(fasta_path)
         if cur is not None and cur.taxon:
-            return cur.taxon
+            return cur.taxon, "the method's current FASTA"
     n = Counter(f.taxon for f in catalog.fastas if f.taxon and library._inside(f.path, fasta_dir))
-    return n.most_common(1)[0][0] if n else None
+    return (n.most_common(1)[0][0], "the FASTA folder's files") if n else (None, "")
+
+
+def method_taxon(catalog, fasta_path: Path | None, fasta_dir: Path | None) -> str | None:
+    """The organism to rank FASTAs for (method_taxon_from without the words)."""
+    return method_taxon_from(catalog, fasta_path, fasta_dir)[0]
 
 
 def catalog_age_hours(catalog, now: datetime | None = None) -> float | None:
@@ -751,10 +757,11 @@ class LibraryDialog(_Window):
         wf = resolve_file(paths.get("workflow_dir"), str(m.get("workflow") or ""), library.WORKFLOW_SUFFIX)
         fa = resolve_file(paths.get("fasta_dir"), str(m.get("fasta") or ""))
         pinned = self.catalog.find(wf) if wf else None
-        taxon = method_taxon(self.catalog, fa, Path(paths["fasta_dir"]) if paths.get("fasta_dir") else None)
+        taxon, taxon_from = method_taxon_from(self.catalog, fa,
+                                              Path(paths["fasta_dir"]) if paths.get("fasta_dir") else None)
         rows = candidate_rows(self.catalog, self.kind or "other", what=self._what(), show_all=self.show_all.get(),
                               installed_version=self.installed, pinned=pinned, taxon=taxon,
-                              prefer=str(m.get("workflow") or ""))
+                              prefer=str(m.get("workflow") or ""), taxon_from=taxon_from)
         self.rows = filter_rows(rows, self.filter.get())
         self.tree.delete(*self.tree.get_children())
         for i, r in enumerate(self.rows):

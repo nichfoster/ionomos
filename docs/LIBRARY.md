@@ -36,7 +36,8 @@ ionomos library check [--json]
 - **list** prints the last scan, one line per file plus its summary, and for a
   workflow that is not itself a run's, the finished searches with its settings
   ("used in 4 finished search(es), the latest 2026-10-15"); `--flags` adds
-  every mark with what to do.
+  every mark with what to do. `--kind K` with no workflow of that kind says so
+  (and lists the kinds when K is not one; exit 2).
 - **show** describes one file now (no scan needed): kind, every setting below,
   the tools it needs, what its search left (or, from the last scan, the
   finished searches with its settings), its flags.
@@ -192,7 +193,9 @@ finished searches instead of as rival workflows.
 
 `describe_fasta(path) -> FastaInfo`. The file is read as bytes in 8 MB chunks;
 only header lines are looked at, so a 1 GB file is never decoded or split
-into lines. The result is cached by (path, modification time, size), in memory
+into lines, and what is kept between chunks is at most one header line (a
+header over 64 kB is cut), so a file without line breaks is read as fast as
+any other. The result is cached by (path, modification time, size), in memory
 and, through the catalog, across scans (a reading made by an older Ionomos,
 `reader` below `FASTA_READER`, is read again). A reading that ran out of time or was
 stopped says so (`complete: false`) and is not cached.
@@ -276,12 +279,16 @@ flag, −3 per warning. Files that are no longer on disk are left out. These
 weights are Ionomos' choice; they order, the reasons explain. Candidates within
 0.5 points of each other (`TIE`) are a tie: their order means nothing.
 
-`recommend_fastas(catalog, taxon)`: +15 the organism asked for (−30 another, 0 when its organism is unknown),
-3 per finished search that used it (by path, else by file name), +10 usable
-decoys, +3 contaminants, +2 reviewed, up to +3 for a recent date, +4 already in
-the FASTA folder, and the same flag penalties. `auto_assign` asks for the
-organism of the FASTAs already in the FASTA folder, else of those finished
-searches used.
+`recommend_fastas(catalog, taxon, kind, taxon_from)`: one candidate per
+content (fingerprint), represented by the copy in the FASTA folder, then one
+without a space in its path, with FragPipe's name, with a date in its name, the
+newest file; +15 the organism asked for (−30 another, 0 when its organism is
+unknown), 3 per finished search that used it (by path, else by file name), +10
+usable decoys, +3 contaminants, +2 reviewed, up to +3 for a recent date, +4
+already in the FASTA folder, and the same flag penalties. `auto_assign` asks
+for the organism of the FASTAs already in the FASTA folder, else of those
+finished searches used (`lab_taxon`), and the reason says so ("Human, the
+organism of the FASTA folder's files"), never "as asked".
 
 `auto_assign(cfg_dict, catalog, installed_version, notes) -> [Proposal]` proposes the
 best candidate without an error for every method whose workflow (FragPipe

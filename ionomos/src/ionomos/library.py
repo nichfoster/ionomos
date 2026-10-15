@@ -50,6 +50,7 @@ SEARCH_PROTEIN_LIST = "protein.fas"                  # Philosopher's per-group o
 MAX_WORKFLOW_BYTES = 5_000_000                       # a FragPipe workflow is ~20 kB; bigger is something else
 CHUNK = 8 << 20
 HASH_BYTES = 1 << 20                                 # the fingerprint hashes the first and last 1 MB
+MAX_HEADER = 64 << 10                                # a header line longer than this is cut (a FASTA's are < 1 kB)
 DECOY_TAGS = ("rev_", "DECOY_", "REV_", "decoy_")    # detected, never assumed
 CONTAM_TAGS = (b"contam_", b"CON__")
 OLD_DAYS = 365
@@ -332,6 +333,16 @@ def _day(ts: float) -> str:
         return ""
 
 
+def _a(word: str) -> str:
+    """'A' or 'An' before a word: 'An iTRAQ-4 search', 'A TMT-10 search', 'An isoDTB search'."""
+    return "An" if word[:1].lower() in "aeio" else "A"
+
+
+def plural(n: int, word: str, many: str = "") -> str:
+    """'1 protein', '20,698 proteins'."""
+    return f"{n:,} {word if n == 1 else (many or word + 's')}"
+
+
 def safe_name(name: str) -> str:
     """A FragPipe-safe file name: no spaces, only letters, digits and . _ - (FragPipe refuses spaces in paths)."""
     out = re.sub(r"[^A-Za-z0-9._-]+", "_", name.strip()).strip("_")
@@ -547,7 +558,7 @@ def _kind_words(info: WorkflowInfo, props: dict) -> str:
     if info.kind == "TMT":
         lt = info.label_type or "TMT (label type not set)"
         ms3 = " MS3" if "ms3" in info.name.lower() or "MS3" in info.description else ""
-        return f"A {lt}{ms3} search with TMT-Integrator"
+        return f"{_a(lt)} {lt}{ms3} search with TMT-Integrator"
     if info.kind in LABELLED_KINDS:
         mbr = st.get("match-between-runs")
         what = {"isoDTB": "An isoDTB search (light/heavy labelled cysteines, IonQuant)",
@@ -758,24 +769,33 @@ def _headers(fh, stop: threading.Event | None, deadline: float | None):
     """Every header line (without '>') of a FASTA opened in binary mode, read in big chunks: a 1 GB file is
     never decoded or split into lines. Raises TimeoutError when stopped or out of time."""
     carry = b"\n"
+    skipping = False   # inside a header line longer than MAX_HEADER, already given: drop it up to its end
     while True:
         if (stop is not None and stop.is_set()) or (deadline is not None and time.monotonic() > deadline):
             raise TimeoutError
         chunk = fh.read(CHUNK)
         if not chunk:
             break
+        if skipping:
+            k = chunk.find(b"\n")
+            if k < 0:
+                continue
+            chunk, carry, skipping = chunk[k:], b"", False
         buf = carry + chunk
         pos = 0
         carry = b""
         while True:
             i = buf.find(b"\n>", pos)
-            if i < 0:
-                k = buf.rfind(b"\n", pos)
-                carry = buf[k:] if k >= 0 else b""
+            if i < 0:   # only a line break at the very end can start a header in the next chunk (#156: was the
+                carry = b"\n" if buf.endswith(b"\n") else b""   # whole buffer, quadratic without line breaks)
                 break
             j = buf.find(b"\n", i + 1)
             if j < 0:
-                carry = buf[i:]
+                if len(buf) - i > MAX_HEADER:
+                    yield buf[i + 2:i + 2 + MAX_HEADER].rstrip(b"\r")
+                    skipping = True
+                else:
+                    carry = buf[i:]
                 break
             yield buf[i + 2:j].rstrip(b"\r")
             pos = j
@@ -923,11 +943,11 @@ def _fasta_summary(info: FastaInfo) -> str:
         src = "unreviewed UniProt (TrEMBL)"
     else:
         src = f"UniProt, {100 * info.unreviewed / uni:.0f} % unreviewed"
-    iso = f", {info.isoforms:,} isoforms" if info.isoforms else ""
+    iso = f", {plural(info.isoforms, 'isoform')}" if info.isoforms else ""
     what = []
     what.append(f"decoys ({info.decoy_tag})" if info.decoys else "NO decoys")
-    what.append(f"{info.contaminants} contaminants" if info.contaminants else "no contaminants")
-    text = f"{who}, {src} ({info.proteins:,} proteins{iso}) with {' and '.join(what)}"
+    what.append(plural(info.contaminants, "contaminant") if info.contaminants else "no contaminants")
+    text = f"{who}, {src} ({plural(info.proteins, 'protein')}{iso}) with {' and '.join(what)}"
     if info.name_date:
         text += f", made {info.name_date}"
     if info.proteome:
@@ -1632,10 +1652,12 @@ def _used_fastas(catalog: Catalog) -> Counter:
     return used
 
 
-def recommend_fastas(catalog: Catalog, taxon: str | None = None, kind: str | None = None) -> list[Candidate]:
+def recommend_fastas(catalog: Catalog, taxon: str | None = None, kind: str | None = None,
+                     taxon_from: str = "") -> list[Candidate]:
     """FASTAs (one per content), best first: usable decoys, contaminants, reviewed, the organism asked for,
     made recently, used by finished searches, already in the FASTA folder. `kind` is not used yet: every search
-    kind takes the same database (kept so the picker can ask per method)."""
+    kind takes the same database (kept so the picker can ask per method). `taxon_from`: where the organism came
+    from, in words ('the FASTA folder's files'), for the reason; '' = the caller asked for it."""
     used = _used_fastas(catalog)
     groups: dict[str, list[FastaInfo]] = {}
     for f in catalog.fastas:
@@ -1644,13 +1666,15 @@ def recommend_fastas(catalog: Catalog, taxon: str | None = None, kind: str | Non
         groups.setdefault(f.fingerprint or _key(f.path), []).append(f)
     out = []
     for members in groups.values():
-        members.sort(key=lambda f: ({"pinned": 0, "cache": 1}.get(f.source, 2), " " in f.path, -f.mtime))
+        members.sort(key=lambda f: ({"pinned": 0, "cache": 1}.get(f.source, 2), " " in f.path,
+                                    not f.fragpipe_style, not f.name_date, -f.mtime))   # #156: not dup-human.fas
         rep = members[0]
         score, reasons = 0.0, []
         if taxon:
             if rep.taxon == str(taxon) or (rep.top_species and rep.species and rep.species[0][0] == str(taxon)):
                 score += 15
-                reasons.append(f"{rep.top_species or 'the organism'} as asked")
+                who = rep.top_species or "the organism"
+                reasons.append(f"{who}, the organism of {taxon_from}" if taxon_from else f"{who} as asked")
             elif not rep.top_species:
                 reasons.append("its organism can't be read from its headers (no OX=) or its name")
             else:
@@ -1690,18 +1714,23 @@ def _age_days(day: str) -> int:
         return 0
 
 
-def _lab_taxon(catalog: Catalog, fasta_dir: Path | None) -> str | None:
-    """The organism of the FASTAs already in the FASTA folder, else of the FASTAs finished searches used."""
+def lab_taxon(catalog: Catalog, fasta_dir: Path | None) -> tuple[str | None, str]:
+    """(taxon, where it came from in words): the organism of the FASTAs already in the FASTA folder, else of the
+    FASTAs finished searches used; (None, '') when neither says."""
     pinned = Counter(f.taxon for f in catalog.fastas if f.taxon and _inside(f.path, fasta_dir))
     if pinned:
-        return pinned.most_common(1)[0][0]
+        return pinned.most_common(1)[0][0], "the FASTA folder's files"
     used = _used_fastas(catalog)
     counts = Counter()
     for f in catalog.fastas:
         if f.taxon:
             counts[f.taxon] += used.get(_key(f.path), 0)
     best = counts.most_common(1)
-    return best[0][0] if best and best[0][1] else None
+    return (best[0][0], "the FASTAs finished searches used") if best and best[0][1] else (None, "")
+
+
+def _lab_taxon(catalog: Catalog, fasta_dir: Path | None) -> str | None:
+    return lab_taxon(catalog, fasta_dir)[0]
 
 
 def _clear_best(cands: list[Candidate]) -> tuple[Candidate | None, list[Candidate]]:
@@ -1732,7 +1761,7 @@ def auto_assign(cfg_dict: dict, catalog: Catalog, installed_version: str = "",
     wf_dir = Path(paths["workflow_dir"]) if paths.get("workflow_dir") else None
     fa_dir = Path(paths["fasta_dir"]) if paths.get("fasta_dir") else None
     ctx = Context(workflow_dir=wf_dir, fasta_dir=fa_dir, installed_version=installed_version)
-    taxon = _lab_taxon(catalog, fa_dir)
+    taxon, taxon_from = lab_taxon(catalog, fa_dir)
     out: list[Proposal] = []
     for key, m in (cfg_dict.get("methods") or {}).items():
         if not isinstance(m, dict):
@@ -1773,7 +1802,7 @@ def auto_assign(cfg_dict: dict, catalog: Catalog, installed_version: str = "",
             if errs:
                 why = errs[0].text
         if why:
-            cands = [c for c in recommend_fastas(catalog, taxon, kind)
+            cands = [c for c in recommend_fastas(catalog, taxon, kind, taxon_from)
                      if not any(f.severity == "error" for f in c.flags)]
             best, tied = _clear_best(cands)
             if best is not None:
@@ -2211,6 +2240,13 @@ def _cli_list(args, cat: Catalog) -> int:
         return 1
     ws = [w for w in cat.workflows if args.kind is None or w.kind.lower() == args.kind.lower()]
     fs = [] if args.kind else cat.fastas
+    if args.kind and not ws:   # #156: not the scan header and nothing else
+        known = args.kind.lower() in (k.lower() for k in KINDS)
+        found = sorted({w.kind for w in cat.workflows}, key=lambda k: KINDS.index(k) if k in KINDS else 99)
+        print(f"no workflows of kind {args.kind} in the last scan"
+              + ("" if known else f" ({args.kind} is not a kind; kinds: {', '.join(KINDS)})")
+              + (f"; found: {', '.join(found)}" if found else ""), file=sys.stderr)
+        return 0 if known else 2
     if args.what == "workflows":
         fs = []
     elif args.what == "fastas":
@@ -2284,13 +2320,13 @@ def _cli_recommend(args, cfg, cat: Catalog) -> int:
     ctx = context_from(cfg, tools=False)
     judge_catalog(cat, Context(workflow_dir=ctx.workflow_dir, fasta_dir=ctx.fasta_dir, installed_version=inst,
                                pinned=ctx.pinned, install_roots=ctx.install_roots))
-    taxon = _lab_taxon(cat, Path(cfg.fasta_dir))
+    taxon, taxon_from = lab_taxon(cat, Path(cfg.fasta_dir))
     report = {}
     for key in cfg.methods:
         kind = cfg.kind(key)
         pin = cat.find(ctx.pinned[kind]) if kind in ctx.pinned else None
         report[key] = {"kind": kind, "workflows": recommend(cat, kind, inst, pin, cfg.methods[key].workflow)[:3],
-                       "fastas": recommend_fastas(cat, taxon, kind)[:3]}
+                       "fastas": recommend_fastas(cat, taxon, kind, taxon_from)[:3]}
     notes: list[str] = []
     proposals = auto_assign(d, cat, inst, notes)
     if args.json:

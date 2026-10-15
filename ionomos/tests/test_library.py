@@ -10,6 +10,7 @@ import json
 import os
 import re
 import threading
+import time
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -349,6 +350,78 @@ def test_stock_ties_are_never_broken_by_file_name(tmp_path):
     assert ("TMT", "workflow") not in {(p.method, p.what) for p in props}
     note = next(n for n in notes if n.startswith("TMT: "))
     assert "fit equally well" in note and "Nonspecific-HLA-TMT10.workflow" in note and "adopt" in note
+
+
+def test_words_are_grammatical(tmp_path):
+    """#156 item 1: 'An iTRAQ-4 search', '1 protein', '1 contaminant'."""
+    itraq = library.describe_workflow(write_wf(tmp_path / "iTRAQ4.workflow", "TMT", tmtintegrator__channel_num="iTRAQ-4"))
+    assert itraq.summary.startswith("An iTRAQ-4 search with TMT-Integrator"), itraq.summary
+    one = library.describe_fasta(make_fasta(tmp_path / "one.fasta", human=1, contam=1))
+    assert "(1 protein)" in one.summary and "1 contaminant" in one.summary and "contaminants" not in one.summary
+
+
+def test_the_organism_reason_says_where_it_came_from(pc):
+    """#156 item 2: the organism was inferred (the FASTA folder's files), nobody asked for it."""
+    cat = _scan(pc)
+    d = configio.read_config(pc["cfg_path"])
+    d["methods"]["DIA"]["fasta"] = "gone.fas"
+    prop = next(p for p in library.auto_assign(d, cat, "24.0") if p.what == "fasta")
+    assert "Human, the organism of the FASTA folder's files" in prop.candidate.reasons
+    assert not any("as asked" in r for r in prop.candidate.reasons)
+
+
+def test_list_with_an_unknown_kind_says_so(pc, capsys):
+    """#156 item 3: `library list --kind foo` printed the header and nothing else, exit 0."""
+    library.save_catalog(pc["cfg"], _scan(pc))
+    assert cli.main(["--config", str(pc["cfg_path"]), "library", "list", "--kind", "foo"]) == 2
+    err = capsys.readouterr().err
+    assert "no workflows of kind foo" in err and "kinds: isoDTB, TMT" in err and "found: isoDTB" in err
+    assert cli.main(["--config", str(pc["cfg_path"]), "library", "list", "--kind", "PAL"]) == 0
+    assert "no workflows of kind PAL in the last scan" in capsys.readouterr().err
+
+
+def test_identical_copies_are_represented_by_the_newest_fragpipe_and_fragpipes_name(tmp_path):
+    """#156 item 4: the same settings saved by 22.0 (a newer file: the zip unpacked after the install) and by 24.0
+    are represented by the 24.0 one; identical FASTAs by the one with FragPipe's name, not dup-human.fas."""
+    inst = tmp_path / "FragPipe-24.0"
+    (inst / "bin").mkdir(parents=True)
+    (inst / "bin" / "fragpipe.bat").write_text("x")
+    old = tmp_path / "Downloads" / "FragPipe-jre-22.0" / "fragpipe"
+    (old / "bin").mkdir(parents=True)
+    (old / "bin" / "fragpipe.bat").write_text("x")
+    new_wf = write_wf(inst / "workflows" / "chemprot-ABPP-isoDTB.workflow", "isoDTB")
+    old_wf = write_wf(old / "workflows" / "isoDTB-ABPP.workflow", "isoDTB", saved="22.0")
+    os.utime(new_wf, (1_700_000_000, 1_700_000_000))
+    ctx = Context(install_roots=[inst, old], installed_version="24.0")
+    cat = library.Catalog(workflows=[library.describe_workflow(p, ctx) for p in (old_wf, new_wf)])
+    best = library.recommend(cat, "isoDTB", "24.0")[0]
+    assert best.copies == 2 and Path(best.info.path) == new_wf
+    assert "saved with the installed FragPipe 24.0" in best.reasons
+    good = make_fasta(tmp_path / "fasta" / HUMAN)
+    dup = tmp_path / "fasta" / "dup-human.fas"
+    dup.write_bytes(good.read_bytes())
+    os.utime(good, (1_700_000_000, 1_700_000_000))
+    fcat = library.Catalog(fastas=[library.describe_fasta(p) for p in (dup, good)])
+    assert Path(library.recommend_fastas(fcat, "9606")[0].info.path) == good
+
+
+def test_a_fasta_without_line_breaks_is_read_in_linear_time(tmp_path, monkeypatch):
+    """#156 item 5: a file with no line break kept the whole buffer as carry, so each chunk copied all before it
+    (a 1 GB zero-filled .fasta took 60 s). Now the carry is at most one header line."""
+    monkeypatch.setattr(library, "CHUNK", 4096)
+    zeros = tmp_path / "sparse.fasta"
+    with open(zeros, "wb") as fh:
+        fh.truncate(16 << 20)
+    t0 = time.monotonic()
+    info = library.describe_fasta(zeros)
+    assert time.monotonic() - t0 < 5 and info.entries == 0 and info.error
+    # a header longer than MAX_HEADER is cut, and the entries after it are still found
+    monkeypatch.setattr(library, "MAX_HEADER", 1000)
+    long = tmp_path / "long.fasta"
+    long.write_bytes(b">" + b"A" * 50_000 + b"\nMKV\n>sp|P1|X_HUMAN OX=9606\nMKV\n")
+    with open(long, "rb") as fh:
+        got = list(library._headers(fh, None, None))
+    assert len(got) == 2 and len(got[0]) == 1000 and got[1] == b"sp|P1|X_HUMAN OX=9606"
 
 
 def test_tmt_phospho_stays_tmt_and_says_phospho(tmp_path):

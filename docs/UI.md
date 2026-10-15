@@ -180,7 +180,9 @@ branch `feat/tmt-library` in this change.
   attention items (Open = the pop-up with what to do), and the last 15 jobs
   with Open report / Open folder / Re-run analysis / Analysis options… / Show
   in Jobs / Open inbox. Refreshed every 4 s while shown, read on a thread
-  (`uinav.snapshot`). A new install still opens on ✓ Setup.
+  (`uinav.snapshot`). A new install still opens on ✓ Setup. A job list that
+  can't be read (a damaged `ionomos.db`) is said beside the headline with
+  `ionomos repair-ledger`, never shown as an empty, healthy list.
 - **Why**: everyone; problems 1, 2, 10 (re-running an analysis is two clicks
   from the first screen).
 - **Files**: `uinav.py` (new), `app.py` (`_tab_today`, `refresh_today`,
