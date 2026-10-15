@@ -394,6 +394,8 @@ def cmd_check(args) -> int:
         row(False, "config", str(exc))
         return 1
     row(True, "config parses")
+    for w in cfg.warnings:  # an unknown key (a typo), a file not saved as UTF-8 (#137, D86)
+        row(None, "config", w)
     for name in ("inbox", "users_root", "workflow_dir", "fasta_dir", "log_dir"):
         p = getattr(cfg, name)
         row(p.is_dir(), f"paths.{name}", str(p))

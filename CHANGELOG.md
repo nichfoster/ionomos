@@ -219,6 +219,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rightly found nothing. The key's words are now fragments: found inside the
   names they belong to, and on their own only when distinct (KL6159A), so
   `inspect` agrees with the leak check on the same zip.
+- **An unknown key in config.yaml is reported, with the nearest known one**
+  (#137). `watcher.poll_secnds`, `fragpipe.thread`, `timout_minutes` or a
+  `notifyy:` section were silently ignored while `ionomos check` said all
+  good and the PC ran with the defaults. `check` now prints a `!` line for
+  each ("watcher.poll_secnds: unknown setting, did you mean poll_seconds?
+  (ignored)"), the app's checklist marks Settings saved as a warning, and
+  `Config.unknown_keys` holds them; a warning, not an error, so an older
+  config with a retired key still loads. `paths`, `watcher`, `fragpipe`,
+  `gui`, `users`, `qc_trend`, `library` and the top-level sections are
+  checked; `analysis`, `naming`, `notify` and `methods` check their own.
 - **CLI polish** (#143): a fold-change-only comparison (1 vs 1 sample) prints
   "34 up, 34 down by fold change alone (no replicates to test)" instead of "of
   0 tested"; `ionomos cancel` of a missing job exits 1 (as `retry` does) and

@@ -146,7 +146,11 @@ def run(config_path: Path, data: dict | None = None, probe_watcher: bool = True)
     else:
         try:
             cfg = load(config_path, check_paths=True)
-            add(Item("config", "Settings saved", "ok", str(config_path)))
+            if cfg.unknown_keys:  # an unknown key (a typo) is ignored, so the lab PC runs with the default (#137)
+                add(Item("config", "Settings saved", "warn", "; ".join(cfg.unknown_keys),
+                         "Fix the key in config.yaml (a text editor), then Reload."))
+            else:
+                add(Item("config", "Settings saved", "ok", str(config_path)))
         except ConfigError as exc:
             add(Item("config", "Settings saved", "fail", str(exc).replace("\n", " "), "Fix it, then Save.", "save"))
             try:
