@@ -858,6 +858,22 @@ def test_cli(pc, capsys):
     assert cli.main(["--config", cfg, "library", "show", str(pc["root"] / "nothing.workflow")]) == 1
 
 
+def test_adopt_keeps_the_learned_aliases_beside_the_config(pc, capsys):
+    """#149: a config without learned_aliases_file reads it beside config.yaml; saving it through adopt (configio
+    fills in every default) must not re-point it at the default root C:/Fragpipe_Auto."""
+    p = pc["cfg_path"]
+    text = p.read_text(encoding="utf-8")
+    p.write_text(re.sub(r"(?m)^\s*learned_aliases_file:.*\n", "", text), encoding="utf-8")
+    want = p.parent / "learned_aliases.yaml"
+    assert load(p, check_paths=False).learned_aliases_file == want
+    assert cli.main(["--config", str(p), "library", "adopt", str(pc["pax8"]), "--method", "TMT"]) == 0
+    capsys.readouterr()
+    assert load(p, check_paths=False).learned_aliases_file == want
+    assert "Fragpipe_Auto/learned" not in p.read_text(encoding="utf-8").replace(str(pc["auto"]).replace("\\", "/"), "")
+    assert configio.read_config(pc["root"] / "elsewhere" / "config.yaml")["users"]["learned_aliases_file"] == \
+        (pc["root"] / "elsewhere" / "learned_aliases.yaml").as_posix()
+
+
 def test_cli_without_a_scan(pc, capsys):
     assert cli.main(["--config", str(pc["cfg_path"]), "library", "list"]) == 1
     assert "no scan yet" in capsys.readouterr().out
