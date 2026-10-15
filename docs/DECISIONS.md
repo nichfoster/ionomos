@@ -4185,3 +4185,38 @@ screen, and at 1366×768 the whole bottom bar with Save vanished; there were no 
 locally hidden); `tests/test_app.py`'s first-screen assertion now says "the Setup tab on a new install"; the app
 photographed on a testbed at its natural size and at 1366×768. **Not verified**: the PC's own screen and
 scaling; a lab member using Today; Ctrl+<n> on a non-US keyboard layout.
+
+
+### D95 — The example is real data a stranger can fetch; the demo stays simulated and offline
+
+**2026-10-15.** A stranger who tries `ionomos demo` sees a report on invented numbers (D40). Before trusting the
+tool, they want to see it on a real table, and VISION.md "the road to publishing" step 2 and ROADMAP 5A / 5D step 4
+ask for a real-data example.
+
+1. **The data: FragPipe-Analyst's own tutorial inputs.** The datasets of Hsiao et al. (J. Proteome Res. 2024,
+   doi:10.1021/acs.jproteome.4c00294) are one zip on Zenodo (record 13147961, doi:10.5281/zenodo.13147961,
+   CC BY 4.0, 20,856,553 bytes, MD5 a4927977e8ab5b759c7cb23190b45d8f, SHA-256
+   1a9d962e4e29b124a6ca26ce08d086183b975aca72479a55ece9fe0979eafa7d). They were chosen over a PRIDE dataset because
+   they are FragPipe output (the format Ionomos is built around) in all three kinds the lab runs: label-free
+   (an AP-MS pull-down, Swantek et al. Science 2021), DIA and TMT (the CPTAC ccRCC tumours, Clark et al. Cell
+   2019). They are small, their licence is plain, and readers can open FragPipe-Analyst's own tutorial on the same
+   data next to Ionomos' report.
+2. **Fetched, never bundled** (D36, D40). `ionomos example` downloads from Zenodo with stdlib `urllib`: a timeout,
+   a `.part` file, and size, MD5 and SHA-256 checked before the file gets its name. The pip package and the
+   repository hold none of it, except a 240-row excerpt of each table under `tests/golden/example/` with the
+   licence text beside it, so the tests run offline (CC BY 4.0 allows this; the changes are stated). If Zenodo
+   changes the file, the checksums stop matching, and the example refuses with a sentence rather than analysing
+   something else.
+3. **The demo is unchanged**: simulated, offline, with planted truth to check against. The example needs the
+   network once, or a zip given with `--zip`. Neither one ever writes into a folder that holds anything.
+4. **The tables are the authors', byte for byte.** Ionomos adds only `experiment.yaml` (the design from the
+   authors' `experiment_annotation.tsv`, with the samples they left out, excluded) and README files. Its own
+   defaults are used, not the tutorials' settings. EXAMPLE.md lists the differences and the `experiment.yaml`
+   lines that match the DIA tutorial.
+5. **No claim of agreement with FragPipe-Analyst.** No FragPipe-Analyst result for these data is published,
+   and R was not available where this was built. So there is no `ionomos example --compare` and no
+   VALIDATION.md row. The markers the tutorials name move the same way in Ionomos; that is stated as a sanity
+   check, not a validation (D92 point 1).
+
+Not decided here: the mixed-species benchmark (ROADMAP 5D steps 4 and 5) is still open. This example does not
+serve `ionomos benchmark --expected`. A PRIDE HYE dataset, or the lab's own, is still wanted for that.

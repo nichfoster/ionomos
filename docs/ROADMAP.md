@@ -399,7 +399,7 @@ installed.
   codes become editable config, with a "test your names" check (CLI + setup
   window), so another lab's convention needs no code change. Keep
   NAMING_CONVENTION.md ↔ naming.py in sync.
-- [ ] **Docs for a stranger:** (2026-09-30: QUICKSTART.md, ENGINES.md, the simulated demo and the "never done to your data" page (`help/safety.md`, #57) done; 2026-10-15: [VISION.md](VISION.md), SCOPE.md rewritten for today, CITATION.cff, CONTRIBUTING.md, a code of conduct, issue and pull-request templates; still to do: a real-data example and a documentation site, 5D steps 4 and 7)
+- [ ] **Docs for a stranger:** (2026-09-30: QUICKSTART.md, ENGINES.md, the simulated demo and the "never done to your data" page (`help/safety.md`, #57) done; 2026-10-15: [VISION.md](VISION.md), SCOPE.md rewritten for today, CITATION.cff, CONTRIBUTING.md, a code of conduct, issue and pull-request templates; 2026-10-15: a real-data example, `ionomos example` (FragPipe-Analyst's published LFQ / DIA / TMT data, D95, [EXAMPLE.md](EXAMPLE.md)); still to do: a documentation site, 5D step 7)
 - [x] **Help users can see** (2026-09-30, D46, #57; the report's help added for designs, dose-response and TMT in #58–#60): one help source shown in two
   places. In the report: a Help entry, "?" buttons on each section and QC tab, a glossary,
   and troubleshooting for the issues in that report. From the app and CLI: a full offline
@@ -590,10 +590,15 @@ it. "The maintainer" is @nichfoster (accounts, settings, the lab, authorship);
 "an agent" opens a pull request that the maintainer merges (D31). Steps 1–3
 need nothing from the lab.
 
-1. [ ] **PyPI** — *the maintainer*. Set up trusted publishing as the header of
-   `.github/workflows/publish-pypi.yml` says (pending publisher on pypi.org,
-   the `pypi` environment on GitHub, the `PYPI_PUBLISH` variable), then tag
-   the next release. On 2026-10-15 `ionomos` is not on PyPI.
+1. [ ] **PyPI** — *the maintainer*. Release readiness checked 2026-10-15 (the
+   wheel and sdist build, `twine check --strict`, the wheel alone in a fresh
+   venv runs demo / analyze / help / export; CI's `package` job repeats it on
+   every push). One-time setup, exact steps in DEV_LOOP.md "Releasing": a
+   pending publisher on pypi.org (project `ionomos`, owner `nichfoster`, repo
+   `ionomos`, workflow `publish-pypi.yml`, environment `pypi`), the `pypi`
+   environment on GitHub (required reviewer, tag rule `v*`), the repository
+   variable `PYPI_PUBLISH=true`; then tag the next release. On 2026-10-15
+   `ionomos` is not on PyPI (a pending publisher does not reserve the name).
    *Then an agent* drops "until it is on PyPI" from README.md,
    QUICKSTART.md and `ionomos/README.md`.
 2. [ ] **Repository settings** — *the maintainer*. Branch protection on
@@ -606,21 +611,32 @@ need nothing from the lab.
    SCOPE.md for today's scope, CITATION.cff, CONTRIBUTING.md,
    CODE_OF_CONDUCT.md (Contributor Covenant 2.1), issue templates that ask
    for the diagnostics, a pull-request template.
-   - [ ] *an agent*: SECURITY.md (report privately; what is in scope: the
-     report's escaping of names, the bundle's anonymisation and leak check
-     (D63), the assistant's localhost gate (D57)).
+   - [x] *an agent*, 2026-10-15: SECURITY.md (GitHub private vulnerability
+     reporting, which the maintainer must switch on in Settings → Code
+     security before the file is true; scope: the report's escaping of
+     names, the bundle's anonymisation and leak check (D63), the assistant's
+     localhost gate (D57), intake never deleting; supported versions: the
+     latest minor).
 4. [ ] **A real-data example** — *the maintainer* picks a public PRIDE
    dataset whose licence allows reuse, a mixed-species benchmark (human /
    yeast / *E. coli*) if possible, so it serves step 5 too; *an agent* adds
    how to fetch its tables (not bundled: the demo stays offline, D40), its
    expected ratios for `ionomos benchmark --expected`, a test on a small
    slice of it, and its report for the site.
+   Half done 2026-10-15 (D95): `ionomos example` fetches FragPipe-Analyst's
+   published AP-MS / ccRCC DIA / ccRCC TMT data from Zenodo (CC BY 4.0), with
+   a test on a 240-row excerpt. Still open: a mixed-species PRIDE dataset
+   with its expected ratios for `ionomos benchmark --expected`, and the
+   reports on the documentation site.
 5. [ ] **The real-data evidence** — *the lab and the maintainer*; *an agent*
    writes it up in VALIDATION.md. The open items of 5C #10: a mixed-species
    sample on the lab's instrument (or step 4's dataset) benchmarked and the
    imputation default decided from it; one `ionomos compare` against a real
    FragPipe-Analyst export and one against a real MSstats or Perseus export;
    real TMT and isoDTB searches through the watcher (REAL_RUNS.md).
+   Also: FragPipe-Analyst's own result for the example data (its web app or
+   FragPipeAnalystR), then `ionomos compare` and a VALIDATION.md row
+   (EXAMPLE.md says how).
 6. [ ] **Pilot labs** — *the maintainer*. 2–3 labs, ideally chemoproteomics
    groups already on FragPipe isoDTB / ABPP workflows, or a core facility.
    Their problems go to issues; what they needed to change goes to
@@ -660,7 +676,11 @@ need nothing from the lab.
     minor release; best-effort support through GitHub issues.
 12. [ ] **v1.0** — *the maintainer* tags it when VISION.md's "done for v1.0"
     holds.
-13. [ ] **Interoperate rather than compete** (ongoing): open in
+13. [ ] **Dead code**: `ionomos/src/ionomos/runners/` is imported by nothing
+    in the program, only by `tests/test_downstream.py`, and the exe build's
+    `deploy/check_frozen.py` lists it as an exception; remove it or wire it
+    in (*the maintainer decides*, 2026-10-15).
+14. [ ] **Interoperate rather than compete** (ongoing): open in
     FragPipe-Analyst (already exported), optional pmultiqc-compatible QC,
     SDRF.
 

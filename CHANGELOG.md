@@ -149,6 +149,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Help: "How do I tell Ionomos which TMT channel is which sample?" (`faq.tmt-channels`); a line in the TMT
   paragraph of Getting started.
 - `tmtkit.reference_conditions(tmt, ref_tag)`.
+- **A real-data example: `ionomos example`** (D95, docs/EXAMPLE.md, `example.py`). It downloads the example
+  datasets of FragPipe-Analyst's own paper (Hsiao et al., J. Proteome Res. 2024; Zenodo
+  doi:10.5281/zenodo.13147961, CC BY 4.0, 20.9 MB), checks the size, MD5 and SHA-256, and writes
+  `./ionomos_example/` with three real experiments: a label-free cyclin D1 pull-down (CCND1 3 vs control 4), and
+  clear cell renal cell carcinoma tumours against normal tissue (20 vs 12) by DIA-NN and by four TMT-11 plexes.
+  Each table is copied out of the zip byte for byte. The design (`experiment.yaml`) comes from the authors'
+  `experiment_annotation.tsv`, leaving out what they left out. Each experiment is analysed like `ionomos analyze`,
+  and each folder's README.txt says what its report should show. The whole run takes under a minute.
+  `--dataset apms|dia|tmt`, `--list`, `--zip PATH` (a copy downloaded by hand), `--no-enrichment`, `--open`.
+  The download goes to a `.part` file and is renamed only once it is verified. A copy kept by an earlier run, or
+  one in the current folder, is reused, so no network is needed the second time. Offline (or with
+  `IONOMOS_OFFLINE`), the message names the URL and the `--zip` command. It never writes into a folder that holds
+  anything. The data are never bundled. `tests/golden/example/` holds a 240-row excerpt of each table with its
+  licence, so the tests run the whole path offline.
+- docs/EXAMPLE.md: the data, how to run it, and a walk through the three reports: the cyclin D1 complex (CDK4/6/2,
+  p21/p27/p57) found and seen only in the bait; CA9 up and oxidative phosphorylation down in the tumours; why the TMT
+  fold changes are smaller. It also covers what Ionomos does differently from FragPipe-Analyst, the settings that
+  match the DIA tutorial, and why no comparison with FragPipe-Analyst is claimed. README docs index,
+  QUICKSTART.md ("Then real data"), ARCHITECTURE.md and VALIDATION.md updated.
+- `SECURITY.md`: private vulnerability reporting, scope, supported versions.
+- `deploy/check_frozen.py`: the exe build fails when a module or data file of the package is not inside the exe.
+- CI: a `package` job on every push (build, `twine check`, contents, the wheel alone in a fresh venv); Python 3.13
+  in the test matrix (the classifier promised it).
+- `deploy\build_exe.ps1 -NoInstaller`: stop after the portable zip.
 
 ### Changed
 
@@ -191,9 +215,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Draft` carries `experiment.yaml`'s `tmt:` and each TMT method's workflow label type / ref tag; the review
   window's TMT notes no longer say "conditions come from the channel annotation" (a dead end).
 - `deploy/ionomos.spec`: hidden imports `ionomos.tmtkit`, `ionomos.tmt_editor`.
+- build-exe.yml sets up Python 3.14, the version the exe was already built with.
 
 ### Fixed
 
+- **TMT-Integrator protein tables are labelled by gene.** In `ratio_protein_*.tsv` / `abundance_protein_*.tsv`,
+  `Index` is the UniProt accession and `Gene` the symbol. Ionomos used `Index` as the label, so volcano names
+  were accessions. Worse, enrichment, which matches gene symbols, found nothing on these tables. The label is now
+  `Gene` when the table has one. Gene tables (`abundance_gene_*`, no `Gene` column) are unchanged.
+  (`downstream/quant.py`, found with `ionomos example`'s TMT data, tested in `tests/test_example.py`.)
+- `ionomos analyze` on a DIA-NN `report.pg_matrix.tsv` on its own no longer reads `N.Sequences` and
+  `N.Proteotypic.Sequences` as two extra samples (DIA-NN 1.9 and later write them before the runs).
+- The sdist no longer carries a partial copy of the tests (`ionomos/MANIFEST.in`).
+- `deploy\build_exe.ps1` works from a source zip without `.git` (the build is stamped "unknown").
 - On a small screen (1366×768) the bottom bar — Save, Help, Report a problem, the ⚠ badge — disappeared; it is now
   packed before the tabs, and its buttons before the config path. (#111)
 - 4 Advanced: the hint "Needs the watcher to run in the logged-in session" covered the "Pop up a window when
