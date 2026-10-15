@@ -1222,7 +1222,9 @@ def read_tail_text(path: Path, max_bytes: int = 400_000, start: int = 0) -> str:
 
 # ------------------------------------------------------------ explanations --
 
-# What FragPipe prints (24.0 source, checked against 23.1; the file each line comes from is named):
+# What FragPipe prints (24.0 source, checked against 23.1; the file each line comes from is named). A message
+# FragPipe shows as a dialog in its window is logged in headless mode with its <b> tags kept and its line breaks
+# turned into spaces (SwingUtils.showDialog / stripHtml): "<b>MSFragger</b> is not valid but it is enabled ...".
 #   "Process 'MSFragger' finished, exit code: 1"       ProcessBuilderInfo.toRunnable, after every step
 #   "Process returned non-zero exit code, stopping"    the same, then FragPipe exits with that step's code
 #   "Cancelling 4 remaining tasks"                     ProcessManager, when a step failed or could not start
@@ -1294,7 +1296,7 @@ EXPLANATIONS: list[tuple[str, str]] = [
     (r"FASTA file path is empty|No FASTA file|Could not find fasta file at",
      "No protein database: set this method's FASTA in the app (tab 3), or re-export the workflow after setting it"),
     (r"No decoys found in the FASTA file|All FASTA entries seem to be decoys|FASTA file contains [\d.,]+% decoys|"
-     r"Decoy protein prefix is empty",
+     r"Decoy protein prefix(?:</b>)? is empty",
      "The FASTA's decoys are not what FragPipe needs (about half the entries, each starting with the decoy "
      "tag, usually rev_): add decoys once in FragPipe's Database tab, put that file in the FASTA folder and "
      "pick it for the method (tab 3)"),
@@ -1327,14 +1329,14 @@ EXPLANATIONS: list[tuple[str, str]] = [
      "A path or command line got longer than Windows allows: shorten the experiment folder and raw file names "
      "(or search fewer files at once), then Retry"),
     (r"(?i)msfragger.{0,80}(not found|could not find|missing|download|not configured)|"
-     r"(download|install).{0,40}msfragger|MSFragger is not valid but it is enabled|MSFragger path is null|"
+     r"(download|install).{0,40}msfragger|MSFragger(?:</b>)? is not valid but it is enabled|MSFragger path is null|"
      r"Not a MSFragger jar",
      "MSFragger isn't installed for FragPipe: open the FragPipe GUI once, Config tab -> Download/Update "
      "MSFragger (accept the licence), then Retry. If the GUI has it, set Tools folder in Advanced"),
-    (r"(?i)ionquant.{0,80}(not found|could not find|missing|download)|IonQuant is not valid but it is enabled|"
+    (r"(?i)ionquant.{0,80}(not found|could not find|missing|download)|IonQuant(?:</b>)? is not valid but it is enabled|"
      r"IonQuant path is null|Not an IonQuant jar",
      "IonQuant isn't installed for FragPipe: FragPipe GUI -> Config tab -> Download/Update IonQuant, then Retry"),
-    (r"(?i)diatracer.{0,80}(not found|could not find|missing|download)|diaTracer is not valid but it is enabled|"
+    (r"(?i)diatracer.{0,80}(not found|could not find|missing|download)|diaTracer(?:</b>)? is not valid but it is enabled|"
      r"diaTracer path is null",
      "diaTracer isn't installed for FragPipe: FragPipe GUI -> Config tab -> Download/Update diaTracer"),
     (r"Version string not found for DIA-NN|Does not appear to be an executable file|"

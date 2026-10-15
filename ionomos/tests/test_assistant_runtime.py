@@ -34,7 +34,7 @@ def _with(cfg, **block):
     return replace(cfg, assistant=assistant.settings_from({"enabled": True, "model": "big", "stream": False, **block}))
 
 
-ANSWER = [{"content": "FragPipe ran out of memory [log:1#257]."}]
+ANSWER = [{"content": "FragPipe ran out of memory [log:1#242]."}]
 
 
 # ----------------------------------------------------------------- settings --

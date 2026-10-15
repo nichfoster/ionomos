@@ -49,11 +49,17 @@ bin\fragpipe.bat --headless --workflow <wf> --manifest <mf> --workdir <out>
 - **Manifest** = `.fp-manifest`, UTF-8, tab-separated:
   `path \t experiment \t bioreplicate \t data type`. Lines starting `#` or
   `//` are skipped. Data types: `DDA`, `DDA+`, `DIA`, `GPF-DIA`,
-  `DIA-Quant`, `DIA-Lib` (anything else is read as `DDA`); Ionomos writes
-  `DDA` or `DIA`. Bioreplicate is a whole number or empty. **A file that
-  does not exist is dropped without a message**, which is why Ionomos checks
-  the raws itself before every run. Two files with the same name stop the
-  run.
+  `DIA-Quant`, `DIA-Lib` (anything else is read as `DDA`; an empty type is
+  guessed from the path); Ionomos writes `DDA` or `DIA`. Bioreplicate is a
+  whole number that fits Java's `int` or empty: **a line whose bioreplicate
+  `Integer.parseInt` refuses (a 14-digit Xcalibur stamp, a space) is left
+  out** with one ERROR line ("Manifest file contained some badly formatted
+  lines") **and the run goes on without it** (`TabWorkflow.manifestLoad`).
+  **A file that does not exist stops a headless run** ("Some loaded files
+  don't exist. Please double check.", each path, exit code 1;
+  `showSkippedFiles`, 23.1 and 24.0; only the window skips it). Ionomos
+  checks the raws itself before every run and bounds replicates to 1–999
+  (D85). Two files with the same name stop the run.
 - **Experiment names** keep only letters, digits and `_`: FragPipe turns
   every other character into `_` (`EJQ-2-027` → `EJQ_2_027`). Output
   folders are `<experiment>_<bioreplicate>\`, and one flat folder when the
@@ -81,19 +87,27 @@ bin\fragpipe.bat --headless --workflow <wf> --manifest <mf> --workdir <out>
   | `MSFragger [Work dir: C:\…]` | a step starts (steps like `CheckCentroid` have no folder) | the progress line |
   | `Process 'MSFragger' finished, exit code: 0` | a step ends | steps done; a non-zero code fails the job and names the step |
   | `Process returned non-zero exit code, stopping` / `Cancelling N remaining tasks` | after a failed step | failed, also when the launcher exits 0 |
-  | `2026-10-01 14:03:11,532 ERROR - <message>` | a check failed before any step | quoted in the reason; explained in plain words |
+  | `2026-10-01 14:03:11,532 ERROR - <message>` | a check failed before any step (a window dialog keeps its `<b>` tags and loses its line breaks: `SwingUtils.stripHtml`) | quoted in the reason; explained in plain words |
   | `=====…ALL JOBS DONE IN 12.3 MINUTES=====…` | every step ran | missing = a warning on a done job (D59) |
 
 - **Exit code**: 0 when every step ran; the failing step's code otherwise;
   1 when a check fails before any step.
 - **Files FragPipe writes itself** in the output folder: `fragpipe.workflow`
-  (the settings used), `fragpipe-files.fp-manifest`, `fragpipe.job`,
-  `log_<date>_<time>.txt` (its console, good run or bad),
-  `experiment_annotation.tsv`, `sdrf.tsv` (when the workflow has
+  (the settings used), `fragpipe-files.fp-manifest`, `fragpipe.job` (a
+  tab-separated batch table), `log_<date>_<time>.txt` (its console in
+  UTF-8, good run or bad; an empty one when a check failed after the folder
+  existed), `experiment_annotation.tsv` (when IonQuant or DIA-NN is set up,
+  before the first step), `sdrf.tsv` (when the workflow has
   `workflow.misc.save-sdrf=true`, as the stock ones do), `filelist_*.txt`,
-  `modmasses_ionquant.txt`. Good provenance, keep them. ⚠ The analysis
+  `modmasses_ionquant.txt`. A dry run writes the manifest, `fragpipe.workflow`
+  and `fragpipe.job` too. MSFragger writes `<raw>_uncalibrated.mzML`
+  **beside each raw file**, in the experiment folder (the PC's inventory),
+  and DIA-NN is given those. Good provenance, keep them. ⚠ The analysis
   currently reads that `sdrf.tsv` as the experiment's own design: open in
   ROADMAP.
+- **The console** on the PC is in the Windows code page (cp1252: Java 17
+  without `-Dfile.encoding`), `?` for a letter it lacks, CRLF at the end of
+  each line; the `log_*.txt` FragPipe saves is UTF-8.
 - **After every search** Ionomos writes `ionomos_run\run_fingerprint.json`:
   the command line, FragPipe's version block, key settings, output file
   names and sizes, the ends of the console log and what the parsers read.
@@ -423,7 +437,10 @@ on the PC. Try the bundled one first; if the headless run complains, set
 
 **Key output**: `<workdir>\dia-quant-output\report.tsv` (+
 `report.pg_matrix.tsv`, `report.stats.tsv`) in FragPipe 24; earlier versions
-wrote `diann-output\`. With a spectral library or DIA-NN in the workflow
+wrote `diann-output\`. With DIA-NN 2.x (the PC's 2.3.2) DIA-NN writes
+`report.parquet` and FragPipe's step "DIA-Quant convert Parquet to Tsv"
+makes `report.tsv` from it (`CmdDiann`); the run columns are the
+`<raw>_uncalibrated.mzML` files MSFragger wrote beside the raws. With a spectral library or DIA-NN in the workflow
 there are no per-experiment folders. ⚠ The stock workflow's own notes say
 "For quantification using DIA-NN, Thermo/Sciex DIA files should be in mzML
 format": whether `.raw` works on the PC is for the first DIA run to show.

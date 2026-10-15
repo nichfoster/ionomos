@@ -140,7 +140,7 @@ def test_every_scored_scenario_over_real_http_with_the_ci_rubric(built, tmp_path
     assert json.loads(j.read_text(encoding="utf-8"))["summary"]["passed"] == len(SCORED)
     table = t.read_text(encoding="utf-8")
     assert f"Passed {len(SCORED)} of {len(SCORED)} (100%)" in table and "it asks for 0: met" in table
-    assert "fragpipe_out_of_memory" in table and "Sources:" in table and "[log:1#257]" in table
+    assert "fragpipe_out_of_memory" in table and "Sources:" in table and "[log:1#242]" in table
     # a second scorecard in the same second gets its own name; an existing file is never written over
     assert evaluate.out_paths(None, "20261003-120000")[0].name.endswith("-120000-2.json")
     before = j.read_bytes()

@@ -46,7 +46,8 @@ def _status(dest: Path) -> dict:
 
 
 def _console(dest: Path) -> str:
-    return (dest / fragpipe.RUN_DIR / fragpipe.CONSOLE_LOG).read_text(encoding="utf-8")
+    """The console log as Ionomos reads it: FragPipe on Windows writes the code page (cp1252), not UTF-8."""
+    return fragpipe.decode_console((dest / fragpipe.RUN_DIR / fragpipe.CONSOLE_LOG).read_bytes())
 
 
 # ---------------------------------------------------------------- a real log --
@@ -322,13 +323,15 @@ REAL_FAILURES = [
     (_refused("Output directory path contains whitespace characters. Some programs in the pipeline might not work "
               "properly in this case. Please change output directory to one without spaces."), "space in it"),
     (_refused('There are spaces in the path: "C:\\Program Files\\FragPipe\\tools\\MSFragger-4.4.1.jar"'), "space in it"),
-    # FragpipeRun.configureTaskGraph, after SwingUtils.stripHtml
-    (_refused("MSFragger is not valid but it is enabled in the workflow. Please disable MSFragger or fix it in the "
-              "Config tab."), "MSFragger isn't installed"),
-    (_refused("IonQuant is not valid but it is enabled in the workflow. Please disable IonQuant or fix it in the "
-              "Config tab."), "IonQuant isn't installed"),
-    (_refused("diaTracer is not valid but it is enabled in the workflow. Please disable diaTracer or fix it in the "
-              "Config tab."), "diaTracer isn't installed"),
+    # FragpipeRun.configureTaskGraph: a dialog, logged in headless mode by SwingUtils.showDialog, whose stripHtml
+    # only turns line breaks into spaces, so the <b> tags stay (24.0 source)
+    (_refused("<b>MSFragger</b> is not valid but it is enabled in the workflow. Please disable MSFragger or fix it in "
+              "the <b>Config</b> tab."), "MSFragger isn't installed"),
+    (_refused("<b>IonQuant</b> is not valid but it is enabled in the workflow. Please disable IonQuant or fix it in "
+              "the <b>Config</b> tab."), "IonQuant isn't installed"),
+    (_refused("<b>diaTracer</b> is not valid but it is enabled in the workflow. Please disable diaTracer or fix it in "
+              "the <b>Config</b> tab."), "diaTracer isn't installed"),
+    (_refused("<b>Decoy protein prefix</b> is empty. Please fix it in <b>Database</b> tab."), "FASTA's decoys"),
     # Msfragger.testJar / IonQuant: the commercial builds' licence lines
     ("The license (C:\\FragPipe\\FragPipe-24.0\\license.dat) has expired. Expiry date: 2025-09-15.\n", "licence problem"),
     ("No license file found.\n", "licence problem"),
@@ -386,7 +389,9 @@ REAL_FAILURES = [
     ('Exception in thread "main" java.lang.RuntimeException: Invalid line in annotation file C:\\x\\annotation.txt: '
      "126 DMSO rep 1\n", "TMT annotation"),
     # FragpipeRun.checkInputLcmsFiles2, run()
-    (_refused("Some input LCMS files have the same name, even though located in different folders:"), "file list"),
+    (_refused("<html>Some input LCMS files have the same name, even though located in different folders:\n\n"
+              "<html>File Name - <b>a.raw</b>:\n    - C:\\x\\a.raw\n    - C:\\y\\a.raw\n\nFiles might get overwritten "
+              "and results might be not what's expected.\nConsider renaming input files."), "file list"),
     (_refused("Percolator was enabled but MSFragger's output formats did not contain pin or pepXML."),
      "settings contradict"),
     # issue #2418
@@ -432,7 +437,8 @@ def test_every_explanation_is_exercised_by_a_test():
 
 
 def test_the_failed_step_is_named_with_what_it_said():
-    log = REAL_FAILURES[23][0]  # PhilosopherReport and the locked psm.tsv
+    log = next(x for x, _hint in REAL_FAILURES  # PhilosopherReport and the locked psm.tsv
+               if "PhilosopherReport [Work dir" in x and "used by another process" in x)
     step, code, said = fragpipe.failed_step(log)
     assert (step, code) == ("PhilosopherReport", "1")
     assert said.endswith('used by another process."')  # not FragPipe's "Cancelling 4 remaining tasks"
@@ -631,8 +637,14 @@ def test_the_fake_refuses_what_fragpipe_refuses(bed, monkeypatch):
     fragpipe.write_inputs(spec)
     _fasta(fa, 4, 1)
     res = fragpipe.run(spec, poll=0.1)
-    assert res.code == 1 and "FASTA's decoys" in res.reason and "ERROR - FASTA file contains 20.0% decoys." in res.reason
-    assert not any((dest / "fragpipe").iterdir())
+    # DecimalFormat("##.#'%'") in FragpipeRun.checkDbConfig: 20%, not 20.0%
+    assert res.code == 1 and "FASTA's decoys" in res.reason and "ERROR - FASTA file contains 20% decoys." in res.reason
+    # prepareWd made the group folder before the check; the shutdown hook saved the (empty) console
+    left = {p.relative_to(dest / "fragpipe").as_posix() for p in (dest / "fragpipe").rglob("*")}
+    assert {p for p in left if not p.startswith("log_")} == {"EJQ_PK_EJQ_2_027_isoDTB_1uM_3h_1",
+                                                           "EJQ_PK_EJQ_2_027_isoDTB_1uM_3h_2",
+                                                           "EJQ_PK_EJQ_2_027_isoDTB_1uM_3h_3"}
+    assert [(dest / "fragpipe" / p).stat().st_size for p in left if p.startswith("log_")] == [0]
 
 
 # ------------------------------------------------------------------ run loop --
@@ -729,7 +741,9 @@ def test_a_dry_run_is_never_taken_for_a_search(bed, tmp_path):
     spec.command = lambda: [*fragpipe.RunSpec.command(spec)[:2], "--dry-run", *fragpipe.RunSpec.command(spec)[2:]]
     res = fragpipe.run(spec, poll=0.1)
     assert not res.ok and "only did a dry run" in res.reason
-    assert sorted(p.name for p in (dest / "fragpipe").iterdir()) == ["left_over.txt"]  # a dry run writes nothing
+    # a dry run writes its inputs (FragpipeRun.run saves the manifest, settings and job before the dry-run
+    # notice; the configure() steps their file lists into an output folder that exists), never a result
+    assert sorted(p.name for p in (dest / "fragpipe").iterdir()) == sorted(DRY_RUN_FILES + ["left_over.txt"])
 
 
 def test_a_retry_that_succeeds_is_not_blamed_for_the_earlier_attempt(bed, monkeypatch):
@@ -872,7 +886,11 @@ def test_fake_help_and_unknown_options_answer_as_fragpipe_does(bed):
     assert fake_fragpipe.help_text().count("--") >= 12
 
 
-def test_fake_dry_run_checks_and_lists_but_writes_nothing(bed):
+DRY_RUN_FILES = ["fragpipe-files.fp-manifest", "fragpipe.job", "fragpipe.workflow", "filelist_ionquant.txt",
+                 "filelist_proteinprophet.txt", "modmasses_ionquant.txt", "msbooster_params.txt"]
+
+
+def test_fake_dry_run_checks_and_lists_and_writes_only_its_inputs(bed):
     _queue(bed)
     spec = fragpipe.prepare(bed["ledger"].get(1), bed["cfg"])
     fragpipe.write_inputs(spec)
@@ -881,7 +899,15 @@ def test_fake_dry_run_checks_and_lists_but_writes_nothing(bed):
     assert code == 0 and "It's a dry-run, not running the commands." in text
     facts = fragpipe.console_facts(text)
     assert facts["dry_run"] and facts["commands"] and facts["finished"] == [] and facts["started"] == []
-    assert list(spec.workdir.iterdir()) == []
+    assert sorted(p.name for p in spec.workdir.iterdir()) == sorted(DRY_RUN_FILES)
+    # no group folder (prepareWd is skipped), no log, no experiment_annotation.tsv (configure skips it dry)
+    job = (spec.workdir / "fragpipe.job").read_text(encoding="utf-8").splitlines()
+    assert job[0].startswith("# Job name (optional)\tWorkflow file path\t") and job[1].startswith("runtime-save\t")
+    # a dry run into a folder that does not exist yet: the manifest save makes it, the file lists are not written
+    cmd[cmd.index("--workdir") + 1] = str(bed["root"] / "dry")
+    assert _fake(bed, *cmd[1:], "--dry-run")[0] == 0
+    assert sorted(p.name for p in (bed["root"] / "dry").iterdir()) == ["fragpipe-files.fp-manifest", "fragpipe.job",
+                                                                       "fragpipe.workflow"]
 
 
 def test_fake_refuses_spaces_as_on_windows(bed):
@@ -895,18 +921,58 @@ def test_fake_refuses_spaces_as_on_windows(bed):
     assert "space in it" in fragpipe.explain(text)[0]
 
 
-def test_fake_skips_manifest_files_that_do_not_exist_like_fragpipe(bed):
-    """FragPipe drops missing files from the manifest without a word (TabWorkflow.manifestLoad): Ionomos checks
-    the raws itself before every run for that reason."""
+def test_fake_stops_on_manifest_files_that_do_not_exist_like_fragpipe(bed):
+    """Headless FragPipe 23 and 24 stop on a manifest file that does not exist (TabWorkflow.showSkippedFiles:
+    "Some loaded files don't exist. Please double check.", each path, System.exit(1)); only the window skips
+    them. Ionomos checks the raws itself before every run, so a job never gets there."""
     dest = _queue(bed)
     spec = fragpipe.prepare(bed["ledger"].get(1), bed["cfg"])
     fragpipe.write_inputs(spec)
     gone = next(dest.glob("*_1_1.raw"))
     gone.rename(gone.with_suffix(".away"))
     code, text = _fake(bed, *spec.command()[1:])
-    assert code == 0 and gone.name not in text.split("LCMS files:")[1].split("commands to execute")[0]
+    assert code == 1 and "ERROR - Some loaded files don't exist. Please double check." in text
+    assert f"ERROR - {gone.resolve()}" in text and "commands to execute" not in text
+    assert [p.stat().st_size for p in spec.workdir.glob("log_*.txt")] == [0]  # the shutdown hook's empty log
     with pytest.raises(fragpipe.JobError, match="raw file\\(s\\) missing"):
         fragpipe.prepare(bed["ledger"].get(1), bed["cfg"])
+
+
+def test_fake_reads_the_manifest_as_fragpipe_does(bed, tmp_path):
+    """TabWorkflow.manifestLoad: a bioreplicate that Integer.parseInt refuses (the 14-digit Xcalibur stamp of the
+    lab's first real search, REAL_RUNS.md job 1) drops that line with one ERROR line, and the run goes on with
+    the rest; "01" is replicate 1; an empty data type is guessed from the path ("DIA" in capitals = DIA)."""
+    from ionomos import fake_fragpipe as fake
+
+    raws = tmp_path / "raws"
+    raws.mkdir()
+    names = ["A_1.raw", "A_2.raw", "B_DIA_1.raw", "C.raw", "D_1.raw"]
+    for n in names:
+        (raws / n).write_bytes(b"x")
+    mf = tmp_path / "m.fp-manifest"
+    mf.write_text("# comment\n// another\n\n"
+                  f"{raws / 'A_1.raw'}\tA\t01\tDDA\n"
+                  f"{raws / 'A_2.raw'}\tA\t20260508180610\tDDA\n"       # longer than a Java int
+                  f"{raws / 'B_DIA_1.raw'}\tB-x\t2\t\n"                 # no data type: guessed
+                  f"{raws / 'C.raw'}\t\t\n"                             # no experiment, no replicate
+                  f"{raws / 'D_1.raw'}\tD\t 3\tDDA\n", encoding="utf-8")  # " 3": parseInt does not trim
+    files, bad = fake.read_manifest(mf)
+    assert [(p.name, e, r, t) for p, e, r, t in files] == [("A_1.raw", "A", 1, "DDA"), ("B_DIA_1.raw", "B_x", 2, "DIA"),
+                                                           ("C.raw", "", None, "DDA")]
+    assert [b.split("\t")[0].endswith(("A_2.raw", "D_1.raw")) for b in bad] == [True, True]
+    # through the launcher: one ERROR line naming the lines (line breaks become spaces), then a normal run
+    _queue(bed)
+    spec = fragpipe.prepare(bed["ledger"].get(1), bed["cfg"])
+    fragpipe.write_inputs(spec)
+    lines = spec.manifest.read_text(encoding="utf-8").splitlines()
+    first = lines[0].split("\t")
+    lines[0] = "\t".join([first[0], first[1], "20260508180610", first[3]])
+    spec.manifest.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    code, text = _fake(bed, *spec.command()[1:], env={"IONOMOS_FAKE_FP_SECONDS": "0"})
+    assert code == 0 and "ERROR - Manifest file contained some badly formatted lines  " in text
+    assert len([ln for ln in text.splitlines() if "ERROR - Manifest file" in ln]) == 1
+    listed = text.split("LCMS files:")[1].split("commands to execute")[0]
+    assert Path(first[0]).name not in listed and len(lines) - 1 == listed.count(".raw\t")
 
 
 def test_fragpipes_own_sdrf_is_not_taken_for_the_users_design(bed):
@@ -1020,7 +1086,8 @@ def test_preflight_on_a_working_setup(bed):
     scratch = Path(by["files"].detail)
     assert scratch.parent == bed["cfg"].log_dir / names.PREFLIGHT_DIR
     assert (scratch / "launcher_help.log").is_file() and (scratch / "isoDTB" / "ionomos_run" / "dry_run_console.log").is_file()
-    assert list((scratch / "isoDTB" / "fragpipe").iterdir()) == []
+    # a dry run writes its inputs into the output folder, never a result (FragpipeRun.run)
+    assert sorted(p.name for p in (scratch / "isoDTB" / "fragpipe").iterdir()) == sorted(DRY_RUN_FILES)
     assert not any(p.is_file() for u in bed["cfg"].users_root.iterdir() for p in u.rglob("*"))
     assert "ready for a search" in preflight.text(checks) or "Nothing blocks a search" in preflight.text(checks)
     again = Path(_by_key(preflight.run(bed["cfg"], dry=False))["files"].detail)

@@ -61,7 +61,7 @@ def test_isodtb_job_runs_to_done(bed):
     fasta = bed["cfg"].fasta_dir / "human_reviewed_decoys.fas"
     assert fragpipe.workflow_db_path(wf) == str(fasta).replace("\\", "/")
     assert (dest / "fragpipe" / "combined_modified_peptide_label_quant.tsv").is_file()
-    console = (run / fragpipe.CONSOLE_LOG).read_text(encoding="utf-8")
+    console = fragpipe.decode_console((run / fragpipe.CONSOLE_LOG).read_bytes())  # cp1252, as on the PC
     assert "ALL JOBS DONE IN" in console and "FAKE FragPipe" in console
 
     st = _status(dest)
@@ -394,7 +394,7 @@ def test_stop_kills_fragpipe_and_requeues(bed, monkeypatch):
     assert not t.is_alive()
     job = bed["ledger"].get(1)
     assert job.status == "queued" and "interrupted" in job.reason
-    assert "stopped by ionomos" in (dest / fragpipe.RUN_DIR / fragpipe.CONSOLE_LOG).read_text(encoding="utf-8")
+    assert "stopped by ionomos" in fragpipe.decode_console((dest / fragpipe.RUN_DIR / fragpipe.CONSOLE_LOG).read_bytes())
 
 
 def test_watcher_and_worker_together(bed):

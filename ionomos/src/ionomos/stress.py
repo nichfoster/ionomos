@@ -126,9 +126,12 @@ def _write(p: Path, nbytes: int, rng: random.Random):
     p.write_bytes(rng.randbytes(nbytes) if nbytes else b"")
 
 
+TMT_MAP = ("tmt:\n  channels: {126: DMSO_1_126, 127N: DMSO_2_127N, 127C: Drug_1_127C, 128N: Drug_2_128N, 128C: NA, "
+           "129N: NA, 129C: NA, 130N: NA, 130C: NA, 131N: NA}\n")
+
 # Faults a "fault" drop asks the fake FragPipe for: each ends failed with FAILED.txt, or done with a report
 FAULTS = ("oom", "killed", "disk-full", "raw-vanished", "garbled-log", "empty-table", "truncated-table", "header-only",
-          "truncated-psm", "no-done-line", "step-fail-exit0", "cancel-exit0")
+          "truncated-psm", "no-done-line", "step-fail-exit0", "cancel-exit0", "non-ascii", "fail-once")
 
 
 def _make_drop(staging: Path, i: int, rng: random.Random, used: set[str],
@@ -166,8 +169,9 @@ def _make_drop(staging: Path, i: int, rng: random.Random, used: set[str],
         files = [f"S{tag}_{r}_{f}.raw" for r in range(1, reps + 1) for f in range(1, fracs + 1)]
     elif kind == "tmt":
         files = [f"P{tag}_TMT_F{f}.raw" for f in range(1, rng.randint(2, 5))]
-        (folder / "experiment.yaml").write_text(
-            "tmt:\n  channels: {126: DMSO_1, 127N: DMSO_2, 127C: Drug_1, 128N: Drug_2}\n", encoding="utf-8")
+        # every channel of the workflow's label type (TMT-10), NA for the unused ones: FragPipe stops on a shorter
+        # map, and so does Ionomos before the search (D91); a 4-channel map made every TMT drop fail unsearched
+        (folder / "experiment.yaml").write_text(TMT_MAP, encoding="utf-8")
     elif kind == "loose":
         files = [f"{name}_{c}_{r}.raw" for c in ("DMSO", "Drug") for r in range(1, rng.randint(2, 4))]
     else:  # dia, fail
