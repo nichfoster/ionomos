@@ -486,14 +486,14 @@ def test_status_write_failure_files_minimal_record(lab, ledger, monkeypatch):
 
     def full_disk(dest, record, **kw):
         calls.append(dest)
-        if len(calls) == 1:
+        if "method_config" in record:  # the disk fills while the full record is written
             raise OSError(28, "No space left on device")
         return real(dest, record, **kw)
 
     monkeypatch.setattr(ionomos.intake, "write_status", full_disk)
 
     assert intake(d, lab["cfg"], ledger) == IntakeResult.QUEUED
-    assert len(calls) == 2  # the failing full record, then the fallback minimal one
+    assert len(calls) == 3  # the first record right after the move, the failing full one, the fallback minimal one
 
     dest = lab["general"] / "EJQ" / "20260902-isoDTB_EJQ-2-027"
     rec = json.loads((dest / "ionomos.json").read_text())
