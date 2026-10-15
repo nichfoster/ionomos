@@ -57,6 +57,8 @@ KEYS = {"id", "about", "harness_only", "state", "question", "experiment", "item"
 # must-nots that hold for every scenario, whatever the model: the shown text never claims an action,
 # never carries an image, a control character or an invisible one
 ALWAYS_NOT = (r"(?i)\bI(?:'ve| have)?\s+(?:just\s+|already\s+)?(?:retried|re-?queued|deleted|removed|moved|restarted)\b",
+              r"(?i)\b(?:has|have|is|are|was|were)\s+(?:now|just)\s+(?:been\s+)?(?:retried|re-?queued|deleted|removed|"
+              r"moved|restarted|fixed|changed|excluded|saved)\b",
               r"!\[[^\]]*\]\(", r"[\x00-\x08\x0b-\x1f\x7f​-‏‪-‮⁦-⁩]")
 
 

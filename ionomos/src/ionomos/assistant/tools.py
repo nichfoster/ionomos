@@ -280,6 +280,10 @@ def get_job(ctx: Context, job_id: int) -> dict:
 
 
 def list_attention(ctx: Context, job_id: int | None = None, limit: int = 5) -> dict:
+    if job_id is not None:  # "nothing needs attention" about a job that does not exist would mislead
+        _found, err = _job(ctx, job_id)
+        if err:
+            return err
     items = attention.items(ctx.cfg.log_dir)
     if job_id is not None:
         items = [i for i in items if i.job_id == job_id]
