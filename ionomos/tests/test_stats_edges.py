@@ -390,6 +390,31 @@ def test_a_vs_b_is_the_mirror_of_b_vs_a(seed):
         assert same(t1, -t2) and same(d1, d2) and same(p1, p2)
 
 
+@pytest.mark.parametrize("seed", range(15))
+def test_sample_order_and_units_change_nothing(seed):
+    """The same table with its columns in another order, or its intensities in other units (x 1024 = +10 log2), gives
+    the same p-values and fold changes. minprob is the exception, as in imputeLCMD: it draws column by column."""
+    rng = random.Random(600 + seed)
+    m = random_design(rng, n=60)
+    order = list(range(len(m.samples)))
+    rng.shuffle(order)
+    shuffled = matrix([[row[j] for j in order] for row in m.values], [m.samples[j] for j in order], m.condition)
+    shifted = matrix([[None if v is None else v + 10 for v in row] for row in m.values], m.samples, m.condition)
+    a, b = rng.sample(m.conditions, 2)
+    imp, norm = rng.choice(["none", "perseus", "mindet", "knn"]), rng.choice(["median", "auto", "gn", "ratio"])
+    out = []
+    for x in (m, shuffled, shifted):
+        p, _ = fpa.process(x, normalization=norm, imputation=imp, condition_pct=50)
+        out.append(fpa.limma_contrasts(p.m.values, p.m.samples, p.m.condition, [(a, b)])[0])
+        if len(p.m.conditions) >= 3:
+            out[-1].f = dz.f_test(p.m.values, dz.plain(p.m), a).p
+    for r in out[1:]:
+        assert all(same(x, y, 1e-7) for x, y in zip(out[0].p, r.p, strict=True)), (imp, norm)
+        assert all(same(x, y, 1e-7) for x, y in zip(out[0].diff, r.diff, strict=True)), (imp, norm)
+        if hasattr(r, "f"):
+            assert all(same(x, y, 1e-7) for x, y in zip(out[0].f, r.f, strict=True)), (imp, norm)
+
+
 @pytest.mark.parametrize("seed", range(20))
 def test_the_mirror_holds_through_the_pipeline(seed):
     """run_contrasts + to_diff on processed data: fold change negated, the same p and q, up and down swapped."""
@@ -494,6 +519,27 @@ def test_irs_leaves_a_single_plex_and_label_free_data_unchanged(seed):
                 assert info is None or not info.get("applied")
         p, _ = fpa.process(m)
         assert plex.df_spent(p) is None
+
+
+def test_a_protein_without_any_reference_value_is_not_left_unscaled_among_scaled_ones():
+    """D48: a plex without a reference value for a protein gets missing values rather than unscaled ones. With the
+    reference missing in every plex the row was left as it was, its plexes apart, next to rows put on one scale."""
+    m = sim(21, groups=(("Pool", 2), ("DMSO", 4), ("Drug", 4)), miss=0)
+    m.exp = "TMT"
+    m.meta["plex"] = {s: str(1 + j % 2) for j, s in enumerate(m.samples)}
+    pools = [j for j, s in enumerate(m.samples) if m.condition[s] == "Pool"]
+    m.values[0] = [None if j in pools else v for j, v in enumerate(m.values[0])]  # no reference anywhere
+    m.values[1][pools[0]] = None                                                    # none in plex 1 only
+    out, info, notes = plex.normalise(m, analysis.Settings())
+    assert info["applied"] and info["method"] == "IRS (reference channel)"
+    assert all(v is None for v in out.values[0])
+    plex1 = [k for k, s in enumerate(out.samples) if out.meta["plex"][s] == "1"]
+    assert all((v is None) == (k in plex1) for k, v in enumerate(out.values[1]))
+    assert all(v is not None for v in out.values[2])
+    assert info["proteins_scaled"] == len(m.values) - 1
+    assert info["values_dropped"] == len(out.samples) + len(plex1)
+    p, _ = fpa.process(out, imputation="none")
+    assert "P0000" not in {f.id for f in p.m.features}
 
 
 ROLE_WORDS = ["DMSO", "Vehicle", "Mock", "Probe", "Probe_Comp", "Drug", "Drug_10x", "DrugComp", "Pool", "QC", "EV",
