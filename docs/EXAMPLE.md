@@ -176,9 +176,11 @@ biology should not.
   ratios to each plex's pool, as FragPipe-Analyst's tutorial does. The
   plexes are already on one scale, so no IRS is applied. No values are
   imputed: TMT data are not, in Ionomos or in FragPipe-Analyst (D24). The
-  missing-value check calls the pattern random here, which suits that. One note
-  reads "TMT sample names don't follow condition_1_channel ...". It describes
-  the names (CPTAC aliquot IDs). `experiment.yaml` then sets the conditions.
+  missing-value check calls the pattern random here, which suits that. The
+  names are CPTAC aliquot IDs, not `condition_1_channel`; `experiment.yaml`'s
+  `sample_conditions` gives every sample its condition, so no note about the
+  names appears (one does only when a condition had to be read from a name,
+  #158).
 - **Replicate agreement** (under "How far to trust this") is a median r of
   0.51. That is low only in appearance. Ratios to a pool remove what every
   sample shares, so what is left is the biological difference between

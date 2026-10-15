@@ -300,3 +300,24 @@ def test_the_analysis_off_path_still_writes_the_tmt_qc(tmp_path, monkeypatch):
     assert (dest / "results" / names.TMT_QC_FILE).is_file() and not (dest / "results" / "report.html").exists()
     assert "TMT QC: 1 of 1 plex(es) are labelled below 95%" in job.reason
     assert postprocess._tmt_qc_only(tmp_path / "nothing_here", {}, []) == []
+
+
+@pytest.mark.parametrize(("given", "said"), [
+    ({}, "conditions were taken from the text before the first '_'"),
+    ({"A1-00004_T": "Tumor", "A1-00005_N": "NAT", "A1-00006_T": "Tumor", "A1-00007_N": "NAT"}, None),
+    ({"A1-00004_T": "Tumor", "A1-00005_N": "NAT"}, "the conditions of 2 of 4 samples (e.g. A1-00006_T)"),
+])
+def test_the_name_note_only_when_a_condition_was_guessed(tmp_path, given, said):
+    """#158: "TMT sample names don't follow condition_1_channel ... conditions were taken from the text before the
+    first '_'" was printed although experiment.yaml's sample_conditions gave every sample its condition."""
+    dest = tmp_path / "e"
+    simulate.tmt_abundance(dest / "fragpipe" / "tmt-report" / "abundance_gene_MD.tsv",
+                           ["A1-00004_T", "A1-00005_N", "A1-00006_T", "A1-00007_N"], 3, n_genes=60)
+    out = analyze(dest, "TMT", {"enrichment": False, "sample_conditions": given})
+    a = json.loads((dest / "results" / "analysis.json").read_text(encoding="utf-8"))
+    everything = "\n".join(out.warnings) + json.dumps(a)
+    if said is None:
+        assert "follow condition_1_channel" not in everything
+        assert set(a["samples"].values()) == {"Tumor", "NAT"}
+    else:
+        assert said in everything

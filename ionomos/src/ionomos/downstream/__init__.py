@@ -482,7 +482,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     if loaded is not None:
         m, files, lnotes = loaded
         out.files += files
-        notes += lnotes
+        notes += tmt.name_note(lnotes, m, settings)   # not when the conditions were given, not guessed (#158)
         if m is not None:
             notes += m.notes
             notes += stage("input-check", guards.check_input, m) or []  # implausible values, repeated names (D60)

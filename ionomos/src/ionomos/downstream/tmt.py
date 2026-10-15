@@ -15,6 +15,7 @@ one plex the file is the R script's, byte for byte (tests/golden/R_experimental_
 
     annotation_rows(header, multiplex=False) -> [{plex, channel, sample, sample_name, condition, replicate}]
     write_annotation(abundance_tsv, out, multiplex=False) -> out
+    name_note(notes, m, settings) -> notes           NAME_NOTE only for conditions really read from a name (#158)
     experiments(workdir, record) -> [plex]           the FragPipe experiments (plexes) of a search
     plexes_and_channels(samples, maps) -> ({sample: plex}, {sample: channel})   from the channel maps, else the names
 """
@@ -52,6 +53,27 @@ def annotation_rows(header: list[str], multiplex: bool = False) -> list[dict]:
 
 def write_annotation(abundance_tsv: Path, out: Path, multiplex: bool = False) -> Path:
     return write_tsv(out, HEADER, annotation_rows(read_header(abundance_tsv), multiplex))
+
+
+def name_note(notes: list[str], m, settings) -> list[str]:
+    """The loader's notes, with NAME_NOTE ("conditions were taken from the text before the first '_'") only where it
+    is true (#158): left out when analysis.sample_conditions or an input SDRF's factor (D47) gives every sample its
+    condition, and naming the guessed samples' count when they give some."""
+    if NAME_NOTE not in notes or m is None:
+        return list(notes)
+    given = set(getattr(settings, "sample_conditions", None) or {})
+    sdrf = m.meta.get("sdrf") or {}
+    if sdrf.get("used") and sdrf.get("factors"):
+        given |= set(m.samples) - set(sdrf.get("unmatched") or [])
+    guessed = [s for s in m.samples if s not in given]
+    rest = [n for n in notes if n != NAME_NOTE]
+    if not guessed:
+        return rest
+    if len(guessed) == len(m.samples):
+        return list(notes)
+    return rest + [f"TMT sample names don't follow condition_1_channel (e.g. DMSO_1_126), so the lab's annotation "
+                   f"file is empty; the conditions of {len(guessed)} of {len(m.samples)} samples (e.g. {guessed[0]}) "
+                   f"were taken from the text before the first '_'"]
 
 
 def experiments(workdir: Path, record: dict | None) -> list[str]:
