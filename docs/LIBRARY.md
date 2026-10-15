@@ -326,15 +326,15 @@ ones). Not yet on the lab PC: how long a scan of `C:\` roots and of `D:\`
 takes, how many of the ~150 run folders still hold readable tables, whether
 the window's cache names the last FASTA, and junctions on the real drives.
 
-## Wave 2: the app
+## The app
 
-The Methods tab gets "Find on this PC…": the scan runs off the Tk thread with
+The Methods tab has "Find on this PC…": the scan runs off the Tk thread with
 progress and a Stop button, then a table of candidates per method (kind,
 summary, flags, why it is recommended) with Use / Adopt; pickers beside the
 workflow and FASTA boxes; a FASTA panel with "Check for updates"; and on first
 setup "Ionomos found … use the recommended ones?" (`auto_assign`, then Apply
 writes `config.yaml` through `configio`). The public functions above are the
-whole interface it needs: `scan`, `load_catalog`, `save_catalog`, `recommend`,
+whole interface it uses: `scan`, `load_catalog`, `save_catalog`, `recommend`,
 `recommend_fastas`, `auto_assign`, `apply_proposals`, `adopt`, `adopt_fasta`,
 `update_check`, `describe_workflow`, `describe_fasta`, `default_roots`.
 
