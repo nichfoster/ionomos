@@ -678,7 +678,8 @@ def describe_workflow(path: str | Path, ctx: Context | None = None, *, evidence:
     info.description = _clean_description(props.get("workflow.description", ""))
     db = props.get("database.db-path", "").strip()
     info.database = db
-    info.database_exists = bool(db) and Path(db).is_file()
+    # a path written in a file is never opened when it names another computer: the file may be anyone's (a drop)
+    info.database_exists = bool(db) and not is_network_path(db) and Path(db).is_file()
     info.decoy_tag = props.get("database.decoy-tag", "rev_").strip() or "rev_"
     info.needs = fragpipe.workflow_needs(props)
     info.settings = workflow_settings(props, info.kind)
@@ -712,8 +713,10 @@ def workflow_flags(info: WorkflowInfo, ctx: Context | None = None) -> list[Flag]
             "Adopt it (Ionomos copies it into the workflows folder under a name without spaces); don't point "
             "FragPipe at it where it is.")
     if info.database and not info.database_exists:
-        add("WF_DATABASE_MISSING", "warn", f"The FASTA this workflow was saved with ({info.database}) is not on "
-            f"this PC", "Ionomos searches with the method's FASTA instead; check that it is the same organism "
+        where = ("is on another computer (a network path, which Ionomos does not open when a file names it)"
+                 if is_network_path(info.database) else "is not on this PC")
+        add("WF_DATABASE_MISSING", "warn", f"The FASTA this workflow was saved with ({info.database}) {where}",
+            "Ionomos searches with the method's FASTA instead; check that it is the same organism "
             "and pick one in the method's FASTA box.")
     elif info.database and ctx.fasta_dir is not None and not _inside(info.database, ctx.fasta_dir):
         add("WF_DATABASE_ELSEWHERE", "info", f"Its FASTA {info.database} is outside the FASTA folder "
@@ -1117,23 +1120,46 @@ def _settings(cfg) -> dict:
         return settings_from(None)
 
 
+ROOT_ANSWER_S = 5.0   # a folder that takes longer to say whether it exists (a share whose server is off) is skipped
+
+
+is_network_path = fragpipe.is_network_path
+
+
+def folder_answers(p: Path, seconds: float | None = None) -> bool | None:
+    """Whether `p` is a folder, asked on a helper thread: True / False, or None when there was no answer in
+    `seconds` (a UNC path to a server that is off blocks for about 20 s on Windows)."""
+    box: list[bool] = []
+
+    def ask() -> None:
+        try:
+            box.append(Path(p).is_dir())
+        except OSError:
+            box.append(False)
+
+    t = threading.Thread(target=ask, name="library-root", daemon=True)
+    t.start()
+    t.join(ROOT_ANSWER_S if seconds is None else seconds)
+    return box[0] if box else None
+
+
 def default_roots(cfg, missing: list[str] | None = None) -> list[Path]:
     """Where a scan looks by default: workflow_dir, fasta_dir, every FragPipe installation, users_root and the
-    config's library.roots (UNC paths are plain folders). Only folders that exist, each once; a configured folder
-    that does not exist is said in `missing` (a list of notes), never dropped silently (#153)."""
+    config's library.roots (UNC paths are plain folders). Only folders that exist (and say so within
+    ROOT_ANSWER_S), each once; a configured folder that does not exist, or does not answer, is said in `missing`
+    (a list of notes), never dropped silently (#153)."""
     named = [(Path(cfg.workflow_dir), "paths.workflow_dir"), (Path(cfg.fasta_dir), "paths.fasta_dir")]
     named += [(p, "") for p in install_roots(cfg)]
     named += [(Path(cfg.users_root), "paths.users_root")]
     named += [(Path(os.path.expanduser(r)), "library: roots") for r in _settings(cfg)["roots"]]
     seen, out = set(), []
     for p, where in named:
-        try:
-            ok = p.is_dir()
-        except OSError:
-            ok = False
+        ok = folder_answers(p)
         if not ok:
             if where and missing is not None:
-                missing.append(missing_note(p, where))
+                missing.append(missing_note(p, where) if ok is False else
+                               f"{p} did not answer within {ROOT_ANSWER_S:g} s (a network folder whose computer is "
+                               f"off or unreachable?): not looked at. Check the address in {where}")
             continue
         if _key(p) not in seen:
             seen.add(_key(p))
@@ -1230,14 +1256,19 @@ def scan(roots: list[str | Path] | None = None, *, cfg=None, ctx: Context | None
     seen: set[str] = set()
     for r in roots:
         p = Path(r)
+        there = folder_answers(p, min(ROOT_ANSWER_S, max(limit - (time.monotonic() - started), 0.5)))
+        if there is None:  # asked first: realpath() of a dead share blocks as long as is_dir() does
+            cat.notes.append(f"{p} did not answer within {ROOT_ANSWER_S:g} s (a network folder whose computer is "
+                             "off or unreachable?); skipped. Check the address, or take it out of library.roots")
+            continue
+        if not there:
+            cat.notes.append(f"{p} is not a folder on this PC; skipped")
+            continue
         try:
             real = _key(os.path.realpath(p))
         except OSError:
             real = _key(p)
         if real in seen:
-            continue
-        if not p.is_dir():
-            cat.notes.append(missing_note(p))
             continue
         seen.add(real)
         queue.append((p, 0))
@@ -1339,7 +1370,7 @@ def scan(roots: list[str | Path] | None = None, *, cfg=None, ctx: Context | None
     # FragPipe's window remembers the last FASTA: describe it when the walk didn't pass it
     for hint in cat.hints:
         db = hint.get("database")
-        if db and Path(db).is_file() and _key(db) not in fa_seen and not out_of_time():
+        if db and not is_network_path(db) and Path(db).is_file() and _key(db) not in fa_seen and not out_of_time():
             fa_seen.add(_key(db))
             info = describe_fasta(db, ctx, stop=stop, deadline=deadline)
             info.source = "cache"
@@ -1925,7 +1956,10 @@ def adopt(info: WorkflowInfo | str | Path, method: str, cfg, catalog: Catalog | 
     text = src.read_bytes().decode("utf-8", errors="replace")
     fasta_name = ""
     db = info.database
-    if db and Path(db).is_file() and not _inside(db, fasta_dir):
+    if db and is_network_path(db):
+        notes.append(f"its FASTA {db} is on another computer: not copied (Ionomos does not open a network path a "
+                     "file names). Copy it into the FASTA folder yourself if it is the one you want")
+    elif db and Path(db).is_file() and not _inside(db, fasta_dir):
         res = adopt_fasta(describe_fasta(db), cfg, catalog)
         notes += res["notes"]
         fasta_name = res["fasta"]

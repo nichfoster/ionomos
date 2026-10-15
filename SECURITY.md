@@ -63,6 +63,10 @@ folder (they control what runs, by design); the search engines themselves
 (FragPipe, DIA-NN, MaxQuant, Sage: report those upstream); denial of service
 from a huge or malformed table on your own PC.
 
+What each part protects against, and what it does not, is in
+[docs/SECURITY_NOTES.md](docs/SECURITY_NOTES.md) (with the code and the test
+that attacks it).
+
 ## The project's own rules that matter here
 
 These are tested on every push (`help/safety.md`, `ionomos help safety`):

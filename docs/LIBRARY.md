@@ -86,6 +86,16 @@ configured one that does not is added to `missing` as a note):
    added here** (or given with `--root`), because it is an 18 TB USB drive. A
    UNC path (`//server/share`) is a plain folder.
 
+Each root is asked whether it exists on a helper thread: one that gives no
+answer within 5 s (`ROOT_ANSWER_S`; a share whose server is off takes about
+20 s on Windows) is skipped with a note in the catalog. A network path written
+*inside* a file the walk finds (a workflow's `database.db-path`, the FASTA in a
+`fragpipe-ui.cache`) is never opened, by the scan or by adopt: opening it would
+make Windows sign in to that server as the account Ionomos runs as, and the
+file may come from anyone's drop. Such a workflow carries `WF_DATABASE_MISSING`
+("on another computer"); copy that FASTA into `fasta_dir` by hand if it is the
+one you want (docs/SECURITY_NOTES.md).
+
 The walk is breadth-first over all roots together, so the small pinned folders
 are done first. It is read-only, at most `max_depth` folders deep (default 6)
 and at most `time_limit_s` seconds (default 120); a `stop` event ends it early.

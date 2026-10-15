@@ -606,6 +606,27 @@ def _popen_kwargs() -> dict:
     return {"start_new_session": True}
 
 
+# Windows starts a .bat / .cmd (fragpipe.bat) through cmd.exe, which reads these in the command line Python builds
+# even inside a path: `C:/R&D/users/x.workflow` runs `D/users/x.workflow` as a second command, `%PATH%` is
+# replaced by its value, `|` and `<`/`>` pipe and redirect. Python quotes an argument only when it has a space.
+_CMD_SPECIAL = re.compile(r"[&|<>^%\"\r\n]")
+
+
+def batch_problem(cmd: list[str]) -> str:
+    """Why `cmd` can't be started safely: its program is a .bat / .cmd and an argument (or the program's own path)
+    holds a character cmd.exe would read as part of a command. "" when it can (any other program: no shell)."""
+    if not cmd or Path(str(cmd[0])).suffix.lower() not in (".bat", ".cmd"):
+        return ""
+    for arg in cmd:
+        m = _CMD_SPECIAL.search(str(arg))
+        if m:
+            ch = {"\r": "a line break", "\n": "a line break"}.get(m.group(), f"'{m.group()}'")
+            return (f"{Path(str(cmd[0])).name} is a batch file, and Windows would read the {ch} in {str(arg)!r} as "
+                    "part of a command, not of a name. Nothing was started. Rename that folder or file (letters, "
+                    "digits, - _ . only) and Retry")
+    return ""
+
+
 TASKKILL_SECONDS = 60  # taskkill /T on a large tree takes seconds; one that never returns must not hold the worker
 
 
@@ -654,6 +675,9 @@ def run_to_file(cmd: list[str], out_file: Path, cwd: Path, timeout: float,
     program that can't be started gives (None, 'could not start: <why>', False)."""
     timed_out = False
     code: int | None = None
+    unsafe = batch_problem(cmd)  # a .bat launcher given cmd.exe metacharacters is never started (SECURITY_NOTES.md)
+    if unsafe:
+        return None, unsafe, False
     try:
         with open(out_file, "wb") as out:
             proc = subprocess.Popen(cmd, stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, cwd=str(cwd),
@@ -857,6 +881,9 @@ def _run(spec: RunSpec, stop: threading.Event, on_start, poll: float, on_poll, s
     cmd = spec.command()
     env = getattr(spec, "env", None) or {}
     deadline = started + spec.timeout_minutes * 60 if spec.timeout_minutes else None
+    unsafe = batch_problem(cmd)
+    if unsafe:
+        return RunResult(None, unsafe)
     try:
         out = open(spec.console_log, "ab")  # noqa: SIM115 - handed to the engine; closed below
     except OSError as exc:  # the run folder is unwritable or the disk is full: nothing was started
@@ -1529,6 +1556,16 @@ def read_properties(text: str) -> dict[str, str]:
     return out
 
 
+def is_network_path(p: str | Path) -> bool:
+    """A UNC path (\\\\server\\share, //server/share, \\\\?\\UNC\\...): opening it makes Windows connect to that server
+    and offer the account's sign-in to it, so a path read from a file (a workflow's database.db-path) is never
+    opened when it is one. A \\\\?\\C:\\ long path is local."""
+    s = str(p).replace("/", "\\")
+    if s.startswith("\\\\?\\") and not s[4:8].upper().startswith("UNC\\"):
+        return False
+    return s.startswith("\\\\")
+
+
 def inspect_workflow(path: Path) -> dict:
     """{'database', 'database_exists', 'settings': {label: value}, 'decoy_tag'} for a .workflow file."""
     try:
@@ -1538,7 +1575,7 @@ def inspect_workflow(path: Path) -> dict:
     db = props.get("database.db-path", "")
     return {
         "database": db,
-        "database_exists": bool(db) and Path(db).is_file(),
+        "database_exists": bool(db) and not is_network_path(db) and Path(db).is_file(),
         "decoy_tag": props.get("database.decoy-tag", "rev_") or "rev_",
         "settings": {label: props[k] for k, label in WORKFLOW_KEYS if k in props and props[k] != ""},
     }
@@ -1703,7 +1740,10 @@ def import_workflow(src: Path, method: str, workflow_dir: Path, fasta_dir: Path)
     info = inspect_workflow(dest)
     fasta_name = ""
     db = info.get("database") or ""
-    if db and Path(db).is_file():
+    if db and is_network_path(db):
+        notes.append(f"the workflow's database {db} is on another computer: not copied (Ionomos does not open a "
+                     f"network path a file names) — copy it into {fasta_dir} yourself, or pick a FASTA for {method}")
+    elif db and Path(db).is_file():
         fasta_dir.mkdir(parents=True, exist_ok=True)
         target = fasta_dir / Path(db).name
         if not target.exists():

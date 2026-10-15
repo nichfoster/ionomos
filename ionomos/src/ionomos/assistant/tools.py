@@ -212,7 +212,8 @@ def _console_log(job, rec: dict) -> Path | None:
     run = names.run_dir(Path(job.dest_dir))
     known = (fragpipe.CONSOLE_LOG, diann.CONSOLE_LOG, maxquant.CONSOLE_LOG, sage.CONSOLE_LOG)
     said = Path(str((rec.get("run") or {}).get("console_log") or "")).name
-    found = [run / n for n in known if (run / n).is_file()]
+    # a link in the run folder (a drop can carry one on macOS) could make the model read any file of the account
+    found = [run / n for n in known if (run / n).is_file() and not (run / n).is_symlink()]
     if not found:
         return None
     return next((p for p in found if p.name == said), max(found, key=lambda p: p.stat().st_mtime))
