@@ -40,7 +40,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from tkinter import messagebox, scrolledtext, ttk
 
-from ionomos import attention
+from ionomos import attention, tkutil, uinav
 from ionomos.assistant import askui
 
 log = logging.getLogger("ionomos.popups")
@@ -164,16 +164,17 @@ class Popups:
             return self._center
         win = tk.Toplevel(self.root)
         win.title("Ionomos — needs attention")
-        win.geometry("820x360")
+        tkutil.fit_window(win, 110, 16, min_rows=12)
         f = ttk.Frame(win, padding=10)
         f.pack(fill="both", expand=True)
         f.columnconfigure(0, weight=1)
         f.rowconfigure(0, weight=1)
-        cols = (("what", 190), ("title", 420), ("since", 140))
+        cols = (("what", 24), ("title", 55), ("since", 18))
+        cw = tkutil.char_width()
         tree = ttk.Treeview(f, columns=[c for c, _ in cols], show="headings", selectmode="browse")
-        for c, w in cols:
+        for c, n in cols:
             tree.heading(c, text=c)
-            tree.column(c, width=w, anchor="w", stretch=c == "title")
+            tree.column(c, width=n * cw, anchor="w", stretch=c == "title")
         for sev, colour in SEV_COLOUR.items():
             tree.tag_configure(sev, foreground=colour)
         tree.grid(row=0, column=0, sticky="nsew")
@@ -289,8 +290,11 @@ class ItemWindow:
 
             host = EditorHost(post=self.host.post, open_path=self.host.open_path, config_path=self.host.config_path,
                               log_dir=self.host.log_dir, lab_settings=self.host.lab_settings)
-            self.editor = ExperimentEditor(f, host, on_done=self._analysis_done, compact=True)
-            self.editor.frame.grid(row=row, column=0, sticky="nsew")
+            # the editor is taller than a laptop screen: it scrolls inside the window (tkutil.ScrolledFrame, S1.8)
+            self.editor_scroll = tkutil.ScrolledFrame(f)
+            self.editor_scroll.grid(row=row, column=0, sticky="nsew")
+            self.editor = ExperimentEditor(self.editor_scroll.inner, host, on_done=self._analysis_done, compact=True)
+            self.editor.frame.pack(fill="both", expand=True)
             f.rowconfigure(row, weight=1)
             self.editor.show_issues((item.data or {}).get("issues") or [])
             self.editor.load(Path(item.dest), (item.data or {}).get("method"), item.job_id)
@@ -318,9 +322,16 @@ class ItemWindow:
         win.protocol("WM_DELETE_WINDOW", self.close)
         win.bind("<Escape>", lambda e: self.close())
         win.update_idletasks()
-        w = min(max(win.winfo_reqwidth(), 720), win.winfo_screenwidth() - 40)
-        h = min(win.winfo_reqheight(), win.winfo_screenheight() - 80)
-        win.geometry(f"{w}x{h}+{max((win.winfo_screenwidth() - w) // 2, 0)}+{max((win.winfo_screenheight() - h) // 4, 0)}")
+        sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
+        min_w, min_h = tkutil.text_size(60, 12)
+        req_w, req_h = win.winfo_reqwidth(), win.winfo_reqheight()
+        if self.editor is not None:  # the scrolled editor asks for almost nothing: size the window for its content
+            req_w = max(req_w, self.editor.frame.winfo_reqwidth() + tkutil.text_size(6, 1)[0])
+            req_h += self.editor.frame.winfo_reqheight() - self.editor_scroll.winfo_reqheight()
+        cap_w, cap_h = tkutil.text_size(150, 44)  # never bigger than a 1366x768 laptop at the font's size
+        w, h = uinav.fit_size(max(min(req_w, cap_w), tkutil.text_size(95, 1)[0]), min(req_h, cap_h), sw, sh,
+                              min_w=min_w, min_h=min(min_h, req_h))
+        win.geometry(f"{w}x{h}+{max((sw - w) // 2, 0)}+{max((sh - h) // 4, 0)}")
         win.deiconify()
         win.lift()
         try:
@@ -377,7 +388,8 @@ class ItemWindow:
             finally:
                 led.close()
         except Exception as exc:  # noqa: BLE001
-            messagebox.showerror("Retry", f"Could not re-queue the job: {exc}", parent=self.win)
+            messagebox.showerror("Retry", f"Could not re-queue the job: {exc}\n\n→ Wait a moment and press Retry search "
+                                 "again; if it happens again, press Report a problem…", parent=self.win)
             return
         attention.resolve(self.host.log_dir(), self.item.id)
         self.close()
@@ -416,7 +428,9 @@ class ItemWindow:
             service.reveal(res.path)
             self.msg.configure(text=res.message)
         except Exception as exc:  # noqa: BLE001
-            messagebox.showerror("Report a problem", str(exc), parent=self.win)
+            messagebox.showerror("Report a problem", f"{exc}\n\n→ Try again; if it fails again, open the Ionomos app "
+                                 "from the Start menu and press Report a problem… at the bottom of its window.",
+                                 parent=self.win)
 
     def more_help(self) -> None:
         """The help page, opened at the entry that explains this item (help.topic_for_item)."""

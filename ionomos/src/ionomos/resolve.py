@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
-from ionomos import tkutil
+from ionomos import tkutil, uinav
 from ionomos.intake import Draft, DraftFile, Kind
 from ionomos.manifest import FileOverride, Overrides
 from ionomos.naming import DEFAULT_METHOD_ALIASES, NUMBER_WHY, NamingError, number_ok, parse_raw_name, tokens_of
@@ -535,7 +535,9 @@ class TkResolver:
                 remove(source.parent, target)
                 refresh_files()
             except (OSError, ValueError) as exc:
-                messagebox.showerror("Could not remove file", str(exc), parent=win)
+                messagebox.showerror("Could not remove file", f"{exc}\n\n→ Close any program that has the file "
+                                     "open, then press Delete again. The file stays in the inbox until then.",
+                                     parent=win)
 
         def refresh_files():
             from ionomos.intake import _find_raws
@@ -808,7 +810,9 @@ class TkResolver:
             try:
                 remove(source.parent, source)
             except (OSError, ValueError) as exc:
-                messagebox.showerror("Could not remove folder", str(exc), parent=win)
+                messagebox.showerror("Could not remove folder", f"{exc}\n\n→ Close any program or Explorer "
+                                     "window that has the folder open, then press Delete from inbox again. The "
+                                     "folder stays in the inbox until then.", parent=win)
                 return
             skip()
 
@@ -867,7 +871,9 @@ class TkResolver:
         win.update_idletasks()
         w, h = win.winfo_reqwidth(), win.winfo_reqheight()
         sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
-        win.geometry(f"+{max((sw - w) // 2, 0)}+{max((sh - h) // 3, 0)}")
+        fw, fh = uinav.fit_size(w, h, sw, sh, min_w=1, min_h=1)  # never bigger than the screen (S1.10)
+        size = f"{fw}x{fh}" if (fw, fh) != (w, h) else ""
+        win.geometry(f"{size}+{max((sw - fw) // 2, 0)}+{max((sh - fh) // 3, 0)}")
         win.deiconify()
         win.lift()
         win.focus_force()

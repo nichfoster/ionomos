@@ -65,20 +65,31 @@ class ExperimentEditor:
         self.last_outcome = None
         self.frame = f = ttk.Frame(parent)
         f.columnconfigure(0, weight=1)
-        f.rowconfigure(2, weight=1)
+        f.rowconfigure(3, weight=1)
+
+        # the buttons first, so they are on screen however small it is (docs/UI.md S1.8)
+        act = ttk.Frame(f)
+        act.grid(row=0, column=0, sticky="w", **PAD)
+        self.run_btn = ttk.Button(act, text="Run analysis", command=self.run)
+        self.run_btn.pack(side="left", padx=2)
+        ttk.Button(act, text="Save choices", command=self.save_choices).pack(side="left", padx=2)
+        ttk.Button(act, text="Open report", command=self.open_report).pack(side="left", padx=2)
+        ttk.Button(act, text="Results folder", command=self.open_results).pack(side="left", padx=2)
+        self.state = ttk.Label(act, text="", foreground="#2e7d32", wraplength=380, justify="left")
+        self.state.pack(side="left", padx=(8, 2))
 
         self.info = ttk.Label(f, text="", foreground="#555", wraplength=900, justify="left")
-        self.info.grid(row=0, column=0, sticky="w", **PAD)
+        self.info.grid(row=1, column=0, sticky="w", **PAD)
         self.issues = scrolledtext.ScrolledText(f, height=5 if not compact else 6, wrap="word",
                                                 font=("Segoe UI" if _win() else "Helvetica", 10))
-        self.issues.grid(row=1, column=0, sticky="ew", **PAD)
+        self.issues.grid(row=2, column=0, sticky="ew", **PAD)
         for sev, colour in SEV_COLOUR.items():
             self.issues.tag_configure(sev, foreground=colour)
         self.issues.tag_configure("b", font=("Segoe UI" if _win() else "Helvetica", 10, "bold"))
         self.issues.configure(state="disabled")
 
         body = ttk.Frame(f)
-        body.grid(row=2, column=0, sticky="nsew")
+        body.grid(row=3, column=0, sticky="nsew")
         body.columnconfigure(0, weight=3)
         body.columnconfigure(1, weight=2)
         body.rowconfigure(0, weight=1)
@@ -92,11 +103,12 @@ class ExperimentEditor:
         sf.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
         sf.columnconfigure(0, weight=1)
         sf.rowconfigure(0, weight=1)
-        cols = (("sample", 200), ("condition", 150), ("rep", 45), ("used", 70), ("run file", 220))
+        cw = tkutil.char_width()
+        cols = (("sample", 28), ("condition", 21), ("rep", 6), ("used", 10), ("run file", 31))
         self.tree = ttk.Treeview(sf, columns=[c for c, _ in cols], show="headings", height=9, selectmode="extended")
-        for c, w in cols:
+        for c, n in cols:
             self.tree.heading(c, text=c)
-            self.tree.column(c, width=w, anchor="w", stretch=c in ("sample", "condition", "run file"))
+            self.tree.column(c, width=n * cw, anchor="w", stretch=c in ("sample", "condition", "run file"))
         self.tree.tag_configure("off", foreground="#999")
         self.tree.tag_configure("changed", foreground="#1565c0")
         self.tree.grid(row=0, column=0, sticky="nsew")
@@ -135,12 +147,12 @@ class ExperimentEditor:
         rf = ttk.LabelFrame(right, text="Roles (what each condition is)", padding=6)
         rf.grid(row=1, column=0, sticky="ew", pady=(8, 0))
         rf.columnconfigure(1, weight=1)
-        rcols = (("condition", 120), ("samples", 60), ("role", 150), ("from", 190))
+        rcols = (("condition", 17), ("samples", 9), ("role", 21), ("from", 27))
         self.roles_tree = ttk.Treeview(rf, columns=[c for c, _ in rcols], show="headings", height=4,
                                        selectmode="browse")
-        for c, w in rcols:
+        for c, n in rcols:
             self.roles_tree.heading(c, text=c)
-            self.roles_tree.column(c, width=w, anchor="w", stretch=c in ("role", "from"))
+            self.roles_tree.column(c, width=n * cw, anchor="w", stretch=c in ("role", "from"))
         self.roles_tree.tag_configure("ask", foreground=SEV_COLOUR["input"])
         self.roles_tree.tag_configure("set", foreground="#1565c0")
         self.roles_tree.grid(row=0, column=0, columnspan=3, sticky="ew")
@@ -174,18 +186,9 @@ class ExperimentEditor:
         ttk.Combobox(of, textvariable=self.var("normalize"), state="readonly", width=12,
                      values=[LAB_DEFAULT, *NORMALIZATION_CHOICES]).grid(row=2, column=1, columnspan=3, sticky="w", **PAD)
 
-        act = ttk.Frame(right)
-        act.grid(row=3, column=0, sticky="w", pady=(10, 0))
-        self.run_btn = ttk.Button(act, text="Run analysis", command=self.run)
-        self.run_btn.pack(side="left", padx=2)
-        ttk.Button(act, text="Save choices", command=self.save_choices).pack(side="left", padx=2)
-        ttk.Button(act, text="Open report", command=self.open_report).pack(side="left", padx=2)
-        ttk.Button(act, text="Results folder", command=self.open_results).pack(side="left", padx=2)
-        self.state = ttk.Label(right, text="", foreground="#2e7d32", wraplength=380, justify="left")
-        self.state.grid(row=4, column=0, sticky="w", pady=(6, 0))
         self.log = scrolledtext.ScrolledText(f, height=5 if not compact else 4, wrap="word",
                                              font=("Consolas" if _win() else "Menlo", 9))
-        self.log.grid(row=3, column=0, sticky="nsew", pady=(8, 0))
+        self.log.grid(row=4, column=0, sticky="nsew", pady=(8, 0))
         self.log.configure(state="disabled")
 
     # ------------------------------------------------------------- helpers --
@@ -436,7 +439,8 @@ class ExperimentEditor:
         try:
             self._roles = roles.set_role(self._roles, condition, value)
         except roles.RoleError as exc:
-            messagebox.showerror("Role", str(exc), parent=self.frame)
+            messagebox.showerror("Role", f"{exc}\n\n→ Pick another role for this condition, or leave it automatic.",
+                                 parent=self.frame)
             return
         if value == "control" and self.var("de_type").get() in ("control", "all"):
             self.var("control").set(condition)  # refreshes through the variable's trace
@@ -627,10 +631,12 @@ class ExperimentEditor:
             path, _backup = save_analysis(dest, self.choices(), self._lab())
             path = self._save_tmt(dest) or path
         except (ValueError, AnalysisError, OverridesError) as exc:
-            messagebox.showerror("Analysis choices", str(exc), parent=self.frame)
+            messagebox.showerror("Analysis choices", f"{exc}\n\n→ Fix the choice named above, then press Save choices again.",
+                                 parent=self.frame)
             return False
         except OSError as exc:
-            messagebox.showerror("Analysis choices", f"Could not write experiment.yaml:\n{exc}", parent=self.frame)
+            messagebox.showerror("Analysis choices", f"Could not write experiment.yaml:\n{exc}\n\n→ Close experiment.yaml if "
+                                 "another program has it open, then press Save choices again.", parent=self.frame)
             return False
         if path is None:
             return True

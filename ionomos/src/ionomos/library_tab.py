@@ -458,10 +458,10 @@ class DownloadFlow:
 
     def dest_problem(self) -> str:
         if self.dest is None or not str(self.dest).strip():
-            return "No FASTA folder is set (tab 1 Folders)."
+            return "No FASTA folder is set (Folders tab)."
         if " " in str(self.dest):
             return (f"The FASTA folder {self.dest} has a space in its path, which FragPipe can't use: pick a folder "
-                    f"without spaces on tab 1 first.")
+                    f"without spaces on the Folders tab first.")
         return ""
 
     def can_search(self, text: str) -> bool:
@@ -543,12 +543,15 @@ def _thread(fn: Callable[[], None]) -> None:
 class _Window:
     """A Toplevel that knows whether it is still open; workers post into it through the app."""
 
-    def __init__(self, panel, title: str, geometry: str = ""):
+    def __init__(self, panel, title: str, geometry: str = "", size: tuple[int, int] | None = None):
+        """size: (columns, rows) of text, fitted to the screen (tkutil.fit_window); geometry: a Tk geometry string."""
         self.panel, self.app = panel, panel.app
         self.win = tk.Toplevel(self.app.root)
         self.win.title(title)
         self.win.transient(self.app.root)
-        if geometry:
+        if size:
+            tkutil.fit_window(self.win, *size)
+        elif geometry:
             self.win.geometry(geometry)
         self.alive = True
         self.stop_ev = threading.Event()
@@ -583,11 +586,11 @@ def _set_text(box, text: str) -> None:
 class LibraryDialog(_Window):
     """Find on this PC… / Choose…: the catalog's candidates for one method."""
 
-    COLS = (("kind", "kind", 130), ("name", "name", 220), ("where", "where", 220), ("summary", "summary", 330),
-            ("flags", "marks", 60), ("why", "why recommended", 300))
+    COLS = (("kind", "kind", 19), ("name", "name", 31), ("where", "where", 31), ("summary", "summary", 47),
+            ("flags", "marks", 9), ("why", "why recommended", 43))  # widths in characters
 
     def __init__(self, panel, method: str, cfg, cfg_dict: dict, what: str = "both"):
-        super().__init__(panel, "Workflows and FASTAs on this PC", "1150x640")
+        super().__init__(panel, "Workflows and FASTAs on this PC", size=(160, 40))
         self.method, self.cfg, self.cfg_dict = method, cfg, cfg_dict
         self.kind = cfg.kind(method) if method else ""
         self.catalog = None
@@ -631,9 +634,10 @@ class LibraryDialog(_Window):
         tf.columnconfigure(0, weight=1)
         tf.rowconfigure(0, weight=1)
         self.tree = ttk.Treeview(tf, columns=[c for c, _, _ in self.COLS], show="headings", height=12)
-        for c, label, w in self.COLS:
+        cw = tkutil.char_width()
+        for c, label, n in self.COLS:
             self.tree.heading(c, text=label)
-            self.tree.column(c, width=w, anchor="w", stretch=c in ("summary", "why"))
+            self.tree.column(c, width=n * cw, anchor="w", stretch=c in ("summary", "why"))
         self.tree.grid(row=0, column=0, sticky="nsew")
         sb = ttk.Scrollbar(tf, orient="vertical", command=self.tree.yview)
         sb.grid(row=0, column=1, sticky="ns")
@@ -801,11 +805,11 @@ class LibraryDialog(_Window):
 class ProposalDialog(_Window):
     """Review proposals…: auto_assign for the methods whose files are missing or broken; only Apply changes."""
 
-    COLS = (("method", "method", 90), ("what", "file", 70), ("now", "now", 200), ("proposed", "proposed", 260),
-            ("why", "why", 380))
+    COLS = (("method", "method", 13), ("what", "file", 10), ("now", "now", 28), ("proposed", "proposed", 37),
+            ("why", "why", 54))  # widths in characters
 
     def __init__(self, panel, cfg, cfg_dict: dict):
-        super().__init__(panel, "Ionomos proposes workflows and FASTAs", "1000x560")
+        super().__init__(panel, "Ionomos proposes workflows and FASTAs", size=(140, 35))
         self.cfg, self.cfg_dict = cfg, cfg_dict
         self.catalog = None
         self.proposals: list = []
@@ -817,7 +821,8 @@ class ProposalDialog(_Window):
         ttk.Label(f, text="For each method whose workflow or FASTA is missing or has a problem, the best file found "
                           "on this PC. Methods whose files are fine are left alone. Nothing changes until you press "
                           "Apply: then the files are copied into the pinned folders (originals stay where they are) "
-                          "and config.yaml is saved, the old one backed up.", wraplength=960, justify="left"
+                          "and config.yaml is saved, the old one backed up.", wraplength=tkutil.text_size(134, 1)[0],
+                  justify="left"
                   ).grid(row=0, column=0, sticky="w")
         st = ttk.Frame(f)
         st.grid(row=1, column=0, sticky="ew", pady=4)
@@ -827,9 +832,10 @@ class ProposalDialog(_Window):
         self.stop_btn = ttk.Button(st, text="Stop", command=self.stop_ev.set, state="disabled")
         self.stop_btn.grid(row=0, column=1, padx=4)
         self.tree = ttk.Treeview(f, columns=[c for c, _, _ in self.COLS], show="headings", height=8)
-        for c, label, w in self.COLS:
+        cw = tkutil.char_width()
+        for c, label, n in self.COLS:
             self.tree.heading(c, text=label)
-            self.tree.column(c, width=w, anchor="w")
+            self.tree.column(c, width=n * cw, anchor="w")
         self.tree.grid(row=2, column=0, sticky="nsew")
         self.tree.bind("<<TreeviewSelect>>", lambda e: self.selected())
         self.details = _text_box(f, height=9)
@@ -919,7 +925,7 @@ class DownloadDialog(_Window):
     """Download from UniProt…: organism -> proteome -> download + decoys and contaminants into fasta_dir."""
 
     def __init__(self, panel, cfg, method: str):
-        super().__init__(panel, "Download a FASTA from UniProt", "820x520")
+        super().__init__(panel, "Download a FASTA from UniProt", size=(115, 32))
         self.cfg, self.method = cfg, method
         self.flow = DownloadFlow(cfg.fasta_dir)
         f = ttk.Frame(self.win, padding=8)
@@ -934,9 +940,10 @@ class DownloadDialog(_Window):
         self.search_btn = ttk.Button(f, text="Search", command=self.search)
         self.search_btn.grid(row=0, column=2, **PAD)
         self.tree = ttk.Treeview(f, columns=("id", "organism", "taxon", "proteins"), show="headings", height=6)
-        for c, w in (("id", 120), ("organism", 360), ("taxon", 80), ("proteins", 120)):
+        cw = tkutil.char_width()
+        for c, n in (("id", 17), ("organism", 51), ("taxon", 11), ("proteins", 17)):
             self.tree.heading(c, text=c)
-            self.tree.column(c, width=w, anchor="w")
+            self.tree.column(c, width=n * cw, anchor="w")
         self.tree.grid(row=1, column=0, columnspan=3, sticky="nsew", **PAD)
         self.tree.bind("<<TreeviewSelect>>", lambda ev: self._picked())
         opts = ttk.Frame(f)
@@ -947,7 +954,8 @@ class DownloadDialog(_Window):
         ttk.Checkbutton(opts, text="With isoforms", variable=self.isoforms).pack(side="left", padx=12)
         ttk.Label(f, text=f"Saved in the FASTA folder: {cfg.fasta_dir} (decoys rev_ and contaminants contam_ are "
                           f"added as FragPipe's Database tab does; nothing is overwritten)", foreground="#666",
-                  wraplength=780, justify="left").grid(row=3, column=0, columnspan=3, sticky="w", **PAD)
+                  wraplength=tkutil.text_size(110, 1)[0], justify="left").grid(
+            row=3, column=0, columnspan=3, sticky="w", **PAD)
         self.msg = _text_box(f, height=7)
         self.msg.grid(row=4, column=0, columnspan=3, sticky="nsew", **PAD)
         bb = ttk.Frame(f)
@@ -1032,7 +1040,7 @@ class PrepareDialog(_Window):
     """Add decoys and contaminants…: one FASTA without decoys -> a FragPipe-ready copy in fasta_dir."""
 
     def __init__(self, panel, cfg, method: str, src: Path):
-        super().__init__(panel, "Add decoys and contaminants", "760x360")
+        super().__init__(panel, "Add decoys and contaminants", size=(108, 22))
         self.cfg, self.method, self.src = cfg, method, Path(src)
         self.final: Path | None = None
         f = ttk.Frame(self.win, padding=8)
@@ -1040,7 +1048,7 @@ class PrepareDialog(_Window):
         f.columnconfigure(0, weight=1)
         f.rowconfigure(1, weight=1)
         ttk.Label(f, text=f"{self.src}\n→ a new file in {cfg.fasta_dir} (the file you picked is not changed)",
-                  wraplength=720, justify="left").grid(row=0, column=0, sticky="w")
+                  wraplength=tkutil.text_size(102, 1)[0], justify="left").grid(row=0, column=0, sticky="w")
         self.msg = _text_box(f, height=9)
         self.msg.grid(row=1, column=0, sticky="nsew", pady=4)
         bb = ttk.Frame(f)
