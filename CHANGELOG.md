@@ -195,6 +195,86 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of an over-expression); a note says so. New role `background` in
   `analysis.roles` and the Roles list; `background_keywords` setting; report
   note `PULLDOWN_DESIGN`; `simulate.pulldown_pg_matrix` for tests.
+- **Round 4: tests against hostile and odd input** (2026-10-15). Each area was attacked with malformed, empty,
+  huge, unicode, CRLF, concurrent, interrupted, read-only, missing and duplicated input; each round-4 fix under
+  Fixed has a regression test.
+  - **Loaders** (D96): `tests/test_loader_formats.py` + `tests/loader_formats.py` (343 tests). One simulated
+    experiment written in every format (DIA-NN matrix / long / Parquet, FragPipe DIA and IonQuant, MaxQuant,
+    Spectronaut long and pivot, AlphaDIA, MSstats, Proteome Discoverer, Sage, any table as tab / comma / semicolon
+    / .xlsx) gives one hit list; each format with nine harmless differences reads to the same numbers; with ten
+    kinds of damage it is read with a note or refused in words and analyze() never crashes; 100,000 rows of each;
+    the TMT formats (PD, MSstatsTMT, Sage TMT, MaxQuant) take the same changes and find the planted hits;
+    provenance on binary / empty / wrong-shaped logs and records for every method.
+  - `tables.decode`, `tables.open_text`, `tables.unquote`, `tables.reader`, `tables.delimiter`: the one place text
+    encodings, quotes and delimiters are decided (D96).
+  - **Statistics**: `tests/test_stats_edges.py` (232 cases, ~6 s): n = 1 and n = 0 groups, all-missing features,
+    constant columns and tables, duplicate IDs, 0 / negative / inf / NaN intensities, one sample, 500 samples,
+    values rounded to 3 decimals, a block with one level, self-comparisons, an empty sample under every
+    imputation; seeded property tests on random designs: A vs B is the mirror of B vs A; no p-value without values
+    in both groups and a variance (D32); the missing-value filter removes exactly the failing features, each once;
+    sample order and units change nothing; IRS leaves one plex, no plex and label-free data unchanged; the roles
+    never compare a condition with itself. Every golden still holds to its tolerance, none touched.
+  - **Intake and the watcher**: `tests/test_intake_faults.py` (54 fault-injection tests against the testbed and
+    its fake FragPipe): copies still running, renamed / removed / duplicated drops, unicode / device /
+    200-character / trailing-dot names, a read-only inbox, every kind of wrong `experiment.yaml`, damaged history
+    / status files / ledger rows, locked and held-open ledgers and `repair-ledger`, the lock of a killed watcher, a
+    stop while filing, a restart mid-job with a damaged `ionomos.json`.
+  - **Engines run directly** (D97): `tests/standin_engine.py`, a stand-in engine (driven by `IONOMOS_STANDIN`)
+    that hangs, prints garbage or binary, exits with any code or signal, writes whole / partial / zero-byte /
+    header-only tables, locks a table from a grandchild, leaves a process behind, or floods its log;
+    `tests/test_engine_faults.py` (109 tests) runs it as FragPipe, DIA-NN, MaxQuant, Sage, ThermoRawFileParser and
+    the preflight's launcher, and kill_tree / kill_pid_tree / stop_leftover for Windows and POSIX with the
+    module's os / subprocess / signal stubbed. `fragpipe.code_text`, `fragpipe.move_aside`, `fragpipe.run_to_file`.
+  - **The command line's exit codes, the same for every subcommand** (D101), in `cli.py`'s docstring (so in
+    `ionomos --help`): 0 done, 1 the answer is no, 2 nothing was done (usage, unreadable config, missing folder or
+    file), 3 a watcher is already running, 70 crashed, 130 Ctrl-C. `cli.build_parser()`; a help text for every
+    option `cli.py` defines (14 had none). Tests: `test_cli_contract.py`, `test_config_errors.py`,
+    `test_config_roundtrip.py`, `test_check_agreement.py`, `test_hostile_pc.py`.
+  - **Security** (D98, D99): `docs/SECURITY_NOTES.md`, what each component protects against whom, what it does
+    not, the code and the tests. `tests/test_security.py` (90 tests): zip-slip and absolute members, a 10 GB
+    zip-bomb entry, a manifest bomb, webhook credentials and redirects to a private address, `!!python` tags in
+    every YAML reader, `& | < > ^ % "` and line breaks through the command lines, PowerShell quoting, a hostile log
+    read by the assistant, a symlinked log, a dead UNC scan root, network paths inside scanned files, update
+    refusals, and secrets planted in config.yaml searched for in the notification, fingerprint, status file, logs,
+    catalog, `ionomos check` and every assistant tool result.
+  - **The assistant**: 19 scenarios (85 in all, 53 scored by `ionomos ask-eval`): ambiguous questions, a job with
+    no log, every tool with bad arguments, tool names that do not exist, injections in an experiment's name and in
+    a pop-up's folder name, a slow model past and within its time limit, a 10 MB reply, a change off the
+    whitelist, and a proposal that passes every check but changes another job. The injection fixture state gains
+    job 3 (its name an instruction) and a rejected folder whose name is one. `tests/test_assistant_robustness.py`:
+    the audit log under threads and processes at once, concurrent asks, a trickling model over real HTTP, every
+    tool against every kind of bad argument, an injected help entry, whitelist values that try to smuggle a
+    second `experiment.yaml` key. The scripted model can be slow (`"seconds"`) or huge (`"pad"`); its HTTP server
+    sends a paced reply as it comes.
+  - **The report's front end**: the QC and enrichment tabs are ARIA tab lists (arrow keys, Home, End); sortable
+    column headers take Tab, Enter and Space and carry `aria-sort`; the two-way switches carry `aria-pressed`;
+    every chart (`svg role=img`, the heatmap canvas) has an `aria-label` naming what it shows; a `?` controls its
+    panel (`aria-controls`) and Escape on it closes the panel. JS harness: `hostile.test.mjs`,
+    `searchjunk.test.mjs`, `keyboard.test.mjs`, `exportall.test.mjs` (34 tests).
+  - **The library** (D100): `ionomos library scan --only`, `--replace`; `ionomos library adopt --force`;
+    `library.save_scan`, `merge_scan`, `adopt_problems`, `live_workflows`, `lab_taxon`, `CANONICAL_STOCK`,
+    `LABEL_KINDS`; flag `WF_KIND_MISMATCH` with a help entry.
+  - **FASTAs**: `fastasource.fasta_headers(fh, stop, deadline, chunk=…)`, `fastasource.text_before_first_header`;
+    `prepare_for_fragpipe(…, fasta_dir=)` and `download_proteome(…, fasta_dir=)` (for the wording of the space
+    note).
+  - **The testbed** (D102): methods LFQ (`LFQ-MBR.workflow`, keyword `labelfree`), Phospho (`LFQ-phospho.workflow`,
+    keyword `lfqphospho`) and Open (`Open.workflow` / `Open-noLOS.workflow`, keyword `opensearch`), each with a
+    `naming.methods` rule `{sample}_{rep}[_{fraction}]`. Scenarios `lfq_good` (label-free, `combined_protein.tsv`
+    in a real file's layout), `phospho_lfq` (`combined_site_STY_79.9663.tsv`, sites analysed), `dia_fractions`
+    (two fractions per sample), `open_search` and `open_search_no_los` (`psm.tsv` with mass shifts,
+    `ptm-shepherd-output/`), `non_ascii_log` (tools print umlauts, µ and Japanese), `retry_previous` (fails once,
+    then a Retry leaves `fragpipe_previous_*`). Fake modes `non-ascii` and `fail-once`, which also join the stress
+    run's fault drops. `ionomos testbed list` shows each sample's fake mode and every fake mode.
+    `tests/test_testbed.py`: 19 tests, 32 cases.
+  - **The docs are checked against the code on every test run** (`tests/test_docs_sync.py`): every CLI
+    subcommand (read from the real parser) is in `cli.py`'s docstring, ARCHITECTURE's `cli.py` row and README, and
+    every `ionomos X` a doc shows exists; every key `configio.dump_config` writes is explained in ARCHITECTURE's
+    config section or a doc it names; every help id the code opens and every `faq.*` / `issue.*` a doc names
+    exists; every relative link in `docs/*.md` and the top-level `*.md` resolves, `#anchors` included; every
+    `Dnn` cited in the changelog, docs, code and tests is a DECISIONS heading, and the headings are unique, in
+    order, without gaps; no paragraph that says "not built yet" / "wave 2" / "awaits" names what [Unreleased]
+    added; every testbed scenario is in TESTING.md; every file name in `names.py` is in ARCHITECTURE's on-disk
+    layout.
 
 ### Changed
 
@@ -238,6 +318,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   window's TMT notes no longer say "conditions come from the channel annotation" (a dead end).
 - `deploy/ionomos.spec`: hidden imports `ionomos.tmtkit`, `ionomos.tmt_editor`.
 - build-exe.yml sets up Python 3.14, the version the exe was already built with.
+- **Round 4** (2026-10-15):
+  - **Loaders** (D96): `tables.read_tsv` (FragPipe's tables and Ionomos' own) now takes UTF-16 / cp1252, a comma
+    or semicolon file, and cells in quotes; a quote still never spans cells or lines.
+  - **Engines**: the time-limit hint says "the search hung", not "FragPipe hung" (it is shown for every engine).
+  - **Exit codes** (D101): `ionomos check` and `ionomos preflight` exit 2 (was 1) when config.yaml can't be read,
+    like every other command; `analyze` / `export` of a job that isn't in the ledger exit 1 (was 2), like `retry`
+    and `cancel`; `cancel` of a job that doesn't exist exits 1 (was 0). An empty value in config.yaml
+    (`poll_seconds:` with nothing after it) means the default.
+  - **experiment.yaml**: the unknown-key message names the key probably meant (`methd (did you mean method?)`)
+    and every key the file can have. A channel written twice in `tmt:` is REJECTED at intake (`TMT_BLOCK`), was
+    taken with the last name; `TMT_ALL_NA` is an error (the job fails before the search), was a warning (#156).
+  - **The library** (D100): `library scan --root DIR` adds DIR to the default roots instead of replacing them
+    (`--only` for the old meaning). Kinds `SILAC`, `isoTOP`, `ipIAA`, `PAL`, `labelled` beside isoDTB / TMT / DIA
+    / LFQ / phospho / open / other. `library._headers` delegates to `fastasource.fasta_headers` (a header is kept
+    up to 64 kB; real ones are < 1 kB).
+  - **The assistant**: a proposal made from a question about an attention item without a job, or about an
+    experiment Ionomos did not find, says so in its window, as one for another job already did (D75 4).
+  - **The assistant corpus cites the fake FragPipe's new console line numbers** (D102): `log:1#257` -> `#242`,
+    `log:2#240/241/248` -> `#244/245/252` (#183).
+  - `tests/test_service.py::test_create_desktop_shortcut_encoded_command` asserted the broken PowerShell for
+    `O'Brien`; it now asserts the doubled quote (D99).
 
 ### Fixed
 
@@ -330,6 +431,334 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`ionomos testbed stress` left its temp folder behind on Windows.** The
   ledger connections were never closed, and Windows can't remove an open
   `ionomos.db`.
+- **Round 4: tables from every engine, in every state they arrive in** (D96).
+  - A cell longer than 131,072 characters (MaxQuant's `Evidence IDs` / `MS/MS IDs` of an abundant protein on a
+    big experiment, a long protein list) crashed every table reader (`CRASH_READ`: "field larger than field
+    limit"). The limit is raised for the whole process (`tables.py`).
+  - A cut-off, empty or not-Parquet `report.parquet` crashed the read with pyarrow's own error; it is now refused
+    in words (`UNUSABLE_TABLE`: "can't be read as a Parquet file … copy or export it again").
+  - Sage's `results.json` with a `database` that is not a section (hand-edited or damaged) crashed the read and
+    the provenance (`'str' object has no attribute 'get'`).
+  - A sample named with a superscript digit (`Ctrl_²`) crashed the read (`str.isdigit()` accepts it, `int()`
+    does not).
+  - UTF-16 files (Excel's "Unicode text") were not recognised by any engine: a Spectronaut long report was
+    analysed as a plain table with `R.Replicate` and `PG.Quantity` as its two samples, a DIA-NN / FragPipe matrix
+    had no runs, an SDRF was not found. Every reader now takes UTF-8 (BOM or not), UTF-16 with a BOM, and cp1252
+    (with a note).
+  - Files saved again from Excel with every cell in quotes: FragPipe's `pg_matrix` / `combined_protein` had no
+    samples; a quoted cell holding a tab shifted the rest of its row (silently wrong numbers); a Proteome
+    Discoverer export saved as `.csv` lost its conditions (the header reader split `"…: F1: Sample, DMSO"` at its
+    commas); a FragPipe table saved with commas had one "sample".
+  - A Spectronaut (or DIA-NN, MSstats, MSstatsTMT, Sage) report written with decimal commas (`1234,56`, a German
+    or French Windows) or thousands separators was read as all missing, its q-values too. The engines' long
+    readers now read numbers the way the any-table reader does, with the same note.
+  - A row of a DIA-NN / Spectronaut long report or Sage's `lfq.tsv` whose q-value is blank or not a number passed
+    the 1 % filter; it is now left out and counted. A q-value column with no number at all is not used as a
+    filter (a note says so) instead of leaving out every row.
+  - Sage's `lfq.tsv` with a file's column twice added that file to itself (read as two fractions: doubled
+    intensities); a repeated peptide-ion row was added to the first. Both are read once, with a note.
+  - A run column twice in a DIA-NN matrix read the same column as two samples (`IDENTICAL_SAMPLES`); the repeat
+    is left out with the note FragPipe's TMT tables already had.
+  - A quote that is never closed made the any-table reader (and every engine read through it) join the rest of
+    the file into one cell; the file is read again with quotes as plain characters, with a note. Sage's own
+    tables never treat a quote as special.
+  - A file cut off in the middle of its last row (an export or copy that stopped) gave a half row: the row is
+    left out and the note says the file looks cut off. NUL bytes (an interrupted copy) are counted in a note.
+  - An engine's own table of 0 bytes (`report.tsv`, `report.parquet`, `proteinGroups.txt`, `lfq.tsv`, `tmt.tsv`,
+    `pg.matrix.tsv`) gave "no FragPipe result table found"; it is now named and called empty (0 bytes: the engine
+    stopped or the copy did not finish). A header-only DIA-NN, Spectronaut, MSstats or MSstatsTMT report is
+    refused as "a header but no rows" instead of loading an empty matrix.
+  - An engine report saved as `.xlsx` (Proteome Discoverer's Excel export, a Spectronaut or MSstats report opened
+    in Excel) was not recognised as that engine; Spectronaut's long report was then analysed as a plain table.
+  - DIA-NN's main report named by `--out` (`exp1.tsv`, or `exp1.parquet` with `exp1.stats.tsv` beside it) was
+    only recognised as `report.tsv`; without the matrices it was read as a plain table. A spectral library
+    (`*lib*.parquet`) is never taken for the report.
+  - A semicolon file with dots between the thousands (`1.234.567,8`) is read (a German Excel export).
+  - Sage TMT: a cut-off `tmt.tsv` (rows shorter than its header) is said in a note instead of skipped in silence.
+  - An SDRF or TMT `annotation.txt` saved as UTF-16 / cp1252 / with quoted cells is read.
+- **Round 4: the statistics on degenerate input** (each fix restores D32, D48 or D42's "explained, never
+  crashed").
+  - **A condition is never compared with itself.** `comparisons: ["Drug vs Drug"]` was accepted: limma gave
+    every feature p = 1 (an invented p-value, D32), and with a block or covariates the statistics stage crashed
+    with "division by zero" and the design was dropped with that as its reason. It is now refused with a sentence
+    (`settings_from`; a run falls back to the default comparisons and says why), and every model leaves such a
+    contrast untested.
+  - **`analysis.control` and `analysis.roles` disagreeing no longer gives "EV vs EV".** With `control: EV` and
+    `roles: {EV: compound}`, the roles' comparisons held EV against itself. It is skipped, and a note says the two
+    settings disagree.
+  - **An empty sample no longer knocks out every comparison under mindet / minprob imputation.** A sample without
+    a single value (a failed run kept in the table) was imputed with NaN in every row, so limma's pooled variance
+    was NaN and no feature was tested, without a word; knn wrote the log2 value 0 into it. Such a sample now stays
+    missing, with a note, as under perseus (R's MinDet / MinProb give NA there too, and impute.knn refuses).
+  - **An infinite value no longer gives an infinite fold change with p = 0.** Both limma models count NaN and
+    ±inf as missing, as lmFit does (`is.finite`).
+  - **A covariate or block given as `NA` / `NaN` / `not available` is no value**, not a level of its own
+    (`design.MISSING_WORDS`): a batch of 1, 2 and NA silently gave one sample a batch of its own, and an age with
+    one NA was reported as "confounded with condition". The design is not used and `DESIGN_NOT_USED` names the
+    sample.
+  - **IRS: a protein with no reference value in any plex is missing, not left unscaled** (D48). Plex-mean IRS
+    (`irs: sum`) is unchanged.
+  - The moderated F-test with a single condition gives no p-value instead of p = 1.
+- **Round 4: intake, the watcher, the ledger and the worker.**
+  - An `experiment.yaml` with a date that does not exist (`date: 2026-02-30`) rejected the folder as "an
+    unexpected problem — send diagnostics" and crashed the naming window's reading; it is now refused as a date,
+    with how to write it.
+  - `allow_uneven_fractions: 'false'` (or `'no'`) in `experiment.yaml` switched the fraction check *off*
+    (`bool('false')`); yes/no values are read as such and anything else is refused.
+  - `method:`, `user:`, `workflow:` or `fasta:` given as a list or a mapping in `experiment.yaml` were turned into
+    text (`user: [EJQ]` filed under `EJQ`); they are refused with an example.
+  - A naming-history file with one non-UTF-8 byte rejected **every** drop as "an unexpected problem"; such a line
+    now matches nothing.
+  - A raw file whose name has a whole word in another script (`実験_1_1.raw`, `Probe_α_1_1.raw`) was filed with
+    the word gone and the numbers read as the sample; it now goes to the naming window or gets a note saying to
+    rename it.
+  - A drop that could never be moved (an inbox Ionomos may read but not change, a file another program never lets
+    go of) was retried every five minutes for ever with only a log line; after ten minutes an attention item
+    ("Can't take in … yet") says what to check, and closes itself when the folder is filed (D17).
+  - The job list locked by another program for longer than the ledger waits rejected the drop with "send
+    diagnostics", and it stayed rejected after the lock was gone; it is retried.
+  - Ionomos stopping between moving a drop and writing its `ionomos.json` left the experiment in no list, never
+    searched; the first status record is written straight after the move and the hourly check adopts it.
+  - Inbox and users_root on two drives: a file still being written (Explorer sets the final size first) was
+    copied half-written, and the clean-up then deleted the finished files from the inbox while the message said
+    to keep the filed copy. The copy now waits until no file in the drop is open (Windows, D29).
+  - Windows: an inbox folder whose name ends in a dot or a space (made on a Mac, in WSL) was skipped for ever
+    without a word, or stood in for the folder without the dot; it is renamed in the inbox, or the log says once
+    how to.
+  - An `ionomos.json` that is valid JSON of the wrong shape (`null`, `[]`, a plan without its folder) stopped
+    `ionomos run` at start-up, and crashed `repair-ledger` and the hourly adoption; it is now skipped with a
+    warning like broken JSON.
+  - One damaged job record in the job list (`parsed_json`) made every list of jobs fail (worker, app, `status`);
+    that job alone now fails.
+  - An unexpected error while preparing a search escaped the worker's loop, and the same first queued job failed
+    again every poll, so no job behind it ever ran; it now fails that job with the reason.
+  - `ionomos repair-ledger` while the job list or its journal is open in another program stopped half way with a
+    `PermissionError`; it now changes nothing, says to close the program, and exits 1.
+  - Loose raw files named like a Windows device (`NUL_1.raw`, `NUL_2.raw`) asked for a folder named `NUL`; it is
+    `NUL_files`.
+- **Round 4: DIA-NN, MaxQuant, Sage and FragPipe's run loop** (D97).
+  - DIA-NN, MaxQuant and Sage named an earlier attempt's output folder to the second only
+    (`diann_previous_<time>`), so a second retry in the same second failed. All four runners now share
+    `fragpipe.move_aside` (`-2`, `-3` …), as FragPipe had (D69).
+  - A full disk (or any write error that wasn't a locked file) while writing a DIA-NN job's `diann.cfg`, or a
+    MaxQuant / Sage job without a lab file, held the job for ever as "workflow file for DIA missing: diann.cfg".
+    The job now fails with the real cause ("could not prepare DIA-NN inputs: … No space left on device" → "The
+    disk is full").
+  - `MaxQuantCmd --create` ran under `subprocess.run(capture_output=True, timeout=300)`: at the limit Python kills
+    MaxQuant but then waits, with no limit, for the pipe a child of it still holds, so the worker hung for good
+    (Stop could not end it). It now runs with its output in `ionomos_run/maxquant_create.log` and its process tree
+    killed at the limit (`fragpipe.run_to_file`, which the preflight now uses too). Its failures (exit code, no
+    template, not XML) fail the job with what to check.
+  - A lab `mqpar:` that is not XML or not MaxQuant's (`<MaxQuantParams>`) failed every attempt as "Ionomos hit an
+    unexpected error: ParseError"; it now holds the job before an attempt is counted ("mqpar … can't be used: …;
+    save the parameters again from the MaxQuant GUI"), help topic `search.hold-mqpar`.
+  - Sage: a half-written mzML left in `sage_mzml/converting/` by a killed conversion was moved into place as a
+    finished one when the converter exited 0 without writing. It is now removed before that file is converted.
+  - Sage: a raw file stamped in the future was converted again on every retry, and a raw file replaced by a copy
+    with an older time stamp was never converted again. Each conversion now records the raw file's size and time
+    (`<name>.mzML.source.json`).
+  - Sage: a damaged `sage_job.json` ended `ionomos sage-job` with a traceback; it now prints what is wrong and to
+    Retry (exit code 2). `sage --help` output is decoded with `errors="replace"`.
+  - DIA-NN, MaxQuant or Sage exiting 0 without their main table (`report.pg_matrix.tsv`,
+    `combined/txt/proteinGroups.txt`, `lfq.tsv` / `tmt.tsv`) was a "done" job with nothing to analyse; it now
+    fails ("… exited 0 but did not write its result table …").
+  - A result table held open by another program was reported as "the run did not finish writing it"; it is now
+    named as open in another program, with its own cause.
+  - Windows exit codes read as 4294967295 / 3221225477; they are now shown as `-1` / `0xC0000005`. `0xC0000135`
+    / `0xC0000139` / `0xC000007B` (a DLL missing or for the wrong Windows: DIA-NN without the Visual C++
+    Redistributable) get their own cause, and any other `0xC0xxxxxx` status reads "crashed with Windows error
+    0x…". A failed FragPipe step's code says what it means.
+  - `kill_tree` gave up when `taskkill` could not run and left the search running; it now ends at least the
+    process Ionomos started. A search that still does not stop at the time limit or the log limit is named in the
+    reason with its process number and what to do.
+  - `stop_leftover` raised on a record that was valid JSON but not an object (`null`, `[]`); a damaged record is
+    now removed. `kill_pid_tree` never signals pid ≤ 1.
+  - POSIX: a process an engine left running after it exited by itself is stopped, and the job carries a note
+    saying so. Windows: #174.
+  - Preflight: its time limits were bound when the module loaded; a launcher with no output said "output: "
+    instead of "none"; a launcher that could not be started showed only the hint, not why; `install_report`
+    raised when the folder above the installation could not be listed.
+- **Round 4: config.yaml and the command line** (D101).
+  - Every config.yaml error names the file, the key, the key's line and what to do
+    (`C:/Fragpipe_Auto/config.yaml, line 14: 'watcher.poll_seconds' must be above 0, not 0; e.g. 10`); the
+    watcher's folder checks give each problem its line.
+  - A wrong type in config.yaml is an error naming the key instead of a crash or a surprise: `users:` or `gui:`
+    that isn't a mapping, `threads: eight`, `auto_run: 'false'` in quotes (read as on), `poll_seconds: 0` (the
+    inbox scanned non-stop), `.nan`, a negative time.
+  - One alias written alone is one alias: `Isaac: IJ` under `users.aliases`, a learned alias, a method's
+    `aliases: tmt`, `postprocess: tmt_annotation` and `users.ignore: FragPipe*` were split into characters.
+  - The app's Save (and `ionomos init`, `library adopt`) no longer drops what it has no field for: six analysis
+    settings the loader takes (`comparisons`, `exclude_samples`, `sample_conditions`, `sdrf_factor`,
+    `ratio_centre`, `protein_correction`), any other key a lab typed, a typo (D67 item 4) and an unknown section.
+  - A method with no `aliases:` keeps its built-in ones after a Save: isoDTB was written back as `[isodtb]`, and
+    folders named `…iso-dtb…` were no longer recognised.
+  - A Save that dies half-way (crash, full disk, power cut) leaves the previous config.yaml as it was: the text is
+    written to `config.yaml.tmp`, flushed to disk and swapped in. The same for `learned_aliases.yaml` and
+    `config_path.txt`. Two Saves within one second keep both backups.
+  - `ionomos check` finds what the app's checklist finds: a folder the account can't write, an inbox inside the
+    users folder (or the reverse, or logs inside the inbox), a `users.default` without a folder, paths on two
+    drives, a disk whose free space can't be read, the startup task (Windows). Initials for a user without a
+    folder are a warning in both.
+  - No Task Scheduler (schtasks missing, its service stopped or hung) is "unavailable" with what to do, not a
+    crash of the checklist, `ionomos diagnose` or Install task.
+  - `ionomos run` with a log folder it can't write says so and exits 2 (was a traceback).
+  - A damaged job ledger: `status`, `retry`, `cancel` say which file and to run `ionomos repair-ledger`, exit 1.
+  - Every command starts when the app-data folder can't be made or the remembered-config file isn't text.
+  - The update check never raises on an answer of another shape (a proxy page, a list, a missing download
+    address, `size: big`) or a connection cut mid-answer; a download cut mid-file or a Downloads folder that
+    can't be written is a `DownloadError`.
+  - `health.LOCK_NAME` reads `names.LOCK_FILE`.
+- **Round 4: security and privacy** (D98, D99, docs/SECURITY_NOTES.md).
+  - `ionomos bundle unpack` keeps every file inside the folder it is given: a job's folder name in BUNDLE.json
+    (`../../x`, a drive, an absolute or UNC path) no longer chooses where files land; members with a colon (NTFS
+    stream), a Windows device name, a trailing dot or space or a control character are left out and listed; two
+    members with one name are a note; a damaged member is a plain error.
+  - `ionomos bundle unpack` refuses a zip bomb (a member over 1 GB that deflated more than 100:1) and a bundle
+    bigger than the disk's free space before writing anything; `inspect` refuses a BUNDLE.json that claims to be
+    gigabytes. The unpacked config.yaml no longer keeps the sender's `library:` block, engine program paths
+    (`*_exe`) or FragPipe tool / Python folders.
+  - A webhook address with `user:password@` printed the password in the watcher log and `ionomos notify-test`:
+    such an address is refused when read, and the path, query and user part of every hook address are hidden
+    wherever they appear on their own.
+  - Diagnostics and bundles of a config.yaml that does not parse could show a webhook address or password written
+    in flow style, as a list item, or on the lines below the key; they now also hide a webhook address or
+    password replaced earlier (the secrets of `config-backups/`).
+  - Slack messages escape `&`, `<` and `>`: a reason can no longer `@channel` or make a link.
+  - A search whose launcher is a `.bat` under a folder with `&`, `|`, `<`, `>`, `^`, `%` or `"` (e.g. `C:/R&D/`)
+    ran part of the path as a second command; it now fails at once saying which folder to rename, and preflight
+    does not start such a launcher either (D99).
+  - The Desktop shortcut failed for a Windows profile with an apostrophe (`C:\Users\O'Brien`); quotes (also the
+    typographic ones) are doubled. The startup task refuses a command with `%`.
+  - `ionomos library scan` (and adopt / Import workflow) no longer opens a network path written inside a
+    workflow or fragpipe-ui.cache it finds; the workflow is flagged WF_DATABASE_MISSING "on another computer"
+    (D98). A scan root on a server that is off cost ~20 s each; now 5 s on a helper thread and a note.
+  - The assistant's `log_tail` no longer follows a console log that is a symbolic link out of the run folder.
+  - `updates.download()` refuses a release without a published SHA-256, a non-https address and an asset name
+    that is not `Ionomos-Setup-<version>.exe`; `check_latest()` no longer raises on an odd GitHub answer.
+- **Round 4: the assistant.**
+  - The audit log lost records when several questions were asked at once (on Windows about one in ten, others
+    glued into unreadable lines). Each record is now one write of one whole line under a lock; a line cut short
+    by a crash costs only that record; a question with a U+2028 line separator no longer loses its record.
+  - `assistant.timeout_seconds` now limits the whole reply; it only bounded each wait for data, so a model that
+    trickled a token every few seconds was never stopped. A reply is read in 64 KB pieces, so a 10 MB reply on
+    one line stops at the 2 MB cap.
+  - `ionomos ask --experiment ²` (or 5,000 digits, or a number SQLite cannot hold) crashed; it now says "there is
+    no job". An `--item` id that cannot be a file name in the attention folder is "no attention item".
+  - A tool call with megabytes of arguments was sent back to the model in every later request; arguments over
+    4,000 characters are now refused and `{}` goes back. Call ids are cleaned, capped and unique.
+  - An answer saying "job 2 has now been retried" was shown (only first-person claims were caught); a claim with
+    "now" / "just" is not shown either (D57 5).
+  - `list_attention` for a job that does not exist said "nothing needs attention"; it is now "there is no job N".
+  - A fixture state whose search failed (a too-deep folder) was scored as if it had worked; the states now check
+    the jobs that must end done.
+- **Round 4: the report's front end.**
+  - The report no longer goes blank when its data lacks an optional key (notes, settings, a comparison's
+    confidence intervals or counts, a feature's values).
+  - A two-sample report's PCA tab said "could not be drawn" (one principal component); PC1 is drawn.
+  - An axis over values past 2^53 looped forever and froze the page; a dose-response series of 150,000 curves
+    overflowed `Math.min(...)` and its potency plot was not drawn.
+  - A one-word search, `desc:` or `/pattern/` that found nothing said nothing and left the table showing every
+    hit; it now says "0 matches · not found …" and the table shows nothing. A run of `*` no longer freezes the
+    page, `/re/g` and `/re/y` no longer carry their position from one name to the next, and a very long search is
+    said back shortened.
+  - Keyboard: a QC or enrichment tab, a select, a pager button or a column header whose section is drawn again
+    keeps the keyboard; closing a help panel with × or Escape and closing the Export dialog give the keyboard back
+    to what opened them; the Export dialog keeps Tab inside it; the "Import .gmt" and "Load style" file pickers
+    can be reached with Tab.
+  - Light-mode muted text (`--muted`) is `#6f6d68` (5:1) instead of `#898781` (3.5:1, below WCAG AA for 12–13 px
+    text); no other colour changed.
+  - `npm test` in `tests/js` ran nothing on Node 22; it is `node --test` now, which finds the same files on Node
+    20 (CI) and 22.
+- **Round 4: the workflow and FASTA library** (D100).
+  - The library no longer proposes SILAC3-phospho for the isoDTB method or Nonspecific-HLA-TMT10 for TMT when a
+    method's workflow is missing: SILAC, isoTOP, ipIAA and PAL are their own kinds; FragPipe's own stock workflow
+    for a kind ranks first; candidates that tie are never proposed and `recommend` / Review proposals… say why
+    (#148).
+  - Saving a config kept outside C:\Fragpipe_Auto no longer re-points `users.learned_aliases_file` at
+    C:/Fragpipe_Auto: when it is not set, it stays beside config.yaml (#149).
+  - `library adopt --no-config` never replaces the workflow a method searches with (the copy gets
+    `<method>-2.workflow`); `adopt` refuses a workflow of another kind than the method's (`WF_KIND_MISMATCH`) or a
+    file with a ✗ mark unless `--force`; the app's Use for <method> asks first and copies beside the saved
+    config's files, so only Save changes the next search (#150).
+  - A FASTA's organism is named only when most of its targets carry `OX=`: FragPipe's own human GENCODE FASTA is
+    no longer "Cow, 59 % unreviewed UniProt"; FASTA_UNREVIEWED needs unreviewed entries to be over half of the
+    proteins (#151).
+  - `library scan` that stopped early or looked in fewer folders keeps what the last scan found that it did not
+    see (`--replace` keeps only the new scan); `--root` adds to the default folders (`--only` for them alone); a
+    `library.roots` folder that does not exist is a note; `C:\FragPipe*` matches only real FragPipe
+    installations, so C:\Fragpipe_Auto's workflows are not "stock" (#153).
+  - Library wording and corners (#156 items 1-5): "An iTRAQ-4 search", "1 protein"; the FASTA organism reason
+    says where it came from; `library list --kind foo` says there is no such kind; identical copies are
+    represented by the newest FragPipe version; a FASTA without line breaks is read in linear time.
+  - The Today tab says when the job list can't be read (a damaged ionomos.db) instead of an empty list, and the
+    Jobs tab's Find box no longer matches "none" on every job without a reason (#156 items 15, 16).
+- **Round 4: FASTAs.**
+  - A FASTA saved as "UTF-8 with BOM" keeps its first protein: `fasta prepare` (Python and Philosopher), the
+    library and FragPipe's decoy check (`fragpipe.fasta_info`) all skip a leading byte-order mark. Philosopher,
+    which crashed on it, is given a BOM-less copy in its hidden work folder, so the result is byte for byte that
+    of the file saved without a BOM; a note says the mark was there (#152).
+  - `fasta prepare` refuses a FASTA with text before its first `>` header, naming the line and the fix, instead
+    of silently losing the first protein; a UTF-16 file is told to be saved as UTF-8 (#152).
+  - A Philosopher failure note leaves out the frames of a Go crash report (#152).
+  - FASTA files without line breaks are read in linear time and bounded memory (a 1 GB zero-filled file took
+    60 s): one chunked header reader, `fastasource.fasta_headers`, for the library, `fragpipe.fasta_info` and
+    `fasta prepare` (#156 item 5).
+  - `ionomos fasta release` on a path that does not exist says so and exits 1; a folder stands for the FASTAs in
+    it (#156 item 6).
+  - `fasta prepare "name with space.fasta"` no longer writes a FASTA name with spaces: spaces become `_`, with a
+    note; the note for a destination folder with a space suggests config.yaml's `fasta_dir` (#156 item 7).
+- **Round 4: TMT** (D91 unchanged).
+  - A TMT job that failed on its channel map is searched with the fixed map after Retry: every search plans from
+    the experiment folder's `experiment.yaml` as it is then (`tmtkit.current_block`), not from the block saved in
+    `ionomos.json` at intake; the intake block is used only when `experiment.yaml` is gone. `ionomos.json` →
+    `run.tmt_map` records the map searched and where it came from. The Analysis tab's channel grid now reaches the
+    next search too (#147).
+  - `tag: iTRAQ-4`, `iTRAQ-8`, `TMT-35`, `TMT-2`, `TMT-0`, `iodoTMT-6` (FragPipe 24's own label types) are
+    accepted at intake, planned and checked by their channels; sCLIP-6, IBT-16, DiLeu-12, DiLeu-1, DeAla-13,
+    Trp-2 are accepted and passed on (`TMT_LABEL_UNKNOWN`); `TMT_TAG_MISMATCH` compares any tag with the workflow
+    by FragPipe's name; `tmt suggest --tag iTRAQ-4` works; the channel editor no longer turns an iTRAQ map into
+    TMT-10 (#154).
+  - Multi-plex TMT: `results/fragpipe-analyst/experiment_annotation.tsv` carries each sample's plex and channel
+    and replicate numbers used once per condition; `results/experimental_annotation.tsv` keeps every plex's
+    `condition_<k>_channel` names when the search had several plexes (one plex stays byte-identical to the lab's R
+    script); `TMT_NAME_PATTERN` asks for `condition_plex_channel` with several plexes (#155).
+  - TMT polish (#156 items 8-14): a channel written twice in `experiment.yaml`'s `tmt:` is refused saying so; a
+    `reference_channel` the kit does not have is said (`TMT_REFERENCE_UNKNOWN`), a reference on an NA channel of
+    a single plex too; `tmt plan` says a not-UTF-8 `experiment.yaml` once; `TMT_DUPLICATE_NAME` inside one plex
+    says "used twice in plex X"; `TMT_ALL_NA` fails the job before the search; the channel editor says which names
+    a label switch put aside and brings them back; exported TMT QC figures have no "hits:" / statistics footer,
+    no doubled `<title>`, no "plex plexB".
+  - No "TMT sample names don't follow condition_1_channel" note when `sample_conditions` (or an input SDRF) gives
+    every sample its condition; with some given, the note counts the guessed ones (#158).
+  - A comparison of conditions with long names (runs named after their files) gets its volcano and table: file
+    names are cut at 80 characters plus a short hash (`analysis.SLUG_MAX`); the paths had passed Windows' 260 and
+    the doctor said "the volcano plot wasn't written" per comparison (#157).
+- **Round 4: the testbed's fake FragPipe does what FragPipe 24's source does** (D102; each difference and its
+  source is in `fake_fragpipe.py`'s header).
+  - A manifest file that does not exist stops a headless run ("Some loaded files don't exist. Please double
+    check.", exit 1). It used to be dropped without a word, and WORKFLOWS.md said the same.
+  - A bioreplicate `Integer.parseInt` refuses drops its line ("Manifest file contained some badly formatted
+    lines") and the run goes on without it. This explains the two runs missing from the lab's first real search
+    (REAL_RUNS.md, job 1).
+  - Dialog messages keep their `<b>` tags in headless mode (`SwingUtils.stripHtml` only removes line breaks). The
+    output and group folders exist before the file and FASTA checks; a check that fails then leaves an empty
+    `log_<date>.txt`.
+  - A dry run writes the manifest, `fragpipe.workflow` and `fragpipe.job`; `fragpipe.job` is FragPipe's
+    tab-separated batch table; `log_<date>.txt` holds the console's text in UTF-8 (a name already taken gets
+    `_1`); the console is in the Windows code page (cp1252, `?` for a letter it lacks) with CRLF line ends.
+  - `experiment_annotation.tsv` and the file lists are written before the first step; TMT conditions are read
+    FragPipe's way. Decoy share "20%", not "20.0%"; new refusal "Database looks to be empty"; the same-name
+    refusal is FragPipe's whole message; the execution order lists each command once; `--ram 0` shows FragPipe's
+    memory in the commands, and `--ram` / `--threads` values Java refuses get Java's exception.
+  - DIA runs with DIA-NN 2.3.2 (the PC's), with its Parquet -> TSV and plot steps. DIA-NN gets
+    `<raw>_uncalibrated.mzML`, written beside each raw; the report's run columns carry those names, and the output
+    folder gets a flat `psm.tsv`.
+  - The open-search "Localize mass shift" ERROR line is printed, and the run goes on. `sdrf.tsv` has the
+    precursor window, `NT=Trypsin/P;CS=(?<=[KR])`, a column per modification and the organism from the FASTA.
+  - FragPipe's real "<b>MSFragger</b> is not valid ..." (and IonQuant, diaTracer, "Decoy protein prefix")
+    messages get their explanation; the `<b>` tags kept them from matching (`fragpipe.EXPLANATIONS`).
+  - `ionomos testbed stress`: the TMT drops carry a whole TMT-10 channel map. Since D91 every TMT drop failed
+    before the search, so the stress run searched no TMT.
 
 ### Documentation
 
@@ -349,10 +778,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   normalisation.)
 - New open problems in ROADMAP.md:
   - contaminants are not removed from FragPipe DIA searches, because DIA-NN
-    drops the `contam_` prefix;
+    drops the `contam_` prefix (fixed above, D87);
   - `experiment.yaml` replicate numbers are not bounded (fixed above, D85);
-  - an empty-vector control reads bait-enriched proteins as "down";
+  - an empty-vector control reads bait-enriched proteins as "down" (D88, above);
   - the FragPipeAnalystR golden is tidier than a real matrix.
+- **Round 4: the docs agree with the code** (`tests/test_docs_sync.py` checks it).
+  - `cli.py`'s docstring (the top of `ionomos --help`) lists `preflight`, `stop`, `check-folder` and `attention`,
+    which existed but were missing; `run` no longer says "worker: Phase 2". README has a Commands section.
+  - ARCHITECTURE.md: the `cli.py` row lists every command and the hidden ones; the on-disk layout adds
+    `inbox\.removed\`, `config-backups\`, `logs\ionomos.lock` / `ionomos.pid` / `naming-history.jsonl` /
+    `ionomos_benchmark\`, an experiment's `experiment-backups\` and `results\tmt_qc*`, and the app-data and
+    Desktop folders; the configuration section names where every other key is explained and has a table of the
+    30-odd keys that were explained nowhere, the assistant's runtime keys among them. The three
+    `runners/*` rows now say they are 0.4 leftovers nothing imports, and point at `postprocess.py` →
+    `downstream/`.
+  - TESTING.md: the testbed's drops counted right (29 now), an interrupted job is re-queued, not failed, no stale
+    test count, rows for the docs check and every round-4 test file. LIBRARY.md: "Wave 2: the app" is "The app".
+  - `docs/SECURITY_NOTES.md` (D98, D99): the threat model of each component, named in ARCHITECTURE's doc list and
+    the README docs index.
+  - DECISIONS.md: D96–D102 (round 4).
 
 ## [0.18.1] - 2026-10-06
 
