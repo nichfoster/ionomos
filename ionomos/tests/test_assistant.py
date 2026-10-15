@@ -230,7 +230,8 @@ def test_the_assistant_package_cannot_write_delete_start_or_connect():
     for name in ("client.py", "audit.py"):
         src = (PKG / name).read_text(encoding="utf-8")
         assert "subprocess" not in src and "unlink" not in src and "shutil" not in src
-    assert '"a"' in (PKG / "audit.py").read_text(encoding="utf-8") and '"w"' not in (PKG / "audit.py").read_text(encoding="utf-8")
+    src = (PKG / "audit.py").read_text(encoding="utf-8")  # opened for appending only, never truncated
+    assert "os.O_APPEND" in src and "O_TRUNC" not in src and '"w"' not in src and "write_text" not in src
 
 
 @pytest.mark.parametrize(("name", "args", "problem"), [
@@ -278,7 +279,8 @@ def test_tools_wrap_the_ledger_attention_help_and_the_log(bed):
     row = att["items"][0]
     assert (row["id"], row["kind"], row["help"]) == (item.id, "search_failed", helpdoc.topic_for_item(item))
     assert row["causes"] == item.causes and row["fixes"] == item.fixes
-    assert tools.call(ctx, "list_attention", {"job_id": 2})["items"] == []
+    # a job that does not exist is an error, not "nothing needs attention" (round 4)
+    assert tools.call(ctx, "list_attention", {"job_id": 2})["error"] == "there is no job 2"
 
     tail = tools.call(ctx, "log_tail", {"job_id": 1})
     log_lines = names.console_log(Path(led.dest_dir)).read_text(encoding="utf-8").splitlines()
