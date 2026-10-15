@@ -217,6 +217,10 @@
     return { id: host.id, sel: el.tagName.toLowerCase() + "[" + a + "='" + String(el.getAttribute(a)).replace(/['\\]/g, "\\$&") + "']" };
   }
   document.addEventListener("focusin", (e) => { kbd = { el: e.target, key: focusKey(e.target) }; });
+  // a window without the focus fires no focusin: also note what has the keyboard as a key, click or change
+  // starts (capture: before the control draws its section again); a press on the page itself forgets it
+  const noteFocus = () => { const a = document.activeElement; kbd = a && a !== document.body && a !== document.documentElement ? { el: a, key: focusKey(a) } : null; };
+  ["keydown", "click", "change"].forEach((t) => document.addEventListener(t, noteFocus, true));
   if (window.MutationObserver && document.body) {
     new MutationObserver(() => {
       if (!kbd || !kbd.key || kbd.el.isConnected) return;  // still there (or the user moved on): nothing to do
