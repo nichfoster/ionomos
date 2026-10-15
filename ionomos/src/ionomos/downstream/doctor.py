@@ -897,8 +897,11 @@ def _result_checks(f: Findings, s, add) -> None:
         if v is None or not Path(v).is_file() or Path(v).stat().st_size < 200:
             add(Issue("NO_VOLCANO", "error", f"{d.name}: the volcano plot wasn't written",
                       "The statistics exist but the plot file is missing.",
-                      ["The results folder is read-only or the disk is full", "A bug in the plotting step"],
-                      ["Check free disk space and that results/ can be written, then Re-run analysis"],
+                      ["The results folder is read-only or the disk is full",
+                       "The path is longer than Windows opens (260 characters): a deep experiment folder",
+                       "A bug in the plotting step (analysis_error.txt in results/ says)"],
+                      ["Check free disk space and that results/ can be written; move a deeply nested folder up; "
+                       "then Re-run analysis"],
                       {"comparison": d.name}))
     if f.enrichment_notes:
         add(Issue("ENRICHMENT", "warning", "Enrichment was incomplete", "; ".join(f.enrichment_notes),
