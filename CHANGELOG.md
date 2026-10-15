@@ -219,6 +219,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rightly found nothing. The key's words are now fragments: found inside the
   names they belong to, and on their own only when distinct (KL6159A), so
   `inspect` agrees with the leak check on the same zip.
+- **A drop whose path is longer than Windows allows is rejected once, not
+  ignored or retried for ever** (#139). With long paths off, a folder of 260+
+  characters cannot be stat'ed, so the watcher skipped it in silence on every
+  poll; a folder whose files were too long was retried every 15 s as a
+  "transient problem", because the rejection note's temp name was itself too
+  long and the FileNotFoundError looked transient. Now: the watcher says once
+  in the log and as a needs-attention item that the folder cannot be opened
+  (closed when it leaves the inbox); intake reads a FileNotFoundError on a
+  path of 260+ characters as "This path is N characters long; Windows allows
+  259 here" and rejects with a note, or with an attention item when even the
+  note's path would be too long; the note's temp name is shortened when the
+  note's own is near the limit; a rejection without a note waits for the
+  folder to change instead of being offered again every poll.
 - **The app no longer dies at start when config.yaml has a YAML slip** (an
   unclosed bracket from hand editing, #136). `configio.read_config` turns the
   parser's error into the same `could not parse <file>: line N, column M: …`

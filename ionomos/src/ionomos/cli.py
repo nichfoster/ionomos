@@ -299,7 +299,7 @@ def cmd_run(args) -> int:
         return intake(folder, live.get(), intake_ledger, resolver)
 
     w = Watcher(cfg.inbox, on_stable, cfg.poll_seconds, cfg.stable_seconds, cfg.min_raw_files, heartbeat=hb,
-                group_loose=cfg.group_loose_files)
+                group_loose=cfg.group_loose_files, log_dir=cfg.log_dir)
 
     def shutdown(*_):
         if not stop.is_set():
