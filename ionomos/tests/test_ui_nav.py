@@ -33,8 +33,31 @@ def test_the_tab_list_matches_the_tabs_the_app_builds():
         assert f'("{key}", "' in app_src, f"app._tab_frames has no {key}"
     assert set(uinav.DIGIT_TABS.values()) <= set(uinav.TAB_KEYS)
     for digit, key in uinav.DIGIT_TABS.items():
-        label = next(lbl for k, lbl, _ in uinav.TABS if k == key)
-        assert digit == "0" or label.startswith(f"{digit} "), (digit, label)  # Ctrl+6 is the tab labelled 6
+        assert uinav.TAB_KEYS[int(digit)] == key  # Ctrl+<n> is the n-th tab of the row (Ctrl+0 Today, Ctrl+1 Inbox)
+    assert uinav.DIGIT_TABS["0"] == "today" and uinav.DIGIT_TABS["2"] == "jobs"
+
+
+def test_tabs_are_grouped_daily_setup_help_without_numbers():
+    """S1.6 (D94): Today · Inbox · Jobs · Analysis, then the set-up tabs, then Help; no label starts with a digit."""
+    assert uinav.TAB_KEYS[:4] == uinav.TAB_GROUPS["daily"] and uinav.TAB_KEYS[-1] == "help"
+    assert sum(len(v) for v in uinav.TAB_GROUPS.values()) == len(uinav.TABS)
+    assert set(sum(uinav.TAB_GROUPS.values(), ())) == set(uinav.TAB_KEYS)
+    for _k, label, _h in uinav.TABS:
+        assert not label[0].isdigit(), label
+
+
+def test_no_text_names_a_tab_by_number():
+    """Every help text, checklist line and hint names tabs by name (S1.6): no "tab 3", "Tab 1", "7 Analysis"."""
+    pat = re.compile(r"\b[Tt]abs? [0-9]\b|\(tab [0-9]\)|(?<![.\w])[1-8] (Folders|Users|Methods|Advanced|Run & Test|"
+                     r"Jobs|Analysis|Notifications)\b|TAB \([0-9]\)")
+    bad = []
+    for p in [*SRC.rglob("*.py"), *(SRC / "help").glob("*.md"), *(SRC.parent.parent.parent / "docs").glob("*.md")]:
+        if p.name in ("DECISIONS.md", "UI.md", "CHANGELOG.md"):  # history: they quote the old names
+            continue
+        for i, line in enumerate(p.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            if pat.search(line) and "Ctrl+" not in line:  # the keyboard legend numbers positions, not tabs
+                bad.append(f"{p.name}:{i}: {line.strip()[:90]}")
+    assert not bad, "\n".join(bad)
 
 
 def test_the_shortcuts_are_listed_in_the_help_tab_and_the_faq():
@@ -228,12 +251,12 @@ def test_today_tab_keys_and_remembered_window(tmp_path, monkeypatch):
         opened = []
         monkeypatch.setattr(app, "open_help", lambda topic=None: opened.append(topic))
         assert app._keys["<F1>"]() == "break" and opened == ["faq.app"]  # Today's topic
-        app._keys["<Control-Key-7>"]()
-        assert app.nb.select() == str(app.tab_analysis)
+        app._keys["<Control-Key-3>"]()  # Ctrl+3: the third tab after Today = Analysis (uinav.DIGIT_TABS)
+        assert uinav.DIGIT_TABS["3"] == "analysis" and app.nb.select() == str(app.tab_analysis)
         app._keys["<F1>"]()
         assert opened[-1] == "faq.rerun"
-        app._keys["<Control-Key-6>"]()
-        assert app.nb.select() == str(app.tab_jobs)
+        app._keys["<Control-Key-2>"]()
+        assert uinav.DIGIT_TABS["2"] == "jobs" and app.nb.select() == str(app.tab_jobs)
         app.v("jobs.find").set("isaac")
         assert len(app.jtree.get_children()) == 1 and "1 shown" in app.jobs_state.cget("text")
         app.v("jobs.find").set("")
@@ -262,3 +285,68 @@ def test_today_tab_keys_and_remembered_window(tmp_path, monkeypatch):
         app.popups.stop()
     finally:
         tk.Tk.destroy(root)
+
+
+# ---------------------------------------------------- the status line, the inbox and the error rule (slice 2) --
+
+
+def test_watcher_status_reads_everything_off_tk(tmp_path):
+    logs, db = tmp_path / "logs", tmp_path / "ionomos.db"
+    logs.mkdir()
+    st = uinav.watcher_status(logs, None)
+    assert st.watcher == "Watcher: stopped" and not st.ok and st.fragpipe == "FragPipe: no jobs yet" and st.task is None
+    assert st.strip() == "Watcher: stopped   ·   FragPipe: no jobs yet"
+    led = Ledger(db)
+    try:
+        led.insert(Job(inbox_name="a", user="EJQ", method="isoDTB", dest_dir=str(tmp_path)))
+        led.insert(Job(inbox_name="b", user="EJQ", method="DIA", dest_dir=str(tmp_path)))
+        led.start_attempt(1)
+        led.set_status(2, "failed", "boom")
+    finally:
+        led.close()
+    st = uinav.watcher_status(logs, db, here_pid=4321, here_label="lab config", ask_task=True)
+    assert st.ok and "started here, lab config, pid 4321" in st.watcher
+    assert "RUNNING job 1" in st.fragpipe and "0 queued, 1 failed, 0 done" in st.fragpipe
+    assert st.task is not None and st.task.startswith("Startup task:")
+    assert uinav.jobs_summary(tmp_path / "missing.db") == "FragPipe: no jobs yet"
+    bad = tmp_path / "bad.db"
+    bad.write_bytes(b"not a database")
+    assert uinav.watcher_status(tmp_path / "no-logs", bad).fragpipe == "FragPipe: no jobs yet"  # never raises
+
+
+def test_inbox_listing(tmp_path):
+    from tests.conftest import make_drop
+
+    assert uinav.inbox_listing(None) is None and uinav.inbox_listing(tmp_path / "missing") is None
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    assert uinav.inbox_listing(inbox) == []
+    make_drop(inbox, "good", ["EJQ_PK_EJQ-2-027_isoDTB_1uM_3h_1_1.raw"])
+    (inbox / ".removed").mkdir()
+    (inbox / "x.REJECTED.txt").write_text("why", encoding="utf-8")
+    (inbox / "loose.raw").write_bytes(b"\0" * 8)
+    mixed = make_drop(inbox, "mixed", ["stray.raw"])
+    (mixed / "raw").mkdir()
+    (mixed / "raw" / "EJQ_PK_EJQ-2-027_isoDTB_1uM_3h_1_1.raw").write_bytes(b"\0" * 64)
+    entries = uinav.inbox_listing(inbox)
+    assert [e.name for e in entries] == ["good", "loose.raw", "mixed"]  # hidden and note files left out
+    good = entries[0]
+    assert good.children == [(str(inbox / "good" / "EJQ_PK_EJQ-2-027_isoDTB_1uM_3h_1_1.raw"),
+                              "EJQ_PK_EJQ-2-027_isoDTB_1uM_3h_1_1.raw")]
+    assert entries[1].children == []
+    text = entries[2].children[0][1]
+    assert "top level" in text and "raw/" in text  # the unusable layout explained on the drop (issue #14)
+
+
+def test_state_keeps_the_save_confirmation_flag(tmp_path):
+    p = tmp_path / names.UI_STATE_FILE
+    assert uinav.save_state(p, {"tab": "jobs", "confirm_single": False})
+    assert uinav.load_state(p) == {"tab": "jobs", "confirm_single": False}
+    p.write_text('{"confirm_single": "yes"}', encoding="utf-8")
+    assert uinav.load_state(p) == {}
+
+
+def test_tab_labels_and_names():
+    assert uinav.tab_label("jobs").strip() == next(lbl for k, lbl, _ in uinav.TABS if k == "jobs")
+    assert uinav.tab_label("jobs").startswith("  ") and uinav.tab_label("jobs").endswith("  ")
+    assert uinav.tab_name("setup") == "Setup" and uinav.tab_label("nowhere").strip() == "nowhere"
