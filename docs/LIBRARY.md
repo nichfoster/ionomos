@@ -15,21 +15,29 @@ PC" (end of this page) are its interface.
 ## Commands
 
 ```
-ionomos library scan [--root DIR ...] [--depth N] [--time S] [--json]
+ionomos library scan [--root DIR ...] [--only] [--replace] [--depth N] [--time S] [--json]
 ionomos library list [workflows|fastas] [--kind TMT] [--flags] [--json]
 ionomos library show PATH [--json]
 ionomos library recommend [--apply] [--json]
-ionomos library adopt PATH --method KEY [--with-fasta] [--no-config]
+ionomos library adopt PATH --method KEY [--with-fasta] [--no-config] [--force]
 ionomos library check [--json]
 ```
 
 - **scan** looks (read-only) and saves what it found in
   `<log_dir>/library.json` (`names.LIBRARY_FILE`). A FASTA that has not changed
-  since the last scan is not read again.
+  since the last scan is not read again. `--root DIR` *adds* a folder to the
+  default ones (below); `--only` looks in the `--root` folders alone. A scan
+  that stopped early (`--time`, Stop) or looked in fewer folders than the last
+  one does not replace the fuller catalog: the files of the last scan it did
+  not see, still on disk and unchanged, are kept (`library.save_scan`), and a
+  note says so; `--replace` keeps only the new scan. A configured folder that
+  does not exist (an unplugged drive in `library.roots`, a typo) is a note in
+  the output, the catalog and `list`.
 - **list** prints the last scan, one line per file plus its summary, and for a
   workflow that is not itself a run's, the finished searches with its settings
   ("used in 4 finished search(es), the latest 2026-10-15"); `--flags` adds
-  every mark with what to do.
+  every mark with what to do. `--kind K` with no workflow of that kind says so
+  (and lists the kinds when K is not one; exit 2).
 - **show** describes one file now (no scan needed): kind, every setting below,
   the tools it needs, what its search left (or, from the last scan, the
   finished searches with its settings), its flags.
@@ -42,7 +50,14 @@ ionomos library check [--json]
 - **adopt** copies a workflow into the workflows folder as `<method>.workflow`
   (or a FASTA into the FASTA folder) and sets it for the method in
   `config.yaml`. The method keeps its FASTA unless that is missing or
-  `--with-fasta` is given. `--no-config` only copies.
+  `--with-fasta` is given. `--no-config` only copies, under a name no method
+  of the saved config.yaml uses (`TMT-2.workflow` when `TMT.workflow` is what
+  the method searches with), so the next search is not changed behind the
+  config's back. A workflow of another kind than the method's
+  (`WF_KIND_MISMATCH`: a DIA workflow for TMT) or a file with a ✗ mark (a FASTA
+  without decoys, a TMT workflow without a label type, a decoy tag that does
+  not match its FASTA) is refused, nothing copied, with each reason and its
+  fix; `--force` adopts it anyway (`library.adopt_problems`).
 - **check** compares each method's pinned files with what the PC has: a stock
   workflow of the same kind saved with a newer FragPipe, an old FASTA, a newer
   FASTA of the same proteome, a pinned file that is gone. It changes nothing;
@@ -55,12 +70,17 @@ Restart the watcher after `--apply` or `adopt` (it reads the methods at start).
 
 ## Where it looks
 
-`default_roots(cfg)`, each folder once, only those that exist:
+`default_roots(cfg, missing)`, each folder once, only those that exist (a
+configured one that does not is added to `missing` as a note):
 
 1. `paths.workflow_dir` and `paths.fasta_dir` (the pinned folders);
 2. every FragPipe installation: the configured launcher's (`bin\..`), every
    launcher `fragpipe.launcher_candidates()` finds, `C:\FragPipe\*`,
-   `C:\FragPipe*` and `%USERPROFILE%\Downloads\FragPipe*` (the 22.0 zip);
+   `C:\FragPipe*` and `%USERPROFILE%\Downloads\FragPipe*` (the 22.0 zip). A
+   folder these patterns match counts only when it is an installation
+   (`bin\fragpipe.bat` or `lib\fragpipe-*.jar` inside, or in its `fragpipe\`
+   as in the zip): `C:\Fragpipe_Auto` and `C:\Fragpipe_General` are not, so their
+   workflows are never called *stock*;
 3. `paths.users_root`;
 4. `library.roots` from `config.yaml` — **`D:/` is not looked at unless it is
    added here** (or given with `--root`), because it is an 18 TB USB drive. A
@@ -107,10 +127,15 @@ with source `cache`.
 
 **Kind** (`kind`, plus `traits`): first what it quantifies, from its `run-*`
 switches as `fpfolder.workflow_kind` reads them — TMT-Integrator on → `TMT`;
-DIA-NN on → `DIA`; MS1 quant (`quantitation.run-label-free-quant`) with
-`ionquant.use-labeling` → `isoDTB`, without → `LFQ`. An isoDTB light/heavy
-mass (561.3387 / 567.3462) among the enabled variable mods also makes it
-`isoDTB` (trait `isoDTB label`). If none of isoDTB / TMT / DIA: a precursor
+DIA-NN on → `DIA`; MS1 quant (`quantitation.run-label-free-quant`) without
+`ionquant.use-labeling` → `LFQ`; with it, the label (`ionquant.light` /
+`.medium` / `.heavy`, as FragPipe 24.0's stock workflows set them) says which:
+561.3387 / 567.3462 → `isoDTB` (chemprot-ABPP-isoDTB), 464.286 / 470.300 →
+`isoTOP`, 463.237 / 467.253 → `ipIAA`, 436.226 / 442.263 → `PAL` (chemprot-PAL),
+labels on K and R only → `SILAC` (SILAC3), none of these → `labelled`
+(without labels set, an isoDTB mass among the variable mods → `isoDTB`). An
+isoDTB light/heavy mass among the enabled variable mods of a label-free
+workflow also makes it `isoDTB` (trait `isoDTB label`). If none of isoDTB / TMT / DIA: a precursor
 window in Da at least 50 wide (`msfragger.precursor_mass_units=0`, Open:
 −150 to 500) or mass offsets (`msfragger.mass_offsets` other than 0, or
 `mass_offsets_detailed`) → `open` (trait `open` or `mass-offset`);
@@ -132,6 +157,9 @@ channel whose name contains `tmtintegrator.ref_tag`), group-by, protein
 normalisation, minimum purity; MS1 quant on/off/labelled; match-between-runs;
 DIA-NN; spectral library; Percolator / PeptideProphet; protein FDR from
 `phi-report.filter`.
+
+SILAC, isoTOP, ipIAA and PAL are their own kinds, so a stock SILAC3 is never a
+candidate for the isoDTB method and is never called an isoDTB search.
 
 **Summary**, e.g. *"A TMT-10 MS3 search with TMT-Integrator: carbamidomethyl
 C, TMT K fixed; oxidation M, acetyl protein N-term, TMT peptide N-term
@@ -165,16 +193,26 @@ finished searches instead of as rival workflows.
 
 `describe_fasta(path) -> FastaInfo`. The file is read as bytes in 8 MB chunks;
 only header lines are looked at, so a 1 GB file is never decoded or split
-into lines. The result is cached by (path, modification time, size), in memory
-and, through the catalog, across scans. A reading that ran out of time or was
+into lines, and what is kept between chunks is at most one header line (a
+header over 64 kB is cut), so a file without line breaks is read as fast as
+any other. The result is cached by (path, modification time, size), in memory
+and, through the catalog, across scans (a reading made by an older Ionomos,
+`reader` below `FASTA_READER`, is read again). A reading that ran out of time or was
 stopped says so (`complete: false`) and is not cached.
 
 - entries, decoys and targets; the **decoy prefix is detected**, not assumed:
   the most common of `rev_`, `DECOY_`, `REV_`, `decoy_`;
 - contaminants: targets starting `contam_` (FragPipe) or `CON__` (MaxQuant);
 - organisms from `OX=` / `OS=` of the targets that are not contaminants, the
-  top one and its share;
+  top one and its share. The organism is named only when at least half of
+  the proteins carry an `OX=`; otherwise (GENCODE / Ensembl / smORF headers,
+  as in FragPipe's own `…Gencode_v42…FragPipe.2.fasta.fas`, whose few
+  UniProt-style headers are its bovine contaminants) it is *organism
+  unknown*, unless the name says it (`UP000005640_9606`), and ranking neither
+  rewards nor punishes it for the organism;
 - reviewed (`sp|`) and unreviewed (`tr|`) entries, isoforms (`sp|P12345-2|`);
+  when fewer than half of the proteins have UniProt headers, the summary says
+  *mostly not UniProt-style headers* instead of a reviewed share;
 - from the name: the date FragPipe / Philosopher put first
   (`YYYY-MM-DD-decoys-…`), the UniProt proteome and taxon
   (`UP000005640_9606`), and whether the name has FragPipe's form
@@ -206,6 +244,7 @@ a code in `library.py` has no entry or is missing here.
 | `WF_LABEL_TYPE_UNSET` | error | TMT-Integrator on, no `tmtintegrator.channel_num` | set the label type in FragPipe |
 | `WF_DECOY_TAG_MISMATCH` | error | its decoy tag differs from its FASTA's decoy prefix | set the tag to the FASTA's prefix |
 | `WF_NO_RUNS` | info | a run folder with no readable table, or settings no finished search used | prefer one that has produced results |
+| `WF_KIND_MISMATCH` | error | `adopt` / Use for: the workflow's kind is not the method's | pick one of the method's kind; `--force` if meant |
 | `WF_DIFFERS_FROM_PINNED` | info | same kind as a method's pinned workflow, other settings (listed) | check each difference is meant |
 | `FASTA_UNREADABLE` | error | can't be opened, or no `>` line | pick another |
 | `FASTA_SPACE_IN_PATH` | warn | a space in its path | adopt it (copied without spaces) |
@@ -213,8 +252,8 @@ a code in `library.py` has no entry or is missing here.
 | `FASTA_DECOY_SHARE` | error (info at ≥ 1 GB) | decoys outside 40–60 % of entries (`fragpipe.decoy_problem`'s rule) | add decoys once, to a file without any |
 | `FASTA_DECOY_TAG` | info | decoys not `rev_` | the workflow's decoy tag must match |
 | `FASTA_NO_CONTAMINANTS` | warn | no `contam_` / `CON__` entries | make it with Add contaminants |
-| `FASTA_MIXED_SPECIES` | warn | the top organism under 90 % of the proteins | fine for a benchmark; else one organism |
-| `FASTA_UNREVIEWED` | warn | more unreviewed (`tr`) than reviewed (`sp`) entries | use a reviewed proteome |
+| `FASTA_MIXED_SPECIES` | warn | the top organism under 90 % of the proteins that name one (only when the organism is known) | fine for a benchmark; else one organism |
+| `FASTA_UNREVIEWED` | warn | more unreviewed (`tr`) than reviewed (`sp`) entries, and they are over half of the proteins | use a reviewed proteome |
 | `FASTA_OLD` | warn | the date in its name is over 12 months ago | make a new one for new projects |
 | `FASTA_DUPLICATE` | info | the same fingerprint at another path | keep the one in the FASTA folder |
 | `PINNED_MISSING` | error | `check`: a method's workflow / FASTA is not in its folder | `recommend --apply` |
@@ -228,22 +267,36 @@ content hash (its representative: the method's current file, else pinned,
 stock, the newest run), best first, with the reasons in words, e.g. *"used in
 6 finished search(es), the latest 2026-08-17; saved with the installed FragPipe
 24.0; its FASTA exists"*. Points: 4 per finished search (at most 10 counted);
-+10 saved with the installed major version, −3 per major version older, −8
-newer; +5 its FASTA exists; +6 it is the method's current workflow, +3 another
-pinned one; +2 stock; −40 per error flag, −3 per warning. Files that are no
-longer on disk are left out. These weights are Ionomos' choice; they order,
-the reasons explain.
++10 saved with the installed major version (the newest version among the copies
+with the same settings; that copy represents them), −3 per major version older,
+−8 newer; +5 its FASTA exists; +6 it is the method's current workflow, +3 another
+pinned one; +2 stock; FragPipe's own stock workflow for the kind
+(`CANONICAL_STOCK`: isoDTB → `chemprot-ABPP-isoDTB` (22.0: `isoDTB-ABPP`), TMT →
+`TMT10-MS3`, `TMT10`, `TMT16`, DIA → `DIA_SpecLib_Quant`, LFQ → `LFQ-MBR`) +4 for
+the first, +3, +2 for the next; the stock workflow whose name the method's
+`workflow:` asks for (e.g. `TMT16.workflow`) counts as the first; −40 per error
+flag, −3 per warning. Files that are no longer on disk are left out. These
+weights are Ionomos' choice; they order, the reasons explain. Candidates within
+0.5 points of each other (`TIE`) are a tie: their order means nothing.
 
-`recommend_fastas(catalog, taxon)`: +15 the organism asked for (−30 another),
-3 per finished search that used it (by path, else by file name), +10 usable
-decoys, +3 contaminants, +2 reviewed, up to +3 for a recent date, +4 already in
-the FASTA folder, and the same flag penalties. `auto_assign` asks for the
-organism of the FASTAs already in the FASTA folder, else of those finished
-searches used.
+`recommend_fastas(catalog, taxon, kind, taxon_from)`: one candidate per
+content (fingerprint), represented by the copy in the FASTA folder, then one
+without a space in its path, with FragPipe's name, with a date in its name, the
+newest file; +15 the organism asked for (−30 another, 0 when its organism is
+unknown), 3 per finished search that used it (by path, else by file name), +10
+usable decoys, +3 contaminants, +2 reviewed, up to +3 for a recent date, +4
+already in the FASTA folder, and the same flag penalties. `auto_assign` asks
+for the organism of the FASTAs already in the FASTA folder, else of those
+finished searches used (`lab_taxon`), and the reason says so ("Human, the
+organism of the FASTA folder's files"), never "as asked".
 
-`auto_assign(cfg_dict, catalog, installed_version) -> [Proposal]` proposes the
+`auto_assign(cfg_dict, catalog, installed_version, notes) -> [Proposal]` proposes the
 best candidate without an error for every method whose workflow (FragPipe
-methods) or FASTA is missing or has an error, and for nothing else.
+methods) or FASTA is missing or has an error, and for nothing else. When the
+best candidates tie, it proposes none of them (never the first file name among
+equals) and `notes` says so with the tied names and how to pick one; also when
+nothing usable was found. `recommend` prints them under *Not proposed*, the
+app's Review proposals… in its status line.
 `apply_proposals` adopts them and edits the dict; the caller writes it.
 
 ## Adopting
@@ -254,7 +307,11 @@ methods) or FASTA is missing or has an error, and for nothing else.
   `fragpipe.import_workflow`, so a pinned file it replaces is kept as
   `<name>.bak-<time>`; the method key is made FragPipe-safe (letters, digits,
   `.`, `_`, `-`) for the file name; adopting the same workflow again copies
-  nothing;
+  nothing. `avoid` (`live_workflows`: the files the saved config.yaml's
+  methods search with) is never replaced: the copy then gets `<method>-2.workflow`
+  (`-3` …). The CLI passes the other methods' files (all of them with
+  `--no-config`); the app's **Use for <method>** passes all of them, so the
+  watcher's next search changes only when **Save** writes the new name;
 - its FASTA, when it exists outside `fasta_dir`, is copied in first
   (`adopt_fasta`) and the copy's `database.db-path` points at it;
 - `adopt_fasta` names the copy without spaces; a file of the same content
@@ -343,15 +400,17 @@ whole interface it uses: `scan`, `load_catalog`, `save_catalog`, `recommend`,
 Tab 3 Methods has a panel **Workflows and FASTAs on this PC** under the method
 form. **Find on this PC…** opens a window that reads the last catalog (so it
 opens at once) or, when there is none, scans with a progress line and a
-**Stop** button; **Rescan** looks again. A scan stopped early does not replace
-a fuller catalog on disk. The table lists, for the selected method's kind, the
+**Stop** button; **Rescan** looks again. A scan stopped early keeps what the
+last one found that it did not look at (`library.save_scan`, as the CLI). The table lists, for the selected method's kind, the
 candidates `recommend` and `recommend_fastas` rank (kind, name, folder,
 summary, marks ✗ ! ·, why recommended); **Show all** adds every other file
 (other kinds, files with an error, copies), a filter box narrows by words.
 The details pane shows the summary, the settings, what its search left and
 every flag with its fix. **Use for <method>** copies the file in (`adopt` /
-`adopt_fasta`, on a worker thread), puts it in the method's box and applies
-the method; **Save** keeps it. **Open folder** opens the file's folder. A
+`adopt_fasta`, on a worker thread) under a name the saved config does not use
+yet, puts it in the method's box and applies the method; **Save** keeps it. A
+workflow of another kind or a file with a ✗ mark asks first (*Use it anyway?*,
+default No), with each reason and its fix. **Open folder** opens the file's folder. A
 **Choose…** button beside the workflow and the FASTA box opens the same window
 showing only workflows or only FASTAs. Under the buttons, the method's FASTA
 is described in words (`describe_fasta`, off the Tk thread, a newer choice

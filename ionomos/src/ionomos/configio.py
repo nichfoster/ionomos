@@ -102,14 +102,21 @@ def read_config(path: str | Path) -> dict:
     """Raw dict from disk with defaults filled in for missing keys. Missing file -> defaults."""
     p = Path(path)
     if not p.is_file():
-        return defaults()
+        d = defaults()
+        d["users"]["learned_aliases_file"] = (p.parent / "learned_aliases.yaml").as_posix()
+        return d
     raw = yaml.safe_load(read_yaml_text(p)) or {}  # cp1252 (Notepad "ANSI") read with a warning, D86
     if not isinstance(raw, dict):
         raw = {}
     if isinstance(raw.get("notify"), dict):
         raw["notify"] = _notify_keys(raw["notify"])  # a bare `on:` key loads as True
     d = _normalise(_merge(defaults(), raw))
-    ex = (raw.get("analysis") or {}).get("export") if isinstance(raw.get("analysis"), dict) else None
+    users_raw = raw.get("users") if isinstance(raw.get("users"), dict) else {}
+    if not users_raw.get("learned_aliases_file"):
+        # not set: the loader's own default, the file beside this config.yaml (config.py), never the default root's,
+        # so that saving a config kept elsewhere (a testbed, D:) does not move where learned aliases live (#149)
+        d["users"]["learned_aliases_file"] = (p.parent / "learned_aliases.yaml").as_posix()
+    ex =(raw.get("analysis") or {}).get("export") if isinstance(raw.get("analysis"), dict) else None
     if isinstance(ex, dict) and "font_pt" not in ex and isinstance(d["analysis"].get("export"), dict):
         d["analysis"]["export"].pop("font_pt", None)  # not set: the size's own text size (7 pt for col1), not 14
     return d

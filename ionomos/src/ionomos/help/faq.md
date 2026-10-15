@@ -517,7 +517,10 @@ In the app, tab **3 Methods**, select the method, then use the panel
   marks (✗ must be fixed, ! check it) and why one is recommended for this
   method. **Use for** the method copies the file into the workflows or
   FASTA folder (the original stays where it is; a file it replaces is kept
-  as `.bak-<time>`). The list is remembered: the next time it opens at once,
+  as `.bak-<time>`, and the file a method searches with now is never
+  replaced before you Save: the copy then gets a `-2` name). A workflow of
+  another kind than the method's, or a file with a ✗ mark, asks first. The
+  list is remembered: the next time it opens at once,
   and **Rescan** looks again. The drive with the lab's data (`D:/`) is only
   looked at when it is added under `library: roots:` in config.yaml.
 - **Choose…** beside the workflow or FASTA box opens the same list with only
