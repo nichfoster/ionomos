@@ -75,6 +75,9 @@ def _check_url(where: str, url: str) -> None:
         u, host = None, None
     if u is None or not host or u.scheme not in ("http", "https"):
         raise NotifyError(f"{where} must be an https:// address")
+    if "@" in u.netloc:  # urllib would send user:password@ nowhere useful, and its errors would show the password
+        raise NotifyError(f"{where} has a user name or password before the host (user:password@): webhook "
+                          "addresses carry their key in the path; copy the address the service gave without it")
     if u.scheme == "http" and host not in _LOOPBACK:
         raise NotifyError(f"{where} must start with https:// (http:// is only accepted for this computer, localhost)")
 
@@ -209,13 +212,51 @@ def secrets(s: dict, env=None) -> list[str]:
     """Every secret value in use: the webhook URLs and the SMTP password, from the file or the environment."""
     out = [_hook_url(s, n, env) for n in HOOKS] + [s[n]["url"] for n in HOOKS]
     out += [_password(s, env), s["email"]["password"]]
+    out += [part for url in out[:2 * len(HOOKS)] for part in _url_parts(url)]
     return sorted({v for v in out if v}, key=len, reverse=True)
+
+
+def _url_parts(url: str) -> list[str]:
+    """The pieces of a hook address an error message may quote on their own: the user:password before the host,
+    the path and the query (where hooks keep their key). Short pieces ("/", "/hook") are not secrets."""
+    try:
+        u = urllib.parse.urlsplit(url)
+    except ValueError:
+        return []
+    parts = [u.netloc.rpartition("@")[0], u.path, u.query, u.path + ("?" + u.query if u.query else "")]
+    return [p for p in parts if len(p) >= 12] + [p for p in (u.password,) if p and len(p) >= 4]
 
 
 # hook addresses carry their key in the path; hide any that turn up in a text we did not write
 _HOOK_URLS = re.compile(r"https://(?:hooks\.slack\.com/|[\w.-]*webhook\.office\.com/|[\w.-]*logic\.azure\.com[:/])[^\s\"'<>]+")
-_SECRET_LINE = re.compile(r"^(\s*[\"']?(?:url|password)[\"']?\s*:[ \t]*)(\S[^\n]*)$", re.MULTILINE)
+_SECRET_LINE = re.compile(r"^(\s*(?:-\s+)?[\"']?(?:url|password)[\"']?\s*:[ \t]*)(\S[^\n]*)$", re.MULTILINE)
 _EMPTY_VALUE = re.compile(r"(\"\"|'')(\s+#.*)?\s*")
+# the value on the lines below the key: `url:` / `password: |` / `url: >-` (YAML block and plain multi-line values)
+_SECRET_BLOCK = re.compile(r"^(\s*)(?:-\s+)?[\"']?(?:url|password)[\"']?\s*:[ \t]*(?:[|>][-+0-9]*)?[ \t]*(?:#.*)?$")
+# inside a flow mapping: {url: https://..., password: x}  (a config that doesn't parse is redacted by its text alone)
+_SECRET_FLOW = re.compile(r"([{,][ \t]*)([\"']?)(url|password)\2([ \t]*:[ \t]*)"
+                          r"(\"[^\"\n]*\"?|'[^'\n]*'?|[^\s\[{,}\]#][^,}\]\n]*)")
+
+
+def _hide_below(text: str) -> str:
+    """Lines more indented than a secret key whose value starts on the next line, replaced by ***."""
+    out, indent = [], None
+    for line in text.splitlines(keepends=True):
+        body = line.rstrip("\r\n")
+        if indent is not None:
+            if not body.strip():
+                out.append(line)
+                continue
+            lead = len(body) - len(body.lstrip())
+            if lead > indent:
+                out.append(body[:lead] + HIDDEN + line[len(body):])
+                continue
+            indent = None
+        m = _SECRET_BLOCK.match(body)
+        if m:
+            indent = len(m.group(1))
+        out.append(line)
+    return "".join(out)
 
 
 def scrub(text: str, secret_values=()) -> str:
@@ -242,6 +283,7 @@ def raw_secrets(raw) -> list[str]:
             for k in ("url_env", "password_env"):
                 if isinstance(c.get(k), str) and os.environ.get(c[k]):
                     out.append(os.environ[c[k]])
+    out += [part for v in out if "://" in v for part in _url_parts(v)]
     return sorted({v for v in out if v.strip()}, key=len, reverse=True)
 
 
@@ -269,7 +311,8 @@ def redact_config_text(text: str, secret_values=()) -> str:
         comment = re.search(r"\s+#.*$", value)
         return m.group(1) + HIDDEN + (comment.group(0) if comment else "")
 
-    return _SECRET_LINE.sub(hide, scrub(text, secret_values))
+    text = _SECRET_LINE.sub(hide, _hide_below(scrub(text, secret_values)))
+    return _SECRET_FLOW.sub(lambda m: m.group(1) + m.group(2) + m.group(3) + m.group(2) + m.group(4) + HIDDEN, text)
 
 
 # ----------------------------------------------------------------- message --
@@ -344,9 +387,16 @@ def sample_message(s: dict) -> Message:
     return Message(title, tuple(facts), {**fields, "text": msg.text})
 
 
+def _slack_text(s: str) -> str:
+    """Slack reads <...> as a link or a mention (<!channel> pings everyone): &, < and > are escaped, as its
+    message-formatting rules ask, so a name or a reason is shown as written."""
+    return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def slack_payload(msg: Message) -> dict:
     """Slack incoming webhook: {"text": ...} (mrkdwn)."""
-    return {"text": "\n".join([f"*{msg.title}*", *(f"{k}: {v}" for k, v in msg.facts)])}
+    return {"text": "\n".join([f"*{_slack_text(msg.title)}*",
+                               *(f"{_slack_text(k)}: {_slack_text(v)}" for k, v in msg.facts)])}
 
 
 def teams_payload(msg: Message) -> dict:

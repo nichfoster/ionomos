@@ -4,9 +4,11 @@ Each block names the boundary it attacks: a bundle someone else made (unpack, in
 notification channels, the command lines Ionomos builds, the assistant's tools, the library scan and the update
 path; then the secrets a lab plants in config.yaml and its logs, searched for in everything Ionomos writes or
 sends. No test opens a socket to anything but 127.0.0.1."""
+import http.server
 import json
 import os
 import shutil
+import threading
 import warnings
 import zipfile
 from pathlib import Path
@@ -14,7 +16,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from ionomos import bundle, names
+from ionomos import bundle, names, notify
 
 # ------------------------------------------------- a bundle from someone else ----
 
@@ -172,3 +174,107 @@ def test_unpacked_config_keeps_no_program_the_sender_named(tmp_path):
     for word in ("evil", "notify", "assistant", "library", "hooks.slack"):
         assert word not in written, word
     assert out["config"] == tmp_path / "un" / "config.yaml" or any("does not load" in n for n in out["notes"])
+
+
+# ------------------------------------------------------------- notifications ----
+
+PASSWORD = "Sup3rS3cretPw"
+
+
+@pytest.mark.parametrize("url", [f"https://bob:{PASSWORD}@hooks.example.org/services/x",
+                                 f"https://{PASSWORD}@hooks.example.org/x", f"http://bob:{PASSWORD}@127.0.0.1:9/x"])
+def test_a_webhook_address_with_a_password_is_refused_without_showing_it(url, monkeypatch):
+    """urllib reads user:password@host as a host with a port named 'password@host' and says so in its error, which
+    the log and `ionomos notify-test` print: the address is refused when it is read instead."""
+    with pytest.raises(notify.NotifyError, match="user name or password") as exc:
+        notify.settings_from({"enabled": True, "webhook": {"url": url}})
+    assert PASSWORD not in str(exc.value)
+    monkeypatch.setenv("IONOMOS_TEST_HOOK", url)  # the same address from the environment, read when sending
+    s = notify.settings_from({"enabled": True, "timeout_seconds": 1, "slack": {"url_env": "IONOMOS_TEST_HOOK"}})
+    (r,) = notify.send_test(s)
+    assert not r.ok and "user name or password" in r.detail and PASSWORD not in r.detail
+
+
+def test_a_partial_address_in_an_error_is_hidden_too():
+    s = notify.settings_from({"enabled": True,
+                              "webhook": {"url": "https://lab.example.org/hooks/ionomos/KEY-0123456789"}})
+    assert notify.scrub("404 for /hooks/ionomos/KEY-0123456789", notify.secrets(s)) == "404 for ***"
+
+
+class _Recorder(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):  # noqa: N802 - the http.server name
+        self.server.got.append(self.path)
+        self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        self.send_response(self.server.code if self.server.location else 200)
+        if self.server.location:
+            self.send_header("Location", self.server.location)
+        self.end_headers()
+
+    do_GET = do_POST  # noqa: N815
+
+    def log_message(self, *a):
+        pass
+
+
+@pytest.fixture
+def servers():
+    made = []
+
+    def start(location: str = "", code: int = 302):
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Recorder)
+        srv.daemon_threads, srv.got, srv.location, srv.code = True, [], location, code
+        srv.url = f"http://127.0.0.1:{srv.server_address[1]}"
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        made.append(srv)
+        return srv
+
+    yield start
+    for srv in made:
+        srv.shutdown()
+        srv.server_close()
+
+
+@pytest.mark.parametrize("code", [301, 302, 303, 307, 308])
+def test_a_hook_that_redirects_to_a_private_address_is_not_followed(servers, code):
+    """The second server stands for 169.254.169.254 (a cloud metadata service) or a printer on the lab network."""
+    inside = servers()
+    hook = servers(location=inside.url + "/latest/meta-data", code=code)
+    s = notify.settings_from({"enabled": True, "timeout_seconds": 2, "webhook": {"url": hook.url + "/h"}})
+    (r,) = notify.send_test(s)
+    assert not r.ok and str(code) in r.detail
+    assert hook.got == ["/h"] and inside.got == []
+
+
+def test_slack_shows_a_name_or_reason_as_written_and_pings_nobody():
+    msg = notify.Message("Ionomos: a/b failed", (("Reason", "<!channel> look at <https://x.example|this> & fix"),))
+    text = notify.slack_payload(msg)["text"]
+    assert "<" not in text and ">" not in text
+    assert "&lt;!channel&gt; look at &lt;https://x.example|this&gt; &amp; fix" in text
+
+
+BROKEN_CONFIGS = [  # each fails to parse, so file_secrets() knows no value and the text alone must be enough
+    "notify: {enabled: true, webhook: {url: https://example.org/hook/FLOW-SECRET}}\n  broken: [\n",
+    "notify:\n  email: {host: h, username: u, password: FLOW-SECRET-2, from: a@b.c}\n  oops: [\n",
+    "notify:\n  webhook:\n    url: >-\n      https://example.org/hook/FOLDED-SECRET\n  oops: [\n",
+    "notify:\n  email:\n    password: |\n      BLOCK-SECRET\n  oops: [\n",
+    "notify:\n  webhook:\n    url:\n      https://example.org/NEXT-LINE-SECRET\n    url_env: X\n  oops: [\n",
+    "notify:\n  hooks:\n    - url: https://example.org/LIST-SECRET\n  oops: [\n",
+]
+
+
+@pytest.mark.parametrize("text", BROKEN_CONFIGS)
+def test_a_config_that_does_not_parse_is_still_redacted(text, tmp_path):
+    p = tmp_path / "config.yaml"
+    p.write_text(text, encoding="utf-8")
+    assert notify.file_secrets(p) == []
+    out = notify.redact_config_text(text, notify.file_secrets(p))
+    assert "SECRET" not in out and "***" in out
+    assert out.count("\n") == text.count("\n")  # line for line: the report still shows where the error is
+
+
+def test_redaction_leaves_the_rest_of_the_config_readable():
+    text = ("assistant:\n  base_url: http://127.0.0.1:11434/v1\nnotify:\n  webhook:\n    url:\n      https://x/SECRET\n"
+            "    url_env: HOOK_URL\n  email: {host: smtp.example.org, port: 587}\n")
+    out = notify.redact_config_text(text)
+    assert "base_url: http://127.0.0.1:11434/v1" in out and "url_env: HOOK_URL" in out
+    assert "{host: smtp.example.org, port: 587}" in out and "SECRET" not in out
