@@ -281,6 +281,25 @@ def test_redaction_leaves_the_rest_of_the_config_readable():
     assert "{host: smtp.example.org, port: 587}" in out and "SECRET" not in out
 
 
+def test_a_hook_address_replaced_last_week_is_hidden_too(lab):
+    """The app keeps every saved config.yaml in config-backups/; the old address is still in old log lines."""
+    from ionomos import configio, service
+
+    old, new = "https://lab.example.org/hooks/OLD-ROTATED-SECRET", "https://lab.example.org/hooks/NEW-SECRET-xyz"
+    cfg_path = lab["cfg_path"]
+    raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+    raw["notify"] = {"enabled": True, "webhook": {"url": old}}
+    cfg_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    assert configio.backup_config(cfg_path) is not None
+    raw["notify"]["webhook"]["url"] = new
+    cfg_path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    (lab["cfg"].log_dir / names.LOG_FILE).write_text(f"WARNING could not notify by webhook at {old}\n",
+                                                      encoding="utf-8")
+    assert old in notify.file_secrets(cfg_path) and new in notify.file_secrets(cfg_path)
+    text = service.diagnostics(cfg_path)
+    assert "SECRET" not in text and "could not notify by webhook at ***" in text
+
+
 # ------------------------------------------------------- command lines Ionomos builds ----
 
 ODD_ARGS = ["C:/R&D/users/x.workflow", "C:/a|b", "C:/in<out", "C:/out>in", "C:/x^y", "C:/100%PATH%x",

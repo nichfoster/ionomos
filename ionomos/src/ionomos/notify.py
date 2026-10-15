@@ -287,16 +287,29 @@ def raw_secrets(raw) -> list[str]:
     return sorted({v for v in out if v.strip()}, key=len, reverse=True)
 
 
+BACKUPS_READ = 30  # configio keeps 30 backups
+
+
 def file_secrets(config_path: Path | str) -> list[str]:
-    """`raw_secrets` of a config file; [] if it can't be read or parsed."""
+    """`raw_secrets` of a config file and of its backups (config-backups/config-*.yaml: a hook address replaced
+    last week is still in last week's log lines); [] for a file that can't be read or parsed."""
+    import yaml
+
+    from ionomos.config import read_yaml_text
+    from ionomos.configio import BACKUP_DIR
+
+    out: set[str] = set()
+    p = Path(config_path)
     try:
-        import yaml
-
-        from ionomos.config import read_yaml_text
-
-        return raw_secrets(yaml.safe_load(read_yaml_text(config_path)))
-    except Exception:  # noqa: BLE001 - redaction must never crash diagnostics
-        return []
+        backups = sorted((p.parent / BACKUP_DIR).glob("config-*.yaml"))[-BACKUPS_READ:]
+    except OSError:
+        backups = []
+    for f in (p, *backups):
+        try:
+            out.update(raw_secrets(yaml.safe_load(read_yaml_text(f))))
+        except Exception:  # noqa: BLE001 - redaction must never crash diagnostics
+            continue
+    return sorted(out, key=len, reverse=True)
 
 
 def redact_config_text(text: str, secret_values=()) -> str:
