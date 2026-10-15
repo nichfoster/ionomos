@@ -4,7 +4,7 @@ Run as `python standin_engine.py [anything]`: what it does comes from the enviro
 stands in for FragPipe's launcher, DIA-NN, MaxQuant or Sage whatever arguments the runner passes.
 
     IONOMOS_STANDIN       comma-separated steps, done in order:
-        say=<text>            print a line (a backslash-n in it: a line break; no commas)
+        say=<text>            print a line (a backslash-n in it: a line break; %2C: a comma)
         garbage               print lines of printable nonsense (no error word in them)
         binary                write raw bytes: NULs, 0xFF, half a UTF-8 letter, colour codes, no line end
         table=<rel>           write a whole three-column table at <out>/<rel>
@@ -79,7 +79,7 @@ def main() -> int:
     for step in steps:
         name, _, arg = step.partition("=")
         if name == "say":
-            print(arg.replace("\\n", "\n"), flush=True)  # a written \n is a line break
+            print(arg.replace("\\n", "\n").replace("%2C", ","), flush=True)  # written \n: a line break
         elif name == "garbage":
             for i in range(50):
                 print(f"{i:03d} {GARBAGE[i % 7:]}{GARBAGE[: i % 11]}", flush=True)

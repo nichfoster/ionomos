@@ -680,7 +680,7 @@ def _stop_stragglers(spec: RunSpec, proc: subprocess.Popen) -> str:
     """POSIX: processes the engine started that still run after it ended by itself (its process group outlives
     it). They could go on writing into the output folder the analysis is about to read, or hold its files: they
     are stopped, and that is said. '' when there were none. On Windows they can't be told apart from other
-    programs once the engine is gone (no process group to ask): see docs/ROADMAP.md."""
+    programs once the engine is gone (no process group to ask): issue #174."""
     if os.name == "nt":
         return ""
 
@@ -1074,7 +1074,10 @@ def judge(spec: RunSpec, code: int | None, offset: int = 0) -> RunResult:
         lead = f"{hints[0]} — " if hints else ""
         if bad_step:
             name, c, said = bad_step
-            return RunResult(code, f"{lead}FragPipe step {name} failed (exit code {c}); it said: {said}", hints=hints)
+            # FragPipe exits with the step's code, so what the code says is the step's: -1073741819 is 0xC0000005
+            what = f", {how}" if how and not how.startswith("stopped in the middle") else ""
+            return RunResult(code, f"{lead}FragPipe step {name} failed (exit code {c}{what}); it said: {said}",
+                             hints=hints)
         return RunResult(code, f"{lead}{spec.engine_name} exited with code {code_text(code)}"
                                + (f" ({how})" if how else "") + f"; last lines: {tail(spec.console_log, 4) or '(none)'}",
                          hints=hints)

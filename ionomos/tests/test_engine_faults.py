@@ -163,6 +163,16 @@ def test_an_engine_that_exits_oddly_fails_with_a_readable_reason(tmp_path, monke
     assert not (spec.run_dir / names.ENGINE_PID_FILE).exists()
 
 
+@only_windows
+def test_a_fragpipe_step_that_crashed_is_named_with_what_its_code_means(tmp_path, monkeypatch):
+    """Java prints a step's exit code signed (-1073741819) and FragPipe exits with it (0xC0000005)."""
+    spec = _spec(tmp_path, monkeypatch, "say=MSFragger [Work dir: C:\\x]\\nProcess 'MSFragger' finished%2C exit "
+                                        "code: -1073741819,exit=3221225477", engine="FragPipe")
+    res = _run(spec)
+    assert "FragPipe step MSFragger failed (exit code -1073741819, crashed with an access violation)" in res.reason
+    assert res.hints[0].startswith("FragPipe or a tool it started crashed without a message")
+
+
 # (stand-in steps that end with exit 0, words in the reason, words of the first hint or None)
 EXIT0 = [
     pytest.param("partial=report.pg_matrix.tsv", "report.pg_matrix.tsv ends in the middle of a row",
@@ -243,7 +253,7 @@ def test_an_engine_that_will_not_stop_is_named_and_stopped_later(tmp_path, monke
 def test_a_process_left_behind_by_an_engine_that_ended_does_not_hold_the_run(tmp_path, monkeypatch):
     """The engine exits 0 and leaves a process of its own running. Its console log is a file, not a pipe, so the
     run ends with the engine. POSIX: the leftover (the engine's process group) is stopped and noted. Windows: it
-    can't be told from other programs once its parent is gone (ROADMAP); it is not waited for."""
+    can't be told from other programs once its parent is gone (issue #174); it is not waited for."""
     spec = _spec(tmp_path, monkeypatch, "grandchild=120,table=report.pg_matrix.tsv")
     try:
         res = _run(spec)
@@ -446,6 +456,31 @@ def test_diann_output_that_cannot_be_moved_aside_holds_with_that_reason(bed):
     job = bed["ledger"].get(1)
     assert job.status == "queued" and "can't be moved aside" in job.reason and "workflow file" not in job.reason
     assert (dest / "diann" / "mine.txt").read_text(encoding="utf-8") == "kept"
+
+
+def test_a_retry_does_not_rewrite_the_tmt_annotation_it_wrote_before(tmp_path, monkeypatch):
+    """A person opens a plex's annotation.txt in Excel (which locks it) to check the channels, then presses Retry:
+    the retry reads the file the first attempt wrote as the plex's own (tmtkit.plan) and never writes it again."""
+    cfg = load(testbed.init(tmp_path / "bed"))
+    led = Ledger(cfg.database)
+    folder = testbed.drop(tmp_path / "bed", "tmt_plexes")
+    assert intake(folder, cfg, led).value == "queued"
+    dest = Path(led.list()[-1].dest_dir)
+    w = Worker(cfg, led)
+    assert w.run_once() and led.get(1).status == "done", led.get(1).reason
+    real = Path.write_text
+
+    def excel_has_it(self, *a, **kw):
+        if self.name == "annotation.txt":
+            raise PermissionError(13, "The process cannot access the file because it is being used by another "
+                                      "process", str(self))
+        return real(self, *a, **kw)
+
+    monkeypatch.setattr(Path, "write_text", excel_has_it)
+    led.requeue(1, "retry requested", reset_attempts=True)
+    assert w.run_once()
+    assert led.get(1).status == "done", led.get(1).reason
+    assert (dest / "plexA" / "annotation.txt").is_file()
 
 
 # ------------------------------------------------------------- retries keep every earlier attempt --
