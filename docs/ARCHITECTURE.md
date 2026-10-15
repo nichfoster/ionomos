@@ -79,9 +79,7 @@
 | `health.py` | Failsafes: single-instance lock, heartbeat, thread supervisor, crash hooks/files, disk/RAM facts, log-problem extraction, the rotating log handler | — |
 | `notify.py` | Messages when a search is done / failed / held (D58): `notify:` settings, the message, the webhook / Teams / Slack / email senders, redaction of secrets. Off by default | — |
 | `stress.py` | `ionomos testbed stress`: messy drops + chaos against a real watcher/worker, invariant checks; name fuzzer | — |
-| `runners/isodtb.py` | Post-proc: modified-peptide → site merge — thin entry point delegating to `downstream/isodtb.py`, which holds the algorithm | port of `lab-scripts/isoDTB_…R` |
-| `runners/tmt.py` | Post-proc: experimental annotation fix | port of `lab-scripts/correct_experimental_annotation…R` |
-| `runners/dia.py` | Post-proc: (TBD — probably nothing beyond copying `report.tsv` up) | — |
+| `runners/` | Left from 0.4 and imported by nothing in the program (`deploy/check_frozen.py` leaves it out of the exe): `isodtb.py` is a thin entry over `downstream/isodtb.py` that only `tests/test_downstream.py` calls; `fragpipe.py`, `tmt.py` and `dia.py` are stubs. The post-processing runs in `postprocess.py` → `downstream/` (`isodtb.py`, `tmt.py`: the R ports) | port of `lab-scripts/isoDTB_…R`, `correct_experimental_annotation…R` |
 | `cli.py` | `ionomos setup / run / stop / check / preflight / status / attention / dry-run / names test / retry / cancel / pause / resume / repair-ledger / init / testbed / diagnose / bundle / spectronaut-columns / notify-test / update / help / ask / ask-eval / analyze / check-folder / export / demo / example / compare / benchmark / qc-trend / library / fasta / tmt`; no args → app; hidden `fake-fragpipe`, `fake-diann`, `fake-maxquant`, `fake-sage`, `fake-rawparser` for the testbed, `sage-job` for the worker, `probe-gui` for `check`. The list in its docstring is `ionomos --help`; `tests/test_docs_sync.py` keeps it, this row and README in step with the parser | — |
 
 ## Data flow for one job
