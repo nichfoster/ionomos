@@ -33,8 +33,15 @@ def suggestions(cfg, user, method, filenames):
     path = history_path(cfg)
     if not path.is_file():
         return {}
+    try:
+        # errors="replace": one line saved in another encoding (an editor's "ANSI") must not stop every drop; such a
+        # line just matches nothing. A file that can't be read at all means no suggestions, not a rejected drop.
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        log.warning("Could not read the naming history %s (%s); no learned names this time", path, exc)
+        return {}
     exact, samples = {}, {}
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in text.splitlines():
         try:
             record = json.loads(line)
             if record["user"] != user or record["method"] != method:

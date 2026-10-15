@@ -31,7 +31,10 @@ e.g. `20260902_EJQ_isoDTB_EJQ-2-027_1uM-3h`.
 **Spaces and punctuation are tolerated** — the folder is renamed on the way in
 (`20260902-isoDTB_EJQ-2-027 (1uM 3h)` → `20260902-isoDTB_EJQ-2-027-1uM-3h`)
 because FragPipe cannot handle spaces in paths. The original name is kept in
-`ionomos.json`.
+`ionomos.json`. On Windows a folder whose name ends in a dot or a space (made
+on a Mac or in WSL; Windows programs can't open it by that name) is first
+renamed in the inbox without them; if that name is taken, the log says so once
+and how to rename it.
 
 Rejected, with a `<name>.REJECTED.txt` note left next to the folder:
 
@@ -60,6 +63,14 @@ depends on the method: an **isoDTB** file must end in a valid
 outright; **DIA and TMT** also accept a bare stem, so a date-like tail is
 absorbed into the condition/sample name (`DMSO_20260902.raw` → condition
 `DMSO_20260902`, bioreplicate 1 — no phantom number is minted).
+
+**Letters FragPipe can't take.** Names are cleaned to `A-Z a-z 0-9 . _ -`; a
+character outside that becomes `-` inside a word (`Müller_1_1.raw` → sample
+`M-ller`, `10µM` → `10-M`). A whole word written only in such letters (`実験`,
+`α`, `Проба`) would vanish and the numbers after it would be read as the sample
+(`実験_1_1.raw` was filed as sample `1`), so such a file is not filed: the
+naming window opens for it (or the note says to rename it, e.g. `alpha` for
+`α`). Symbols on their own (`🧪`) are dropped as before.
 
 The same bound holds wherever a number comes from (D85): `files:` in
 `experiment.yaml`, the naming window, the naming history and a queued job's
@@ -326,7 +337,8 @@ CS_22rv1_FLAG-AR_MA25-10uM_MA25_2.raw  ┘
 
 Files sharing at least the first two name parts go together; trailing
 replicate/fraction numbers and Xcalibur timestamps are left out of the folder
-name; method keywords stay in it. From there it's an ordinary folder drop, so
+name; method keywords stay in it (a name Windows keeps for a device, such as
+`NUL` or `CON`, gets `_files` added). From there it's an ordinary folder drop, so
 the same rules apply: initials and a method keyword somewhere in the file
 names (or the window asks). A folder is still the better habit — it keeps
 unrelated runs apart for sure. Non-raw loose files are left alone.
@@ -460,6 +472,15 @@ analysis:                   # results/report.html for this experiment (lab defau
 
 notes: "24 h treatment, 1 µM"   # copied into ionomos.json for provenance
 ```
+
+A key Ionomos doesn't know rejects the folder with a note that names it, the
+key it was probably meant to be (`methd (did you mean method?)`) and every key
+the file can have. `method`, `user`, `workflow` and `fasta` take one name (a
+list is refused, not turned into text); `allow_uneven_fractions` takes
+`true`/`false` (also `yes`/`no`, `on`/`off`, `1`/`0`, quoted or not; anything
+else is refused, so a quoted `'false'` no longer switches the check off); a
+date YAML reads as one but that doesn't exist (`2026-02-30`) is refused as a
+date, not as an unexpected problem.
 
 The sample names in `block:` and `covariates:` are the analysis' samples:
 `condition_replicate` for DIA / LFQ (`DMSO_1`), the TMT sample names
