@@ -203,7 +203,7 @@ def test_a_connection_cut_mid_answer_is_no_update(monkeypatch):
 def test_a_download_cut_mid_file_is_a_download_error_and_leaves_nothing(tmp_path, monkeypatch):
     import urllib.request
 
-    rel = updates.Release("9.9.9", "", "Ionomos-Setup-9.9.9.exe", "https://x/s.exe", 10, None)
+    rel = updates.Release("9.9.9", "", "Ionomos-Setup-9.9.9.exe", "https://x/s.exe", 10, "0" * 64)  # no SHA-256, no download
     monkeypatch.setattr(urllib.request, "urlopen",
                         lambda req, timeout=0: _Resp(exc=http.client.IncompleteRead(b"MZ", 10)))
     with pytest.raises(updates.DownloadError, match="download failed"):
@@ -214,6 +214,6 @@ def test_a_download_cut_mid_file_is_a_download_error_and_leaves_nothing(tmp_path
 def test_a_downloads_folder_that_cannot_be_made_is_a_download_error(tmp_path):
     blocker = tmp_path / "Downloads"
     blocker.write_text("a file", encoding="utf-8")
-    rel = updates.Release("9.9.9", "", "Ionomos-Setup-9.9.9.exe", "https://x/s.exe", 10, None)
+    rel = updates.Release("9.9.9", "", "Ionomos-Setup-9.9.9.exe", "https://x/s.exe", 10, "0" * 64)  # no SHA-256, no download
     with pytest.raises(updates.DownloadError, match="cannot save into"):
         updates.download(rel, blocker)
