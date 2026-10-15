@@ -30,14 +30,14 @@ outside the clone and are never touched.
    It installs git if missing (asks first), clones the repo to `C:\ionomos-src`
    (the repository is public; no sign-in needed), makes the Python environment, puts a **Ionomos** shortcut on the
    Desktop, and opens the app.
-3. In the app: tab 1 → **Apply layout** → **Create all missing folders**, then
-   tab 5 → **Save & Check**. Same as [DEPLOY_WINDOWS.md](DEPLOY_WINDOWS.md) A3.
+3. In the app: **Folders** → **Apply layout** → **Create all missing folders**, then
+   **Save & Check** (bottom bar). Same as [DEPLOY_WINDOWS.md](DEPLOY_WINDOWS.md) A3.
 
 ## Every day after that
 
 | On the Mac | On the PC |
 |---|---|
-| Describe the problem to Claude (paste the diagnostics), it fixes + tests, then `git push` | Open Ionomos → tab 5 → the *Development install* box says **UPDATE AVAILABLE** → **Update from GitHub & restart** |
+| Describe the problem to Claude (paste the diagnostics), it fixes + tests, then `git push` | Open Ionomos → **Run & Test** → **Testing** → the *Development install* box says **UPDATE AVAILABLE** → **Update from GitHub & restart** |
 | | Test again |
 | | Something's off → **Copy diagnostics** → paste into the chat |
 
