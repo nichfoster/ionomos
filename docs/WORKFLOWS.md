@@ -478,13 +478,15 @@ features × samples matrix of log2 values and runs the same statistics:
   measured in ≥ 50 % of at least one condition (`filter_condition_pct`;
   FragPipe-Analyst: 0) → normalisation (`normalize`: auto | median | gn | ratio | none; see below) →
   imputation (`imputation: auto` = Perseus-type down-shifted draws for DIA and
-  label-free, none for TMT; also none | min | zero | mindet | minprob | knn) →
+  label-free, none for TMT; also none | min | zero | mindet | minprob | knn; a
+  sample without a single value is not imputed and stays missing, with a note) →
   limma (`~0 + condition`, eBayes, 95 % CIs) → Benjamini–Hochberg. Hits need
   |log2FC| ≥ `log2fc` *and* adjusted p ≤ `alpha` (inclusive, as `add_rejections`).
   Welch and Student remain selectable (`test`).
 - **Comparisons:** `de_type: control` (each condition vs the recognised
   control, default), `all` (every pair, control as reference), `others` (each
-  vs the rest), or an explicit `comparisons:` list. isoDTB: each condition's
+  vs the rest), or an explicit `comparisons:` list (two different conditions
+  each: "Drug vs Drug" is refused). isoDTB: each condition's
   ratios vs 0 (moderated one-sample test).
 - **Roles** (`downstream/roles.py`, D61). Each condition is a control, a
   compound, a competition (probe plus competitor), a pooled reference, a
