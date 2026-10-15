@@ -219,6 +219,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rightly found nothing. The key's words are now fragments: found inside the
   names they belong to, and on their own only when distinct (KL6159A), so
   `inspect` agrees with the leak check on the same zip.
+- **`check-folder` on a table file checks that file, and a folder of several
+  tables says which one was read** (#141). `check-folder a_small.tsv` used to
+  check the parent folder and recommend `analyze <folder>`, which writes
+  elsewhere than `analyze a_small.tsv` does; now it describes the file (a
+  results table or a table of quantities, rows, samples or comparisons), its
+  `<name>_ionomos/results` folder and the command for that file. When a
+  folder holds more than one usable table, `analyze` notes "read b_main.tsv;
+  also here: a_small.tsv. Name the file to analyse it instead", and
+  `check-folder` (and the app's check window) list them under "Also here".
 - **`ionomos analyze --normalize` takes `auto` and `ratio`** (#133), the values
   the doctor's own advice tells a command-line user to set; it refused them
   with "invalid choice". Every value `analysis.normalize` takes is accepted.

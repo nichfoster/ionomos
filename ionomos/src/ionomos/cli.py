@@ -757,12 +757,53 @@ def cmd_check_folder(args) -> int:
     """What a folder of FragPipe output holds and what is wrong with it, before analysing it (fpfolder.py, D80)."""
     from ionomos import postprocess
 
-    cfg, _lab, _whose = analysis_config(args, Path(args.folder))
-    sc = postprocess.check_folder(Path(args.folder), cfg, args.method)
+    picked = Path(args.folder)
+    if picked.is_file() and _is_loose_table(picked):  # a table of its own, not a FragPipe file in its folder (#141)
+        return _check_table(picked)
+    cfg, _lab, _whose = analysis_config(args, picked)
+    sc = postprocess.check_folder(picked, cfg, args.method)
     print(sc.text())
     if not sc.blocking:
         print(f"\nready: ionomos analyze \"{sc.dest}\"" + (f" --method {sc.method}" if args.method else ""))
     return 1 if sc.blocking else 0
+
+
+def _is_loose_table(path: Path) -> bool:
+    """A protein / results table of its own (check and analyse the file), as against one of FragPipe's own
+    tables (combined_protein.tsv, psm.tsv), which stands for the output folder around it."""
+    from ionomos.downstream import anytable
+
+    name = path.name.lower()
+    return (path.suffix.lower() in anytable.TABLE_SUFFIXES and name not in anytable.SKIP_NAMES
+            and not name.startswith("combined_"))
+
+
+def _check_table(table: Path) -> int:
+    """`check-folder` on a table file: what the file holds and the command that analyses that file, with its
+    results folder (<stem>_ionomos/results, where `analyze` puts them)."""
+    from ionomos.downstream import anytable
+
+    print(f"Table: {table}")
+    try:
+        d = anytable.describe(table)
+    except Exception as exc:  # noqa: BLE001 - anytable raises its own and the csv module's errors
+        print(f"  not readable as a table: {exc}")
+        return 1
+    kind, rows = d["kind"], d["rows"]
+    if kind == "differential":
+        comps = ", ".join(d["comparisons"])
+        print(f"  a results table: {rows} rows, comparisons: {comps}")
+    elif kind == "quantities":
+        n, how = len(d["samples"]), d["found_by"]
+        print(f"  a table of quantities: {rows} rows, {n} samples ({how})")
+    else:
+        print(f"  {rows} rows, but no sample columns and no fold-change / p-value columns Ionomos recognises")
+        return 1
+    results = table.parent / f"{table.stem}_ionomos" / "results"
+    quote = chr(34)
+    print(f"Results go to: {results}")
+    print(f"ready: ionomos analyze {quote}{table}{quote}")
+    return 0
 
 
 _EXPORT_SIZES = ("slide169", "slide43", "half", "col1", "col2")  # charts.SIZES without "custom" (a test compares them)

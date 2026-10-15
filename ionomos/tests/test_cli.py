@@ -137,3 +137,28 @@ def test_analyze_normalize_takes_every_value_the_setting_takes(tmp_path, capsys)
         assert main(["analyze", str(table), "--quiet", "--no-enrichment", "--normalize", value]) == 0, value
     assert set(fpa.NORMALIZATION_METHODS) == {"auto", "median", "gn", "ratio", "none"}
     capsys.readouterr()
+
+
+def test_check_folder_on_a_table_checks_that_file_and_a_folder_of_tables_names_the_others(tmp_path, capsys):
+    """#141: check-folder on a table file checked its parent folder and recommended a different command; a
+    folder with several tables silently analysed one of them."""
+    two = tmp_path / "twotables"
+    two.mkdir()
+    a = _fc_table(two, "a_small.tsv")
+    _fc_table(two, "b_main.tsv")
+    quote = chr(34)
+    assert main(["check-folder", str(a)]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith(f"Table: {a}") and "a results table" in out
+    assert f"ready: ionomos analyze {quote}{a}{quote}" in out
+    assert str(two / "a_small_ionomos" / "results") in out and "b_main" not in out
+    assert main(["check-folder", str(two)]) == 0
+    out = capsys.readouterr().out
+    assert "Also here: " in out and "(name the file to analyse it instead)" in out and "_small" in out or "_main" in out
+    assert main(["analyze", str(two), "--quiet", "--no-enrichment"]) == 0
+    out = capsys.readouterr().out
+    assert "also here:" in out and "Name the file to analyse it instead" in out
+    bad = tmp_path / "bad.tsv"
+    bad.write_text("just\tsome\ntext\there\n", encoding="utf-8")
+    assert main(["check-folder", str(bad)]) == 1
+    assert "Ionomos recognises" in capsys.readouterr().out

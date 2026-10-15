@@ -180,7 +180,14 @@ def _load_quantities(method: str | None, workdir: Path, results: Path, record: d
     if (rollup or "auto") != "auto":  # FragPipe's and any other table hold proteins (or sites) already
         notes += engines.rollup_unused(rollup, "this table holds proteins or sites already, not peptides")
     if table is not None or method == "table":
-        path = Path(table) if table is not None else anytable.find_table(workdir)
+        if table is not None:
+            path = Path(table)
+        else:
+            found = anytable.candidate_tables(workdir)
+            path = found[0][0] if found else None
+            others = anytable.others_note(workdir, found)  # several tables: say which was read (#141)
+            if others:
+                notes = notes + [others]
         if path is None:
             return None, files, [f"no protein or result table found in {workdir.name}/"]
         return anytable.load(path), files, notes
