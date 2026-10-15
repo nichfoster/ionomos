@@ -5,7 +5,7 @@ Three layers, all runnable on macOS and Windows:
 | Layer | What | Command |
 |---|---|---|
 | Unit + e2e (`pytest`) | naming, config, config I/O, ledger, watcher timing, intake, overrides, **FragPipe runner + worker** (done / failed / held / timeout / stop / re-run against the fake FragPipe), resolver logic, **real tkinter dialog and the setup app** (skipped if no display), and 6 end-to-end runs of watcher-thread + intake against testbed samples | `scripts/test_mac.sh` / `scripts\test_windows.ps1` |
-| Testbed (manual) | A fake lab on disk with 22 sample drops covering every path, a fake FragPipe, and the real CLI | `ionomos testbed …` |
+| Testbed (manual) | A fake lab on disk with 29 sample drops covering every path, a fake FragPipe, and the real CLI | `ionomos testbed …` |
 | The real PC | `dry-run` on real folders, then a throwaway drop; **Copy diagnostics** to report back | see DEV_LOOP.md |
 | Downstream | other engines (`tests/test_engines.py`): each format with its real column names, FDR / reverse / contaminant filters, provenance, and the same simulated experiment giving identical hits through DIA-NN, MaxQuant, Spectronaut and Sage files (Sage's `lfq.tsv`: razor grouping, fractions added, peptide and protein q filters, median polish checked by hand); D35 insights: outlier / batch / missingness / p-value-shape detection on planted data and no false alarms on clean data, rank-based gene sets, end to end into the TSVs, analysis.json and the report (`tests/test_insights.py`); R-script ports byte-identical to the real scripts; t-tests/BH vs scipy; moderated t vs limma; planted-effect recovery for isoDTB/DIA/TMT; report self-contained with its data, SVG valid | `tests/test_downstream.py`, golden files in `tests/golden/` |
 | JS harness (report front end) | dev-only jsdom tests of `report.js`: every section against the payload shapes that have bitten before (zero comparisons, one sample, ratio/isoDTB, 10k features × 50 samples, all p-values missing, dark/light) and hostile `<`/`&`/quote names through every dynamic-HTML sink incl. tooltips and the CSV export; the search grammar (lists, wildcards, regex, `desc:`, `term:`), suggestions, box selection, highlight groups, the address state, hit filters and every discovery / QC section (`discovery.test.mjs`); the help: the nav entry, a **?** on each section, QC tab and issue box, panels that open and close, every help link resolving in the page, escaped issue titles, a report without help (`help.test.mjs`); figure export (D62, `export.test.mjs`): the buttons of each chart, every control of the Export dialog changing the SVG (size presets in px and mm, font, palettes, background, title, legend, names, line and point size), text kept as text and no CSS in the file, the cut-offs in `<desc>`, the style kept in the browser, lab defaults and reset, a hostile style file, PNG with its print size and description (a stand-in canvas: jsdom draws nothing), copy as an image (a stand-in clipboard), the store-only .zip unzipped by the harness' own reader with every CRC-32 checked, its README and tables, 10,000 features, and the friendlier options (tooltips, the cut-offs in words, reset to lab defaults); hostile names through the export's file names, SVG, README and CSV (`escaping.test.mjs`); a pytest check fails when `tests/js/fixture.html` drifts from the shipped assets | `cd ionomos/tests/js && npm ci && npm test`; sync check runs with pytest |
@@ -92,7 +92,7 @@ ionomos --config C:\ionomos-testbed\Fragpipe_Auto\config.yaml run   # Windows
 **Terminal 2:**
 
 ```bash
-ionomos testbed list                       # the 22 samples and what each proves
+ionomos testbed list                       # the 29 samples, their fake modes and every mode
 ionomos testbed drop iso_good              # -> queued under Fragpipe_General/EJQ
 ionomos testbed drop iso_good --slow       # file-by-file copy: watch the "waiting for copy to settle" log line
 ionomos testbed drop gui_unknown_user      # -> resolver window pops in terminal 1
@@ -143,6 +143,13 @@ init --slow-defaults` uses production timings (10 s / 60 s).
 | `tmt_own_annotation` | the user's own `annotation.txt`, no `tmt:` block → read, never written; FragPipe uses it, the report knows the conditions |
 | `tmt_bridge` | two plexes in their own folders with a pool on 126 in each → the TMT QC finds the bridge near the median in both |
 | `tmt_poor_label` | the fake's `tmt-poor-labelling` mode (20 % of N-termini unlabelled) → done, `TMT_LOW_LABELLING` |
+| `lfq_good` | label-free DDA (method LFQ): IonQuant's `combined_protein.tsv` in a real file's layout (blocks per quantity, Java floats, `contam_` rows), `experiment_annotation.tsv` type 0 → Drug vs DMSO |
+| `phospho_lfq` | label-free phospho (method Phospho, `analysis.phospho: true`): `combined_site_STY_79.9663.tsv` → a site-level analysis, EGF vs Ctrl |
+| `dia_fractions` | DIA in two fractions per sample (fractions in `experiment.yaml`): DIA-NN gets 12 `_uncalibrated.mzML` runs for 6 samples; the analysis asks (`DUPLICATE_SAMPLES`, #180) |
+| `open_search` | an open search (-150 to +500 Da, Crystal-C, PTM-Shepherd): `psm.tsv` with mass shifts, `ptm-shepherd-output/`, no quantification → done; the analysis reports NO_TABLE (#181) |
+| `open_search_no_los` | the same with "Localize mass shift" off (`workflow: Open-noLOS.workflow`): FragPipe's non-fatal ERROR line → still done |
+| `non_ascii_log` | tools printing non-ASCII: `?` on the cp1252 console, the real text in `log_<date>.txt` → done |
+| `retry_previous` | fake mode `fail-once`: IonQuant fails the first attempt; Retry → done, the first attempt kept as `fragpipe_previous_<time>` |
 
 After a GUI answer, look at `experiment.yaml` inside the moved folder: that is
 the persisted decision, and the same file can be hand-written by a user to
@@ -216,10 +223,18 @@ Failure modes of the fake FragPipe for manual testing:
 step-fail-exit0 | step-fail-neg-exit0 | cancel-exit0 | silent-exit0 |
 no-done-line | child | hang | killed | disk-full | raw-vanished | garbled-log |
 huge-log | runaway-log | empty-table | header-only | truncated-table |
-missing-table | truncated-psm` (what each acts out: `fake_fragpipe.MODES`),
+missing-table | truncated-psm | non-ascii | fail-once` (what each acts out: `fake_fragpipe.MODES`),
 several joined by commas. For one experiment only, put the mode(s) in a file
 `fake_fragpipe_mode.txt` in its folder (before dropping it); it wins over the
 environment. The stress tester's `fault` drops do that.
+
+Measured in round 4 on this PC (Windows, Python 3.14, long paths off, so drop
+names are cut to 104 characters): `--n 60 --seed 1` gave done 38, failed 7,
+rejected 10, ignored 4, 206 raws delivered in 67 s, 8 of them TMT jobs (the
+TMT drops carry a whole TMT-10 channel map since D91); `--n 150 --seed 7`
+gave done 93, failed 28, rejected 25, ignored 3, 661 raws in 159 s. All
+invariants held; each failed job's reason was the fault planted for it or an
+empty raw file.
 
 ## FragPipe faults (D69)
 
@@ -303,6 +318,14 @@ with the fake's and fix the fake first, then the parsers.
 `IONOMOS_FAKE_FP_STRICT=1` makes the fake refuse paths with spaces as real
 FragPipe does (always on under Windows). One test is an expected failure:
 FragPipe's own `sdrf.tsv` being read as the user's design (ROADMAP).
+
+Round 4 checked the fake against FragPipe 24.0's source: it prints FragPipe's
+own headless forms (dialogs keep their `<b>` tags), stops on a manifest file
+that does not exist ("Some loaded files don't exist"), and drops a manifest
+line whose bioreplicate is not a Java int ("badly formatted lines"). Its
+console is the lab PC's, cp1252 with CRLF (`IONOMOS_FAKE_FP_ENCODING=utf-8`
+gives a Linux FragPipe's). `tests/test_testbed.py` checks the fake against
+the source and drives the round-4 scenarios.
 
 ## The assistant's scenario corpus
 

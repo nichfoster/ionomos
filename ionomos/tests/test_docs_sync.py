@@ -249,7 +249,7 @@ def test_the_config_check_sees_the_optional_keys():
 HELP_NS = ("faq", "issue", "attention", "intake", "search", "glossary", "qc", "report", "start", "safety", "trouble",
            "library")
 FILE_EXT = {"html", "tsv", "css", "js", "txt", "json", "jsonl", "parquet", "csv", "xlsx", "md", "yaml", "py", "gmt",
-            "fas", "fasta", "log", "zip", "raw", "workflow"}
+            "fas", "fasta", "log", "zip", "raw", "workflow", "pdf"}
 _ID = re.compile(rf"^(?:{'|'.join(HELP_NS)})\.([A-Za-z0-9_][A-Za-z0-9_-]*)$")
 
 
