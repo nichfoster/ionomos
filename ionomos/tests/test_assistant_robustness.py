@@ -79,7 +79,7 @@ def test_audit_log_keeps_every_record_when_threads_and_processes_append_at_once(
 
 def test_concurrent_asks_each_get_their_own_record(fp, tmp_path):
     def one(n):
-        model = fake.ScriptedModel([{"content": f"Answer {n}: FragPipe ran out of memory [log:1#257]."}])
+        model = fake.ScriptedModel([{"content": f"Answer {n}: FragPipe ran out of memory [log:1#242]."}])
         out[n] = assistant.ask(fp, f"question {n}", experiment="1", transport=model,
                                audit_path=tmp_path / "audit.jsonl")
 
@@ -102,7 +102,7 @@ def test_audit_log_survives_a_line_cut_short_and_line_separators_in_a_question(f
     with open(p, "ab") as fh:  # a crash in the middle of a record
         fh.write(b'{"ts": "2026-10-15T10:00:00", "question": "cut sh')
     q = "why\u2028did it\u2029fail? \u0085 \u000c"  # json.dumps leaves U+2028 / U+2029 as they are
-    ans, _ = _ask(fp, q, [{"content": "FragPipe ran out of memory [log:1#257]."}], tmp_path, experiment="1")
+    ans, _ = _ask(fp, q, [{"content": "FragPipe ran out of memory [log:1#242]."}], tmp_path, experiment="1")
     assert ans.grounded
     recs = audit.read(p)
     assert [r["question"] for r in recs] == ["before", tools.clean(q, assistant.MAX_QUESTION)]
@@ -169,7 +169,7 @@ def test_tool_call_arguments_too_long_are_refused_and_not_sent_back(fp, tmp_path
     huge = json.dumps({"query": "memory", "pad": "B" * 1_500_000})
     turns = [{"tool_calls": [{"id": "x" * 5000, "name": "search_help", "arguments": huge},
                              {"id": "x" * 5000, "name": "get_job", "arguments": {"job_id": 1}}]},
-             {"content": "FragPipe ran out of memory [log:1#257]."}]
+             {"content": "FragPipe ran out of memory [log:1#242]."}]
     ans, model = _ask(fp, "Why did my search fail?", turns, tmp_path, experiment="1")
     assert ans.grounded
     mine = [c for c in ans.tool_calls if c["by"] == "model"]

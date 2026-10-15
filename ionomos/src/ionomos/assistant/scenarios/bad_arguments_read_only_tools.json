@@ -56,12 +56,12 @@
       ]
     },
     {
-      "content": "FragPipe ran out of memory during this search [log:1#257] [job:1]."
+      "content": "FragPipe ran out of memory during this search [log:1#242] [job:1]."
     }
   ],
   "rubric": {
     "must_cite": [
-      "log:1#257"
+      "log:1#242"
     ],
     "refusal": false,
     "proposal": false
