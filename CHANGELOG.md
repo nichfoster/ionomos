@@ -211,6 +211,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   while its attention items held the user's initials and experiment names.
   A `\uXXXX` escape is now a name boundary for the scrubber, the leak check,
   `bundle inspect` and `bundle translate`.
+- **`ionomos bundle inspect` no longer reports ordinary words (run, then,
+  own, txt) as real names** (#142). It registered every entry of the key
+  file's `names` group (the words of experiment names, which the bundle
+  replaces only inside those names) as a name of its own, and found "run"
+  in every workflow and "txt" in every file list; the bundle's own check had
+  rightly found nothing. The key's words are now fragments: found inside the
+  names they belong to, and on their own only when distinct (KL6159A), so
+  `inspect` agrees with the leak check on the same zip.
 - **The app no longer dies at start when config.yaml has a YAML slip** (an
   unclosed bracket from hand editing, #136). `configio.read_config` turns the
   parser's error into the same `could not parse <file>: line N, column M: …`

@@ -668,3 +668,25 @@ def test_a_rejected_drop_with_a_curly_quoted_title_leaves_no_name_in_the_bundle(
     assert items and _survivors(res.path, ["EJQ_2027_mystery", "mystery", "EJQ"]) == []
     check = bundle.self_check(res.path, bed["cfg_path"])
     assert check["hits"] == 0, check
+
+
+def test_inspect_does_not_call_the_plain_words_of_a_name_leaks(bed):
+    """#142: `bundle inspect` registered the key file's name fragments (then, own, run, txt) as names of their
+    own and found them in Ionomos' own text. Its verdict must agree with the bundle's leak check."""
+    _job(bed)
+    inbox = bed["cfg"].inbox
+    for name in ("EJQ_isoDTB_then_TMT", "EJQ_isoDTB_own-map", "XYZ99_isoDTB_run"):
+        (inbox / name).mkdir()
+        (inbox / f"{name}.REJECTED.txt").write_text("no", encoding="utf-8")
+    res = bundle.create(bed["cfg_path"], opts=Options(level="validate"), dest_dir=bed["out"])
+    key = json.loads(res.key_path.read_text(encoding="utf-8"))
+    assert {"then", "own", "map", "run"} <= {v.casefold() for v in key["names"].values()}
+    text = "\n".join(d.decode("utf-8", "replace") for d in _members(res.path).values())
+    assert " run " in text or "run-" in text or "run:" in text  # Ionomos' own word 'run' is all over the zip
+    for config in (bed["cfg_path"], None):
+        check = bundle.self_check(res.path, config)
+        assert check["sources"] and check["hits"] == 0, [(f["path"], f["hits"]) for f in check["files"] if f["hits"]]
+    # the fragments still count inside the names they belong to
+    bad = _members(res.path)["README.txt"].decode() + "\nleft: EJQ_isoDTB_then_TMT\n"
+    anon, _src = bundle._checker(None, key)
+    assert anon.find(bad) == ["EJQ_isoDTB_then_TMT"] and anon.find("run then own txt") == []
