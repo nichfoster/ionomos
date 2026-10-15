@@ -194,6 +194,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`ionomos analyze` on a scratch table no longer picks up the lab's
+  config.yaml that happens to sit on the PC**, nor posts the table's problems
+  to the lab's attention list (#134). The lab's settings apply to a job id, to
+  a folder or table under the lab's users folder, and to anything when
+  `--config` or `IONOMOS_CONFIG` names the config; any other folder or table
+  gets Ionomos' defaults. The output now says which: `settings: C:\Fragpipe_Auto\config.yaml`
+  or `settings: Ionomos' defaults (â€¦ not used: --config applies it)`. Only the
+  lab's own experiments raise attention items. `check-folder` follows the
+  same rule.
 - On a small screen (1366×768) the bottom bar — Save, Help, Report a problem, the ⚠ badge — disappeared; it is now
   packed before the tabs, and its buttons before the config path. (#111)
 - 4 Advanced: the hint "Needs the watcher to run in the logged-in session" covered the "Pop up a window when

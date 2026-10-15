@@ -116,6 +116,45 @@ def _load(args, check_paths: bool) -> Config:
     return cfg
 
 
+def config_named(args) -> bool:
+    """True when the person named the config: --config on the command line, or IONOMOS_CONFIG."""
+    from ionomos.names import config_env
+
+    return bool(getattr(args, "config_given", False) or config_env())
+
+
+def _inside(folder: Path, root: Path | None) -> bool:
+    if root is None:
+        return False
+    try:
+        return Path(folder).resolve().is_relative_to(Path(root).resolve())
+    except OSError:
+        return False
+
+
+def analysis_config(args, dest: Path | None = None, job: bool = False) -> tuple[Config | None, bool, str]:
+    """Whose settings an analysis of `dest` runs with (#134): (config, lab's, a line saying which).
+
+    The lab's config.yaml applies to a job id, to anything when the person named the config (--config,
+    IONOMOS_CONFIG), and to a folder or table inside the lab's users folder. Any other folder or table gets
+    Ionomos' own defaults, so a scratch table on a PC that also holds a lab install is not analysed with the
+    lab's settings, and nothing about it is posted to the lab's attention list. Only the lab's own experiments
+    (a job id, a folder under users_root) raise attention items."""
+    cfg = None
+    try:
+        cfg = load(args.config, check_paths=False)
+    except ConfigError:
+        pass  # analysing a folder works without a lab config (defaults)
+    if cfg is None:
+        return None, False, "settings: Ionomos' defaults (no config.yaml)"
+    if job or (dest is not None and _inside(dest, cfg.users_root)):
+        return cfg, True, f"settings: {cfg.config_path} (a lab experiment)"
+    if config_named(args):
+        return cfg, False, f"settings: {cfg.config_path}"
+    return None, False, (f"settings: Ionomos' defaults ({cfg.config_path} is this PC's lab config, not used: "
+                         "--config applies it)")
+
+
 # ---------------------------------------------------------------- commands --
 
 
@@ -646,11 +685,9 @@ def cmd_analyze(args) -> int:
     """Re-run the downstream analysis for a job (by id) or any experiment / FragPipe folder."""
     from ionomos import postprocess
 
-    cfg = None
-    try:
-        cfg = load(args.config, check_paths=False)
-    except ConfigError:
-        pass  # analysing a folder works without a lab config (defaults)
+    target = args.target
+    cfg, lab_experiment, whose = analysis_config(args, Path(target) if not target.isdigit() else None,
+                                                  job=target.isdigit())
     if args.method and args.method not in ANALYZE_METHODS:
         # a method of the lab's own: postprocess.prepare reads it as its kind (like: / engine:, D54)
         own = list(cfg.methods) if cfg is not None else []
@@ -659,7 +696,6 @@ def cmd_analyze(args) -> int:
             print(f"--method {args.method!r} is not one of {', '.join([*ANALYZE_METHODS, *own])}", file=sys.stderr)
             return 2
         args.method = key
-    target = args.target
     if target.isdigit():
         if cfg is None or not cfg.database.is_file():
             print("no job ledger here; give a folder path instead", file=sys.stderr)
@@ -682,6 +718,7 @@ def cmd_analyze(args) -> int:
     if not dest.is_dir():
         print(f"not a folder or table: {dest}", file=sys.stderr)
         return 2
+    print(whose)
     extra = {}
     if args.control:
         extra["control"] = args.control
@@ -701,7 +738,7 @@ def cmd_analyze(args) -> int:
                                      progress=(lambda m: print(f"  … {m}", flush=True)) if not args.quiet else None,
                                      table=table, strict=bool(args.method))
     _print_outcome(out)
-    if cfg is not None:
+    if cfg is not None and lab_experiment:  # the lab's attention list is for the lab's experiments (#134)
         job_id = int(target) if target.isdigit() else None
         postprocess.record_issues(cfg.log_dir, dest, out, job_id)
     if out.report:
@@ -715,11 +752,7 @@ def cmd_check_folder(args) -> int:
     """What a folder of FragPipe output holds and what is wrong with it, before analysing it (fpfolder.py, D80)."""
     from ionomos import postprocess
 
-    cfg = None
-    try:
-        cfg = load(args.config, check_paths=False)
-    except ConfigError:
-        pass
+    cfg, _lab, _whose = analysis_config(args, Path(args.folder))
     sc = postprocess.check_folder(Path(args.folder), cfg, args.method)
     print(sc.text())
     if not sc.blocking:

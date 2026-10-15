@@ -66,3 +66,41 @@ def test_update_outside_checkout(monkeypatch, capsys):
     monkeypatch.setattr(service, "source_checkout", lambda: None)
     assert main(["update"]) == 2
     assert "not running from a git checkout" in capsys.readouterr().err
+
+
+def _fc_table(folder, name="fc.tsv"):
+    rows = ["Gene\tlogFC\tP.Value"] + [f"G{i}\t{2 if i < 5 else 0}\t{0.001 if i < 5 else 0.5}" for i in range(40)]
+    p = folder / name
+    p.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    return p
+
+
+def test_analyze_outside_the_lab_ignores_the_pc_lab_config(lab, tmp_path, monkeypatch, capsys):
+    """#134: a scratch table on a PC with a lab install is analysed with Ionomos' defaults and posts nothing to
+    the lab's attention list, unless --config (or IONOMOS_CONFIG) names the lab config; a table under the lab's
+    users folder is a lab experiment and uses the lab's settings."""
+    import ionomos.cli as cli
+
+    monkeypatch.delenv("IONOMOS_CONFIG", raising=False)
+    monkeypatch.setattr(cli, "default_config_path", lambda: lab["cfg_path"])  # what service finds on the PC
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    table = _fc_table(scratch)
+    assert main(["analyze", str(table), "--quiet", "--no-enrichment"]) == 0
+    out = capsys.readouterr().out
+    assert "settings: Ionomos' defaults" in out and str(lab["cfg_path"]) in out and "--config applies it" in out
+    assert not list((lab["auto"] / "logs").rglob("*.json"))  # nothing in the lab's attention list
+
+    assert main(["--config", str(lab["cfg_path"]), "analyze", str(table), "--quiet", "--no-enrichment"]) == 0
+    out = capsys.readouterr().out
+    assert f"settings: {lab['cfg_path']}" in out and "defaults" not in out.split("\n")[0]
+    assert not list((lab["auto"] / "logs").rglob("*.json"))  # still not a lab experiment
+
+    monkeypatch.setenv("IONOMOS_CONFIG", str(lab["cfg_path"]))
+    assert main(["analyze", str(table), "--quiet", "--no-enrichment"]) == 0
+    assert f"settings: {lab['cfg_path']}" in capsys.readouterr().out
+    monkeypatch.delenv("IONOMOS_CONFIG")
+
+    mine = _fc_table(lab["general"] / "EJQ", "20260901-DIA_EJQ-1.tsv")
+    assert main(["analyze", str(mine), "--quiet", "--no-enrichment"]) == 0
+    assert "(a lab experiment)" in capsys.readouterr().out
