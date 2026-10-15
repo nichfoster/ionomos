@@ -89,10 +89,24 @@ def _block_values(m, spec, pattern: str) -> tuple[str, dict[str, str]]:
             raise DesignError("block: replicate needs every sample's replicate number, and these have none: "
                               + ", ".join(miss[:5]))
         return "replicate", {s: str(m.replicate[s]) for s in m.samples}
-    miss = [s for s in m.samples if s not in spec]
+    miss = [s for s in m.samples if s not in spec or _missing(spec[s])]
     if miss:
         raise DesignError("block: these samples have no block: " + ", ".join(miss[:5]))
     return "block", {s: str(spec[s]) for s in m.samples}
+
+
+MISSING_WORDS = {"na", "n/a", "#n/a", "nan", "null", "-", "inf", "-inf", "+inf", "infinity", "-infinity",
+                 "not available", "not applicable"}  # tables.NA_STRINGS, and the SDRF's words for no value
+
+
+def _missing(v) -> bool:
+    """A covariate cell with no value: empty, NA / NaN / not available (SDRF), or a number that isn't finite. Such
+    a cell must not become a factor level of its own ("NA" next to 1 and 2)."""
+    if v is None or isinstance(v, bool):
+        return v is None
+    if isinstance(v, (int, float)):
+        return not math.isfinite(v)
+    return str(v).strip().lower() in MISSING_WORDS or not str(v).strip()
 
 
 def _num(v) -> float | None:
@@ -139,7 +153,7 @@ def build(m, block="", block_from: str = "", covariates: dict | None = None) -> 
         cols += cc
         formula.append(name)
     for cname, spec in covariates.items():
-        miss = [s for s in samples if s not in spec or spec[s] is None or str(spec[s]).strip() == ""]
+        miss = [s for s in samples if s not in spec or _missing(spec[s])]
         if miss:
             raise DesignError(f"covariate {cname!r} has no value for: " + ", ".join(miss[:5]))
         nums = {s: _num(spec[s]) for s in samples}

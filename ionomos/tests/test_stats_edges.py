@@ -546,3 +546,18 @@ def test_a_control_that_the_roles_make_a_compound_is_not_compared_with_itself():
     comps, notes = analysis.choose_comparisons(m, s)
     assert all(t != c for t, c in comps) and comps
     assert any("which analysis.roles makes a compound" in n for n in notes)
+
+
+@pytest.mark.parametrize("missing", ["NA", "nan", float("nan"), "not available", "inf", None, " "])
+def test_a_missing_covariate_or_block_value_is_named_not_made_a_level(missing):
+    """'NA' next to 1 and 2 became a third factor level (the sample silently got a batch of its own), or, for a
+    numeric covariate, turned every age into a level and was reported as 'confounded with condition'."""
+    m = sim(20, groups=(("DMSO", 4), ("Drug", 4)))
+    age = {s: 30 + 5 * k for k, s in enumerate(m.samples)}
+    batch = {s: str(1 + k % 2) for k, s in enumerate(m.samples)}
+    for spec in ({"age": {**age, "Drug_2": missing}}, {"batch": {**batch, "Drug_2": missing}}):
+        with pytest.raises(dz.DesignError, match="no value for: Drug_2"):
+            dz.build(m, covariates=spec)
+    with pytest.raises(dz.DesignError, match="no block: Drug_2"):
+        dz.build(m, {**batch, "Drug_2": missing})
+    assert dz.build(m, covariates={"pre": {s: ("none" if k % 2 else "LPS") for k, s in enumerate(m.samples)}})
