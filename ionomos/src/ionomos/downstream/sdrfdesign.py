@@ -37,6 +37,7 @@ from pathlib import Path, PureWindowsPath
 
 from ionomos.downstream.plex import channel_key, same_channel
 from ionomos.downstream.quant import QuantMatrix, match_run_stem, run_stem
+from ionomos.downstream.tables import open_text, unquote
 
 SKIP_DIRS = {"results", "ionomos_run", "fragpipe-analyst", "__MACOSX"}
 RESERVED = {"not available", "not applicable", "na", "n/a", ""}
@@ -84,8 +85,8 @@ def is_sdrf_name(name: str) -> bool:
 
 def _header(path: Path) -> list[str]:
     try:
-        with open(path, encoding="utf-8-sig", errors="replace", newline="") as fh:
-            return [h.strip().lower() for h in fh.readline().rstrip("\r\n").split("\t")]
+        with open_text(path) as fh:
+            return [unquote(h.strip()).strip().lower() for h in fh.readline().rstrip("\r\n").split("\t")]
     except OSError:
         return []
 
@@ -100,8 +101,8 @@ def _engine_template(path: Path, rows: int = 200) -> bool:
     24's stock workflows write one into their output folder (workflow.misc.save-sdrf); it is FragPipe's
     template for the user to fill in, not this experiment's design."""
     try:
-        with open(path, encoding="utf-8-sig", errors="replace", newline="") as fh:
-            head = [h.strip().lower() for h in fh.readline().rstrip("\r\n").split("\t")]
+        with open_text(path) as fh:
+            head = [unquote(h.strip()).strip().lower() for h in fh.readline().rstrip("\r\n").split("\t")]
             if any(h.startswith("factor value") for h in head) or "source name" not in head:
                 return False
             col = head.index("source name")
@@ -110,7 +111,7 @@ def _engine_template(path: Path, rows: int = 200) -> bool:
                 cells = line.rstrip("\r\n").split("\t")
                 if not any(c.strip() for c in cells):
                     continue
-                if (cells[col].strip().lower() if col < len(cells) else "") not in ("", "not available", "na"):
+                if (unquote(cells[col].strip()).lower() if col < len(cells) else "") not in ("", "not available", "na"):
                     return False
                 seen += 1
                 if seen >= rows:
@@ -185,8 +186,9 @@ def read(path: Path, factor: list[str] | str | None = None) -> Design:
     condition (`compound` or `factor value[compound]`); default every factor column, their values joined."""
     path = Path(path)
     try:
-        with open(path, encoding="utf-8-sig", errors="replace", newline="") as fh:
-            grid = [r for r in csv.reader(fh, delimiter="\t", quoting=csv.QUOTE_NONE) if any(c.strip() for c in r)]
+        with open_text(path) as fh:
+            grid = [[unquote(c.strip()) for c in r] for r in csv.reader(fh, delimiter="\t", quoting=csv.QUOTE_NONE)
+                    if any(c.strip() for c in r)]  # cells in quotes: an SDRF saved again from Excel
     except OSError as exc:
         raise DesignError(f"{path.name}: {exc}") from exc
     if not grid:
