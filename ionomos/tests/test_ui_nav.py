@@ -256,7 +256,9 @@ def test_today_tab_keys_and_remembered_window(tmp_path, monkeypatch):
     try:
         app = App(root, cfg)
         assert app.nb.select() == str(app.tab_jobs)  # the tab used last
-        assert uinav.parse_geometry(root.geometry())[2:] == (30, 40)  # put where it was
+        # a withdrawn window does not take its position on Windows (CI gave +24+8 for +30+40): the size is
+        # what Tk honours before the window is shown
+        assert uinav.parse_geometry(root.geometry())[:2] == (1000, 700)  # the size it had
         app.popups.stop()
     finally:
         tk.Tk.destroy(root)

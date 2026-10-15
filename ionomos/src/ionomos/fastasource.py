@@ -762,11 +762,21 @@ def find_philosopher(roots: Iterable[Path] = ()) -> Path | None:
     for d in folders:
         if not d.is_dir():
             continue
-        hits = [p for p in d.iterdir() if p.is_file() and p.name.lower().startswith("philosopher")
-                and (p.suffix.lower() == ".exe" if os.name == "nt" else p.suffix.lower() in ("", ".py"))]
+        # `philosopher-v5.1.10` has the pathlib suffix ".10": decide on the whole name, not the suffix
+        hits = [p for p in d.iterdir() if p.is_file() and _philosopher_name(p.name)]
         if hits:
             return max(hits, key=lambda p: [int(x) if x.isdigit() else x for x in re.split(r"(\d+)", p.name)])
     return None
+
+
+def _philosopher_name(name: str) -> bool:
+    """`philosopher-v5.1.10.exe` on Windows; `philosopher-v5.1.10`, `philosopher` or a `.py` stand-in elsewhere."""
+    n = name.lower()
+    if not n.startswith("philosopher"):
+        return False
+    if os.name == "nt":
+        return n.endswith(".exe")
+    return n.endswith(".py") or re.fullmatch(r"philosopher(-v[\d.]+)?", n) is not None
 
 
 def _tool_cmd(exe: Path) -> list[str]:

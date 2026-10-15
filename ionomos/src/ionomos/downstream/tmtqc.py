@@ -119,7 +119,8 @@ def psm_files(workdir: Path) -> list[Path]:
     """FragPipe's psm.tsv files: one per <experiment>_<bioreplicate> folder (or the output folder itself)."""
     workdir = Path(workdir)
     out = []
-    for p in [workdir / "psm.tsv", *sorted(workdir.glob("*/psm.tsv"))]:
+    # sorted(Path) compares case-insensitively on Windows and not on Linux: the same order everywhere
+    for p in [workdir / "psm.tsv", *sorted(workdir.glob("*/psm.tsv"), key=lambda q: q.parent.name.lower())]:
         if p.is_file() and "_previous_" not in str(p) and "results" not in p.relative_to(workdir).parts[:1]:
             out.append(p)
     return out
