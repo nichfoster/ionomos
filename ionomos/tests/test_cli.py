@@ -1,3 +1,6 @@
+import os
+from pathlib import Path
+
 from ionomos.cli import main
 from tests.conftest import iso_raws, make_drop
 
@@ -66,3 +69,126 @@ def test_update_outside_checkout(monkeypatch, capsys):
     monkeypatch.setattr(service, "source_checkout", lambda: None)
     assert main(["update"]) == 2
     assert "not running from a git checkout" in capsys.readouterr().err
+
+
+def _fc_table(folder, name="fc.tsv"):
+    rows = ["Gene\tlogFC\tP.Value"] + [f"G{i}\t{2 if i < 5 else 0}\t{0.001 if i < 5 else 0.5}" for i in range(40)]
+    p = folder / name
+    p.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    return p
+
+
+def test_analyze_outside_the_lab_ignores_the_pc_lab_config(lab, tmp_path, monkeypatch, capsys):
+    """#134: a scratch table on a PC with a lab install is analysed with Ionomos' defaults and posts nothing to
+    the lab's attention list, unless --config (or IONOMOS_CONFIG) names the lab config; a table under the lab's
+    users folder is a lab experiment and uses the lab's settings."""
+    import ionomos.cli as cli
+
+    monkeypatch.delenv("IONOMOS_CONFIG", raising=False)
+    monkeypatch.setattr(cli, "default_config_path", lambda: lab["cfg_path"])  # what service finds on the PC
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    table = _fc_table(scratch)
+    assert main(["analyze", str(table), "--quiet", "--no-enrichment"]) == 0
+    out = capsys.readouterr().out
+    assert "settings: Ionomos' defaults" in out and str(lab["cfg_path"]) in out and "--config applies it" in out
+    assert not list((lab["auto"] / "logs").rglob("*.json"))  # nothing in the lab's attention list
+
+    assert main(["--config", str(lab["cfg_path"]), "analyze", str(table), "--quiet", "--no-enrichment"]) == 0
+    out = capsys.readouterr().out
+    assert f"settings: {lab['cfg_path']}" in out and "defaults" not in out.split("\n")[0]
+    assert not list((lab["auto"] / "logs").rglob("*.json"))  # still not a lab experiment
+
+    monkeypatch.setenv("IONOMOS_CONFIG", str(lab["cfg_path"]))
+    assert main(["analyze", str(table), "--quiet", "--no-enrichment"]) == 0
+    assert f"settings: {lab['cfg_path']}" in capsys.readouterr().out
+    monkeypatch.delenv("IONOMOS_CONFIG")
+
+    mine = _fc_table(lab["general"] / "EJQ", "20260901-DIA_EJQ-1.tsv")
+    assert main(["analyze", str(mine), "--quiet", "--no-enrichment"]) == 0
+    assert "(a lab experiment)" in capsys.readouterr().out
+
+
+def test_testbed_init_warns_when_the_folder_leaves_no_room_for_long_paths(tmp_path, monkeypatch, capsys):
+    """#138: a testbed 150 characters deep with Windows long paths off fails its searches on 260+ character
+    paths; init now says so, as stress already did."""
+    import types
+
+    from ionomos import preflight, testbed
+
+    fake = types.SimpleNamespace(**{k: getattr(os, k) for k in dir(os) if not k.startswith("__")})
+    fake.name = "nt"
+    monkeypatch.setattr(testbed, "os", fake)
+    monkeypatch.setattr(preflight, "_long_paths_enabled", lambda: False)
+    deep = Path("C:/" + "d" * 150)
+    note = testbed.path_room_note(deep)
+    assert note and "long paths are off" in note and "past Windows' 260" in note
+    assert testbed.path_room_note(Path("C:/bed")) is None
+    monkeypatch.setattr(preflight, "_long_paths_enabled", lambda: True)
+    assert testbed.path_room_note(deep) is None
+
+
+def test_analyze_normalize_takes_every_value_the_setting_takes(tmp_path, capsys):
+    """#133: the doctor's advice says to set auto or ratio, which --normalize refused."""
+    from ionomos.downstream import fpa
+
+    table = _fc_table(tmp_path)
+    for value in fpa.NORMALIZATION_METHODS:
+        assert main(["analyze", str(table), "--quiet", "--no-enrichment", "--normalize", value]) == 0, value
+    assert set(fpa.NORMALIZATION_METHODS) == {"auto", "median", "gn", "ratio", "none"}
+    capsys.readouterr()
+
+
+def test_check_folder_on_a_table_checks_that_file_and_a_folder_of_tables_names_the_others(tmp_path, capsys):
+    """#141: check-folder on a table file checked its parent folder and recommended a different command; a
+    folder with several tables silently analysed one of them."""
+    two = tmp_path / "twotables"
+    two.mkdir()
+    a = _fc_table(two, "a_small.tsv")
+    _fc_table(two, "b_main.tsv")
+    quote = chr(34)
+    assert main(["check-folder", str(a)]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith(f"Table: {a}") and "a results table" in out
+    assert f"ready: ionomos analyze {quote}{a}{quote}" in out
+    assert str(two / "a_small_ionomos" / "results") in out and "b_main" not in out
+    assert main(["check-folder", str(two)]) == 0
+    out = capsys.readouterr().out
+    assert "Also here: " in out and "(name the file to analyse it instead)" in out and "_small" in out or "_main" in out
+    assert main(["analyze", str(two), "--quiet", "--no-enrichment"]) == 0
+    out = capsys.readouterr().out
+    assert "also here:" in out and "Name the file to analyse it instead" in out
+    bad = tmp_path / "bad.tsv"
+    bad.write_text("just\tsome\ntext\there\n", encoding="utf-8")
+    assert main(["check-folder", str(bad)]) == 1
+    assert "Ionomos recognises" in capsys.readouterr().out
+
+
+def test_dry_run_does_not_promise_a_window_when_the_gui_is_off(lab, tmp_path, capsys):
+    """#143: with gui.enabled false the watcher rejects with a note; dry-run said a window would open."""
+    import yaml
+
+    bad = make_drop(lab["inbox"], "nobody_isoDTB", ["S_1_1.raw"])
+    assert main(["--config", str(lab["cfg_path"]), "dry-run", str(bad)]) == 1
+    assert "the resolver window would open" in capsys.readouterr().out
+    d = dict(lab["cfg_dict"])
+    d["gui"] = {"enabled": False}
+    off = tmp_path / "off.yaml"
+    off.write_text(yaml.safe_dump(d), encoding="utf-8")
+    assert main(["--config", str(off), "dry-run", str(bad)]) == 1
+    out = capsys.readouterr().out
+    assert "gui.enabled is off" in out and "would open" not in out
+
+
+def test_fold_change_only_and_unusable_tables_say_so_and_exit_1(tmp_path, capsys):
+    """#143: 1 vs 1 sample printed '34 up, 34 down of 0 tested'; an unusable table exited 0."""
+    rows = ["Gene\tDMSO_1\tDrug_1"] + [f"G{i}\t{1000 + i}\t{(1000 + i) * (8 if i < 5 else 1)}" for i in range(40)]
+    one = tmp_path / "one.tsv"
+    one.write_text(chr(10).join(rows) + chr(10), encoding="utf-8")
+    assert main(["analyze", str(one), "--quiet", "--no-enrichment"]) == 0
+    out = capsys.readouterr().out
+    assert "of 0 tested" not in out and "by fold change alone" in out and "[FOLD CHANGE ONLY]" in out
+    empty = tmp_path / "empty.tsv"
+    empty.write_text("a\tb" + chr(10), encoding="utf-8")
+    assert main(["analyze", str(empty), "--quiet", "--no-enrichment"]) == 1
+    assert "[error]" in capsys.readouterr().out

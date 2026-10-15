@@ -486,9 +486,27 @@ def load(path: str | Path) -> QuantMatrix:
 
 def find_table(folder: str | Path) -> Path | None:
     """The most promising table under folder (3 levels deep, results/ and old runs skipped): one with results
-    beats one with quantities; more rows win."""
+    beats one with quantities; more rows win. candidate_tables() lists the others too (#141)."""
+    found = candidate_tables(folder)
+    return found[0][0] if found else None
+
+
+def others_note(folder: str | Path, found: list[tuple[Path, str, int]]) -> str | None:
+    """What to say when a folder holds more than one usable table (#141): which was read, which were not."""
+    if len(found) < 2:
+        return None
     folder = Path(folder)
-    best, best_key = None, None
+    rest = ", ".join(p.relative_to(folder).as_posix() for p, _k, _n in found[1:6])
+    more = f" and {len(found) - 6} more" if len(found) > 6 else ""
+    return (f"read {found[0][0].relative_to(folder).as_posix()}; also here: {rest}{more}. Name the file to analyse "
+            "it instead (ionomos analyze <file>, or pick it in the Analysis tab)")
+
+
+def candidate_tables(folder: str | Path) -> list[tuple[Path, str, int]]:
+    """Every table under folder that Ionomos could read, best first: (path, kind, rows); results beat
+    quantities, more rows win."""
+    folder = Path(folder)
+    found: list[tuple[Path, str, int]] = []
     cands = []
     for p in sorted(folder.rglob("*")):
         rel = p.relative_to(folder).parts
@@ -510,7 +528,5 @@ def find_table(folder: str | Path) -> Path | None:
             continue
         if not d["kind"]:
             continue
-        key = (d["kind"] == "differential", d["rows"])
-        if best_key is None or key > best_key:
-            best, best_key = p, key
-    return best
+        found.append((p, d["kind"], d["rows"]))
+    return sorted(found, key=lambda x: (x[1] == "differential", x[2]), reverse=True)

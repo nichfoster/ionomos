@@ -242,17 +242,21 @@ def backup(db_path: str | Path, backup_dir: str | Path, keep: int = 14) -> Path 
     return dest
 
 
-def rebuild_from_status_files(db_path: str | Path, users_root: str | Path) -> tuple[Path | None, int]:
+def rebuild_from_status_files(db_path: str | Path, users_root: str | Path, healthy: bool = False
+                              ) -> tuple[Path | None, int]:
     """Replace a broken ledger: move it aside, re-create jobs from every <user>/<exp>/ionomos.json.
 
     Each experiment folder carries its full intake record, so nothing about
     what was filed is lost with the database. Jobs that were running come
-    back queued. Returns (where the broken file was moved, jobs recovered).
+    back queued. Returns (where the old file was moved, jobs recovered). A
+    `healthy` ledger rebuilt on request (--force) is kept as .before-rebuild-,
+    not .broken- (#143).
     """
     p = Path(db_path)
     moved = None
     if p.exists():
-        moved = p.with_name(f"{p.name}.broken-{datetime.now():%Y%m%d-%H%M%S}")
+        kept_as = "before-rebuild" if healthy else "broken"
+        moved = p.with_name(f"{p.name}.{kept_as}-{datetime.now():%Y%m%d-%H%M%S}")
         p.replace(moved)
         for ext in ("-wal", "-shm", "-journal"):
             side = p.with_name(p.name + ext)

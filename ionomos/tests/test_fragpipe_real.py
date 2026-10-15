@@ -392,6 +392,12 @@ REAL_FAILURES = [
     # issue #2418
     (_failed("IonQuant", "2025-09-03 13:09:16 [ERROR] - There were errors creating indexes : com.univocity.parsers."
                          "common.DataProcessingException: '\u200b' is not a character"), "character in the FASTA"),
+    # #138: a missing file whose path passes 260 characters (long paths off): Java's and Python's words
+    (_failed("Percolator", "java.io.FileNotFoundException: C:\\Users\\" + "x" * 262
+                           + "\\interact.pep.xml (The system cannot find the path specified)"),
+     "longer than Windows allows (260 characters"),
+    (_failed("Percolator", "FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\" + "y" * 262
+                           + "\\interact.pep.xml'"), "longer than Windows allows (260 characters"),
 ]
 
 
@@ -417,6 +423,7 @@ def test_every_explanation_is_exercised_by_a_test():
         "timed out after 240 min (fragpipe.timeout_minutes)",
         "FragPipe wrote more than 2000 MB to its console log; stopped so it can't fill the disk",
         "FragPipe ended by SIGKILL", "FragPipe crashed with an access violation (0xC0000005)",
+        "FragPipe stopped after an error that Ionomos does not recognise",
         "FragPipe's result table combined_modified_peptide_label_quant.tsv ends in the middle of a row (it was cut off)",
         "FragPipe exited 0 without its 'ALL JOBS DONE' line and without any of its result tables: the run did not "
         "finish", "Ionomos hit an unexpected error while running the search: OSError: x",

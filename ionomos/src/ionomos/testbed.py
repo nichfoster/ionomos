@@ -1170,11 +1170,33 @@ def add_parser(sub):
     return p
 
 
+def path_room_note(root: Path) -> str | None:
+    """A note when Windows long paths are off and `root` is so deep that the testbed's own samples would pass
+    260 characters inside their experiment folders (#138); None otherwise (and off Windows)."""
+    from ionomos.preflight import _long_paths_enabled
+    from ionomos.stress import BELOW
+
+    if os.name != "nt" or _long_paths_enabled() is not False:
+        return None
+    longest = max(len(spec["folder"]) for spec in SAMPLES.values())
+    user = max(len(u) for u in USERS)
+    depth = len(str(Path(root).resolve()))
+    need = depth + len("/Fragpipe_General/") + user + 1 + longest + BELOW
+    if need < 260:
+        return None
+    return (f"note: Windows long paths are off and this folder is {depth} characters deep; the longest sample "
+            f"needs about {need}, past Windows' 260. A search of a long-named drop will fail on its paths: put "
+            "the testbed nearer the drive root, e.g. C:/bed.")
+
+
 def main(args) -> int:
     if args.tb_cmd == "init":
         cfg = init(Path(args.dir), args.slow_defaults)
         print((Path(args.dir).resolve() / "README.txt").read_text(encoding="utf-8"))
         print(f"config: {cfg}")
+        note = path_room_note(Path(args.dir))
+        if note:
+            print(note)
         return 0
     if args.tb_cmd == "list":
         w = max(len(n) for n in SAMPLES)
