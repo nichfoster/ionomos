@@ -28,7 +28,7 @@ see below.
 
 | Engine | What Ionomos reads | Quantity used | Filters applied by Ionomos | Version from |
 |---|---|---|---|---|
-| **FragPipe** (run by Ionomos) | isoDTB `combined_modified_peptide_label_quant.tsv`, TMT-Integrator `abundance_*_MD.tsv`, DIA-NN `*pg_matrix.tsv`, IonQuant `combined_protein.tsv` | per method (see WORKFLOWS.md) | none (FragPipe's own FDR) | `log_*.txt`, `fragpipe.workflow` (plus MSFragger / IonQuant / DIA-NN versions and the FASTA) |
+| **FragPipe** (run by Ionomos) | isoDTB `combined_modified_peptide_label_quant.tsv`, TMT-Integrator `abundance_*_MD.tsv` (else `_GN`, `_None`, `ratio_*`; below), DIA-NN `*pg_matrix.tsv`, IonQuant `combined_protein.tsv` | per method (see WORKFLOWS.md) | none (FragPipe's own FDR) | `log_*.txt`, `fragpipe.workflow` (plus MSFragger / IonQuant / DIA-NN versions and the FASTA) |
 | **DIA-NN** standalone | `*pg_matrix.tsv` (preferred), else the long report `report.tsv` (1.x) or `report.parquet` (2.x) | pg_matrix values, or `PG.MaxLFQ` | long report: `Q.Value` ≤ 1% and `PG.Q.Value` ≤ 1% | `*.log.txt` |
 | **MaxQuant** | `combined/txt/proteinGroups.txt` | `LFQ intensity`, else `Intensity`; `Reporter intensity corrected` for TMT | rows marked `+` in Reverse / Potential contaminant / Only identified by site are left out; `CON__` contaminants removed | `parameters.txt`, `mqpar.xml` |
 | **Sage** | `lfq.tsv` (a row per peptide ion, a column per file); `results.sage.tsv` and `results.json` beside it when they are there | proteins summarised per sample by Tukey median polish of the ion intensities; proteins grouped by razor peptides (below) | `q_value` ≤ 1% per peptide; with `results.sage.tsv`, the peptide's best `protein_q` ≤ 1% too; decoys left out | `results.json` (also the FASTA and every search setting) |
@@ -176,6 +176,28 @@ analysis:
   `Norm` channels as MSstatsTMT does it.
 - The report's PCA can be coloured by plex and switched between the values
   before and after IRS.
+
+### FragPipe TMT: what is read (D91)
+
+- **Quantities**: TMT-Integrator's `tmt-report/` in this order
+  (`quant.TMT_TABLES`): `abundance_gene_MD.tsv`, `abundance_protein_MD.tsv`,
+  then the `_GN` and `_None` tables (a workflow set to another normalisation;
+  `_None` is not normalised, so Ionomos' normalisation is the only one), then
+  `ratio_gene_*` / `ratio_protein_*` (log2 ratios to the reference, when no
+  abundance table is there), then any other abundance table. Columns:
+  `Index, NumberPSM, ProteinID` (gene) or `Gene` (protein)`, MaxPepProb,
+  ReferenceIntensity`, then one per sample, named by the annotation file. All
+  of them are ratios to TMT-Integrator's reference (virtual or a reference
+  sample), so IRS is never applied on top. The note in the report says which
+  table was read and why.
+- **Sites**: `abundance_single-site_MD.tsv` with `analysis.phospho: true`
+  (phospho.py, D79); peptide and multi-site tables are not analysed.
+- **QC**: each plex's `psm.tsv` (`Intensity <sample>` reporter columns,
+  `Purity`, `Assigned Modifications`) for the TMT QC (`downstream/tmtqc.py`,
+  WORKFLOWS.md "TMT"): channels, labelling efficiency, precursor purity.
+- **Channel map**: the `annotation.txt` FragPipe used (beside the raw files),
+  else `experiment.yaml` `tmt:`, else what intake read (`ionomos.json`
+  `plan.tmt`).
 
 In MaxQuant, the channel totals over experiments
 (`Reporter intensity corrected 1`, without an experiment name) are left out,

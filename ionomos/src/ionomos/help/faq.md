@@ -448,3 +448,116 @@ The full help opens from the app's **Help** button, or with `ionomos help
 --open` (`ionomos help NO_TABLE` jumps to one topic). It is written in plain
 text files inside Ionomos (`ionomos/src/ionomos/help/`); corrections are
 welcome through **Report a problem…** or on GitHub.
+
+## How do I find my way around the app? {#faq.app}
+
+The app opens on **Today**: what needs you (a failed search, an analysis
+that needs a decision, a folder that couldn't be taken in), whether the
+watcher runs, the setup checklist's one line, and the recent jobs. Select a
+job and press **Open report**, **Open folder** or **Re-run analysis**;
+double-click opens the report. A new install opens on **✓ Setup** instead.
+
+The other tabs, left to right: **✓ Setup** (the checklist), **1 Folders**,
+**2 Users**, **3 Methods**, **4 Advanced** and **5 Run & Test** (setting up,
+mostly once), **Inbox** (what is waiting to be taken in), **6 Jobs** (every
+search, with a Find box), **7 Analysis** ([re-run an
+analysis](#faq.rerun), the lab's defaults, figure style, accuracy checks),
+**8 Notifications** ([messages](#faq.notify)) and **Help**. The app
+remembers its size and the tab you used last.
+
+Keys in the main window:
+
+- **F1**: help for the tab you are on
+- **F5**: refresh the tab you are on
+- **Ctrl+S**: Save
+- **Ctrl+F**: find a job
+- **Ctrl+0**: Today; **Ctrl+1** … **Ctrl+8**: the tab with that number
+- **Ctrl+Tab**, **Ctrl+Shift+Tab**: the next or previous tab
+
+## How do I get or update a FASTA? {#faq.fasta}
+
+FragPipe searches the protein list in a FASTA file. The one the lab uses,
+`2026-01-30-decoys-contam-UP000005640_9606.fasta.fas`, is the human
+proteome from UniProt with decoys (`rev_` entries) and contaminants
+(`contam_` entries) added in FragPipe's Database tab; the date in the name
+is the day it was made.
+
+- **How old is it?** `ionomos fasta release` asks UniProt for its current
+  release and says, for each FASTA in the FASTA folder, whether a newer
+  release came out after the file was made.
+- **A new one:** `ionomos fasta search mouse` finds the proteome's id (like
+  `UP000005640` for human); `ionomos fasta download UP000005640` downloads
+  the reviewed entries, adds decoys and contaminants with FragPipe's own
+  Philosopher (as the Database tab does), and saves the result in the FASTA
+  folder under the same kind of name. Add `--unreviewed` for every UniProt
+  entry, `--isoforms` for isoforms.
+- **A FASTA you already have** (from UniProt, without decoys):
+  `ionomos fasta prepare <file>` writes a new file beside it with decoys and
+  contaminants. A file that already has decoys is refused, because decoys
+  added twice stop the search ([why](#search.hold-decoys)).
+
+Nothing is overwritten: a name that is taken gets `-2`. A new FASTA changes
+the results, so keep the old file for experiments already searched with it
+and switch at the start of a project, then choose the new file for the
+method (app, tab 3 Methods). Downloads need the internet; UniProt's data is
+free to use (CC BY 4.0).
+
+## How do I find or update a workflow or FASTA? {#faq.library}
+
+In the app, tab **3 Methods**, select the method, then use the panel
+**Workflows and FASTAs on this PC** under the form:
+
+- **Find on this PC…** looks through the workflows and FASTA folders, every
+  FragPipe installation and the users folder (it only reads; **Stop** ends
+  it early) and lists what it found: what each file is in plain words, its
+  marks (✗ must be fixed, ! check it) and why one is recommended for this
+  method. **Use for** the method copies the file into the workflows or
+  FASTA folder (the original stays where it is; a file it replaces is kept
+  as `.bak-<time>`). The list is remembered: the next time it opens at once,
+  and **Rescan** looks again. The drive with the lab's data (`D:/`) is only
+  looked at when it is added under `library: roots:` in config.yaml.
+- **Choose…** beside the workflow or FASTA box opens the same list with only
+  workflows or only FASTAs.
+- The line under the buttons says what the method's FASTA holds (decoys,
+  contaminants, organism, date) and what is wrong with it.
+- **Download from UniProt…** and **Add decoys and contaminants…** make a new
+  FragPipe-ready FASTA in the FASTA folder; **Check for updates** says
+  whether a newer stock workflow or FASTA exists and how old each FASTA is
+  against UniProt, and changes nothing. More on FASTAs:
+  [How do I get or update a FASTA?](#faq.fasta)
+- When a method's workflow or FASTA is missing or broken, a yellow line
+  offers **Review proposals…**: the file Ionomos would use for each such
+  method, with its reasons. Only **Apply** changes anything; config.yaml is
+  backed up first.
+
+Press **Save** after **Use for**, and restart the watcher so new searches
+use the new files. The same is on the command line: `ionomos library scan`,
+`list`, `show`, `recommend`, `adopt`, `check`.
+
+## How do I tell Ionomos which TMT channel is which sample? {#faq.tmt-channels}
+
+When you drop a TMT folder, the window that opens shows **TMT channels**
+under the files: a tab per [plex](#glossary.plex), a row per
+[channel](#glossary.channel). The label type (TMT-10, TMT-16 …) is set from
+the method's workflow; if you pick another, an orange line says the search
+would stop, so pick the kit you used and the workflow that goes with it.
+
+- **Suggest…** (start here): type the conditions (`DMSO, Drug`), how many
+  channels each has (`3`, or `3, 4`) and the pool / bridge channel if there
+  is one (`126`). The grid fills in names like `DMSO_1_127N`.
+- Or type a condition on a row: the name follows. Unused channels are
+  **NA**. A name typed by hand is kept.
+- **Read annotation.txt from the folder** shows the annotation file you
+  made in FragPipe's window (it is never changed).
+- Mark the pooled / bridge channel **reference (bridge, pooled)**: it is
+  used to put the plexes on one scale and is never compared (no
+  "Pool vs DMSO").
+- Red lines under the grid are what FragPipe would stop on (fix them, or
+  **Clear** to decide later); the other lines are worth a look.
+
+**Accept** saves the map in the folder's `experiment.yaml` (`tmt:`). For an
+experiment already searched, the same grid is on the **Analysis** tab:
+**Save choices** keeps the old `experiment.yaml` in `experiment-backups/`;
+the new names are used by the next search (Retry), and the reference
+channel's role at once.
+

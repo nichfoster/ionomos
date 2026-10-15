@@ -181,3 +181,16 @@ RUN_FINGERPRINT_GLOB = "run_fingerprint*.json"
 # Where a simulated `ionomos benchmark` writes when no folder is given: ./ionomos_benchmark on the command line,
 # <log_dir>/ionomos_benchmark from the app (accuracy.default_benchmark_dir, D67).
 BENCHMARK_DIR = "ionomos_benchmark"
+
+# The workflow and FASTA library (library.py, D89): what `ionomos library scan` found on this PC, in log_dir.
+# New after 0.18 (long after the LabWatch rename), so there is no LabWatch-era twin to read.
+LIBRARY_FILE = "library.json"
+
+# TMT QC after a search (downstream/tmtqc.py, D91): results/tmt_qc.json and a table per plex,
+# results/tmt_qc_<plex>.tsv. New after 0.18, so there is no LabWatch-era twin.
+TMT_QC_FILE = "tmt_qc.json"
+TMT_QC_TABLE = "tmt_qc_{plex}.tsv"
+
+# The app's window size and the tab used last (uinav.py, docs/UI.md), next to config.yaml. New after 0.18, so
+# there is no LabWatch-era twin. Only the app reads it; deleting it just resets the window.
+UI_STATE_FILE = "ionomos-ui.json"

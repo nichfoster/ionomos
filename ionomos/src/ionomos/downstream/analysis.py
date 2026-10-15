@@ -55,6 +55,8 @@ experiment.yaml `analysis:` block:
       irs: auto                   # several TMT plexes on one scale (plex.py): auto | reference | sum | none
       tmt_reference: [126]        # IRS reference (pooled / bridge) channel(s) or sample(s); default: the SDRF's
                                   #   pooled rows, else samples named pool / bridge / reference / norm
+      tmt_min_labelling: 0.95     # TMT QC (tmtqc.py, D91): share of PSMs fully labelled below this -> TMT_LOW_LABELLING
+      tmt_min_purity: 0.7         # TMT QC: a plex's median precursor purity below this -> TMT_LOW_PURITY
 
       doses:                      # dose-response curves (doseresponse.py); default: read from the condition names
         DMSO: 0                   #   (Cmpd_10nM, Cmpd_0p1uM, 10 µM); the control is dose 0
@@ -173,6 +175,8 @@ class Settings:
     sdrf_factor: list[str] = field(default_factory=list)  # factor value column(s) of an input SDRF; [] = all, joined
     tmt_reference: list[str] = field(default_factory=list)  # IRS reference channel(s) (126) or sample(s); [] = found
     irs: str = "auto"  # auto | reference | sum | none: put several TMT plexes on one scale
+    tmt_min_labelling: float = 0.95    # TMT QC (tmtqc.py): fully labelled PSMs below this share -> TMT_LOW_LABELLING
+    tmt_min_purity: float = 0.7        # TMT QC: a plex's median precursor purity below this -> TMT_LOW_PURITY
 
     doses: dict[str, str | float] = field(default_factory=dict)  # condition -> dose ("10 nM"); doseresponse.py
     dose_unit: str = ""
@@ -333,8 +337,10 @@ def settings_from(*layers: dict | None) -> Settings:
             try:
                 if k in ("log2fc", "alpha", "impute_shift", "impute_scale", "filter_global_pct", "filter_condition_pct",
                          "dose_alpha", "dose_fc_lim", "liganded_ratio", "phospho_min_localization",
-                         "ksea_networkin_score"):
+                         "ksea_networkin_score", "tmt_min_labelling", "tmt_min_purity"):
                     v = float(v)
+                    if k in ("tmt_min_labelling", "tmt_min_purity") and not 0 <= v <= 1:
+                        raise AnalysisError(f"{k} is a share between 0 and 1 (0.95 = 95 %)")
                 elif k in ("min_valid", "top_labels", "seed", "pca_features", "heatmap_max", "dose_min_doses",
                            "liganded_min_replicates", "time_min_points", "ksea_min_substrates", "string_min_score"):
                     v = int(v)
@@ -682,11 +688,13 @@ def choose_comparisons(m: QuantMatrix, s: Settings) -> tuple[list[tuple[str, str
     design = roles.plan(m, s)  # a competition experiment: the comparisons follow the roles (D61)
     if design.active:
         return list(design.comparisons), notes + design.notes
+    apart = [c for c in roles.kept_apart(design, m) if c != ctrl]  # a pooled / bridge reference: for IRS only
     if ctrl is None:
-        ctrl = sorted(conds)[0]
+        ctrl = sorted([c for c in conds if c not in apart] or conds)[0]
         notes.append(f"no control condition recognised; using {ctrl!r} as control (alphabetically first). "
                      f"Choose it on the Analysis tab or set analysis.control in experiment.yaml.")
-    return [(c, ctrl) for c in conds if c != ctrl], notes
+    notes += [f"Not compared: {c} (a pooled reference, not a treatment)" for c in apart if c != ctrl]
+    return [(c, ctrl) for c in conds if c != ctrl and c not in apart], notes
 
 @dataclass
 class DiffResult:

@@ -42,8 +42,6 @@ from ionomos.manifest import (
     OverridesError,
     fp_manifest_text,
     load_overrides,
-    parse_overrides,
-    tmt_annotation_files,
 )
 from ionomos.naming import NUMBER_WHY, NamingError, number_ok, sanitize
 
@@ -300,35 +298,16 @@ def decoy_problem(props: dict[str, str], fasta: Path) -> str:
     return ""
 
 
-def annotation_problems(per_exp: dict[str, str], label_type: str = "") -> list[str]:
-    """What FragPipe would reject in TMT annotation files ({plex: text}); [] when nothing.
+def annotation_problems(per_exp: dict[str, str], label_type: str = "", ref_tag: str = "", add_ref=None) -> list[str]:
+    """What FragPipe would reject in TMT annotation files ({plex: text}); [] when nothing. The rules live in
+    tmtkit.fragpipe_problems (CmdTmtIntegrator and TmtiPanel.parseTmtAnnotationFile, 24.0): a line is "<channel>
+    <sample>" split on whitespace, so a sample name can't hold a space or be empty (NA leaves a channel out); a file
+    lists as many channels as the workflow's label type (tmtintegrator.channel_num, e.g. TMT-10); a sample name is
+    used once across all plexes; with a reference sample (tmtintegrator.add_Ref=-1) a name contains the ref tag."""
+    from ionomos.tmtkit import annotation_rows, fragpipe_problems
 
-    From TmtiPanel.parseTmtAnnotationFile and CmdTmtIntegrator (24.0): a line is "<channel> <sample>" split on
-    whitespace, so a sample name can't hold a space or be empty (NA leaves a channel out); a file lists as many
-    channels as the workflow's label type (tmtintegrator.channel_num, e.g. TMT-10); a sample name is used once
-    across all plexes."""
-    out: list[str] = []
-    m = re.search(r"-(\d+)$", label_type.strip())
-    want = int(m.group(1)) if m else 0
-    seen: dict[str, str] = {}
-    for exp, text in per_exp.items():
-        rows = [ln.split() for ln in text.splitlines() if ln.strip()]
-        odd = [" ".join(r) for r in rows if len(r) != 2]
-        if odd:
-            out.append(f"plex {exp}: a channel needs one sample name without spaces (NA to leave it out), "
-                       f"got {odd[0]!r}")
-            continue
-        if want and len(rows) != want:
-            out.append(f"plex {exp} lists {len(rows)} channel(s) but the workflow's label type is {label_type} "
-                       f"({want}); list every channel, with NA for the unused ones")
-        for _ch, sample in rows:
-            if sample.upper() == "NA":
-                continue
-            if sample in seen:
-                out.append(f"sample name {sample} is used twice (plex {seen[sample]} and {exp}); FragPipe needs "
-                           f"every name once across all plexes")
-            seen.setdefault(sample, exp)
-    return out
+    rows = {exp: annotation_rows(text) for exp, text in per_exp.items()}
+    return [f.text for f in fragpipe_problems(rows, label_type, ref_tag, add_ref)]
 
 
 # ---------------------------------------------------------------- prepare --
@@ -515,38 +494,19 @@ def prepare(job: Job, cfg: Config) -> RunSpec:
     annotations: dict[str, str] = {}
     kind = cfg.kind(job.method)
     if kind == "TMT":
-        experiments = sorted({line[1] for line in lines})
-        try:
-            ov = parse_overrides({"tmt": overrides["tmt"]}) if overrides.get("tmt") else None
-            per_exp = tmt_annotation_files(ov, experiments) if ov else {}
-        except OverridesError as exc:
-            raise JobError(str(exc)) from exc
-        # FragPipe (TmtiPanel, 23.1 and 24.0) takes a plex's annotation from the one folder that holds all
-        # its files, and only when exactly one file ending in annotation.txt is in it.
-        folders = {exp: {str(Path(line[0]).parent) for line in lines if line[1] == exp} for exp in experiments}
-        own_folder = (all(len(fs) == 1 for fs in folders.values())
-                      and len({f for fs in folders.values() for f in fs}) == len(experiments))
-        if not per_exp:
-            warnings.append("TMT job without a tmt: channel map in experiment.yaml; FragPipe will use its "
-                            "default channel names")
-            if len(experiments) > 1 and not own_folder:
-                warnings.append(shared_plex_warning(len(experiments)))
-        elif own_folder:
-            # each plex's annotation.txt goes in the folder holding its files (the experiment folder, raw/, or
-            # the plex's own <plex>/ subfolder when the drop came laid out that way)
-            def where(exp: str) -> str:
-                folder = Path(next(iter(folders[exp])))
-                return "annotation.txt" if folder == raw_dir else str(folder / "annotation.txt")
+        # tmtkit.plan (D91): FragPipe (TmtiPanel, 23.1 and 24.0) takes a plex's annotation from the one folder that
+        # holds all its files, and only when exactly one file ending in annotation.txt is in it. Each plex's
+        # annotation.txt goes in that folder (the experiment folder, raw/, or the plex's own <plex>/ subfolder);
+        # a person's own file there is read, never written over; a map FragPipe would stop on, or a tag that is
+        # not the workflow's label type, fails the job here, before the search.
+        from ionomos import tmtkit
 
-            annotations = {where(exp): text for exp, text in per_exp.items()}
-        elif len(per_exp) == 1:
-            annotations["annotation.txt"] = next(iter(per_exp.values()))
-        else:
-            warnings.append(shared_plex_warning(len(per_exp)))
-        if annotations:
-            bad = annotation_problems(per_exp, props.get("tmtintegrator.channel_num", ""))
-            if bad:
-                raise JobError("experiment.yaml tmt: " + "; ".join(bad))
+        tp = tmtkit.plan(dest, {"tmt": overrides.get("tmt") or {}}, props, lines, raw_dir, wf.name)
+        if tp.errors():
+            raise JobError(tp.error_text())
+        annotations = tp.annotations
+        warnings += [f.text for f in tp.warnings()]
+        notes += [f"TMT: {f.text}" for f in tp.infos()]
 
     spec = RunSpec(
         job_id=job.id or 0, method=job.method, dest=dest, exe=exe, workflow_src=wf, fasta=fasta,
@@ -564,12 +524,10 @@ def prepare(job: Job, cfg: Config) -> RunSpec:
 
 
 def shared_plex_warning(n: int) -> str:
-    """Several TMT plexes whose raw files sit in one folder (D69). The layout is the lab's choice: Ionomos never
-    moves the files, it says what FragPipe will do."""
-    return (f"{n} TMT plexes share one folder: FragPipe reads one annotation file per folder, so Ionomos writes "
-            f"none and FragPipe will name the channels <plex>_<channel> (an annotation.txt of your own there would "
-            f"be used for every plex, and FragPipe stops on the repeated sample names). To get the sample names, "
-            f"drop the experiment with each plex's raw files in a folder of its own (<plex>\\*.raw)")
+    """Several TMT plexes whose raw files sit in one folder (D69): tmtkit.shared_plex_warning."""
+    from ionomos.tmtkit import shared_plex_warning as text
+
+    return text(n)
 
 
 def write_inputs(spec: RunSpec) -> str | None:

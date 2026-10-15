@@ -477,9 +477,11 @@ SIZES = {  # name, width, height, unit, text size (pt) that suits it; a 16:9 Pow
     "col2": ("Journal figure, two columns (180 mm)", 180, 110, "mm", 7), "custom": ("Custom size", 0, 0, "", 0)}
 STATIC_FIGURES = ("volcano", "pca", "heatmap", "correlation", "dose_potency", "dose_curves", "time_patterns",
                   "time_profiles", "liganded_rank", "liganded_selectivity", "run_order",
-                  "kinase_activity")  # report.js STATIC_FIGS; the last eight: sectionfigs.py
+                  "kinase_activity", "tmt_channels", "tmt_labelling",
+                  "tmt_purity")  # report.js STATIC_FIGS; all but the first four: sectionfigs.py
 FIGURE_GROUPS = {"dose": ("dose_potency", "dose_curves"), "time": ("time_patterns", "time_profiles"),
-                 "liganded": ("liganded_rank", "liganded_selectivity")}  # shorthands a config or --figures may use
+                 "liganded": ("liganded_rank", "liganded_selectivity"),
+                 "tmt": ("tmt_channels", "tmt_labelling", "tmt_purity")}  # shorthands a config or --figures may use
 STYLE_DEFAULTS: dict = {
     "size": "slide169", "width": 1280, "height": 720, "unit": "px", "font_pt": 14, "font_family": "Arial",
     "line_scale": 1, "point_scale": 1, "palette": "default", "up": "#e34948", "down": "#2a78d6", "neutral": "#c3c2b7",
@@ -557,7 +559,7 @@ def _style_value(k: str, v):
             if all(n in STATIC_FIGURES for n in names):
                 return list(dict.fromkeys(names))
         raise StyleError(f"export.figures must list any of {', '.join(STATIC_FIGURES)}, or {', '.join(FIGURE_GROUPS)} "
-                         "for both of a section's figures (or all, or [] for none)")
+                         "for all of a section's figures (or all, or [] for none)")
     raise StyleError(f"unknown export setting {k!r}")
 
 

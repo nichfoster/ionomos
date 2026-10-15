@@ -351,6 +351,8 @@ def infer(conditions: list[str], s, sizes: dict[str, int] | None = None, sources
     for name, text in (getattr(s, "roles", None) or {}).items():
         c = _find(name, conditions)
         if c is None:
+            if _quiet_reference(text):
+                continue  # a pooled reference that IRS used and then left out of the data (plex.py, D48)
             plan.notes.append(f"analysis.roles names {name!r}, which is not a condition here "
                               f"(conditions: {', '.join(conditions)})")
             continue
@@ -459,6 +461,13 @@ def infer(conditions: list[str], s, sizes: dict[str, int] | None = None, sources
     return plan
 
 
+def _quiet_reference(text) -> bool:
+    try:
+        return parse_role(text)[0] == "reference"
+    except RoleError:
+        return False
+
+
 def _link(rest: list[str], compounds: list[str], whole=()) -> tuple[str, str]:
     """The compound a competition competes: the one its name contains (the longest such), else the only one."""
     best, score, tie = "", 0, False
@@ -474,6 +483,17 @@ def _link(rest: list[str], compounds: list[str], whole=()) -> tuple[str, str]:
     if len(compounds) == 1 and not tie:
         return compounds[0], "the only compound"
     return "", ""
+
+
+def kept_apart(design: Plan, m) -> list[str]:
+    """The pooled / bridge reference conditions left out of the default comparisons, with or without a competition
+    design and also when analysis.control is set: a reference whose role was given (analysis.roles, which the TMT
+    channel editor writes, or an SDRF) or, in TMT data, read from the name or the tmt: map's reference channel
+    (postprocess.prepare). Such a channel is there to join the plexes (IRS, D48), not a treatment. Other data keep
+    D61's rule (a pool by name alone is left out only of a competition design's comparisons)."""
+    tmt = getattr(m, "exp", "") == "TMT"
+    return [c for c, r in design.roles.items()
+            if r.role == "reference" and (tmt or not str(r.source).startswith("name"))]
 
 
 def plan(m, s) -> Plan:
@@ -525,12 +545,15 @@ def plan(m, s) -> Plan:
             out.skipped.append((k, "no compound to compare it with: only compared with the control" if ctrl
                                 else "no compound and no control to compare it with"))
     explicit = bool(s.control) and ctrl is not None  # analysis.control: every condition is still compared with it
+    apart = kept_apart(out, m)  # a reference given as one (or in TMT data): never a treatment, also with control:
     for c in conds:
         r = out.roles[c]
         if r.role == "background":
             if ctrl:
                 out.skipped.append((f"{c} vs {ctrl}", "a background (negative control): the pull-downs are "
                                                       "compared against it instead"))
+        elif c in apart:
+            out.skipped.append((c, "a pooled reference, not a treatment"))
         elif explicit and c != ctrl:
             add(c, ctrl, "")
         elif r.role == "control" and c != ctrl:

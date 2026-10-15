@@ -18,6 +18,7 @@ decision made once is remembered if the folder is re-dropped.
       channels: {126: DMSO_126, 127N: DMSO_127N, ...}     # one plex
       # or, several plexes:  plexes: {plex1: {channels: {...}}, plex2: {...}}
       reference_channel: 126         # the pooled / bridge channel for IRS across plexes (= analysis.tmt_reference)
+      # tag: TMT-6 | TMT-10 | TMT-11 | TMT-16 | TMT-18 (tmtkit.LABEL_TYPES); a plex in plexes: may set its own reference:
     notes: free text
 """
 from __future__ import annotations
@@ -67,6 +68,9 @@ class Overrides:
     notes: str | None = None
     resolved_by: str | None = None  # "gui" when a human set these
     analysis: dict = field(default_factory=dict)  # per-experiment analysis settings (comparisons, control, ...)
+    # a window's TMT channel editor showed the whole map (tmt_editor.py): save_overrides writes ov.tmt as the whole
+    # tmt: block, and {} removes it. Not written to the file; False = an existing tmt: is kept unless ov.tmt is set
+    tmt_set: bool = field(default=False, compare=False)
 
     def is_empty(self) -> bool:
         return not any([self.method, self.user, self.date, self.workflow, self.fasta,
@@ -187,15 +191,11 @@ def parse_overrides(data: dict | None) -> Overrides:
 
     tmt = data.get("tmt") or {}
     if tmt:
-        if not isinstance(tmt, dict):
-            raise OverridesError("tmt: must be a mapping")
-        plexes = tmt.get("plexes") or ({"default": tmt} if tmt.get("channels") else {})
-        if not plexes and tmt.get("reference_channel") in (None, ""):
-            raise OverridesError("tmt: needs either channels: {...} or plexes: {name: {channels: {...}}}")
-        for plex, spec in plexes.items():
-            ch = (spec or {}).get("channels")
-            if not isinstance(ch, dict) or not ch:
-                raise OverridesError(f"tmt: plex {plex!r} needs a non-empty channels mapping")
+        from ionomos.tmtkit import check_block  # the label types and the map rules live there (D91)
+
+        problems = check_block(tmt)
+        if problems:
+            raise OverridesError("; ".join(problems))
         ov.tmt = tmt
     return ov
 
@@ -249,6 +249,8 @@ def overrides_text(folder: Path, ov: Overrides, replace_analysis: bool = False, 
             merged.pop("analysis", None)
     elif isinstance(existing.get("analysis"), dict) and ov.analysis:  # a new control keeps saved comparisons
         merged["analysis"] = {**existing["analysis"], **ov.analysis}
+    if ov.tmt_set and not ov.tmt:  # the channel editor was cleared: its answer is "no map"
+        merged.pop("tmt", None)
     header = "# Written by ionomos. Edit freely; keys are documented in docs/NAMING_CONVENTION.md\n"
     return header + yaml.safe_dump(merged, sort_keys=False, allow_unicode=True)
 
@@ -347,17 +349,10 @@ def tmt_annotation_files(ov: Overrides, experiments: list[str]) -> dict[str, str
     `tmt.plexes` must name each experiment. Content is FragPipe's
     '<channel>\\t<sample>' per line.
     """
-    tmt = ov.tmt or {}
-    if not tmt or not (tmt.get("plexes") or tmt.get("channels")):  # e.g. only reference_channel: no annotation
-        return {}
-    if "plexes" in tmt:
-        plexes = tmt["plexes"]
-        missing = set(experiments) - set(plexes)
-        if missing:
-            raise OverridesError(f"tmt.plexes has no entry for experiment(s): {', '.join(sorted(missing))}")
-        return {exp: _annot(plexes[exp]["channels"]) for exp in experiments}
-    return {exp: _annot(tmt["channels"]) for exp in experiments}
+    from ionomos.tmtkit import TmtError, annotation_text, maps_from_block
 
-
-def _annot(channels: dict) -> str:
-    return "".join(f"{ch}\t{name}\n" for ch, name in channels.items())
+    try:
+        maps = maps_from_block(ov.tmt or {}, experiments)  # e.g. only reference_channel: no annotation
+    except TmtError as exc:
+        raise OverridesError(str(exc)) from exc
+    return {exp: annotation_text(ch) for exp, ch in maps.items()}

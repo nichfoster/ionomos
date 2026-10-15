@@ -160,8 +160,10 @@ def run(config_path: Path, data: dict | None = None, probe_watcher: bool = True)
             worst = "fail" if any(o is False for o, _ in lines) else ("warn" if any(o is None for o, _ in lines) else "ok")
             status = {"fail": "todo", "warn": "warn", "ok": "ok"}[worst]
             add(Item(f"method:{key}", f"{key}: workflow + FASTA ready", status, "; ".join(t for _, t in lines),
-                     "Tab 3: select the method -> Import workflow… (from a run that worked)." if status != "ok" else "",
+                     "Tab 3: select the method -> Choose… / Find on this PC… (or Import workflow… from a run that "
+                     "worked)." if status != "ok" else "",
                      "open_tab:3" if status != "ok" else None))
+        add(library_item(cfg))
         # 7. disk
         free = health.disk_free_gb(cfg.users_root)
         if free is not None:
@@ -192,6 +194,44 @@ def run(config_path: Path, data: dict | None = None, probe_watcher: bool = True)
                      "" if st == "installed" else "Install the startup task (replaces the LabWatch one).",
                      None if st == "installed" else "install_task"))
     return items
+
+
+def library_item(cfg) -> Item:
+    """'Workflows and FASTAs: N pinned, flags: …' from the last library scan (library.py, D89). Read-only: the
+    saved catalog is judged again in memory; nothing is scanned and no FASTA is read during a check."""
+    from ionomos import library
+
+    title = "Workflows and FASTAs"
+    try:
+        cat = library.load_catalog(cfg)
+        if not cat.scanned_at and not (cat.workflows or cat.fastas):
+            return Item("library", title, "ok", "not looked for on this PC yet (optional)",
+                        "Tab 3 → Find on this PC… lists every workflow and FASTA with what is wrong with it.")
+        ctx = library.context_from(cfg, tools=False)
+        library.judge_catalog(cat, ctx)
+    except Exception as exc:  # noqa: BLE001 - a checklist line must never break the checklist
+        return Item("library", title, "warn", f"the last scan could not be read ({exc})",
+                    "Tab 3 → Find on this PC… → Rescan.", "open_tab:3")
+    pinned = [x for x in (*cat.workflows, *cat.fastas) if x.source == "pinned" and Path(x.path).is_file()]
+    marks = {"error": "✗", "warn": "!"}
+    seen, flags = set(), []
+    for x in sorted(pinned, key=lambda x: x.name.lower()):
+        for f in x.flags:
+            if f.severity in marks and (f.code, x.name) not in seen:
+                seen.add((f.code, x.name))
+                flags.append(f"{marks[f.severity]} {f.code} ({x.name})")
+    errors = any(f.startswith("✗") for f in flags)
+    flags.sort(key=lambda t: not t.startswith("✗"))
+    when = cat.scanned_at.replace("T", " ")[:16]
+    detail = (f"{len(pinned)} pinned, flags: " + ("; ".join(flags[:4]) + (f" … ({len(flags)})" if len(flags) > 4
+                                                                          else "") if flags else "none")
+              + f" (as of the scan of {when})")
+    if not flags:
+        return Item("library", title, "ok", detail)
+    return Item("library", title, "warn", detail,
+                "Tab 3 → Find on this PC…: each mark says what to do; Check for updates for newer files."
+                if not errors else "Tab 3 → Find on this PC… → a ✗ file needs another; Review proposals… picks one.",
+                "open_tab:3")
 
 
 def summary(items: list[Item]) -> str:

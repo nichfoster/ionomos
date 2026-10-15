@@ -135,6 +135,7 @@ class Config:
     notify: dict = field(default_factory=dict)  # messages on done / failed / held (notify.py, D58); {} = off
     assistant: dict = field(default_factory=dict)  # the local assistant (assistant/, D49 / D57); {} = off
     config_python: str = ""  # FragPipe's --config-python (the Python folder); "" = what FragPipe remembers (D59)
+    library: dict = field(default_factory=dict)  # where `ionomos library scan` looks (library.py, D89); {} = defaults
 
     @property
     def method_aliases(self) -> dict[str, list[str]]:
@@ -326,6 +327,7 @@ def load(path: str | Path, check_paths: bool = True) -> Config:
         qc_trend=_qc_trend(raw.get("qc_trend")),
         notify=_notify(raw.get("notify")),
         assistant=_assistant(raw.get("assistant")),
+        library=_library(raw.get("library")),
         user_ignore=tuple(str(x) for x in (users.get("ignore") if users.get("ignore") is not None else DEFAULT_USER_IGNORE)),
     )
 
@@ -427,6 +429,16 @@ def _assistant(raw) -> dict:
         return settings_from(raw)
     except AssistantError as exc:
         raise ConfigError(f"assistant.{exc}" if not str(exc).startswith("must") else f"assistant: {exc}") from None
+
+
+def _library(raw) -> dict:
+    """library: section (where the workflow / FASTA library looks, D89), validated by the module that uses it."""
+    from ionomos.library import LibraryError, settings_from
+
+    try:
+        return settings_from(raw)
+    except LibraryError as exc:
+        raise ConfigError(f"library.{exc}" if not str(exc).startswith("must") else f"library: {exc}") from None
 
 
 def _read_learned(path: Path, strict: bool = False) -> dict[str, list[str]]:

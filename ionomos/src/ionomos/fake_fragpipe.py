@@ -14,6 +14,9 @@ FragPipe's issue tracker):
     ERROR lines ("<time> ERROR - text")     logback.xml
     output folder names                     CmdIonquant, CmdTmtIntegrator (tmt-report), CmdDiann (dia-quant-output)
     sdrf.tsv, experiment_annotation.tsv     SDRFtable, ToolingUtils
+    TMT label types, the reference check    QuantLabel, CmdTmtIntegrator (tmtkit.LABEL_TYPES is the one source)
+    TMT psm.tsv reporter columns            TMT-Integrator's PsmPreProcessor ("Intensity <sample>", "Intensity NA")
+    tmt-report/ file names and columns      FragPipe's output guide ([abundance|ratio]_[level]_[norm].tsv)
 
 What is invented: the tools' own chatter between a step's start and end line (a few typical lines each), the
 result tables (ionomos.downstream.simulate, with planted hits) and every number. Nothing is searched.
@@ -37,6 +40,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+from ionomos.tmtkit import LABEL_TYPES
+
 VERSION = "24.0"
 BUILD = "24.0-build27"
 # name -> version, in the order of FragpipeRun.createVersionsString (the PC's tool versions where known)
@@ -50,11 +55,8 @@ TOOL_VERSIONS = (
 SYSTEM_LINES = ("System OS: Windows 11, Architecture: AMD64",
                 "Java Info: 17.0.10, OpenJDK 64-Bit Server VM, Eclipse Adoptium",
                 ".NET Core Info: N/A")
-TMT_CHANNELS = {"TMT-6": ("126", "127", "128", "129", "130", "131"),
-                "TMT-10": ("126", "127N", "127C", "128N", "128C", "129N", "129C", "130N", "130C", "131N"),
-                "TMT-11": ("126", "127N", "127C", "128N", "128C", "129N", "129C", "130N", "130C", "131N", "131C"),
-                "TMT-16": ("126", "127N", "127C", "128N", "128C", "129N", "129C", "130N", "130C", "131N", "131C",
-                           "132N", "132C", "133N", "133C", "134N")}
+# the label types' channels in FragPipe's order (QuantLabel.java): tmtkit.LABEL_TYPES is the one source (D91)
+TMT_CHANNELS = {name: lt.channels for name, lt in LABEL_TYPES.items()}
 
 # IONOMOS_FAKE_FP_MODE -> what it acts out
 MODES = {
@@ -84,6 +86,10 @@ MODES = {
     "truncated-table": "a complete run whose main result table stops in the middle of a row",
     "missing-table": "a complete run that writes no main result table",
     "truncated-psm": "a complete run whose psm.tsv files stop in the middle of a row",
+    # D91: what the TMT QC (downstream/tmtqc.py) must catch, in the psm.tsv files of a complete run
+    "tmt-poor-labelling": "a TMT run whose psm.tsv has 20 % of peptide N-termini without TMT",
+    "tmt-low-purity": "a TMT run whose psm.tsv precursor purity is around 0.55",
+    "tmt-empty-channel": "a TMT run whose second named channel has almost no reporter signal",
 }
 
 
@@ -339,6 +345,12 @@ def fake_fragpipe(argv: list[str]) -> int:
                            "all experiments.")
                     return 1
                 seen.add(sample)
+            ref_tag = props.get("tmtintegrator.ref_tag", "")
+            if props.get("tmtintegrator.add_Ref", "").strip() == "-1" and not any(ref_tag in s for _c, s in rows):
+                _error(f"Found annotation files without reference channel\nspecified:\n{found}\n\nOne sample name in "
+                       f"each annotation file must start with\nthe reference tag you set. You can change that in Quant "
+                       f"tab, [Ref Sample Tag] text field.")
+                return 1
 
     # ---- what would run ------------------------------------------------------------------------------------------
     java = r"C:\FragPipe\FragPipe-24.0\jre\bin\java.exe" if os.name == "nt" else "/opt/fragpipe/jre/bin/java"
@@ -597,7 +609,7 @@ def fake_fragpipe(argv: list[str]) -> int:
         runtimes[name] = runtimes.get(name, 0.0) + (time.monotonic() - t0) / 60
 
     # ---- the files a run leaves ------------------------------------------------------------------------------------
-    _write_outputs(wd, files, groups, gdirs, props, annotations, label, run_tmt, flat, Path(a["workflow"]).name)
+    _write_outputs(wd, files, groups, gdirs, props, annotations, label, run_tmt, flat, Path(a["workflow"]).name, modes)
     _spoil_tables(wd, modes)
 
     _citations()
@@ -680,7 +692,7 @@ def _save_log(wd: Path) -> None:
 
 
 def _write_outputs(wd: Path, files, groups, gdirs, props, annotations, label: str, run_tmt: bool, flat: bool,
-                   workflow_name: str) -> None:
+                   workflow_name: str, modes: set[str] | None = None) -> None:
     from ionomos import testbed
 
     # intermediate files a search leaves beside its tables (names as in FragPipe's output documentation)
@@ -702,7 +714,8 @@ def _write_outputs(wd: Path, files, groups, gdirs, props, annotations, label: st
         (wd / "modmasses_ionquant.txt").write_text("15.9949\n42.0106\n", encoding="utf-8")
 
     rows = [[str(p), e, r or "1", t] for p, e, r, t in files]  # as the manifest FragPipe read
-    testbed._fake_results(wd, rows, workflow_name, annotations=annotations if run_tmt else None, label=label)
+    testbed._fake_results(wd, rows, workflow_name, annotations=annotations if run_tmt else None, label=label,
+                          props=props, modes=modes)
 
     # experiment_annotation.tsv (ToolingUtils): the sample sheet FragPipe-Analyst reads
     if run_tmt:

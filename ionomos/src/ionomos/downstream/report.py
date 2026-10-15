@@ -22,6 +22,8 @@ The page carries its data as JSON and draws everything in the browser
                    feature's profile over its replicates
     Liganded sites (isoDTB) per compound the liganded fraction and a ratio rank plot; a site x compound table of
                    competition ratios with the call, selectivity and, with a site annotation, known / new
+    TMT plexes     (a FragPipe TMT search, tmtqc.py, D91) per plex the reporter intensity of each channel, the
+                   labelling efficiency (N-termini, K, fully labelled) and the precursor purity, against their limits
     QC             sample scorecard, PCA (with what explains each PC), correlation, missing values, missingness
                    against intensity, distributions, CV, mean-variance, abundance rank, identifications,
                    imputation, power (minimum detectable fold change against replicates), search quality per
@@ -109,6 +111,8 @@ def payload(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: li
         d["qc"]["psm"] = psm
     if ctx.get("run_order"):  # each sample's QC against the order of acquisition (runorder.py, D78)
         d["qc"]["run"] = ctx["run_order"]
+    if ctx.get("tmt_qc"):  # TMT plexes and channels (tmtqc.py, D91): shown even when there are no quantities
+        d["tmtqc"] = ctx["tmt_qc"]
     if pm is None:
         return d
     d["f"] = {"id": [f.id for f in pm.features], "label": [f.label for f in pm.features],
@@ -570,6 +574,28 @@ def _phos_methods(phos: dict) -> str:
     return " ".join(out)
 
 
+def _tmt_methods(t: dict) -> str:
+    """Methods: the TMT QC (tmtqc.py, D91) in one paragraph."""
+    w, lab, lim = t.get("workflow") or {}, t.get("labelling") or {}, t.get("limits") or {}
+    parts = [f"TMT QC: {len(t.get('plexes') or [])} plex(es) read from FragPipe's psm.tsv files"
+             + (f" ({escape(str(w['label']))}" + (f", reporter ions from {escape(str(w['quant']))}" if w.get("quant")
+                                                  else "") + ")" if w.get("label") else "") + "."]
+    if lab.get("full") is not None:
+        parts.append(f"{100 * lab['full']:.1f} % of {lab.get('psms', 0):,} PSMs were fully labelled (peptide "
+                     f"N-terminus, acetylated or pyro-Glu N-termini excepted, and every K"
+                     + ("; TMT on K is a fixed modification in the workflow, so only the N-terminus is measured"
+                        if lab.get("k_fixed") else "") + f"); the limit is {100 * lim.get('min_labelling', 0.95):g} %.")
+    pur = t.get("purity") or {}
+    if pur.get("median") is not None:
+        parts.append(f"The median precursor purity was {pur['median']:.2f} (limit {lim.get('min_purity', 0.7):g})"
+                     + (f"; {100 * pur['below_min']:.1f} % of PSMs were below TMT-Integrator's min purity "
+                        f"{pur['min_purity']:g} and left out by it" if pur.get("below_min") is not None
+                        and pur.get("min_purity") is not None else "") + ".")
+    parts.append("Each channel's reporter intensity is summarised as log2 quantiles over the PSMs with signal, and "
+                 "as its median log2 ratio to each PSM's median over the named channels.")
+    return " ".join(parts)
+
+
 def _pipeline(p: fpa.Processed | None, diffs: list[DiffResult]) -> str:
     if p is None:
         return ""
@@ -687,6 +713,7 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
     spec_shown = bool(ctx.get("specific"))
     phos_shown = bool(phos and (phos.get("ran") or (phos.get("ksea") or {}).get("ran") is not None
                                 or (phos.get("string") or {}).get("ran") is not None))
+    tmt_shown = bool(ctx.get("tmt_qc"))
     b = [f"<main><div class='top'><div><h1>{escape(title)}</h1><div class='meta'>{escape(meta)}</div></div>"
          "<div><span id='slidesmsg' class='muted' role='status'></span> <button id='theme' title='Light / dark'>◐</button> "
          "<button id='share' title='Copy a link to this view (comparison, cut-offs, search)'>Link</button> "
@@ -702,6 +729,7 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
          + "<a href='#time' id='navtime'" + ("" if time_shown else " hidden") + ">Time course</a>"
          + "<a href='#cys' id='navcys'" + ("" if cys_shown else " hidden") + ">Liganded sites</a>"
          + "<a href='#phos' id='navphos'" + ("" if phos_shown else " hidden") + ">" + _phos_title(phos) + "</a>"
+         + "<a href='#tmt' id='navtmt'" + ("" if tmt_shown else " hidden") + ">TMT plexes</a>"
          + "<a href='#quality'>Quality control</a>"
          "<a href='#methods'>Methods</a><a href='#files'>Files</a><a href='#help'>Help</a></nav>",
          "<noscript><div class='notes'>This report draws its charts with JavaScript. The volcano_*.svg and *.tsv "
@@ -826,6 +854,12 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
              "substrates move together (KSEA: a z-score from the substrates' fold changes, not a measurement of the "
              "kinase), and which hits are known to interact (STRING). The kinase-substrate table and the network "
              "are the lab's downloads.</p><div id='phosbody'></div></section>")
+    b.append("<section id='tmt'" + ("" if tmt_shown else " hidden") + "><h2>TMT plexes and channels</h2>"
+             "<p class='sub'>What the search saw in each plex before any statistics: each channel's reporter "
+             "intensity (a named channel with almost no signal is a wrong map or a failed sample; a bridge "
+             "channel sits near the others), how completely the peptides were labelled, and how pure the "
+             "precursors were (impure ones compress ratios toward 1). From FragPipe's psm.tsv files.</p>"
+             "<div id='tmtbody'></div></section>")
     b.append("<section id='quality'><h2>Quality control</h2><div id='qc'></div></section>")
     method = ctx.get("method", "")
     text = methods_text(pm, p, diffs, s, method, ctx.get("fragpipe", ""), enrichment, ranked, ctx.get("engine"),
@@ -839,6 +873,8 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
         b.append(f"<p class='methods'>{_cys_methods(cys)}</p>")
     if phos_shown:
         b.append(f"<p class='methods'>{_phos_methods(phos)}</p>")
+    if tmt_shown:
+        b.append(f"<p class='methods'>{_tmt_methods(ctx['tmt_qc'])}</p>")
     b.append(_provenance_table(ctx.get("engine") or {}))
     b.append("<h3>Settings used</h3>" + _settings_table(s, p, ctx.get("model"), ctx.get("roles")))
     if any(f.startswith("fragpipe-analyst/") for f in files):

@@ -97,6 +97,59 @@ Tandem mass tags: up to 18 samples are labelled with different tags, mixed and
 measured together in one run (a plex). Each sample is a "channel". Values are
 compared within the plex.
 
+## Channel {#glossary.channel}
+
+One TMT tag, named by its reporter ion's mass: `126`, `127N`, `127C`, ….
+Each sample of a [plex](#glossary.plex) is labelled with one channel; unused
+channels are `NA` in the channel map. Sample names keep their channel
+(`DMSO_1_126`), as the SOP asks.
+
+## Plex {#glossary.plex}
+
+The samples labelled with one TMT kit and mixed into one tube, measured
+together (often as several fractions). In FragPipe a plex is one
+*experiment*; its raw files go in a folder of their own when there are
+several plexes.
+
+## Label type {#glossary.label-type}
+
+Which TMT kit was used, as FragPipe names it: TMT-6, TMT-10, TMT-11,
+TMT-16 or TMT-18 (the last two are TMTpro). The workflow's label type
+(`tmtintegrator.channel_num`) and the channel map must agree.
+
+## Reference or bridge channel {#glossary.bridge}
+
+A channel holding the same pooled sample in every plex. It puts several
+plexes on one scale (IRS), and TMT-Integrator can use it as the reference
+(*Define reference: Reference sample*). Without one, TMT-Integrator uses a
+*virtual* reference: the mean of the channels.
+
+## Labelling efficiency {#glossary.labelling}
+
+The share of peptides that carry the TMT label where they should: on the
+N-terminus and on every lysine (K). Unlabelled peptides have no reporter
+ions. The TMT QC counts it from the search's `psm.tsv`; above 95 % is good.
+
+## Precursor purity {#glossary.purity}
+
+How much of the ion signal isolated for fragmentation was the identified
+peptide (FragPipe's `Purity`, 0 to 1). Other peptides isolated with it add
+their reporter ions ([interference](#glossary.ratio-compression)).
+
+## Ratio compression {#glossary.ratio-compression}
+
+Interference from co-isolated peptides adds the same reporter signal to every
+channel, which pulls TMT ratios toward 1: real fold changes look smaller.
+Low [purity](#glossary.purity) and quantification from MS2 make it worse.
+
+## MS2 and MS3 quantification {#glossary.ms3}
+
+Where the reporter ions are read. MS2: in the same spectrum used to identify
+the peptide (faster, more interference). MS3 (SPS-MS3 on the Eclipse):
+after a second isolation of fragments, which removes most interference. The
+workflow says which (`tmtintegrator.quant_level` 2 or 3; the lab's TMT10-MS3
+workflow uses MS3).
+
 ## isoDTB {#glossary.isodtb}
 
 Isotopically labelled desthiobiotin tags that label reactive cysteines. Two

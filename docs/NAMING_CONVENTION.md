@@ -410,11 +410,11 @@ allow_uneven_fractions: true   # accept reps with different fraction sets
 files:                      # per-file overrides; numbers 1–999 (fraction: -1 = single-shot)
   KL6159A_1_1.raw: {experiment: plex1, bioreplicate: 1, fraction: 1}
 
-tmt:                        # TMT only; one block per plex (= experiment name). FragPipe and Sage TMT both use it
-  tag: TMT-10
+tmt:                        # TMT only: the channel map (every key below, under "The tmt: block")
+  tag: TMT-10               # the kit; must be the workflow's label type
   channels:                 # channel → sample name as condition_plex_channel: the lab's
     126:  DMSO_1_126        #   annotation script (and the report's conditions) key on it
-    127N: DMSO_1_127N
+    127N: DMSO_1_127N       #   ... every channel of the kit, NA for the unused ones
     127C: Drug_1_127C
   reference_channel: 126    # the pooled / bridge channel that joins several plexes (IRS; = analysis.tmt_reference)
 
@@ -470,6 +470,71 @@ covariate. A design that can't be used (a block equal to the condition, a
 sample without a value, more parameters than samples) is explained in a
 pop-up and the comparisons use the plain `~0 + condition` model. With three or
 more conditions every report also has a moderated F-test ("any change").
+
+### The `tmt:` block
+
+Which sample is on which TMT channel (D91, `tmtkit.py`; how it reaches
+FragPipe: [WORKFLOWS.md](WORKFLOWS.md), "TMT"). FragPipe and Sage TMT both use
+it. Instead of it, a FragPipe `annotation.txt` of your own beside each plex's
+raw files works too (Ionomos reads it and never changes it; it wins over this
+block).
+
+| Key | What | |
+|---|---|---|
+| `tag` | the kit: `TMT-6`, `TMT-10`, `TMT-11`, `TMT-16` (TMTpro), `TMT-18` (also `TMT10`, `TMTpro`, `TMTpro-18`) | must be the workflow's label type (`tmtintegrator.channel_num`), or the job fails before the search saying which to change; optional (the workflow's is used) |
+| `channels` | `{channel: sample name}` for one plex, or the same names for every plex | **every** channel of the kit, `NA` for an unused one; a name has no spaces and is used once; keep the channel in the name (`DMSO_1_126`); listed in any order (Ionomos writes them in the kit's) |
+| `plexes` | `{plex: {channels: {...}, reference: 126}}`, the plex being its folder (`<plex>\*.raw`) or its file name before `_TMT_F<n>` | every plex of the drop needs an entry; names unique across plexes (`DMSO_1_126`, `DMSO_2_126`) |
+| `reference_channel` | the bridge / pool channel (or sample name) in every plex; a list for several | joins the plexes (IRS, D48; the same as `analysis.tmt_reference`); a plex's own `reference:` wins |
+
+Names follow `condition_plex_channel`: the condition is one word (the text
+before the first `_`), the plex a number, the channel the reporter. The lab's
+annotation script keeps only `condition_1_channel`; other names still work in
+the report (a note says so). `ionomos tmt suggest` writes the block from a few
+answers; `ionomos tmt plan <folder>` shows what will be used. The **TMT
+channels** grid in the review window and on the Analysis tab (`tmt_editor.py`)
+writes the same block (the reference channel as `reference_channel`, or a
+plex's own `reference:` when the plexes differ) and, for each reference
+channel's condition, `analysis.roles: {Pool: reference}` (never compared).
+
+One plex, TMT-10, six samples and four unused channels:
+
+```yaml
+tmt:
+  tag: TMT-10
+  channels: {126: DMSO_1_126, 127N: DMSO_1_127N, 127C: DMSO_1_127C, 128N: Drug_1_128N, 128C: Drug_1_128C,
+             129N: Drug_1_129N, 129C: NA, 130N: NA, 130C: NA, 131N: NA}
+```
+
+Two plexes in their own folders (`plexA\`, `plexB\`), a pool on 126 in each:
+
+```yaml
+tmt:
+  tag: TMT-10
+  reference_channel: 126
+  plexes:
+    plexA:
+      channels: {126: Pool_1_126, 127N: DMSO_1_127N, 127C: DMSO_1_127C, 128N: DMSO_1_128N, 128C: Drug_1_128C,
+                 129N: Drug_1_129N, 129C: Drug_1_129C, 130N: NA, 130C: NA, 131N: NA}
+    plexB:
+      channels: {126: Pool_2_126, 127N: DMSO_2_127N, 127C: DMSO_2_127C, 128N: DMSO_2_128N, 128C: Drug_2_128C,
+                 129N: Drug_2_129N, 129C: Drug_2_129C, 130N: NA, 130C: NA, 131N: NA}
+```
+
+TMTpro 16 with its own workflow (FragPipe's stock `TMT16`, pinned in the
+workflow folder):
+
+```yaml
+workflow: TMT16.workflow
+tmt:
+  tag: TMT-16
+  channels: {126: DMSO_1_126, 127N: DMSO_1_127N, 127C: DMSO_1_127C, 128N: DMSO_1_128N, 128C: Drug_1_128C,
+             129N: Drug_1_129N, 129C: Drug_1_129C, 130N: Drug_1_130N, 130C: NA, 131N: NA, 131C: NA,
+             132N: NA, 132C: NA, 133N: NA, 133C: NA, 134N: NA}
+```
+
+With the workflow's *Define reference: Reference sample* (`add_Ref=-1`),
+FragPipe also needs a name containing its *Ref sample tag* in every plex
+(`Bridge_1_126` with the tag `Bridge`).
 
 ## What the watcher derives
 

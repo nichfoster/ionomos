@@ -40,6 +40,12 @@ Three layers, all runnable on macOS and Windows:
 | GitHub Actions | the pytest suite and the JS report-harness on Linux **and Windows** on every push; on a version tag also the frozen exe (pipeline + stress) and the **installer**: install, retire a fake LabWatch, upgrade, uninstall, data kept | Actions tab |
 | Migration | an install from the LabWatch era (old status files, run folders, logs, lock, config pointer, env var) keeps working | `tests/test_migration.py` |
 | pip install / demo | `ionomos demo` finds what it planted (hits, on/off proteins, gene sets by both tests), never writes into an existing folder, is reproducible, works offline with no lab config; `demo` and `analyze <table\|folder>` run in a Python where `import tkinter` fails (a subprocess, so nothing Tk can creep into the analysis path); the demo gene sets and the LICENSE copy ship in the package | `tests/test_demo.py`, `tests/test_packaging.py`; the wheel itself: `publish-pypi` workflow (below) |
+| Workflow and FASTA library (D89) | a fake PC built from the 2026-09-15 inventory's real names (paths with spaces, the recycle bin, the 22.0 zip, three FragPipe installations, the UI cache, a junction): workflow kinds, settings and summaries; the content hash grouping identical settings; every flag code (a test fails when one has no help entry or is missing from LIBRARY.md); FASTA counts and decoy-tag detection at any chunk size, CRLF, no final newline, a 1 GB file; the cache; depth, time, stop and exclude limits; recommend ordering and reasons; `auto_assign` leaving working methods alone; adopt (copies, `.bak`, safe names, provenance); `update_check`; config round trip; every CLI subcommand. **Not covered**: the lab PC's real drives | `tests/test_library.py` |
+| FASTA sources (D90) | `urlopen` stubbed: UniProt request URLs and parameters, timeouts, the count check, release parsing; offline, HTTP errors, broken gzip and Stop each give a sentence, no exception, no `.part` left; never overwrite; a FASTA with decoys refused; Philosopher's file name reproduced from the PC's; the reversal quirk; contaminant fallbacks; the output passes `fragpipe.decoy_problem`; a fake Philosopher as a real subprocess (commands, order, its folder removed, fallback to Python); stock-workflow listing in both repo layouts; CLI smoke. **Not covered**: the real network, the Philosopher bundled with FragPipe 24 | `tests/test_fastasource.py` |
+| TMT kit and TMT QC (D91) | label types, name parsing, FragPipe's channel-map rules and every Ionomos flag, a user's own `annotation.txt`, suggestions, the plan for every drop layout (`<plex>\*.raw` too), `tmt:` block checks, the CLI; synthetic `psm.tsv` files for every QC issue code and the degraded paths (no `psm.tsv`, few PSMs), the report section and its exported figures, the analysis-off path. **Not covered**: a real FragPipe 24 `psm.tsv` | `tests/test_tmtkit.py`, `tests/test_tmtqc.py` |
+| Methods tab: Find on this PC, FASTA panel, proposals (D89) | the no-Tk logic (candidate rows, filtering, proposal text, the banner condition, the download dialog's states, the setup item never scanning or reading a FASTA); three hidden-window tests (CI only) | `tests/test_library_tab.py` |
+| TMT channel editor (D91) | the no-Tk state (block ↔ grid, validation pass-through, suggest, read from the folder), the reference role, `configio` round trip of the TMT analysis keys; a hidden-window test (CI only) | `tests/test_tmt_editor.py` |
+| UI navigation (D93) | tab keys, the Today snapshot off the Tk thread, the window state file (lenient read, clamped to the screen), shortcuts; one hidden-window test (CI only) | `tests/test_ui_nav.py` |
 
 ## One-shot setup
 
@@ -131,6 +137,11 @@ init --slow-defaults` uses production timings (10 s / 60 s).
 | `tmt_flat_plexes` | two TMT plexes in one folder: filed as dropped, with a warning that FragPipe names the channels |
 | `fp_cut_table` | the fake leaves its main table cut off mid-row → `failed`, "not written to the end" |
 | `fp_hang` | the fake hangs in MSFragger with a child process → killed with it at the time limit (5 min) |
+| `tmt16_na` | TMTpro 16 (`workflow: TMT16.workflow`): 11 channels named, 5 `NA`; `annotation.txt` in the kit's order (D91) |
+| `tmt_tag_mismatch` | `tag: TMT-16` against the TMT-10 workflow → said at intake, the job fails before FragPipe starts, saying which to change |
+| `tmt_own_annotation` | the user's own `annotation.txt`, no `tmt:` block → read, never written; FragPipe uses it, the report knows the conditions |
+| `tmt_bridge` | two plexes in their own folders with a pool on 126 in each → the TMT QC finds the bridge near the median in both |
+| `tmt_poor_label` | the fake's `tmt-poor-labelling` mode (20 % of N-termini unlabelled) → done, `TMT_LOW_LABELLING` |
 
 After a GUI answer, look at `experiment.yaml` inside the moved folder: that is
 the persisted decision, and the same file can be hand-written by a user to

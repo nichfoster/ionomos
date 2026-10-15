@@ -2648,6 +2648,119 @@
         C.genes.map((g) => "<tr><td>" + esc(g[0]) + "</td><td>" + esc(g[1]) + "</td><td>" + g[2].map((p, k) => esc(p) + " (" + g[3][k] + ")").join(", ") + "</td></tr>").join("") + "</tbody></table>" : "");
   }
 
+  // -------------------------------------------- TMT plexes and channels
+  // D.tmtqc (tmtqc.py report_payload, D91): per plex its channels ch[] = {c: channel, n: sample name, cond, na,
+  // ref, sig: share of PSMs with signal, q: log2 reporter intensity at 5/25/50/75/95 %, rel: median log2 against
+  // the PSM's median over the named channels, flags}, labelling (nterm, k, full, k_fixed) and purity (bins of 0.05,
+  // median, below_min). The numbers are made in Python; sectionfigs.figure_tmt_* draws the same figures for
+  // `ionomos export`.
+  const TM = { p: 0 };
+  const tmPct = (v) => (v == null ? "–" : (100 * v).toFixed(v >= 0.995 || v < 0.1 ? 0 : 1) + " %");
+  const tmTile = (k, v, d) => "<div class='tile'><div class='k'>" + esc(k) + "</div><div class='v'>" + esc(v) + "</div><div class='d'>" + esc(d) + "</div></div>";
+  function tmPlexes() { return (D.tmtqc && D.tmtqc.plexes) || []; }
+  function renderTmt() {
+    const host = $("#tmtbody");
+    if (!host) return;
+    const X = D.tmtqc;
+    if (!X || !((X.plexes || []).length || (X.tables || []).length)) { host.innerHTML = ""; return; }
+    ["#tmt", "#navtmt"].forEach((s) => { const e = $(s); if (e) e.hidden = false; });
+    const P = tmPlexes(), W = X.workflow || {}, L = X.labelling || {}, U = X.purity || {}, lim = X.limits || {};
+    TM.p = Math.min(TM.p, Math.max(0, P.length - 1));
+    const ref = W.add_ref === "-1" ? " · reference sample tagged " + (W.ref_tag || "?") : W.add_ref ? " · virtual reference" : "";
+    let h = "<div class='tiles'>" + tmTile("Label type", W.label || "–", (W.quant ? "reporter ions from " + W.quant : "from the tables") + ref) +
+      tmTile("Plexes", String(P.length), fmtInt(P.reduce((a, p) => a + p.psms, 0)) + " PSMs") +
+      tmTile("Fully labelled", tmPct(L.full), "N-termini " + tmPct(L.nterm) + " · K " + tmPct(L.k) + (L.k_fixed ? " (fixed)" : "") + " · limit " + tmPct(lim.min_labelling)) +
+      tmTile("Precursor purity", U.median != null ? fmt(U.median, 2) : "–", "median · limit " + (lim.min_purity != null ? lim.min_purity : "–") +
+        (U.below_min != null ? " · " + tmPct(U.below_min) + " below " + U.min_purity : "")) + "</div>";
+    if (!P.length) h += "<div class='empty'>" + esc((X.notes || []).join(" ") || "No psm.tsv was found.") + "</div>";
+    else {
+      const p = P[TM.p], tsv = safeName("tmt_qc_" + p.name + ".tsv");
+      h += "<h3>Channels</h3><div class='row'>" + (P.length > 1 ? "<label class='ctl'>Plex <select id='tmplex'>" +
+        P.map((x, k) => "<option value='" + k + "'" + (k === TM.p ? " selected" : "") + ">" + esc(x.name) + "</option>").join("") + "</select></label>" : "") +
+        "<span class='muted'>" + esc(p.name) + ": " + fmtInt(p.psms) + " PSMs; log2 reporter intensity per channel (box 25–75 %, whiskers 5–95 %), grey: unused (NA), outlined: the reference · every number: <a href='" +
+        esc(tsv) + "'>" + esc(tsv) + "</a></span></div><div class='card chart' id='tmch'></div><div id='tmtable'></div>" +
+        "<h3>Labelling</h3><div class='card chart' id='tmlab'></div><h3>Precursor purity</h3><div class='card chart' id='tmpur'></div>";
+    }
+    if ((X.notes || []).length && P.length) h += "<p class='muted'>" + X.notes.map(esc).join("<br>") + "</p>";
+    host.innerHTML = h;
+    const sel = $("#tmplex");
+    if (sel) sel.onchange = (e) => { TM.p = +e.target.value; renderTmt(); };
+    if (P.length) { safe(renderTmtChannels, "#tmch"); safe(renderTmtTable, "#tmtable"); safe(renderTmtLabelling, "#tmlab"); safe(renderTmtPurity, "#tmpur"); }
+  }
+  /** One plex's channels: a box of log2 reporter intensity each (sectionfigs.figure_tmt_channels draws the same). */
+  function renderTmtChannels() {
+    const host = $("#tmch"), p = tmPlexes()[TM.p];
+    if (!host || !p) return;
+    const C = p.ch, W = widthOf(host, 900), H = heightOf(320), Lm = 60, R = 12, T = 18, B = 96;
+    const root = frame(host, W, H), g = svg("g", {}, root);
+    const vals = [];
+    C.forEach((c) => { if (c.q) vals.push(c.q[0], c.q[4]); });
+    if (!vals.length) { text(root, W / 2, H / 2, "No reporter signal in this plex", { "text-anchor": "middle" }); svgTools(host, root, "tmt_channels_" + p.name); return; }
+    let lo = Math.min(...vals), hi = Math.max(...vals);
+    const pad = (hi - lo) * 0.08 || 1;
+    lo -= pad; hi += pad;
+    const bw = (W - Lm - R) / C.length, Y = (v) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+    axes(g, () => 0, Y, [], niceTicks(lo, hi, 6).filter((v) => v >= lo && v <= hi), Lm, R, T, B, W, H, "", "log2 reporter intensity");
+    C.forEach((c, j) => {
+      const x = Lm + bw * j + bw / 2, w = Math.max(4, Math.min(28, bw * 0.55)), col = c.na ? css("--ns") : condColor(c.cond);
+      if (c.q) {
+        svg("line", { x1: x, x2: x, y1: Y(c.q[0]), y2: Y(c.q[4]), stroke: col, "stroke-width": 1.5 }, g);
+        const box = svg("rect", { x: x - w / 2, y: Y(c.q[3]), width: w, height: Math.max(1, Y(c.q[1]) - Y(c.q[3])), fill: col, "fill-opacity": c.na ? 0.35 : 0.85,
+          stroke: c.ref ? css("--text") : "none", "stroke-width": c.ref ? 2 : 0 }, g);
+        title(box, c.c + " " + c.n + ": median log2 " + fmt(c.q[2], 2) + ", signal in " + tmPct(c.sig) + " of PSMs, " + fmt(c.rel, 2) + " log2 from the PSMs' median" + (c.flags.length ? " (" + c.flags.join(", ") + ")" : ""));
+        svg("line", { x1: x - w / 2, x2: x + w / 2, y1: Y(c.q[2]), y2: Y(c.q[2]), stroke: css("--surface"), "stroke-width": 2 }, g);
+      }
+      if (c.flags.length) text(g, x, T - 4, "!", { "text-anchor": "middle", fill: css("--up"), "font-weight": 700 });
+      const t = text(g, 0, 0, (c.c + " " + (c.na ? "NA" : c.n)).slice(0, 24), { "font-size": 10.5, transform: "translate(" + (x + 3) + "," + (H - B + 10) + ") rotate(60)" });
+      t.setAttribute("x", 0);
+    });
+    svgTools(host, root, "tmt_channels_" + p.name);
+  }
+  function renderTmtTable() {
+    const host = $("#tmtable"), p = tmPlexes()[TM.p];
+    if (!host || !p) return;
+    host.innerHTML = "<div class='tablewrap'><table><thead><tr><th>Channel</th><th>Sample</th><th>Condition</th><th>PSMs with signal</th><th>median log2</th><th>log2 vs the PSMs' median</th><th></th></tr></thead><tbody>" +
+      p.ch.map((c) => "<tr" + (c.na ? " class='muted'" : "") + "><td>" + esc(c.c) + "</td><td>" + esc(c.na ? "NA (unused)" : c.n) + (c.ref ? " <span class='badge'>reference</span>" : "") + "</td><td>" + esc(c.cond) + "</td><td class='n'>" +
+        tmPct(c.sig) + "</td><td class='n'>" + fmt(c.q ? c.q[2] : null, 2) + "</td><td class='n'>" + fmt(c.rel, 2) + "</td><td>" + esc(c.flags.join(", ")) + "</td></tr>").join("") + "</tbody></table></div>";
+  }
+  /** Labelling per plex: N-termini, K and fully labelled PSMs against the limit (sectionfigs.figure_tmt_labelling). */
+  function renderTmtLabelling() {
+    const host = $("#tmlab"), P = tmPlexes(), lim = (D.tmtqc.limits || {}).min_labelling;
+    if (!host || !P.length) return;
+    const keys = [["nterm", "N-termini"], ["k", "K"], ["full", "fully labelled PSMs"]], cols = [css("--c0"), css("--c1"), css("--c2")];
+    const W = widthOf(host, 900), H = heightOf(260), Lm = 60, R = 12, T = 14, B = 54, root = frame(host, W, H), g = svg("g", {}, root);
+    const lo = Math.min(0.8, ...P.flatMap((p) => keys.map(([k]) => (p.labelling[k] == null ? 1 : p.labelling[k])))) - 0.02;
+    const Y = (v) => T + (1 - (v - lo) / (1 - lo)) * (H - T - B), gw = (W - Lm - R) / P.length, bw = Math.min(26, (gw * 0.7) / 3);
+    axes(g, () => 0, Y, [], niceTicks(lo, 1, 5).filter((v) => v >= lo && v <= 1), Lm, R, T, B, W, H, "", "share labelled");
+    P.forEach((p, j) => {
+      keys.forEach(([k, lab], i) => {
+        const v = p.labelling[k];
+        if (v == null) return;
+        const x = Lm + gw * j + gw / 2 + (i - 1.5) * bw;
+        title(svg("rect", { x: x, y: Y(v), width: bw * 0.9, height: Math.max(1, H - B - Y(v)), fill: cols[i] }, g), p.name + ", " + lab + ": " + tmPct(v) + (k === "k" && p.labelling.k_fixed ? " (TMT on K is fixed in the workflow)" : ""));
+      });
+      text(g, Lm + gw * j + gw / 2, H - B + 16, String(p.name).slice(0, 24), { "text-anchor": "middle", "font-size": 11 });
+    });
+    if (lim != null && lim > lo) svg("line", { x1: Lm, x2: W - R, y1: Y(lim), y2: Y(lim), stroke: css("--up"), "stroke-dasharray": "5 4" }, g);
+    const lg = svg("g", {}, root);
+    keys.forEach(([, lab], i) => { svg("rect", { x: Lm + i * 170, y: H - 18, width: 10, height: 10, fill: cols[i] }, lg); text(lg, Lm + i * 170 + 14, H - 9, lab, { "font-size": 11 }); });
+    svgTools(host, root, "tmt_labelling");
+  }
+  /** Precursor purity, every plex together, with TMT-Integrator's min purity and Ionomos' limit (sectionfigs.figure_tmt_purity). */
+  function renderTmtPurity() {
+    const host = $("#tmpur"), U = D.tmtqc.purity || {}, lim = D.tmtqc.limits || {};
+    if (!host) return;
+    const bins = U.bins || [];
+    const W = widthOf(host, 900), H = heightOf(240), Lm = 60, R = 12, T = 14, B = 44, root = frame(host, W, H), g = svg("g", {}, root);
+    if (!bins.length) { text(root, W / 2, H / 2, "psm.tsv has no Purity column", { "text-anchor": "middle" }); svgTools(host, root, "tmt_purity"); return; }
+    const top = Math.max(1, ...bins), X = (v) => Lm + v * (W - Lm - R), Y = (v) => T + (1 - v / top) * (H - T - B);
+    axes(g, X, Y, [0, 0.2, 0.4, 0.6, 0.8, 1], niceTicks(0, top, 4).filter((v) => v <= top), Lm, R, T, B, W, H, "precursor purity", "PSMs");
+    bins.forEach((n, k) => title(svg("rect", { x: X(k / bins.length) + 0.5, y: Y(n), width: Math.max(1, X(1 / bins.length) - X(0) - 1), height: H - B - Y(n), fill: css("--c0") }, g), (k / bins.length).toFixed(2) + "–" + ((k + 1) / bins.length).toFixed(2) + ": " + fmtInt(n) + " PSMs"));
+    if (U.min_purity != null) svg("line", { x1: X(U.min_purity), x2: X(U.min_purity), y1: T, y2: H - B, stroke: css("--muted"), "stroke-dasharray": "4 4" }, g);
+    if (lim.min_purity != null) svg("line", { x1: X(lim.min_purity), x2: X(lim.min_purity), y1: T, y2: H - B, stroke: css("--up"), "stroke-dasharray": "5 4" }, g);
+    svgTools(host, root, "tmt_purity");
+  }
+
   // ----------------------------------------------------------------- help
   // Plain-language help from ionomos/help/*.md, rendered to safe HTML in Python (report.py _help_payload):
   // a "?" beside each section title, QC tab and issue opens its entry inline, and the Help section at the
@@ -2657,7 +2770,7 @@
   const HELP_AT = [["#differential > h2", "report.differential"], ["#differential > p.sub", "report.search"],
     ["#differential-body > .bar", "report.cutoffs"], ["#differential-body > h3", "report.phist"],
     ["#differential-body > .tablebar", "report.table"], ["#compare > h2", "report.compare"], ["#specific > h2", "report.specific"], ["#onoff > h2", "report.onoff"],
-    ["#heat > h2", "report.heatmap"], ["#enrichment > h2", "report.enrichment"], ["#dose > h2", "report.dose"], ["#time > h2", "report.time"], ["#cys > h2", "report.cys"], ["#phos > h2", "report.phos"], ["#quality > h2", "report.quality"],
+    ["#heat > h2", "report.heatmap"], ["#enrichment > h2", "report.enrichment"], ["#dose > h2", "report.dose"], ["#time > h2", "report.time"], ["#cys > h2", "report.cys"], ["#phos > h2", "report.phos"], ["#tmt > h2", "report.tmt"], ["#quality > h2", "report.quality"],
     ["#methods > h2", "report.methods"], ["#files > h2", "report.files"]];
   const HELP_H = { "Data source": "report.source", "Settings used": "report.methods", "Sample metadata": "report.sdrf",
     "Cross-check": "report.fpa", "Highlight groups": "report.groups", "Hits": "report.hitfilters", "Plot": "report.plotoptions", "Figures for slides": "report.export" };
@@ -2737,7 +2850,7 @@
   const SIZES = { slide169: ["16:9 slide", 1280, 720, "px", 14], slide43: ["4:3 slide", 960, 720, "px", 14], half: ["Half a slide", 640, 600, "px", 12],
     col1: ["Journal figure, one column (85 mm)", 85, 70, "mm", 7], col2: ["Journal figure, two columns (180 mm)", 180, 110, "mm", 7], custom: ["Custom size", 0, 0, "", 0] };
   // what `figures:` may list (the watcher's static files; charts.STATIC_FIGURES, where the groups dose, time and liganded are also taken)
-  const STATIC_FIGS = ["volcano", "pca", "heatmap", "correlation", "dose_potency", "dose_curves", "time_patterns", "time_profiles", "liganded_rank", "liganded_selectivity", "run_order", "kinase_activity"];
+  const STATIC_FIGS = ["volcano", "pca", "heatmap", "correlation", "dose_potency", "dose_curves", "time_patterns", "time_profiles", "liganded_rank", "liganded_selectivity", "run_order", "kinase_activity", "tmt_channels", "tmt_labelling", "tmt_purity"];
   const TOP_PANELS = 6;  // dose-response curves and time-course features per series in "Export for slides" (sectionfigs.TOP_PANELS)
   const STYLE_DEFAULTS = { size: "slide169", width: 1280, height: 720, unit: "px", font_pt: 14, font_family: "Arial", line_scale: 1, point_scale: 1,
     palette: "default", up: "#e34948", down: "#2a78d6", neutral: "#c3c2b7", background: "light", title: true, subtitle: true, legend: true, note: true,
@@ -2832,7 +2945,8 @@
     ["distributions", "Value distribution per sample", ""], ["cv_", "Coefficient of variation", ""], ["mean_variance", "Mean against variance", ""], ["abundance_rank", "Abundance rank", ""],
     ["identifications", "Identifications per sample", ""], ["imputation", "Measured and imputed values", ""], ["power", "Power", ""], ["search_quality_", "Search quality per run", ""], ["run_order_", "QC against the order of acquisition", ""],
     ["dose_potency_", "Dose-response: potency against effect", ""], ["dose_curve_", "Dose-response curve", ""], ["time_course_", "Time course", ""], ["time_patterns_", "Time-course patterns", ""],
-    ["liganded_rank_", "Liganded sites", ""], ["liganded_selectivity", "Liganded sites across compounds", ""], ["kinase_activity_", "Kinase activity (KSEA)", ""]];
+    ["liganded_rank_", "Liganded sites", ""], ["liganded_selectivity", "Liganded sites across compounds", ""], ["kinase_activity_", "Kinase activity (KSEA)", ""],
+    ["tmt_channels_", "TMT channels: reporter intensity per channel", ""], ["tmt_labelling", "TMT labelling efficiency", ""], ["tmt_purity", "TMT precursor purity", ""]];
   const TEST_NAMES = { limma: "limma moderated t-test", welch: "Welch t-test", student: "Student t-test" };
   /** The cut-offs in plain words: shown beside the plot and written into every exported figure. */
   function cutText(c) {
@@ -2855,6 +2969,7 @@
     else if (/^(values_|dose_curve_|time_course_|time_patterns_|cv_|liganded_rank_|dose_potency_)/.test(name)) detail = name.replace(/^(values|dose_curve|time_course|time_patterns|cv|liganded_rank|dose_potency)_/, "");
     else if (/^run_order_/.test(name) && D.qc.run) detail = ((D.qc.run.metrics || []).find((m) => "run_order_" + m.key === name) || {}).label || "";
     else if (/^kinase_activity_/.test(name) && phosComps()[PH.c]) detail = phosComps()[PH.c].name;
+    else if (/^tmt_channels_/.test(name) && tmPlexes()[TM.p]) detail = "plex " + tmPlexes()[TM.p].name;
     const cuts = cut === "view" ? cutText(c) + (filterText() ? "; " + filterText() : "") : cut === "saved" ? savedCutText() + " (the report's saved cut-offs)" : "";
     return { what: what, cut: cut, cuts: cuts, c: c, detail: clean(detail), title: clean(c ? c.name : what), subtitle: clean((c ? what + " · " : detail ? detail + " · " : "") + D.title) };
   }
@@ -2956,15 +3071,15 @@
   }
   // the report's parts as redraw() draws them: a chart's own part is drawn again for its export
   const STEPS = [["#volcano", renderVolcano], ["#phist", renderPHist], ["#detail", renderDetail], ["#comparebody", renderCompare], ["#enrich", renderEnrichment],
-    ["#dosebody", renderDose], ["#cysbody", renderCys], ["#timebody", renderTime], ["#phosbody", renderPhos], ["#qc", renderQC]];
+    ["#dosebody", renderDose], ["#cysbody", renderCys], ["#timebody", renderTime], ["#phosbody", renderPhos], ["#tmtbody", renderTmt], ["#qc", renderQC]];
   function holdState() {
     return { ci: ST.ci, zoom: ST.zoom, mode: ST.mode, labels: ST.labels, lm: ST.opt.labelMatches, pinned: ST.pinned, focus: ST.focus, qc: qcTab, enr: enrMode, ds: DS.s, df: DS.focus,
       ora: renderORA._st && Object.assign({}, renderORA._st), rank: renderRank._st && Object.assign({}, renderRank._st), psm: qcPsm._st && Object.assign({}, qcPsm._st), run: qcRun._st && Object.assign({}, qcRun._st), pcn: qcPCA._st && qcPCA._st.names,
-      ts: TS.s, tf: TS.focus, cc: CS.c, pc: PH.c, pk: PH.kin };
+      ts: TS.s, tf: TS.focus, cc: CS.c, pc: PH.c, pk: PH.kin, tm: TM.p };
   }
   function restoreState(h) {
     ST.ci = h.ci; ST.zoom = h.zoom; ST.mode = h.mode; ST.labels = h.labels; ST.opt.labelMatches = h.lm; ST.pinned = h.pinned; ST.focus = h.focus; qcTab = h.qc; enrMode = h.enr; DS.s = h.ds; DS.focus = h.df;
-    TS.s = h.ts; TS.focus = h.tf; CS.c = h.cc; PH.c = h.pc; PH.kin = h.pk;
+    TS.s = h.ts; TS.focus = h.tf; CS.c = h.cc; PH.c = h.pc; PH.kin = h.pk; TM.p = h.tm == null ? TM.p : h.tm;
     [[renderORA, h.ora], [renderRank, h.rank], [qcPsm, h.psm], [qcRun, h.run]].forEach(([fn, was]) => { if (was && fn._st) Object.assign(fn._st, was); else if (!was) delete fn._st; });
     if (qcPCA._st && h.pcn != null) qcPCA._st.names = h.pcn;
   }
@@ -3040,6 +3155,9 @@
     if (CY && CY.compounds.length > 1 && CY.nlig.some(Boolean)) add("Liganded sites across compounds", selectivitySvg, "liganded_selectivity");
     // kinase activity (D79): one bar chart per comparison, as `ionomos export` draws it
     phosComps().forEach((c, k) => { if (c.k.length) add("Kinase activity: " + c.name, () => { PH.c = k; PH.kin = null; renderPhos(); }, "kinase_activity_"); });
+    // TMT plexes and channels (D91): a channel chart per plex, the labelling and the purity, as `ionomos export` draws them
+    tmPlexes().forEach((p, k) => add("TMT channels: " + p.name, () => { TM.p = k; renderTmt(); }, "tmt_channels_"));
+    if (tmPlexes().length) { add("TMT labelling", renderTmt, "tmt_labelling"); if (((D.tmtqc.purity || {}).bins || []).length) add("TMT precursor purity", renderTmt, "tmt_purity"); }
     return out;
   }
   /** The largest panels of about this shape for n charts in W x H: [columns, rows, panel width, panel height] (sectionfigs._grid). */
@@ -3658,7 +3776,7 @@
     safe(renderHeatmap, "#heatmap");
     safe(renderEnrichment, "#enrich");
     safe(renderDose, "#dosebody");
-    safe(renderCys, "#cysbody"); safe(renderTime, "#timebody"); safe(renderPhos, "#phosbody");
+    safe(renderCys, "#cysbody"); safe(renderTime, "#timebody"); safe(renderPhos, "#phosbody"); safe(renderTmt, "#tmtbody");
     safe(renderQC, "#qc");
     safe(renderHelp, "#helpbody");
     const xo = $("#xopen"), xz = $("#xzipnow"), sl = $("#slides");
@@ -3681,7 +3799,7 @@
   }
   function redraw() {
     if (D.comps.length) { safe(renderVolcano, "#volcano"); safe(renderPHist, "#phist"); safe(renderDetail, "#detail"); safe(renderCompare, "#comparebody"); safe(renderSpecific, "#specificbody"); }
-    safe(renderHeatmap, "#heatmap"); safe(renderEnrichment, "#enrich"); safe(renderDose, "#dosebody"); safe(renderCys, "#cysbody"); safe(renderTime, "#timebody"); safe(renderPhos, "#phosbody"); safe(renderQC, "#qc");
+    safe(renderHeatmap, "#heatmap"); safe(renderEnrichment, "#enrich"); safe(renderDose, "#dosebody"); safe(renderCys, "#cysbody"); safe(renderTime, "#timebody"); safe(renderPhos, "#phosbody"); safe(renderTmt, "#tmtbody"); safe(renderQC, "#qc");
   }
   let rt = null;
   window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(redraw, 150); });

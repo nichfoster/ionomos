@@ -447,3 +447,65 @@ def test_open_window_picks_up_a_user_added_meanwhile(lab):
     assert not hung  # checked after the window closed; before it opens the list is always empty
     assert filled == [True]
     assert ov is not None and ov.user == "Kosuke"
+
+
+
+# ------------------------------------------------- TMT: the channel editor (D91) --
+
+
+def test_a_tmt_drop_reviewed_with_a_channel_map_is_filed_with_it(lab, ledger):
+    import json
+
+    from ionomos import names
+    from tests.test_resolve import _bridge_block, _tmt_drop
+
+    folder = _tmt_drop(lab, "20260201_Aman_TMT_KL6165-editor")
+    block = _bridge_block().block()
+
+    def answer(d):
+        assert d.tmt_workflows["TMT"]["label"] == "TMT-10"
+        a = Answer(user="Aman", method="TMT", date=d.date, allow_uneven=False, files=d.files, tmt=block,
+                   tmt_errors=[])
+        assert validate(a, d.known_methods, d.kinds) == ""
+        return to_overrides(a, d)
+
+    assert intake(folder, lab["cfg"], ledger, Reviewer(answer)) == IntakeResult.QUEUED
+    filed = lab["general"] / "Aman" / "20260201_Aman_TMT_KL6165-editor"
+    ov = load_overrides(filed)
+    assert ov.tmt == block and ov.analysis == {"roles": {"Pool": "reference"}} and ov.resolved_by == "gui"
+    rec = json.loads(names.status_path(filed).read_text(encoding="utf-8"))
+    assert [p["source"] for p in rec["plan"]["tmt"]["plexes"]] == ["experiment.yaml", "experiment.yaml"]
+    assert rec["plan"]["tmt"]["plexes"][0]["channels"]["126"] == "Pool_1_126"
+
+
+@pytest.mark.skipif(not _ok, reason=f"no GUI: {_why}")
+def test_review_window_shows_the_channel_editor_for_a_tmt_drop(lab):
+    from ionomos.resolve import TkResolver
+    from tests.test_resolve import _bridge_block, _drive_dialog, _tmt_drop
+
+    folder = _tmt_drop(lab, "20260201_Aman_TMT_KL6165-window")
+    d = draft(folder, lab["cfg"], review=True)
+    root = make_tk_root()
+    root.withdraw()
+    seen = {}
+
+    def act(win):
+        frames = [w for w in _widgets(win) if w.winfo_class() == "TLabelframe"
+                  and str(w.cget("text")).startswith("TMT channels")]
+        seen["editors"] = len(frames)
+        texts = [str(w.cget("text")) for w in _widgets(win) if w.winfo_class() == "TLabel"]
+        seen["note"] = next((t for t in texts if t.startswith("TMT: the conditions are the channel names")), "")
+        ed = frames[0].editor
+        seen["start"] = str(ed.suggest_btn.cget("text"))
+        seen["label"] = ed.label_v.get()
+        seen["tabs"] = [ed.book.tab(t, "text") for t in ed.book.tabs()]
+        assert ed.suggest("DMSO, Drug", "3", "126") == ""   # what the Suggest… dialog's button does
+        next(w for w in _widgets(win) if w.winfo_class() == "TButton"
+             and str(w.cget("text")).startswith("Accept")).invoke()
+
+    assert not _drive_dialog(root, act)
+    ov = TkResolver(root).review(d)
+    root.destroy()
+    assert seen["editors"] == 1 and seen["start"] == "Suggest…  (start here)" and seen["label"] == "TMT-10"
+    assert seen["tabs"] == ["plexA", "plexB"] and "never compared" in seen["note"]
+    assert ov is not None and ov.tmt == _bridge_block().block() and ov.analysis == {"roles": {"Pool": "reference"}}
