@@ -73,6 +73,80 @@ def test_channel_keys(ch, key):
     assert tmtkit.channel_key(ch) == key
 
 
+@pytest.mark.parametrize("text", [
+    "tmt:\n  channels:\n    '126': DMSO_1_126\n    '126': Drug_1_126\n",
+    "tmt:\n  channels: {126: DMSO_1_126, '126': Drug_1_126}\n",
+    "tmt:\n  plexes:\n    a:\n      channels: {126: A_1_126, 126: B_1_126}\n",
+])
+def test_a_channel_written_twice_in_experiment_yaml_is_refused(tmp_path, text):
+    """#156: YAML kept the last of two equal keys, so the first name vanished and TMT_CHANNEL_TWICE never fired."""
+    from ionomos.manifest import load_overrides
+
+    (tmp_path / "experiment.yaml").write_text(text, encoding="utf-8")
+    with pytest.raises(OverridesError, match="126 is written twice"):
+        load_overrides(tmp_path)
+
+
+def test_two_spellings_of_one_channel_are_refused():
+    assert tmtkit.check_block({"channels": {"127n": "A_1_127N", "127N": "B_1_127N"}}) == [
+        "tmt: channel 127N is written twice (as '127n', '127N'); list every channel once"]
+    assert tmtkit.repeated_keys("tmt: [unclosed") == [] and tmtkit.repeated_keys("files: {a: 1, a: 2}") == []
+
+
+def test_a_reference_that_is_not_a_channel_of_the_kit_is_said(tmp_path):
+    """#156: reference_channel 135N on TMT-10 gave no flag with one plex and a misleading one with two; a reference
+    on an NA channel of a single plex was taken silently; the plex line still named a pool as the reference."""
+    one = tmtkit.validate({"p": GOOD}, "TMT-10", reference=["135N"])
+    assert _codes(one) == ["TMT_REFERENCE_UNKNOWN"]
+    assert one[0].text.startswith("reference 135N is not a channel of TMT-10 (126, 127N")
+    two = tmtkit.validate({"a": _map(["Pool", "DMSO", "Drug"]), "b": _map(["Pool", "DMSO", "Drug"], plex=2)},
+                          "TMT-10", reference=["135N"])
+    assert "TMT_REFERENCE_UNKNOWN" in _codes(two) and "TMT_REFERENCE_MISSING" not in _codes(two)
+    na = tmtkit.validate({"p": GOOD}, "TMT-10", reference=["131N"])
+    assert _codes(na) == ["TMT_REFERENCE_MISSING"] and "131N is NA" in na[0].text
+    assert tmtkit.validate({"p": GOOD}, "TMT-10", reference=["126"]) == []
+    assert tmtkit.validate({"p": GOOD}, "TMT-10", reference=["Pool_1_126"]) == []  # a name: not a channel
+    dest = tmp_path / "x"
+    dest.mkdir()
+    pooled = _map(["Pool", "DMSO", "Drug"])
+    tp = tmtkit.plan(dest, {"tmt": {"tag": "TMT-10", "channels": pooled, "reference_channel": "135N"}}, PROPS10,
+                     [(dest / "A_F1.raw", "A", 1, "DDA")])
+    assert tp.plexes[0].reference == [] and "reference" not in tp.summary()[1]
+
+
+def test_a_name_twice_in_one_plex_says_so():
+    """#156: TMT_DUPLICATE_NAME for a name repeated inside one plex said "(plex KLX and KLX)"."""
+    f = [x for x in tmtkit.validate({"KLX": {**GOOD, "131N": "DMSO_1_126"}}, "TMT-10")
+         if x.code == "TMT_DUPLICATE_NAME"]
+    assert f[0].text == "sample name DMSO_1_126 is used twice in plex KLX; FragPipe needs every name once"
+
+
+def test_a_plex_of_na_only_stops_before_the_search():
+    """#156: TMT_ALL_NA was a warning, so the job was searched and the fake FragPipe crashed (the wrong diagnosis
+    followed); a plex with no sample can't be right."""
+    from ionomos.downstream import simulate
+
+    f = [x for x in tmtkit.validate({"p": {ch: "NA" for ch in TMT10}}, "TMT-10") if x.code == "TMT_ALL_NA"]
+    assert f[0].severity == "error"
+    assert simulate._control([]) == ""
+
+
+def test_tmt_plan_says_a_not_utf8_experiment_yaml_once(tmp_path, caplog, capsys):
+    """#156: `tmt plan` on an experiment.yaml saved as Windows-1252 said "is not UTF-8 ... Save it as UTF-8" twice."""
+    drop = tmp_path / "20260126_Aman_TMT_KL6159A-9plex"
+    drop.mkdir()
+    (drop / "KL6159A_TMT_F1.raw").write_bytes(b"\0" * 8)
+    text = yaml.safe_dump({"notes": "24 h \u2013 1 \u00b5M", "tmt": {"tag": "TMT-10", "channels": GOOD}},
+                          allow_unicode=True)
+    (drop / "experiment.yaml").write_bytes(text.encode("cp1252"))
+    cfg = testbed.init(tmp_path / "bed")
+    with caplog.at_level("WARNING"):
+        assert cli.main(["--config", str(cfg), "tmt", "plan", str(drop)]) == 0
+    capsys.readouterr()
+    said = [r for r in caplog.records if "is not UTF-8" in r.getMessage()]
+    assert len(said) == 1, [r.getMessage() for r in said]
+
+
 def test_fragpipes_other_label_types_are_passed_on(tmp_path):
     """#154: a tag FragPipe knows but Ionomos has no channels for is accepted and checked by FragPipe's rules only;
     the tag is compared with the workflow's label by name."""

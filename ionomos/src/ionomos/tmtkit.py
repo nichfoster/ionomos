@@ -93,6 +93,7 @@ TESTED = ("TMT-6", "TMT-10", "TMT-11", "TMT-16", "TMT-18", "iTRAQ-4")   # search
 OTHER_FRAGPIPE_LABELS = ("sCLIP-6", "IBT-16", "DiLeu-12", "DiLeu-1", "DeAla-13", "Trp-2")
 CHANNEL_RE = re.compile(r"^(\d{3})(ND|CD|[NCD]?)$", re.I)
 _CHANNEL_TOKEN = re.compile(r"^\d{3}(?:ND|CD|[NCD])?$", re.I)
+_CHANNEL_WORD = re.compile(r"(?:tmt|itraq)?\d{3}(?:nd|cd|[ncd])?", re.I)   # a channel as a person writes it
 LAB_NAME = re.compile(r"^[A-Za-z0-9]+_1_\d{3}[A-Z]?$")   # the lab's R script keeps only these (downstream/tmt.py)
 LAB_NAME_PLEXES = re.compile(r"^[A-Za-z0-9]+_\d+_\d{3}[A-Z]?$")   # ... and with several plexes Ionomos' port (#155)
 REFERENCE_WORDS = re.compile(r"(?i)(?:^|[_\-\s.])(?:pool(?:ed)?|bridge|ref(?:erence)?|norm|irs)(?:$|[_\-\s.\d])")
@@ -264,6 +265,35 @@ def _norm_channels(ch) -> dict[str, str]:
     return {str(k).strip(): ("" if v is None else str(v)) for k, v in ch.items()}
 
 
+def repeated_keys(text: str) -> list[str]:
+    """Keys written twice in one mapping of experiment.yaml's `tmt:` block ('126' twice, or 126 and '126'), as
+    "plex: 126"-style words. YAML keeps only the last of them, so the first name would vanish without a word (#156):
+    manifest.load_overrides refuses the file instead. [] when none, or when the text isn't YAML."""
+    import yaml
+
+    try:
+        root = yaml.compose(text, Loader=yaml.SafeLoader)
+    except yaml.YAMLError:
+        return []
+    tmt = next((v for k, v in getattr(root, "value", []) or []
+                if isinstance(root, yaml.MappingNode) and getattr(k, "value", None) == "tmt"), None)
+    out: list[str] = []
+
+    def walk(node, where: str) -> None:
+        if not isinstance(node, yaml.MappingNode):
+            return
+        seen: set[str] = set()
+        for k, v in node.value:
+            key = str(getattr(k, "value", "")).strip()
+            if isinstance(k, yaml.ScalarNode) and key in seen:
+                out.append(f"{where}{key}")
+            seen.add(key)
+            walk(v, f"{where}{key} > " if key not in ("channels",) else where)
+
+    walk(tmt, "")
+    return out
+
+
 def _refs(v) -> list[str]:
     if v is None or v == "":
         return []
@@ -302,6 +332,13 @@ def check_block(tmt) -> list[str]:
         ch = spec.get("channels")
         if not isinstance(ch, dict) or not ch:
             out.append(f"tmt: plex {plex!r} needs a non-empty channels mapping")
+            continue
+        keys = [channel_key(c) or str(c).strip() for c in ch]   # 126 and '126', 127n and 127N are one channel
+        twice = sorted({k for k in keys if keys.count(k) > 1})
+        if twice:
+            out.append(f"tmt: {'' if plex == 'default' else f'plex {plex!r}: '}channel {', '.join(twice)} is "
+                       f"written twice (as {', '.join(repr(c) for c in ch if (channel_key(c) or str(c)) in twice)}); "
+                       f"list every channel once")
     return out
 
 
@@ -393,7 +430,11 @@ def fragpipe_problems(rows_by_plex: dict[str, list[list[str]]], label: str = "",
         for _ch, sample in rows:
             if is_na(sample):
                 continue
-            if sample in seen:
+            if sample in seen and seen[sample] == plex:   # #156: said "(plex KLX and KLX)"
+                out.append(Flag("TMT_DUPLICATE_NAME", "error", f"sample name {sample} is used twice in plex {plex}; "
+                                f"FragPipe needs every name once", "give each channel its own name (the channel "
+                                "in it: DMSO_1_126, DMSO_1_127N)", plex, source))
+            elif sample in seen:
                 out.append(Flag("TMT_DUPLICATE_NAME", "error", f"sample name {sample} is used twice (plex "
                                 f"{seen[sample]} and {plex}); FragPipe needs every name once across all plexes",
                                 "give each plex's channels their own names (DMSO_1_126 in plex 1, DMSO_2_126 in "
@@ -437,7 +478,8 @@ def validate(channels_by_plex: dict[str, dict[str, str]], label_type_name: str =
         named = {channel_key(c) or str(c): n for c, n in ch.items() if not is_na(n) and str(n).strip()
                  and len(str(n).split()) == 1}  # a name FragPipe would refuse is said once, above
         if ch and not named:
-            out.append(Flag("TMT_ALL_NA", "warn", f"plex {plex}: every channel is NA, so it has no samples",
+            # an error since #156: a plex with no sample can't be right, and a search of it reports nothing
+            out.append(Flag("TMT_ALL_NA", "error", f"plex {plex}: every channel is NA, so it has no samples",
                             "name the channels that hold samples", plex, source))
         for c, name in named.items():
             p = parse_sample_name(name)
@@ -464,8 +506,25 @@ def validate(channels_by_plex: dict[str, dict[str, str]], label_type_name: str =
                         f"(e.g. {unlike[0]}): experimental_annotation.tsv leaves them out, and the report takes "
                         f"the condition from the text before the first '_'",
                         "name channels like DMSO_1_126 in plex 1, DMSO_2_126 in plex 2", source=source))
+    refs = reference if isinstance(reference, dict) else {p: list(reference or []) for p in channels_by_plex}
+    bad = sorted({str(r).strip() for rs in refs.values() for r in rs or [] if lt and _CHANNEL_WORD.fullmatch(
+        str(r).strip()) and channel_key(r) not in lt.channels})   # #156: '135N' on TMT-10 was taken silently
+    if bad:
+        out.append(Flag("TMT_REFERENCE_UNKNOWN", "warn", f"reference {', '.join(bad)} "
+                        f"{'is not a channel' if len(bad) == 1 else 'are not channels'} of {lt.name} "
+                        f"({', '.join(lt.channels)})", "set reference_channel: to the channel the bridge / pool "
+                        "sample is on", source=source))
+    if len(channels_by_plex) == 1:   # one plex: a reference on an NA channel was taken silently (#156)
+        plex, ch = next(iter(channels_by_plex.items()))
+        by_ch = {channel_key(c) or str(c): n for c, n in ch.items()}
+        empty = [str(r) for r in refs.get(plex) or [] if channel_key(r) in by_ch and str(r).strip() not in bad
+                 and (is_na(by_ch[channel_key(r)]) or not str(by_ch[channel_key(r)]).strip())]
+        if empty:
+            out.append(Flag("TMT_REFERENCE_MISSING", "warn", f"the reference channel {', '.join(empty)} is NA: no "
+                            "sample is on it", "name the bridge / pool sample on it, or remove reference_channel",
+                            plex, source))
     if len(channels_by_plex) > 1:
-        refs = reference if isinstance(reference, dict) else {p: list(reference or []) for p in channels_by_plex}
+        refs = {p: [r for r in rs or [] if str(r).strip() not in bad] for p, rs in refs.items()}   # said above
         anyref = any(refs.values())
         at: dict[str, list[str]] = {}   # plex -> the names on its reference channel(s)
         for plex, ch in channels_by_plex.items():
@@ -866,7 +925,7 @@ def plan(dest: Path, overrides, workflow_props: dict | None, raws, raw_dir: Path
         want = refs.get(pp.name) or []
         pp.reference = [f"{c} ({n})" for c, n in ch.items() if (channel_key(c) in {channel_key(r) for r in want}
                                                               or n in want) and not is_na(n)]
-        if not pp.reference:
+        if not pp.reference and not want:   # a reference given and not found is said (a flag), not replaced (#156)
             pp.reference = [f"{c} ({n})" for c, n in ch.items() if not is_na(n) and is_reference_name(n, tp.ref_tag)]
         for n in ch.values():
             p = parse_sample_name(n)
@@ -1063,10 +1122,12 @@ def plan_for_folder(folder: Path, cfg=None, method: str | None = None, unknown_o
     lines = list((rec.get("plan") or {}).get("manifest") or [])
     filed, source = _filed_method(rec), names.STATUS_FILE
     intake_said = ""
+    read_by_intake = False
     if not lines and cfg is not None:
         try:
             from ionomos.intake import plan as intake_plan
 
+            read_by_intake = True
             p = intake_plan(folder, cfg)
             lines = [{"file": m.file, "experiment": m.experiment, "bioreplicate": m.bioreplicate} for m in p.manifest]
             if not filed and p.folder.method:
@@ -1080,7 +1141,17 @@ def plan_for_folder(folder: Path, cfg=None, method: str | None = None, unknown_o
     if intake_said:
         print(intake_said)
     method = given or filed
-    ov = load_overrides(folder)
+    if read_by_intake:   # intake's reading said a not-UTF-8 experiment.yaml once already (#156: it was said twice)
+        import logging
+
+        quiet = logging.getLogger("ionomos.config")
+        was, quiet.disabled = quiet.disabled, True
+        try:
+            ov = load_overrides(folder)
+        finally:
+            quiet.disabled = was
+    else:
+        ov = load_overrides(folder)
     if not lines:
         from ionomos.intake import _raw_places
         from ionomos.naming import NamingError, parse_raw_name

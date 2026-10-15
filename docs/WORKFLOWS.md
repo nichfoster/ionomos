@@ -270,18 +270,26 @@ Ionomos' own (`tmtkit.validate` / `plan`): errors `TMT_TAG_MISMATCH` (the
 `tag:` is not the workflow's label type: change one; the message says which),
 `TMT_UNKNOWN_CHANNEL` and `TMT_CHANNEL_TWICE` (FragPipe's window refuses such
 a file; headless does not check, but the names would land on the wrong
-reporters), `TMT_BLOCK` (an unknown key or tag in `tmt:`); warnings
+reporters), `TMT_ALL_NA` (a plex whose every channel is NA: it has no
+sample, so the map can't be right), `TMT_BLOCK` (an unknown key or tag in
+`tmt:`, or a channel written twice: `'126'` twice, `126` and `'126'`, `127n`
+and `127N`; YAML would keep only the last name, so intake refuses the file
+instead, #156); warnings `TMT_REFERENCE_UNKNOWN` (a `reference_channel` that is
+not a channel of the label type), a reference on an NA channel
+(`TMT_REFERENCE_MISSING`, with one plex too);
 `TMT_NAME_CHANNEL` (`127N: DMSO_1_126`), `TMT_ONE_CHANNEL` (a condition with
 one channel: compared anyway, low confidence, D32), `TMT_REFERENCE_MISSING`
 (several plexes, and one has no sample, or not its pool, on the reference
-channel), `TMT_FRACTIONS_DIFFER`, `TMT_BIOREPLICATE`, `TMT_ALL_NA`,
+channel), `TMT_FRACTIONS_DIFFER`, `TMT_BIOREPLICATE`,
 `TMT_CHANNEL_ORDER` (a user's file not in the kit's order),
 `TMT_SEVERAL_FILES`, `TMT_ANNOTATION_DIFFERS`, `TMT_NO_MAP`,
 `TMT_SHARED_FOLDER`, `TMT_LABEL_UNSET`, `TMT_LABEL_UNKNOWN`; notes
 `TMT_NAME_PATTERN` (not `condition_1_channel`: the lab's R script skips the
 name, the report takes the text before the first `_`) and `TMT_NO_BRIDGE`.
 Intake records all of them in `ionomos.json` (`plan.tmt`, and the warnings in
-`plan.warnings`); nothing a TMT check finds refuses a drop.
+`plan.warnings`); nothing a TMT check finds refuses a drop, except a `tmt:`
+block that can't be read as written (`TMT_BLOCK`: the drop is REJECTED, saying
+what to fix).
 
 ### Plexes and folders
 
@@ -332,7 +340,9 @@ sample name, condition, replicate (counted: the k-th channel of a condition
 across the plexes) and role (sample, reference (bridge, pooled), NA). The
 label type is pre-set from the method's workflow (`tmtintegrator.channel_num`)
 or `experiment.yaml`'s `tag:`; another choice is said in orange (the job
-would fail before the search). Typing a condition names the channel
+would fail before the search). Switching to a kit with fewer channels puts the
+names on the missing ones aside, says which under the grid, and brings them
+back when a kit with those channels is picked again. Typing a condition names the channel
 `<condition>_<plex>_<channel>` (the plex's position, as `tmtkit.suggest_channels`);
 a name typed by hand is kept and its condition is the text before the first
 `_`. **Read annotation.txt from the folder** reads a person's own files

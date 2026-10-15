@@ -233,6 +233,23 @@ def test_the_section_figures_export(analysed):
     assert "126 Pool_1_126" in texts and "130N NA" in texts and "TMT channels: plex KL6166" in texts
     assert len([r for r in ET.fromstring(figs["tmt_labelling.svg"]).iter(f"{SVG}rect") if r.get("fill") != "none"]) >= 3
     assert charts.catalog({}, ["tmt"]) == []  # nothing without the section
+    # #156: the footer said "hits: dashed: the limit 95% · limma moderated t-test; normalisation …" (cut with "…" on
+    # the channel chart), the <title> "TMT labelling efficiency: TMT labelling efficiency"
+    for n, s in figs.items():
+        root = ET.fromstring(s.encode("utf-8"))
+        foot = [t.text or "" for t in root.iter(f"{SVG}text")][-1]
+        desc = root.find(f"{SVG}desc").text
+        assert "hits:" not in s and "normalisation" not in foot and "Analysis:" not in desc, (n, foot)
+        assert not foot.endswith("…"), (n, foot)
+    title = {n: ET.fromstring(s.encode("utf-8")).find(f"{SVG}title").text for n, s in figs.items()}
+    assert title == {"tmt_channels_KL6166.svg": "TMT channels: plex KL6166", "tmt_labelling.svg":
+                     "TMT labelling efficiency", "tmt_purity.svg": "TMT precursor purity"}
+    foot = [t.text for t in ET.fromstring(figs["tmt_labelling.svg"]).iter(f"{SVG}text")][-1]
+    assert foot.endswith("· dashed: the limit 95%"), foot
+    d2 = {**d, "tmtqc": {**d["tmtqc"], "plexes": [{**d["tmtqc"]["plexes"][0], "name": "plexB"}]}}
+    figs = {n: s for n, _w, s in charts.figures(d2, charts.style_from(), ["tmt"])}
+    texts = [t.text for t in ET.fromstring(figs["tmt_channels_plexB.svg"]).iter(f"{SVG}text")]
+    assert "TMT channels: plexB" in texts   # not "plex plexB"
 
 
 def test_every_tmt_issue_has_help():

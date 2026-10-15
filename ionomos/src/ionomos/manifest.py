@@ -205,10 +205,18 @@ def load_overrides(folder: Path) -> Overrides:
     p = Path(folder) / EXPERIMENT_YAML
     if not p.is_file():
         return Overrides()
+    text = read_yaml_text(p, error=OverridesError)
     try:
-        data = yaml.safe_load(read_yaml_text(p, error=OverridesError))
+        data = yaml.safe_load(text)
     except yaml.YAMLError as exc:
         raise OverridesError(f"{EXPERIMENT_YAML} is not valid YAML: {exc}") from exc
+    if isinstance(data, dict) and data.get("tmt"):
+        from ionomos.tmtkit import repeated_keys
+
+        twice = repeated_keys(text)   # YAML keeps the last of two equal keys: the first name would vanish (#156)
+        if twice:
+            raise OverridesError(f"tmt: {', '.join(twice)} is written twice in {EXPERIMENT_YAML} (YAML keeps only the "
+                                 f"last one); list every channel once")
     return parse_overrides(data)
 
 

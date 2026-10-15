@@ -789,9 +789,11 @@ def figure_tmt_channels(d: dict, pi: int, style: dict, generator: str = "") -> s
         legend.append((None, "! " + "; ".join(flagged[:3])))
     name = clean_text(P.get("name")) or f"plex {pi + 1}"
     what = "TMT channels"
-    return _compose(style, d, draw, what, f"{what}: plex {name}",
+    plex = name if name.lower().startswith("plex") else f"plex {name}"   # #156: "plex plexB"
+    return _compose(style, d, draw, what, f"{what}: {plex}",
                     f"Reporter intensity per channel, {P.get('psms', 0):,} PSMs · {d.get('title') or ''}", legend,
-                    "box: 25-75 %, whiskers: 5-95 % of the PSMs with signal", about=name, generator=generator)
+                    "box: 25-75 %, whiskers: 5-95 % of the PSMs with signal", about=plex, generator=generator,
+                    stats=False)
 
 
 _TMT_LAB = (("nterm", "N-termini"), ("k", "K"), ("full", "fully labelled PSMs"))
@@ -839,7 +841,8 @@ def figure_tmt_labelling(d: dict, style: dict, generator: str = "") -> str:
         legend.append((None, "TMT on K is fixed in the workflow"))
     what = "TMT labelling efficiency"
     return _compose(style, d, draw, what, what, f"{len(P)} plex{'es' if len(P) != 1 else ''} · {d.get('title') or ''}",
-                    legend, f"dashed: the limit {lim:.0%}" if lim is not None else "", about=what, generator=generator)
+                    legend, f"dashed: the limit {lim:.0%}" if lim is not None else "", generator=generator,
+                    stats=False)   # #156: no "hits:" or statistics on a QC chart, no "<what>: <what>" title
 
 
 def figure_tmt_purity(d: dict, style: dict, generator: str = "") -> str:
@@ -882,7 +885,7 @@ def figure_tmt_purity(d: dict, style: dict, generator: str = "") -> str:
     what = "TMT precursor purity"
     med = U.get("median")
     return _compose(style, d, draw, what, what, (f"median {med:.2f} · " if med is not None else "")
-                    + (d.get("title") or ""), legend, "", about=what, generator=generator)
+                    + (d.get("title") or ""), legend, "", generator=generator, stats=False)
 
 
 # ------------------------------------------------------------------ catalog --

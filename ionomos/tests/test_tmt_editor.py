@@ -147,7 +147,25 @@ def test_label_type_change_keeps_shared_channels_and_warns_against_the_workflow(
     cm.set_label("nonsense")
     assert cm.label == "TMT-6"
     cm.set_label("TMT10")
-    assert cm.label_warning() == "" and cm.maps()["plexA"]["127C"] == "NA"  # gone with TMT-6, not brought back
+    # #156: put aside by TMT-6 (said in the summary) and brought back by TMT-10
+    assert cm.label_warning() == "" and cm.maps()["plexA"]["127C"] == "DMSO_1_127C"
+
+
+def test_a_label_switch_says_which_names_it_put_aside():
+    """#156: TMT-16 -> TMT-10 dropped the names on 131C-134N silently and for good."""
+    cm = ChannelMap.empty(["p"], workflow_label="TMT-16")
+    cm.suggest(["DMSO", "Drug"], 7)
+    assert cm.maps()["p"]["133N"] == "Drug_1_133N"
+    assert cm.set_label("TMT-10") == ["131C", "132N", "132C", "133N"]
+    assert "131C" not in cm.maps()["p"]
+    assert cm.summary()[1] == ("the names on 131C, 132N, 132C, 133N were put aside: TMT-10 has no such channels "
+                               "(pick TMT-16 again to get them back)")
+    assert cm.set_label("TMT-16") == [] and cm.maps()["p"]["133N"] == "Drug_1_133N"
+    assert not any("put aside" in line for line in cm.summary())
+    cm.set_label("TMT-10")
+    cm.clear()
+    cm.set_label("TMT-16")
+    assert cm.is_empty()   # Clear empties what was put aside too
 
 
 def test_an_itraq_map_stays_itraq():
