@@ -32,7 +32,8 @@ def _rows(head):
 def test_the_loader_reads_exactly_the_listed_columns(tmp_path, monkeypatch):
     seen = []
     real = engines._read_long
-    monkeypatch.setattr(engines, "_read_long", lambda path, want: seen.append(list(want)) or real(path, want))
+    monkeypatch.setattr(engines, "_read_long", lambda path, want, *a, **k: seen.append(list(want)) or
+                        real(path, want, *a, **k))
     head = [*reversed(COLS), "EG.ModifiedSequence", "FG.Charge"]  # any order, other columns ignored
     path = _report(tmp_path / "Ionomos_Report.tsv", head, _rows(head))
     assert engines._spectronaut_score(path) == 0.9

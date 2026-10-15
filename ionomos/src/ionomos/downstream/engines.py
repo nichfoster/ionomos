@@ -46,7 +46,8 @@ from pathlib import Path
 from ionomos.downstream import anytable
 from ionomos.downstream import rollup as _rollup
 from ionomos.downstream.quant import Feature, QuantMatrix, run_stem
-from ionomos.downstream.tables import num
+from ionomos.downstream.tables import num, open_text
+from ionomos.downstream.tables import reader as text_rows  # an engine's own tab file, line by line
 
 SKIP_DIRS = {"results", "ionomos_run", "__MACOSX", "fragpipe-analyst"}
 LONG_FDR = 0.01  # precursor and protein-group q-value filter for long reports (the engines' own default)
@@ -81,21 +82,49 @@ def _files(root: Path, depth: int = 4):
 
 
 def _header(path: Path) -> list[str]:
-    """First line of a text table, split on its delimiter ('' on failure)."""
+    """First line of a text table, split on its delimiter as csv reads it (a quoted header may hold the delimiter:
+    Proteome Discoverer's 'Abundance: F1: 126, Sample, DMSO' in a comma file); [] on failure. UTF-16 and cp1252
+    files are read as tables.open_text reads them; an .xlsx (a report saved again from Excel) by its first row."""
+    if Path(path).suffix.lower() == ".xlsx":
+        return _xlsx_header(Path(path))
     try:
-        with open(path, encoding="utf-8-sig", errors="replace", newline="") as fh:
-            line = fh.readline()
+        with open_text(path) as fh:
+            line = fh.readline(1 << 20)
     except OSError:
         return []
     delim = "\t" if line.count("\t") >= max(line.count(","), line.count(";")) else (
         "," if line.count(",") >= line.count(";") else ";")
     if "\t" in line and Path(path).suffix.lower() in (".tsv", ".txt", ".tab"):  # headers with commas (PD TMT)
         delim = "\t"
-    return [h.strip().strip('"') for h in line.rstrip("\r\n").split(delim)]
+    cells = next(csv.reader([line.rstrip("\r\n")], delimiter=delim), [])
+    return [h.strip().strip('"') for h in cells]
 
 
-def _read_long(path: Path, want: list[str]) -> tuple[list[str], list[list[str]]]:
-    """A long table (tsv/csv or parquet): only the wanted columns that exist, in that order."""
+_XLSX_HEADERS: dict[tuple[str, int, int], list[str]] = {}
+
+
+def _xlsx_header(path: Path) -> list[str]:
+    """The first row of an .xlsx's first sheet (remembered per file, size and time: detection asks once per
+    adapter); [] when it can't be read."""
+    try:
+        st = path.stat()
+        key = (str(path), st.st_size, st.st_mtime_ns)
+        if key not in _XLSX_HEADERS:
+            if len(_XLSX_HEADERS) > 64:
+                _XLSX_HEADERS.clear()
+            rows = anytable._xlsx(path) if st.st_size <= anytable.SCAN_BYTES else []
+            _XLSX_HEADERS[key] = [str(h).strip() for h in rows[0]] if rows else []
+        return _XLSX_HEADERS[key]
+    except (OSError, anytable.TableError, ValueError, KeyError, IndexError, SyntaxError):  # SyntaxError: bad XML
+        return []
+
+
+def _read_long(path: Path, want: list[str], notes: list[str] | None = None,
+               need: tuple[str, ...] = ()) -> tuple[list[str], list[list[str]]]:
+    """A long table (tsv/csv or parquet): only the wanted columns that exist, in that order. notes: a list for what
+    the reader repaired (decimal commas or thousands separators, a cut-off last row, a stray quote: anytable.
+    read_table). need: columns without which the table is not this engine's: TableError naming the missing ones.
+    A column named twice is read from its first occurrence."""
     if path.suffix.lower() == ".parquet":
         try:
             import pyarrow.parquet as pq  # optional: DIA-NN 2.x / AlphaDIA parquet reports
@@ -103,15 +132,31 @@ def _read_long(path: Path, want: list[str]) -> tuple[list[str], list[list[str]]]
             raise anytable.TableError(
                 f"{path.name} is a Parquet file; reading it needs the optional package pyarrow "
                 "(pip install pyarrow), or re-run DIA-NN with --matrices to also get report.pg_matrix.tsv") from exc
-        names = pq.ParquetFile(path).schema_arrow.names
-        cols = [c for c in want if c in names]
-        table = pq.read_table(path, columns=cols)
+        try:
+            names = pq.ParquetFile(path).schema_arrow.names
+            cols = [c for c in want if c in names]
+            _need(path, cols, need)
+            table = pq.read_table(path, columns=cols)
+        except (OSError, ValueError) as exc:  # pyarrow.ArrowInvalid is a ValueError: not Parquet, or cut off
+            if isinstance(exc, anytable.TableError):
+                raise
+            raise anytable.TableError(f"{path.name} can't be read as a Parquet file ({exc}); it may be damaged or "
+                                      "still being written: copy or export it again") from exc
         data = [table.column(c).to_pylist() for c in cols]
         rows = [["" if v is None else str(v) for v in r] for r in zip(*data, strict=True)]
         return cols, rows
-    header, rows = anytable.read_table(path)
+    header, rows = anytable.read_table(path, notes)
     idx = [header.index(c) for c in want if c in header]
-    return [header[j] for j in idx], [[r[j] if j < len(r) else "" for j in idx] for r in rows]
+    cols = [header[j] for j in idx]
+    _need(path, cols, need)
+    return cols, [[r[j] if j < len(r) else "" for j in idx] for r in rows]
+
+
+def _need(path: Path, cols: list[str], need: tuple[str, ...]) -> None:
+    missing = [c for c in need if c not in cols]
+    if missing:
+        raise anytable.TableError(f"{path.name} has no column {', '.join(missing)}, which this format needs "
+                                  "(the header may be damaged, or the export left the column out)")
 
 
 def _log2(v: float | None) -> float | None:
@@ -142,7 +187,7 @@ def _matrix_from_long(path: Path, feats: dict[str, Feature], cells: dict[tuple[s
         cond_s = {s: cond.get(colmap[s], s) for s in samples}
     reps = {s: rep[colmap[s]] for s in samples if colmap[s] in rep}
     for s in samples:
-        if s not in reps and s.rsplit("_", 1)[-1].isdigit():
+        if s not in reps and s.rsplit("_", 1)[-1].isdecimal():
             reps[s] = int(s.rsplit("_", 1)[1])
     values = [[_log2(cells.get((i, colmap[s]))) for s in samples] for i in ids]
     if cond:
@@ -176,6 +221,40 @@ def _split_note(feats_of: dict[str, dict[str, dict[str, float]]], runs: list[str
             "group on its own)") if split else ""
 
 
+class _QFilter:
+    """The long reports' 1 % filter on their q-value columns (those of `names` the table has). A row passes when
+    every such q-value is at most LONG_FDR. A row whose q-value cell is blank or not a number is left out too, and
+    counted: nothing says it passed (a cut or damaged report). A column with no number in any row is not used as a
+    filter at all, with a note, rather than leaving out every row."""
+
+    def __init__(self, cols: list[str], rows: list[list[str]], names: tuple[str, ...]):
+        present = [c for c in names if c in cols]
+        self.blank_cols = [c for c in present if not any(num(r[cols.index(c)]) is not None for r in rows)]
+        self.cols = [cols.index(c) for c in present if c not in self.blank_cols]
+        self.dropped = 0
+        self.no_value = 0
+
+    def passes(self, r: list[str]) -> bool:
+        for j in self.cols:
+            q = num(r[j])
+            if q is None:
+                self.no_value += 1
+                return False
+            if q > LONG_FDR:
+                self.dropped += 1
+                return False
+        return True
+
+    def notes(self, name: str) -> list[str]:
+        out = []
+        if self.no_value:
+            out.append(f"{name}: {self.no_value:,} row(s) with a blank or unreadable q-value were left out (nothing "
+                       "says they pass the 1% filter)")
+        if self.blank_cols:
+            out.append(f"{name}: {', '.join(self.blank_cols)} holds no numbers, so it was not used as a filter")
+        return out
+
+
 # ------------------------------------------------------------------ DIA-NN --
 
 
@@ -198,7 +277,8 @@ def load_diann_long(path: Path, rollup: str = "auto") -> QuantMatrix:
     want = ["Run", "Protein.Group", "Protein.Ids", "Genes", "Protein.Names", "First.Protein.Description",
             "PG.MaxLFQ", "PG.Quantity", "Q.Value", "PG.Q.Value", "Global.PG.Q.Value", "Precursor.Id",
             "Precursor.Normalised", "Precursor.Quantity"]
-    cols, rows = _read_long(path, want)
+    read_notes: list[str] = []
+    cols, rows = _read_long(path, want, read_notes)
     ix = {c: j for j, c in enumerate(cols)}
     qcol = "PG.MaxLFQ" if "PG.MaxLFQ" in ix else "PG.Quantity" if "PG.Quantity" in ix else None
     method = _rollup.resolve(rollup, "engine")
@@ -210,17 +290,17 @@ def load_diann_long(path: Path, rollup: str = "auto") -> QuantMatrix:
         method = "engine"
     if (qcol is None and method == "engine") or "Run" not in ix or "Protein.Group" not in ix:
         raise anytable.TableError(f"{path.name}: not a DIA-NN report (needs Run, Protein.Group and PG.MaxLFQ)")
+    if not rows:
+        raise anytable.TableError(f"{path.name} has a header but no rows: DIA-NN reported no precursor")
+    qf = _QFilter(cols, rows, ("Q.Value", "PG.Q.Value"))
     feats: dict[str, Feature] = {}
     cells: dict[tuple[str, str], float] = {}
     prec: dict[str, dict[str, dict[str, float]]] = {}
     peps: dict[str, set[str]] = {}
     runs: list[str] = []
     seen_runs: set[str] = set()
-    dropped = 0
     for r in rows:
-        q, pgq = num(r[ix["Q.Value"]]) if "Q.Value" in ix else None, num(r[ix["PG.Q.Value"]]) if "PG.Q.Value" in ix else None
-        if (q is not None and q > LONG_FDR) or (pgq is not None and pgq > LONG_FDR):
-            dropped += 1
+        if not qf.passes(r):
             continue
         run, pg = r[ix["Run"]], r[ix["Protein.Group"]]
         if not pg:
@@ -248,16 +328,17 @@ def load_diann_long(path: Path, rollup: str = "auto") -> QuantMatrix:
     for pg, f in feats.items():
         f.peptides = len(peps.get(pg, ())) or None
     meta = {"engine": "DIA-NN", "evidence": "precursors"}
+    dropped = f" ({qf.dropped:,} rows above it left out)" if qf.dropped else ""
     if method == "engine":
         notes = [f"DIA-NN long report {path.name}: protein quantity {qcol}, precursors and protein groups at "
-                 f"q ≤ {LONG_FDR:g}" + (f" ({dropped:,} rows above it left out)" if dropped else "")]
+                 f"q ≤ {LONG_FDR:g}" + dropped]
     else:
         cells = _rolled_up(prec, runs, method)
         meta.update(quantity=f"{_rollup.LABELS[method]} of {pcol} (Ionomos)", rollup=method)
         notes = [f"DIA-NN long report {path.name}: precursors ({pcol}) rolled up to protein groups by "
                  f"{_rollup.describe(method)}, not DIA-NN's own {qcol or 'PG.MaxLFQ'}; precursors and protein groups "
-                 f"at q ≤ {LONG_FDR:g}" + (f" ({dropped:,} rows above it left out)" if dropped else "")
-                 + _split_note(prec, runs, method)]
+                 f"at q ≤ {LONG_FDR:g}" + dropped + _split_note(prec, runs, method)]
+    notes += read_notes + qf.notes(path.name)
     if fallback:
         notes.append(fallback)
     runs_clean = {r: run_stem(r) for r in runs}
@@ -440,8 +521,12 @@ def load_spectronaut(path: Path, rollup: str = "auto") -> QuantMatrix:
                     "instead (ionomos spectronaut-columns lists them)")
         method = "engine"
     want = [qcol if c == "PG.Quantity" else c for c, _need, _why in SPECTRONAUT_COLUMNS]
-    cols, rows = _read_long(path, want)
+    read_notes: list[str] = []
+    cols, rows = _read_long(path, want, read_notes, need=("R.FileName", "PG.ProteinGroups", qcol))
+    if not rows:
+        raise anytable.TableError(f"{path.name} has a header but no rows: the report holds no precursor")
     ix = {c: j for j, c in enumerate(cols)}
+    qf = _QFilter(cols, rows, ("PG.Qvalue", "EG.Qvalue"))
     prec: dict[str, dict[str, dict[str, float]]] = {}
     feats: dict[str, Feature] = {}
     cells: dict[tuple[str, str], float] = {}
@@ -449,12 +534,8 @@ def load_spectronaut(path: Path, rollup: str = "auto") -> QuantMatrix:
     rep: dict[str, int] = {}
     runs: list[str] = []
     peps: dict[str, set[str]] = {}
-    dropped = 0
     for r in rows:
-        pq_, eq = (num(r[ix["PG.Qvalue"]]) if "PG.Qvalue" in ix else None), (
-            num(r[ix["EG.Qvalue"]]) if "EG.Qvalue" in ix else None)
-        if (pq_ is not None and pq_ > LONG_FDR) or (eq is not None and eq > LONG_FDR):
-            dropped += 1
+        if not qf.passes(r):
             continue
         run, pg = r[ix["R.FileName"]], r[ix["PG.ProteinGroups"]]
         if not pg:
@@ -487,16 +568,17 @@ def load_spectronaut(path: Path, rollup: str = "auto") -> QuantMatrix:
     for pg, f in feats.items():
         f.peptides = len(peps.get(pg, ())) or None
     meta = {"engine": "Spectronaut", "evidence": "precursors", "quantity": qcol}
+    dropped = f"; {qf.dropped:,} rows above q {LONG_FDR:g} left out" if qf.dropped else ""
     if method == "engine":
         notes = [f"Spectronaut report {path.name}: protein quantity {qcol}; conditions and replicates from "
-                 f"R.Condition / R.Replicate" + (f"; {dropped:,} rows above q {LONG_FDR:g} left out" if dropped else "")]
+                 f"R.Condition / R.Replicate" + dropped]
     else:
         cells = _rolled_up(prec, runs, method)
         meta.update(quantity=f"{_rollup.LABELS[method]} of FG.Quantity (Ionomos)", rollup=method)
         notes = [f"Spectronaut report {path.name}: precursors (FG.Quantity) rolled up to protein groups by "
                  f"{_rollup.describe(method)}, not Spectronaut's {qcol}; conditions and replicates from R.Condition / "
-                 f"R.Replicate" + (f"; {dropped:,} rows above q {LONG_FDR:g} left out" if dropped else "")
-                 + _split_note(prec, runs, method)]
+                 f"R.Replicate" + dropped + _split_note(prec, runs, method)]
+    notes += read_notes + qf.notes(path.name)
     if fallback:
         notes.append(fallback)
     return _matrix_from_long(path, feats, cells, runs, cond, rep, "DIA", notes, meta)
@@ -583,7 +665,10 @@ def load_msstats(path: Path, rollup: str = "auto") -> QuantMatrix:
     pep ="PeptideModifiedSequence" if "PeptideModifiedSequence" in h else "PeptideSequence"
     want = ["ProteinName", pep, "PrecursorCharge", "FragmentIon", "ProductCharge", "IsotopeLabelType", "Condition",
             "BioReplicate", "Run", "Intensity"]
-    cols, rows = _read_long(path, want)
+    read_notes: list[str] = []
+    cols, rows = _read_long(path, want, read_notes, need=("ProteinName", "Condition", "Run", "Intensity"))
+    if not rows:
+        raise anytable.TableError(f"{path.name} has a header but no rows")
     ix = {c: j for j, c in enumerate(cols)}
     by: dict[str, dict[str, dict[str, float]]] = {}
     cond: dict[str, str] = {}
@@ -600,13 +685,16 @@ def load_msstats(path: Path, rollup: str = "auto") -> QuantMatrix:
         if run not in cond:
             runs.append(run)
             cond[run] = r[ix["Condition"]].strip()
-            rv = num(r[ix["BioReplicate"]])
+            rv = num(r[ix["BioReplicate"]]) if "BioReplicate" in ix else None
             if rv is not None and rv == int(rv):
                 rep[run] = int(rv)
         feat = "|".join(r[ix[c]] for c in (pep, "PrecursorCharge", "FragmentIon", "ProductCharge") if c in ix)
         v = num(r[ix["Intensity"]])
         if v is not None and v > 1:  # MSstats treats intensities <= 1 as missing
             by.setdefault(prot, {}).setdefault(feat, {})[run] = math.log2(v)
+    if not by:
+        raise anytable.TableError(f"{path.name}: MSstats format, but no light row has an intensity above 1 (MSstats "
+                                  "counts lower ones as missing)" + ("; " + "; ".join(read_notes) if read_notes else ""))
     method = _rollup.resolve(rollup, "median_polish")
     feats: dict[str, Feature] = {}
     cells: dict[tuple[str, str], float] = {}
@@ -621,7 +709,7 @@ def load_msstats(path: Path, rollup: str = "auto") -> QuantMatrix:
     how = "Tukey median polish (MSstats' default)" if method == "median_polish" else _rollup.describe(method)
     notes = [f"MSstats-format {path.name}: {len(feats):,} proteins summarised from {sum(len(v) for v in by.values()):,} "
              f"features by {how}" + (f"; {heavy:,} heavy / reference rows left out" if heavy else "")
-             + _split_note(by, runs, method)]
+             + _split_note(by, runs, method)] + read_notes
     samples_cond = {r: cond[r] for r in runs if cond.get(r)}
     return _matrix_from_long(path, feats, cells, runs, samples_cond, rep, "LFQ", notes,
                              {"engine": "MSstats format", "evidence": "peptides",
@@ -820,13 +908,17 @@ def load_msstats_tmt(path: Path) -> QuantMatrix:
     already on one scale (the reference normalisation), so the IRS step (plex.py) is not applied again."""
     want = ["ProteinName", "PeptideSequence", "Charge", "PrecursorCharge", "PSM", "Mixture", "TechRepMixture", "Run",
             "Fraction", "Channel", "Condition", "BioReplicate", "Intensity"]
-    cols, rows = _read_long(path, want)
+    read_notes: list[str] = []
+    cols, rows = _read_long(path, want, read_notes)
     if not {"ProteinName", "Mixture", "Run", "Channel", "Intensity"} <= set(cols):
         raise anytable.TableError(f"{path.name}: not MSstatsTMT format (needs ProteinName, Mixture, Run, Channel, "
                                   "Intensity)")
+    if not rows:
+        raise anytable.TableError(f"{path.name} has a header but no rows")
     s = msstats_tmt_summary(cols, rows)
     if not any(s["abundance"].values()):
-        raise anytable.TableError(f"{path.name}: MSstatsTMT format, but no protein has a usable intensity")
+        raise anytable.TableError(f"{path.name}: MSstatsTMT format, but no protein has a usable intensity"
+                                  + ("; " + "; ".join(read_notes) if read_notes else ""))
     labels = _channel_labels(s["channels"])
     keys: list[tuple[str, str]] = []  # (mixture, channel) samples, in mixture order then channel order
     info: dict[tuple, tuple] = {}
@@ -863,7 +955,7 @@ def load_msstats_tmt(path: Path) -> QuantMatrix:
     techreps = s["runs"] > len(mix_order)
     notes = [f"MSstatsTMT-format {path.name}: {len(feats):,} proteins in {len(mix_order)} mixture(s), summarised "
              "as MSstatsTMT's proteinSummarization (median polish per run, global median and reference-channel "
-             "normalisation; no model-based imputation)"] + s["notes"]
+             "normalisation; no model-based imputation)"] + s["notes"] + read_notes
     if techreps:
         notes.append("technical replicates of a mixture were averaged (log2) into one sample per channel")
     samples = [name[k] for k in keys]
@@ -875,7 +967,7 @@ def load_msstats_tmt(path: Path) -> QuantMatrix:
     for k in keys:
         c, bio = info[k]
         counts[c] += 1
-        m.replicate[name[k]] = int(bio) if bio.isdigit() else counts[c]
+        m.replicate[name[k]] = int(bio) if bio.isdecimal() else counts[c]
     m.meta.update({"plex": {name[k]: k[0] for k in keys}, "channel": {name[k]: labels[k[1]] for k in keys},
                    "runs": {name[k]: s["runs_of"].get(k[0], []) for k in keys}, "conditions_from": "engine"})
     if s["normalised"]:
@@ -961,13 +1053,19 @@ def _sage_settings(folder: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def _sage_db(settings: dict) -> dict:
+    """results.json's "database" section, {} when it is missing or not a section (a hand-edited or damaged file)."""
+    db = settings.get("database")
+    return db if isinstance(db, dict) else {}
+
+
 def _sage_protein_q(path: Path) -> dict[str, float]:
     """peptide -> the best protein q-value of its target PSMs in results.sage.tsv (read line by line: the
     table has a row per PSM)."""
     out: dict[str, float] = {}
     try:
-        with open(path, encoding="utf-8", errors="replace", newline="") as fh:
-            rd = csv.reader(fh, delimiter="\t")
+        with open_text(path) as fh:
+            rd = text_rows(fh)
             head = next(rd, [])
             if "peptide" not in head or "protein_q" not in head:
                 return {}
@@ -1048,15 +1146,22 @@ def load_sage(path: Path, sample_map: dict[str, tuple[str, int]] | None = None, 
     from ionomos.downstream.doctor import suggest_conditions
     from ionomos.downstream.quant import match_run_stem
 
-    header, rows = anytable.read_table(path)
-    ix = {h: j for j, h in enumerate(header)}
+    read_notes: list[str] = []
+    header, rows = anytable.read_table(path, read_notes)
+    ix: dict[str, int] = {}
+    for j, h in enumerate(header):  # a column named twice: the first is read (each is one file's intensities)
+        ix.setdefault(h, j)
     if not {"peptide", "proteins"} <= set(ix):
         raise anytable.TableError(f"{path.name}: not Sage's lfq.tsv (needs peptide, proteins and a column per file)")
-    files = [h for h in header if h not in _SAGE_META]
+    files = list(dict.fromkeys(h for h in header if h and h not in _SAGE_META))
+    twice = sorted({h for h in header if h in files and header.count(h) > 1})
+    if twice:
+        read_notes.append(f"{path.name}: the column(s) {', '.join(twice)} appear more than once; the first of each was "
+                          "read (adding both would double that file's intensities)")
     if not files:
         raise anytable.TableError(f"{path.name}: Sage's lfq.tsv has no file columns")
     settings = _sage_settings(path.parent)
-    decoy = str((settings.get("database") or {}).get("decoy_tag") or "rev_")
+    decoy = str(_sage_db(settings).get("decoy_tag") or "rev_")
     results = path.parent / "results.sage.tsv"
     prot_q = _sage_protein_q(results) if results.is_file() else {}
     sample_map = sample_map or {}
@@ -1086,41 +1191,50 @@ def load_sage(path: Path, sample_map: dict[str, tuple[str, int]] | None = None, 
     for s in samples:
         if s not in cond:
             cond[s] = guessed[s]
-            if s.rsplit("_", 1)[-1].isdigit():
+            if s.rsplit("_", 1)[-1].isdecimal():
                 reps[s] = int(s.rsplit("_", 1)[1])
     col = {s: j for j, s in enumerate(samples)}
 
     ions: dict[tuple[str, str], list[float]] = {}
     pep_prots: dict[str, tuple[str, ...]] = {}
-    above_pep = above_prot = 0
+    above_pep = above_prot = repeated = 0
+    qf = _QFilter(header, rows, ("q_value",))
     for r in rows:
         pep = r[ix["peptide"]]
         prots = tuple(p for p in r[ix["proteins"]].split(";") if p and not p.startswith(decoy))
         if not pep or not prots:
             continue
-        q = num(r[ix["q_value"]]) if "q_value" in ix else None
-        if q is not None and q > LONG_FDR:
-            above_pep += 1
+        if not qf.passes(r):
             continue
         if prot_q.get(pep, 0.0) > LONG_FDR:
             above_prot += 1
             continue
+        ion = (pep, r[ix["charge"]] if "charge" in ix else "")
+        if ion in ions:  # Sage writes one row per peptide ion; a second one is a damaged or concatenated file
+            repeated += 1
+            continue
         pep_prots[pep] = prots
-        vals = ions.setdefault((pep, r[ix["charge"]] if "charge" in ix else ""), [0.0] * len(samples))
+        vals = ions.setdefault(ion, [0.0] * len(samples))
         for f in files:
             v = num(r[ix[f]])
             if v is not None and v > 0:
                 vals[col[sample_of[f]]] += v
+    above_pep = qf.dropped
     if not ions:
-        raise anytable.TableError(f"{path.name}: no peptide passes q ≤ {LONG_FDR:g} in Sage's lfq.tsv")
+        raise anytable.TableError(f"{path.name}: no peptide passes q ≤ {LONG_FDR:g} in Sage's lfq.tsv"
+                                  + ("; " + "; ".join(read_notes + qf.notes(path.name)) if read_notes or qf.no_value
+                                     else ""))
 
     group = razor_groups(pep_prots)
     by_group: dict[tuple[str, ...], list[tuple[str, list[float]]]] = defaultdict(list)
     for (pep, _z), vals in ions.items():
         if any(vals):
             by_group[group[pep]].append((pep, vals))
+    if not by_group:
+        raise anytable.TableError(f"{path.name}: Sage's lfq.tsv has peptides at q ≤ {LONG_FDR:g}, but none with an "
+                                  "intensity above 0 in any file" + ("; " + "; ".join(read_notes) if read_notes else ""))
     shared = sum(1 for pep, prots in pep_prots.items() if any(p not in group[pep] for p in prots))
-    fasta = Path(str((settings.get("database") or {}).get("fasta") or ""))
+    fasta = Path(str(_sage_db(settings).get("fasta") or ""))
     names = _fasta_names(fasta) if str(fasta) not in ("", ".") else {}
     method = _rollup.resolve(rollup, "median_polish")
     feats, values = [], []
@@ -1146,6 +1260,10 @@ def load_sage(path: Path, sample_map: dict[str, tuple[str, int]] | None = None, 
     if above_pep or above_prot:
         notes.append(f"{above_pep:,} ion(s) above the peptide q-value and {above_prot:,} above the protein q-value "
                      "were left out")
+    if repeated:
+        notes.append(f"{repeated:,} row(s) repeat a peptide ion (same peptide and charge) already read; Sage writes "
+                     "one row per ion, so the repeats were left out (was the file joined from two?)")
+    notes += read_notes + qf.notes(path.name)
     if shared:
         notes.append(f"{shared:,} peptide(s) shared between protein groups were given to the group with the most "
                      "peptides")
@@ -1201,10 +1319,12 @@ def _sage_psms(path: Path, decoy: str) -> tuple[dict[tuple[str, str], tuple[str,
     out: dict[tuple[str, str], tuple[str, str, tuple[str, ...]]] = {}
     n = {"rows": 0, "decoy": 0, "rank": 0, "q": 0, "chimeric": 0}
     twice: set[tuple[str, str]] = set()
-    with open(path, encoding="utf-8-sig", errors="replace", newline="") as fh:
-        rd = csv.reader(fh, delimiter="\t")
+    with open_text(path) as fh:
+        rd = text_rows(fh)
         head = next(rd, [])
-        ix = {h: j for j, h in enumerate(head)}
+        ix: dict[str, int] = {}
+        for j, h in enumerate(head):
+            ix.setdefault(h, j)
         need = ("peptide", "proteins", "filename", "scannr")
         if not all(c in ix for c in need):
             raise anytable.TableError(f"{path.name}: not Sage's PSM table (needs {', '.join(need)})")
@@ -1243,8 +1363,8 @@ def _sage_reporters(path: Path, wanted, n_channels: int) -> dict[tuple[str, str]
     for every MS2 / MS3 spectrum, identified or not). Two rows for one spectrum (two MS3 scans of one MS2):
     the one with the larger total."""
     out: dict[tuple[str, str], list[float]] = {}
-    with open(path, encoding="utf-8-sig", errors="replace", newline="") as fh:
-        rd = csv.reader(fh, delimiter="\t")
+    with open_text(path) as fh:
+        rd = text_rows(fh)
         next(rd, None)
         for r in rd:
             if len(r) < 3 + n_channels:
@@ -1306,6 +1426,8 @@ def load_sage_tmt(path: Path, sample_map: dict[str, tuple[str, int]] | None = No
 
     path = Path(path)
     header = _header(path)
+    if not any(header):
+        raise anytable.TableError(f"{path.name} is empty: Sage may have stopped before writing it; run the search again")
     if tuple(header[:3]) != _SAGE_TMT_META or len(header) < 4:
         raise anytable.TableError(f"{path.name}: not Sage's tmt.tsv (needs filename, scannr, ion_injection_time "
                                   "and a column per reporter channel)")
@@ -1315,7 +1437,7 @@ def load_sage_tmt(path: Path, sample_map: dict[str, tuple[str, int]] | None = No
         raise anytable.TableError(f"{path.name} holds reporter ions per spectrum; Sage's results.sage.tsv, which "
                                   "says which peptide each spectrum is, must be in the same folder")
     settings = _sage_settings(path.parent)
-    decoy = str((settings.get("database") or {}).get("decoy_tag") or "rev_")
+    decoy = str(_sage_db(settings).get("decoy_tag") or "rev_")
     psm, dropped = _sage_psms(results, decoy)
     reporters = _sage_reporters(path, psm, len(labels))
     quantified = {k: v for k, v in reporters.items() if any(v)}
@@ -1378,7 +1500,7 @@ def load_sage_tmt(path: Path, sample_map: dict[str, tuple[str, int]] | None = No
     # PSMs -> MSstatsTMT's summary per protein group, plex and channel
     pep_prots = {psm[k][0]: psm[k][2] for k in quantified}
     group = razor_groups(pep_prots)
-    fasta = Path(str((settings.get("database") or {}).get("fasta") or ""))
+    fasta = Path(str(_sage_db(settings).get("fasta") or ""))
     names = _fasta_names(fasta) if str(fasta) not in ("", ".") else {}
     ident = {g: _sage_group(g, names) for g in set(group.values())}
     table: dict[tuple, dict[str, dict[str, float]]] = defaultdict(dict)
@@ -1460,28 +1582,55 @@ ADAPTERS = [
     ("MaxQuant", "MaxQuant", lambda p: p.name == "proteinGroups.txt", _maxquant_score, load_maxquant),
     ("Sage", "Sage", lambda p: p.name == "lfq.tsv", _sage_score, load_sage),
     ("Sage", "Sage", lambda p: p.name == "tmt.tsv", _sage_tmt_score, load_sage_tmt),  # preferred to lfq.tsv
-    ("Spectronaut", "Spectronaut", lambda p: p.suffix.lower() in (".tsv", ".csv", ".txt", ".xls"),
+    ("Spectronaut", "Spectronaut", lambda p: p.suffix.lower() in (".tsv", ".csv", ".txt", ".xls", ".xlsx"),
      _spectronaut_score, load_spectronaut),
     ("AlphaDIA", "AlphaDIA", lambda p: p.name.lower() in ("pg.matrix.tsv", "protein_groups.tsv"),
      _alphadia_score, load_alphadia),
-    ("MSstats format", "MSstats", lambda p: p.suffix.lower() in (".csv", ".tsv", ".txt"), _msstats_score, load_msstats),
-    ("MSstatsTMT format", "MSstatsTMT", lambda p: p.suffix.lower() in (".csv", ".tsv", ".txt"), _msstats_tmt_score,
+    ("MSstats format", "MSstats", lambda p: p.suffix.lower() in (".csv", ".tsv", ".txt", ".xlsx"), _msstats_score, load_msstats),
+    ("MSstatsTMT format", "MSstatsTMT", lambda p: p.suffix.lower() in (".csv", ".tsv", ".txt", ".xlsx"), _msstats_tmt_score,
      load_msstats_tmt),
-    ("Proteome Discoverer", "PD", lambda p: p.suffix.lower() in (".txt", ".tsv", ".csv"), _pd_score, load_pd),
-    ("DIA-NN", "DIA-NN", lambda p: p.name.lower() in ("report.tsv", "report.parquet") or
-     p.name.lower().endswith((".report.tsv", ".report.parquet")), _diann_long_score, load_diann_long),
+    ("Proteome Discoverer", "PD", lambda p: p.suffix.lower() in (".txt", ".tsv", ".csv", ".xlsx"), _pd_score, load_pd),
+    ("DIA-NN", "DIA-NN", lambda p: _diann_pick(p), _diann_long_score, load_diann_long),
 ]
+
+
+def _diann_pick(p: Path) -> bool:
+    """DIA-NN's main report: report.tsv / report.parquet, or whatever --out named it. A .tsv is then known by its
+    columns (_diann_long_score); a .parquet by the files DIA-NN writes beside it (<out>.stats.tsv or
+    <out>.pg_matrix.tsv), never a spectral library (report-lib.parquet)."""
+    name = p.name.lower()
+    if name in ("report.tsv", "report.parquet") or name.endswith((".report.tsv", ".report.parquet")):
+        return True
+    if p.suffix.lower() == ".tsv":
+        return not name.endswith(("_matrix.tsv", ".stats.tsv"))
+    if p.suffix.lower() == ".parquet" and "lib" not in name:
+        stem = p.name[: -len(".parquet")]
+        return any((p.parent / f"{stem}{x}").is_file() for x in (".stats.tsv", ".pg_matrix.tsv"))
+    return False
 METHODS = {a[1]: a for a in ADAPTERS}
 
 
+# The file names only one engine writes: an empty one (0 bytes) is still that engine's table, so the analysis can say
+# the table is empty instead of finding nothing at all
+_OWN_NAMES = {"report.tsv": "DIA-NN", "report.parquet": "DIA-NN", "proteingroups.txt": "MaxQuant", "lfq.tsv": "Sage",
+              "tmt.tsv": "Sage", "pg.matrix.tsv": "AlphaDIA"}
+
+
 def detect_all(workdir: Path, limit_bytes: int = 2 * 1024**3) -> list[Detected]:
-    """Every recognised engine table under workdir, best first."""
+    """Every recognised engine table under workdir, best first. An empty file with a name only one engine writes
+    (_OWN_NAMES) is listed last (score 0.01): loading it says it is empty."""
     out = []
     for p in _files(workdir):
         try:
-            if p.stat().st_size > limit_bytes or p.name.startswith((".", "~$")):
+            size = p.stat().st_size
+            if size > limit_bytes or p.name.startswith((".", "~$")):
                 continue
         except OSError:
+            continue
+        if size == 0:
+            own = _OWN_NAMES.get(p.name.lower())
+            if own:
+                out.append(Detected(METHODS[own][0], own, p, 0.01))
             continue
         for engine, method, pick, score, _load in ADAPTERS:
             if not pick(p):
@@ -1614,7 +1763,7 @@ def provenance(workdir: Path, method: str | None, source: str = "", meta: dict |
             out["files"].append(rel(rec))
             settings = _sage_settings(rec.parent)
             out["version"] = str(settings.get("version") or "")
-            fasta = str((settings.get("database") or {}).get("fasta") or "")
+            fasta = str(_sage_db(settings).get("fasta") or "")
             if fasta:
                 out["fasta"] = fasta
         out["fdr"] = meta.get("fdr") or f"peptide and protein q ≤ {LONG_FDR:g}"
