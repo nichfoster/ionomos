@@ -265,6 +265,8 @@ def test_tmt_formats_take_the_same_changes(tmp_path, name, op):
         return
     if op in ("bom", "crlf", "quote", "utf16"):
         assert m is not None and _same(_snapshot(m), _snapshot(m0)) == ""
+    if op == "cut-off" and m is not None:
+        assert any("cut off" in n for n in m.notes), m.notes
 
 
 # --------------------------------------------------------------------- size --

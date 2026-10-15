@@ -1358,16 +1358,20 @@ def _sage_psms(path: Path, decoy: str) -> tuple[dict[tuple[str, str], tuple[str,
     return out, n
 
 
-def _sage_reporters(path: Path, wanted, n_channels: int) -> dict[tuple[str, str], list[float]]:
+def _sage_reporters(path: Path, wanted, n_channels: int, short: list[int] | None = None
+                    ) -> dict[tuple[str, str], list[float]]:
     """tmt.tsv -> {(filename, scannr): reporter intensities} for the wanted spectra only (the file has a row
     for every MS2 / MS3 spectrum, identified or not). Two rows for one spectrum (two MS3 scans of one MS2):
-    the one with the larger total."""
+    the one with the larger total. short: a list to which the count of rows with fewer cells than the header (a
+    cut-off file) is added."""
     out: dict[tuple[str, str], list[float]] = {}
+    cut = 0
     with open_text(path) as fh:
         rd = text_rows(fh)
         next(rd, None)
         for r in rd:
             if len(r) < 3 + n_channels:
+                cut += bool(any(c.strip() for c in r))
                 continue
             key = (r[0].strip(), r[1].strip())
             if key not in wanted:
@@ -1375,6 +1379,8 @@ def _sage_reporters(path: Path, wanted, n_channels: int) -> dict[tuple[str, str]
             vals = [max(num(x) or 0.0, 0.0) for x in r[3:3 + n_channels]]
             if key not in out or sum(vals) > sum(out[key]):
                 out[key] = vals
+    if short is not None:
+        short.append(cut)
     return out
 
 
@@ -1439,7 +1445,8 @@ def load_sage_tmt(path: Path, sample_map: dict[str, tuple[str, int]] | None = No
     settings = _sage_settings(path.parent)
     decoy = str(_sage_db(settings).get("decoy_tag") or "rev_")
     psm, dropped = _sage_psms(results, decoy)
-    reporters = _sage_reporters(path, psm, len(labels))
+    short: list[int] = []
+    reporters = _sage_reporters(path, psm, len(labels), short)
     quantified = {k: v for k, v in reporters.items() if any(v)}
     if not quantified:
         raise anytable.TableError(f"{path.name}: no PSM of {results.name} passes q ≤ {LONG_FDR:g} with reporter "
@@ -1542,6 +1549,9 @@ def load_sage_tmt(path: Path, sample_map: dict[str, tuple[str, int]] | None = No
     blank = len(psm) - len(quantified)
     if blank:
         notes.append(f"{blank:,} passing PSM(s) had no reporter ions in {path.name} and were left out")
+    if short and short[0]:
+        notes.append(f"{short[0]:,} row(s) of {path.name} have fewer cells than its header and were left out: the file "
+                     "may be cut off (a search or copy that did not finish)")
     if shared:
         notes.append(f"{shared:,} peptide(s) shared between protein groups were given to the group with the most "
                      "peptides")
