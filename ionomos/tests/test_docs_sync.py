@@ -68,11 +68,7 @@ HIDDEN = {"probe-gui", "sage-job", "fake-sage", "fake-rawparser", "fake-maxquant
 PLANNED = {"doctor": "docs/UI.md slice S3.1 (#125): one 'Check everything' list"}
 # README lists every command once the coordinator adds the line from round4/notes-docs-consistency.md (README is
 # edited only through notes this round). Empty this set when that line is in README.md.
-README_PENDING = {
-    "run", "check", "status", "dry-run", "names", "retry", "diagnose", "spectronaut-columns", "bundle", "stop",
-    "init", "check-folder", "export", "ask-eval", "attention", "qc-trend", "cancel", "pause", "resume",
-    "notify-test", "repair-ledger", "update", "testbed", "tmt",
-}
+README_PENDING: set[str] = set()
 
 
 class _Parser(Exception):
@@ -364,7 +360,9 @@ def test_the_slugs_are_githubs():
 
 # Decisions cited before their entry is written: {number: where}. The coordinator writes D95 from the round's
 # notes (docs/EXAMPLE.md, example.py: `ionomos example`); empty this when DECISIONS.md has it.
-DECISION_PENDING = {95: "docs/EXAMPLE.md, example.py (ionomos example)"}
+DECISION_PENDING: dict[int, str] = {}
+# a number taken by a decision in a pull request that is not merged into this branch yet
+DECISION_GAPS = {94: "PR #145 (the tester's issues #133-#143)"}
 _DREF = re.compile(r"(?<![\w-])D(\d{1,3})(?![\w])")
 
 
@@ -379,8 +377,10 @@ def test_decision_headings_are_unique_and_in_order():
     assert not dupes, f"docs/DECISIONS.md has these decision numbers twice: {dupes}"
     out_of_order = [f"D{a} before D{b}" for a, b in zip(nums, nums[1:], strict=False) if b <= a]
     assert not out_of_order, f"docs/DECISIONS.md headings out of order: {out_of_order}"
-    gaps = sorted(set(range(1, max(nums) + 1)) - set(nums))
+    gaps = sorted(set(range(1, max(nums) + 1)) - set(nums) - set(DECISION_GAPS))
     assert not gaps, f"docs/DECISIONS.md skips: {gaps}"
+    closed = sorted(n for n in DECISION_GAPS if n in nums)
+    assert not closed, f"DECISIONS.md now has {closed}: take them out of DECISION_GAPS"
 
 
 def _cited() -> dict[int, set[str]]:
@@ -472,7 +472,7 @@ def test_no_doc_says_something_the_changelog_added_is_still_to_come():
 
 # CHANGELOG.md is edited only through notes this round; the coordinator merges its two "### Added" sections.
 # Set this to [] when [Unreleased] has one of each.
-CHANGELOG_PENDING = ["Added"]
+CHANGELOG_PENDING: list[str] = []
 
 
 def test_the_changelog_unreleased_has_one_heading_per_kind():

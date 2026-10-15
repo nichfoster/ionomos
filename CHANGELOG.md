@@ -173,6 +173,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI: a `package` job on every push (build, `twine check`, contents, the wheel alone in a fresh venv); Python 3.13
   in the test matrix (the classifier promised it).
 - `deploy\build_exe.ps1 -NoInstaller`: stop after the portable zip.
+- **`FILTER_REMOVES_ONE_CONDITION`** (D84): a warning when a filter on all
+  samples removes features that a condition had in every sample. It says
+  how many, in which condition, and how many were seen nowhere else. It
+  suggests 0 % of all samples and 50 % of one condition (Ionomos' default).
+  It is in the report, the attention list and the help.
+- **Pull-downs with a negative control** (D88). A condition named as an
+  empty vector, beads only, IgG or an untagged bait (`EV`, `empty`, `beads`,
+  `IgG` …) is the pull-down's *background* when its samples also miss
+  clearly more proteins than the others (then it is sure), or the
+  experiment folder's name says pull-down (`IP`, `pulldown`, `BioID` …).
+  Then:
+  - every pull-down is compared against it (`DMSO vs EV`, `Drug vs EV`), so
+    what the bait pulls down reads as *up*; the background is no longer
+    compared with the control (`EV vs DMSO`);
+  - when sure, the missing-value filter across all samples doesn't count
+    its samples, and it is normalised among its own samples, the pull-downs
+    among theirs.
+
+  The name alone is not enough (an empty vector is also the plain control
+  of an over-expression); a note says so. New role `background` in
+  `analysis.roles` and the Roles list; `background_keywords` setting; report
+  note `PULLDOWN_DESIGN`; `simulate.pulldown_pg_matrix` for tests.
 
 ### Changed
 
@@ -308,31 +330,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`ionomos testbed stress` left its temp folder behind on Windows.** The
   ledger connections were never closed, and Windows can't remove an open
   `ionomos.db`.
-
-### Added
-
-- **`FILTER_REMOVES_ONE_CONDITION`** (D84): a warning when a filter on all
-  samples removes features that a condition had in every sample. It says
-  how many, in which condition, and how many were seen nowhere else. It
-  suggests 0 % of all samples and 50 % of one condition (Ionomos' default).
-  It is in the report, the attention list and the help.
-- **Pull-downs with a negative control** (D88). A condition named as an
-  empty vector, beads only, IgG or an untagged bait (`EV`, `empty`, `beads`,
-  `IgG` …) is the pull-down's *background* when its samples also miss
-  clearly more proteins than the others (then it is sure), or the
-  experiment folder's name says pull-down (`IP`, `pulldown`, `BioID` …).
-  Then:
-  - every pull-down is compared against it (`DMSO vs EV`, `Drug vs EV`), so
-    what the bait pulls down reads as *up*; the background is no longer
-    compared with the control (`EV vs DMSO`);
-  - when sure, the missing-value filter across all samples doesn't count
-    its samples, and it is normalised among its own samples, the pull-downs
-    among theirs.
-
-  The name alone is not enough (an empty vector is also the plain control
-  of an over-expression); a note says so. New role `background` in
-  `analysis.roles` and the Roles list; `background_keywords` setting; report
-  note `PULLDOWN_DESIGN`; `simulate.pulldown_pg_matrix` for tests.
 
 ### Documentation
 

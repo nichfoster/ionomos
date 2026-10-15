@@ -117,6 +117,18 @@ ionomos benchmark --grid quick     # sensitivity and false discoveries on simula
 
 Windows, macOS or Linux; no lab setup, no Tk. See [docs/QUICKSTART.md](docs/QUICKSTART.md).
 
+## Commands
+
+`ionomos --help` lists every command with its options; `ionomos <command> --help` the details.
+
+- **Any computer** (the pip install): `demo`, `example`, `analyze`, `check-folder`, `export`, `compare`,
+  `benchmark`, `spectronaut-columns`, `help`.
+- **The lab PC**: `setup` (the app; also what a bare `ionomos` opens), `init`, `check`, `preflight`, `run`,
+  `stop`, `status`, `attention`, `dry-run`, `names test`, `retry`, `cancel`, `pause`, `resume`,
+  `repair-ledger`, `qc-trend`, `library`, `fasta`, `tmt`, `notify-test`, `diagnose`, `bundle`, `ask`,
+  `ask-eval`, `update`.
+- **Testing**: `testbed` (a fake lab with a fake FragPipe; docs/TESTING.md).
+
 ## Quick start (dev, on this Mac)
 
 ```bash
