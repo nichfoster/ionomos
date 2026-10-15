@@ -877,3 +877,18 @@ def test_fasta_old_uses_the_name_date(tmp_path):
         info = library.describe_fasta(make_fasta(tmp_path / f"{day}-decoys-contam-UP000005640_9606.fasta.fas"),
                                       Context(today=today))
         assert ("FASTA_OLD" in {f.code for f in info.flags}) is flagged
+
+
+# --- fix-fasta (round 4)
+
+
+def test_a_fasta_with_a_byte_order_mark_counts_its_first_protein(tmp_path):
+    """#152: `library show` said "2 proteins" for a 3-protein FASTA saved as UTF-8 with BOM (Notepad, Excel)."""
+    plain = make_fasta(tmp_path / "plain.fasta", human=3, contam=1)
+    bom = tmp_path / "bom.fasta"
+    bom.write_bytes(b"\xef\xbb\xbf" + plain.read_bytes())
+    a, b = library.describe_fasta(plain), library.describe_fasta(bom)
+    assert (b.entries, b.targets, b.decoys, b.contaminants, b.reviewed) == (8, 4, 4, 1, 3)
+    assert (b.entries, b.targets, b.proteins, b.summary) == (a.entries, a.targets, a.proteins, a.summary)
+    with open(bom, "rb") as fh:
+        assert next(library._headers(fh, None, None)).startswith(b"sp|P00000|")

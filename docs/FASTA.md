@@ -69,14 +69,20 @@ philosopher workspace --clean --nocheck
 ```
 
 Philosopher writes its `.fas` into the folder it runs in; that file is moved to its final name and the folder is
-removed. If Philosopher fails (exit code, time limit, no file), the note quotes its last lines and the file is made
-in Python instead.
+removed. If Philosopher fails (exit code, time limit, no file), the note quotes its last lines (the frames of a Go
+crash report are left out: "then Philosopher crashed") and the file is made in Python instead.
+
+A source saved as "UTF-8 with BOM" (Notepad's and Excel's UTF-8 option on Windows: `EF BB BF` before the first `>`)
+crashes the Philosopher bundled with FragPipe (5.1.3-RC9; #152). Philosopher is then given a copy without the
+byte-order mark, made in its hidden folder and removed with it, rather than the file being refused: Philosopher's
+output depends only on the entries, so the result is byte for byte the one of the file saved without a BOM, and
+the lab member has nothing to re-save. The Python way skips the mark too, and a note says it was there.
 
 **In Python** (no FragPipe on this computer, `--no-philosopher`, or your own contaminant file), the same as
 Philosopher's `dat.Create` + `dat.Save`:
 
 - the file is read as Philosopher reads it (tabs in headers become spaces; sequence lines stripped and joined;
-  `\r\n` accepted); a header that appears twice keeps the later sequence;
+  `\r\n` accepted; a leading UTF-8 byte-order mark skipped); a header that appears twice keeps the later sequence;
 - each contaminant is added as `contam_<header>` unless its accession (between the first two `|`) is already a
   target's: human keratins in a human proteome stay targets;
 - every entry gets a decoy `rev_<header>` with its sequence reversed. Philosopher keeps a first `M` in place, and its
@@ -97,8 +103,16 @@ says which was used. A given contaminant file is always used in Python (Philosop
 them when it downloads by itself.
 
 **Checks**: a source that already has decoys is refused (decoys twice break the search), as is a file with no
-entries; a source of 1 GB or more gets a note. The result is checked with `fragpipe.decoy_problem` (the same 40–60 %
-rule as the search) and the counts are in the result: entries, targets, decoys, contaminants, decoy share.
+entries (one saved as UTF-16, Notepad's "Unicode", is told to be saved as UTF-8), and a file with text before its
+first header (`text_before_first_header`: a stray character before the first `>`, or sequence lines with no
+header; the message names the line). Such text belongs to no entry, so Philosopher and a plain reader drop it, and
+with it the first protein: refusing is the only way not to lose a protein silently. Blank lines and a byte-order
+mark before the first header are fine. A source of 1 GB or more gets a note. The result is checked with
+`fragpipe.decoy_problem` (the same 40–60 % rule as the search) and the counts are in the result: entries, targets,
+decoys, contaminants, decoy share.
+
+Every FASTA reader of the library and the search checks (`library.describe_fasta`, `fragpipe.fasta_info`) skips a
+leading UTF-8 byte-order mark too, so a file saved with one is counted in full.
 
 ### Release and staleness
 

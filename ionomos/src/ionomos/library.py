@@ -709,12 +709,16 @@ def _headers(fh, stop: threading.Event | None, deadline: float | None):
     """Every header line (without '>') of a FASTA opened in binary mode, read in big chunks: a 1 GB file is
     never decoded or split into lines. Raises TimeoutError when stopped or out of time."""
     carry = b"\n"
+    first = True
     while True:
         if (stop is not None and stop.is_set()) or (deadline is not None and time.monotonic() > deadline):
             raise TimeoutError
         chunk = fh.read(CHUNK)
         if not chunk:
             break
+        if first:  # a UTF-8 byte-order mark ("UTF-8 with BOM") before the first '>' hid the first protein (#152)
+            first = False
+            chunk = chunk[3:] if chunk.startswith(b"\xef\xbb\xbf") else chunk
         buf = carry + chunk
         pos = 0
         carry = b""

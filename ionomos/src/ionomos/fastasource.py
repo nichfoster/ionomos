@@ -592,12 +592,28 @@ def fragpipe_fasta_name(src_name: str, *, day: Date | None = None, decoys: bool 
     return "-".join(parts) + f"-{Path(src_name).name}.fas"
 
 
+BOM = b"\xef\xbb\xbf"  # UTF-8 byte-order mark: Notepad's and Excel's "UTF-8 with BOM" put it before the first '>'
+_UTF16_BOMS = (b"\xff\xfe", b"\xfe\xff")
+
+
+def _lines(fh):
+    """The lines of a file opened in binary mode, a leading UTF-8 byte-order mark skipped."""
+    first = True
+    for line in fh:
+        if first:
+            first = False
+            line = line[len(BOM):] if line.startswith(BOM) else line
+        yield line
+
+
 def read_fasta(path: Path) -> list[tuple[bytes, bytes]]:
     """[(header without '>', sequence)] the way Philosopher reads a FASTA (fas.ParseFile2): tabs in a header become
-    spaces, sequence lines are stripped and joined, line ends may be \\n or \\r\\n."""
+    spaces, sequence lines are stripped and joined, line ends may be \\n or \\r\\n; a leading UTF-8 byte-order mark is
+    skipped. Text before the first header belongs to no entry and is not returned: `prepare_for_fragpipe` refuses
+    such a file first (`text_before_first_header`)."""
     out: list[tuple[bytes, bytearray]] = []
     with open(path, "rb") as fh:
-        for line in fh:
+        for line in _lines(fh):
             line = line.rstrip(b"\r\n")
             if line.startswith(b">"):
                 out.append((line[1:].replace(b"\t", b" "), bytearray()))
@@ -606,7 +622,37 @@ def read_fasta(path: Path) -> list[tuple[bytes, bytes]]:
     return [(h, bytes(s)) for h, s in out]
 
 
+def text_before_first_header(path: Path) -> tuple[int, str]:
+    """(line number, its start) of the first text that comes before the file's first header, or (0, '') when the
+    first text (after a UTF-8 byte-order mark and blank lines) is a '>' header or the file has no text. Such text
+    belongs to no entry; Philosopher and a plain reader drop it, and with it the first protein when it is that
+    protein's header behind a stray character. Reads only up to that first text."""
+    lines = 0
+    indent = b""  # blanks already on the current line (" >sp|…" is not a header)
+    with open(path, "rb") as fh:
+        first = True
+        while True:
+            buf = fh.read(CHUNK)
+            if not buf:
+                return 0, ""
+            if first:
+                first = False
+                buf = buf[len(BOM):] if buf.startswith(BOM) else buf
+            text = buf.lstrip()
+            blank = buf[:len(buf) - len(text)]
+            lines += blank.count(b"\n")
+            nl = blank.rfind(b"\n")
+            indent = blank[nl + 1:] if nl >= 0 else indent + blank[:80]
+            if text:
+                if text.startswith(b">") and not indent:
+                    return 0, ""
+                start = (indent + text[:80]).split(b"\n")[0].rstrip()
+                return lines + 1, start.decode("utf-8", "replace")
+
+
 def _parse_fasta_bytes(data: bytes) -> list[tuple[bytes, bytes]]:
+    if data.startswith(BOM):
+        data = data[len(BOM):]
     out: list[tuple[bytes, bytearray]] = []
     for line in data.splitlines():
         if line.startswith(b">"):
@@ -674,7 +720,7 @@ def _scan(path: Path, decoy_tag: str) -> dict:
     entries = decoys = contam = 0
     tag, con = b">" + decoy_tag.encode(), b">" + CONTAM_PREFIX.encode()
     with open(path, "rb") as fh:
-        for line in fh:
+        for line in _lines(fh):
             if line.startswith(b">"):
                 entries += 1
                 if line.startswith(tag):
@@ -691,7 +737,7 @@ def contaminants_from_fasta(path: Path, prefix: str = CONTAM_PREFIX, decoy_tag: 
     out: list[tuple[bytes, bytearray]] = []
     keep = False
     with open(path, "rb") as fh:  # streamed: only the contam_ entries of a big FASTA are kept
-        for line in fh:
+        for line in _lines(fh):
             line = line.rstrip(b"\r\n")
             if line.startswith(b">"):
                 keep = line.startswith(p)
@@ -808,12 +854,23 @@ def _run_tool(cmd: list[str], cwd: Path, log: Path, timeout_s: float, stop: thre
                 raise TimeoutError(f"Philosopher took longer than {timeout_s:.0f} s")
 
 
+# a line of a Go crash report: "goroutine 1 [running]:", "main.main()", "github.com/x/y.(*T).F(...)", "…/f.go:23 +0x85"
+_GO_FRAME = re.compile(r"\.go:\d+|^goroutine \d+|^[\w.\-/*()]+\(.*\)$|^\.\.\.|^exit status \d+$")
+
+
 def _last_lines(path: Path, n: int = 6) -> str:
+    """The last `n` lines Philosopher printed, without the frames of a Go crash report (they name Philosopher's own
+    source files, which say nothing to a lab member); the crash itself is said in words."""
     try:
-        text = path.read_bytes()[-4000:].decode("utf-8", "replace")
+        text = path.read_bytes()[-16000:].decode("utf-8", "replace")
     except OSError:
         return ""
-    return " | ".join(ln.strip() for ln in text.splitlines()[-n:] if ln.strip())
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    kept = [ln for ln in lines if not _GO_FRAME.search(ln)]
+    out = " | ".join(kept[-n:])
+    if len(kept) < len(lines):
+        out += (" | " if out else "") + "then Philosopher crashed (its stack trace is left out)"
+    return out
 
 
 def _with_philosopher(exe: Path, src: Path, work: Path, decoy_tag: str, contam: bool,
@@ -861,7 +918,11 @@ def prepare_for_fragpipe(src: Path, dest_dir: Path | None = None, *, decoy_tag: 
       a path   a contaminant FASTA of your own (Python; Philosopher can only add its own list).
       None     no contaminants.
     The source is never changed; nothing is overwritten. The result passes `fragpipe.decoy_problem` (40-60 %
-    decoys) or carries an error saying why not."""
+    decoys) or carries an error saying why not.
+
+    A leading UTF-8 byte-order mark is skipped by both methods (Philosopher is given a copy without it), so the
+    result is the one the file saved without it gives. Text before the first header is refused (it would cost the
+    first protein)."""
     from ionomos import fragpipe
 
     src = Path(src)
@@ -878,12 +939,27 @@ def prepare_for_fragpipe(src: Path, dest_dir: Path | None = None, *, decoy_tag: 
                          f"folder like C:/Fragpipe_Auto/fasta")
     try:
         before = _scan(src, decoy_tag)
+        with open(src, "rb") as fh:
+            start = fh.read(len(BOM))
+        stray_line, stray = text_before_first_header(src)
     except OSError as exc:
         res.error = f"{src.name} can't be read ({exc})"
         return res
     if before["entries"] == 0:
         res.error = f"{src.name} has no FASTA entries (no line starts with '>')"
+        if start.startswith(_UTF16_BOMS):
+            res.error += (": it is saved as UTF-16 ('Unicode' in Notepad). Open it in Notepad, choose Save As, "
+                          "Encoding UTF-8, and prepare that file")
         return res
+    if stray:
+        res.error = (f"{src.name} has text before its first protein header (line {stray_line}: '{stray}'), so the "
+                     f"first protein would be lost. Open it in a text editor, make the first line the first '>' "
+                     f"header, save, and prepare it again")
+        return res
+    has_bom = start == BOM
+    if has_bom:
+        res.notes.append(f"{src.name} starts with a UTF-8 byte-order mark (saved as 'UTF-8 with BOM'); it was "
+                         f"skipped, so the result is the same as for the file saved without one")
     if before["decoys"]:
         res.error = (f"{src.name} already has decoys ({before['decoys']:,} entries start with '{decoy_tag}'): "
                      f"adding more would make it unusable. Use it as it is, or start from the file without decoys")
@@ -915,7 +991,8 @@ def prepare_for_fragpipe(src: Path, dest_dir: Path | None = None, *, decoy_tag: 
                 _say(progress, f"running Philosopher on {src.name}")
                 work = Path(tempfile.mkdtemp(prefix=".ionomos-philosopher-", dir=dest_dir))
                 try:
-                    out = _with_philosopher(exe, src, work, decoy_tag, want_contam, stop, philosopher_timeout_s)
+                    given = _without_bom(src, work / "input") if has_bom else src
+                    out = _with_philosopher(exe, given, work, decoy_tag, want_contam, stop, philosopher_timeout_s)
                     part = dest_dir / (final_name + ".part")
                     part = unique_path(part) if part.exists() else part
                     shutil.move(str(out), str(part))
@@ -950,6 +1027,19 @@ def prepare_for_fragpipe(src: Path, dest_dir: Path | None = None, *, decoy_tag: 
         res.error = f"the new file would not pass FragPipe's check: {problem}"
     _say(progress, f"saved {res.path.name}")
     return res
+
+
+def _without_bom(src: Path, folder: Path) -> Path:
+    """A copy of `src` without its leading UTF-8 byte-order mark, same name, in `folder` (a folder of its own, so it
+    is never taken for Philosopher's .fas). The bundled Philosopher crashes on a BOM; given this copy it makes
+    exactly what it makes from the file saved without one (its output depends on the entries, not the file)."""
+    folder.mkdir(parents=True, exist_ok=True)
+    copy = folder / src.name
+    with open(src, "rb") as fin, open(copy, "wb") as fout:
+        if fin.read(len(BOM)) != BOM:
+            fin.seek(0)
+        shutil.copyfileobj(fin, fout, CHUNK)
+    return copy
 
 
 def _prepare_python(src: Path, dest_dir: Path, name_for: Callable[[bool], str], res: PrepareResult, decoy_tag: str,

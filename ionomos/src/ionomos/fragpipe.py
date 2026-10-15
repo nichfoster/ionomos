@@ -1312,11 +1312,13 @@ def fasta_info(path: Path, decoy_tag: str = "rev_") -> dict:
     key = (str(p), st.st_mtime, st.st_size)
     if key in _FASTA_CACHE:
         return _FASTA_CACHE[key]
+    from ionomos.fastasource import _lines  # a leading UTF-8 byte-order mark skipped
+
     entries = decoys = 0
     tag = b">" + decoy_tag.encode()
     try:
         with open(p, "rb") as fh:
-            for line in fh:
+            for line in _lines(fh):
                 if line.startswith(b">"):
                     entries += 1
                     if line.startswith(tag):

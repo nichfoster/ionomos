@@ -569,3 +569,94 @@ def test_no_network_at_import(monkeypatch):
         importlib.reload(fastasource)
     assert fastasource.urlopen is __import__("urllib.request").request.urlopen
     assert sys.modules["ionomos.fastasource"] is fastasource
+
+
+# --- fix-fasta (round 4)
+
+BOM = b"\xef\xbb\xbf"
+
+
+def test_a_bom_fasta_keeps_its_first_protein_in_python(tmp_path, monkeypatch):
+    """#152: the Python way read b'\\xef\\xbb\\xbf>sp|P68871…' as text before the first header and dropped it."""
+    monkeypatch.setenv("IONOMOS_OFFLINE", "1")
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    plain = fastasource.prepare_for_fragpipe(_src(tmp_path / "a"), contaminants=None, date=date(2026, 10, 15))
+    src = _src(tmp_path / "b", BOM + HUMAN)
+    res = fastasource.prepare_for_fragpipe(src, contaminants=None, date=date(2026, 10, 15))
+    assert res.ok and res.method == "python"
+    assert (res.entries, res.targets, res.decoys) == (6, 3, 3)
+    assert res.path.read_bytes() == plain.path.read_bytes(), "the same file as from the file saved without a BOM"
+    assert b"P68871" in res.path.read_bytes()
+    assert any("byte-order mark" in n for n in res.notes)
+    assert src.read_bytes().startswith(BOM), "the source is never changed"
+    assert fastasource.read_fasta(src)[0][0].startswith(b"sp|P68871")
+    assert fastasource._scan(src, "rev_")["entries"] == 3
+    mine = _src(tmp_path, BOM + CRAP, name="my_contaminants.fasta")  # a contaminant file of your own, with a BOM
+    res = fastasource.prepare_for_fragpipe(src, tmp_path / "c", contaminants=mine)
+    assert res.ok and res.contaminants == 2, "ALBU_BOVIN (the first entry) is kept"
+
+
+def test_a_bom_fasta_reaches_philosopher_without_the_bom(tmp_path, philosopher):
+    """#152: the bundled Philosopher crashes on the BOM. It is given a copy without it, so its result is the one of
+    the file saved without a BOM (the stand-in, like a plain reader, would otherwise lose the first protein)."""
+    exe, log = philosopher
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    plain = fastasource.prepare_for_fragpipe(_src(tmp_path / "a"), tmp_path / "out-a", philosopher=exe,
+                                             date=date(2026, 10, 15))
+    src = _src(tmp_path / "b", BOM + HUMAN)
+    res = fastasource.prepare_for_fragpipe(src, tmp_path / "out-b", philosopher=exe, date=date(2026, 10, 15))
+    assert res.ok and res.method == "philosopher", (res.error, res.notes)
+    assert res.path.name == plain.path.name and res.path.read_bytes() == plain.path.read_bytes()
+    assert (res.entries, res.contaminants) == (8, 1)
+    custom = [ln for ln in log.read_text().splitlines() if "database --custom" in ln][-1]
+    assert str(src.resolve()) not in custom and custom.split("--custom ")[1].startswith(str(tmp_path / "out-b"))
+    assert _files(tmp_path / "out-b") == [res.path.name], "the copy went with Philosopher's folder"
+    assert src.read_bytes() == BOM + HUMAN
+
+
+@pytest.mark.parametrize("data, line, words", [
+    (b"x>sp|P68871|HBB_HUMAN Hemoglobin\nMVHL\n>sp|P2|B\nMK\n", 1, "x>sp|P68871"),
+    (b"\r\n\r\nMVHLTPEEK\n>sp|P2|B\nMK\n", 3, "MVHLTPEEK"),
+    (BOM + b" >sp|P1|A\nMK\n>sp|P2|B\nMK\n", 1, ">sp|P1|A"),
+])
+def test_text_before_the_first_header_is_refused_not_dropped(tmp_path, monkeypatch, data, line, words):
+    monkeypatch.setenv("IONOMOS_OFFLINE", "1")
+    src = _src(tmp_path, data)
+    assert fastasource.text_before_first_header(src)[0] == line
+    res = fastasource.prepare_for_fragpipe(src, tmp_path / "out", contaminants=None)
+    assert not res.ok and f"line {line}" in res.error and words in res.error and "first protein" in res.error
+    assert not (tmp_path / "out").exists() or _files(tmp_path / "out") == []
+    for fine in (HUMAN, b"\n\n" + HUMAN, BOM + HUMAN, b""):
+        assert fastasource.text_before_first_header(_src(tmp_path, fine, name="ok.fasta")) == (0, "")
+
+
+def test_a_utf16_fasta_is_refused_with_how_to_save_it(tmp_path, monkeypatch):
+    monkeypatch.setenv("IONOMOS_OFFLINE", "1")
+    src = _src(tmp_path, HUMAN.decode().encode("utf-16"))
+    res = fastasource.prepare_for_fragpipe(src, tmp_path / "out")
+    assert not res.ok and "UTF-16" in res.error and "UTF-8" in res.error
+
+
+def test_bom_in_fragpipe_fasta_info(tmp_path):
+    p = _src(tmp_path, BOM + b">rev_a\nKM\n>b\nMK\n", name="x.fas")
+    assert fragpipe.fasta_info(p) == {"entries": 2, "decoys": 1, "gb": p.stat().st_size / 1e9}
+    assert fragpipe.decoy_problem({"percolator.run-percolator": "true"}, p) == ""
+
+
+def test_a_go_crash_report_is_said_in_words(tmp_path):
+    log = tmp_path / "philosopher.log"
+    log.write_text("INFO[10:00:00] Executing Database\n"
+                   "panic: runtime error: index out of range [0] with length 0\n\n"
+                   "goroutine 1 [running]:\n"
+                   "github.com/Nesvilab/philosopher/lib/dat.ProcessDB(...)\n"
+                   "\tE:/Projects/philosopher/phi-5.1.1_RC/philosopher/lib/dat/dat.go:120 +0x85\n"
+                   "github.com/spf13/cobra.(*Command).Execute(...)\n"
+                   "\tE:/Projects/philosopher/vendor/github.com/spf13/cobra/command.go:968\n"
+                   "main.main()\n\t.../main.go:23 +0x85\n")
+    text = fastasource._last_lines(log)
+    assert ".go:" not in text and "cobra" not in text and "main.main" not in text
+    assert "panic: runtime error" in text and "Philosopher crashed" in text
+    log.write_text("ERRO[0000] something went wrong\n")
+    assert fastasource._last_lines(log) == "ERRO[0000] something went wrong"
