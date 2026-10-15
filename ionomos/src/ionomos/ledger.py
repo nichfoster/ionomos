@@ -15,9 +15,9 @@ The same `parsed` dict stored here is what intake writes to ionomos.json.
 Missing-id contracts: get() returns None; set_status()/requeue() are silent no-ops
 (pinned by tests); start_attempt() raises LedgerError.
 
-Thread-safe (D89): one connection, and every use of it holds `_lock`. The watcher,
-the worker and the app share a Ledger across threads; two threads stepping the same
-cached statement at once read NULL columns and short lists.
+Thread-safe (D89): one connection, and every use of it holds `_lock`, so one Ledger
+may be shared across threads (a worker thread and its caller, as the test bed does).
+Unlocked, two threads stepping the same cached statement read NULL columns and short lists.
 """
 from __future__ import annotations
 

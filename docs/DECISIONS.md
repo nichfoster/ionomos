@@ -3940,3 +3940,41 @@ lab's confirmation of the words, the thresholds and the normalisation is in
 ROADMAP.md. A second agent reviewed the change before the PR; its findings
 (tag words in folder names, a "?" on every EV control, notes on plain
 proteomes, the preview not matching the analysis) are fixed above.
+### D89 — A Ledger can be shared across threads: one connection, one lock
+**2026-10-14.** Master CI (run 38039976679, ubuntu, Python 3.14, after PR
+#101) failed `test_the_worker_loop_runs_through_a_queue_of_faults` with
+`TypeError: the JSON object must be str, bytes or bytearray, not NoneType` in
+`Job._from_row`. `parsed_json` is `NOT NULL`, so the row was torn on the way
+out, not stored wrong. The test polls `ledger.list()` from the main thread
+while `Worker.run_forever` calls `list()` and writes through the same Ledger
+on its own thread. `Ledger` opened one connection with
+`check_same_thread=False` and nothing serialised its use. Two threads running
+the same query share one cached prepared statement, and one resetting it while
+the other reads gives NULL columns. A two-thread loop on one Ledger hit this
+within seconds: the same `TypeError`, `list()` returning 8 or 11 of 20 rows,
+and `InterfaceError: bad parameter or other API misuse`.
+
+Every use of the connection now holds a `threading.RLock`: each read fetches
+its rows inside it, each write commits inside it, and `close()` takes it too.
+`start_attempt` reads and updates under one hold, so two callers count 1, 2, …
+rather than both returning the same number. It is re-entrant because
+`recover_on_startup` calls `set_status`.
+
+A connection per thread was the other option. It was not taken:
+- **Tests and helpers use `ledger._conn`** to delete or patch a row. With one
+  connection they keep working; with one per thread, `_conn` would have to
+  become a per-thread property and its writes could wait on another thread's
+  open read.
+- **Short-lived threads would leave connections open.** On Windows an open
+  handle stops `rebuild_from_status_files` from moving a damaged database
+  aside, and `close()` could not reach other threads' connections.
+- **The ledger is small and its calls are short**, so one lock costs nothing
+  measurable next to a FragPipe search.
+
+No production path is known to share one Ledger across threads today:
+`ionomos run` gives the worker its own (`Worker(cfg)`), and the app opens one
+per call. The lock makes sharing safe rather than leaving it to that
+convention, which the test bed already broke. On-disk names and the schema are
+unchanged. `test_ledger.py` hammers one Ledger from two threads (both tests
+failed 5 runs out of 5 on the old code). **Not verified**: CI's Linux
+runners, where the original failure was seen.
