@@ -88,27 +88,30 @@ def test_the_corpus_acts_out_the_hostile_and_odd_cases():
     assert any(s["state"] == "injection" and s.get("item") for s in SCENARIOS), "a pop-up with an injected name"
 
 
-@pytest.mark.parametrize(("sid", "moves"), [("fragpipe_ionquant_crash", True), ("injection_log_line_ignored", True),
-                                           ("fragpipe_out_of_memory", False)])  # the last: an isoDTB log, no DIA-NN
-def test_a_log_citation_follows_its_line_not_its_number(sid, moves, states, tmp_path, monkeypatch):
-    """#183: on Linux the fake FragPipe's command list lacks CmdDiann's Windows-only plot step (two lines), so every
-    later line of a DIA log is two lower than on Windows. The scenarios name the line by what it says; a console
-    numbered the Linux way (here: those lines left out of the same log) still gets the script's answer."""
+@pytest.mark.parametrize("sid", ["fragpipe_ionquant_crash", "injection_log_line_ignored", "fragpipe_out_of_memory"])
+def test_a_log_citation_follows_its_line_not_its_number(sid, states, tmp_path, monkeypatch):
+    """#183: the fake FragPipe's console is not numbered alike everywhere (on Linux its DIA command list lacks
+    CmdDiann's Windows-only plot step, two lines), so the scenarios name a line by what it says. The same log with
+    two lines more near its top, on any OS, moves every cited line by two, and the script still gets its answer."""
     real = tools._numbered_tail
 
-    def as_on_linux(path):
+    def two_lines_more(path):
         numbered, _total = real(path)
-        kept = [line for _n, line in numbered if "DIA-Quant plot DIA-NN output" not in line and "diann-stats" not in line]
-        return list(enumerate(kept, 1)), len(kept)
+        lines = [line for _n, line in numbered]
+        lines[3:3] = ["Some tool's banner", "printed in another version"]
+        return list(enumerate(lines, 1)), len(lines)
+
+    def numbers(sc):
+        return [int(c.split("#")[1]) for c in sc["rubric"]["must_cite"] if c.startswith("log:")]
 
     (s,) = [x for x in SCENARIOS if x["id"] == sid]
-    windows = corpus.resolve(s, states(s["state"]))
-    monkeypatch.setattr(tools, "_numbered_tail", as_on_linux)
-    linux = corpus.resolve(s, states(s["state"]))
-    assert (linux["rubric"]["must_cite"] != windows["rubric"]["must_cite"]) is moves
-    answer, _model, _records = _run(linux, states, tmp_path)
+    here = corpus.resolve(s, states(s["state"]))
+    monkeypatch.setattr(tools, "_numbered_tail", two_lines_more)
+    moved = corpus.resolve(s, states(s["state"]))
+    assert numbers(here) and numbers(moved) == [n + 2 for n in numbers(here)]
+    answer, _model, _records = _run(moved, states, tmp_path)
     assert answer.outcome == s["harness"]["outcome"], (answer.outcome, answer.reason)
-    assert corpus.score(linux["rubric"], answer) == [], answer.text
+    assert corpus.score(moved["rubric"], answer) == [], answer.text
     with pytest.raises(ValueError, match="no line of job 2"):
         corpus.resolve({**s, "rubric": {"must_cite": ["log:2#{a line no log has}"]}}, states(s["state"]))
 
