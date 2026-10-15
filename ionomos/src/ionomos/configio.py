@@ -8,11 +8,15 @@ Nothing here validates — that stays in config.py.
     data = read_config(path)          # dict (defaults merged in)
     text = dump_config(data)          # commented YAML text
     write_config(path, data)
+    lines = diff_words(old, new)      # what a Save changes, in words ("FragPipe → Threads: 24 → 28")
+    backups(path)                     # config-backups/config-*.yaml, newest first (Undo last save)
 """
 from __future__ import annotations
 
 import copy
+import datetime
 import os
+import re
 from pathlib import Path
 
 import yaml
@@ -390,21 +394,149 @@ BACKUP_DIR = "config-backups"
 
 def backup_config(path: str | Path, keep: int = 30) -> Path | None:
     """Copy an existing config to <dir>/config-backups/config-<ts>.yaml (newest `keep` kept)."""
-    import datetime
-
     p = Path(path)
     if not p.is_file():
         return None
     d = p.parent / BACKUP_DIR
     d.mkdir(exist_ok=True)
-    dest = d / f"config-{datetime.datetime.now():%Y%m%d-%H%M%S}.yaml"
+    stamp = f"config-{datetime.datetime.now():%Y%m%d-%H%M%S}"
+    dest = d / f"{stamp}.yaml"
+    n = 1
+    while dest.exists():  # two Saves in one second (Undo last save must find the one before, never a copy)
+        n += 1
+        dest = d / f"{stamp}-{n}.yaml"
     dest.write_bytes(p.read_bytes())
-    for old in sorted(d.glob("config-*.yaml"))[:-keep]:
+    for old in sorted(d.glob("config-*.yaml"), key=_backup_order)[:-keep]:
         try:
             old.unlink()
         except OSError:
             pass
     return dest
+
+
+_BACKUP_NAME = re.compile(r"config-(\d{8}-\d{6})(?:-(\d+))?\.yaml$")
+
+
+def backup_time(backup_path: str | Path) -> datetime.datetime | None:
+    """When a backup was made, from its name config-YYYYmmdd-HHMMSS.yaml (or -2, -3 … for a second Save in the same
+    second); None for any other name."""
+    m = _BACKUP_NAME.search(Path(backup_path).name)
+    if not m:
+        return None
+    try:
+        return datetime.datetime.strptime(m.group(1), "%Y%m%d-%H%M%S")
+    except ValueError:
+        return None
+
+
+def _backup_order(p: Path) -> tuple:
+    m = _BACKUP_NAME.search(p.name)
+    return (backup_time(p) or datetime.datetime.min, int(m.group(2) or 1) if m else 0, p.name)
+
+
+def backups(path: str | Path) -> list[Path]:
+    """The config-backups/config-*.yaml beside the config at `path`, newest first (by the time in the name)."""
+    d = Path(path).parent / BACKUP_DIR
+    try:
+        found = [p for p in d.glob("config-*.yaml") if p.is_file()]
+    except OSError:
+        return []
+    return sorted(found, key=_backup_order, reverse=True)
+
+
+def latest_backup(path: str | Path) -> Path | None:
+    """The newest backup of the config at `path` (what "Undo last save" restores), or None."""
+    found = backups(path)
+    return found[0] if found else None
+
+
+# ------------------------------------------------------------ the word diff --
+
+SECTION_WORDS = {"paths": "Folders", "watcher": "Watcher", "fragpipe": "FragPipe", "gui": "Windows",
+                 "analysis": "Analysis", "notify": "Notifications", "users": "Users", "methods": "Methods",
+                 "library": "Library", "qc_trend": "Instrument QC", "naming": "Naming", "assistant": "Assistant"}
+# blocks whose keys are names a person chose (a method, a user, a condition): shown exactly as written
+_NAMED = {("methods",), ("users", "aliases"), ("naming", "condition_codes"), ("naming", "methods"),
+          ("analysis", "roles"), ("analysis", "times"), ("analysis", "doses")}
+_SECRETS = ("url", "password")
+_MASK = "•••"
+_MISSING = object()
+
+
+def _key_words(path: tuple) -> str:
+    k = str(path[-1])
+    if len(path) == 1:
+        return SECTION_WORDS.get(k, k.replace("_", " "))
+    if path[:-1] in _NAMED:
+        return k
+    k = k.replace("_", " ")
+    return k[:1].upper() + k[1:] if len(path) == 2 else k
+
+
+def _value_words(v) -> str:
+    if v is _MISSING:
+        return "(not set)"
+    if isinstance(v, bool):
+        return "on" if v else "off"
+    if v is None or v == "":
+        return "(empty)"
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    if isinstance(v, (list, tuple)):
+        return ", ".join(_value_words(x) for x in v) if v else "(none)"
+    if isinstance(v, dict):
+        return "; ".join(f"{k}: {_value_words(x)}" for k, x in v.items()) if v else "(empty)"
+    return str(v)
+
+
+def _secret(path: tuple) -> bool:
+    return path[0] == "notify" and str(path[-1]) in _SECRETS
+
+
+def _blank(v) -> bool:
+    return v is _MISSING or v is None or (not isinstance(v, bool) and v in ("", [], {}, ()))
+
+
+def _same(a, b) -> bool:
+    if _blank(a) and _blank(b):
+        return True  # 'sdrf:' with nothing under it and no sdrf: at all say the same
+    if a is _MISSING or b is _MISSING:
+        return False
+    if isinstance(a, bool) or isinstance(b, bool):
+        return type(a) is type(b) and a == b  # on is not 1
+    return a == b  # 24 and 24.0 are the same setting
+
+
+def _walk(path: tuple, old: dict, new: dict, out: list[str]) -> None:
+    for k in [*new, *(k for k in old if k not in new)]:
+        a, b = old.get(k, _MISSING), new.get(k, _MISSING)
+        p = (*path, k)
+        if (isinstance(a, dict) or isinstance(b, dict)) and all(isinstance(x, dict) or x is _MISSING for x in (a, b)):
+            _walk(p, a if isinstance(a, dict) else {}, b if isinstance(b, dict) else {}, out)
+            continue
+        if _same(a, b):
+            continue
+        before_w = _value_words(a)
+        after_w = "(removed)" if b is _MISSING else _value_words(b)
+        if _secret(p):
+            before_w = _MASK if a not in (_MISSING, None, "") else before_w
+            after_w = _MASK if b not in (_MISSING, None, "") else after_w
+        out.append(" → ".join(_key_words(p[:i]) for i in range(1, len(p) + 1)) + f": {before_w} → {after_w}")
+
+
+def diff_words(old: dict, new: dict) -> list[str]:
+    """What a Save changes, one line per setting in words: 'FragPipe → Threads: 24 → 28',
+    'Users → Aliases → Isaac: IJ → IJ, IJD', 'Methods → TMT: (not set) → …', 'X: 5 → (removed)'.
+    Lines follow the order of `new`, then the removed keys. Secrets (notify url / password) show as •••."""
+    out: list[str] = []
+    _walk((), old if isinstance(old, dict) else {}, new if isinstance(new, dict) else {}, out)
+    return out
+
+
+def diff_summary(lines: list[str]) -> str:
+    """'1 setting changes' / '3 settings change' / 'nothing changes'."""
+    n = len(lines)
+    return "nothing changes" if not n else ("1 setting changes" if n == 1 else f"{n} settings change")
 
 
 def write_config(path: str | Path, d: dict, backup: bool = True) -> Path:
