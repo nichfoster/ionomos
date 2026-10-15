@@ -236,13 +236,13 @@ class LmFit:
 
 def lm_fit(values: Matrix, x: list[list[float]]) -> LmFit:
     """limma lmFit on a design matrix (samples × columns), row by row with missing values dropped.
-    Rows sharing a pattern of missing values share one QR."""
+    Rows sharing a pattern of missing values share one QR. NaN and ±inf are missing (lmFit: is.finite)."""
     p = len(x[0]) if x else 0
     nan = math.nan
     cache: dict[tuple, tuple] = {}
     coefs, sus, s2s, dfs = [], [], [], []
     for row in values:
-        obs = tuple(j for j, v in enumerate(row) if v is not None and not math.isnan(v))
+        obs = tuple(j for j, v in enumerate(row) if v is not None and math.isfinite(v))
         if not obs:
             coefs.append([nan] * p)
             sus.append([nan] * p)
@@ -373,6 +373,8 @@ def moderated_f(t_rows: list[list[float]], cov_contrasts: list[list[float]], df2
     """limma classifyTestsF(fstat.only = TRUE) + pf: (F, p, df1). t_rows: moderated t per row per contrast;
     cov_contrasts: C'(X'X)^-1 C (its correlation decorrelates the t's); df2: d0 + residual df per row."""
     k = len(cov_contrasts)
+    if not k:  # no contrast (a single condition): nothing to test, so no F and no p-value (D32)
+        return [math.nan] * len(t_rows), [math.nan] * len(t_rows), 0
     diag = [cov_contrasts[i][i] or 1.0 for i in range(k)]
     cor = [[cov_contrasts[i][j] / math.sqrt(diag[i] * diag[j]) for j in range(k)] for i in range(k)]
     vals, vecs = _eigen_sym(cor)
@@ -436,7 +438,7 @@ def _eigen_sym(a: list[list[float]], sweeps: int = 100):
 def _group_stats(values: Matrix, idx: list[int]):
     ns, means = [], []
     for row in values:
-        xs = [row[j] for j in idx if row[j] is not None]
+        xs = [row[j] for j in idx if row[j] is not None and math.isfinite(row[j])]
         ns.append(len(xs))
         means.append(sum(xs) / len(xs) if xs else math.nan)
     return ns, means
