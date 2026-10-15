@@ -29,11 +29,11 @@ see below.
 | Engine | What Ionomos reads | Quantity used | Filters applied by Ionomos | Version from |
 |---|---|---|---|---|
 | **FragPipe** (run by Ionomos) | isoDTB `combined_modified_peptide_label_quant.tsv`, TMT-Integrator `abundance_*_MD.tsv` (else `_GN`, `_None`, `ratio_*`; below), DIA-NN `*pg_matrix.tsv`, IonQuant `combined_protein.tsv` | per method (see WORKFLOWS.md) | none (FragPipe's own FDR) | `log_*.txt`, `fragpipe.workflow` (plus MSFragger / IonQuant / DIA-NN versions and the FASTA) |
-| **DIA-NN** standalone | `*pg_matrix.tsv` (preferred), else the long report `report.tsv` (1.x) or `report.parquet` (2.x) | pg_matrix values, or `PG.MaxLFQ` | long report: `Q.Value` ≤ 1% and `PG.Q.Value` ≤ 1% | `*.log.txt` |
+| **DIA-NN** standalone | `*pg_matrix.tsv` (preferred), else the long report `report.tsv` (1.x) or `report.parquet` (2.x) | pg_matrix values, or `PG.MaxLFQ` | long report: `Q.Value` ≤ 1% and `PG.Q.Value` ≤ 1% (a row with a blank q-value is left out) | `*.log.txt` |
 | **MaxQuant** | `combined/txt/proteinGroups.txt` | `LFQ intensity`, else `Intensity`; `Reporter intensity corrected` for TMT | rows marked `+` in Reverse / Potential contaminant / Only identified by site are left out; `CON__` contaminants removed | `parameters.txt`, `mqpar.xml` |
 | **Sage** | `lfq.tsv` (a row per peptide ion, a column per file); `results.sage.tsv` and `results.json` beside it when they are there | proteins summarised per sample by Tukey median polish of the ion intensities; proteins grouped by razor peptides (below) | `q_value` ≤ 1% per peptide; with `results.sage.tsv`, the peptide's best `protein_q` ≤ 1% too; decoys left out | `results.json` (also the FASTA and every search setting) |
 | **Sage TMT** | `tmt.tsv` (a row per spectrum, a column per reporter channel) with `results.sage.tsv` beside it; read instead of `lfq.tsv` when both are there | proteins summarised per plex and channel as the MSstatsTMT format is (below); several plexes joined by IRS | PSMs: targets of `rank` 1 with `spectrum_q`, `peptide_q` and `protein_q` ≤ 1%; spectra with more than one such PSM left out | `results.json` |
-| **Spectronaut** | a protein pivot report (`<run>.PG.Quantity`) or the long BGS report (`R.FileName`, `R.Condition`, `R.Replicate`, `PG.ProteinGroups`, `PG.Quantity`) | `PG.Quantity` | long report: `PG.Qvalue` and `EG.Qvalue` ≤ 1% | not in the export |
+| **Spectronaut** | a protein pivot report (`<run>.PG.Quantity`) or the long BGS report (`R.FileName`, `R.Condition`, `R.Replicate`, `PG.ProteinGroups`, `PG.Quantity`) | `PG.Quantity` | long report: `PG.Qvalue` and `EG.Qvalue` ≤ 1% (a row with a blank q-value is left out) | not in the export |
 | **AlphaDIA** | `pg.matrix.tsv` | protein-group matrix | none | `frozen_config.yaml` |
 | **MSstats format** (quantms, Skyline, any MSstats converter) | `ProteinName, PeptideSequence, PrecursorCharge, FragmentIon, ProductCharge, IsotopeLabelType, Condition, BioReplicate, Run, Intensity` | proteins summarised per run by Tukey median polish (MSstats' default) | heavy / reference rows left out; intensities ≤ 1 count as missing | not in the file |
 | **MSstatsTMT format** (MSstatsTMT's converters, quantms / OpenMS, FragPipe) | `ProteinName, PeptideSequence, Charge, PSM, Mixture, TechRepMixture, Run, Channel, Condition, BioReplicate, Intensity` (`Fraction` optional) | proteins summarised as MSstatsTMT's `proteinSummarization(method = "MedianPolish")`: fractions of a mixture combined, global median normalisation, median polish per run, reference normalisation on the `Norm` channels; one sample per mixture × channel (technical replicates averaged) | `Norm` and `Empty` channels left out after the normalisation; intensities < 1 count as missing | not in the file |
@@ -447,7 +447,12 @@ FragPipe search of the same files.
 
 The formats were built from each vendor's documentation and tested with files
 using the real column names (`tests/test_engines.py`, `tests/test_plexes.py`); the MSstatsTMT summary is checked against MSstatsTMT 2.20 itself. The Proteome Discoverer
-column naming comes from the documentation, not from a real export. If a real
+column naming comes from the documentation, not from a real export. A table
+saved again from Excel (UTF-16 "Unicode text", cells in quotes, commas
+instead of tabs) and a report written with decimal commas (Spectronaut on a
+German Windows) are read to the same numbers; a cut-off, empty or damaged file
+is named and refused, or read with a note ([VALIDATION.md](VALIDATION.md),
+"Messy input"). If a real
 file from your engine isn't recognised, please send its header line with
 **Report a problem**. For checking a search itself, `ionomos bundle 12
 --include diann-report,peptides` also puts DIA-NN's main report

@@ -548,7 +548,16 @@ covers, and what happens (`tests/test_robustness.py`):
 | values beyond 2^100 or below 2^-100, numbers too large for a float | missing | a note with the count |
 | 1 or 2 features | analysed; median normalisation is pointed out as the reason nothing is testable | a note, `FEW_FEATURES`, `VARIANCE_PRIOR` |
 | 50,000 features × 6 samples | about 3 s on the development Mac (the lab PC was not timed) | – |
-| ragged rows, a BOM, CRLF, NUL bytes, an unterminated quote | read | a note for ragged rows |
+| ragged rows, a BOM, CRLF | read | a note for ragged rows |
+| UTF-16 (Excel's "Unicode text"), Windows' cp1252, every cell in quotes, commas instead of tabs, a delimiter inside a quoted cell (any format, FragPipe's tables too) | read to the same numbers | a note for cp1252 |
+| a quote that is never closed | quotes read as plain characters, so no rows are joined | a note |
+| a file cut off in the middle of its last row | that row left out | a note: copy or export it again |
+| NUL bytes (a copy that did not finish) | read | a note that the file may be damaged |
+| a cell longer than 131,072 characters (MaxQuant's ID lists on a big experiment) | read | – |
+| decimal commas or thousands separators in an engine's long report (Spectronaut on a German Windows) | read | a note |
+| a long report's row whose q-value is blank or not a number | left out (a q-value column with no number at all is not used as a filter) | a note with the count |
+| an engine's own table of 0 bytes, a header only, a damaged Parquet file | refused | `UNUSABLE_TABLE`, naming the file |
+| a run column twice in a DIA-NN matrix, a file column twice or a peptide ion twice in Sage's `lfq.tsv` | read once, never added twice | a note |
 
 Statistics that run but may not mean what they say are reported by
 `downstream/guards.py`, never repaired silently:
@@ -563,6 +572,15 @@ Statistics that run but may not mean what they say are reported by
 Groups that are too small were already handled (D32). A prior with infinite
 degrees of freedom (one pooled variance) is limma's normal answer when the
 variances are alike; it is stated under "How far to trust this", not raised.
+
+Every engine format is checked the same way (`tests/test_loader_formats.py`,
+round 4): one simulated experiment written as DIA-NN (matrix, long report,
+Parquet), FragPipe, MaxQuant, Spectronaut, AlphaDIA, MSstats, Proteome
+Discoverer, Sage and any table (tab, comma, semicolon, `.xlsx`) gives one
+hit list; each format with the harmless differences above reads to the same
+numbers, and with the damage above is read with a note or refused in words;
+100,000 rows of each load in seconds. The TMT formats (Proteome Discoverer,
+MSstatsTMT, Sage TMT, MaxQuant) take the same changes.
 
 The fuzzing: 37 hand-made messy tables, each also with three random settings
 (111 analyses), and 160 seeded random damages to simulated DIA, TMT and
