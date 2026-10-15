@@ -276,6 +276,10 @@ class Worker:
             self._fail(job, f"could not prepare {spec.engine_name} inputs: {exc}", spec,
                        fragpipe.explain(str(exc)))
             return True
+        except fragpipe.JobError as exc:  # e.g. MaxQuant could not make its parameter template: the reason says why
+            self.current = None
+            self._fail(job, str(exc), spec, fragpipe.explain(str(exc)))
+            return True
         if moved:
             spec.warnings.append(f"previous attempt's output kept as {moved}/")
         log.info("job %d: %s %s on %s (%d raw files, attempt %d)", job.id, spec.engine_name, job.method, dest,
@@ -430,7 +434,9 @@ def _input_hold(spec: fragpipe.RunSpec, exc: OSError) -> str:
     The workflow or FASTA vanished since prepare() looked (setup: held like a missing one), or the previous
     attempt's output can't be moved aside because a file in it is open (Excel, Explorer's preview): Ionomos never
     writes a new search into it, so it waits (D69)."""
-    if not spec.workflow_src.is_file():
+    # DIA-NN, and MaxQuant / Sage without a lab file, have no source workflow: their workflow_src is only the name
+    # of the file Ionomos writes (diann.cfg), never on disk, and must not turn every write error into this hold
+    if len(spec.workflow_src.parts) > 1 and not spec.workflow_src.is_file():
         return f"workflow file for {spec.method} missing: {spec.workflow_src} (it disappeared just before the search)"
     if spec.fasta is not None and not spec.fasta.is_file():
         return f"FASTA for {spec.method} missing: {spec.fasta} (it disappeared just before the search)"

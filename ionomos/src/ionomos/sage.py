@@ -34,11 +34,10 @@ import os
 import subprocess
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 
 from ionomos.config import Config
-from ionomos.fragpipe import Hold, JobError, RunSpec, _find_file, check_raws
+from ionomos.fragpipe import Hold, JobError, RunSpec, _find_file, check_raws, move_aside
 from ionomos.ledger import Job
 from ionomos.manifest import OverridesError, parse_overrides, tmt_annotation_files
 
@@ -298,10 +297,7 @@ def write_inputs(spec: SageSpec) -> str | None:
     """ionomos_run/sage.json + sage_job.json and an empty sage/ folder; an old sage/ is kept, renamed, never
     deleted. sage_mzml/ is left as it is: mzML files already converted are reused."""
     spec.run_dir.mkdir(parents=True, exist_ok=True)
-    moved = None
-    if spec.workdir.exists() and any(spec.workdir.iterdir()):
-        moved = f"{WORKDIR}_previous_{datetime.now():%Y%m%d-%H%M%S}"
-        os.replace(spec.workdir, spec.dest / moved)
+    moved = move_aside(spec.workdir)
     spec.workdir.mkdir(exist_ok=True)
     spec.workflow.write_text(json.dumps(spec.config(), indent=2) + "\n", encoding="utf-8", newline="\n")
     spec.manifest.write_text(json.dumps(spec.job(), indent=2) + "\n", encoding="utf-8", newline="\n")
@@ -343,37 +339,73 @@ def _say(*parts) -> None:
     print("ionomos sage-job:", *parts, flush=True)
 
 
+SOURCE_SUFFIX = ".source.json"  # beside a finished mzML: the raw file it was converted from, as it was then
+
+
+def _source(raw: Path) -> dict:
+    st = raw.stat()
+    return {"raw": raw.name, "size": st.st_size, "mtime_ns": st.st_mtime_ns}
+
+
 def _fresh(mzml: Path, raw: Path) -> bool:
+    """Is `mzml` a finished conversion of `raw` as it is now? Its record (<name>.mzML.source.json, written when the
+    conversion was moved into place) must give the raw file's present size and time: a raw file replaced since,
+    say a re-copied one whose time stamp is older than the mzML, is converted again, and a raw file stamped in the
+    future (an instrument PC's clock ahead) is not converted on every Retry. An mzML without a record (made before
+    the record existed, or put there by hand) counts when it is newer than the raw file."""
     try:
-        return mzml.stat().st_size > 0 and mzml.stat().st_mtime >= raw.stat().st_mtime
+        if mzml.stat().st_size == 0:
+            return False
+        try:
+            rec = json.loads(mzml.with_name(mzml.name + SOURCE_SUFFIX).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            rec = None
+        if isinstance(rec, dict):
+            now = _source(raw)
+            return rec.get("size") == now["size"] and rec.get("mtime_ns") == now["mtime_ns"]
+        return mzml.stat().st_mtime >= raw.stat().st_mtime
     except OSError:
         return False
 
 
 def convert(converter: list[str], raw: Path, mzml: Path) -> int:
     """One .raw -> indexed mzML with ThermoRawFileParser. It is written to sage_mzml/converting/ and moved
-    into place when complete, so a conversion that was cancelled half-way is never taken for a finished one."""
+    into place when complete, so a conversion that was cancelled half-way is never taken for a finished one: what
+    an earlier, unfinished conversion left in converting/ is removed first, or a converter that writes nothing
+    would hand that half file on as its result."""
     tmp_dir = mzml.parent / "converting"
     tmp_dir.mkdir(parents=True, exist_ok=True)
+    made = tmp_dir / mzml.name
+    try:
+        made.unlink(missing_ok=True)  # Ionomos' own half-written file, never a finished one or a raw
+    except OSError as exc:
+        _say(f"ERROR: an unfinished conversion {made} from an earlier attempt can't be removed "
+             f"({exc.strerror or exc}); close the program that holds it, then Retry")
+        return 1
     cmd = converter + [f"-i={raw}", f"-o={tmp_dir}", "-f=2"]
     try:
         code = subprocess.run(cmd, stdin=subprocess.DEVNULL).returncode
     except OSError as exc:
         _say(f"ERROR: could not start the raw converter ({converter[0]}): {exc}")
         return 1
-    made = tmp_dir / mzml.name
     if code != 0 or not made.is_file() or made.stat().st_size == 0:
         _say(f"ERROR: converting {raw.name} failed (ThermoRawFileParser exit code {code}"
              f"{'' if made.is_file() else ', no mzML written'})")
         return code or 1
     os.replace(made, mzml)
+    record = mzml.with_name(mzml.name + SOURCE_SUFFIX)
+    try:  # best effort: without it the mzML counts as converted while it is newer than the raw file
+        record.write_text(json.dumps(_source(raw)) + "\n", encoding="utf-8")
+    except OSError:
+        pass
     return 0
 
 
 def telemetry_flag(sage: list[str]) -> list[str]:
     """[the flag that switches Sage's telemetry off] when this Sage knows it (asked with --help), else []."""
     try:
-        r = subprocess.run(sage + ["--help"], capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
+        r = subprocess.run(sage + ["--help"], capture_output=True, text=True, errors="replace", timeout=60,
+                           stdin=subprocess.DEVNULL)
     except (OSError, subprocess.TimeoutExpired):
         return []
     return [NO_TELEMETRY] if NO_TELEMETRY in (r.stdout + r.stderr) else []
@@ -385,8 +417,16 @@ def run_job(argv: list[str]) -> int:
     if len(argv) != 1 or not Path(argv[0]).is_file():
         _say("usage: ionomos sage-job <sage_job.json>")
         return 2
-    job = json.loads(Path(argv[0]).read_text(encoding="utf-8"))
-    todo = [(Path(c["raw"]), Path(c["mzml"])) for c in job.get("convert") or []]
+    try:
+        job = json.loads(Path(argv[0]).read_text(encoding="utf-8"))
+        todo = [(Path(c["raw"]), Path(c["mzml"])) for c in job.get("convert") or []]
+        sage = [str(x) for x in job["sage"]]
+        if not sage or (todo and not job.get("converter")):
+            raise ValueError("no Sage" if not sage else "files to convert but no converter")
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        _say(f"ERROR: {argv[0]} is not a Sage job Ionomos can run ({type(exc).__name__}: {exc}); Retry the job, "
+             f"which writes it again")
+        return 2
     for k, (raw, mzml) in enumerate(todo, 1):
         if _fresh(mzml, raw):
             _say(f"[{k}/{len(todo)}] {mzml.name} already converted")
@@ -395,7 +435,6 @@ def run_job(argv: list[str]) -> int:
         code = convert(job["converter"], raw, mzml)
         if code != 0:
             return code
-    sage = [str(x) for x in job["sage"]]
     quiet = telemetry_flag(sage)
     _say("Sage telemetry switched off" if quiet else
          "this Sage has no telemetry switch (versions before the flag sent none, or check its --help)")

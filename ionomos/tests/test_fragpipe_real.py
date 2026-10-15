@@ -421,6 +421,11 @@ def test_every_explanation_is_exercised_by_a_test():
         "FragPipe exited 0 without its 'ALL JOBS DONE' line and without any of its result tables: the run did not "
         "finish", "Ionomos hit an unexpected error while running the search: OSError: x",
         "java.io.FileNotFoundException: C:\\x\\a.raw (The system cannot find the file specified)",
+        # round 4: tests/test_engine_faults.py acts each out with a stand-in engine
+        "DIA-NN could not start: a DLL it needs is missing",
+        "DIA-NN did not stop when told to (process 4242): end it in Task Manager before a Retry",
+        "DIA-NN's result table report.pg_matrix.tsv can't be read (Permission denied): it is open in another program",
+        "DIA-NN exited 0 but did not write its result table report.pg_matrix.tsv in diann/",
     ) for msg in fragpipe.explain(log)}
     missing = [msg for _rx, msg in fragpipe.EXPLANATIONS if msg not in here | elsewhere]
     assert missing == []
@@ -1042,7 +1047,7 @@ def test_preflight_dry_run_reports_what_fragpipe_refuses(bed, monkeypatch):
 
 
 def test_preflight_static_starts_nothing(bed, monkeypatch):
-    monkeypatch.setattr(preflight.subprocess, "Popen", lambda *a, **k: 1 / 0)
+    monkeypatch.setattr(fragpipe.subprocess, "Popen", lambda *a, **k: 1 / 0)
     checks = preflight.run(bed["cfg"], start=False)
     keys = {c.key for c in checks}
     assert "starts" not in keys and not any(k.endswith(":dry") for k in keys) and "method:isoDTB:fasta" in keys

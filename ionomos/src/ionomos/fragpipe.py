@@ -530,17 +530,28 @@ def shared_plex_warning(n: int) -> str:
     return text(n)
 
 
+def move_aside(workdir: Path) -> str | None:
+    """An earlier attempt's output folder, if it holds anything, renamed to <name>_previous_<time> beside it and
+    never deleted; None when there was nothing to keep. Every engine's runner uses it. A name that is taken (two
+    attempts in one second) gets -2, -3 ...: a rename onto an existing empty folder would succeed on POSIX and fail
+    on Windows, and onto a full one fail everywhere (D69). Raises OSError when it can't be moved (a file in it is
+    open): the worker then holds the job, and nothing is written into the old output."""
+    workdir = Path(workdir)
+    if not (workdir.exists() and any(workdir.iterdir())):
+        return None
+    stamp = f"{workdir.name}_previous_{datetime.now():%Y%m%d-%H%M%S}"
+    moved = next((n for n in (stamp, *(f"{stamp}-{i}" for i in range(2, 1000))) if not (workdir.parent / n).exists()),
+                 None)
+    if moved is None:
+        raise FileExistsError(17, "a thousand earlier attempts were kept within one second", str(workdir))
+    os.rename(workdir, workdir.parent / moved)
+    return moved
+
+
 def write_inputs(spec: RunSpec) -> str | None:
     """Create ionomos_run/ inputs and an empty workdir. Returns the name an old workdir was moved to, if any."""
     spec.run_dir.mkdir(parents=True, exist_ok=True)
-    moved = None
-    if spec.workdir.exists() and any(spec.workdir.iterdir()):
-        # FragPipe wants an empty output folder; keep the old attempt, never delete it. A name that is taken (two
-        # attempts in one second) gets -2, -3 ...: os.replace onto an existing empty folder would succeed on POSIX
-        # and fail on Windows, and onto a full one fail everywhere (D69)
-        stamp = f"{WORKDIR}_previous_{datetime.now():%Y%m%d-%H%M%S}"
-        moved = next(n for n in (stamp, *(f"{stamp}-{i}" for i in range(2, 1000))) if not (spec.dest / n).exists())
-        os.rename(spec.workdir, spec.dest / moved)
+    moved = move_aside(spec.workdir)  # FragPipe wants an empty output folder
     spec.workdir.mkdir(exist_ok=True)
     if spec.fasta is not None and not spec.fasta.is_file():  # moved since prepare(): the worker holds the job
         raise FileNotFoundError(2, "the FASTA is gone", str(spec.fasta))
@@ -625,7 +636,75 @@ def kill_tree(proc: subprocess.Popen) -> None:
     try:
         proc.wait(timeout=10)
     except subprocess.TimeoutExpired:
-        pass
+        # taskkill missing from PATH or refused, a process group that could not be signalled: end at least the
+        # process Ionomos started (TerminateProcess / SIGKILL), so the job is not left with a live search
+        try:
+            proc.kill()
+            proc.wait(timeout=10)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+
+def run_to_file(cmd: list[str], out_file: Path, cwd: Path, timeout: float,
+                env: dict[str, str] | None = None) -> tuple[int | None, str, bool]:
+    """A short helper run of an engine (`--help`, `--create`, a dry run): output to a file, never a pipe, and its
+    process tree killed at the time limit. subprocess.run(capture_output=True, timeout=...) is not bounded: after
+    the time limit it kills the program but then waits, without a limit, for the pipe to close, and a program the
+    engine started keeps it open (D73). -> (exit code or None, the output as text, timed out). Never raises: a
+    program that can't be started gives (None, 'could not start: <why>', False)."""
+    timed_out = False
+    code: int | None = None
+    try:
+        with open(out_file, "wb") as out:
+            proc = subprocess.Popen(cmd, stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, cwd=str(cwd),
+                                    env={**os.environ, **env} if env else None, **_popen_kwargs())
+            try:
+                code = proc.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                kill_tree(proc)
+    except (OSError, ValueError) as exc:  # ValueError: a NUL in a path from the settings
+        return None, f"could not start: {exc}", False
+    return code, read_tail_text(out_file, 2_000_000), timed_out
+
+
+def _not_stopped(spec: RunSpec, proc: subprocess.Popen) -> str:
+    """'' when the engine ended; else what a person must do, for the end of a reason (the run folder keeps its
+    engine_pid.json, so the next Ionomos start or attempt tries again: stop_leftover)."""
+    if proc.poll() is not None:
+        return ""
+    return f" — {spec.engine_name} did not stop when told to (process {proc.pid}): end it in Task Manager before a Retry"
+
+
+def _stop_stragglers(spec: RunSpec, proc: subprocess.Popen) -> str:
+    """POSIX: processes the engine started that still run after it ended by itself (its process group outlives
+    it). They could go on writing into the output folder the analysis is about to read, or hold its files: they
+    are stopped, and that is said. '' when there were none. On Windows they can't be told apart from other
+    programs once the engine is gone (no process group to ask): see docs/ROADMAP.md."""
+    if os.name == "nt":
+        return ""
+
+    def alive() -> bool:
+        try:
+            os.killpg(proc.pid, 0)
+            return True
+        except OSError:
+            return False
+
+    if not alive():
+        return ""
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(proc.pid, sig)
+        except OSError:
+            break
+        end = time.monotonic() + 5
+        while alive() and time.monotonic() < end:
+            time.sleep(0.05)
+        if not alive():
+            break
+    return (f"a program {spec.engine_name} started was still running after {spec.engine_name} ended; Ionomos "
+            f"stopped it" + (" (it may still be running: check the process list)" if alive() else ""))
 
 
 POLL_SECONDS = 1.0  # how often a running search is checked (cancel, stop, time limit, console size)
@@ -682,6 +761,8 @@ def _forget_engine(spec: RunSpec) -> None:
 
 def kill_pid_tree(pid: int, group: bool = False) -> None:
     """Stop a process Ionomos started earlier and no longer has a handle on, with everything it started."""
+    if pid <= 1:  # 0 and 1 (init) are never a search; os.kill(-1) on POSIX would signal every process of the user
+        return
     if os.name == "nt":
         _taskkill(pid)
         return
@@ -722,9 +803,13 @@ def stop_leftover(run_dir: Path) -> str:
     marker = Path(run_dir) / ENGINE_PID_FILE
     try:
         rec = json.loads(marker.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except OSError:  # gone, or can't be read now: nothing to act on
         return ""
+    except ValueError:  # cut off or damaged (a full disk when it was written): it can never name a process again
+        rec = {}
     msg = ""
+    if not isinstance(rec, dict):  # valid JSON but not a record (a hand edit, another program): nothing to stop
+        rec = {}
     try:
         pid, when = int(rec.get("pid") or 0), rec.get("started")
         now = process_started(pid) if pid else None
@@ -801,7 +886,13 @@ def _run(spec: RunSpec, stop: threading.Event, on_start, poll: float, on_poll, s
             return ended
         code = proc.returncode
         _say(out, f"\n# exit code {code} after {(_clock() - started) / 60:.1f} min\n")
-    return judge(spec, code, offset)
+        straggler = _stop_stragglers(spec, proc)
+        if straggler:
+            _say(out, f"# {straggler}\n")
+    res = judge(spec, code, offset)
+    if straggler:
+        res.warnings.append(straggler)
+    return res
 
 
 def _watch(spec: RunSpec, proc: subprocess.Popen, out, stop: threading.Event, poll: float, on_poll,
@@ -831,8 +922,9 @@ def _watch(spec: RunSpec, proc: subprocess.Popen, out, stop: threading.Event, po
             _say(out, f"\n# TIMEOUT after {spec.timeout_minutes} min\n")
             reason = f"timed out after {spec.timeout_minutes} min (fragpipe.timeout_minutes)"
             text = attempt_text(read_tail_text(spec.console_log, start=offset))
-            return RunResult(proc.returncode, f"{reason}; it was at: {progress(spec.console_log)}",
-                             timed_out=True, hints=explain(reason) + explain(text))
+            alive = _not_stopped(spec, proc)
+            return RunResult(proc.returncode, f"{reason}; it was at: {progress(spec.console_log)}{alive}",
+                             timed_out=True, hints=explain(alive) + explain(reason) + explain(text))
         try:
             grown = spec.console_log.stat().st_size - offset
         except OSError:
@@ -842,7 +934,8 @@ def _watch(spec: RunSpec, proc: subprocess.Popen, out, stop: threading.Event, po
             mb = f"{MAX_CONSOLE_BYTES / 1e6:g}"
             _say(out, f"\n# STOPPED: the console log grew past {mb} MB\n")
             reason = f"{spec.engine_name} wrote more than {mb} MB to its console log; stopped so it can't fill the disk"
-            return RunResult(proc.returncode, reason, hints=explain(reason))
+            alive = _not_stopped(spec, proc)
+            return RunResult(proc.returncode, reason + alive, hints=explain(alive) + explain(reason))
 
 
 # Exit codes that say how a process ended rather than what went wrong in it. Windows reports an NTSTATUS as an
@@ -850,7 +943,29 @@ def _watch(spec: RunSpec, proc: subprocess.Popen, out, stop: threading.Event, po
 _ENDED_FROM_OUTSIDE = {0xC000013A: "Ctrl+C or the console window closing", 0x40010004: "the session ending"}
 _CRASH_CODES = {0xC0000005: "an access violation", 0xC00000FD: "a stack overflow", 0xC0000409: "a stack buffer overrun",
                 0xC0000017: "running out of memory", 0xC0000142: "a DLL that failed to start",
+                0xC0000374: "a corrupted heap", 0xC0000094: "a division by zero", 0xC000001D: "an illegal instruction",
                 0xE0434352: "a .NET exception"}
+# The program never ran: Windows could not load it (STATUS_DLL_NOT_FOUND, an entry point missing from a DLL,
+# STATUS_INVALID_IMAGE_FORMAT). DIA-NN without the Visual C++ Redistributable ends this way, with no output at all.
+_CANT_START = {0xC0000135: "a DLL it needs is missing", 0xC0000139: "a DLL it needs is the wrong version",
+               0xC000007B: "it or a DLL it needs is for another kind of Windows (32/64-bit)"}
+
+
+def _ntstatus_error(unsigned: int) -> bool:
+    """An NTSTATUS error code (0xC0xxxxxx): Windows ended the process for it. A program's own small negative exit
+    code (-1 is 0xFFFFFFFF) is not one."""
+    return 0xC0000000 <= unsigned <= 0xC0FFFFFF
+
+
+def code_text(code: int | None) -> str:
+    """An exit code as a person can read it: Windows reports codes as unsigned 32-bit numbers, so a program's
+    exit(-1) arrives as 4294967295 (shown -1) and a crash as 3221225477 (shown 0xC0000005)."""
+    if code is None:
+        return "none"
+    if 0x80000000 <= code <= 0xFFFFFFFF:
+        known = _ntstatus_error(code) or code in _ENDED_FROM_OUTSIDE or code in _CRASH_CODES or code in _CANT_START
+        return f"0x{code:08X}" if known else str(code - (1 << 32))
+    return str(code)
 
 
 def exit_code_reason(code: int | None, text: str) -> str:
@@ -868,8 +983,12 @@ def exit_code_reason(code: int | None, text: str) -> str:
         return f"ended by {name}"
     if unsigned in _ENDED_FROM_OUTSIDE:
         return f"ended by {_ENDED_FROM_OUTSIDE[unsigned]}"
+    if unsigned in _CANT_START:
+        return f"could not start: {_CANT_START[unsigned]}"
     if unsigned in _CRASH_CODES:
-        return f"crashed with {_CRASH_CODES[unsigned]} (0x{unsigned:08X})"
+        return f"crashed with {_CRASH_CODES[unsigned]}"
+    if _ntstatus_error(unsigned):
+        return f"crashed with Windows error 0x{unsigned:08X}"
     facts = console_facts(text)
     if not facts["error_lines"] and not facts["finished"] and not facts["started"] and not facts["commands"]:
         return ""  # it stopped before running anything: the last lines say why
@@ -918,6 +1037,10 @@ def check_tables(spec: RunSpec) -> tuple[str, list[str]]:
         p = spec.workdir / name
         if p.is_file() and p.suffix.lower() in TABLE_SUFFIXES:
             found.append((name, table_problem(p)))
+    locked = [(n, why) for n, why in found if why.startswith("can't be read")]
+    if locked:  # a whole table may be behind the lock: not "cut off", and a Retry once it is closed may do
+        return (f"{spec.engine_name}'s result table {locked[0][0]} {locked[0][1]}: it is open in another program, "
+                f"or a program of the search still holds it"), []
     broken = [(n, why) for n, why in found if why and "no rows" not in why]
     if broken:
         return (f"{spec.engine_name}'s result table {broken[0][0]} {broken[0][1]}: the run did not finish writing "
@@ -952,8 +1075,8 @@ def judge(spec: RunSpec, code: int | None, offset: int = 0) -> RunResult:
         if bad_step:
             name, c, said = bad_step
             return RunResult(code, f"{lead}FragPipe step {name} failed (exit code {c}); it said: {said}", hints=hints)
-        return RunResult(code, f"{lead}{spec.engine_name} exited with code {code}"
-                               + (f" ({how})" if how else "") + f"; last lines: {tail(spec.console_log, 4)}",
+        return RunResult(code, f"{lead}{spec.engine_name} exited with code {code_text(code)}"
+                               + (f" ({how})" if how else "") + f"; last lines: {tail(spec.console_log, 4) or '(none)'}",
                          hints=hints)
     if bad_step:
         name, c, said = bad_step
@@ -974,6 +1097,14 @@ def judge(spec: RunSpec, code: int | None, offset: int = 0) -> RunResult:
     broken, table_warnings = check_tables(spec)
     if broken:
         return RunResult(1, broken, hints=explain(broken) + hints)
+    if not is_fragpipe and missing_outputs(spec):
+        # DIA-NN, MaxQuant and Sage write their main table under the name Ionomos gave them (--out,
+        # fixedCombinedFolder, output_directory) whenever they finish, and the analysis reads nothing else: exit 0
+        # without it is an unfinished run, not a done job with nothing to analyse
+        want = " / ".join(spec.expected_outputs())
+        return RunResult(1, f"{spec.engine_name} exited 0 but did not write its result table {want} in "
+                            f"{spec.workdir.name}/; last lines: {tail(spec.console_log, 4) or '(none)'}",
+                         hints=explain("exited 0 but did not write its result table") + hints)
     finished = not is_fragpipe or bool(_ALL_DONE.search(text))
     if not finished and missing_outputs(spec):
         why = ("FragPipe exited 0 without its 'ALL JOBS DONE' line and without any of its result tables: the run "
@@ -1083,8 +1214,11 @@ EXPLANATIONS: list[tuple[str, str]] = [
     # Ionomos' own words about how a search ended (D69): fragpipe.run / judge / the worker write these
     (r"timed out after [\d.]+ min \(fragpipe\.timeout_minutes\)",
      "The search ran longer than the time limit (Time limit in Advanced, fragpipe.timeout_minutes): raise it for "
-     "a big experiment, then Retry. If the log's last step had stopped printing long before, FragPipe hung: Retry "
-     "once, and send Report a problem if it hangs again"),
+     "a big experiment, then Retry. If the log's last step had stopped printing long before, the search hung: "
+     "Retry once, and send Report a problem if it hangs again"),
+    (r"did not stop when told to \(process \d+\)",
+     "The search program did not stop when Ionomos ended it, and may still be running and writing: end it in "
+     "Task Manager (Details: the process number in the reason), then Retry"),
     (r"wrote more than [\d.]+ MB to its console log",
      "A tool printed the same thing over and over, so the search was stopped before its log filled the disk: "
      "Retry once; if it happens again, send Report a problem (it includes the end of the log)"),
@@ -1093,12 +1227,23 @@ EXPLANATIONS: list[tuple[str, str]] = [
      "The search was ended from outside while it ran: Task Manager or another program, signing out, the PC "
      "shutting down or going to sleep, or Windows ending it for lack of memory. Nothing in the search itself "
      "failed: Retry, and keep the PC awake (Sleep: Never) while searches run"),
+    (r"(?:FragPipe|DIA-NN|MaxQuant|Sage) could not start: ",
+     "Windows could not start a program of the search: a DLL it needs is missing, or is for another Windows "
+     "(32/64-bit). Usually that is the Microsoft Visual C++ Redistributable (x64) — DIA-NN has VC_redist.x64.exe "
+     "in its folder — or a .NET runtime: install it, then Retry"),
     (r"(?:FragPipe|DIA-NN|MaxQuant|Sage) crashed with ",
      "FragPipe or a tool it started crashed without a message (Windows reported the crash): Retry once; if it "
      "crashes again, send Report a problem"),
     (r"result table .{1,160} (?:is empty \(0 bytes\)|ends in the middle of a row|is not text|has no line ends)",
      "The search's result table was not written to the end: usually the disk filled up, or the search was ended "
      "while it wrote. Free space on the drive holding the experiment folders, then Retry"),
+    (r"result table .{1,160} can't be read \(",
+     "A result table of the search is open in another program (Excel, a viewer, antivirus) or still held by a "
+     "program of the search, so Ionomos can't read it: close it (end a leftover search program in Task Manager), "
+     "then Retry"),
+    (r"exited 0 but did not write its result table",
+     "The search program said it succeeded but left no result table: it was ended early or its settings send "
+     "the results elsewhere. Look at the end of its log, then Retry; if it happens again, send Report a problem"),
     (r"without its 'ALL JOBS DONE' line and without any of its result tables",
      "FragPipe reported success but did not finish (no end line, no result tables): it was ended early, or the "
      "launcher is not FragPipe's own fragpipe.bat (tab 1). Retry; if it happens again, send Report a problem"),
@@ -1521,7 +1666,13 @@ def install_report(cfg: Config) -> list[tuple[bool | None, str, str]]:
                  f"no {root / 'cache' / 'fragpipe-ui.cache'}: FragPipe's window was never used with this "
                  f"installation, so a search doesn't know where MSFragger is — open FragPipe once (Config tab), "
                  f"or set Tools folder in Advanced to {root / 'tools'}"))
-    licence = next((p for d in (root, root.parent) if d.is_dir() for p in sorted(d.iterdir())
+    def listing(d: Path) -> list[Path]:
+        try:  # the folder above the installation may be C:\ or one this account may not list
+            return sorted(d.iterdir()) if d.is_dir() else []
+        except OSError:
+            return []
+
+    licence = next((p for d in (root, root.parent) for p in listing(d)
                     if p.is_file() and p.name.lower().startswith("license") and p.name.lower().endswith(".dat")), None)
     if licence is not None:
         rows.append((True, "licence file", f"{licence} (commercial licence; FragPipe passes it to its tools)"))

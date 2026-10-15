@@ -21,21 +21,19 @@ files, as it always does. The analysis then reads proteinGroups.txt (downstream/
 """
 from __future__ import annotations
 
-import os
-import subprocess
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
 from ionomos.config import Config
-from ionomos.fragpipe import Hold, JobError, RunSpec, _find_file, _popen_kwargs, check_raws
+from ionomos.fragpipe import Hold, JobError, RunSpec, _find_file, check_raws, code_text, move_aside, run_to_file
 from ionomos.ledger import Job
 
 WORKDIR = "maxquant"
 MQPAR = "mqpar.xml"
 DEFAULT_TEMPLATE = "mqpar_default.xml"
 CONSOLE_LOG = "maxquant_console.log"
+CREATE_LOG = "maxquant_create.log"  # what `MaxQuantCmd --create` printed
 NO_FRACTION = "32767"  # MaxQuant's "not fractionated"
 EXE_CANDIDATES = ("C:/MaxQuant/*/bin/MaxQuantCmd.exe", "C:/Program Files/MaxQuant/*/bin/MaxQuantCmd.exe",
                   "/opt/MaxQuant*/bin/MaxQuantCmd.dll")
@@ -116,12 +114,29 @@ def prepare(job: Job, cfg: Config) -> MaxQuantSpec:
         if template is None:
             raise Hold(f"mqpar {mcfg.extra['mqpar']!r} for {job.method} not in {cfg.workflow_dir} "
                        "(save the parameters from the MaxQuant GUI: File -> Save parameters)")
+        problem = template_problem(template)
+        if problem:  # setup, not the job: checked here, before an attempt is counted
+            raise Hold(f"mqpar {template.name} for {job.method} can't be used: it {problem}; save the parameters "
+                       f"again from the MaxQuant GUI (File -> Save parameters) into {cfg.workflow_dir}")
     lines = check_raws(dest, plan, cfg)
     return MaxQuantSpec(job_id=job.id or 0, method=job.method, dest=dest, exe=exe, workflow_src=template or Path(MQPAR),
                         fasta=fasta, manifest_lines=lines, threads=cfg.threads, ram_gb=0,
                         timeout_minutes=cfg.timeout_minutes,
                         raw_dir=dest / plan["raw_dir"] if plan.get("raw_dir") else dest, template=template,
                         fractions=fractions_of(lines, job.method, cfg))
+
+
+def template_problem(path: Path) -> str:
+    """'' for a file patch_mqpar can use; else what is wrong with it (unreadable, not XML, not MaxQuant's)."""
+    try:
+        root = ET.fromstring(path.read_text(encoding="utf-8-sig", errors="replace"))
+    except OSError as exc:
+        return f"can't be read ({exc.strerror or exc})"
+    except ET.ParseError as exc:
+        return f"is not a readable XML file ({exc})"
+    if root.tag != "MaxQuantParams":
+        return f"is not a MaxQuant parameter file (its root is <{root.tag}>, not <MaxQuantParams>)"
+    return ""
 
 
 def fractions_of(lines, method: str, cfg: Config) -> dict[str, str]:
@@ -212,31 +227,43 @@ def patch_mqpar(text: str, spec: MaxQuantSpec, fractions: dict[str, str], lfq: b
     return '<?xml version="1.0" encoding="utf-8"?>\n' + ET.tostring(root, encoding="unicode") + "\n"
 
 
+CREATE_TIMEOUT = 300.0  # seconds for `MaxQuantCmd --create`: it only writes a file
+
+
 def create_template(spec: MaxQuantSpec) -> Path:
-    """`MaxQuantCmd --create <file>`: the installed version's default parameters."""
+    """`MaxQuantCmd --create <file>`: the installed version's default parameters. Its output goes to
+    ionomos_run/maxquant_create.log; a MaxQuant that hangs is ended with what it started (fragpipe.run_to_file)."""
     target = spec.run_dir / DEFAULT_TEMPLATE
     cmd = _launch(spec.exe) + ["--create", str(target)]
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL,
-                           cwd=str(spec.run_dir), **_popen_kwargs())
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise JobError(f"could not make a MaxQuant parameter template ({' '.join(cmd)}): {exc}") from exc
-    if r.returncode != 0 or not target.is_file():
-        raise JobError(f"MaxQuant --create failed (exit {r.returncode}): {(r.stdout + r.stderr).strip()[-300:]}")
+    log = spec.run_dir / CREATE_LOG
+    code, said, timed_out = run_to_file(cmd, log, spec.run_dir, CREATE_TIMEOUT)
+    fix = ("check that maxquant_exe is the bin/MaxQuantCmd.exe of a MaxQuant that runs on this PC (try "
+           "`MaxQuantCmd.exe --create test.xml` in a terminal), or give the method a mqpar saved from the MaxQuant "
+           "GUI; then Retry")
+    if code is None and not timed_out:
+        raise JobError(f"MaxQuant could not make its parameter template: {said} ({' '.join(cmd)}); {fix}")
+    if timed_out:
+        raise JobError(f"MaxQuant --create did not end within {CREATE_TIMEOUT:.0f} s and was stopped (its output: "
+                       f"{log}); {fix}")
+    lines = " | ".join(ln.strip() for ln in said.splitlines() if ln.strip())[-300:]
+    if code != 0 or not target.is_file():
+        raise JobError(f"MaxQuant --create failed (exit code {code_text(code)}"
+                       f"{'' if target.is_file() else ', no template written'}): {lines or '(no output)'}; {fix}")
     return target
 
 
 def write_inputs(spec: MaxQuantSpec) -> str | None:
     """ionomos_run/mqpar.xml and an empty maxquant/ folder; an old maxquant/ is kept, renamed, never deleted."""
     spec.run_dir.mkdir(parents=True, exist_ok=True)
-    moved = None
-    if spec.workdir.exists() and any(spec.workdir.iterdir()):
-        moved = f"{WORKDIR}_previous_{datetime.now():%Y%m%d-%H%M%S}"
-        os.replace(spec.workdir, spec.dest / moved)
+    moved = move_aside(spec.workdir)
     spec.workdir.mkdir(exist_ok=True)
     template = spec.template or create_template(spec)
-    text = patch_mqpar(template.read_text(encoding="utf-8-sig", errors="replace"), spec, spec.fractions,
-                       lfq=spec.template is None)
+    try:
+        text = patch_mqpar(template.read_text(encoding="utf-8-sig", errors="replace"), spec, spec.fractions,
+                           lfq=spec.template is None)
+    except ET.ParseError as exc:
+        raise JobError(f"MaxQuant's parameter template {template} is not a readable XML file ({exc}); "
+                       f"give the method a mqpar saved from the MaxQuant GUI, then Retry") from exc
     spec.workflow.write_text(text, encoding="utf-8", newline="\n")
     return moved
 

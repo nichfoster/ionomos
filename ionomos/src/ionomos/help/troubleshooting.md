@@ -247,7 +247,9 @@ starts by itself once it is found.
 ## MaxQuant parameter file missing {#search.hold-mqpar}
 
 The method names a lab MaxQuant parameter file (`mqpar:`) that isn't in the
-workflow folder. In the MaxQuant GUI, set up the search you normally use,
+workflow folder, or one that can't be used: not XML (cut off, or a different
+file under that name) or not MaxQuant's (its first element is not
+`<MaxQuantParams>`). In the MaxQuant GUI, set up the search you normally use,
 then **File → Save parameters**, and put the file in the workflow folder
 under that name. Or remove `mqpar:` to use MaxQuant's defaults with
 label-free quantification.
