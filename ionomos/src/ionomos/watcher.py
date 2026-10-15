@@ -62,6 +62,16 @@ def fingerprint(folder: Path) -> Fingerprint:
     return tuple(sorted(entries))
 
 
+def _extended(folder: Path, name: str) -> str:
+    r"""Windows' \\?\ form of folder\name, which keeps a trailing dot or space (a normal path loses it)."""
+    base = os.path.abspath(str(folder))
+    if base.startswith("\\\\?\\"):
+        return f"{base}\\{name}"
+    if base.startswith("\\\\"):  # \\server\share
+        return f"\\\\?\\UNC\\{base[2:]}\\{name}"
+    return f"\\\\?\\{base}\\{name}"
+
+
 def count_raws(fp: Fingerprint) -> int:
     return sum(1 for rel, _s, _m in fp if rel.lower().endswith(RAW_SUFFIX))
 
@@ -107,6 +117,7 @@ class Watcher:
         self._loose_fp: tuple = ()
         self._loose_since = 0.0
         self._loose_announced = False
+        self._said: set[str] = set()  # inbox names already logged as unreachable (once each)
 
     # ------------------------------------------------------------------ poll --
 
@@ -132,7 +143,14 @@ class Watcher:
         present: set[Path] = set()
         for entry in sorted(self.inbox.iterdir()):
             try:
-                if _ignored(entry.name) or not entry.is_dir():
+                if _ignored(entry.name):
+                    continue
+                if os.name == "nt" and entry.name != entry.name.rstrip(". "):
+                    # by its listed name Windows reaches the folder without the dot (or nothing): never evaluate it
+                    # as itself, or intake would move its twin
+                    self._unreachable(entry)
+                    continue
+                if not entry.is_dir():
                     continue
                 present.add(entry)
                 if self._evaluate(entry, now):
@@ -144,6 +162,33 @@ class Watcher:
         for gone in [p for p in self._pending if p not in present]:
             del self._pending[gone]
         return handed
+
+    def _unreachable(self, entry: Path) -> None:
+        """Windows: a folder whose name ends in a dot or a space (made on a Mac, in WSL or by a script) is listed but
+        can't be opened by that name — Windows trims the end — so it used to be skipped for ever without a word. It
+        is renamed, inside the inbox and nothing else, to the name without them; the next poll sees it."""
+        ext = _extended(self.inbox, entry.name)
+        if not os.path.isdir(ext):
+            return
+        new = entry.name.rstrip(". ")
+        if not new or os.path.lexists(_extended(self.inbox, new)):
+            if entry.name not in self._said:
+                self._said.add(entry.name)
+                log.error("the inbox folder %r ends in a dot or a space, which Windows programs can't open, and %s; "
+                          "rename it in a Command Prompt: ren \"%s\" <new name>", entry.name,
+                          f"a folder named {new!r} is already there" if new else "nothing would be left of its name",
+                          ext)
+            return
+        try:
+            os.rename(ext, _extended(self.inbox, new))
+            log.info("renamed inbox folder %r to %r: Windows programs can't open a name that ends in a dot or a space",
+                     entry.name, new)
+        except OSError as exc:
+            if entry.name not in self._said:
+                self._said.add(entry.name)
+                log.error("the inbox folder %r ends in a dot or a space, which Windows programs can't open, and it "
+                          "could not be renamed (%s); rename it in a Command Prompt: ren \"%s\" <new name>",
+                          entry.name, exc, ext)
 
     def _handle_loose(self, now: float) -> None:
         from ionomos import loose

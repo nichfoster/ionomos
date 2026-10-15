@@ -104,9 +104,12 @@ def _read_status(dest: Path, fallback: dict) -> dict:
     try:
         from ionomos.names import status_path
 
-        return json.loads(status_path(dest).read_text(encoding="utf-8"))
+        rec = json.loads(status_path(dest).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return dict(fallback)
+    # valid JSON of the wrong shape (null, a list: a hand edit) is as unreadable as broken JSON; a status update
+    # must never raise, or recover() stops the watcher from starting
+    return rec if isinstance(rec, dict) else dict(fallback)
 
 
 def _update_status(job: Job, **changes) -> None:
@@ -114,7 +117,7 @@ def _update_status(job: Job, **changes) -> None:
     if not dest.is_dir():
         return
     rec = _read_status(dest, job.parsed)
-    run = dict(rec.get("run") or {})
+    run = dict(rec["run"]) if isinstance(rec.get("run"), dict) else {}
     run.update(changes.pop("run", {}))
     rec.update(changes)
     if run:
@@ -196,6 +199,14 @@ class Worker:
                 continue
             except fragpipe.JobError as exc:
                 self._fail(job, str(exc), hints=fragpipe.explain(str(exc)))
+                return True
+            except Exception as exc:  # noqa: BLE001 - a bug or a damaged job record: fail this job, not the queue
+                # it used to escape run_once, and the same first queued job raised again every poll: no job behind
+                # it was ever searched
+                log.exception("job %d: could not prepare the search", job.id)
+                self._held.pop(job.id, None)
+                reason = f"Ionomos could not prepare the search: {type(exc).__name__}: {exc}"
+                self._fail(job, reason, hints=fragpipe.explain(reason))
                 return True
             self._held.pop(job.id, None)
             return self._run(job, spec)

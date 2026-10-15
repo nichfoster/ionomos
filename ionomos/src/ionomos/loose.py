@@ -81,9 +81,14 @@ def folder_name_for(stems: list[str]) -> str:
         parts = parts[:-2]
     name = "".join(parts).strip("_-. ")
     try:
-        return sanitize(name) if name else "loose_files"
+        safe = sanitize(name) if name else "loose_files"
     except Exception:  # noqa: BLE001 - symbols-only names: let intake explain it later
         return "loose_files"
+    # a folder Ionomos makes must be one Windows can make: NUL_1.raw + NUL_2.raw would ask for the device NUL
+    return f"{safe}_files" if safe.split(".")[0].upper() in WINDOWS_RESERVED else safe
+
+
+WINDOWS_RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"{d}{i}" for d in ("COM", "LPT") for i in "123456789¹²³")}
 
 
 def group(names: list[str]) -> dict[str, list[str]]:

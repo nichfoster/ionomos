@@ -1147,7 +1147,11 @@ def cmd_repair_ledger(args) -> int:
     if state == "ok" and not args.force:
         print("ledger is fine; nothing to do (use --force to rebuild anyway)")
         return 0
-    moved, n = ledger_mod.rebuild_from_status_files(cfg.database, cfg.users_root)
+    try:
+        moved, n = ledger_mod.rebuild_from_status_files(cfg.database, cfg.users_root)
+    except ledger_mod.LedgerError as exc:  # the file is open in another program: nothing was changed
+        print(str(exc), file=sys.stderr)
+        return 1
     print(f"ledger rebuilt from the experiment folders: {n} job(s)" + (f"; old file kept as {moved}" if moved else ""))
     return 0
 

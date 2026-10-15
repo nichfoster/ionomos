@@ -100,6 +100,14 @@ or add an `experiment.yaml`; Ionomos tries again by itself. Deleting the note
 also makes it try again. The reasons are explained under
 [Why a folder is not taken in](#trouble.intake).
 
+**"Can't take in … yet"** (no note) means Ionomos has been trying for over
+ten minutes and the computer keeps refusing to move the folder. Either a file
+in it is still open in another program (a copy still running, Xcalibur, Excel,
+an antivirus scan): close it. Or Ionomos may not change the inbox (a read-only
+folder, a share it can only read): give the account it runs as the right to
+create, rename and delete files there. Ionomos keeps trying by itself, and the
+message closes when the folder is filed.
+
 ## The instrument QC standard looks off {#attention.qc_trend}
 
 Your lab's recurring QC standard (a HeLa or K562 run, for example) came
