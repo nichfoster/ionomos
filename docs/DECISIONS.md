@@ -4220,3 +4220,185 @@ ask for a real-data example.
 
 Not decided here: the mixed-species benchmark (ROADMAP 5D steps 4 and 5) is still open. This example does not
 serve `ionomos benchmark --expected`. A PRIDE HYE dataset, or the lab's own, is still wanted for that.
+
+
+### D96 — Every table reader decides encodings, quotes and delimiters in one place; the engines' long readers read decimal commas
+**2026-10-15.** Round 4 wrote one simulated experiment in every format Ionomos reads and damaged each copy in
+the ways files arrive from a lab: saved again from Excel (UTF-16, every cell in quotes, a comma or semicolon), on
+a German or French Windows (decimal commas, dots between thousands), cut off by a copy, or with a MaxQuant cell of
+200,000 characters. Most of these crashed a reader or, worse, read as all missing without a word. This amends D60
+point 3.
+
+1. **One place decides how text is read** (`tables.decode`, `open_text`, `unquote`, `reader`, `delimiter`):
+   UTF-8 with or without a BOM, UTF-16 with a BOM, and cp1252 (with a note); cells in quotes; the delimiter. A
+   quote still never spans cells or lines; an unclosed quote makes the file be read again with quotes as plain
+   characters, with a note. csv's cell limit is raised for the whole process (MaxQuant's ID lists).
+2. **The engines' long readers read decimal commas and thousands separators too.** D60 let
+   `anytable.read_table` read them only when asked (the `notes` argument), "so the engines' readers behave as
+   before". Before meant every quantity and q-value of a Spectronaut report exported on a German or French
+   Windows was missing, and nothing said so. The long readers (`engines._read_long`: DIA-NN, Spectronaut,
+   MSstats, MSstatsTMT, and Sage's `lfq.tsv`) now ask, with the same one-reading-per-file rule and the same note;
+   `1,234` alone is still read as 1234 with a note. FragPipe's own tables (`tables.read_tsv`) are machine-written
+   with decimal points and are not changed.
+3. **A q-value that isn't a number is not a pass.** A long report's row with a blank or unreadable q-value no
+   longer passes the 1 % filter (nothing says it passed); it is left out and counted. A q-value column with no
+   number in any row is not used as a filter, with a note.
+4. **Damage is said, never read as data.** A file cut off mid-row loses that row with a note; a 0-byte engine
+   table is named and called empty; a header-only report is refused as "a header but no rows"; a column or row
+   twice is read once with a note; a cut-off or non-Parquet `report.parquet` is refused in words
+   (`UNUSABLE_TABLE`).
+
+**Verified**: `tests/test_loader_formats.py` with `tests/loader_formats.py` (343 tests): the same hits from every
+format, nine harmless differences reading to the same numbers, ten kinds of damage read with a note or refused,
+100,000 rows of each, the TMT formats, provenance on damaged logs and records. **Not verified**: on real files:
+Excel's UTF-16 save of each engine's table, a Spectronaut report from a German Windows, a Proteome Discoverer
+`.xlsx` export, DIA-NN 2.x `--out` names.
+
+
+### D97 — An engine run directly must leave its main table; Sage conversions are recorded; helper runs are bounded
+**2026-10-15.** Round 4 drove the runners with a stand-in engine that hangs, prints garbage, exits with odd codes,
+writes partial tables and leaves processes behind. This amends D39, D50, D51 and D69 item 4.
+
+1. **An engine run directly must leave its main table.** DIA-NN, MaxQuant and Sage write their main table under
+   the name Ionomos gave them (`--out`, `fixedCombinedFolder`, `output_directory`) whenever they finish, and the
+   analysis reads nothing else. So exit code 0 without that table fails the job, where D69 had only a note. The
+   note stays for FragPipe, whose output names vary between versions and whose "ALL JOBS DONE" line is the second
+   signal.
+2. **Sage conversions are recorded.** A finished mzML is reused only while its raw file has the size and time
+   stamp recorded at conversion (`<name>.mzML.source.json`). A time stamp alone can't tell a re-copied raw file
+   from the old one, or a file stamped in the future from a changed one. Without a record the old "mzML newer than
+   the raw file" rule still applies. What a killed conversion left in `converting/` is Ionomos' own unfinished
+   file and is removed before that raw file is converted again.
+3. **Helper runs are bounded.** Every short run of an engine outside the run loop (`MaxQuantCmd --create`, the
+   preflight's `--help` and dry run) writes to a file and has its process tree killed at the limit
+   (`fragpipe.run_to_file`), never `subprocess.run(capture_output=True, timeout=…)`, which waits without a limit
+   for a pipe a child still holds.
+4. **Every runner moves an earlier attempt aside the same way** (`fragpipe.move_aside`:
+   `<workdir>_previous_<time>`, then `-2`, `-3` …), as FragPipe already did (D69), so two retries in one second
+   keep both earlier outputs.
+
+**Verified**: `tests/test_engine_faults.py` (109 tests) with `tests/standin_engine.py` as FragPipe, DIA-NN,
+MaxQuant, Sage, ThermoRawFileParser and the preflight's launcher; kill_tree / kill_pid_tree / stop_leftover for
+Windows and POSIX with the module's os / subprocess / signal stubbed. **Not verified**: on the PC with the real
+engines; a process an engine leaves running after it exits is stopped on POSIX only (Windows: #174); a leftover
+search that can't be stopped does not hold the job yet (#175).
+
+
+### D98 — A path written inside a file Ionomos reads is never opened when it names another computer
+**2026-10-15.** A workflow's `database.db-path`, a `fragpipe-ui.cache`, anything a drop can carry may hold
+`\\server\share\...`. Opening such a path makes Windows sign in to that server as the account Ionomos runs as,
+and its NTLM hash goes to whoever runs the server (docs/SECURITY_NOTES.md).
+
+1. **Such a path is reported, never stat'ed, read or copied** (`fragpipe.is_network_path`). `ionomos library
+   scan`, adopt and Import workflow flag the workflow `WF_DATABASE_MISSING` "on another computer".
+2. **Paths the config owner writes are theirs** (`library.roots`, `paths:`) and are used as given. A scan root on
+   a server that does not answer is given 5 s on a helper thread, then a note.
+3. **experiment.yaml should follow**: its `workflow:` / `fasta:` (and `site_annotation:`) still accept any
+   absolute or UNC path (#168).
+
+**Verified**: `tests/test_security.py`: network paths inside scanned files are flagged and never opened; a dead
+UNC root is faked with a blocking `is_dir`, so no SMB packet leaves the PC. **Not verified**: on the lab PC's
+network; a mapped drive letter (`Z:`) inside a scanned file is not recognised as a network path.
+
+
+### D99 — A batch launcher is never given an argument cmd.exe would read as code
+**2026-10-15.** Windows runs a `.bat` / `.cmd` (fragpipe.bat) through cmd.exe, and Python quotes only arguments
+with spaces. A search under `C:/R&D/` ran part of its path as a second command.
+
+1. **`& | < > ^ % "` and line breaks in any argument, or in the launcher's own path, refuse the start**, saying
+   which folder or file to rename (`fragpipe.batch_problem`, used by the run loop and the preflight).
+2. **Escaping for cmd.exe is not attempted**: no escaping is right for both cmd.exe and the Gradle script inside
+   fragpipe.bat.
+3. The same care elsewhere: the Desktop shortcut's PowerShell doubles quotes (`C:\Users\O'Brien`, the
+   typographic ones too); the startup task refuses a command with `%` (Task Scheduler expands `%NAME%`).
+
+**Verified**: `tests/test_security.py` (`& | < > ^ % "` and line breaks through the command lines; the PowerShell
+round trip runs on Windows only). **Not verified**: the real fragpipe.bat under such a folder on the PC;
+`maxquant.create_template` and `sage.run_job` start programs without `batch_problem` (real installs are .exe).
+
+
+### D100 — The library's kinds come from the label; FragPipe's own stock workflow breaks ties; a partial scan keeps the catalog
+**2026-10-15.** The library proposed SILAC3-phospho for the isoDTB method and Nonspecific-HLA-TMT10 for TMT,
+replaced a live workflow behind config.yaml, and a scan that stopped early lost what the last one found
+(#148, #150, #153). This amends D89 items 2, 4, 7 and 9.
+
+1. **The kind comes from the switches, then from the label, then from the mods** (D89 item 2). MS1-labelled
+   quantification (`ionquant.use-labeling`) is isoDTB only for isoDTB's masses (561.3387 / 567.3462 in
+   `ionquant.light` / `.heavy`, or among the variable mods when no label is set); isoTOP, ipIAA and PAL (by their
+   masses, as FragPipe 24.0's stock chemprot workflows set them), SILAC (labels on K and R only) and `labelled`
+   are their own kinds, never candidates for the isoDTB method.
+2. **Evidence beats names, and FragPipe's own name beats file-name order** (D89 item 4). Besides finished
+   searches, version, FASTA and pinned / stock, FragPipe's own stock workflow for the kind (`CANONICAL_STOCK`, or
+   the stock file the method's `workflow:` names) gets +4 / +3 / +2. Candidates within 0.5 points tie;
+   `auto_assign` never proposes one of a tie (nor anything when nothing usable is found) and says why. Identical
+   settings are represented by the newest FragPipe version.
+3. **Adopting copies, and never swaps a live file behind config.yaml** (D89 item 7). A workflow file the saved
+   config.yaml's methods search with is never replaced by a copy the config does not switch to at the same time
+   (`live_workflows`: `--no-config`, the app's Use before Save, another method's file): the copy gets
+   `<method>-2.workflow`. A workflow of another kind than the method's (`WF_KIND_MISMATCH`) or a file with an
+   error flag is refused (CLI, `--force` overrides) or asked about (app, default No).
+4. **A partial scan never loses a fuller catalog** (D89 item 9). A scan that stopped early or looked in fewer
+   folders than the last keeps the last catalog's files it did not see that are still on disk unchanged
+   (`save_scan`, CLI and app); `--replace` keeps only the new one. `--root` adds to the default roots (`--only`
+   for them alone); a configured root that does not exist is a note. Only a folder with `bin/fragpipe*` or
+   `lib/fragpipe*.jar` (or `fragpipe/` holding them) is a FragPipe installation.
+5. **A FASTA's organism is named only when at least half of its proteins carry `OX=`** (else "organism unknown",
+   no ranking bonus or penalty); readings made before are read again (`FastaInfo.reader`, `FASTA_READER = 2`).
+   FragPipe's own human GENCODE FASTA is no longer "Cow" (#151).
+
+**Verified**: `tests/test_library.py` (+17 tests: the MS1-labelled kinds, stock ties, adopt `--no-config` and
+refusals, the GENCODE organism, install globs, the partial-scan merge, missing roots);
+`tests/test_library_tab.py` (Use asks and avoids the live file; CI only). **Not verified**: on the lab PC: the
+merged catalog after a `--time`-limited scan of `D:\`; the app's "Use it anyway?" question and the Review
+proposals status line. `fpfolder.workflow_kind` still calls SILAC / PAL / isoTOP / ipIAA search folders isoDTB
+for the analysis (#161).
+
+
+### D101 — The command line's exit codes are one table, and config.yaml errors point at the line
+**2026-10-15.** Scripts (the installer, a lab's own batch file) and the app's Run & Test pane read the exit code
+of `ionomos …`, and it meant different things per command: `check` exited 1 for an unreadable config and `stop`
+2; `analyze 17` exited 2 and `retry 17` 1; `cancel 17` 0.
+
+1. **One table, in `cli.py`'s docstring** (so in `ionomos --help`): **0** done (for a check: nothing wrong);
+   **1** it ran and the answer is no (a check found a problem, the job / attention item / help topic named isn't
+   there, the job's state doesn't allow it, the ledger can't be read, the work failed); **2** nothing was done
+   (wrong usage, a value the command doesn't take, a config.yaml it needs can't be read, a folder or file it was
+   given isn't there); **3** `run` only: a watcher is already running; **70** Ionomos crashed; **130** Ctrl-C.
+   Cancelling a job that has already ended is 0: nothing to cancel is the state asked for.
+2. **`tests/test_cli_contract.py` holds every subcommand in a table**: a new one fails until it is added, and the
+   codes, `--help` and an unreadable config are checked for each.
+3. **A config.yaml error starts with the file and the line of the key at fault** (`config.key_line`, from the
+   YAML's own marks), then says what the key takes and an example. The app's probe file
+   (`.config.checking.yaml`) is not named: it isn't the person's file. Values of the wrong type are errors that
+   name the key (a quoted `'false'` was on), one name alone is a list of one, and an empty value is the default.
+4. **A Save keeps what it has no field for and never half-writes** (D67 item 4 now covers every section and
+   unknown sections). config.yaml, `learned_aliases.yaml` and `config_path.txt` are replaced atomically
+   (`config.write_text_atomic`: .tmp, fsync, replace).
+5. **`ionomos check` finds what the app's checklist finds**: they share `setupcheck.layout_findings`,
+   `disk_finding` and `task_finding`.
+
+**Verified**: `tests/test_cli_contract.py`, `tests/test_config_errors.py`, `tests/test_config_roundtrip.py`,
+`tests/test_check_agreement.py` (13 lab states), `tests/test_hostile_pc.py`. **Not verified**: the installer and
+the Run & Test pane against the new codes on the PC. Two commands still disagree with the table (#167), and 24
+options outside `cli.py` have no `--help` text (#166).
+
+
+### D102 — The fake FragPipe follows FragPipe's source over earlier docs, and says where it can't
+**2026-10-15.** Round 4 checked the fake against FragPipe 24.0's source (FragPipeMain, FragpipeRun, TabWorkflow,
+TabRun, CmdDiann, CmdIonquant, SwingUtils and others at tag 24.0), not its documentation. This amends D59 item 10.
+
+1. **Where the source and the docs disagree, the source wins, and the doc is corrected.** Example: a manifest
+   file that does not exist stops a headless run ("Some loaded files don't exist"); it is not skipped, as
+   WORKFLOWS.md said. A bioreplicate Java's `Integer.parseInt` refuses drops its manifest line ("badly formatted
+   lines"); dialogs keep their `<b>` tags in headless mode.
+2. **Each change is listed with its source file in `fake_fragpipe.py`'s header**, and so are the three things
+   the fake does not model: `report.parquet` (a fake one would be read as Parquet), the "IonQuant MS1 (TMT)"
+   step, and an empty manifest.
+3. **The fake's console is the lab PC's**: cp1252 bytes with CRLF line ends, because FragPipe's start script sets
+   no `-Dfile.encoding` and Java 17 then writes in the Windows code page. `log_<date>.txt` holds the same text in
+   UTF-8. `IONOMOS_FAKE_FP_ENCODING=utf-8` gives a Linux FragPipe's console.
+
+**Verified**: `tests/test_testbed.py` (19 tests, 32 cases) against the source and the round-4 scenarios; two
+stress runs on the PC (docs/TESTING.md). **Not verified**: on the PC: the "badly formatted lines" ERROR line in
+job 1's console log (REAL_RUNS.md), that the console is cp1252 with CRLF, that `<raw>_uncalibrated.mzML` sits
+beside the raws of an Ionomos job, that a dry run writes `fragpipe.job` into the preflight folder.
