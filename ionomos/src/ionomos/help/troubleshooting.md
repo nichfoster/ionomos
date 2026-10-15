@@ -379,7 +379,8 @@ pop-up. After fixing the cause, press **Retry**; the earlier output is kept.
 - **experiment.yaml tmt: ...** (TMT): the channel list doesn't fit what
   FragPipe accepts. List every channel of the label type once, with one
   sample name without spaces per channel, `NA` for an unused channel, and
-  no name twice.
+  no name twice. Fix `tmt:` in the experiment folder's `experiment.yaml` (or
+  on the Analysis tab), then Retry: the Retry reads the file again.
 - **A path has a space in it** (DIA-NN): DIA-NN can't take spaces in paths.
   Rename the folder or file.
 - **The experiment folder is gone**: it was moved or renamed after filing.

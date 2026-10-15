@@ -290,6 +290,7 @@ class Worker:
             "fasta": str(spec.fasta) if spec.fasta else None, "manifest": str(spec.manifest),
             "workdir": str(spec.workdir), "console_log": str(spec.console_log),
             "command": spec.command(), "warnings": list(spec.warnings), "notes": list(getattr(spec, "notes", ())),
+            **({"tmt_map": spec.tmt_map} if getattr(spec, "tmt_map", None) else {}),  # the map searched (#147)
         })
         try:
             (dest / FAILED_NOTE).unlink(missing_ok=True)

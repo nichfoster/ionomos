@@ -108,6 +108,7 @@ class RunSpec:
     config_python: str = ""
     env: dict[str, str] = field(default_factory=dict)  # added to the engine's environment (launcher_env)
     notes: list[str] = field(default_factory=list)  # worth recording (log, ionomos.json), not worth a warning
+    tmt_map: dict = field(default_factory=dict)  # TMT: {from, tmt} the channel map this search used (ionomos.json run)
 
     @property
     def run_dir(self) -> Path:
@@ -492,6 +493,7 @@ def prepare(job: Job, cfg: Config) -> RunSpec:
 
     raw_dir = dest / plan["raw_dir"] if plan.get("raw_dir") else dest
     annotations: dict[str, str] = {}
+    tmt_map: dict = {}
     kind = cfg.kind(job.method)
     if kind == "TMT":
         # tmtkit.plan (D91): FragPipe (TmtiPanel, 23.1 and 24.0) takes a plex's annotation from the one folder that
@@ -499,11 +501,20 @@ def prepare(job: Job, cfg: Config) -> RunSpec:
         # annotation.txt goes in that folder (the experiment folder, raw/, or the plex's own <plex>/ subfolder);
         # a person's own file there is read, never written over; a map FragPipe would stop on, or a tag that is
         # not the workflow's label type, fails the job here, before the search.
+        # The map is the experiment folder's experiment.yaml as it is now, not the one frozen in the job list at
+        # intake: a map fixed after a failed job (in the file or on the Analysis tab) is what the Retry uses (#147).
         from ionomos import tmtkit
 
-        tp = tmtkit.plan(dest, {"tmt": overrides.get("tmt") or {}}, props, lines, raw_dir, wf.name)
+        try:
+            block, block_from = tmtkit.current_block(dest, overrides.get("tmt"))
+        except tmtkit.TmtError as exc:
+            raise JobError(f"TMT: {exc}") from None
+        tp = tmtkit.plan(dest, {"tmt": block}, props, lines, raw_dir, wf.name)
         if tp.errors():
-            raise JobError(tp.error_text())
+            raise JobError(tp.error_text() + (f" (channel map from {block_from})" if block_from else ""))
+        tmt_map = {"from": block_from or "none (no tmt: map)", "tmt": block}
+        if block_from and block_from != "experiment.yaml":
+            notes.append(f"TMT: the channel map is from {block_from}")
         annotations = tp.annotations
         warnings += [f.text for f in tp.warnings()]
         notes += [f"TMT: {f.text}" for f in tp.infos()]
@@ -513,7 +524,7 @@ def prepare(job: Job, cfg: Config) -> RunSpec:
         manifest_lines=lines, threads=cfg.threads, ram_gb=cfg.ram_gb, timeout_minutes=cfg.timeout_minutes,
         config_tools_folder=cfg.config_tools_folder, config_diann=cfg.config_diann,
         annotations=annotations, raw_dir=raw_dir, warnings=warnings, kind=kind,
-        config_python=cfg.config_python, env=launcher_env(exe), notes=notes,
+        config_python=cfg.config_python, env=launcher_env(exe), notes=notes, tmt_map=tmt_map,
     )
     spaced = space_problem(spec)
     if spaced and _refuses_spaces():

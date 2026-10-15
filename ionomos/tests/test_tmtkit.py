@@ -503,3 +503,50 @@ def test_a_fake_ref_tag_rule_is_fragpipes(bed, tmp_path):
     with pytest.raises(fragpipe.JobError, match=re.escape("has no sample name containing the workflow's Ref sample "
                                                           "tag 'Bridge'")):
         fragpipe.prepare(job, bed["cfg"])
+
+
+def test_a_retry_uses_the_fixed_experiment_yaml_not_intakes_map(bed):
+    """#147: a TMT job failed on its channel map; the person fixed tmt: in experiment.yaml and pressed Retry. The
+    retry planned the search from the map frozen in the job list at intake and failed again, word for word."""
+    from ionomos.worker import request_retry
+
+    dest, job, rec = _run(bed, "tmt_tag_mismatch")
+    assert job.status == "failed" and "tag: TMT-16" in job.reason and "(channel map from experiment.yaml)" in job.reason
+    assert rec["plan"]["overrides"]["tmt"]["tag"] == "TMT-16"   # what intake saw: kept as it was
+    block = tmtkit.to_overrides_block(GOOD, "TMT-10")
+    (dest / "experiment.yaml").write_text(yaml.safe_dump({"tmt": block}), encoding="utf-8")
+    assert request_retry(bed["ledger"], job.id)[0]
+    Worker(bed["cfg"], bed["ledger"]).run_once()
+    job = bed["ledger"].get(job.id)
+    assert job.status == "done", job.reason
+    assert (dest / "annotation.txt").read_text(encoding="utf-8") == tmtkit.annotation_text(GOOD)
+    rec = json.loads((dest / names.STATUS_FILE).read_text(encoding="utf-8"))
+    assert rec["run"]["tmt_map"]["from"] == "experiment.yaml (changed since intake)"
+    assert rec["run"]["tmt_map"]["tmt"]["tag"] == "TMT-10"
+    assert rec["plan"]["overrides"]["tmt"]["tag"] == "TMT-16"   # intake's record is history, never rewritten
+    assert "TMT: the channel map is from experiment.yaml (changed since intake)" in rec["run"]["notes"]
+
+
+def test_the_retry_map_when_experiment_yaml_is_broken_or_gone(bed):
+    """#147: the folder's experiment.yaml is the map; a file that can't be read fails the job saying so (no Hold,
+    D91), and only a file that is gone falls back to the map saved at intake."""
+    dest, job, _rec = _run(bed, "tmt_good")
+    assert job.status == "done", job.reason
+    yml = dest / "experiment.yaml"
+    now = yaml.safe_load(yml.read_text(encoding="utf-8"))["tmt"]
+    filed = tmtkit._as_json(now)
+    assert tmtkit.current_block(dest, filed) == (now, "experiment.yaml")   # 126: vs "126": is no change
+    yml.write_text("tmt: [unclosed\n", encoding="utf-8")
+    with pytest.raises(tmtkit.TmtError, match="experiment.yaml can't be read, so its tmt: map can't be used"):
+        tmtkit.current_block(dest, filed)
+    bed["ledger"].requeue(job.id, "test")
+    with pytest.raises(fragpipe.JobError, match=r"^TMT: experiment.yaml can't be read.*fix the file, then Retry"):
+        fragpipe.prepare(bed["ledger"].get(job.id), bed["cfg"])
+    yml.unlink()
+    block, src = tmtkit.current_block(dest, filed)
+    assert block == filed and src == "the map saved at intake (experiment.yaml is gone)"
+    spec = fragpipe.prepare(bed["ledger"].get(job.id), bed["cfg"])
+    assert spec.tmt_map["from"] == src and "TMT: the channel map is from " + src in spec.notes
+    yml.write_text("notes: no map any more\n", encoding="utf-8")
+    assert tmtkit.current_block(dest, filed) == ({}, "experiment.yaml (its tmt: block was removed after intake)")
+    assert tmtkit.current_block(dest, {}) == ({}, "")

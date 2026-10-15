@@ -601,6 +601,35 @@ def _lines(raws, dest: Path) -> list[tuple[Path, str, int]]:
     return out
 
 
+def current_block(dest: Path, filed: dict | None = None) -> tuple[dict, str]:
+    """The `tmt:` block a search of a filed experiment uses, and where it came from (#147): the experiment folder's
+    experiment.yaml as it is now (read as intake reads it, manifest.load_overrides), so a map fixed after a failed
+    job, in the file or on the Analysis tab, is the one the Retry uses; the block saved at intake (ionomos.json
+    plan.overrides.tmt, `filed`) only when experiment.yaml is gone. Raises TmtError when experiment.yaml can't be
+    read: the job fails with that, rather than searching with a map the person has since changed."""
+    from ionomos.manifest import EXPERIMENT_YAML, OverridesError, load_overrides
+
+    filed = dict(filed or {})
+    if not (Path(dest) / EXPERIMENT_YAML).is_file():
+        return filed, ("the map saved at intake (experiment.yaml is gone)" if filed else "")
+    try:
+        now = dict(load_overrides(dest).tmt or {})
+    except (OverridesError, OSError) as exc:
+        said = " ".join(str(exc).split())  # one line: it becomes the job's reason (FAILED.txt, the job list)
+        raise TmtError(f"{EXPERIMENT_YAML} can't be read, so its tmt: map can't be used: {said}; fix the file, "
+                       f"then Retry") from None
+    if not now:
+        return {}, ("experiment.yaml (its tmt: block was removed after intake)" if filed else "")
+    return now, "experiment.yaml" + (" (changed since intake)" if filed and _as_json(now) != _as_json(filed) else "")
+
+
+def _as_json(block) -> object:
+    """A block as ionomos.json keeps it (YAML's 126: key is "126" there)."""
+    import json
+
+    return json.loads(json.dumps(block, default=str))
+
+
 def _overrides_tmt(overrides) -> dict:
     if overrides is None:
         return {}

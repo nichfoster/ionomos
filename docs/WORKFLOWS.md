@@ -220,6 +220,16 @@ DiLeu and others; Ionomos passes a map for those on unchecked
    searched with a warning (`TMT_NO_MAP`), and the report's conditions are
    unknown (`TMT_CONDITIONS_UNKNOWN`) until they are set on the Analysis tab.
 
+Every search, a Retry too, plans from the experiment folder's
+`experiment.yaml` **as it is then** (read as intake reads it,
+`tmtkit.current_block`), not from the block intake saved in `ionomos.json`
+(`plan.overrides.tmt`, kept as history): a map fixed after a failed job, in
+the file or on the Analysis tab, is what the Retry searches with (#147). Only
+when `experiment.yaml` is gone is the intake block used; an `experiment.yaml`
+that can't be read fails the job saying so. `ionomos.json` → `run.tmt_map`
+records the map searched and where it came from (`experiment.yaml`,
+`experiment.yaml (changed since intake)`, `the map saved at intake …`).
+
 `ionomos tmt plan <folder>` shows the result for a drop or a filed
 experiment without changing anything; `ionomos tmt suggest --tag TMT-16
 --conditions DMSO,Drug --replicates 3 --reference 126` prints a `tmt:` block;
@@ -318,7 +328,8 @@ Run analysis (editor; the old file kept in `experiment-backups/`), together
 with `analysis.roles` for the reference channels. In the review window a map
 FragPipe would stop on keeps the window open with the reason (Clear to
 decide later); a cleared grid removes an old `tmt:` block. For a filed
-experiment the map is used by the next search (Retry); this analysis reads the
+experiment the map is used by the next search (Retry reads `experiment.yaml`
+again); this analysis reads the
 sample names in TMT-Integrator's tables, so a condition in it is changed in
 the sample list on the left.
 
