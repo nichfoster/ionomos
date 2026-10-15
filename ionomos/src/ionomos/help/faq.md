@@ -419,7 +419,9 @@ the Jobs tab's **Retry**; an analysis change is the experiment editor's
 Save, and the old `experiment.yaml` is kept in the experiment's
 `experiment-backups` folder. Re-run the analysis to use it (Jobs tab →
 **Re-run analysis**). If the job or its `experiment.yaml` changed after the
-proposal was made, Confirm does nothing and says so; ask again.
+proposal was made, Confirm does nothing and says so; ask again. If the change
+is for another job than the one you asked about, the window says so: read
+the job number before you press **Confirm**.
 
 In a terminal, `ionomos ask` shows the same proposal and the command or the
 app's steps to make it; it never makes it. Every proposal, and whether it was
@@ -438,7 +440,9 @@ sends nothing.
 While a search runs, the lab may have set the assistant to use a smaller
 model, or to pause so the search keeps the computer to itself
 (`assistant.while_searching`). A paused assistant says so, and you get
-Ionomos's own explanation, as above. Before choosing a model, the person who
+Ionomos's own explanation, as above. "Not answering" also covers a model that
+took longer than `assistant.timeout_seconds` to finish its reply, or sent more
+than 2 MB: nothing it sent is shown. Before choosing a model, the person who
 looks after Ionomos measures it on this computer with `ionomos ask-eval`.
 
 ## Where is this help, and can I change it? {#faq.help}
