@@ -105,7 +105,7 @@ def _find(root: Path, *patterns: str) -> Path | None:
 def detect_method(workdir: Path) -> str | None:
     if _find(workdir, isodtb.LABEL_FILE):
         return "isoDTB"
-    if _find(workdir, "abundance_*_MD.tsv", "abundance_*.tsv"):
+    if _find(workdir, "abundance_*_MD.tsv", "abundance_*.tsv", "ratio_gene_*.tsv", "ratio_protein_*.tsv"):
         return "TMT"
     if _find(workdir, "*pg_matrix.tsv"):
         return "DIA"
@@ -191,14 +191,11 @@ def _load_quantities(method: str | None, workdir: Path, results: Path, record: d
         files += site_files
         return _merge_ratio([quant.from_isodtb_sites(p) for p in site_files]), files, notes
     if method == "TMT":
-        from ionomos.fpfolder import TABLES
-
-        ab = _find(workdir, *TABLES["TMT"])  # _MD (the lab's) first; a search normalised otherwise writes _GN / _None
+        ab = _find(workdir, *quant.TMT_TABLES)  # _MD (the lab's) first, then _GN / _None, then the ratios (D91)
         if ab is None:
             return None, files, ["no tmt-report/abundance_*.tsv found (did TMT-Integrator run?)"]
-        if not ab.name.endswith("_MD.tsv"):
-            notes.append(f"read {ab.name}: TMT-Integrator was not set to median centring (MD), so its own "
-                         "normalisation is kept")
+        if quant.tmt_table_note(ab):
+            notes.append(quant.tmt_table_note(ab))
         ann_path = tmt.write_annotation(ab, results / "experimental_annotation.tsv")
         files.append(ann_path)
         ann = tmt.annotation_rows(read_header(ab))
@@ -697,6 +694,15 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     else:
         psm_info, psm_view, f.psm_problems, qnotes = searched
         notes += qnotes
+    tmtqc_info: dict = {"ran": False, "reason": "not a FragPipe TMT search"}
+    tmt_view: dict | None = None
+    if method == "TMT" and table is None:  # TMT QC from psm.tsv and tmt-report (tmtqc.py, D91)
+        got = stage("tmt_qc", _tmt_qc, dest, workdir, record, settings, results, out, say)
+        if got is None:
+            tmtqc_info = {"ran": False, "reason": "the TMT QC step failed (see analysis_error.txt)"}
+        else:
+            tmtqc_info, tmt_view, f.tmt_problems, tnotes = got
+            notes += tnotes
     ordered = stage("run_order", _run_order, processed, record, dest, insight, psm_view, say)
     if ordered is None:
         run_info = {"ran": False, "reason": "the run-order step failed (see analysis_error.txt)"}
@@ -726,6 +732,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     ctx["sdrf"] = sdrf_info
     ctx["model"], ctx["ftest"] = model, ftest
     ctx["run_order"] = run_view  # the Run order QC tab and figure (runorder.py, D78)
+    ctx["tmt_qc"] = tmt_view     # the "TMT plexes and channels" section and its figures (tmtqc.py, D91)
     ctx["roles"], ctx["specific"] = design_plan, specific
     figure_files: list[Path] = []
     phos_view = stage("phospho", phospho.report_payload, (m.meta.get("phospho") if m is not None else None),
@@ -792,6 +799,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
         "roles": design_plan.as_dict() if design_plan is not None else {},
         "specific_targets": spec_info,
         "psm_qc": psm_info,
+        "tmt_qc": tmtqc_info,
         "run_order": run_info,
         "sdrf": sdrf_info,
         "figures": [f"{RESULTS}/{p.relative_to(results).as_posix()}" for p in figure_files],
@@ -964,6 +972,22 @@ def _psm_qc(workdir: Path, settings, results: Path, out: Outcome, say) -> tuple[
         table = f"{RESULTS}/psm_qc.tsv"
     return (psmqc.summary(res, table), psmqc.report_payload(res), res.problems,
             [f"search quality: {n}" for n in res.notes])
+
+def _tmt_qc(dest: Path, workdir: Path, record, settings, results: Path, out: Outcome, say
+            ) -> tuple[dict, dict | None, list, list[str]]:
+    """results/tmt_qc.json and tmt_qc_<plex>.tsv: channels, labelling, purity per plex (tmtqc.py, D91). Returns
+    (analysis.json summary, the report's payload or None, problems for the doctor, notes)."""
+    from ionomos.downstream import tmtqc
+
+    say("TMT QC (channels, labelling, purity)")
+    res = tmtqc.run_folder(dest, record, workdir, settings)
+    if not res.found:
+        return tmtqc.summary(res), None, [], []
+    written = tmtqc.write(res, results)
+    out.files += written
+    return (tmtqc.summary(res, [f"{RESULTS}/{p.name}" for p in written]), tmtqc.report_payload(res), res.problems,
+            [n for n in res.notes if "no psm.tsv" in n])
+
 
 def _run_order(processed, record, dest: Path, insight: dict, psm_view, say) -> tuple[dict, dict | None, list, list[str]]:
     """Each sample's QC numbers against the order of acquisition (runorder.py, D78). Returns (analysis.json

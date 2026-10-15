@@ -17,7 +17,7 @@ from ionomos.downstream import charts, raster, sectionfigs, simulate, slides
 
 SVG = "{http://www.w3.org/2000/svg}"
 SECTION_KINDS = ("dose_potency", "dose_curves", "time_patterns", "time_profiles", "liganded_rank", "liganded_selectivity",
-                 "run_order", "kinase_activity")  # the last two: D78, D79
+                 "run_order", "kinase_activity", "tmt_channels", "tmt_labelling", "tmt_purity")  # D78, D79, D91
 
 
 @pytest.fixture(scope="module")
@@ -79,7 +79,7 @@ def test_the_new_kinds_and_their_groups_are_export_figures():
     assert charts.style_from({"figures": "time"})["figures"] == ["time_patterns", "time_profiles"]
     assert charts.style_from({"figures": ["liganded", "liganded_rank"]})["figures"] == ["liganded_rank", "liganded_selectivity"]
     assert charts.style_from({"figures": "all"})["figures"] == list(charts.STATIC_FIGURES)
-    with pytest.raises(charts.StyleError, match="or dose, time, liganded for both of a section's figures"):
+    with pytest.raises(charts.StyleError, match="or dose, time, liganded, tmt for all of a section's figures"):
         charts.style_layer({"figures": ["doses"]})
 
 

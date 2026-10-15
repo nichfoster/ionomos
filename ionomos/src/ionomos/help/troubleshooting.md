@@ -942,6 +942,100 @@ Then re-run the analysis ([How?](#faq.rerun)). Normalisation is not the
 problem here: without IRS its composition check already compares the
 samples within each plex.
 
+## Part of the peptides carry no TMT label {#issue.TMT_LOW_LABELLING}
+
+The TMT QC read the search's `psm.tsv` files: fewer than 95 % of the PSMs
+(`analysis.tmt_min_labelling`) carry the label on the peptide N-terminus and
+on every lysine (K). An acetylated or pyro-Glu N-terminus can't take a label
+and is not counted. Unlabelled peptides have no reporter ions, so the plex
+loses depth; the ratios of what was quantified usually stand.
+
+- Look at the **TMT plexes and channels** section: one plex or all? The
+  N-termini or the lysines? (The stock workflows fix TMT on K, so only the
+  N-terminus can be measured; that is said there.)
+- Common causes: too little reagent for the amount of peptide, old or wet
+  reagent, a buffer with amines (Tris, ammonium bicarbonate) or a pH below 8.
+- Next time, run a label check on a small aliquot before pooling.
+
+## The precursors were often not pure {#issue.TMT_LOW_PURITY}
+
+In a plex, the median [precursor purity](#glossary.purity) is below 0.7
+(`analysis.tmt_min_purity`): other peptides were isolated together with the
+one identified, and their reporter ions add to its own. That pulls ratios
+toward 1 ([ratio compression](#glossary.ratio-compression)), so fold changes
+are probably smaller than the truth. TMT-Integrator already leaves out PSMs
+below the workflow's own min purity (`tmtintegrator.min_purity`, 0.5 in the
+stock workflows). Trust the direction more than the size. For the next runs:
+fractionate more, narrow the isolation window, or quantify from
+[MS3](#glossary.ms3).
+
+## A named TMT channel has almost no signal {#issue.TMT_CHANNEL_EMPTY}
+
+A channel that the channel map gives a sample name has reporter signal in
+fewer than half of the PSMs, or is about 10 times weaker than the others. The
+map most likely names the wrong channel (the sample is on another one), or
+that sample's labelling failed or it was lost before pooling.
+
+- Compare the map (`experiment.yaml` `tmt:`, or the `annotation.txt` beside
+  the raw files) with the lab notebook; `ionomos tmt plan <folder>` shows it.
+- If the map was wrong: fix it and **Retry** the search. If the sample really
+  is empty: mark the channel `NA` and Retry, or leave the sample out on the
+  Analysis tab.
+
+## The reference channel is far from the others {#issue.TMT_REFERENCE_WEAK}
+
+The reference ([bridge](#glossary.bridge)) channel is more than 2-fold above
+or below the other channels. A bridge only has to be the same in every plex,
+so a steady offset is harmless. Check that it looks the same in each plex in
+the **TMT plexes and channels** section; if the map names the wrong channel,
+fix `reference_channel` (or `analysis.tmt_reference`) and re-run the analysis
+([How?](#faq.rerun)).
+
+## The TMT tables do not match the channel map {#issue.TMT_LABEL_TYPE_MISMATCH}
+
+The search's `psm.tsv` or `tmt-report` tables have another number of channels,
+or other sample names, than the channel map. Usually the workflow's
+[label type](#glossary.label-type) (`tmtintegrator.channel_num`, e.g.
+`TMT-10`) is not the kit that was used, or FragPipe used another annotation
+file than the one meant (two files ending in `annotation.txt` in a folder,
+or none). `ionomos tmt plan <folder>` shows the label type and which file
+FragPipe reads. Fix the map or pick the workflow made for the kit, then
+**Retry** the search.
+
+## The TMT channel names carry no condition {#issue.TMT_CONDITIONS_UNKNOWN}
+
+The channels are named like `plexA_126` (FragPipe's own names when no channel
+map reached it) or have no `_`, so the report can't tell which condition each
+channel belongs to; it takes the text before the first `_`. Name the channels
+`condition_plex_channel` (`DMSO_1_126`) in `experiment.yaml` `tmt:` or in an
+`annotation.txt` beside the raw files, then **Retry** the search; or set each
+sample's condition on the Analysis tab and run the analysis again.
+
+## A TMT channel map that the search would stop on {#trouble.tmt-map}
+
+Before a TMT search, Ionomos checks the channel map the way FragPipe will
+(`ionomos tmt plan <folder>` shows the same, without changing anything). The
+job fails before FragPipe starts, with the rule, when:
+
+- a line is not a channel and **one** sample name without spaces (write `NA`
+  for an unused channel);
+- the map does not list **every** channel of the label type (TMT-10 has 10);
+- a sample name is used twice, also across plexes (`DMSO_1_126` in plex 1,
+  `DMSO_2_126` in plex 2);
+- the workflow uses a reference sample (*Define reference: Reference sample*)
+  and a plex has no name containing its *Ref sample tag*;
+- a channel is not one of the kit's (`127X`), or listed twice;
+- `tag:` in `experiment.yaml` is not the workflow's label type (TMT-16 against
+  a TMT-10 workflow): change `tag:`, or name the right workflow with
+  `workflow:`.
+
+Warnings (the search still runs): a name whose channel token is not the
+channel it is on (`127N: DMSO_1_126`), a condition with one channel only (it
+is compared anyway, labelled low confidence), a plex without the reference
+channel, plexes with different numbers of fractions, a bioreplicate other
+than 1, and your own `annotation.txt` differing from `experiment.yaml` (the
+file wins: FragPipe reads it, and Ionomos never changes it).
+
 ## The experimental design couldn't be used {#issue.DESIGN_NOT_USED}
 
 The experiment asks for blocks or covariates (`block`, `block_from` or
@@ -1105,3 +1199,180 @@ protein jumps with the plex and hides the shift.
 Neither method is right when nearly everything changes, for example a
 pulldown against empty beads. Then no normalisation (`none`), equal loading
 and more replicates are the honest choices.
+
+## Workflows and FASTAs found on this PC {#library.about}
+
+`ionomos library scan` looks through the workflows folder, the FASTA folder,
+every FragPipe installation, the users folder and any folder added under
+`library: roots:` in config.yaml (for example `D:/`). It only reads. Each
+workflow and FASTA it finds gets a sentence saying what it is, and marks for
+what is wrong with it: ✗ means a search would fail or give wrong results, !
+means check it, a dot is for your information. `ionomos library recommend`
+ranks them per method and says why; `ionomos library adopt` copies the one
+you choose into the pinned folders (the file it replaces is kept as
+`.bak-<time>`). The entries below explain each mark.
+
+## The workflow file can't be read {#library.wf_unreadable}
+
+The file is not a FragPipe workflow (another program's `.workflow`, an empty
+or damaged file). Pick another one, or open FragPipe, load the settings you
+want and save them again on the Workflow tab (Save to custom folder).
+
+## The workflow's path has a space {#library.wf_space_in_path}
+
+FragPipe refuses paths with spaces. That only matters if FragPipe is pointed
+at the file where it is. Adopting it copies it into the workflows folder
+under a name without spaces, which is all you need to do.
+
+## The workflow's FASTA is not on this PC {#library.wf_database_missing}
+
+The workflow remembers the FASTA it was saved with (`database.db-path`), and
+that file is gone or was on another computer. Ionomos always searches with
+the method's own FASTA, so this is not an error, but check that the method's
+FASTA is the same organism and kind (decoys, contaminants) the workflow was
+made for.
+
+## The workflow's FASTA is outside the FASTA folder {#library.wf_database_elsewhere}
+
+Its FASTA exists, somewhere else on the PC. Adopting the workflow copies that
+FASTA into the FASTA folder too (never moves it), so the search and the
+record of what was searched stay together.
+
+## Saved with an older FragPipe {#library.wf_older_fragpipe}
+
+FragPipe opens workflows from older versions; settings that were added since
+take their default values, and tools may have changed what a setting means.
+Load the workflow in the installed FragPipe, check the tabs that matter
+(database, mods, quantification), and save it again; or start from the
+installed version's own stock workflow of that kind.
+
+## Saved with a newer FragPipe {#library.wf_newer_fragpipe}
+
+The workflow comes from a newer FragPipe than the one on this PC. Settings
+the older version does not know are ignored without a word. Update FragPipe
+on this PC, or save the workflow again from the installed version.
+
+## A tool the workflow needs is not installed {#library.wf_tool_missing}
+
+The workflow switches on a tool (DIA-NN, IonQuant, diaTracer, or FragPipe's
+Python for a spectral library) that the FragPipe installation does not have.
+The search would stop. Install it from FragPipe's Config tab (Download /
+Update), or set its path in the app's Advanced settings; `ionomos preflight`
+checks the installation.
+
+## The workflow writes FragPipe's sdrf.tsv {#library.wf_sdrf_on}
+
+FragPipe 24's stock workflows have "Save SDRF" on. The analysis then finds
+`sdrf.tsv` in the output and reads it as the experiment's own design, which
+it is not. Switch off Save SDRF on FragPipe's Workflow tab and save the
+workflow again before adopting it.
+
+## A TMT workflow without a label type {#library.wf_label_type_unset}
+
+TMT-Integrator runs, but the workflow does not say which TMT kit was used
+(TMT-10, TMT-16, TMTpro-18 ...). FragPipe cannot read the channels without it.
+Open the workflow in FragPipe, choose the label type on the Quant (Isobaric)
+tab, and save it again.
+
+## The workflow's decoy tag does not match its FASTA {#library.wf_decoy_tag_mismatch}
+
+The workflow looks for decoys starting with one prefix (usually `rev_`) and
+its FASTA uses another. FragPipe would find no decoys and stop. Set the decoy
+tag on FragPipe's Database tab to the FASTA's prefix, or use a FASTA made by
+FragPipe, then save the workflow again.
+
+## No finished search used these settings {#library.wf_no_runs}
+
+Either the search in that folder left no result table (it failed, was
+stopped, or its tables were moved), or no search on this PC ever used these
+exact settings. Nothing is wrong in itself; a workflow that has produced
+results before is the safer choice, and a new one is best tried on a small
+search first.
+
+## Differs from the pinned workflow of the same kind {#library.wf_differs_from_pinned}
+
+The mark lists each setting that differs from the workflow the method uses
+now, with the pinned value in brackets. Check that every difference is meant
+(match-between-runs, mods, tolerances, the TMT reference) before adopting it.
+
+## The FASTA can't be read {#library.fasta_unreadable}
+
+The file could not be opened, or no line starts with `>`, so it is not a
+FASTA. Pick another one.
+
+## The FASTA's path has a space {#library.fasta_space_in_path}
+
+FragPipe refuses paths with spaces. Adopt the FASTA: Ionomos copies it into
+the FASTA folder under a name without spaces and leaves the original where it
+is.
+
+## The FASTA has no decoys {#library.fasta_no_decoys}
+
+No entry starts with a decoy prefix (`rev_`, `DECOY_` ...). Headless FragPipe
+stops at once on such a file ([why](#search.hold-decoys)). Make a FASTA with
+decoys and contaminants in FragPipe's Database tab (Download, or Browse and
+then Add decoys and Add contaminants), or with `ionomos fasta prepare`.
+
+## Not about half of the FASTA is decoys {#library.fasta_decoy_share}
+
+FragPipe searches only when 40 to 60 % of the entries are decoys. A file with
+decoys added twice, or added to only part of it, falls outside that. Start
+again from a FASTA without decoys and add them once. FragPipe does not count
+files of 1 GB or more, so for those the mark is for information only.
+
+## The decoys use another prefix {#library.fasta_decoy_tag}
+
+The decoys start with something other than FragPipe's usual `rev_`. That is
+fine as long as the workflow's decoy tag (FragPipe's Database tab) is the
+same prefix.
+
+## The FASTA has no contaminants {#library.fasta_no_contaminants}
+
+Without contaminant entries (`contam_` from FragPipe, `CON__` from MaxQuant),
+keratins, trypsin and serum albumin from the bench end up as proteins of your
+organism, and the analysis can't remove them. Make the FASTA again with Add
+contaminants on FragPipe's Database tab.
+
+## The FASTA mixes organisms {#library.fasta_mixed_species}
+
+Less than 90 % of the proteins come from one organism. That is right for a
+mixed-species benchmark (human, yeast and E. coli together) and wrong for an
+ordinary experiment: use a FASTA of your organism alone.
+
+## Most of the FASTA is unreviewed UniProt {#library.fasta_unreviewed}
+
+Most entries start `tr|` (TrEMBL, not checked by a curator). The lab's
+searches use reviewed (Swiss-Prot) proteomes; unreviewed entries make the
+search slower and the protein groups larger. Use a reviewed FASTA unless you
+need the extra entries.
+
+## The FASTA is more than a year old {#library.fasta_old}
+
+The date in the name (FragPipe writes `YYYY-MM-DD-decoys-...`) is more than a
+year ago. UniProt is updated every eight weeks. Make a new one for new
+projects (FragPipe's Database tab, or `ionomos fasta download`), and keep the
+old one: searches already done stay tied to it.
+
+## The same FASTA is in several places {#library.fasta_duplicate}
+
+The same file (same size, entries and content) is stored more than once.
+Nothing to fix; keep the copy in the FASTA folder and use that one.
+
+## A method's pinned file is missing {#library.pinned_missing}
+
+The workflow or FASTA config.yaml names for a method is not in the pinned
+folder, so its searches wait. `ionomos library recommend --apply` puts the
+best candidate back, or pick one in the app's Methods tab.
+
+## FragPipe has a newer stock workflow of this kind {#library.update_stock_newer}
+
+The method's workflow was saved with an older FragPipe than the stock
+workflow of the same kind in the installed FragPipe. Compare the two
+(`ionomos library show` on each). If the lab's changes still apply, make them
+in the new one, save it, and adopt it.
+
+## A newer FASTA of the same proteome is on this PC {#library.update_fasta_newer}
+
+Another FASTA of the same UniProt proteome, made later, exists on this PC.
+Adopt it for new projects (`ionomos library adopt <path> --method <method>`);
+searches already done keep the FASTA they were made with.

@@ -455,6 +455,32 @@ Shown only when the lab asked for it (all of it is off by default):
   other hits, with STRING's combined score. Works for proteins too, not only
   sites. The list is in `results/string_partners.tsv`.
 
+## TMT plexes and channels {#report.tmt}
+
+Shown for a FragPipe TMT search. Before any statistics, what the search saw
+in each [plex](#glossary.plex), read from FragPipe's `psm.tsv` files:
+
+- **Channels**: per channel a box of the reporter intensity (log2) over the
+  PSMs: the box is the middle half, the whiskers 5–95 %. Grey channels are
+  unused (`NA`); an outlined one is the [reference](#glossary.bridge). A named
+  channel far below the others (`!`) usually means a wrong channel map or a
+  lost sample. The table below gives each channel's share of PSMs with
+  signal and its distance from the other channels; every number is in
+  `results/tmt_qc_<plex>.tsv`.
+- **Labelling**: the share of PSMs labelled on the N-terminus, of lysines
+  labelled, and of PSMs fully labelled, against the limit (dashed, 95 %;
+  [labelling efficiency](#glossary.labelling)). When the workflow fixes TMT
+  on K, every identified K carries it, so only the N-terminus is a real
+  measurement.
+- **Precursor purity**: how pure the isolated precursors were
+  ([purity](#glossary.purity)), with TMT-Integrator's min purity (grey dashed:
+  PSMs left of it were not quantified) and the limit for a plex's median
+  (0.7). Impure precursors [compress ratios](#glossary.ratio-compression).
+
+Without `psm.tsv` (a TMT-Integrator table dropped in by hand) only the
+channel names of the `tmt-report` tables are checked. What the checks find
+is listed with the report's other issues, each with what to do.
+
 ## Quality control {#report.quality}
 
 Tabs of checks on the samples and the data. Start with the **Sample

@@ -1,6 +1,6 @@
 """
 Figures for slides from the report's dose-response, time-course and liganded-site sections (D68), its run-order
-QC (D78) and its kinase-activity section (D79).
+QC (D78), its kinase-activity section (D79) and its TMT plexes section (D91).
 
     catalog(payload, which, features, top)   the figures these sections can draw: [charts.Figure]
 
@@ -21,6 +21,11 @@ the plot, the cut-offs line, a <desc> that says where the figure came from), fro
                           ones first, with the Theil-Sen line (runorder.py, D78)
     kinase_activity       per comparison (phosphosites with a kinase-substrate table, D79): the KSEA z-score of every
                           kinase with enough substrates, coloured where it is significant
+    tmt_channels          per TMT plex (tmtqc.py, D91): each channel's log2 reporter intensity over the PSMs (box
+                          25-75 %, whiskers 5-95 %), coloured by condition, unused channels grey, the reference outlined
+    tmt_labelling         every TMT plex: the share of N-termini, K and PSMs fully labelled, against the limit
+    tmt_purity            every TMT plex together: the precursor purity histogram, TMT-Integrator's min purity and
+                          Ionomos' limit
 
 Nothing is analysed again: the numbers are the report's. Colours are written out, text is <text>, no CSS.
 """
@@ -38,7 +43,7 @@ from ionomos.downstream.timecourse import curve_at
 TOP_PANELS = 6     # curves / profiles drawn when no feature is named (report.js TOP_PANELS)
 MAX_PANELS = 24
 SECTION_FIGURES = ("dose_potency", "dose_curves", "time_patterns", "time_profiles", "liganded_rank",
-                   "liganded_selectivity", "run_order", "kinase_activity")
+                   "liganded_selectivity", "run_order", "kinase_activity", "tmt_channels", "tmt_labelling", "tmt_purity")
 _DOSE_CLS = ("up", "down", "not", "unclear")
 _TIME_CLS = ("up", "down", "mixed", "not")
 
@@ -723,6 +728,163 @@ def figure_kinase_activity(d: dict, ci: int, style: dict, generator: str = "") -
                     legend, rule, about=name, generator=generator)
 
 
+# ------------------------------------------------------------------ TMT QC --
+
+
+def _tmt_colours(d: dict, ink: dict, chans: list[dict]) -> dict[str, str]:
+    col = charts._cond_colors(d, ink)
+    for c in chans:
+        if c.get("cond") and c["cond"] not in col:
+            col[c["cond"]] = ink["c"][len(col) % len(ink["c"])]
+    return col
+
+
+def figure_tmt_channels(d: dict, pi: int, style: dict, generator: str = "") -> str:
+    """Plex pi's channels (tmtqc.py, D91): a box of log2 reporter intensity per channel in the kit's order (report.js
+    renderTmtChannels draws the same)."""
+    P = ((d.get("tmtqc") or {}).get("plexes") or [])[pi]
+    C = P.get("ch") or []
+    vals = [v for c in C if c.get("q") for v in (c["q"][0], c["q"][4])]
+    if not vals:
+        return ""
+    ink = _inks(style)
+    ls = style["line_scale"]
+    col = _tmt_colours(d, ink, C)
+    lo, hi = min(vals), max(vals)
+    pad = (hi - lo) * 0.08 or 1
+    lo, hi = lo - pad, hi + pad
+    L, R, T, B = 60, 12, 18, 96
+
+    def draw(W: int, H: int) -> str:
+        bw = (W - L - R) / len(C)
+
+        def Y(v):
+            return T + (1 - (v - lo) / (hi - lo)) * (H - T - B)
+
+        b = _axes(ink, lambda v: 0, Y, [], _inner_ticks(lo, hi, 6), L, R, T, B, W, H, "", "log2 reporter intensity", ls)
+        for j, c in enumerate(C):
+            x, w = L + bw * j + bw / 2, max(4.0, min(28.0, bw * 0.55))
+            fill = ink["ns"] if c["na"] else col.get(c.get("cond"), ink["c"][0])
+            q = c.get("q")
+            if q:
+                b.append(f'<line x1="{_n(x)}" x2="{_n(x)}" y1="{_n(Y(q[0]))}" y2="{_n(Y(q[4]))}" stroke="{fill}" '
+                         f'stroke-width="{_n(1.5 * ls)}"/>')
+                ref = f' stroke="{ink["text"]}" stroke-width="{_n(2 * ls)}"' if c.get("ref") else ""
+                b.append(f'<rect x="{_n(x - w / 2)}" y="{_n(Y(q[3]))}" width="{_n(w)}" height="{_n(max(1, Y(q[1]) - Y(q[3])))}" '
+                         f'fill="{fill}" fill-opacity="{0.35 if c["na"] else 0.85}"{ref}/>')
+                b.append(f'<line x1="{_n(x - w / 2)}" x2="{_n(x + w / 2)}" y1="{_n(Y(q[2]))}" y2="{_n(Y(q[2]))}" '
+                         f'stroke="{ink["surface"]}" stroke-width="{_n(2 * ls)}"/>')
+            if c.get("flags"):
+                b.append(_text(x, T - 4, "!", 12, ink["up"], text_anchor="middle", font_weight=700))
+            b.append(_text(0, 0, (f"{c['c']} " + ("NA" if c["na"] else clean_text(c["n"])))[:24], 10.5, ink["text2"],
+                           transform=f"translate({_n(x + 3)} {_n(H - B + 10)}) rotate(60)"))
+        return "".join(b)
+
+    used = list(dict.fromkeys(c["cond"] for c in C if not c["na"] and c.get("cond")))
+    legend = [(col[c], c) for c in used] + [(ink["ns"], "unused (NA)")]
+    if any(c.get("ref") for c in C):
+        legend.append((None, "outlined: the reference"))
+    flagged = [f"{c['c']} {', '.join(c['flags'])}" for c in C if c.get("flags")]
+    if flagged:
+        legend.append((None, "! " + "; ".join(flagged[:3])))
+    name = clean_text(P.get("name")) or f"plex {pi + 1}"
+    what = "TMT channels"
+    return _compose(style, d, draw, what, f"{what}: plex {name}",
+                    f"Reporter intensity per channel, {P.get('psms', 0):,} PSMs · {d.get('title') or ''}", legend,
+                    "box: 25-75 %, whiskers: 5-95 % of the PSMs with signal", about=name, generator=generator)
+
+
+_TMT_LAB = (("nterm", "N-termini"), ("k", "K"), ("full", "fully labelled PSMs"))
+
+
+def figure_tmt_labelling(d: dict, style: dict, generator: str = "") -> str:
+    """Every plex's labelling efficiency: N-termini, K and PSMs fully labelled, against the limit (tmtqc.py, D91)."""
+    X = d.get("tmtqc") or {}
+    P = X.get("plexes") or []
+    vals = [p["labelling"][k] for p in P for k, _t in _TMT_LAB if (p.get("labelling") or {}).get(k) is not None]
+    if not vals:
+        return ""
+    ink = _inks(style)
+    ls = style["line_scale"]
+    lim = (X.get("limits") or {}).get("min_labelling")
+    lo = min([0.8, *vals]) - 0.02
+    L, R, T, B = 60, 12, 14, 40
+    cols = [ink["c"][i % len(ink["c"])] for i in range(3)]
+
+    def draw(W: int, H: int) -> str:
+        gw = (W - L - R) / len(P)
+        bw = min(26.0, gw * 0.7 / 3)
+
+        def Y(v):
+            return T + (1 - (v - lo) / (1 - lo)) * (H - T - B)
+
+        b = _axes(ink, lambda v: 0, Y, [], _inner_ticks(lo, 1, 5), L, R, T, B, W, H, "", "share labelled", ls)
+        for j, p in enumerate(P):
+            for i, (k, _t) in enumerate(_TMT_LAB):
+                v = (p.get("labelling") or {}).get(k)
+                if v is None:
+                    continue
+                x = L + gw * j + gw / 2 + (i - 1.5) * bw
+                b.append(f'<rect x="{_n(x)}" y="{_n(Y(v))}" width="{_n(bw * 0.9)}" height="{_n(max(1, H - B - Y(v)))}" '
+                         f'fill="{cols[i]}"/>')
+            b.append(_text(L + gw * j + gw / 2, H - B + 16, clean_text(p.get("name"))[:24], 11, ink["text2"],
+                           text_anchor="middle"))
+        if lim is not None and lim > lo:
+            b.append(f'<line x1="{L}" x2="{_n(W - R)}" y1="{_n(Y(lim))}" y2="{_n(Y(lim))}" stroke="{ink["up"]}" '
+                     f'stroke-width="{_n(ls)}" stroke-dasharray="5 4"/>')
+        return "".join(b)
+
+    legend = [(cols[i], t) for i, (_k, t) in enumerate(_TMT_LAB)]
+    if any((p.get("labelling") or {}).get("k_fixed") for p in P):
+        legend.append((None, "TMT on K is fixed in the workflow"))
+    what = "TMT labelling efficiency"
+    return _compose(style, d, draw, what, what, f"{len(P)} plex{'es' if len(P) != 1 else ''} · {d.get('title') or ''}",
+                    legend, f"dashed: the limit {lim:.0%}" if lim is not None else "", about=what, generator=generator)
+
+
+def figure_tmt_purity(d: dict, style: dict, generator: str = "") -> str:
+    """The precursor purity of every plex's PSMs, with TMT-Integrator's min purity and Ionomos' limit (D91)."""
+    X = d.get("tmtqc") or {}
+    U = X.get("purity") or {}
+    bins = U.get("bins") or []
+    if not sum(bins):
+        return ""
+    ink = _inks(style)
+    ls = style["line_scale"]
+    lim = (X.get("limits") or {}).get("min_purity")
+    top = max(bins)
+    L, R, T, B = 60, 12, 14, 44
+
+    def draw(W: int, H: int) -> str:
+        def Xs(v):
+            return L + v * (W - L - R)
+
+        def Y(v):
+            return T + (1 - v / top) * (H - T - B)
+
+        b = _axes(ink, Xs, Y, [0, 0.2, 0.4, 0.6, 0.8, 1], _inner_ticks(0, top, 4), L, R, T, B, W, H,
+                  "precursor purity", "PSMs", ls)
+        n = len(bins)
+        for k, v in enumerate(bins):
+            b.append(f'<rect x="{_n(Xs(k / n) + 0.5)}" y="{_n(Y(v))}" width="{_n(max(1, Xs(1 / n) - Xs(0) - 1))}" '
+                     f'height="{_n(H - B - Y(v))}" fill="{ink["c"][0]}"/>')
+        for v, c, dash in ((U.get("min_purity"), ink["muted"], "4 4"), (lim, ink["up"], "5 4")):
+            if v is not None:
+                b.append(f'<line x1="{_n(Xs(v))}" x2="{_n(Xs(v))}" y1="{T}" y2="{_n(H - B)}" stroke="{c}" '
+                         f'stroke-width="{_n(ls)}" stroke-dasharray="{dash}"/>')
+        return "".join(b)
+
+    legend = [(ink["c"][0], f"{U.get('n', sum(bins)):,} PSMs")]
+    if U.get("min_purity") is not None:
+        legend.append((ink["muted"], f"TMT-Integrator's min purity {U['min_purity']:g}"))
+    if lim is not None:
+        legend.append((ink["up"], f"limit for the median {lim:g}"))
+    what = "TMT precursor purity"
+    med = U.get("median")
+    return _compose(style, d, draw, what, what, (f"median {med:.2f} · " if med is not None else "")
+                    + (d.get("title") or ""), legend, "", about=what, generator=generator)
+
+
 # ------------------------------------------------------------------ catalog --
 
 
@@ -895,4 +1057,17 @@ def catalog(d: dict, which, features=None, top: int | None = None) -> list:
             out.append(Figure(safe_name(f"kinase_activity_{C.get('slug') or nm or ci + 1}.svg"), "kinase_activity",
                               f"Kinase activity, {nm}: KSEA z-score of every kinase with enough measured substrates",
                               lambda st, g, ci=ci: figure_kinase_activity(d, ci, st, g)))
+    T_ = d.get("tmtqc") or {}
+    for pi, P in enumerate(T_.get("plexes") or []):
+        if "tmt_channels" in which and any(c.get("q") for c in P.get("ch") or []):
+            nm = clean_text(P.get("name")) or str(pi + 1)
+            out.append(Figure(safe_name(f"tmt_channels_{nm}.svg"), "tmt_channels",
+                              f"TMT channels, plex {nm}: log2 reporter intensity per channel (D91)",
+                              lambda st, g, pi=pi: figure_tmt_channels(d, pi, st, g)))
+    if "tmt_labelling" in which and any(p.get("labelling") for p in T_.get("plexes") or []):
+        out.append(Figure("tmt_labelling.svg", "tmt_labelling", "TMT labelling efficiency per plex: N-termini, K and "
+                          "fully labelled PSMs against the limit", lambda st, g: figure_tmt_labelling(d, st, g)))
+    if "tmt_purity" in which and sum((T_.get("purity") or {}).get("bins") or []):
+        out.append(Figure("tmt_purity.svg", "tmt_purity", "TMT precursor purity of every PSM, with TMT-Integrator's "
+                          "min purity and the limit", lambda st, g: figure_tmt_purity(d, st, g)))
     return out

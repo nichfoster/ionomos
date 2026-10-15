@@ -10,7 +10,8 @@ Loaders (all tolerant of column order and extra columns):
     from_isodtb_sites(<prefix>_sites.tsv)              site level, ratio
     from_pg_matrix(DIA-NN *pg_matrix.tsv, samples)     protein level, intensity
     from_combined_protein(FragPipe combined_protein.tsv)  protein level, intensity (DDA label-free)
-    from_tmt_abundance(tmt-report/abundance_*_MD.tsv)  gene/protein level, intensity (already log2)
+    from_tmt_abundance(tmt-report/abundance_*_MD.tsv)  gene/protein level, intensity (already log2); TMT_TABLES:
+                                                       _GN, _None and ratio_* when _MD is absent (D91)
 """
 from __future__ import annotations
 
@@ -238,8 +239,38 @@ _TMT_META = {"Index", "Gene", "NumberPSM", "ProteinID", "Protein ID", "MaxPepPro
              "Start", "End", "Protein"}
 
 
+# TMT-Integrator's tables, in the order they are read (D91): the gene and protein abundances, median centred (MD,
+# the lab's), then with variance scaling (GN) or not normalised (None), then the ratio tables of the same levels, then
+# anything else it wrote. Peptide and site tables come last: the protein analysis does not want them first (sites go
+# through analysis.phospho, phospho.py). FragPipe's output guide: [abundance|ratio]_[level]_[normalisation].tsv
+TMT_TABLES = ("abundance_gene_MD.tsv", "abundance_protein_MD.tsv", "abundance_gene_GN.tsv", "abundance_protein_GN.tsv",
+              "abundance_gene_None.tsv", "abundance_protein_None.tsv", "ratio_gene_MD.tsv", "ratio_protein_MD.tsv",
+              "ratio_gene_*.tsv", "ratio_protein_*.tsv", "abundance_gene_*.tsv", "abundance_protein_*.tsv",
+              "abundance_*_MD.tsv", "abundance_*.tsv", "ratio_*.tsv")
+
+
+def tmt_table_note(path: Path) -> str:
+    """What reading this TMT-Integrator table means, '' for the lab's own (abundance_gene_MD / protein_MD)."""
+    n = Path(path).name
+    if n.startswith("ratio_"):
+        return (f"read {n}: TMT-Integrator's log2 ratios to the reference (no abundance table was found); the "
+                "comparisons are the same, without the reference intensity added back")
+    if n.endswith("_None.tsv"):
+        return (f"read {n}: TMT-Integrator did not normalise these (None); Ionomos' own normalisation "
+                "(analysis.normalize) is the only one")
+    if n.endswith("_GN.tsv"):
+        return f"read {n}: TMT-Integrator median-centred and variance-scaled these (GN)"
+    if not n.endswith("_MD.tsv"):
+        return f"read {n}: TMT-Integrator was not set to median centring (MD), so its own normalisation is kept"
+    if not n.startswith(("abundance_gene_", "abundance_protein_")):
+        return f"read {n}: no gene or protein table was found, so this level is analysed"
+    return ""
+
+
 def from_tmt_abundance(path: Path, annotation: list[dict] | None = None) -> QuantMatrix:
-    """TMT-Integrator abundance table (values are already log2 ratios to the reference)."""
+    """TMT-Integrator abundance or ratio table (values are already log2 ratios to the reference; an abundance adds
+    the reference intensity back). Any of TMT_TABLES: Index, NumberPSM, ProteinID | Gene, MaxPepProb,
+    ReferenceIntensity, then a column per sample."""
     header, rows = read_tsv(path)
     by_sample = {a["sample"]: a for a in annotation or []}
     start = header.index("ReferenceIntensity") + 1 if "ReferenceIntensity" in header else 0

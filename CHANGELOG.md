@@ -7,8 +7,197 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The workflow and FASTA library: `ionomos library`** (D89, docs/LIBRARY.md).
+  The PC holds well over a hundred FragPipe workflows (one in every output
+  folder on `D:\`, custom ones such as `fragpipe_pax8.workflow`, the stock ones
+  of three FragPipe versions) and FASTAs in several places, and nothing said
+  which is which. `ionomos library scan` finds them (read-only; the pinned
+  folders, every FragPipe installation, users_root and `library.roots`, e.g.
+  `D:/`; at most 6 folders deep and 120 s, then it says how far it got), and
+  describes each in words: *"A TMT-10 MS3 search with TMT-Integrator:
+  carbamidomethyl C, TMT K fixed; …; saved with FragPipe 24.0"*, *"Human,
+  reviewed UniProt (20,698 proteins) with decoys (rev_) and N contaminants,
+  made 2026-01-30"*. 25 marks with what to do (`FASTA_NO_DECOYS`,
+  `FASTA_DECOY_SHARE`, `WF_TOOL_MISSING`, `WF_SDRF_ON`, `WF_DIFFERS_FROM_PINNED`
+  …), each with a help entry. `list`, `show PATH`, `recommend` (the best
+  workflow and FASTA per method, with reasons: finished searches that used it,
+  the FragPipe version, its FASTA), `recommend --apply` (only for methods
+  whose files are missing or broken; config.yaml backed up first), `adopt PATH
+  --method KEY` (copies, never moves; the replaced file kept as `.bak-<time>`;
+  its FASTA copied in under a name without spaces) and `check` (a newer stock
+  workflow, an old FASTA, a newer FASTA of the same proteome). The catalog is
+  `logs/library.json`. A 1 GB FASTA is read in under 2 s, once per version.
+  A search's own `fragpipe.workflow` copy (it differs only in `workdir=`)
+  counts as the pinned workflow's evidence, not as a rival, and FragPipe's
+  per-search `protein.fas` is never taken for a search database.
+  `config.yaml` has a `library:` block (`roots`, `exclude`, `max_depth`,
+  `time_limit_s`); a config without it gets the defaults.
+- **App, tab 3 Methods: a panel "Workflows and FASTAs on this PC"**
+  (`library_tab.py`, D89/D90).
+  - **Find on this PC…** lists every FragPipe workflow and FASTA the library
+    found, ranked for the selected method (kind, name, folder, summary, marks,
+    why recommended), with the details of each (settings, every flag and what
+    to do). The scan runs in the background with a Stop button and is
+    remembered, so the window opens at once next time (Rescan looks again).
+    **Use for <method>** copies the file into the workflows / FASTA folder
+    (never moves it) and puts it in the method's box; **Open folder**;
+    **Show all** and a filter.
+  - **Choose…** beside the workflow and FASTA boxes: the same list, only
+    workflows or only FASTAs. The method's FASTA is described in words under
+    the buttons (read in the background; FASTAs can be 1 GB).
+  - **Download from UniProt…** (organism → proteome → reviewed / isoforms →
+    download + decoys and contaminants into the FASTA folder, progress and
+    Stop) and **Add decoys and contaminants…** (a FASTA you pick → a new
+    FragPipe-ready file; the source is not changed), each ending with **Use
+    for <method>**. **Check for updates**: newer stock workflows, old or
+    superseded FASTAs, each FASTA against UniProt's current release. Changes
+    nothing.
+  - First setup: when a method's workflow or FASTA is missing or broken, a
+    banner "Ionomos found N workflows and M FASTAs on this PC …" → **Review
+    proposals…** (the file Ionomos would use for each such method, with
+    reasons). Only **Apply** changes anything; config.yaml is saved through
+    the app's Save (checked, backed up).
+  - Setup checklist: "Workflows and FASTAs: N pinned, flags: …" from the last
+    scan (no scan during a check). Help: "How do I find or update a workflow
+    or FASTA?" (`faq.library`).
+- **FASTAs from UniProt, made ready for FragPipe, and a check of how old they
+  are** (D90, docs/FASTA.md). `ionomos fasta search human` finds a proteome's
+  id; `ionomos fasta download UP000005640` downloads its reviewed entries
+  (`--unreviewed`, `--isoforms`) from UniProt's REST API, checks the count
+  against UniProt's, and adds `rev_` decoys and `contam_` contaminants with
+  FragPipe's own Philosopher, as FragPipe's Database tab does (the same steps
+  in Python when there is no FragPipe). The result is named as FragPipe names
+  it (`2026-10-14-decoys-reviewed-contam-UP000005640_9606.fasta.fas`) and
+  passes FragPipe's 40–60 % decoy rule. `ionomos fasta prepare FILE` does the
+  second half for a FASTA you have; `ionomos fasta release` says, for each
+  FASTA in the FASTA folder, whether UniProt has released since it was made;
+  `ionomos fasta stock-workflows 24.0 [--get NAME]` lists or saves FragPipe's
+  stock workflows of a release from its GitHub source. Nothing is overwritten;
+  offline, every command says so instead of failing. New help entry "How do I
+  get or update a FASTA?" (`faq.fasta`).
+- **TMT, end to end** (D91, WORKFLOWS.md). `tmtkit.py` is the one place that
+  knows TMT label types (TMT-6/10/11, TMTpro 16/18: FragPipe's channels in
+  order, reagent masses 229.1629 / 304.2071), reads annotation files as
+  FragPipe does, applies FragPipe's channel-map rules and Ionomos' own checks
+  as flags with fixes, and plans every plex of a drop (the map from
+  `experiment.yaml` or the drop's own `annotation.txt`, read only).
+  `ionomos tmt plan <folder>` (what will be written and every flag, read
+  only), `ionomos tmt annotation <folder> [--write]` (never over an existing
+  file), `ionomos tmt suggest --tag TMT-16 --conditions DMSO,Drug
+  --replicates 3 --reference 126 [--plexes a,b]` (a `tmt:` block to paste),
+  `ionomos tmt qc <folder>`. Each refuses a job that is not TMT ("this is a DIA
+  job, not TMT"), and `suggest` refuses an impossible map (no replicates, a
+  condition or reference twice, more samples than channels) in one sentence.
+- **TMT QC after the search** (`downstream/tmtqc.py`, D91): per plex and
+  channel from `psm.tsv` (reporter signal, distance from the other channels,
+  the reference), labelling efficiency (N-termini, K, fully labelled),
+  precursor purity. `results/tmt_qc.json`, `results/tmt_qc_<plex>.tsv`,
+  `analysis.json` → `tmt_qc`, a report section **TMT plexes and channels**
+  (channel chart per plex, labelling bars, purity histogram; all three export
+  as figures, `--figures tmt`), and doctor issues `TMT_LOW_LABELLING`,
+  `TMT_LOW_PURITY`, `TMT_CHANNEL_EMPTY`, `TMT_REFERENCE_WEAK`,
+  `TMT_LABEL_TYPE_MISMATCH`, `TMT_CONDITIONS_UNKNOWN`. Runs for TMT kinds
+  only, also when `analysis.enabled` is off. Analysis settings
+  `tmt_min_labelling` (0.95) and `tmt_min_purity` (0.7).
+- Testbed: scenarios `tmt16_na`, `tmt_tag_mismatch`, `tmt_own_annotation`,
+  `tmt_bridge`, `tmt_poor_label`; a `TMT16.workflow`; the fake FragPipe writes
+  TMT `psm.tsv` files (reporter columns, Purity, labels) and the `tmt-report`
+  set (gene/protein abundance and ratio, `_None`, peptide, single-site with
+  phospho), acts out `tmt-poor-labelling`, `tmt-low-purity`,
+  `tmt-empty-channel`, and stops on a missing reference tag as FragPipe does.
+- Help: `report.tmt`, glossary (channel, plex, label type, reference/bridge,
+  labelling efficiency, precursor purity, ratio compression, MS2 vs MS3),
+  troubleshooting for every new issue and `trouble.tmt-map`.
+- **Docs for a published tool.** `docs/VISION.md`: what Ionomos is for in one paragraph, who it is for (the lab
+  running the PC, a lab member who only drops folders, a core facility, a scientist with a table, another lab, a
+  reviewer), its principles with the decisions behind them, what it is not, a comparison with FragPipe-Analyst,
+  MSstats, Perseus, Prostar, DEP, MS-DAP, quantms and limpa (what each does that Ionomos does not), the road to
+  publishing (PyPI, a real-data example from PRIDE, the evidence, JOSS, a preprint and a J. Proteome Res.
+  technical note, a documentation site), versioning and support promises from 1.0, and what "done for v1.0"
+  means (D92).
+- **Community files**: `CITATION.cff` (GitHub's "Cite this repository"; it also lists FragPipe-Analyst, limma and
+  CurveCurator, whose methods are ported), `CONTRIBUTING.md` (reporting with the diagnostics or a bundle, the dev
+  loop, the rules: docs are the spec, the decision log, agents open pull requests and a person merges them),
+  `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1), issue templates for bugs and features, and a pull-request
+  template.
+- The app opens on a **Today** tab: what needs you (the attention items, Open = the pop-up with what to do), the
+  watcher and queue line, the setup checklist's one line, and the last 15 jobs with Open report, Open folder,
+  Re-run analysis, Analysis options… and Show in Jobs. Read off the Tk thread (`uinav.snapshot`). A new install
+  still opens on ✓ Setup. (#109)
+- The app remembers its window size, maximised state and last tab in `ionomos-ui.json` next to `config.yaml`
+  (`names.UI_STATE_FILE`), fitted to the screen on the next start; a window bigger than the screen is shrunk. (#110)
+- **F1** opens the help page at the current tab's topic; **F5** refreshes the tab; **Ctrl+S** saves; **Ctrl+F**
+  finds a job; **Ctrl+0** Today, **Ctrl+1 … Ctrl+8** the tab with that number; Ctrl+Tab / Ctrl+Shift+Tab; Enter
+  opens the report in a job list. Listed on the Help tab and in the new help entry `faq.app`. (#112)
+- A **Find** box on the Jobs tab (every word must match; `12` / `#12` is job 12; Escape clears). (#113)
+- `docs/UI.md`: the UI's principles, every tab and window and who uses it, what was seen on screen, and the plan
+  in four slices (#109–#132).
+- **TMT channels** editor (`tmt_editor.py`, D91): a grid per plex (channel, sample name, condition, replicate,
+  role: sample / reference (bridge, pooled) / NA), the label type pre-set from the method's workflow
+  (`tmtintegrator.channel_num`, an orange line when another is picked), **Read annotation.txt from the folder**
+  (never changed), **Suggest…** (conditions, replicates per condition, reference channel), **Clear**, FragPipe's
+  rules and Ionomos' checks under the grid in `tmtkit`'s own words (what FragPipe would stop on in red), and a
+  summary in plain words.
+  - In the **review window** for a TMT drop, under the file table (pre-filled from `experiment.yaml` `tmt:`, else
+    the drop's own `annotation.txt`, else empty with "Suggest… (start here)"). Accept writes the map as
+    `experiment.yaml` `tmt:`; a map FragPipe would stop on keeps the window open with the reason; a cleared grid
+    removes an old `tmt:` block.
+  - On the **Analysis tab** (experiment editor) for a TMT experiment: Save choices / Run analysis write `tmt:`
+    (the old `experiment.yaml` kept in `experiment-backups/`); the names are used by the next search.
+- Help: "How do I tell Ionomos which TMT channel is which sample?" (`faq.tmt-channels`); a line in the TMT
+  paragraph of Getting started.
+- `tmtkit.reference_conditions(tmt, ref_tag)`.
+
+### Changed
+
+- `fragpipe.prepare` plans TMT jobs with `tmtkit.plan`: annotation files are
+  written in the kit's order; a `tag:` that is not the workflow's label type
+  fails the job before the search, saying which to change; a person's own
+  `*annotation.txt` is checked with FragPipe's rules (a file FragPipe would
+  stop on fails the job before the search, the file untouched); the "no
+  channel map" warning adds that the report will not know the conditions.
+- `experiment.yaml` `tmt:` is checked with `tmtkit`: unknown keys and tags are
+  refused with the known ones; a plex may have its own `reference:`;
+  `reference_channel` may be a list. Intake records each TMT plex's channel
+  map and source in `ionomos.json` (`plan.tmt`) and says at intake what would
+  stop the search.
+- The TMT loader reads TMT-Integrator's `_GN`, `_None` and `ratio_*` tables
+  when `_MD` is absent (in a fixed order, `quant.TMT_TABLES`), with a note
+  saying which. `fake_fragpipe.TMT_CHANNELS` comes from `tmtkit`; its TMT-6
+  channels are now FragPipe's (126 127N 128C 129N 130C 131N, was 126–131).
+- The Methods tab's "workflow + FASTA ready" checklist fix now points to
+  Choose… / Find on this PC…. `deploy/ionomos.spec`: hidden imports for
+  `ionomos.library`, `ionomos.fastasource`, `ionomos.library_tab`.
+- **`docs/SCOPE.md` describes today's scope**: the watcher and the pip-installable analysis, in and out of scope
+  with the decision for each, what moved since the v1 plan; the 2026-09-15 lab plan is kept as "Where it
+  started", with which of its success criteria hold.
+- **README**: three sentences on what Ionomos is before the lab diagram; a shorter Status (detail in
+  ROADMAP.md); Cite and Contributing sections; VISION, LIBRARY and FASTA in the docs index.
+- **ROADMAP Phase 5D is a publishing checklist** in order, each step with an owner (the maintainer or an agent):
+  PyPI, repository settings and a Zenodo DOI, community files (done), a real-data example, the real-data
+  evidence, pilot labs, a documentation site, name and logo, a preprint and a technical note, a JOSS paper (not
+  before 2027-03-17), versioning promises, v1.0. Three new risks: mostly agent-written code, real data lagging
+  behind the code, users the maintainer can't see.
+- **A TMT reference (bridge / pooled) channel is never compared** ("Pool vs DMSO" is gone from the `tmt_bridge`
+  scenario). Its condition takes the existing reference role: written as `analysis.roles: {Pool: reference}` by
+  the editor, derived from `experiment.yaml` `tmt:` (`reference_channel`, a plex's `reference:`, pool / bridge
+  words) by the analysis unless a person gave that condition a role, or read from the name in TMT data. Also with
+  `analysis.control` set and in competition designs; an explicit `comparisons:` list still wins. Other data keep
+  D61's rule. The pool is never the guessed control.
+- `configio.dump_config` writes `analysis.irs`, `tmt_reference`, `tmt_min_labelling`, `tmt_min_purity` when set
+  (the app's Save lost them).
+- `Draft` carries `experiment.yaml`'s `tmt:` and each TMT method's workflow label type / ref tag; the review
+  window's TMT notes no longer say "conditions come from the channel annotation" (a dead end).
+- `deploy/ionomos.spec`: hidden imports `ionomos.tmtkit`, `ionomos.tmt_editor`.
+
 ### Fixed
 
+- On a small screen (1366×768) the bottom bar — Save, Help, Report a problem, the ⚠ badge — disappeared; it is now
+  packed before the tabs, and its buttons before the config path. (#111)
+- 4 Advanced: the hint "Needs the watcher to run in the logged-in session" covered the "Pop up a window when
+  something needs you" checkbox. The Jobs tab's method column was too narrow ("isoDTI"). (#111)
 - **A protein seen in one condition only no longer vanishes when a global
   missing-value filter removes it** (D84). With `filter_global_pct: 66` and
   three conditions of three, a protein in every FPS run and no other was

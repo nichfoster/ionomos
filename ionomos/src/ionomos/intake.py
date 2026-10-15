@@ -123,6 +123,9 @@ class Plan:
     raw_subdirs: dict[str, str] = field(default_factory=dict)
     subdir_renames: dict[str, str] = field(default_factory=dict)  # folder as dropped -> safe name
     warnings: list[str] = field(default_factory=list)  # filed anyway, but worth saying (log, ionomos.json)
+    # TMT (D91, tmtkit.plan): the label type, each plex's channel map and where it comes from (experiment.yaml or the
+    # drop's own annotation.txt, read only), and the flags; {} for other methods
+    tmt: dict = field(default_factory=dict)
 
     def to_json(self) -> dict:
         d = asdict(self)
@@ -165,6 +168,10 @@ class Draft:
     kinds: dict[str, str] = field(default_factory=dict)  # method -> what it behaves as (Config.kind); {} = its key
     lab_analysis: dict = field(default_factory=dict)  # config.yaml analysis: (roles preview, D65)
     exp_analysis: dict = field(default_factory=dict)  # experiment.yaml analysis:, as written (its roles: included)
+    # TMT (the channel editor, tmt_editor.py): experiment.yaml's tmt: as written, and each TMT method's workflow
+    # (tmt_editor.workflow_info: label type, ref tag), read here so the window reads no file itself
+    tmt: dict = field(default_factory=dict)
+    tmt_workflows: dict[str, dict] = field(default_factory=dict)
 
     def kind_of(self, method: str) -> str:
         return self.kinds.get(method, method)
@@ -387,14 +394,50 @@ def _plan(folder: Path, cfg: Config, ledger: Ledger | None = None) -> Plan:
 
     manifest = [ManifestLine(where(r) + r.safe_filename, r.sample, r.rep, mcfg.data_type) for r in raws.files]
     warnings = _plex_warnings(cfg.kind(method), manifest)
+    tmt: dict = {}
+    if cfg.kind(method) == "TMT":
+        dropped = [(folder / (subdirs.get(r.filename) or raw_dir) / r.filename, r.sample, r.rep) for r in raws.files]
+        tmt, more = _tmt_reading(folder, ov, dropped, cfg, method)
+        warnings += more
     return Plan(
         source=str(folder), folder=fn, dest=str(dest),
         date_source="overrides" if ov.date else ("name" if fn.date else "drop"),
         raw_dir=raw_dir, renames=renames, layout=raws.layout, manifest=manifest,
         other_files=others, overrides=ov.to_dict(),
         raw_subdirs={r.safe_filename: subdir_renames[subdirs[r.filename]] for r in raws.files if r.filename in subdirs},
-        subdir_renames={d: v for d, v in subdir_renames.items() if d != v}, warnings=warnings,
+        subdir_renames={d: v for d, v in subdir_renames.items() if d != v}, warnings=warnings, tmt=tmt,
     )
+
+
+def _tmt_reading(folder: Path, ov: Overrides, dropped: list, cfg: Config, method: str) -> tuple[dict, list[str]]:
+    """How a TMT drop's channels will be read (tmtkit.plan, D91), read only: the experiment.yaml map or the drop's
+    own *annotation.txt (never changed), the label type of the method's workflow, and the flags. Nothing here
+    refuses a drop: what would stop the search is said now and fails the job before FragPipe starts. The two
+    layout warnings _plex_warnings gives (no map, plexes sharing a folder) are not repeated."""
+    from ionomos import tmtkit
+
+    props, wf_name = {}, ov.workflow or cfg.methods[method].workflow
+    try:
+        from ionomos.fragpipe import _find_file, read_properties
+
+        wf = _find_file(wf_name, cfg.workflow_dir, ".workflow") if wf_name else None
+        if wf is not None:
+            props = read_properties(wf.read_text(encoding="utf-8", errors="replace"))
+    except OSError:
+        pass
+    try:
+        tp = tmtkit.plan(folder, ov, props, dropped, None, wf_name or "")
+    except Exception as exc:  # noqa: BLE001 - reading the channels must never cost a drop
+        log.warning("%s: could not read the TMT channel map: %s", folder.name, exc)
+        return {}, []
+    skip = ("TMT_NO_MAP", "TMT_SHARED_FOLDER")
+    said = [("the search will stop: " if f.severity == "error" else "TMT: ") + f.line()
+            for f in tp.flags if f.severity in ("error", "warn") and f.code not in skip]
+    info = {"label": tp.label, "label_from": tp.label_from, "user_files": tp.user_files,
+            "plexes": [{"name": p.name, "folder": p.folder, "source": p.source, "channels": p.channels,
+                        "conditions": p.conditions, "reference": p.reference} for p in tp.plexes],
+            "flags": [f.as_dict() for f in tp.flags]}
+    return info, said
 
 
 def _plex_warnings(kind: str, manifest: list[ManifestLine]) -> list[str]:
@@ -427,6 +470,17 @@ def _without_files(folder: Path) -> Overrides:
         return parse_overrides({k: v for k, v in data.items() if k != "files"})
     except (OSError, ValueError, AttributeError, yaml.YAMLError):  # OverridesError is a ValueError
         return Overrides()
+
+
+def _tmt_workflows(cfg: Config, ov: Overrides) -> dict[str, dict]:
+    """{TMT method: its workflow's label type and ref tag} for the review window's channel editor."""
+    from ionomos.tmt_editor import workflow_info
+
+    try:
+        return {m: workflow_info(cfg, m, ov.workflow) for m in cfg.methods if cfg.kind(m) == "TMT"}
+    except Exception:  # noqa: BLE001 - the window works without them (no label check)
+        log.debug("could not read the TMT workflows", exc_info=True)
+        return {}
 
 
 def draft(folder: Path, cfg: Config, error: IntakeError | None = None, review: bool = False) -> Draft:
@@ -505,6 +559,7 @@ def draft(folder: Path, cfg: Config, error: IntakeError | None = None, review: b
         kinds={m: cfg.kind(m) for m in cfg.methods},
         lab_analysis={k: v for k, v in (cfg.analysis or {}).items() if k != "enabled"},
         exp_analysis=dict(ov.analysis or {}),
+        tmt=dict(ov.tmt or {}), tmt_workflows=_tmt_workflows(cfg, ov),
     )
 
 

@@ -172,12 +172,18 @@ def test_existing_user_annotation_txt_is_kept_with_a_warning(bed):
     manifest = [{"file": "PLEX_F1.raw", "experiment": "PLEX", "bioreplicate": 1, "data_type": "DDA"}]
     job = _tmt_job(dest, manifest, {"tag": "TMT-10", "channels": {ch: f"DMSO_{ch}" for ch in TMT10}})
 
-    users_own = "126\tuser edit\n"
+    users_own = "".join(f"{ch}\tCtrl_1_{ch}\n" for ch in TMT10)  # a valid map of the user's own (D91)
     (dest / "annotation.txt").write_text(users_own, encoding="utf-8")
     spec = fragpipe.prepare(job, bed["cfg"])
     fragpipe.write_inputs(spec)
     assert (dest / "annotation.txt").read_text(encoding="utf-8") == users_own
     assert spec.warnings == ["kept the existing annotation.txt (differs from experiment.yaml's tmt: map)"]
+    # a file of the user's that FragPipe would stop on fails the job before the search, and is still not touched
+    broken = "126\tuser edit\n"
+    (dest / "annotation.txt").write_text(broken, encoding="utf-8")
+    with pytest.raises(fragpipe.JobError, match=re.escape("annotation.txt: plex PLEX: a channel needs one sample")):
+        fragpipe.prepare(job, bed["cfg"])
+    assert (dest / "annotation.txt").read_text(encoding="utf-8") == broken
 
 
 def test_a_users_own_named_annotation_file_is_not_joined_by_a_second_one(bed):
@@ -186,7 +192,7 @@ def test_a_users_own_named_annotation_file_is_not_joined_by_a_second_one(bed):
     dest = bed["root"] / "tmt_user_named"
     manifest = [{"file": "PLEX_F1.raw", "experiment": "PLEX", "bioreplicate": 1, "data_type": "DDA"}]
     job = _tmt_job(dest, manifest, {"tag": "TMT-10", "channels": {ch: f"DMSO_{ch}" for ch in TMT10}})
-    (dest / "plex1_annotation.txt").write_text("126 mine\n", encoding="utf-8")
+    (dest / "plex1_annotation.txt").write_text("".join(f"{ch} mine_1_{ch}\n" for ch in TMT10), encoding="utf-8")
     spec = fragpipe.prepare(job, bed["cfg"])
     fragpipe.write_inputs(spec)
     assert not (dest / "annotation.txt").exists()

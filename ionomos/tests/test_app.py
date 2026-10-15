@@ -304,7 +304,7 @@ def _installable_update(app, monkeypatch, shown, installed, downloaded):
 def test_setup_tab_checklist_and_auto_setup(app, tmp_path, monkeypatch):
     from ionomos import configio, fragpipe
 
-    assert app.nb.index(app.nb.select()) == 0  # the checklist is what you see first
+    assert app.nb.select() == str(app.tab_setup)  # a new install: the checklist is what you see first (uinav)
     d = configio.defaults(str(tmp_path / "Auto"), str(tmp_path / "General"))
     monkeypatch.setattr(configio, "defaults", lambda *a, **k: d)
     monkeypatch.setattr(fragpipe, "detect_launcher", lambda: None)

@@ -62,3 +62,24 @@ def test_app_save_keeps_review_and_condition_codes(tmp_path):
     p.write_text(dump_config(d), encoding="utf-8")
     back = read_config(p)
     assert back["gui"]["review_drops"] is False and back["naming"]["condition_codes"] == {"V": "Vehicle"}
+
+
+def test_app_save_keeps_the_lab_wide_tmt_settings(tmp_path):
+    # irs, tmt_reference and the TMT QC limits set in config.yaml survive the app's Save (D48, D91)
+    from ionomos.configio import dump_config, read_config
+    from ionomos.downstream.analysis import settings_from
+
+    p = tmp_path / "config.yaml"
+    d = read_config(p)
+    d["analysis"].update({"irs": "reference", "tmt_reference": ["126", "134N"], "tmt_min_labelling": 0.9,
+                          "tmt_min_purity": 0.6})
+    p.write_text(dump_config(d), encoding="utf-8")
+    back = read_config(p)["analysis"]
+    assert (back["irs"], back["tmt_reference"], back["tmt_min_labelling"], back["tmt_min_purity"]) == \
+        ("reference", ["126", "134N"], 0.9, 0.6)
+    s = settings_from({k: v for k, v in back.items() if k != "enabled"})
+    assert (s.irs, s.tmt_reference, s.tmt_min_labelling, s.tmt_min_purity) == ("reference", ["126", "134N"], 0.9, 0.6)
+    assert load(p, check_paths=False).analysis["tmt_min_purity"] == 0.6   # the real loader accepts it
+    # not set: nothing is written, so the defaults stay the analysis's own
+    p.write_text(dump_config(read_config(tmp_path / "none.yaml")), encoding="utf-8")
+    assert "tmt_min_purity" not in p.read_text(encoding="utf-8")

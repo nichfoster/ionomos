@@ -13,7 +13,8 @@ Shows: what the data is, the doctor's current issues (from the last analysis), e
 its condition / replicate / used, the comparisons, each condition's role with its samples (and a list
 to change it; a guess from a weak keyword is marked to confirm), the comparisons that will be run in
 words and what uneven groups mean (downstream/roles.preview, which holds the logic), per-experiment
-cut-offs. After a run the issues are refreshed and the attention item for the experiment is closed
+cut-offs, and for a TMT experiment its channel map (tmt_editor.py: saved as experiment.yaml tmt: with a backup,
+used by the next search; a reference channel becomes the reference role). After a run the issues are refreshed and the attention item for the experiment is closed
 when nothing is left to decide.
 """
 from __future__ import annotations
@@ -81,6 +82,12 @@ class ExperimentEditor:
         body.columnconfigure(0, weight=3)
         body.columnconfigure(1, weight=2)
         body.rowconfigure(0, weight=1)
+        # a TMT experiment: which sample is on which channel (tmt_editor.py); shown only for TMT
+        self.tmt_holder = ttk.Frame(body)
+        self.tmt_holder.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        self.tmt_holder.columnconfigure(0, weight=1)
+        self.tmt_holder.grid_remove()
+        self.tmt = None                 # tmt_editor.TmtEditorFrame of the experiment, None when not TMT
         sf = ttk.LabelFrame(body, text="Samples", padding=6)
         sf.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
         sf.columnconfigure(0, weight=1)
@@ -240,6 +247,7 @@ class ExperimentEditor:
         def go():
             try:
                 info, err = postprocess.inspect_folder(dest, cfg, method, table), None
+                info["tmt_map"] = _tmt_map(dest, cfg, method, info)
             except Exception as exc:  # noqa: BLE001
                 info, err = None, f"{type(exc).__name__}: {exc}"
             self.host.post(lambda: self._show(dest, method, job_id, info, err, table, then))
@@ -299,6 +307,7 @@ class ExperimentEditor:
             text += "\nnote: " + info["notes"][0]
         self.info.configure(text=text, foreground="#333" if self._samples else "#c62828")
         self.show_issues(info.get("issues") or [])
+        self._show_tmt(dest, info.get("tmt_map"))
         self._fill()
         if then is not None:
             try:
@@ -440,6 +449,49 @@ class ExperimentEditor:
         if row is not None and row.confirmable:
             self.set_role(row.condition, row.role)
 
+    # ----------------------------------------------------------------- TMT --
+
+    def _show_tmt(self, dest: Path, model) -> None:
+        """The channel editor for a TMT experiment (tmt_editor.py); hidden for anything else."""
+        from ionomos.tmt_editor import TmtEditorFrame
+
+        for w in self.tmt_holder.winfo_children():
+            w.destroy()
+        self.tmt = None
+        if model is None:
+            self.tmt_holder.grid_remove()
+            return
+        self.tmt = TmtEditorFrame(self.tmt_holder, model, folder=lambda: dest, on_change=self._tmt_changed,
+                                  title="TMT channels (experiment.yaml tmt:, used by the next search; a reference "
+                                        "channel joins the plexes and is never compared)")
+        self.tmt.frame.grid(row=0, column=0, sticky="ew")
+        self.tmt_holder.grid()
+
+    def _tmt_changed(self) -> None:
+        """A reference channel is the reference role in analysis.roles (left out of the comparisons, D91)."""
+        from ionomos.tmt_editor import roles_with_references
+
+        if self.tmt is None or not self.target:
+            return
+        mine = roles_with_references(self._roles, self.tmt.model.block())
+        if mine != self._roles:
+            self._roles = mine
+            self.refresh_roles()
+
+    def _save_tmt(self, dest: Path) -> Path | None:
+        """Save: the channel map as the whole tmt: block of experiment.yaml, the old file kept in
+        experiment-backups/ first (manifest.backup_experiment_yaml). None when the map did not change."""
+        from ionomos.manifest import backup_experiment_yaml, load_overrides, save_overrides
+
+        if self.tmt is None or not self.tmt.model.changed():
+            return None
+        ov = load_overrides(dest)
+        ov.tmt, ov.tmt_set = self.tmt.model.block(), True
+        backup_experiment_yaml(dest)
+        path = save_overrides(dest, ov)
+        self.tmt.model.initial = self.tmt.model.block()
+        return path
+
     # --------------------------------------------------------------- edits --
 
     def _double_click(self, event):
@@ -573,6 +625,7 @@ class ExperimentEditor:
             # the editor shows the whole analysis: block; checked, and the old file kept in experiment-backups/
             # (the same save a confirmed proposal of the assistant goes through, D75)
             path, _backup = save_analysis(dest, self.choices(), self._lab())
+            path = self._save_tmt(dest) or path
         except (ValueError, AnalysisError, OverridesError) as exc:
             messagebox.showerror("Analysis choices", str(exc), parent=self.frame)
             return False
@@ -679,6 +732,20 @@ class ExperimentEditor:
             title="A protein or results table (MaxQuant, Spectronaut, Perseus, limma, Excel, CSV …)", parent=self.frame,
             filetypes=[("Tables", "*.tsv *.csv *.txt *.xlsx *.tab"), ("All files", "*.*")])
         return Path(f) if f else None
+
+
+def _tmt_map(dest: Path, cfg, method: str | None, info: dict):
+    """The channel editor's state for a TMT experiment (tmt_editor.for_folder), else None. Off the Tk thread."""
+    from ionomos.tmt_editor import for_folder
+
+    kind = cfg.kind(method) if cfg is not None and method in getattr(cfg, "methods", {}) else method
+    if info.get("exp") != "TMT" and kind not in ("TMT", "MSstatsTMT") and info.get("method") != "TMT":
+        return None
+    try:
+        return for_folder(dest, cfg, method if cfg is not None and method in cfg.methods else None)
+    except Exception:  # noqa: BLE001 - the editor works without the channel map
+        log.exception("could not read the TMT channels of %s", dest)
+        return None
 
 
 def _win() -> bool:

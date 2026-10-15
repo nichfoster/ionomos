@@ -77,7 +77,8 @@ def test_slow_drop_is_queued_once_stable(bed):
 def test_all_good_samples_queue(bed):
     w, _ = _run_watcher(bed)
     try:
-        good = ["iso_good", "iso_spaces", "dia_good", "tmt_good", "glued_initials", "method_in_files"]
+        good = ["iso_good", "iso_spaces", "dia_good", "tmt_good", "glued_initials", "method_in_files", "tmt16_na",
+                "tmt_own_annotation", "tmt_tag_mismatch"]  # D91: a tag mismatch is filed, then fails before the search
         for n in good:
             testbed.drop(bed["root"], n)
         assert _wait(lambda: len(bed["ledger"].list("queued")) == len(good), timeout=15)

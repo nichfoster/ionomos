@@ -51,6 +51,15 @@ Command line.
     ionomos notify-test                           send a test message to the channels in config.yaml notify:
     ionomos repair-ledger [--force]               rebuild the job list from the experiment folders
     ionomos update                                git pull + reinstall (only when running from a git checkout)
+    ionomos library  scan | list | show | recommend [--apply] | adopt | check
+                                                   every FragPipe workflow and FASTA on the PC, described, flagged and
+                                                   ranked per method; adopt copies one in (docs/LIBRARY.md, D89)
+    ionomos fasta    search | download | prepare | release | stock-workflows
+                                                   a proteome from UniProt made FragPipe-ready (decoys, contaminants),
+                                                   how old a FASTA is, FragPipe's stock workflows (docs/FASTA.md, D90)
+    ionomos tmt      plan | annotation [--write] | suggest | qc
+                                                   TMT channel maps as FragPipe will read them, a tmt: block to paste,
+                                                   the TMT QC of a finished search (WORKFLOWS.md, D91)
 
 --config defaults to $IONOMOS_CONFIG, then the path last saved by the app (LabWatch-era paths too),
 then ./config.yaml (next to the exe when frozen).
@@ -1208,6 +1217,9 @@ def main(argv: list[str] | None = None) -> int:
     from ionomos import bundle
 
     bundle.add_parser(sub).set_defaults(fn=cmd_bundle)
+    from ionomos import library
+
+    library.add_parser(sub).set_defaults(fn=library.run_cli)  # `ionomos library …` (D89)
     sp = sub.add_parser("stop", help="gracefully stop the running watcher (re-queues a running search)")
     sp.add_argument("--wait", type=float, default=60, help="seconds to wait before forcing it (default 60)")
     sp.add_argument("--remember", action="store_true", help="start it again when the app next opens (updates)")
@@ -1404,6 +1416,12 @@ def main(argv: list[str] | None = None) -> int:
     from ionomos import testbed
 
     testbed.add_parser(sub).set_defaults(fn=cmd_testbed)
+    from ionomos import fastasource
+
+    fastasource.add_parser(sub)  # `ionomos fasta …`; sets its own fn (fastasource.run_cli)
+    from ionomos import tmtkit
+
+    tmtkit.add_parser(sub)  # `ionomos tmt plan | annotation | suggest | qc` (D91); sets its own fn (tmtkit.main)
 
     argv = sys.argv[1:] if argv is None else argv
     if "--version" in argv[:2]:

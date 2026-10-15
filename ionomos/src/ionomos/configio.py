@@ -61,6 +61,7 @@ def defaults(root: str | None = None, users_root: str | None = None) -> dict:
                      "methods": [], "instrument": "", "baseline_runs": 10, "baseline_from": "", "baseline_to": "",
                      "popup": False},
         "notify": copy.deepcopy(_notify_defaults()),
+        "library": {"roots": [], "exclude": [], "max_depth": 6, "time_limit_s": 120},
         "users": {"aliases": {}, "default": "", "learned_aliases_file": f"{root}/learned_aliases.yaml",
                   "ignore": ["FragPipe*", "Fasta*", "New folder*", "~*"]},
         "methods": {
@@ -250,7 +251,9 @@ def dump_config(d: dict) -> str:
               "phospho", "phospho_min_localization", "phospho_localization_per_sample", "phospho_table",  # D79
               "kinase_substrates", "ksea_min_substrates", "ksea_networkin", "ksea_networkin_score", "ksea_organism",
               "ksea_match", "string_network", "string_min_score",
-              "f_test", "rollup"):  # the F-test switch and the protein roll-up: D76
+              "f_test", "rollup",  # the F-test switch and the protein roll-up: D76
+              "irs", "tmt_reference",  # several TMT plexes on one scale (plex.py): D48, D71
+              "tmt_min_labelling", "tmt_min_purity"):  # the TMT QC's limits (tmtqc.py): D91
         if an.get(k) not in (None, ""):
             a(f"  {k}: {_y(an[k])}")
     if isinstance(an.get("times"), dict) and an["times"]:
@@ -290,6 +293,18 @@ def dump_config(d: dict) -> str:
     a(f"  popup: {_y(bool(q.get('popup', False)))}   # true: a broken rule opens a window (default: the attention list only)")
     if q.get("max_file_mb") not in (None, ""):
         a(f"  max_file_mb: {_y(q['max_file_mb'])}   # larger tables are skipped")
+    a("")
+    lib = d.get("library") if isinstance(d.get("library"), dict) else {}
+    a("library:   # where `ionomos library scan` looks for FragPipe workflows and FASTAs (docs/LIBRARY.md)")
+    a(f"  roots: {_y(list(lib.get('roots') or []))}   # more folders besides the pinned ones, FragPipe installations "
+      "and users_root, e.g. [D:/] (UNC paths work)")
+    a(f"  exclude: {_y(list(lib.get('exclude') or []))}   # folder names or path patterns to leave out, e.g. ['*/raw']")
+    a(f"  max_depth: {_y(lib.get('max_depth', 6))}   # folders deep below each root")
+    a(f"  time_limit_s: {_y(lib.get('time_limit_s', 120))}   # a scan stops after this many seconds and says how far "
+      "it got")
+    for k, v in lib.items():  # a typo is written back as it was, so the loader can name it
+        if k not in ("roots", "exclude", "max_depth", "time_limit_s"):
+            a(f"  {_y(str(k))}: {_y(v)}")
     a("")
     n = d.get("notify") if isinstance(d.get("notify"), dict) else {}
     n = _merge(_notify_defaults(), {k: ({"url": v} if isinstance(v, str) and k in ("webhook", "teams", "slack") else v)

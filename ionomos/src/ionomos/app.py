@@ -3,9 +3,11 @@ Ionomos app — setup wizard on first run, control panel afterwards.
 
     ionomos setup [--config PATH]        (or just double-click Ionomos.exe)
 
-Tabs:  ✓ Setup · 1 Folders · 2 Users · 3 Methods · 4 Advanced · 5 Run & Test · Inbox · 6 Jobs · 7 Analysis
-       · 8 Notifications · Help
+Tabs:  Today · ✓ Setup · 1 Folders · 2 Users · 3 Methods · 4 Advanced · 5 Run & Test · Inbox · 6 Jobs
+       · 7 Analysis · 8 Notifications · Help
 Bottom bar: config path, Reload, Save, Save & Check, Report a problem, Help (the full help page in the browser).
+Today (what needs you, recent jobs), F1 / keyboard shortcuts, the remembered window and last tab: uinav.py and
+docs/UI.md. The bottom bar is packed before the tabs, so a small screen shrinks the tabs, never the Save button.
 
 Pure tkinter/ttk. Edits a plain dict (ionomos.configio) and writes a
 commented config.yaml; validation is done by ionomos.config.load so the app
@@ -332,6 +334,7 @@ class App:
 
         self.nb = ttk.Notebook(root)
         self.nb.pack(fill="both", expand=True, padx=8, pady=(8, 0))
+        self._tab_today()
         self._tab_setup()
         self._tab_folders()
         self._tab_users()
@@ -351,9 +354,10 @@ class App:
         root.protocol("WM_DELETE_WINDOW", self.on_close)
         root.report_callback_exception = self._on_tk_error
         root.after(100, self._pump_ui)
-        self.nb.select(0)  # the checklist: always the first thing you see
+        self._restore_ui_state()  # a new install opens on the checklist; afterwards the last tab, else Today
         self.nb.bind("<<NotebookTabChanged>>", lambda e: self.refresh_setup() if self.nb.select() == str(self.tab_setup) else None,
                      add="+")
+        self._bind_keys()
         self.root.after(300, self.refresh_setup)
         self.root.after(600, self._after_update_restart)
         self.root.after(2500, self.check_downloaded_update)
@@ -460,6 +464,269 @@ class App:
 
     def set_status(self, msg: str, ok: bool = True):
         self.status_lbl.configure(text=msg, foreground="#2e7d32" if ok else "#c62828")
+
+    # -------------------------------------------------------- tab: today ----
+
+    _TCOLS = (("id", 40), ("status", 90), ("user", 80), ("method", 72), ("experiment", 300), ("when", 115),
+              ("note", 380))
+
+    def _tab_today(self):
+        """What needs a person, and the recent jobs with one-click report / folder (uinav.snapshot, off Tk)."""
+        f = ttk.Frame(self.nb, padding=12)
+        self.tab_today = f
+        self.nb.add(f, text="  Today  ")
+        f.columnconfigure(0, weight=1)
+        f.rowconfigure(5, weight=1)
+        top = ttk.Frame(f)
+        top.grid(row=0, column=0, sticky="ew")
+        ttk.Label(top, text="Today", font=("", 15, "bold")).pack(side="left")
+        ttk.Button(top, text="Refresh", command=self.refresh_today).pack(side="right", padx=4)
+        ttk.Button(top, text="Help page", command=lambda: self.open_help("faq.app")).pack(side="right", padx=4)
+        self.today_head = ttk.Label(f, text="reading…", font=("", 11), wraplength=900, justify="left")
+        self.today_head.grid(row=1, column=0, sticky="w", pady=(4, 2))
+        st = ttk.Frame(f)
+        st.grid(row=2, column=0, sticky="ew")
+        st.columnconfigure(0, weight=1)
+        self.today_watcher = ttk.Label(st, text="", wraplength=900, justify="left")
+        self.today_watcher.grid(row=0, column=0, sticky="w")
+        ttk.Button(st, text="Run & Test", command=lambda: self.nb.select(self.tab_run)).grid(row=0, column=1, padx=4)
+        self.today_setup = ttk.Label(st, text="", wraplength=900, justify="left")
+        self.today_setup.grid(row=1, column=0, sticky="w")
+        ttk.Button(st, text="Setup checklist", command=lambda: self.nb.select(self.tab_setup)).grid(
+            row=1, column=1, padx=4, pady=2)
+
+        a = ttk.LabelFrame(f, text="Needs you", padding=6)
+        a.grid(row=3, column=0, sticky="ew", pady=(8, 4))
+        a.columnconfigure(0, weight=1)
+        from ionomos.popups import KIND_TITLE, SEV_COLOUR
+
+        self._kind_title = KIND_TITLE
+        self.today_attn = ttk.Treeview(a, columns=("what", "title", "since"), show="headings", height=4,
+                                       selectmode="browse")
+        for c, w in (("what", 230), ("title", 520), ("since", 160)):
+            self.today_attn.heading(c, text=c)
+            self.today_attn.column(c, width=w, anchor="w", stretch=c == "title")
+        for sev, colour in SEV_COLOUR.items():
+            self.today_attn.tag_configure(sev, foreground=colour)
+        self.today_attn.grid(row=0, column=0, sticky="ew")
+        self.today_attn.bind("<Double-1>", lambda e: self._today_open_item())
+        self.today_attn.bind("<Return>", lambda e: self._today_open_item())
+        ab = ttk.Frame(a)
+        ab.grid(row=1, column=0, sticky="w", pady=(4, 0))
+        ttk.Button(ab, text="Open", command=self._today_open_item).pack(side="left", padx=4)
+        ttk.Button(ab, text="The whole list…", command=self.show_attention).pack(side="left", padx=4)
+        ttk.Label(ab, text="double-click = open the window with what to do; items close by themselves once fixed",
+                  foreground="#666").pack(side="left", padx=12)
+
+        j = ttk.LabelFrame(f, text="Recent jobs", padding=6)
+        j.grid(row=5, column=0, sticky="nsew", pady=4)
+        j.columnconfigure(0, weight=1)
+        j.rowconfigure(0, weight=1)
+        self.today_jobs = ttk.Treeview(j, columns=[c for c, _ in self._TCOLS], show="headings", height=8,
+                                       selectmode="browse")
+        for c, w in self._TCOLS:
+            self.today_jobs.heading(c, text=c)
+            self.today_jobs.column(c, width=w, anchor="w", stretch=c in ("experiment", "note"))
+        for tag, color in (("failed", "#c62828"), ("running", "#1565c0"), ("waiting", "#b26a00"),
+                           ("done", "#2e7d32"), ("needs a look", "#b26a00")):
+            self.today_jobs.tag_configure(tag, foreground=color)
+        self.today_jobs.grid(row=0, column=0, sticky="nsew")
+        self.today_jobs.bind("<Double-1>", lambda e: self._today_job("report"))
+        self.today_jobs.bind("<Return>", lambda e: self._today_job("report"))
+        jb = ttk.Frame(j)
+        jb.grid(row=1, column=0, sticky="w", pady=(4, 0))
+        for text, action in (("Open report", "report"), ("Open folder", "folder"), ("Re-run analysis", "analyze"),
+                             ("Analysis options…", "studio"), ("Show in Jobs", "show")):
+            ttk.Button(jb, text=text, command=lambda x=action: self._today_job(x)).pack(side="left", padx=4)
+        ttk.Button(jb, text="Open inbox", command=lambda: self._open(self.v("paths.inbox").get())).pack(
+            side="left", padx=(16, 4))
+        ttk.Label(jb, text="double-click = open the report", foreground="#666").pack(side="left", padx=12)
+        self._today_rows: dict[str, object] = {}
+        self._today_busy = False
+        self._last_setup_text = ""
+        self.nb.bind("<<NotebookTabChanged>>", lambda e: self.refresh_today() if self._current_tab() == "today"
+                     else None, add="+")
+        self.root.after(1200, self._today_tick)
+
+    def _today_tick(self):
+        try:
+            if self._current_tab() == "today":
+                self.refresh_today()
+        except Exception:  # noqa: BLE001 - never stop the refresh loop
+            log.exception("today refresh failed")
+        self.root.after(4000, self._today_tick)
+
+    def refresh_today(self):
+        """Read the attention list and the ledger on a thread; draw on the Tk thread (App.post)."""
+        from ionomos import uinav
+
+        try:
+            self.today_watcher.configure(text=f"{self.run_status.cget('text')}   ·   {self.fp_status.cget('text')}",
+                                         foreground=self.run_status.cget("foreground"))
+        except (AttributeError, tk.TclError):
+            pass
+        if self._today_busy:
+            return
+        self._today_busy = True
+        log_dir, db = self._active_log_dir(), self._active_paths().get("database")
+
+        def go():
+            try:
+                snap = uinav.snapshot(log_dir, db)
+            except Exception as exc:  # noqa: BLE001 - snapshot never raises; belt and braces
+                snap = uinav.Snapshot(problem=str(exc))
+            self.post(lambda: self._show_today(snap))
+
+        threading.Thread(target=go, daemon=True).start()
+
+    def _show_today(self, snap):
+        self._today_busy = False
+        try:
+            self.today_head.configure(text=snap.headline() + (f"  ({snap.problem})" if snap.problem else ""),
+                                      foreground="#c62828" if any(i.severity == "error" for i in snap.attention)
+                                      else "#b26a00" if snap.attention else "")
+            self.today_setup.configure(text=f"Setup: {self._last_setup_text}" if self._last_setup_text else "")
+            sel = self.today_attn.selection()
+            self.today_attn.delete(*self.today_attn.get_children())
+            for it in snap.attention:
+                self.today_attn.insert("", "end", iid=it.id, tags=(it.severity,), values=(
+                    self._kind_title.get(it.kind, it.kind), it.title, (it.created or "").replace("T", " ")[:16]))
+            if sel and self.today_attn.exists(sel[0]):
+                self.today_attn.selection_set(sel[0])
+            sel = self.today_jobs.selection()
+            self.today_jobs.delete(*self.today_jobs.get_children())
+            self._today_rows = {}
+            for r in snap.jobs:
+                self._today_rows[str(r.id)] = r
+                self.today_jobs.insert("", "end", iid=str(r.id), tags=(r.state,), values=(
+                    r.id, r.state, r.user, r.method, r.experiment, r.when, r.note))
+            if sel and self.today_jobs.exists(sel[0]):
+                self.today_jobs.selection_set(sel[0])
+        except tk.TclError:
+            pass  # the window is closing
+
+    def _today_open_item(self):
+        from ionomos import attention
+
+        sel = self.today_attn.selection()
+        it = attention.get(self._active_log_dir(), sel[0]) if sel else None
+        if it is None:
+            messagebox.showinfo("Today", "Select an item first.")
+            return
+        self.popups.show(it)
+
+    def _today_job(self, action: str):
+        sel = self.today_jobs.selection()
+        row = self._today_rows.get(sel[0]) if sel else None
+        if row is None:
+            messagebox.showinfo("Today", "Select a job first.")
+            return
+        if action == "show":
+            self.nb.select(self.tab_jobs)
+            self.v("jobs.find").set("")
+            self.refresh_jobs()
+            if self.jtree.exists(str(row.id)):
+                self.jtree.selection_set(str(row.id))
+                self.jtree.see(str(row.id))
+            return
+        self.job_action(action, job=row.job)
+
+    # ------------------------------------------------- navigation and keys ----
+
+    def _tab_frames(self) -> dict:
+        """uinav.TABS key -> the tab's frame (the keys ionomos-ui.json remembers)."""
+        return {k: getattr(self, f"tab_{a}", None) for k, a in (
+            ("today", "today"), ("setup", "setup"), ("folders", "folders"), ("users", "users"), ("methods", "methods"),
+            ("advanced", "advanced"), ("run", "run"), ("inbox", "inbox"), ("jobs", "jobs"), ("analysis", "analysis"),
+            ("notify", "notify"), ("help", "help"))}
+
+    def _current_tab(self) -> str | None:
+        try:
+            cur = self.nb.select()
+        except tk.TclError:
+            return None
+        return next((k for k, w in self._tab_frames().items() if w is not None and str(w) == cur), None)
+
+    def select_tab(self, key: str) -> None:
+        w = self._tab_frames().get(key)
+        if w is not None:
+            self.nb.select(w)
+
+    def _bind_keys(self) -> None:
+        """Keyboard shortcuts (uinav.SHORTCUTS), on the main window only: a pop-up keeps its own keys."""
+        from ionomos import uinav
+
+        def key(fn):
+            def handler(_e=None):
+                fn()
+                return "break"
+            return handler
+
+        self.nb.enable_traversal()  # Ctrl+Tab / Ctrl+Shift+Tab
+        self._keys = {"<F1>": key(lambda: self.open_help(uinav.tab_help(self._current_tab()))),
+                      "<F5>": key(self.refresh_current_tab), "<Control-s>": key(self.save),
+                      "<Control-f>": key(self.find_job)}
+        for digit, tab in uinav.DIGIT_TABS.items():
+            self._keys[f"<Control-Key-{digit}>"] = key(lambda t=tab: self.select_tab(t))
+        for event, handler in self._keys.items():
+            self.root.bind(event, handler)
+
+    def find_job(self) -> None:
+        self.select_tab("jobs")
+        self.jobs_find.focus_set()
+        self.jobs_find.select_range(0, "end")
+
+    def refresh_current_tab(self) -> None:
+        tab = self._current_tab()
+        if tab == "today":
+            self.refresh_today()
+        elif tab == "setup":
+            self.refresh_setup()
+        elif tab == "jobs":
+            self.refresh_jobs()
+        elif tab == "inbox":
+            self._refresh_inbox()
+        elif tab == "users":
+            self._refresh_users()
+        elif tab == "methods":
+            self._refresh_methods()
+        elif tab == "analysis":
+            self.analysis.refresh_jobs()
+
+    def _restore_ui_state(self) -> None:
+        """The window's size and the last tab from <config folder>/ionomos-ui.json, made to fit this screen.
+        Without one, a window bigger than the screen is shrunk to fit (the bottom bar stays in view)."""
+        from ionomos import uinav
+
+        state = uinav.load_state(uinav.state_path(self.config_path))
+        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
+        geom = uinav.clamp_geometry(state["geometry"], sw, sh) if state.get("geometry") else None
+        if geom:
+            self.root.geometry(geom)
+        else:
+            self.root.update_idletasks()
+            rw, rh = self.root.winfo_reqwidth(), self.root.winfo_reqheight()
+            w, h = uinav.fit_size(rw, rh, sw, sh)
+            if (w, h) != (rw, rh):
+                self.root.geometry(f"{w}x{h}+0+0")
+        if state.get("zoomed") and IS_WIN:
+            try:
+                self.root.state("zoomed")
+            except tk.TclError:
+                pass
+        self.select_tab(uinav.start_tab(self.first_run, state.get("tab")))
+
+    def _save_ui_state(self) -> None:
+        from ionomos import uinav
+
+        try:
+            zoomed = self.root.state() == "zoomed"
+            if zoomed:
+                self.root.state("normal")  # remember the size it goes back to, not the full screen
+            state = {"geometry": self.root.geometry(), "zoomed": zoomed, "tab": self._current_tab() or "today"}
+        except tk.TclError:
+            return
+        uinav.save_state(uinav.state_path(self.config_path), state)
 
     # ------------------------------------------------------ tab: folders ----
 
@@ -698,11 +965,16 @@ class App:
         ttk.Label(e, text="Keywords").grid(row=0, column=2, sticky="e", **PAD)
         ttk.Entry(e, textvariable=self.v("m.aliases"), width=30).grid(row=0, column=3, sticky="ew", **PAD)
         ttk.Label(e, text="Workflow file").grid(row=1, column=0, sticky="e", **PAD)
-        self.m_wf = ttk.Combobox(e, textvariable=self.v("m.workflow"), width=30)
-        self.m_wf.grid(row=1, column=1, sticky="ew", **PAD)
+        wf_box, fa_box = ttk.Frame(e), ttk.Frame(e)  # each box + its Choose… button (library_tab.LibraryPanel)
+        wf_box.grid(row=1, column=1, sticky="ew")
+        wf_box.columnconfigure(0, weight=1)
+        self.m_wf = ttk.Combobox(wf_box, textvariable=self.v("m.workflow"), width=30)
+        self.m_wf.grid(row=0, column=0, sticky="ew", **PAD)
         ttk.Label(e, text="FASTA file").grid(row=1, column=2, sticky="e", **PAD)
-        self.m_fa = ttk.Combobox(e, textvariable=self.v("m.fasta"), width=30)
-        self.m_fa.grid(row=1, column=3, sticky="ew", **PAD)
+        fa_box.grid(row=1, column=3, sticky="ew")
+        fa_box.columnconfigure(0, weight=1)
+        self.m_fa = ttk.Combobox(fa_box, textvariable=self.v("m.fasta"), width=30)
+        self.m_fa.grid(row=0, column=0, sticky="ew", **PAD)
         ttk.Label(e, text="Data type").grid(row=2, column=0, sticky="e", **PAD)
         ttk.Combobox(e, textvariable=self.v("m.data_type"), values=["DDA", "DIA"], state="readonly", width=8).grid(row=2, column=1, sticky="w", **PAD)
         ttk.Label(e, text="Post-processing").grid(row=2, column=2, sticky="e", **PAD)
@@ -724,6 +996,10 @@ class App:
         ttk.Button(b, text="Import workflow…", command=self.import_workflow).pack(side="left", padx=12)
         ttk.Button(b, text="Open workflows folder", command=lambda: self._open(self.v("paths.workflow_dir").get())).pack(side="left", padx=4)
         ttk.Button(b, text="Open FASTA folder", command=lambda: self._open(self.v("paths.fasta_dir").get())).pack(side="left", padx=4)
+        from ionomos.library_tab import LibraryPanel
+
+        # Find on this PC…, Choose…, the FASTA line, Download / decoys / updates, first-setup banner (D89, D90)
+        self.library = LibraryPanel(self, f, row=3)
 
     def _refresh_methods(self):
         self.mtree.delete(*self.mtree.get_children())
@@ -883,6 +1159,7 @@ class App:
 
     def _tab_advanced(self):
         f = ttk.Frame(self.nb, padding=10)
+        self.tab_advanced = f
         self.nb.add(f, text="  4  Advanced  ")
         f.columnconfigure(0, weight=1)
         f.columnconfigure(1, weight=1)
@@ -931,7 +1208,7 @@ class App:
                                "a rejected folder)", variable=self.bv("gui.popups", True)).grid(
             row=2, column=0, columnspan=3, sticky="w", **PAD)
         ttk.Label(g, text="Needs the watcher to run in the logged-in session (the startup task does this).",
-                  foreground="#666", wraplength=380).grid(row=2, column=0, columnspan=3, sticky="w", padx=6)
+                  foreground="#666", wraplength=380).grid(row=3, column=0, columnspan=3, sticky="w", padx=6)
 
         u = group("Users (advanced)", 1, 1)
         ttk.Label(u, text="Learned aliases file").grid(row=0, column=0, sticky="e", **PAD)
@@ -1716,6 +1993,7 @@ class App:
                     row=r, column=3, sticky="ne", pady=3)
         ok = all(i.status in ("ok", "warn") for i in items) and items
         self.setup_summary.configure(text=text, foreground="#2e7d32" if ok else "")
+        self._last_setup_text = text  # the Today tab's Setup line
 
     def _setup_action(self, action: str):
         if action.startswith("open_tab:"):
@@ -1782,6 +2060,7 @@ class App:
 
     def _tab_inbox(self):
         frame = ttk.Frame(self.nb, padding=10)
+        self.tab_inbox = frame
         self.nb.add(frame, text="Inbox")
         ttk.Label(frame, text="Delete removes an item from intake. Recover it from the removed-items folder.").pack(anchor="w")
         self.inbox_tree = ttk.Treeview(frame, show="tree", selectmode="browse")
@@ -1842,11 +2121,12 @@ class App:
 
     # ---------------------------------------------------------- tab: jobs ----
 
-    _JCOLS = (("id", 40), ("status", 70), ("user", 80), ("method", 60), ("experiment", 260), ("queued", 110),
+    _JCOLS = (("id", 40), ("status", 70), ("user", 80), ("method", 72), ("experiment", 260), ("queued", 110),
               ("ran", 70), ("now", 330))
 
     def _tab_jobs(self):
         f = ttk.Frame(self.nb, padding=10)
+        self.tab_jobs = f
         self.nb.add(f, text="  6  Jobs  ")
         f.columnconfigure(0, weight=1)
         f.rowconfigure(1, weight=3)
@@ -1855,6 +2135,11 @@ class App:
         top.grid(row=0, column=0, sticky="ew")
         self.jobs_state = ttk.Label(top, text="", font=("", 10, "bold"))
         self.jobs_state.pack(side="left", padx=4)
+        ttk.Label(top, text="Find").pack(side="left", padx=(16, 2))
+        self.jobs_find = ttk.Entry(top, textvariable=self.v("jobs.find"), width=26)  # uinav.job_matches; Ctrl+F
+        self.jobs_find.pack(side="left")
+        self.jobs_find.bind("<Escape>", lambda e: self.v("jobs.find").set(""))
+        self.v("jobs.find").trace_add("write", lambda *_: self.refresh_jobs())
         ttk.Button(top, text="Check FragPipe install", command=self.check_fragpipe).pack(side="right", padx=4)
         ttk.Button(top, text="Instrument QC", command=self.open_qc_trend).pack(side="right", padx=4)
         self.pause_btn = ttk.Button(top, text="Pause searches", command=self.toggle_pause)
@@ -1871,6 +2156,7 @@ class App:
         self.jtree.grid(row=1, column=0, sticky="nsew", pady=4)
         self.jtree.bind("<<TreeviewSelect>>", lambda e: self.show_job())
         self.jtree.bind("<Double-1>", lambda e: self.job_action("report"))
+        self.jtree.bind("<Return>", lambda e: self.job_action("report"))
 
         b = ttk.Frame(f)
         b.grid(row=2, column=0, sticky="w")
@@ -1913,8 +2199,14 @@ class App:
         self.jtree.delete(*self.jtree.get_children())
         self._jobs_cache = {j.id: j for j in jobs}
         counts: dict[str, int] = {}
+        from ionomos.uinav import job_matches
+
+        query, shown = self.v("jobs.find").get(), 0
         for j in reversed(jobs):  # newest first
             counts[j.status] = counts.get(j.status, 0) + 1
+            if not job_matches(j, query):
+                continue
+            shown += 1
             waiting = j.status == "queued" and (j.reason or "").startswith("waiting:")
             if j.status == "running":
                 now = "FragPipe: " + fragpipe.progress(names.console_log(Path(j.dest_dir)))
@@ -1928,6 +2220,8 @@ class App:
         if sel and self.jtree.exists(sel[0]):
             self.jtree.selection_set(sel[0])
         summary = ", ".join(f"{n} {k}" for k, n in sorted(counts.items()))
+        if query.strip():
+            summary += f"  ·  {shown} shown"
         self.jobs_state.configure(text=(summary or "No jobs") + ("  ·  searches PAUSED" if is_paused else ""),
                                   foreground="#b26a00" if is_paused else "")
 
@@ -1972,11 +2266,11 @@ class App:
             lines += text.splitlines()[-25:]
         return "\n".join(lines)
 
-    def job_action(self, action: str):
+    def job_action(self, action: str, job=None):
         from ionomos import fragpipe
         from ionomos.worker import request_cancel, request_retry
 
-        j = self._selected_job()
+        j = job if job is not None else self._selected_job()  # job: from the Today tab's list
         if j is None:
             messagebox.showinfo("Jobs", "Select a job first.")
             return
@@ -2109,6 +2403,7 @@ class App:
 
     def _tab_help(self):
         f = ttk.Frame(self.nb, padding=10)
+        self.tab_help = f
         self.nb.add(f, text="  Help  ")
         top = ttk.Frame(f)
         top.pack(fill="x", pady=(0, 8))
@@ -2117,7 +2412,9 @@ class App:
                             "message means. Below: setting Ionomos up.", foreground="#555").pack(side="left")
         t = scrolledtext.ScrolledText(f, wrap="word", font=("Menlo" if sys.platform == "darwin" else "Consolas", 10))
         t.pack(fill="both", expand=True)
-        t.insert("1.0", HELP_TEXT)
+        from ionomos import uinav
+
+        t.insert("1.0", uinav.shortcuts_text() + "\n" + HELP_TEXT)
         t.configure(state="disabled")
 
     def open_help(self, topic: str | None = None):
@@ -2134,12 +2431,10 @@ class App:
 
     def _bottom_bar(self):
         b = ttk.Frame(self.root, padding=(8, 6))
-        b.pack(fill="x")
-        ttk.Label(b, text="Config:").pack(side="left")
-        ttk.Label(b, textvariable=self.v("config_path"), foreground="#444").pack(side="left", padx=4)
-        ttk.Button(b, text="Change…", width=9, command=self.change_config).pack(side="left")
+        b.pack(side="bottom", fill="x", before=self.nb)  # packed first: a small screen shrinks the tabs, not Save
+        left = (ttk.Label(b, text="Config:"), ttk.Label(b, textvariable=self.v("config_path"), foreground="#444"),
+                ttk.Button(b, text="Change…", width=9, command=self.change_config))
         self.status_lbl = ttk.Label(b, text="", foreground="#2e7d32")
-        self.status_lbl.pack(side="left", padx=16)
         ttk.Button(b, text="Save & Check", command=self.save_and_check).pack(side="right", padx=4)
         ttk.Button(b, text="Save", command=self.save).pack(side="right", padx=4)
         ttk.Button(b, text="Reload", command=self.reload).pack(side="right", padx=4)
@@ -2148,8 +2443,13 @@ class App:
         ttk.Button(b, text="Help", command=self.open_help).pack(side="right", padx=4)
         self.attn_btn = tk.Button(b, text="", command=self.show_attention, foreground="#b26a00", relief="groove")
         self.update_btn = ttk.Button(b, text="", command=self.install_update)  # shown when an update is downloaded
+        # The left side is packed after the buttons: a long config path or status line is cut, never Save, Help
+        # or the "needs attention" badge (seen on a 1366x768 screen, docs/UI.md).
+        for w, pad in zip(left, (0, 4, 0), strict=True):
+            w.pack(side="left", padx=pad)
+        self.status_lbl.pack(side="left", padx=16)
         b2 = ttk.Frame(self.root, padding=(8, 0, 8, 6))
-        b2.pack(fill="x")
+        b2.pack(side="bottom", fill="x", before=b)
         from ionomos.buildinfo import one_line
 
         ttk.Label(b2, text=one_line(), foreground="#888").pack(side="left")
@@ -2213,6 +2513,7 @@ class App:
             self._cli(["check"])
 
     def on_close(self):
+        self._save_ui_state()  # window size and the tab in use, next to config.yaml (uinav.py)
         try:
             from ionomos import attention
 

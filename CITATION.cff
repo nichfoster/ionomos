@@ -1,0 +1,54 @@
+# GitHub's "Cite this repository" reads this file. Keep `version` and `date-released` equal to
+# ionomos/pyproject.toml and the CHANGELOG at each release (docs/VISION.md, "Versioning and support").
+cff-version: 1.2.0
+message: >-
+  If you use Ionomos, please cite it as below, and also cite the tools whose
+  methods it ports (FragPipe-Analyst, limma, CurveCurator; see README.md, License).
+type: software
+title: "Ionomos: proteomics results to a checked, self-contained report, and a drop-folder watcher that runs FragPipe"
+authors:
+  - given-names: Nich
+    family-names: Foster
+    alias: nichfoster
+version: 0.18.1
+date-released: 2026-10-06
+license: GPL-3.0-or-later
+repository-code: "https://github.com/nichfoster/ionomos"
+url: "https://github.com/nichfoster/ionomos"
+keywords:
+  - proteomics
+  - mass spectrometry
+  - FragPipe
+  - DIA-NN
+  - limma
+  - differential expression
+  - chemoproteomics
+  - isoDTB
+  - TMT
+references:
+  - type: article
+    title: "Analysis and Visualization of Quantitative Proteomics Data Using FragPipe-Analyst"
+    authors:
+      - family-names: Hsiao
+        given-names: Yi
+    journal: Journal of Proteome Research
+    year: 2024
+    doi: 10.1021/acs.jproteome.4c00294
+  - type: article
+    title: "limma powers differential expression analyses for RNA-sequencing and microarray studies"
+    authors:
+      - family-names: Ritchie
+        given-names: Matthew E.
+    journal: Nucleic Acids Research
+    year: 2015
+    doi: 10.1093/nar/gkv007
+  - type: article
+    title: "CurveCurator: a recalibrated F-statistic to assess, classify, and explore significance of dose-response curves"
+    authors:
+      - family-names: Bayer
+        given-names: Florian P.
+    journal: Nature Communications
+    year: 2023
+    volume: 14
+    start: 7902
+    doi: 10.1038/s41467-023-43696-z
