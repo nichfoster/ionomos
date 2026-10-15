@@ -18,7 +18,7 @@ decision made once is remembered if the folder is re-dropped.
       channels: {126: DMSO_126, 127N: DMSO_127N, ...}     # one plex
       # or, several plexes:  plexes: {plex1: {channels: {...}}, plex2: {...}}
       reference_channel: 126         # the pooled / bridge channel for IRS across plexes (= analysis.tmt_reference)
-      # tag: TMT-6 | TMT-10 | TMT-11 | TMT-16 | TMT-18 (tmtkit.LABEL_TYPES); a plex in plexes: may set its own reference:
+      # tag: FragPipe's label type, TMT-10 | TMT-16 | iTRAQ-4 ... (tmtkit.LABEL_TYPES); a plex may set its reference:
     notes: free text
 """
 from __future__ import annotations
@@ -252,7 +252,16 @@ def load_overrides(folder: Path) -> Overrides:
     p = Path(folder) / EXPERIMENT_YAML
     if not p.is_file():
         return Overrides()
-    return parse_overrides(_safe_load(read_yaml_text(p, error=OverridesError)))
+    text = read_yaml_text(p, error=OverridesError)
+    data = _safe_load(text)
+    if isinstance(data, dict) and data.get("tmt"):
+        from ionomos.tmtkit import repeated_keys
+
+        twice = repeated_keys(text)   # YAML keeps the last of two equal keys: the first name would vanish (#156)
+        if twice:
+            raise OverridesError(f"tmt: {', '.join(twice)} is written twice in {EXPERIMENT_YAML} (YAML keeps only the "
+                                 f"last one); list every channel once")
+    return parse_overrides(data)
 
 
 def _safe_load(text: str):

@@ -706,6 +706,8 @@ def choose_comparisons(m: QuantMatrix, s: Settings) -> tuple[list[tuple[str, str
     notes += [f"Not compared: {c} (a pooled reference, not a treatment)" for c in apart if c != ctrl]
     return [(c, ctrl) for c in conds if c != ctrl and c not in apart], notes
 
+SLUG_MAX = 80   # DiffResult.slug: with "volcano_" / "_differential.tsv" a file name stays under 100 characters
+
 @dataclass
 class DiffResult:
     name: str
@@ -737,7 +739,16 @@ class DiffResult:
         return sum(1 for r in self.rows if r["pvalue"] is not None and not math.isnan(r["pvalue"]))
 
     def slug(self) -> str:
-        return re.sub(r"[^A-Za-z0-9._-]+", "_", self.name).strip("_") or "comparison"
+        """The comparison in file names (volcano_<slug>.svg, <slug>_differential.tsv, the report's downloads). A long
+        one is cut, with a short hash of the whole so two stay apart: conditions named after their runs
+        (CPTAC_CCRCC_W_JHU_20190112_LUMOS_C3N-01179_NAT vs ...) made paths longer than Windows opens, and every
+        volcano and table of the comparison was missing (#157)."""
+        s = re.sub(r"[^A-Za-z0-9._-]+", "_", self.name).strip("_") or "comparison"
+        if len(s) <= SLUG_MAX:
+            return s
+        import hashlib
+
+        return s[:SLUG_MAX - 9].rstrip("._-") + "_" + hashlib.sha1(s.encode("utf-8")).hexdigest()[:8]
 
 def comparison_name(treatment: str, control: str | None) -> str:
     if control is None:

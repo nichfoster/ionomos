@@ -401,3 +401,40 @@ def test_reanalysis_honors_updated_file_labels(tmp_path):
     assert out.summary['comparisons'][0]['name'] == 'Drug vs DMSO'
     assert out.summary['comparisons'][0]['tested'] > 0
     assert json.loads((dest / names.STATUS_FILE).read_text(encoding='utf-8')) == record
+
+
+def test_long_comparison_names_make_short_file_names():
+    """#157: conditions named after their runs made every volcano and table path longer than Windows opens, and the
+    doctor said "the volcano plot wasn't written" for each fold-change-only comparison."""
+    long_a = "CPTAC_CCRCC_W_JHU_20190112_LUMOS_C3N-01179_NAT"
+    d = analysis.DiffResult(name=f"{long_a} vs CPTAC_CCRCC_W_JHU_20190112_LUMOS_C3L-00079_NAT", treatment=long_a,
+                            control="CPTAC_CCRCC_W_JHU_20190112_LUMOS_C3L-00079_NAT", kind="intensity", rows=[], settings=None,
+                            y_threshold_p=None)
+    e = analysis.DiffResult(name=f"{long_a} vs CPTAC_CCRCC_W_JHU_20190112_LUMOS_C3L-00418_NAT", treatment=long_a,
+                            control="x", kind="intensity", rows=[], settings=None,
+                            y_threshold_p=None)
+    assert len(d.slug()) == analysis.SLUG_MAX and d.slug().startswith("CPTAC_CCRCC_W_JHU_20190112_LUMOS_C3N-01179")
+    assert d.slug() != e.slug() and d.slug() == d.slug()
+    short = analysis.DiffResult(name="Drug vs DMSO", treatment="Drug", control="DMSO", kind="intensity", rows=[], settings=None,
+                            y_threshold_p=None)
+    assert short.slug() == "Drug_vs_DMSO"
+
+
+def test_runs_named_after_their_files_get_their_volcanos(tmp_path):
+    """#157, end to end: a DIA matrix without a design, every run its own condition (fold change only), in a folder
+    deep enough that the uncut file names passed 260 characters on Windows."""
+    dest = tmp_path / ("e" * max(1, 150 - len(str(tmp_path))))
+    pg = dest / "report.pg_matrix.tsv"
+    pg.parent.mkdir(parents=True)
+    runs = [f"D:/raw/CPTAC_CCRCC_W_JHU_20190112_LUMOS_C3N-0{k:04d}_{t}.raw" for k, t in
+            ((1179, "NAT"), (1522, "T"), (79, "NAT"))]
+    rows = ["\t".join(["Protein.Group", "Protein.Names", "Genes", "First.Protein.Description", *runs])]
+    for i in range(80):
+        rows.append("\t".join([f"P{i:05d}", f"P{i}_HUMAN", f"G{i}", "d"]
+                              + [f"{1000 + (i * 37 + j * 101) % 997:.1f}" for j in range(3)]))
+    pg.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    out = downstream.analyze(dest, "DIA", {"enrichment": False})
+    codes = [i.code for i in out.issues]
+    assert "NO_VOLCANO" not in codes and "FOLD_CHANGE_ONLY" in codes
+    svgs = sorted((dest / "results").glob("volcano_*.svg"))
+    assert len(svgs) == 2 and all(len(p.name) <= analysis.SLUG_MAX + 12 for p in svgs)

@@ -35,8 +35,9 @@ GOOD = _map(["DMSO", "DMSO", "DMSO", "Drug", "Drug", "Drug"])
 
 @pytest.mark.parametrize(("text", "name"), [
     ("TMT-10", "TMT-10"), ("TMT10", "TMT-10"), ("tmt10plex", "TMT-10"), ("Tmt16", "TMT-16"), ("TMTpro", "TMT-16"),
-    ("TMTpro-18", "TMT-18"), ("tmtpro 16", "TMT-16"), ("11", "TMT-11"), ("TMT-6", "TMT-6"), ("TMT-35", None),
-    ("iTRAQ-8", None), ("", None), (None, None), ("TMT-12", None),
+    ("TMTpro-18", "TMT-18"), ("tmtpro 16", "TMT-16"), ("11", "TMT-11"), ("TMT-6", "TMT-6"), ("TMT-35", "TMT-35"),
+    ("iTRAQ-8", "iTRAQ-8"), ("", None), (None, None), ("TMT-12", None), ("iTRAQ4plex", "iTRAQ-4"),
+    ("itraq-8", "iTRAQ-8"), ("iodoTMT-6", "iodoTMT-6"), ("TMT2", "TMT-2"), ("DiLeu-12", None), ("iTRAQ-6", None),
 ])
 def test_label_types_any_spelling(text, name):
     lt = tmtkit.label_type(text)
@@ -44,15 +45,165 @@ def test_label_types_any_spelling(text, name):
 
 
 def test_label_types_match_fragpipe():
-    """QuantLabel.java (FragPipe 24): the channels in the kit's order; TMT-6 is 126 127N 128C 129N 130C 131N."""
+    """QuantLabel.java (FragPipe 24.0, LABELS and labelModMap): the channels in the kit's order, the masses."""
     lts = tmtkit.LABEL_TYPES
-    assert [lt.n for lt in lts.values()] == [6, 10, 11, 16, 18]
+    assert [lt.n for lt in lts.values()][:5] == [6, 10, 11, 16, 18]   # the lab's kits first
     assert lts["TMT-6"].channels == ("126", "127N", "128C", "129N", "130C", "131N")
     assert lts["TMT-18"].channels[-3:] == ("134N", "134C", "135N") and lts["TMT-16"].channels == lts["TMT-18"].channels[:16]
-    assert {lt.mass for lt in lts.values()} == {tmtkit.TMT_MASS, tmtkit.TMTPRO_MASS} == {229.1629, 304.2071}
-    assert [lt.reagent for lt in lts.values()] == ["TMT", "TMT", "TMT", "TMTpro", "TMTpro"]
+    assert lts["TMT-35"].n == 35 and lts["TMT-35"].channels[:18] == lts["TMT-18"].channels
+    assert lts["TMT-35"].channels[18:21] == ("127D", "128ND", "128CD") and lts["TMT-35"].channels[-1] == "135CD"
+    assert lts["iTRAQ-4"].channels == ("114", "115", "116", "117")
+    assert lts["iTRAQ-8"].channels == ("113", "114", "115", "116", "117", "118", "119", "121")
+    assert lts["TMT-2"].channels == ("126", "127C") and lts["TMT-0"].channels == ("126",)
+    assert {k: v.mass for k, v in lts.items()} == {
+        "TMT-6": 229.1629, "TMT-10": 229.1629, "TMT-11": 229.1629, "TMT-16": 304.2071, "TMT-18": 304.2071,
+        "TMT-35": 304.2071, "TMT-2": 225.1558, "TMT-0": 224.1525, "iTRAQ-4": 144.1021, "iTRAQ-8": 304.2054,
+        "iodoTMT-6": 329.2266}
+    assert [lt.reagent for lt in lts.values()][:5] == ["TMT", "TMT", "TMT", "TMTpro", "TMTpro"]
+    assert set(tmtkit.TESTED) <= set(lts) and not set(tmtkit.OTHER_FRAGPIPE_LABELS) & set(lts)
     from ionomos import fake_fragpipe
     assert fake_fragpipe.TMT_CHANNELS == {k: v.channels for k, v in lts.items()}  # one source
+
+
+@pytest.mark.parametrize(("ch", "key"), [
+    ("126", "126"), ("127n", "127N"), ("TMT127N", "127N"), ("128nd", "128ND"), ("135CD", "135CD"),
+    ("127D", "127D"), ("114", "114"), ("115a", ""), ("x", ""),
+])
+def test_channel_keys(ch, key):
+    assert tmtkit.channel_key(ch) == key
+
+
+@pytest.mark.parametrize("text", [
+    "tmt:\n  channels:\n    '126': DMSO_1_126\n    '126': Drug_1_126\n",
+    "tmt:\n  channels: {126: DMSO_1_126, '126': Drug_1_126}\n",
+    "tmt:\n  plexes:\n    a:\n      channels: {126: A_1_126, 126: B_1_126}\n",
+])
+def test_a_channel_written_twice_in_experiment_yaml_is_refused(tmp_path, text):
+    """#156: YAML kept the last of two equal keys, so the first name vanished and TMT_CHANNEL_TWICE never fired."""
+    from ionomos.manifest import load_overrides
+
+    (tmp_path / "experiment.yaml").write_text(text, encoding="utf-8")
+    with pytest.raises(OverridesError, match="126 is written twice"):
+        load_overrides(tmp_path)
+
+
+def test_two_spellings_of_one_channel_are_refused():
+    assert tmtkit.check_block({"channels": {"127n": "A_1_127N", "127N": "B_1_127N"}}) == [
+        "tmt: channel 127N is written twice (as '127n', '127N'); list every channel once"]
+    assert tmtkit.repeated_keys("tmt: [unclosed") == [] and tmtkit.repeated_keys("files: {a: 1, a: 2}") == []
+
+
+def test_a_reference_that_is_not_a_channel_of_the_kit_is_said(tmp_path):
+    """#156: reference_channel 135N on TMT-10 gave no flag with one plex and a misleading one with two; a reference
+    on an NA channel of a single plex was taken silently; the plex line still named a pool as the reference."""
+    one = tmtkit.validate({"p": GOOD}, "TMT-10", reference=["135N"])
+    assert _codes(one) == ["TMT_REFERENCE_UNKNOWN"]
+    assert one[0].text.startswith("reference 135N is not a channel of TMT-10 (126, 127N")
+    two = tmtkit.validate({"a": _map(["Pool", "DMSO", "Drug"]), "b": _map(["Pool", "DMSO", "Drug"], plex=2)},
+                          "TMT-10", reference=["135N"])
+    assert "TMT_REFERENCE_UNKNOWN" in _codes(two) and "TMT_REFERENCE_MISSING" not in _codes(two)
+    na = tmtkit.validate({"p": GOOD}, "TMT-10", reference=["131N"])
+    assert _codes(na) == ["TMT_REFERENCE_MISSING"] and "131N is NA" in na[0].text
+    assert tmtkit.validate({"p": GOOD}, "TMT-10", reference=["126"]) == []
+    assert tmtkit.validate({"p": GOOD}, "TMT-10", reference=["Pool_1_126"]) == []  # a name: not a channel
+    dest = tmp_path / "x"
+    dest.mkdir()
+    pooled = _map(["Pool", "DMSO", "Drug"])
+    tp = tmtkit.plan(dest, {"tmt": {"tag": "TMT-10", "channels": pooled, "reference_channel": "135N"}}, PROPS10,
+                     [(dest / "A_F1.raw", "A", 1, "DDA")])
+    assert tp.plexes[0].reference == [] and "reference" not in tp.summary()[1]
+
+
+def test_a_name_twice_in_one_plex_says_so():
+    """#156: TMT_DUPLICATE_NAME for a name repeated inside one plex said "(plex KLX and KLX)"."""
+    f = [x for x in tmtkit.validate({"KLX": {**GOOD, "131N": "DMSO_1_126"}}, "TMT-10")
+         if x.code == "TMT_DUPLICATE_NAME"]
+    assert f[0].text == "sample name DMSO_1_126 is used twice in plex KLX; FragPipe needs every name once"
+
+
+def test_a_plex_of_na_only_stops_before_the_search():
+    """#156: TMT_ALL_NA was a warning, so the job was searched and the fake FragPipe crashed (the wrong diagnosis
+    followed); a plex with no sample can't be right."""
+    from ionomos.downstream import simulate
+
+    f = [x for x in tmtkit.validate({"p": {ch: "NA" for ch in TMT10}}, "TMT-10") if x.code == "TMT_ALL_NA"]
+    assert f[0].severity == "error"
+    assert simulate._control([]) == ""
+
+
+def test_tmt_plan_says_a_not_utf8_experiment_yaml_once(tmp_path, caplog, capsys):
+    """#156: `tmt plan` on an experiment.yaml saved as Windows-1252 said "is not UTF-8 ... Save it as UTF-8" twice."""
+    drop = tmp_path / "20260126_Aman_TMT_KL6159A-9plex"
+    drop.mkdir()
+    (drop / "KL6159A_TMT_F1.raw").write_bytes(b"\0" * 8)
+    text = yaml.safe_dump({"notes": "24 h \u2013 1 \u00b5M", "tmt": {"tag": "TMT-10", "channels": GOOD}},
+                          allow_unicode=True)
+    (drop / "experiment.yaml").write_bytes(text.encode("cp1252"))
+    cfg = testbed.init(tmp_path / "bed")
+    with caplog.at_level("WARNING"):
+        assert cli.main(["--config", str(cfg), "tmt", "plan", str(drop)]) == 0
+    capsys.readouterr()
+    said = [r for r in caplog.records if "is not UTF-8" in r.getMessage()]
+    assert len(said) == 1, [r.getMessage() for r in said]
+
+
+def test_fragpipes_other_label_types_are_passed_on(tmp_path):
+    """#154: a tag FragPipe knows but Ionomos has no channels for is accepted and checked by FragPipe's rules only;
+    the tag is compared with the workflow's label by name."""
+    assert tmtkit.fragpipe_label("dileu12") == "DiLeu-12" and tmtkit.fragpipe_label("TMT-12") == ""
+    assert tmtkit.check_block({"tag": "DiLeu-12", "channels": {"115a": "A_1_115a"}}) == []
+    dest = tmp_path / "x"
+    dest.mkdir()
+    lines = [(dest / "A_F1.raw", "A", 1, "DDA")]
+    ch = {c: f"A_1_{c}" for c in ("115a", "115b", "116a", "116b", "116c", "117a", "117b", "117c", "118a", "118b",
+                                  "118c", "118d")}
+    tp = tmtkit.plan(dest, {"tmt": {"tag": "DiLeu-12", "channels": ch}}, {"tmtintegrator.channel_num": "DiLeu-12"},
+                     lines)
+    assert tp.errors() == [] and tp.label == "DiLeu-12" and "TMT_LABEL_UNKNOWN" in _codes(tp.flags)
+    assert tp.annotations["annotation.txt"].splitlines()[0] == "115a\tA_1_115a"
+    tp = tmtkit.plan(dest, {"tmt": {"tag": "DiLeu-12", "channels": ch}}, PROPS10, lines)
+    assert [f.code for f in tp.errors()][0] == "TMT_TAG_MISMATCH"
+    assert "change tag: to TMT-10; if they are DiLeu-12, name a DiLeu-12 workflow" in tp.error_text()
+    tp = tmtkit.plan(dest, {"tmt": {"tag": "DiLeu-12", "channels": dict(list(ch.items())[:3])}},
+                     {"tmtintegrator.channel_num": "DiLeu-12"}, lines)
+    assert "TMT_CHANNEL_COUNT" in _codes(tp.errors())   # FragPipe's own rule: the count from the name
+
+
+@pytest.mark.parametrize(("tag", "channels", "wf"), [
+    ("iTRAQ-4", {"114": "A_1_114", "115": "A_1_115", "116": "B_1_116", "117": "B_1_117"}, "iTRAQ-4"),
+    ("TMT-35", None, "TMT-35"),
+    ("TMT-2", {"126": "A_1_126", "127C": "B_1_127C"}, "TMT-2"),
+])
+def test_stock_itraq_and_tmt35_maps_are_planned(tmp_path, tag, channels, wf):
+    """#154: FragPipe 24's stock iTRAQ4.workflow (channel_num=iTRAQ-4) and TMT35.workflow were refused at intake."""
+    channels = channels or tmtkit.suggest_channels(tag, ["A", "B"], 10, "126")
+    assert parse_overrides({"tmt": {"tag": tag, "channels": channels}}).tmt["tag"] == tag
+    dest = tmp_path / "x"
+    dest.mkdir()
+    tp = tmtkit.plan(dest, {"tmt": {"tag": tag, "channels": channels}}, {"tmtintegrator.channel_num": wf},
+                     [(dest / "A_F1.raw", "A", 1, "DDA")])
+    assert tp.errors() == [] and tp.label == wf and "TMT_LABEL_UNKNOWN" not in _codes(tp.flags)
+    assert tp.annotations["annotation.txt"] == tmtkit.annotation_text(channels)
+    tp = tmtkit.plan(dest, {"tmt": {"tag": tag, "channels": channels}}, PROPS10, [(dest / "A_F1.raw", "A", 1, "DDA")])
+    assert "TMT_TAG_MISMATCH" in _codes(tp.errors())
+    bad = dict(channels) | {"131C": "C_1_131C"} if wf != "TMT-35" else {**channels, "999": "C_1_999"}
+    tp = tmtkit.plan(dest, {"tmt": {"tag": tag, "channels": bad}}, {"tmtintegrator.channel_num": wf},
+                     [(dest / "A_F1.raw", "A", 1, "DDA")])
+    assert "TMT_UNKNOWN_CHANNEL" in _codes(tp.errors())
+
+
+def test_suggest_and_block_keep_fragpipes_label_names(capsys):
+    """#154: `tmt suggest --tag iTRAQ-4` / `TMT-35` were refused; the editor turned an iTRAQ map into TMT-10."""
+    m = tmtkit.suggest_channels("itraq4plex", ["DMSO", "Drug"], 2)
+    assert m == {"114": "DMSO_1_114", "115": "DMSO_1_115", "116": "Drug_1_116", "117": "Drug_1_117"}
+    assert tmtkit.suggest_channels("TMT-35", ["A"], 2, "128ND")["128ND"] == "Pool_1_128ND"
+    assert tmtkit.to_overrides_block(m, "iTRAQ4")["tag"] == "iTRAQ-4"
+    assert tmtkit.to_overrides_block({"115a": "x"}, "DiLeu-12")["tag"] == "DiLeu-12"
+    assert cli.main(["tmt", "suggest", "--tag", "iTRAQ-4", "--conditions", "DMSO,Drug", "--replicates", "2"]) == 0
+    block = yaml.safe_load(capsys.readouterr().out.split("\n", 1)[1])["tmt"]
+    assert block["tag"] == "iTRAQ-4" and list(block["channels"]) == ["114", "115", "116", "117"]
+    assert cli.main(["tmt", "suggest", "--tag", "TMT-35", "--conditions", "A,B", "--replicates", "17"]) == 0
+    capsys.readouterr()
 
 
 @pytest.mark.parametrize(("name", "cond", "plex", "ch", "lab"), [
@@ -131,13 +282,13 @@ def _codes(flags):
     ({"p1": {ch: f"KL6159A_{ch}" for ch in TMT10}}, "TMT-10", {}, ["TMT_NAME_PATTERN"]),
     ({"p1": _map(["Pool", "DMSO", "Drug", "DMSO", "Drug"], plex=1),
       "p2": _map(["DMSO", "Drug", "Pool", "DMSO", "Drug"], plex=2)}, "TMT-10", {"reference": ["126"]},
-     ["TMT_NAME_PATTERN", "TMT_REFERENCE_MISSING"]),  # the R script keeps plex 1 only: Pool_2_126 is a pattern note
+     ["TMT_REFERENCE_MISSING"]),  # #155: with several plexes condition_2_channel is kept (no pattern note)
     ({"p1": _map(["Pool", "DMSO", "Drug", "DMSO", "Drug"], plex=1),
       "p2": _map(["", "Drug", "Pool", "DMSO", "Drug"], plex=2)}, "TMT-10", {"reference": ["126"]},
-     ["TMT_NAME_PATTERN", "TMT_REFERENCE_MISSING"]),
+     ["TMT_REFERENCE_MISSING"]),
     ({"p1": _map(["Pool", "DMSO", "Drug", "DMSO", "Drug"], plex=1),
       "p2": _map(["Pool", "DMSO", "Drug", "DMSO", "Drug"], plex=2)}, "TMT-10", {"reference": ["126"]},
-     ["TMT_NAME_PATTERN"]),
+     []),
 ])
 def test_validate(maps, label, kw, codes):
     assert _codes(tmtkit.validate(maps, label, **kw)) == codes
@@ -240,14 +391,14 @@ def test_plan_bioreplicate_and_unknown_label(tmp_path):
     dest = tmp_path / "x"
     dest.mkdir()
     lines = [(dest / "A_F1.raw", "A", 2, "DDA")]
-    tp = tmtkit.plan(dest, {"tmt": {"channels": GOOD}}, {"tmtintegrator.channel_num": "iTRAQ-8"}, lines)
+    tp = tmtkit.plan(dest, {"tmt": {"channels": GOOD}}, {"tmtintegrator.channel_num": "DiLeu-12"}, lines)
     assert {"TMT_BIOREPLICATE", "TMT_LABEL_UNKNOWN"} <= set(_codes(tp.flags))
     tp = tmtkit.plan(dest, {"tmt": {"channels": GOOD}}, {"x": "1"}, lines)
     assert "TMT_LABEL_UNSET" in _codes(tp.flags)
 
 
 @pytest.mark.parametrize(("block", "match"), [
-    ({"tag": "TMT-12", "channels": GOOD}, "tag 'TMT-12' is not a label type Ionomos knows; use one of TMT-6"),
+    ({"tag": "TMT-12", "channels": GOOD}, "tag 'TMT-12' is not a label type FragPipe knows; use one of TMT-6"),
     ({"channels": GOOD, "plex": 1}, r"unknown key\(s\) plex"),
     ({"channels": GOOD, "plexes": {"a": {"channels": GOOD}}}, "either channels"),
     ({"plexes": {"a": {"channels": {}}}}, "plex 'a' needs a non-empty channels mapping"),
@@ -355,7 +506,8 @@ def test_suggest_refuses_answers_that_make_no_map(args, words):
     (["--conditions", ","], "name at least one condition"),
     (["--replicates", "x"], "--replicates x: give a whole number"),
     (["--replicates", ","], "--replicates is empty"),
-    (["--tag", "TMT-35"], "'TMT-35' is not a label type Ionomos knows"),
+    (["--tag", "TMT-12"], "'TMT-12' is not a label type FragPipe knows"),
+    (["--tag", "DiLeu-12"], "Ionomos does not know the channels of DiLeu-12, so it can't suggest a map"),
     (["--plexes", "a,a"], "plex a is named twice in --plexes"),
     (["--replicates", "6"], "and 10 samples fit"),
 ])
@@ -482,6 +634,45 @@ def test_two_plexes_with_a_bridge(bed):
     assert compared == ["Drug vs DMSO"], compared
 
 
+def test_two_plexes_annotation_files_keep_the_plex(bed):
+    """#155: the FragPipe-Analyst annotation said plex 1 with an empty channel for every sample and repeated
+    replicate numbers; the lab's annotation file (the R script keeps `_1_` only) dropped plex 2."""
+    from ionomos.downstream.tables import read_tsv
+
+    dest, job, _rec = _run(bed, "tmt_bridge")
+    assert job.status == "done", job.reason
+    head, rows = read_tsv(dest / "results" / "fragpipe-analyst" / "experiment_annotation.tsv")
+    assert head == ["plex", "channel", "sample", "sample_name", "condition", "replicate"]
+    got = {r["sample"]: (r["plex"], r["channel"]) for r in rows}
+    assert got["Pool_1_126"] == ("1", "126") and got["DMSO_2_127N"] == ("2", "127N"), got
+    assert all(r["sample"].split("_")[1] == r["plex"] and r["sample"].endswith("_" + r["channel"]) for r in rows)
+    pairs = [(r["condition"], r["replicate"]) for r in rows]
+    assert len(pairs) == len(set(pairs)), pairs   # a replicate number once per condition
+    head, lab = read_tsv(dest / "results" / "experimental_annotation.tsv")
+    assert {r["plex"] for r in lab} == {"1", "2"} and len(lab) == len(rows)
+    assert {r["sample_name"] for r in lab} == {r["sample"] for r in lab}   # unique: the plex is kept in the name
+    drug = [r["replicate"] for r in lab if r["condition"] == "Drug"]
+    assert drug == [str(k) for k in range(1, len(drug) + 1)]
+
+
+def test_the_lab_annotation_port_multi_plex_extension():
+    """#155: one plex -> the R script's file byte for byte (tests/test_downstream.py, the golden); several plexes ->
+    condition_<k>_channel kept for every k, plex = k, the whole name as sample_name, replicates running on."""
+    from ionomos.downstream import tmt
+
+    header = ["Index", "Pool_1_126", "DMSO_1_127N", "DMSO_1_127C", "Pool_2_126", "DMSO_2_127N", "odd-name_2_128N"]
+    one = tmt.annotation_rows(header)
+    assert [r["sample"] for r in one] == ["Pool_1_126", "DMSO_1_127N", "DMSO_1_127C"]
+    assert one[1]["sample_name"] == "DMSO_127N"
+    many = tmt.annotation_rows(header, multiplex=True)
+    assert [(r["plex"], r["sample_name"], r["replicate"]) for r in many] == [
+        ("1", "Pool_1_126", 1), ("1", "DMSO_1_127N", 1), ("1", "DMSO_1_127C", 2), ("2", "Pool_2_126", 2),
+        ("2", "DMSO_2_127N", 3)]
+    plex, ch = tmt.plexes_and_channels(["Pool_1_126", "X", "C3L-00004_T"],
+                                       {"plexA": {"126": "Pool_1_126"}, "plexB": {"127N": "C3L-00004_T"}})
+    assert plex == {"Pool_1_126": "plexA", "C3L-00004_T": "plexB"} and ch["C3L-00004_T"] == "127N"
+
+
 def test_the_fake_writes_tmt_integrators_tables(bed):
     dest, job, _rec = _run(bed, "tmt_good")
     rep = dest / "fragpipe" / "tmt-report"
@@ -503,3 +694,76 @@ def test_a_fake_ref_tag_rule_is_fragpipes(bed, tmp_path):
     with pytest.raises(fragpipe.JobError, match=re.escape("has no sample name containing the workflow's Ref sample "
                                                           "tag 'Bridge'")):
         fragpipe.prepare(job, bed["cfg"])
+
+
+def test_an_itraq4_drop_is_taken_in_and_searched(bed):
+    """#154: a drop with tag: iTRAQ-4 and FragPipe's stock iTRAQ4.workflow was REJECTED at intake. Now intake takes
+    it, the annotation is written in iTRAQ's channels and the fake FragPipe searches it (TESTED)."""
+    (bed["cfg"].workflow_dir / "iTRAQ4.workflow").write_text(testbed.workflow_text("TMT", "iTRAQ-4"),
+                                                              encoding="utf-8", newline="\n")
+    drop = bed["root"] / "Fragpipe_Auto" / "inbox" / "20260301_Aman_TMT_KL7001-itraq"
+    drop.mkdir()
+    for i in (1, 2):
+        (drop / f"KL7001_TMT_F{i}.raw").write_bytes(b"RAW" * 400)
+    ch = {"114": "DMSO_1_114", "115": "DMSO_1_115", "116": "Drug_1_116", "117": "Drug_1_117"}
+    (drop / "experiment.yaml").write_text(yaml.safe_dump({"workflow": "iTRAQ4", "tmt": {"tag": "iTRAQ-4",
+                                                                                        "channels": ch}}),
+                                          encoding="utf-8")
+    assert intake(drop, bed["cfg"], bed["ledger"]).value == "queued"
+    job = bed["ledger"].list()[-1]
+    Worker(bed["cfg"], bed["ledger"]).run_once()
+    job = bed["ledger"].get(job.id)
+    assert job.status == "done", job.reason
+    dest = Path(job.dest_dir)
+    assert (dest / "annotation.txt").read_text(encoding="utf-8") == tmtkit.annotation_text(ch)
+    rec = json.loads((dest / names.STATUS_FILE).read_text(encoding="utf-8"))
+    assert rec["plan"]["tmt"]["label"] == "iTRAQ-4" and rec["run"]["tmt_map"]["tmt"]["tag"] == "iTRAQ-4"
+    a = json.loads((dest / "results" / "analysis.json").read_text(encoding="utf-8"))
+    assert set(a["samples"].values()) == {"DMSO", "Drug"}
+
+
+def test_a_retry_uses_the_fixed_experiment_yaml_not_intakes_map(bed):
+    """#147: a TMT job failed on its channel map; the person fixed tmt: in experiment.yaml and pressed Retry. The
+    retry planned the search from the map frozen in the job list at intake and failed again, word for word."""
+    from ionomos.worker import request_retry
+
+    dest, job, rec = _run(bed, "tmt_tag_mismatch")
+    assert job.status == "failed" and "tag: TMT-16" in job.reason and "(channel map from experiment.yaml)" in job.reason
+    assert rec["plan"]["overrides"]["tmt"]["tag"] == "TMT-16"   # what intake saw: kept as it was
+    block = tmtkit.to_overrides_block(GOOD, "TMT-10")
+    (dest / "experiment.yaml").write_text(yaml.safe_dump({"tmt": block}), encoding="utf-8")
+    assert request_retry(bed["ledger"], job.id)[0]
+    Worker(bed["cfg"], bed["ledger"]).run_once()
+    job = bed["ledger"].get(job.id)
+    assert job.status == "done", job.reason
+    assert (dest / "annotation.txt").read_text(encoding="utf-8") == tmtkit.annotation_text(GOOD)
+    rec = json.loads((dest / names.STATUS_FILE).read_text(encoding="utf-8"))
+    assert rec["run"]["tmt_map"]["from"] == "experiment.yaml (changed since intake)"
+    assert rec["run"]["tmt_map"]["tmt"]["tag"] == "TMT-10"
+    assert rec["plan"]["overrides"]["tmt"]["tag"] == "TMT-16"   # intake's record is history, never rewritten
+    assert "TMT: the channel map is from experiment.yaml (changed since intake)" in rec["run"]["notes"]
+
+
+def test_the_retry_map_when_experiment_yaml_is_broken_or_gone(bed):
+    """#147: the folder's experiment.yaml is the map; a file that can't be read fails the job saying so (no Hold,
+    D91), and only a file that is gone falls back to the map saved at intake."""
+    dest, job, _rec = _run(bed, "tmt_good")
+    assert job.status == "done", job.reason
+    yml = dest / "experiment.yaml"
+    now = yaml.safe_load(yml.read_text(encoding="utf-8"))["tmt"]
+    filed = tmtkit._as_json(now)
+    assert tmtkit.current_block(dest, filed) == (now, "experiment.yaml")   # 126: vs "126": is no change
+    yml.write_text("tmt: [unclosed\n", encoding="utf-8")
+    with pytest.raises(tmtkit.TmtError, match="experiment.yaml can't be read, so its tmt: map can't be used"):
+        tmtkit.current_block(dest, filed)
+    bed["ledger"].requeue(job.id, "test")
+    with pytest.raises(fragpipe.JobError, match=r"^TMT: experiment.yaml can't be read.*fix the file, then Retry"):
+        fragpipe.prepare(bed["ledger"].get(job.id), bed["cfg"])
+    yml.unlink()
+    block, src = tmtkit.current_block(dest, filed)
+    assert block == filed and src == "the map saved at intake (experiment.yaml is gone)"
+    spec = fragpipe.prepare(bed["ledger"].get(job.id), bed["cfg"])
+    assert spec.tmt_map["from"] == src and "TMT: the channel map is from " + src in spec.notes
+    yml.write_text("notes: no map any more\n", encoding="utf-8")
+    assert tmtkit.current_block(dest, filed) == ({}, "experiment.yaml (its tmt: block was removed after intake)")
+    assert tmtkit.current_block(dest, {}) == ({}, "")

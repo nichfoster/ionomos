@@ -49,7 +49,7 @@ def _control(conds: list[str]) -> str:
         for c in conds:
             if kw.lower() in c.lower().replace("-", "_").split("_") or c.lower() == kw.lower():
                 return c
-    return sorted(conds)[0]
+    return sorted(conds)[0] if conds else ""   # no samples (a TMT plex of NA only, #156): no control
 
 
 def isodtb_label_quant(path: Path, experiments: dict[str, list[int]], seed: int = 1, n_sites: int = 300,

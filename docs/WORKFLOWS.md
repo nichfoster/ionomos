@@ -212,11 +212,28 @@ mzML (the SOP, by hand in FragPipe's window), and compare PSMs, proteins and
 | `TMT-11` | TMT 11-plex | TMT-10 + 131C | 229.1629 |
 | `TMT-16` | TMTpro 16-plex | TMT-11 + 132N 132C 133N 133C 134N | 304.2071 |
 | `TMT-18` | TMTpro 18-plex | TMT-16 + 134C 135N | 304.2071 |
+| `TMT-35` | TMTpro 35-plex | TMT-18 + 127D 128ND 128CD 129ND 129CD 130ND 130CD 131ND 131CD 132ND 132CD 133ND 133CD 134ND 134CD 135ND 135CD | 304.2071 |
+| `TMT-2` | TMT duplex | 126 127C | 225.1558 |
+| `TMT-0` | TMTzero | 126 | 224.1525 |
+| `iTRAQ-4` | iTRAQ 4-plex | 114 115 116 117 | 144.1021 |
+| `iTRAQ-8` | iTRAQ 8-plex | 113 114 115 116 117 118 119 121 | 304.2054 |
+| `iodoTMT-6` | iodoTMT 6-plex | 126 127 128 129 130 131 | 329.2266 |
 
-`tag:` accepts any common spelling (`TMT10`, `tmt-10`, `TMTpro`, `TMTpro-18`,
-Sage's `Tmt16`). FragPipe also knows TMT-0, TMT-2, TMT-35, iodoTMT, iTRAQ,
-DiLeu and others; Ionomos passes a map for those on unchecked
-(`TMT_LABEL_UNKNOWN`). Masses are the stock workflows' (229.16293, 304.20715).
+The list is FragPipe 24.0's `QuantLabel` (`LABELS`, `labelModMap`, checked
+against the source on 2026-10-15; #154). `tag:` accepts any common spelling
+(`TMT10`, `tmt-10`, `TMTpro`, `TMTpro-18`, Sage's `Tmt16`, `iTRAQ4plex`,
+`itraq-8`). Every label type in the table is checked the same way (channels,
+count, order, the tag against the workflow's `channel_num`). **Searched end to
+end with the fake FragPipe** (`tmtkit.TESTED`, `tests/test_tmtkit.py`): TMT-6,
+TMT-10, TMT-11, TMT-16, TMT-18 and iTRAQ-4 (FragPipe's stock `iTRAQ4.workflow`);
+TMT-35, TMT-2, TMT-0, iTRAQ-8 and iodoTMT-6 are checked and planned by the
+same code but have no testbed scenario. FragPipe's other label types (sCLIP-6,
+IBT-16, DiLeu-12, DiLeu-1, DeAla-13, Trp-2: `tmtkit.OTHER_FRAGPIPE_LABELS`)
+are accepted in `tag:` and **passed on**: the map is written as given and
+checked for FragPipe's own rules only (`TMT_LABEL_UNKNOWN`), and the tag is
+still compared with the workflow's label type by name. A `tag:` FragPipe does
+not know is refused at intake (`TMT_BLOCK`). Masses are the stock workflows'
+(229.16293, 304.20715).
 
 ### The channel map: where it comes from
 
@@ -233,6 +250,16 @@ DiLeu and others; Ionomos passes a map for those on unchecked
 3. **Nothing**: FragPipe names the channels `<plex>_<channel>`; the job is
    searched with a warning (`TMT_NO_MAP`), and the report's conditions are
    unknown (`TMT_CONDITIONS_UNKNOWN`) until they are set on the Analysis tab.
+
+Every search, a Retry too, plans from the experiment folder's
+`experiment.yaml` **as it is then** (read as intake reads it,
+`tmtkit.current_block`), not from the block intake saved in `ionomos.json`
+(`plan.overrides.tmt`, kept as history): a map fixed after a failed job, in
+the file or on the Analysis tab, is what the Retry searches with (#147). Only
+when `experiment.yaml` is gone is the intake block used; an `experiment.yaml`
+that can't be read fails the job saying so. `ionomos.json` → `run.tmt_map`
+records the map searched and where it came from (`experiment.yaml`,
+`experiment.yaml (changed since intake)`, `the map saved at intake …`).
 
 `ionomos tmt plan <folder>` shows the result for a drop or a filed
 experiment without changing anything; `ionomos tmt suggest --tag TMT-16
@@ -257,18 +284,26 @@ Ionomos' own (`tmtkit.validate` / `plan`): errors `TMT_TAG_MISMATCH` (the
 `tag:` is not the workflow's label type: change one; the message says which),
 `TMT_UNKNOWN_CHANNEL` and `TMT_CHANNEL_TWICE` (FragPipe's window refuses such
 a file; headless does not check, but the names would land on the wrong
-reporters), `TMT_BLOCK` (an unknown key or tag in `tmt:`); warnings
+reporters), `TMT_ALL_NA` (a plex whose every channel is NA: it has no
+sample, so the map can't be right), `TMT_BLOCK` (an unknown key or tag in
+`tmt:`, or a channel written twice: `'126'` twice, `126` and `'126'`, `127n`
+and `127N`; YAML would keep only the last name, so intake refuses the file
+instead, #156); warnings `TMT_REFERENCE_UNKNOWN` (a `reference_channel` that is
+not a channel of the label type), a reference on an NA channel
+(`TMT_REFERENCE_MISSING`, with one plex too);
 `TMT_NAME_CHANNEL` (`127N: DMSO_1_126`), `TMT_ONE_CHANNEL` (a condition with
 one channel: compared anyway, low confidence, D32), `TMT_REFERENCE_MISSING`
 (several plexes, and one has no sample, or not its pool, on the reference
-channel), `TMT_FRACTIONS_DIFFER`, `TMT_BIOREPLICATE`, `TMT_ALL_NA`,
+channel), `TMT_FRACTIONS_DIFFER`, `TMT_BIOREPLICATE`,
 `TMT_CHANNEL_ORDER` (a user's file not in the kit's order),
 `TMT_SEVERAL_FILES`, `TMT_ANNOTATION_DIFFERS`, `TMT_NO_MAP`,
 `TMT_SHARED_FOLDER`, `TMT_LABEL_UNSET`, `TMT_LABEL_UNKNOWN`; notes
 `TMT_NAME_PATTERN` (not `condition_1_channel`: the lab's R script skips the
 name, the report takes the text before the first `_`) and `TMT_NO_BRIDGE`.
 Intake records all of them in `ionomos.json` (`plan.tmt`, and the warnings in
-`plan.warnings`); nothing a TMT check finds refuses a drop.
+`plan.warnings`); nothing a TMT check finds refuses a drop, except a `tmt:`
+block that can't be read as written (`TMT_BLOCK`: the drop is REJECTED, saying
+what to fix).
 
 ### Plexes and folders
 
@@ -319,7 +354,9 @@ sample name, condition, replicate (counted: the k-th channel of a condition
 across the plexes) and role (sample, reference (bridge, pooled), NA). The
 label type is pre-set from the method's workflow (`tmtintegrator.channel_num`)
 or `experiment.yaml`'s `tag:`; another choice is said in orange (the job
-would fail before the search). Typing a condition names the channel
+would fail before the search). Switching to a kit with fewer channels puts the
+names on the missing ones aside, says which under the grid, and brings them
+back when a kit with those channels is picked again. Typing a condition names the channel
 `<condition>_<plex>_<channel>` (the plex's position, as `tmtkit.suggest_channels`);
 a name typed by hand is kept and its condition is the text before the first
 `_`. **Read annotation.txt from the folder** reads a person's own files
@@ -332,7 +369,8 @@ Run analysis (editor; the old file kept in `experiment-backups/`), together
 with `analysis.roles` for the reference channels. In the review window a map
 FragPipe would stop on keeps the window open with the reason (Clear to
 decide later); a cleared grid removes an old `tmt:` block. For a filed
-experiment the map is used by the next search (Retry); this analysis reads the
+experiment the map is used by the next search (Retry reads `experiment.yaml`
+again); this analysis reads the
 sample names in TMT-Integrator's tables, so a condition in it is changed in
 the sample list on the left.
 
@@ -373,7 +411,8 @@ there), then any other abundance table. Layout (FragPipe's output guide):
 `Index, NumberPSM, ProteinID | Gene, MaxPepProb, ReferenceIntensity`, a
 column per sample. The sample names are the annotation's; conditions come
 from the R script's `experimental_annotation.tsv` when the names follow
-`condition_1_channel`, else the text before the first `_`. Peptide tables are
+`condition_1_channel` (`condition_<plex>_channel` with several plexes), else
+the text before the first `_`. Peptide tables are
 not analysed; single-site tables go through `analysis.phospho` (ENGINES.md).
 
 ### Confirmed and assumed
@@ -415,9 +454,23 @@ with 8 fractions takes (`timeout_minutes`).
 - Writes `experimental_annotation.tsv`.
 - Note the regex assumes plex index `1` and a single-token condition. Real
   headers look like `DMSO_1_126`.
-- **Ported** (`ionomos/downstream/tmt.py`), byte-identical to the R script.
+- **Ported** (`ionomos/downstream/tmt.py`), byte-identical to the R script
+  for a search with one plex (`tests/golden/R_experimental_annotation.tsv`).
   When names don't follow the pattern the file is empty (as in R); the report
   then takes the condition from the text before the first `_` and says so.
+- **Multi-plex extension** (#155; the R script would keep plex 1 only): when
+  the search had several plexes (FragPipe experiments), names
+  `condition_<k>_channel` are kept for every plex number `k` (what
+  `ionomos tmt suggest --plexes` and the channel editor write), `plex` is `k`,
+  `sample_name` is the whole name (dropping `_<k>_` would give
+  `DMSO_1_127N` and `DMSO_2_127N` the same name) and `replicate` runs on
+  within a condition across the plexes, so no number repeats. `TMT_NAME_PATTERN`
+  then asks for `condition_plex_channel`, which also satisfies
+  `TMT_DUPLICATE_NAME`.
+- **FragPipe-Analyst's** `results/fragpipe-analyst/experiment_annotation.tsv`
+  carries each sample's plex (1, 2 … in the plexes' order) and channel, from
+  the channel maps FragPipe used (annotation files / `experiment.yaml`, else
+  the name), and replicate numbers used once per condition.
 
 ## DIA
 

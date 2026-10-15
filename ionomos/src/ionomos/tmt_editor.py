@@ -63,6 +63,8 @@ class ChannelMap:
     add_ref: str = ""               # tmtintegrator.add_Ref (-1: a reference sample, which must carry the tag)
     sources: dict[str, str] = field(default_factory=dict)   # plex -> where its map came from (words)
     initial: dict = field(default_factory=dict)              # the block it was loaded from (changed())
+    cleared: tuple = ((), "")    # (channels whose names the last label switch put aside, the label they were on)
+    _aside: dict = field(default_factory=dict, repr=False)   # (plex, channel) -> Channel, until a label has it again
 
     # ------------------------------------------------------------- building --
 
@@ -197,15 +199,25 @@ class ChannelMap:
             if p not in self.plexes:
                 del self.sources[p]
 
-    def set_label(self, label: str) -> None:
-        """Another label type: its channels, in its order; what was on a channel it also has is kept."""
+    def set_label(self, label: str) -> list[str]:
+        """Another label type: its channels, in its order; what was on a channel it also has is kept. The names on
+        channels it does not have are put aside (summary() says which) and come back when a label type with those
+        channels is picked again (#156: switching TMT-16 -> TMT-10 dropped 131C-134N without a word, for good).
+        Returns the channels whose names were put aside."""
         lt = tmtkit.label_type(label)
         if lt is None:
-            return
-        self.label = lt.name
+            return []
+        old, self.label = self.label, lt.name
+        cleared: list[str] = []
         for p, rows in self.plexes.items():
             by = {c.channel: c for c in rows}
-            self.plexes[p] = [by.get(ch) or Channel(ch) for ch in lt.channels]
+            for c in rows:
+                if c.channel not in lt.channels and c.role != NA:
+                    self._aside[(p, c.channel)] = c
+                    cleared.append(c.channel)
+            self.plexes[p] = [by.get(ch) or self._aside.pop((p, ch), None) or Channel(ch) for ch in lt.channels]
+        self.cleared = (list(dict.fromkeys(cleared)), old) if cleared else ((), "")
+        return list(self.cleared[0])
 
     def row(self, plex: str, channel: str) -> Channel:
         key = tmtkit.channel_key(channel) or str(channel)
@@ -244,6 +256,8 @@ class ChannelMap:
         for p in self.plexes:
             self.plexes[p] = [Channel(c) for c in self.channels()]
         self.sources.clear()
+        self._aside.clear()
+        self.cleared = ((), "")
 
     def suggest(self, conditions, replicates, reference=None, reference_name: str = REFERENCE_NAME) -> None:
         """Suggest…: tmtkit.suggest_channels for every plex (the plex's position in the names). Raises
@@ -350,6 +364,11 @@ class ChannelMap:
         if self.workflow_label:
             head += (", as the workflow" if not self.label_warning() else f"; the workflow says {self.workflow_label}")
         out = [head]
+        gone, was = self.cleared
+        if gone:
+            out.append(f"the names on {', '.join(gone[:6])}{' …' if len(gone) > 6 else ''} were put aside: "
+                       f"{self.label} has no such channel{'s' if len(gone) != 1 else ''} (pick {was} again to get "
+                       f"them back)")
         if self.is_empty():
             out.append("no channel named yet: FragPipe would name them <plex>_<channel>, and the report would not "
                        "know your conditions. Suggest… fills the grid from a few answers")
@@ -378,8 +397,8 @@ class ChannelMap:
 
 
 def _label_name(text: str) -> str:
-    lt = tmtkit.label_type(text)
-    return lt.name if lt else ""
+    """FragPipe's name for the label type (#154: an iTRAQ-4 map stays iTRAQ-4, never the default TMT-10)."""
+    return tmtkit.fragpipe_label(text)
 
 
 def _label_for_count(n: int) -> str:
@@ -490,7 +509,7 @@ class TmtEditorFrame:
         ttk.Label(top, text="Label type").pack(side="left")
         self.label_v = tkutil.StringVar(value=model.label)
         self.label_cb = ttk.Combobox(top, textvariable=self.label_v, values=list(tmtkit.LABEL_TYPES),
-                                     state="readonly", width=8)
+                                     state="readonly", width=10)
         self.label_cb.pack(side="left", padx=4)
         self.label_cb.bind("<<ComboboxSelected>>", lambda _e: self._label_chosen())
         self.read_btn = ttk.Button(top, text="Read annotation.txt from the folder", command=self.read)

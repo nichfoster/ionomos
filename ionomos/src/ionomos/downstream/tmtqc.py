@@ -35,6 +35,7 @@ tmt-report header is checked.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import random
@@ -545,6 +546,8 @@ def run_folder(folder: Path, record: dict | None = None, workdir: Path | None = 
                   | {str(m.get("experiment")) for m in ((record or {}).get("plan") or {}).get("manifest") or []})
     maps, _src = maps_for(folder, record, exps)
     tmt = (((record or {}).get("plan") or {}).get("overrides") or {}).get("tmt") or {}
+    with contextlib.suppress(tmtkit.TmtError):
+        tmt = tmtkit.current_block(folder, tmt)[0]  # the map the search used (#147), not intake's
     reference = list(getattr(settings, "tmt_reference", None) or []) or tmtkit._refs(tmt.get("reference_channel"))
     limits = {"min_labelling": getattr(settings, "tmt_min_labelling", None),
               "min_purity": getattr(settings, "tmt_min_purity", None)}

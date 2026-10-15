@@ -389,7 +389,8 @@ pop-up. After fixing the cause, press **Retry**; the earlier output is kept.
 - **experiment.yaml tmt: ...** (TMT): the channel list doesn't fit what
   FragPipe accepts. List every channel of the label type once, with one
   sample name without spaces per channel, `NA` for an unused channel, and
-  no name twice.
+  no name twice. Fix `tmt:` in the experiment folder's `experiment.yaml` (or
+  on the Analysis tab), then Retry: the Retry reads the file again.
 - **A path has a space in it** (DIA-NN): DIA-NN can't take spaces in paths.
   Rename the folder or file.
 - **The experiment folder is gone**: it was moved or renamed after filing.
@@ -1172,8 +1173,11 @@ report; they update live. See [Why are there no hits?](#faq.no-hits)
 ## The volcano plot wasn't written {#issue.NO_VOLCANO}
 
 The statistics exist, but the plot file is missing: the results folder is
-read-only or the disk is full. Check free space and that `results\` can be
-written, then **Re-run analysis**.
+read-only, the disk is full, or the path is longer than Windows opens (260
+characters, a deeply nested experiment folder). Check free space and that
+`results\` can be written, move a deeply nested folder up, then **Re-run
+analysis**. (Long condition names, such as runs named after their files, are
+shortened in file names since #157, so they alone no longer cause it.)
 
 ## Enrichment was incomplete {#issue.ENRICHMENT}
 

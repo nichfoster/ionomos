@@ -196,13 +196,24 @@ def _load_quantities(method: str | None, workdir: Path, results: Path, record: d
             return None, files, ["no tmt-report/abundance_*.tsv found (did TMT-Integrator run?)"]
         if quant.tmt_table_note(ab):
             notes.append(quant.tmt_table_note(ab))
-        ann_path = tmt.write_annotation(ab, results / "experimental_annotation.tsv")
+        plexes = tmt.experiments(workdir, record)
+        multiplex = len(plexes) > 1   # the lab file's multi-plex extension (tmt.py, #155)
+        ann_path = tmt.write_annotation(ab, results / "experimental_annotation.tsv", multiplex)
         files.append(ann_path)
-        ann = tmt.annotation_rows(read_header(ab))
+        ann = tmt.annotation_rows(read_header(ab), multiplex)
         if not ann:
-            notes.append("TMT sample names don't follow condition_1_channel (e.g. DMSO_1_126), so the lab's "
-                         "annotation file is empty; conditions were taken from the text before the first '_'")
-        return quant.from_tmt_abundance(ab, ann), files, notes
+            notes.append(tmt.NAME_NOTE)
+        m = quant.from_tmt_abundance(ab, ann)
+        try:  # each sample's plex and channel, for the FragPipe-Analyst export and the PCA (#155)
+            from ionomos.downstream import tmtqc
+
+            dest = workdir.parent if workdir.name == "fragpipe" else workdir
+            plex_of, channel_of = tmt.plexes_and_channels(m.samples, tmtqc.maps_for(dest, record, plexes)[0])
+        except (OSError, ValueError):
+            plex_of, channel_of = {}, {}
+        if plex_of:
+            m.meta["plex"], m.meta["channel"] = plex_of, channel_of
+        return m, files, notes
     if method == "DIA":
         pg = _find(workdir, "report.pg_matrix.tsv", "*pg_matrix.tsv")
         if pg is None:
@@ -471,7 +482,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     if loaded is not None:
         m, files, lnotes = loaded
         out.files += files
-        notes += lnotes
+        notes += tmt.name_note(lnotes, m, settings)   # not when the conditions were given, not guessed (#158)
         if m is not None:
             notes += m.notes
             notes += stage("input-check", guards.check_input, m) or []  # implausible values, repeated names (D60)

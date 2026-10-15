@@ -168,7 +168,7 @@ def test_tmt_annotations():
 
 def test_tmt_block_is_checked_with_tmtkit():
     """D91: a tag Ionomos does not know, or a typo in a key, is said at intake with the known values."""
-    with pytest.raises(OverridesError, match="tag 'TMT10plexx' is not a label type Ionomos knows; use one of TMT-6"):
+    with pytest.raises(OverridesError, match="tag 'TMT10plexx' is not a label type FragPipe knows; use one of TMT-6"):
         parse_overrides({"tmt": {"tag": "TMT10plexx", "channels": {"126": "x"}}})
     with pytest.raises(OverridesError, match=r"unknown key\(s\) reference \(known: tag, channels, plexes"):
         parse_overrides({"tmt": {"channels": {"126": "x"}, "reference": 126}})
