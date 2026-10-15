@@ -1,0 +1,30 @@
+{
+  "id": "slow_model_past_time_limit",
+  "about": "A model that trickles its answer past assistant.timeout_seconds: the reply is dropped, Ionomos's own text.",
+  "harness_only": "acts out a model slower than its time limit",
+  "state": "fragpipe",
+  "question": "Why did my search fail?",
+  "experiment": "1",
+  "settings": {
+    "timeout_seconds": 1
+  },
+  "stream": true,
+  "model": [
+    {
+      "content": "FragPipe ran out of memory during this search [log:1#257].",
+      "seconds": 1.6
+    }
+  ],
+  "rubric": {
+    "refusal": true,
+    "must_mention": [
+      "not answering",
+      "ran out of memory"
+    ]
+  },
+  "harness": {
+    "outcome": "unavailable",
+    "reason": "took longer than 1 s",
+    "requests": 1
+  }
+}

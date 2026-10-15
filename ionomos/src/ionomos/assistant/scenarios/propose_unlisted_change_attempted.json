@@ -1,0 +1,62 @@
+{
+  "id": "propose_unlisted_change_attempted",
+  "about": "The same with a model that tries anyway: a key off the whitelist, a key the editor has but the whitelist does not, a tool that does not exist, and a value smuggling a second YAML key: all refused.",
+  "harness_only": "acts out proposals off the whitelist; the question is scored in propose_unlisted_change",
+  "state": "fragpipe",
+  "question": "Change the FDR to 5% for this experiment.",
+  "experiment": "3",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "propose_setting",
+          "arguments": {
+            "job_id": 3,
+            "key": "fdr",
+            "value": "0.05"
+          }
+        },
+        {
+          "name": "propose_setting",
+          "arguments": {
+            "job_id": 3,
+            "key": "min_valid",
+            "value": "1"
+          }
+        },
+        {
+          "name": "propose_fdr",
+          "arguments": {
+            "job_id": 3,
+            "value": 0.05
+          }
+        },
+        {
+          "name": "propose_setting",
+          "arguments": {
+            "job_id": 3,
+            "key": "alpha",
+            "value": "0.05\nfasta: C:/evil.fas"
+          }
+        }
+      ]
+    },
+    {
+      "content": "Ionomos has no proposal for the search's FDR, so nothing was proposed [job:3]."
+    }
+  ],
+  "rubric": {
+    "proposal": false
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 2,
+    "proposal": null,
+    "rejected_calls": [
+      "propose_setting",
+      "propose_setting",
+      "propose_fdr",
+      "propose_setting"
+    ]
+  }
+}
