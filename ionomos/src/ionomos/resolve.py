@@ -203,7 +203,7 @@ def role_view(files: list[DraftFile], method: str, control: str, d: Draft, chose
     except AnalysisError:
         s = replace(Settings(), control_keywords=tuple(d.control_keywords) or Settings().control_keywords,
                     control=pin or None)
-    return roles.preview(replicates(files), s, chosen, "intensity", method)
+    return roles.preview(replicates(files), s, chosen, "intensity", method, name=d.folder)
 
 
 def _ranges(nums: list[int]) -> str:

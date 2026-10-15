@@ -230,12 +230,13 @@ def dump_config(d: dict) -> str:
     a(f"  control_keywords: {_y(list(an.get('control_keywords') or []))}   # how the control condition is recognised")
     a(f"  competition_keywords: {_y(list(an.get('competition_keywords') or []))}   # a word of a condition name that "
       "means 'plus a competitor' (Probe_Comp): its comparisons follow the design")
-    for k in ("competition_keywords_weak", "role_comparisons", "small_group_min_valid"):  # roles: D61
+    for k in ("competition_keywords_weak", "background_keywords", "role_comparisons",
+              "small_group_min_valid"):  # roles: D61, D88
         if an.get(k) not in (None, ""):
             a(f"  {k}: {_y(list(an[k]) if isinstance(an[k], (list, tuple)) else an[k])}")
     if isinstance(an.get("roles"), dict) and an["roles"]:
-        a("  roles:   # condition -> control | compound | competition of <compound> | reference | qc (usually per "
-          "experiment, in experiment.yaml)")
+        a("  roles:   # condition -> control | compound | competition of <compound> | reference | qc | background "
+          "(usually per experiment, in experiment.yaml)")
         for k, v in an["roles"].items():
             a(f"    {_y(str(k))}: {_y(v)}")
     for k in ("impute_shift", "impute_scale", "seed", "pca_features", "heatmap_max", "control", "variance_prior",

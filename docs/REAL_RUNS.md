@@ -118,7 +118,11 @@ Analysis tab (0.18.0) then analysed the FragPipe folder (D80).
   control keyword), with the vehicle as *the* control. So the comparison is
   "empty vector vs vehicle", and proteins enriched by the bait are listed as
   *down*. The numbers are correct; the direction is easy to misread for a
-  pull-down. [Open](#open)
+  pull-down. Since D88 (unreleased) such a condition is a pull-down's
+  *background*: on this matrix it is read from its name and the data, the
+  comparisons become `FPS vs DMSO`, `DMSO vs EV` and `FPS vs EV` (153
+  proteins up in `DMSO vs EV`), and the EV samples are left out of the
+  global filter and normalised apart.
 - **Leaving the empty-vector runs out failed a stage.** Re-run with
   `exclude_samples: [EV_1, EV_2, EV_3]`, the run-order stage stopped with
   `KeyError: 'EV_2'`. The manifest's map of samples to runs still held the
@@ -172,7 +176,11 @@ What was checked:
 **Conclusion: a settings difference (the missing-value filter), not an
 error in the port.** A global filter of 66 % with three conditions of three
 removes everything seen in only one condition, which in a pull-down or a
-treatment is often the interesting part. Ionomos' own default (0 % of all
+treatment is often the interesting part. Sheena, 2026-10-09: the three
+empty-vector runs are the negative control of the FLAG IP, there to show
+the bait is enriched; they see little beyond what sticks to the beads, so
+many proteins are *expected* to be missing from them, and she would not
+use a global filter on this design. Ionomos' own default (0 % of all
 samples, 50 % of one condition) keeps it. It is then tested (q 0.10 with
 median centring: not a hit, because the imputed values vary) and listed
 under "only in one condition". **Also a gap in the
@@ -203,6 +211,6 @@ port handles each of these, but no golden pins them.
 | 2026-10-06 | A global filter removes what one condition alone has, before testing | Fixed in D84: listed (marked) under "only in one condition", and the `FILTER_REMOVES_ONE_CONDITION` warning. Open: should the Analysis tab caution before the run? |
 | Job 1 | Two runs missing from DIA-NN's matrix | Read job 1's console log for the two DMSO files |
 | 2026-10-06 | FragPipe's `contam_` prefix is lost in DIA-NN's tables, so contaminants stay and BSA reads as `ALB` | Fixed in code (D87): the FASTA's `contam_` accessions are removed. Re-analyse the 2026-10-06 folder on the next release; "contaminants" should show −2 or more (P02769, P00761) |
-| 2026-10-06 | An empty-vector control next to the vehicle: bait-enriched proteins read as "down" | Decide how a pull-down's background control is shown (ROADMAP) |
+| 2026-10-06 | An empty-vector control next to the vehicle: bait-enriched proteins read as "down" | Done in D88 (unreleased): the `background` role; the lab confirms its words and thresholds (ROADMAP) |
 | 2026-10-06 | FragPipeAnalystR golden doesn't cover a real matrix's shape | Add a case with interleaved columns, a duplicated gene and a blank gene |
 | Job 2 | How it ended | Its `ionomos.json` / `DONE.txt`, `run_fingerprint.json` |

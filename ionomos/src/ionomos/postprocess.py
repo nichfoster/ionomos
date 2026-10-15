@@ -199,9 +199,21 @@ def inspect_folder(dest: Path, cfg, method: str | None = None, table: Path | Non
     except (OSError, ValueError):
         pass
     meta = (m.meta or {}) if m is not None else {}
+    background = None
+    if m is not None:  # what the data say about a pull-down's negative control (roles.py, D88), for the Roles list
+        try:
+            from ionomos.downstream import analysis, roles
+
+            lab = {**p["lab"], **p["overrides"]}
+            words = lab.get("background_keywords")
+            st = analysis.Settings(background_keywords=tuple(words)) if words else analysis.Settings()
+            background = roles.background_evidence(m, st, dest.name)
+        except Exception:  # noqa: BLE001 - the editor still opens, read from the names
+            background = None
     return {"method": found, "source": m.source if m else None, "features": len(m.features) if m else 0,
             "kind": m.kind if m else None, "exp": m.exp if m else "",
             "sdrf_roles": dict(meta.get("roles") or {}), "sdrf_file": (meta.get("sdrf") or {}).get("file") or "",
+            "background": background,
             "samples": samples, "notes": p["notes"] + notes, "overrides": p["overrides"], "workdir": workdir,
             "report": dest / downstream.RESULTS / "report.html", "issues": issues,
             "job_id": (p["record"].get("job_id") if isinstance(p["record"], dict) else None)}

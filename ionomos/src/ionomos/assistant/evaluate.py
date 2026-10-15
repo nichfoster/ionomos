@@ -37,6 +37,7 @@ from pathlib import Path
 from ionomos import names
 from ionomos.assistant import client, scenarios
 from ionomos.assistant.scenarios import states
+from ionomos.buildinfo import platform_text
 
 PASS_RATE = 0.90          # ROADMAP 6.1 exit: >= 90 % pass on must / must-not
 TTFT_LIMIT_S = 20.0       # ... and median time to first token < 20 s on the idle PC
@@ -205,7 +206,7 @@ def run(settings: dict, *, workdir: Path | str, only=None, corpus: list[dict] | 
         "created": datetime.now().astimezone().isoformat(timespec="seconds"),
         "ionomos": __version__,
         "python": platform.python_version(),
-        "platform": platform.platform(terse=True),
+        "platform": platform_text(terse=True),
         "model": settings["model"],
         "models_seen": sorted({r.model for r in results if r.model}),
         "base_url": settings["base_url"],

@@ -553,7 +553,6 @@ def diagnostics(config_path: Path, log_lines: int = 150) -> str:
     import datetime
     import json
     import os as _os
-    import platform
 
     from ionomos import fragpipe, health
     from ionomos import ledger as ledger_mod
@@ -566,10 +565,10 @@ def diagnostics(config_path: Path, log_lines: int = 150) -> str:
         a(f"=== {title} " + "=" * max(0, 60 - len(title)))
         a((body or "").rstrip() or "(nothing)")
 
-    from ionomos.buildinfo import one_line
+    from ionomos.buildinfo import one_line, platform_text
 
     a(f"{one_line()}  {datetime.datetime.now():%Y-%m-%d %H:%M:%S}")
-    a(f"python {sys.version.split()[0]}  {platform.platform()}  exe={sys.executable}")
+    a(f"python {sys.version.split()[0]}  {platform_text()}  exe={sys.executable}")
     src = source_checkout()
     if getattr(sys, "frozen", False):
         install = "frozen exe"

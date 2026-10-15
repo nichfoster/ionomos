@@ -26,6 +26,7 @@ from datetime import datetime
 from pathlib import Path
 
 from ionomos import __version__, fragpipe, names
+from ionomos.buildinfo import platform_text
 
 log = logging.getLogger("ionomos.fingerprint")
 
@@ -173,7 +174,7 @@ def build(spec: fragpipe.RunSpec, res: fragpipe.RunResult, attempt: int = 0, fin
         "fingerprint": FORMAT,
         "ionomos": __version__,
         "written_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-        "platform": {"system": platform.platform(), "python": platform.python_version(), "cpus": os.cpu_count()},
+        "platform": {"system": platform_text(), "python": platform.python_version(), "cpus": os.cpu_count()},
         "job": {"id": spec.job_id, "method": spec.method, "kind": spec.kind or spec.method, "attempt": attempt,
                 "experiment_folder": spec.dest.name},
         "engine": {"name": spec.engine_name, "version": fp_version, "launcher": str(spec.exe),

@@ -270,8 +270,9 @@ features × samples matrix of log2 values and runs the same statistics:
   vs the rest), or an explicit `comparisons:` list. isoDTB: each condition's
   ratios vs 0 (moderated one-sample test).
 - **Roles** (`downstream/roles.py`, D61). Each condition is a control, a
-  compound, a competition (probe plus competitor), a pooled reference or a
-  QC standard, read from its name, from `analysis.roles`, or from an SDRF's
+  compound, a competition (probe plus competitor), a pooled reference, a
+  QC standard or a pull-down's background (negative control, D88), read from
+  its name, from `analysis.roles`, or from an SDRF's
   `characteristics[role]` column. With a competition condition the default
   comparisons are compound vs control, competition vs its compound and
   competition vs control (see "Competition experiments" below). isoDTB is
@@ -379,6 +380,7 @@ features × samples matrix of log2 values and runs the same statistics:
   | SMALL_GROUP | decide | a group is too small and not even a fold change could be computed |
   | ROLES_UNSURE | decide | a condition's role can't be told from its name (`Probe_pre`, `Probe_10x`), or a competition can't be linked to one compound; the guess is used meanwhile (D61) |
   | COMPETITION_DESIGN | note | read as a competition experiment: the roles and comparisons chosen, and how to change them (D61) |
+  | PULLDOWN_DESIGN | note | read as a pull-down with a negative control (empty vector, beads, IgG): the comparisons against it, the filter and normalisation that leave it apart, and how to change it (D88) |
   | LOW_CONFIDENCE | note | a group has one sample (or fewer than `min_valid`): tested anyway, p borrowed from the replicated groups (D32) |
   | FOLD_CHANGE_ONLY | note | no replicates anywhere (1 vs 1, one isoDTB replicate, a table without p): fold change only |
   | LOW_SAMPLE | decide | a sample has < 40 % of the median identifications (failed injection?) |
@@ -496,11 +498,43 @@ compound named by the rest of it (or the only compound).
   of the name is another condition (`Probe_pre` next to `Probe`); the
   analysis runs on that reading and asks (`ROLES_UNSURE`).
 
+**Pull-downs with a negative control** (`downstream/roles.py`, D88). An IP
+with an empty vector, beads only, IgG or an untagged bait next to the
+pull-downs: that condition is the *background*. Its name has `EV`, `empty`,
+`emptyvector`, `vector`, `beads`, `IgG`, `isotype`, `untagged`, `nobait` or
+`mockIP` as a word (`background_keywords`), **and** its samples miss
+clearly more proteins than the others (at least 1.5 times as many and 3
+points more, *and* at least 10 proteins measured in every other sample and
+none of its). The name alone is not enough: an empty vector is also the
+plain control of an over-expression. With the data alone it is only
+suggested. When the folder's name says pull-down (`IP`, `coIP`, `pulldown`,
+`APMS`, `BioID`, `TurboID`, `APEX`; not a tag such as FLAG or HA, which
+over-expressions carry too) but the data don't show it, the condition is
+read as the background and compared against, marked unsure, and processed
+with the others.
+
+| Comparison | Reads as |
+|---|---|
+| each pull-down (control, compound, competition) vs the background | enrichment over the negative control (up = pulled down) |
+| compound vs control | what the compound changes in the pull-down |
+
+- The background is not compared with the control (`EV vs DMSO` would put
+  everything the bait pulls down as *down*).
+- When the data agree (or `analysis.roles` says so): the missing-value
+  filter across all samples doesn't count the background samples, as most
+  proteins are expected to be missing there, and
+- normalisation is done within the pull-downs and within the background,
+  never one against the other (`fpa.normalize_apart`); `auto`'s composition
+  check looks at the pull-downs only.
+- Set it yourself with `roles: {EV: background}` (or `negative control`), or
+  `roles: {EV: control}` to stop it.
+
 ```yaml
 analysis:                      # experiment.yaml (one experiment) or config.yaml (lab)
   roles: {DMSO: control, Probe: compound, Probe_Comp: competition of Probe}
   competition_keywords: [comp, competition, competitor, competed, compete, competing, excess]
   competition_keywords_weak: [pre, pretreat, pretreated, pretreatment, block, blocked, blocking, cold]
+  background_keywords: [ev, empty, emptyvector, vector, beads, bead, beadsonly, igg, isotype, untagged, nobait, mockip]
   role_comparisons: true       # false: every condition vs the control, as before
 ```
 

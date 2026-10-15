@@ -797,7 +797,7 @@ def test_preview_marks_the_weak_keywords_to_confirm_and_a_confirmation_settles_t
     assert comp.label == "competition (compound not known)" and comp.confirm and not comp.confirmable
     values = [v for _s, v in roles.role_choices(view, "Comp")]
     assert values == ["", "control", "compound", "competition of A", "competition of B", "competition", "reference",
-                      "qc"]
+                      "qc", "background"]
     linked = roles.preview({"DMSO": 2, "A": 3, "B": 3, "Comp": 3}, Settings(), {"Comp": "competition of B"})
     assert ("Comp", "B") in linked.pairs and not any(r.confirm for r in linked.rows)
 
