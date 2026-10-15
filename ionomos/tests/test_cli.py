@@ -1,3 +1,6 @@
+import os
+from pathlib import Path
+
 from ionomos.cli import main
 from tests.conftest import iso_raws, make_drop
 
@@ -104,3 +107,22 @@ def test_analyze_outside_the_lab_ignores_the_pc_lab_config(lab, tmp_path, monkey
     mine = _fc_table(lab["general"] / "EJQ", "20260901-DIA_EJQ-1.tsv")
     assert main(["analyze", str(mine), "--quiet", "--no-enrichment"]) == 0
     assert "(a lab experiment)" in capsys.readouterr().out
+
+
+def test_testbed_init_warns_when_the_folder_leaves_no_room_for_long_paths(tmp_path, monkeypatch, capsys):
+    """#138: a testbed 150 characters deep with Windows long paths off fails its searches on 260+ character
+    paths; init now says so, as stress already did."""
+    import types
+
+    from ionomos import preflight, testbed
+
+    fake = types.SimpleNamespace(**{k: getattr(os, k) for k in dir(os) if not k.startswith("__")})
+    fake.name = "nt"
+    monkeypatch.setattr(testbed, "os", fake)
+    monkeypatch.setattr(preflight, "_long_paths_enabled", lambda: False)
+    deep = Path("C:/" + "d" * 150)
+    note = testbed.path_room_note(deep)
+    assert note and "long paths are off" in note and "past Windows' 260" in note
+    assert testbed.path_room_note(Path("C:/bed")) is None
+    monkeypatch.setattr(preflight, "_long_paths_enabled", lambda: True)
+    assert testbed.path_room_note(deep) is None

@@ -219,6 +219,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rightly found nothing. The key's words are now fragments: found inside the
   names they belong to, and on their own only when distinct (KL6159A), so
   `inspect` agrees with the leak check on the same zip.
+- **A search that fails on a path longer than Windows allows is explained as
+  that, not as "ended from outside, nothing in the search failed: Retry"**
+  (#138). A missing-file error (Java's FileNotFoundException or
+  NoSuchFileException, Python's FileNotFoundError) naming a path of 240+
+  characters gets "A path got longer than Windows allows (260 characters with
+  long paths off): shorten the experiment folder and raw file names, or move
+  the users folder nearer the drive root". And a log that ends in a traceback
+  or an ERROR line Ionomos does not know is no longer read as "stopped in the
+  middle of a step without saying why" (which led to "ended from outside"):
+  it says the search stopped on an error Ionomos does not recognise and
+  points at the log's last lines. `ionomos testbed init` warns when Windows
+  long paths are off and its folder is so deep that the samples' searches
+  would pass 260 characters.
 - **A drop whose path is longer than Windows allows is rejected once, not
   ignored or retried for ever** (#139). With long paths off, a folder of 260+
   characters cannot be stat'ed, so the watcher skipped it in silence on every
