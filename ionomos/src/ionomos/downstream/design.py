@@ -89,10 +89,24 @@ def _block_values(m, spec, pattern: str) -> tuple[str, dict[str, str]]:
             raise DesignError("block: replicate needs every sample's replicate number, and these have none: "
                               + ", ".join(miss[:5]))
         return "replicate", {s: str(m.replicate[s]) for s in m.samples}
-    miss = [s for s in m.samples if s not in spec]
+    miss = [s for s in m.samples if s not in spec or _missing(spec[s])]
     if miss:
         raise DesignError("block: these samples have no block: " + ", ".join(miss[:5]))
     return "block", {s: str(spec[s]) for s in m.samples}
+
+
+MISSING_WORDS = {"na", "n/a", "#n/a", "nan", "null", "-", "inf", "-inf", "+inf", "infinity", "-infinity",
+                 "not available", "not applicable"}  # tables.NA_STRINGS, and the SDRF's words for no value
+
+
+def _missing(v) -> bool:
+    """A covariate cell with no value: empty, NA / NaN / not available (SDRF), or a number that isn't finite. Such
+    a cell must not become a factor level of its own ("NA" next to 1 and 2)."""
+    if v is None or isinstance(v, bool):
+        return v is None
+    if isinstance(v, (int, float)):
+        return not math.isfinite(v)
+    return str(v).strip().lower() in MISSING_WORDS or not str(v).strip()
 
 
 def _num(v) -> float | None:
@@ -139,7 +153,7 @@ def build(m, block="", block_from: str = "", covariates: dict | None = None) -> 
         cols += cc
         formula.append(name)
     for cname, spec in covariates.items():
-        miss = [s for s in samples if s not in spec or spec[s] is None or str(spec[s]).strip() == ""]
+        miss = [s for s in samples if s not in spec or _missing(spec[s])]
         if miss:
             raise DesignError(f"covariate {cname!r} has no value for: " + ", ".join(miss[:5]))
         nums = {s: _num(spec[s]) for s in samples}
@@ -236,13 +250,13 @@ class LmFit:
 
 def lm_fit(values: Matrix, x: list[list[float]]) -> LmFit:
     """limma lmFit on a design matrix (samples × columns), row by row with missing values dropped.
-    Rows sharing a pattern of missing values share one QR."""
+    Rows sharing a pattern of missing values share one QR. NaN and ±inf are missing (lmFit: is.finite)."""
     p = len(x[0]) if x else 0
     nan = math.nan
     cache: dict[tuple, tuple] = {}
     coefs, sus, s2s, dfs = [], [], [], []
     for row in values:
-        obs = tuple(j for j, v in enumerate(row) if v is not None and not math.isnan(v))
+        obs = tuple(j for j, v in enumerate(row) if v is not None and math.isfinite(v))
         if not obs:
             coefs.append([nan] * p)
             sus.append([nan] * p)
@@ -373,6 +387,8 @@ def moderated_f(t_rows: list[list[float]], cov_contrasts: list[list[float]], df2
     """limma classifyTestsF(fstat.only = TRUE) + pf: (F, p, df1). t_rows: moderated t per row per contrast;
     cov_contrasts: C'(X'X)^-1 C (its correlation decorrelates the t's); df2: d0 + residual df per row."""
     k = len(cov_contrasts)
+    if not k:  # no contrast (a single condition): nothing to test, so no F and no p-value (D32)
+        return [math.nan] * len(t_rows), [math.nan] * len(t_rows), 0
     diag = [cov_contrasts[i][i] or 1.0 for i in range(k)]
     cor = [[cov_contrasts[i][j] / math.sqrt(diag[i] * diag[j]) for j in range(k)] for i in range(k)]
     vals, vecs = _eigen_sym(cor)
@@ -436,7 +452,7 @@ def _eigen_sym(a: list[list[float]], sweeps: int = 100):
 def _group_stats(values: Matrix, idx: list[int]):
     ns, means = [], []
     for row in values:
-        xs = [row[j] for j in idx if row[j] is not None]
+        xs = [row[j] for j in idx if row[j] is not None and math.isfinite(row[j])]
         ns.append(len(xs))
         means.append(sum(xs) / len(xs) if xs else math.nan)
     return ns, means

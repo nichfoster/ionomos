@@ -218,10 +218,12 @@ def normalise(m: QuantMatrix, settings) -> tuple[QuantMatrix, dict | None, list[
                 obs = [row[j] for j in cols] if cols and all(row[j] is not None for j in cols) else []
             if obs:
                 per[p] = _log_mean(obs)
-        if not per:
+        if not per and use == "sum":  # no complete plex: the row stays as it was (df_spent counts no plex for it)
             continue
-        g = sum(per.values()) / len(per)
-        scaled += 1
+        # reference: a plex without a reference value gets missing values, rather than unscaled ones (D48), also
+        # when no plex has one (the row was left unscaled, its plexes apart, among scaled rows)
+        g = sum(per.values()) / len(per) if per else 0.0
+        scaled += 1 if per else 0
         for p, ix in groups.items():
             for j in ix:
                 if vals[i][j] is None:

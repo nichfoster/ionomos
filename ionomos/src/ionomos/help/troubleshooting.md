@@ -1046,7 +1046,9 @@ blocks). The message says why. Common causes:
   condition, e.g. a batch processed one condition at a time. Then the batch
   and the treatment can't be told apart, and no model can fix that.
 - **A sample has no block or covariate value:** a typo in a sample name, or
-  samples renamed or left out since the design was written.
+  samples renamed or left out since the design was written. `NA`, `NaN`,
+  `not available` and an empty cell all count as no value: a sample without
+  one can't be fitted, and an unknown is never a block or level of its own.
 - **Too many blocks or covariates for the number of samples.**
 
 Fix the `analysis:` settings in `experiment.yaml` and re-run. In a paired

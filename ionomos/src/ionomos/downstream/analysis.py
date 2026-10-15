@@ -232,11 +232,20 @@ class AnalysisError(ValueError):
 
 def parse_comparison(c) -> tuple[str, str]:
     if isinstance(c, (list, tuple)) and len(c) == 2:
-        return str(c[0]).strip(), str(c[1]).strip()
-    m = re.match(r"^\s*(.+?)\s+(?:vs\.?|versus|/|-vs-)\s+(.+?)\s*$", str(c), re.IGNORECASE)
-    if not m:
-        raise AnalysisError(f"comparison {c!r} must look like 'Drug vs DMSO' or [Drug, DMSO]")
-    return m.group(1), m.group(2)
+        out = str(c[0]).strip(), str(c[1]).strip()
+    else:
+        m = re.match(r"^\s*(.+?)\s+(?:vs\.?|versus|/|-vs-)\s+(.+?)\s*$", str(c), re.IGNORECASE)
+        if not m:
+            raise AnalysisError(f"comparison {c!r} must look like 'Drug vs DMSO' or [Drug, DMSO]")
+        out = m.group(1), m.group(2)
+    _not_itself(*out)
+    return out
+
+def _not_itself(treatment: str, control: str) -> None:
+    """A condition against itself has no difference to test: every p-value would be 1 (D32: none is invented)."""
+    if treatment == control:
+        raise AnalysisError(f"comparison '{treatment} vs {control}' compares {treatment} with itself; name two "
+                            "different conditions, e.g. 'Drug vs DMSO'")
 
 def _bool(v) -> bool:
     return v if isinstance(v, bool) else str(v).strip().lower() in ("1", "true", "yes", "on")
@@ -670,6 +679,7 @@ def choose_comparisons(m: QuantMatrix, s: Settings) -> tuple[list[tuple[str, str
         return [(c, None) for c in conds], notes
     if s.comparisons:
         for t, c in s.comparisons:
+            _not_itself(t, c)
             for x in (t, c):
                 if x not in conds:
                     raise AnalysisError(f"comparison uses {x!r}, which is not a condition here "
@@ -752,7 +762,7 @@ def _classic(p: fpa.Processed, a: str, b: str, s: Settings) -> fpa.ContrastResul
         nb.append(len(xb))
         ma.append(stats.mean(xa))
         mb.append(stats.mean(xb))
-        if len(xa) >= s.min_valid and len(xb) >= s.min_valid:
+        if len(xa) >= s.min_valid and len(xb) >= s.min_valid and a != b:  # a condition against itself: untested
             tv, dfv, pp = (stats.welch_t if s.test == "welch" else stats.student_t)(xa, xb)
             diff.append(stats.mean(xa) - stats.mean(xb))
         else:
