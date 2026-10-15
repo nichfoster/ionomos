@@ -814,6 +814,11 @@ that scorecard, not leaderboards.
   - **Remains (the box stays open):** nothing has run against a real model or runtime,
     so none of the exit criteria is measured. Needs 6.0 first (a model to try), then
     `ionomos ask-eval` on the PC, idle and during a search, and the settings it suggests.
+  - **Round 4 (2026-10-15):** 19 scenarios (85, 53 scored) and `tests/test_assistant_robustness.py`
+    (the audit log under concurrent writers, a trickling model, a 10 MB reply, every tool's bad arguments, an
+    injected help entry, whitelist smuggling); still nothing against a real model. #170 lists what a real model
+    must be scored on (ambiguous questions, the new injections, near-miss tool names, the passive-claim net,
+    whether 120 s for a whole reply fits).
 - [ ] **6.2 Confirmed actions (2–3 weeks).** The proposal tools and the native
   diff-and-confirm dialog. *Exit:* no path runs an action without a click (tested), and
   3 lab members finish the tasks unaided.
@@ -873,7 +878,9 @@ Collected from the other docs; resolve before/during Phase 1.
 - [ ] A channel named `Pool…` is read as a reference even when marked sample (rename it to make it a sample); fine?
 - [ ] TMT-35 (hyperplexing), iTRAQ and DiLeu are passed to FragPipe unchecked. `downstream/plex.py`'s
       `TMT_ORDERS` (Sage / MaxQuant channel order) is separate from `tmtkit.LABEL_TYPES` (FragPipe's); they
-      describe different engines' columns.
+      describe different engines' columns. → 2026-10-15 (#154): iTRAQ-4, iTRAQ-8, TMT-35, TMT-2, TMT-0 and
+      iodoTMT-6 are planned and checked by their channels; sCLIP-6, IBT-16, DiLeu-12, DiLeu-1, DeAla-13 and Trp-2
+      are still passed on unchecked (`TMT_LABEL_UNKNOWN`).
 
 **Machine**
 - [ ] FragPipe 24.0 launcher: from FragPipe's build it is `C:\FragPipe\FragPipe-24.0\bin\fragpipe.bat`, next to
@@ -1112,3 +1119,64 @@ Collected from the other docs; resolve before/during Phase 1.
 - [ ] Phase 5: publish on PyPI as `ionomos` (needs a PyPI account / trusted publisher set up by the maintainer).
 - [x] Agent auto-merge: removed 2026-09-27; a person merges (D31).
 - [x] CI Python versions: 3.11 (floor), 3.12 (exe build), 3.14 (the PC) since 2026-09-27.
+
+**Round 4 (2026-10-15): left open by the robustness audit** (D96–D102; the fixes are in CHANGELOG [Unreleased])
+- [ ] Loaders (D96), not verified on real files: Excel's UTF-16 save of each engine's table, a Spectronaut report
+      from a German Windows, a Proteome Discoverer `.xlsx` export, DIA-NN 2.x `--out` names. A lab member's real
+      exports would settle these. FragPipe's own tables saved again from Excel with thousands separators are still
+      read as all missing (FragPipe never writes them). A MaxQuant TMT table without a design gets one condition
+      per channel; it should be `unassigned` and ask, as Sage TMT does (#165).
+- [ ] Statistics: a dose-response curve is fitted and called for a protein measured at only two doses (#162; check
+      CurveCurator's per-curve `max_missing` rule first); `qc.pca` takes ~6 min on 500 samples (#163); knn
+      imputation is quadratic in features (#164).
+- [ ] Intake: the watcher has no `log_dir`, so what only it can see (a dot-ended folder whose fixed name is taken, a
+      failing loose-file grouping) is logged but not raised as an attention item; pass `log_dir` (or an
+      `on_problem` callback) from `cli.cmd_run`. macOS / Linux: a folder is moved even while a copy still writes
+      into it (no open-file lock there; a longer `stable_seconds` is the guard). How intake tells the window's
+      `resolved_by: gui` from a hand-written one (#173); `ionomos run`'s two start-up tracebacks (#172).
+- [ ] Engines (D97): stop what an engine leaves running after it exits on Windows (a Job Object or a Toolhelp
+      walk, #174); check on the PC whether MSFragger's `BatmassIoThermoServer.exe` outlives MSFragger. A leftover
+      search that can't be stopped must hold the job, not run a second search beside it, and the cancel result
+      can't say the engine survived the kill (#175). The console log keeps every attempt (up to 2 GB each):
+      move aside or truncate an attempt's log past the limit? Does a MaxQuant retry reuse its per-raw working
+      folders next to the raws (stale results) or redo them? DIA-NN reads `diann.cfg` in an unknown encoding:
+      check a path with µ or ü on the PC, or hold a job whose paths are not ASCII.
+- [ ] Config and CLI (D101): `LiveConfig` can read a config.yaml another editor is writing in place (6 of 138 cut
+      points load as a valid config with fewer methods, put right by the next reload); a settle delay would close
+      it. 24 options outside `cli.py` have no `--help` text (#166); `bundle 77` and `library show <missing>` exit
+      the other way round from the table (#167).
+- [ ] Security (D98, D99, SECURITY_NOTES.md): `experiment.yaml`'s `workflow:` / `fasta:` accept any absolute or
+      UNC path, `site_annotation:` a UNC one (#168); an Authenticode check of the downloaded installer (today:
+      size + SHA-256 from the same GitHub answer); `maxquant.create_template` and `sage.run_job` start programs
+      without `batch_problem`; `bundle inspect --key` reads a member with no line break whole; Teams Adaptive
+      Cards render a little Markdown from a failure reason; a mapped drive letter (`Z:`) inside a scanned file is
+      not recognised as a network path. An attention item id with `../` reads and rewrites a JSON file outside the
+      attention folder (#169; the assistant checks the id itself now).
+- [ ] Assistant: should a whole question have a time limit? It can make 6 requests of `timeout_seconds` each (12
+      minutes by default, #171). Should a proposal for another job than the one asked about be refused rather than
+      shown with a note (D75 4)? Round 4 kept the note and extended it to items without a job and unknown
+      experiments; an injected line can still aim a proposal at another job, which a person then has to read.
+- [ ] Report: rows, chart points and chips cannot be opened from the keyboard (#176); text in palette colours and
+      help.html / charts.py's `#898781` are below 4.5:1 (#177); `composeFigure` still puts the statistics footer
+      on exported TMT QC figures (#178); a user's own `/regex/` with catastrophic backtracking can still freeze the
+      page (JS has no regex time-out). Not verified: a real screen reader, Safari / Firefox, a 100k-feature report
+      in a real browser.
+- [ ] Library (D100): `fpfolder.workflow_kind` still calls SILAC / PAL / isoTOP / ipIAA search folders isoDTB for
+      the analysis (#161). On the PC: the merged catalog after a `--time`-limited scan of `D:\`, the app's "Use it
+      anyway?" question and the Review proposals status line.
+- [ ] FASTA: four more readers (`bundle.fasta_facts`, `sdrf.fasta_organism`, `engines._fasta_names`,
+      `benchmark.read_fasta_species`) still miss the first entry of a BOM file and read a line-free file as one
+      line (#160).
+- [ ] TMT: if the lab has iTRAQ data, try FragPipe's stock iTRAQ4 workflow on the first real TMT run (only the fake
+      has searched it). `_load_quantities` for non-FragPipe engines and `sdrf.py` still read the `tmt:` map
+      saved at intake, not `tmtkit.current_block`.
+- [ ] Testbed (D102): does the lab run DIA in fractions? If so, sum the fractions per sample before the statistics
+      (#180). An open search's report could show PTM-Shepherd's `global.profile.tsv` instead of failing on
+      NO_TABLE (#181). A FragPipe refusal with no explanation entry reads "ended from outside, nothing failed:
+      Retry" (#179); plain analysis notes are shown as warnings on a done job (#182). To confirm on the PC: the
+      "badly formatted lines" ERROR line in job 1's console log (REAL_RUNS.md); that the console is cp1252 with
+      CRLF; that `<raw>_uncalibrated.mzML` sits beside the raws of an Ionomos job; that a dry run writes
+      `fragpipe.job` into the preflight folder.
+- [x] Docs: should `test_docs_sync.py`'s config check also require every key `analysis.Settings` accepts to be
+      written by `dump_config` (#159)? → 2026-10-15 (D101): every such key survives a Save now, and
+      `tests/test_config_roundtrip.py` walks `Settings`' fields, so a new one is covered there.
