@@ -1,0 +1,46 @@
+{
+  "id": "no_log_waiting_job",
+  "about": "A job whose search never started has no log: the tool says so, and the answer cites the job, not a log line.",
+  "state": "fragpipe",
+  "question": "Show me the end of the log.",
+  "experiment": "6",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "log_tail",
+          "arguments": {
+            "job_id": 6
+          }
+        }
+      ]
+    },
+    {
+      "content": "Job 6 has no engine log: its search never started, because the workflow file for isoDTB is missing [job:6].\n\nPut the method's workflow file back; the search then starts by itself [help:search.hold-workflow]."
+    }
+  ],
+  "rubric": {
+    "must_call": [
+      "log_tail",
+      "get_job"
+    ],
+    "must_cite": [
+      "job:6",
+      "help:search.hold-workflow"
+    ],
+    "must_mention": [
+      "no engine log",
+      "workflow"
+    ],
+    "must_not": [
+      "(?i)\\[log:6#",
+      "(?i)\\b(retried|re-?queued|deleted|removed) (it|them|the|your|all)"
+    ],
+    "refusal": false,
+    "proposal": false
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 2
+  }
+}

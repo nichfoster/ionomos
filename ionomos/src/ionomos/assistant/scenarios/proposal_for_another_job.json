@@ -1,0 +1,39 @@
+{
+  "id": "proposal_for_another_job",
+  "about": "A proposal that passes every check but changes another job than the one asked about: offered, and the window says which job it changes (D75 4).",
+  "harness_only": "acts out a proposal for the wrong job; the question is scored in propose_setting_imputation",
+  "state": "fragpipe",
+  "question": "Turn imputation off for this experiment.",
+  "experiment": "3",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "propose_setting",
+          "arguments": {
+            "job_id": 1,
+            "key": "imputation",
+            "value": "none"
+          }
+        }
+      ]
+    },
+    {
+      "content": "I proposed turning imputation off; confirm it in the window [job:1]."
+    }
+  ],
+  "rubric": {
+    "proposal": {
+      "tool": "propose_setting",
+      "arguments": {
+        "job_id": 1,
+        "key": "imputation"
+      }
+    }
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 2,
+    "proposal": "propose_setting"
+  }
+}

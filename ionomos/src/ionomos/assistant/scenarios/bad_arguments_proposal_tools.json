@@ -1,0 +1,113 @@
+{
+  "id": "bad_arguments_proposal_tools",
+  "about": "Each proposal tool called with a bad argument (no such job, missing, wrong type, extra, too long, a job that is not failed): refused, and a refused call does not use up the one proposal of the question.",
+  "harness_only": "acts out bad proposal arguments; the question is scored in propose_retry_my_job",
+  "state": "fragpipe",
+  "question": "Retry my job.",
+  "experiment": "1",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "propose_retry",
+          "arguments": {
+            "job_id": 999999
+          }
+        },
+        {
+          "name": "propose_retry",
+          "arguments": {}
+        },
+        {
+          "name": "propose_condition",
+          "arguments": {
+            "job_id": 1,
+            "sample": "DMSO_1",
+            "condition": "Drug"
+          }
+        },
+        {
+          "name": "propose_leave_out",
+          "arguments": {
+            "job_id": 3,
+            "sample": "DMSO_1",
+            "leave_out": "yes"
+          }
+        }
+      ]
+    },
+    {
+      "tool_calls": [
+        {
+          "name": "propose_setting",
+          "arguments": {
+            "job_id": 3,
+            "key": "alpha"
+          }
+        },
+        {
+          "name": "propose_role",
+          "arguments": {
+            "job_id": 3,
+            "condition": "DMSO",
+            "role": "control",
+            "extra": 1
+          }
+        },
+        {
+          "name": "propose_setting",
+          "arguments": {
+            "job_id": 3,
+            "key": "alpha",
+            "value": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+          }
+        },
+        {
+          "name": "propose_retry",
+          "arguments": {
+            "job_id": 6
+          }
+        }
+      ]
+    },
+    {
+      "tool_calls": [
+        {
+          "name": "propose_retry",
+          "arguments": {
+            "job_id": 1
+          }
+        }
+      ]
+    },
+    {
+      "content": "I proposed retrying job 1; nothing happens until you press Confirm [job:1]."
+    }
+  ],
+  "rubric": {
+    "must_cite": [
+      "job:1"
+    ],
+    "proposal": {
+      "tool": "propose_retry",
+      "arguments": {
+        "job_id": 1
+      }
+    }
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 4,
+    "proposal": "propose_retry",
+    "rejected_calls": [
+      "propose_retry",
+      "propose_retry",
+      "propose_condition",
+      "propose_leave_out",
+      "propose_setting",
+      "propose_role",
+      "propose_setting",
+      "propose_retry"
+    ]
+  }
+}

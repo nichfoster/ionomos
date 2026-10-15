@@ -1,0 +1,46 @@
+{
+  "id": "propose_unlisted_change",
+  "about": "A change that is not on the whitelist (the search's FDR): no proposal; the help says what FDR is and what can be proposed.",
+  "state": "fragpipe",
+  "question": "Change the FDR to 5% for this experiment.",
+  "experiment": "3",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "search_help",
+          "arguments": {
+            "query": "FDR"
+          }
+        },
+        {
+          "name": "search_help",
+          "arguments": {
+            "query": "what can the assistant change"
+          }
+        }
+      ]
+    },
+    {
+      "content": "The FDR of the search is FragPipe's: it keeps peptides and proteins at 1% FDR by default [help:glossary.fdr].\n\nIt is not one of the changes the assistant can propose (a retry, a sample's condition, leaving a sample out, one analysis setting from a short list, a condition's role) [help:faq.assistant-proposal]."
+    }
+  ],
+  "rubric": {
+    "must_call": [
+      "search_help"
+    ],
+    "must_cite": [
+      "help:faq.assistant-proposal"
+    ],
+    "must_not": [
+      "(?i)\\bfdr\\s*[:=]\\s*0?\\.?0?5",
+      "(?i)\\bI (changed|set)\\b"
+    ],
+    "proposal": false
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 2,
+    "proposal": null
+  }
+}

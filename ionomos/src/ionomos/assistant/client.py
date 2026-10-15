@@ -14,6 +14,13 @@ that exists a non-local address is refused whatever `assistant.allow_cloud` says
 A reply is read whole (JSON) or as a stream (server-sent events); a stream only serves to time the first
 token, because nothing is shown before the answer's citations are checked. `transport` replaces the HTTP
 call: tests and the scenario corpus pass assistant.fake.ScriptedModel, so no test opens a socket.
+
+Limits on a reply, whatever the runtime does:
+  - time: `timeout_seconds` is the whole request, from sending it to the end of the reply. The socket's own
+    timeout (the same value) only bounds each wait for data, so a model that trickles a token every few
+    seconds was never stopped; now a reply still coming after timeout_seconds is dropped (ChatError).
+  - size: MAX_REPLY_BYTES. The reply is read in pieces of at most READ_BYTES, so a reply without line
+    breaks (10 MB of JSON on one line) is stopped at the limit instead of being read whole first.
 """
 from __future__ import annotations
 
@@ -28,6 +35,7 @@ from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
 MAX_REPLY_BYTES = 2_000_000
+READ_BYTES = 65_536       # one line of a reply, or a piece of a longer one
 _THINK = re.compile(r"<think>.*?</think>", re.DOTALL | re.IGNORECASE)  # reasoning some local models put in content
 
 Transport = Callable[[str, bytes, dict, float], Iterable[bytes]]
@@ -81,7 +89,8 @@ def _http(url: str, data: bytes, headers: dict, timeout: float) -> Iterator[byte
     req = urllib.request.Request(url, data=data, headers=headers, method="POST")
     try:
         with opener.open(req, timeout=timeout) as resp:
-            yield from resp
+            while line := resp.readline(READ_BYTES):  # never a whole 10 MB line at once
+                yield line
     except urllib.error.HTTPError as exc:
         body = ""
         try:
@@ -112,12 +121,16 @@ def chat(settings: dict, messages: list[dict], tools: list[dict], transport: Tra
     started = time.perf_counter()  # not monotonic(): on Windows before 3.13 that ticks every ~16 ms
     lines, size = [], 0
     reply = Reply()
+    limit = float(settings.get("timeout_seconds", 120))
     try:
-        for raw in (transport or _http)(url, request_body(settings, messages, tools), headers,
-                                        float(settings.get("timeout_seconds", 120))):
+        for raw in (transport or _http)(url, request_body(settings, messages, tools), headers, limit):
             size += len(raw)
             if size > MAX_REPLY_BYTES:
-                raise ChatError("the model's reply is too large")
+                raise ChatError(f"the model's reply is larger than {MAX_REPLY_BYTES // 1_000_000} MB; none of it "
+                                "is used")
+            if time.perf_counter() - started > limit:
+                raise ChatError(f"the model took longer than {limit:g} s to reply (assistant.timeout_seconds); "
+                                "the reply was dropped")
             lines.append(raw)
             if reply.ttft is None and _first_token(raw):
                 reply.ttft = round(time.perf_counter() - started, 3)

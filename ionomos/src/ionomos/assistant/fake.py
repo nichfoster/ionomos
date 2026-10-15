@@ -14,6 +14,9 @@ script; when the script runs out it answers with an empty message. A turn is one
                                                            script malformed JSON)
     {"error": "text"}                                      the runtime is not answering (ChatError)
     {"raw": "text"}                                        these bytes, whatever they are
+and, with any of them but "error":
+    "seconds": 1.5      the reply takes this long, spread over its pieces (a slow model, a trickling stream)
+    "pad": 10000000     the content is repeated until it is this many characters (a model that returns 10 MB)
 
 Like the testbed's fake FragPipe it checks what the real thing would: the URL, that the request is a
 chat completion with a model, a system prompt first, and a tool message for every tool call. With
@@ -55,13 +58,28 @@ class ScriptedModel:
         if "error" in turn:
             raise ChatError(str(turn["error"]))
         if "raw" in turn:
-            return iter([str(turn["raw"]).encode("utf-8")])
+            return self._paced([str(turn["raw"]).encode("utf-8")], turn.get("seconds", 0))
         calls = [{"id": c.get("id", f"call_{len(self.requests)}_{n}"), "type": "function",
                   "function": {"name": c["name"], "arguments": c["arguments"] if isinstance(c.get("arguments"), str)
                                else json.dumps(c.get("arguments") or {})}}
                  for n, c in enumerate(turn.get("tool_calls") or [])]
         content = turn.get("content") or ""
-        return iter(self._events(content, calls) if self.stream else [self._whole(content, calls)])
+        if turn.get("pad") and content:
+            content = (content * (int(turn["pad"]) // len(content) + 1))[: int(turn["pad"])]
+        chunks = self._events(content, calls) if self.stream else [self._whole(content, calls)]
+        return self._paced(chunks, turn.get("seconds", 0))
+
+    @staticmethod
+    def _paced(chunks: list[bytes], seconds: float) -> Iterator[bytes]:
+        """The pieces of a reply, each after its share of `seconds` (none: all at once)."""
+        if not seconds:
+            return iter(chunks)
+
+        def slow():
+            for c in chunks:
+                time.sleep(float(seconds) / len(chunks))
+                yield c
+        return slow()
 
     @staticmethod
     def _check(url: str, body: dict) -> None:
@@ -91,7 +109,8 @@ class ScriptedModel:
                                            "choices": [{"index": 0, "delta": delta}]}).encode("utf-8") + b"\n\n"
 
         out = [event({"role": "assistant"})]
-        out += [event({"content": content[i:i + 7]}) for i in range(0, len(content), 7)]
+        step = max(7, len(content) // 400)  # a long reply in at most ~400 pieces
+        out += [event({"content": content[i:i + step]}) for i in range(0, len(content), step)]
         for n, c in enumerate(calls):
             args = c["function"]["arguments"]
             out.append(event({"tool_calls": [{"index": n, "id": c["id"], "type": "function",
@@ -99,6 +118,11 @@ class ScriptedModel:
             out += [event({"tool_calls": [{"index": n, "function": {"arguments": args[i:i + 5]}}]})
                     for i in range(0, len(args), 5)]
         return out + [b"data: [DONE]\n\n"]
+
+
+def _chain(first: bytes, rest: Iterator[bytes]) -> Iterator[bytes]:
+    yield first
+    yield from rest
 
 
 class ScriptedServer:
@@ -122,7 +146,7 @@ class ScriptedServer:
                     with server._lock:
                         server.requests.append(json.loads(body.decode("utf-8")))
                         server.model.stream = bool(server.requests[-1].get("stream"))
-                        chunks = list(server.model(url, body, dict(self.headers), 0))
+                        chunks = server.model(url, body, dict(self.headers), 0)  # paced: sent as they come
                 except (AssertionError, ValueError, ChatError) as exc:
                     server.errors.append(f"{self.path}: {exc}")
                     self.send_response(500)
@@ -130,13 +154,17 @@ class ScriptedServer:
                     self.wfile.write(json.dumps({"error": {"message": str(exc)}}).encode("utf-8"))
                     return
                 time.sleep(server.delay)
+                first = next(chunks, b"")
                 self.send_response(200)
-                streamed = bool(chunks) and chunks[0].startswith(b"data:")
-                self.send_header("Content-Type", "text/event-stream" if streamed else "application/json")
+                self.send_header("Content-Type", "text/event-stream" if first.startswith(b"data:") else
+                                 "application/json")
                 self.end_headers()
-                for c in chunks:
-                    self.wfile.write(c)
-                    self.wfile.flush()
+                try:
+                    for c in _chain(first, chunks):
+                        self.wfile.write(c)
+                        self.wfile.flush()
+                except OSError:  # the client stopped reading (a reply over its time or size limit)
+                    pass
 
             def log_message(self, *_a):  # quiet
                 pass
