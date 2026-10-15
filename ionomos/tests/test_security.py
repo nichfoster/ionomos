@@ -496,3 +496,97 @@ def test_a_scan_root_on_a_server_that_does_not_answer_is_skipped_in_seconds(tmp_
     t = time.monotonic()
     roots = library.default_roots(cfg)
     assert time.monotonic() - t < 5 and Path(dead_share) not in roots and tmp_path / "wf" in roots
+
+
+# ------------------------------------------------------------------ the update path ----
+
+
+def _release(**kw):
+    from ionomos import updates
+
+    base = dict(version="9.9.9", page="", asset_name="Ionomos-Setup-9.9.9.exe", asset_url="https://x/s.exe",
+                size=3, sha256="0" * 64)
+    return updates.Release(**{**base, **kw})
+
+
+@pytest.mark.parametrize("kw, why", [
+    ({"sha256": None}, "no published SHA-256"),
+    ({"asset_url": "file:///C:/Windows/System32/calc.exe"}, "not https"),
+    ({"asset_url": "http://github.com/x.exe"}, "not https"),
+    ({"asset_url": "ftp://x/s.exe"}, "not https"),
+    ({"asset_name": "..\\..\\Startup\\Ionomos-Setup-9.9.9.exe"}, "not an Ionomos installer name"),
+    ({"asset_name": "Ionomos-Setup-9.9.9.exe.bat"}, "not an Ionomos installer name"),
+])
+def test_an_installer_is_never_fetched_unchecked_from_anywhere_or_under_any_name(tmp_path, monkeypatch, kw, why):
+    import urllib.request
+
+    from ionomos import updates
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: pytest.fail("nothing may be fetched"))
+    with pytest.raises(updates.DownloadError, match=why):
+        updates.download(_release(**kw), tmp_path / "dl")
+    assert not (tmp_path / "dl").exists()
+
+
+@pytest.mark.parametrize("answer", [[], {"assets": [{"name": "Ionomos-Setup-9.9.9.exe"}]},
+                                    {"assets": [{"name": "Ionomos-Setup-9.9.9.exe", "browser_download_url": "https://x",
+                                                 "size": "big"}]}, {"assets": "nope"}])
+def test_an_odd_answer_from_github_is_a_reason_not_a_crash(monkeypatch, answer):
+    import io
+    import urllib.request
+
+    from ionomos import updates
+
+    class Resp(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            self.close()
+
+    monkeypatch.delenv("IONOMOS_OFFLINE", raising=False)
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: Resp(json.dumps(answer).encode()))
+    rel, why = updates.check_latest()
+    assert rel is None and why
+
+
+# ------------------------------------------------------------------- YAML everywhere ----
+
+PYTHON_TAGS = [f"!!python/object/apply:os.system ['echo x > {PWNED}']",
+               f"!!python/object/new:subprocess.Popen [['cmd', '/c', 'echo x > {PWNED}']]",
+               "!!python/name:os.system", "!!python/module:os"]
+
+
+def test_no_yaml_loader_but_safe_load_anywhere():
+    src = Path(bundle.__file__).parent
+    bad = []
+    for p in src.rglob("*.py"):
+        text = p.read_text(encoding="utf-8")
+        for pat in ("yaml.load(", "yaml.unsafe_load", "yaml.full_load", "yaml.load_all", "Loader=", "UnsafeLoader",
+                    "yaml.Loader", "FullLoader"):
+            if pat in text:
+                bad.append(f"{p.name}: {pat}")
+    assert bad == []
+
+
+@pytest.mark.parametrize("tag", PYTHON_TAGS)
+def test_a_python_tag_in_config_or_experiment_yaml_runs_nothing(lab, tag, tmp_path, monkeypatch):
+    from ionomos import configio, manifest
+    from ionomos.config import ConfigError, load
+
+    monkeypatch.chdir(tmp_path)
+    cfg_path = lab["cfg_path"]
+    cfg_path.write_text(cfg_path.read_text(encoding="utf-8") + f"\nevil: {tag}\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match="could not parse"):
+        load(cfg_path)
+    with pytest.raises(yaml.constructor.ConstructorError, match="python"):  # the app's settings reader
+        configio.read_config(cfg_path)
+    drop = tmp_path / "drop"
+    drop.mkdir()
+    (drop / "experiment.yaml").write_text(f"method: TMT\nnotes: {tag}\n", encoding="utf-8")
+    with pytest.raises(manifest.OverridesError, match="not valid YAML"):
+        manifest.load_overrides(drop)
+    from ionomos import notify
+
+    assert notify.file_secrets(cfg_path) == []  # redaction reads it too, and gives up quietly
+    assert not list(tmp_path.rglob(PWNED))

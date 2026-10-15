@@ -57,15 +57,18 @@ def check_latest(timeout: float = 8, url: str = API_LATEST) -> tuple[Release | N
             data = json.loads(r.read().decode("utf-8"))
     except (urllib.error.URLError, OSError, ValueError) as exc:
         return None, f"could not reach GitHub ({exc})"
-    tag = str(data.get("tag_name") or "")
-    for a in data.get("assets") or []:
-        m = INSTALLER_RE.match(a.get("name") or "")
-        if m:
-            digest = a.get("digest") or ""
-            return Release(version=m.group(1), page=data.get("html_url") or "", asset_name=a["name"],
-                           asset_url=a["browser_download_url"], size=int(a.get("size") or 0),
-                           sha256=digest.split(":", 1)[1] if digest.startswith("sha256:") else None,
-                           notes=(data.get("body") or "")[:2000]), ""
+    try:
+        tag = str(data.get("tag_name") or "")
+        for a in data.get("assets") or []:
+            m = INSTALLER_RE.match(str(a.get("name") or ""))
+            if m:
+                digest = str(a.get("digest") or "")
+                return Release(version=m.group(1), page=str(data.get("html_url") or ""), asset_name=a["name"],
+                               asset_url=str(a["browser_download_url"]), size=int(a.get("size") or 0),
+                               sha256=digest.split(":", 1)[1] if digest.startswith("sha256:") else None,
+                               notes=str(data.get("body") or "")[:2000]), ""
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:  # never raises: an odd answer is a reason
+        return None, f"GitHub's answer about the newest release could not be read ({type(exc).__name__})"
     return None, f"release {tag or '?'} has no Ionomos-Setup-*.exe"
 
 
@@ -78,10 +81,18 @@ class DownloadError(RuntimeError):
 
 
 def download(release: Release, dest_dir: Path | None = None, progress=None, timeout: float = 30) -> Path:
-    """Fetch the installer (to a .part file), verify size + SHA-256, then give it its real name."""
+    """Fetch the installer (to a .part file), verify size + SHA-256, then give it its real name. Refused without a
+    published SHA-256, from anything but https://, or under a name that isn't Ionomos-Setup-<version>.exe."""
     import hashlib
     import urllib.request
 
+    if not release.sha256:  # the app says so before asking; this keeps any other caller from running an unchecked file
+        raise DownloadError(f"Ionomos {release.version} has no published SHA-256, so its installer can't be checked; "
+                            f"download it from {RELEASES_PAGE}")
+    if not str(release.asset_url).lower().startswith("https://"):  # urllib also opens file:, ftp: and data: URLs
+        raise DownloadError(f"the release's download address is not https:// ({release.asset_url!r}); not fetched")
+    if not INSTALLER_RE.match(release.asset_name or ""):  # the name becomes a file in Downloads: never a path
+        raise DownloadError(f"{release.asset_name!r} is not an Ionomos installer name; not fetched")
     dest_dir = Path(dest_dir or downloads_dir())
     dest_dir.mkdir(parents=True, exist_ok=True)
     final = dest_dir / release.asset_name
