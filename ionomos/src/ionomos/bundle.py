@@ -39,6 +39,7 @@ import os
 import re
 import string
 import zipfile
+import zlib
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -2198,14 +2199,18 @@ def inspect(zip_path: Path) -> dict:
         with zipfile.ZipFile(_long(zip_path)) as z:
             infos = z.infolist()
             try:
-                manifest = json.loads(z.read(names.BUNDLE_MANIFEST).decode("utf-8"))
+                manifest = json.loads(_read_small(z, names.BUNDLE_MANIFEST).decode("utf-8"))
             except KeyError:
                 manifest = None
             build = None
             if manifest is None and "build.json" in z.namelist():
-                build = json.loads(z.read("build.json").decode("utf-8"))
-    except (OSError, zipfile.BadZipFile, ValueError) as exc:
+                build = json.loads(_read_small(z, "build.json").decode("utf-8"))
+    except (OSError, zipfile.BadZipFile, ValueError, RuntimeError, EOFError) as exc:
         raise BundleError(f"{zip_path} is not a readable bundle: {exc}") from exc
+    if manifest is not None and not isinstance(manifest, dict):
+        raise BundleError(f"{zip_path} is not a readable bundle: its {names.BUNDLE_MANIFEST} is not a JSON object")
+    if build is not None and not isinstance(build, dict):
+        build = None
     out = {"zip": str(zip_path), "zip_bytes": _size(zip_path), "members": len(infos),
            "bytes": sum(i.file_size for i in infos), "manifest": manifest}
     if manifest is None:
@@ -2264,11 +2269,66 @@ def inspect_text(zip_path: Path, config_path: Path | None = None, key_path: Path
     return "\n".join(lines)
 
 
+# A bundle comes from someone else's PC: `unpack` and `inspect` read it as untrusted (docs/SECURITY_NOTES.md).
+MAX_MANIFEST_BYTES = 64 << 20        # BUNDLE.json / build.json: a few kB in a real bundle
+BOMB_MEMBER_BYTES = 1 << 30          # a member above this size ...
+BOMB_RATIO = 100                     # ... that deflated more than this is a zip bomb, not a table
+FREE_MARGIN_BYTES = 1 << 30          # unpack leaves at least this much of the disk free
+_RESERVED = re.compile(r"(?i)^(?:con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³]|conin\$|conout\$)(?:\..*)?$")
+
+
 def _safe_member(name: str) -> PurePosixPath | None:
+    """A zip member's name as a relative path that stays inside the folder it is unpacked into, or None:
+    absolute, drive-qualified, climbing (`..`), a colon anywhere (an NTFS stream), a Windows device name
+    (CON, NUL, COM1 ...) or a part ending in a dot or space (Windows drops those, so two names could meet)."""
     p = PurePosixPath(name.replace("\\", "/"))
-    if p.is_absolute() or ".." in p.parts or not p.parts or ":" in p.parts[0]:
+    if p.is_absolute() or not p.parts or ".." in p.parts:
         return None
+    for part in p.parts:
+        if ":" in part or _RESERVED.match(part) or part != part.rstrip(". ") or any(ord(c) < 32 for c in part):
+            return None
     return p
+
+
+def _safe_folder(name) -> str | None:
+    """A job's folder name from BUNDLE.json: one plain path part, never `..`, a drive or unpack's own names."""
+    if not isinstance(name, str) or "/" in name or "\\" in name:
+        return None
+    p = _safe_member(name)
+    if p is None or len(p.parts) != 1 or p.parts[0].casefold() in (EXTRAS_DIR, LAB_DIR, "config.yaml", "."):
+        return None
+    return p.parts[0]
+
+
+def _read_small(z: zipfile.ZipFile, name: str) -> bytes:
+    """One small member (BUNDLE.json, build.json), refused when it says it is bigger than such a file can be."""
+    info = z.getinfo(name)
+    if info.file_size > MAX_MANIFEST_BYTES:
+        raise BundleError(f"{name} in this zip is {_mb(info.file_size)} unpacked; a bundle's is a few kB. "
+                          "It is not a bundle Ionomos made: nothing was unpacked")
+    return z.read(name)
+
+
+def _bomb_check(infos: list[zipfile.ZipInfo], dest: Path) -> None:
+    """Refuse, before anything is written, a zip that would fill the disk: a member that deflated beyond any
+    table (a zip bomb) or, all together, more than `dest`'s disk has free (keeping FREE_MARGIN_BYTES)."""
+    import shutil
+
+    for zi in infos:
+        if zi.file_size > BOMB_MEMBER_BYTES and zi.file_size > BOMB_RATIO * max(zi.compress_size, 1):
+            raise BundleError(f"{zi.filename} would unpack to {_mb(zi.file_size)} from {_mb(zi.compress_size)}: "
+                              "no table compresses like that (a zip bomb?). Nothing was unpacked")
+    total = sum(zi.file_size for zi in infos)
+    probe = dest
+    while not probe.exists() and probe.parent != probe:
+        probe = probe.parent
+    try:
+        free = shutil.disk_usage(_long(probe)).free
+    except OSError:
+        return
+    if total > free - FREE_MARGIN_BYTES:
+        raise BundleError(f"the bundle unpacks to {_mb(total)} but {probe} has {_mb(free)} free: free some space "
+                          "or unpack it on another disk. Nothing was unpacked")
 
 
 def unpack(zip_path: Path, dest: Path) -> dict:
@@ -2278,41 +2338,76 @@ def unpack(zip_path: Path, dest: Path) -> dict:
     info = inspect(zip_path)
     m = info["manifest"] or {}
     dest = Path(dest)
-    roots = {j["arc"]: j.get("folder") or PurePosixPath(j["arc"]).name for j in m.get("jobs") or []}
-    if info["manifest"] is None:
-        roots = {j: PurePosixPath(j).name for j in info["legacy"]["jobs"]}
-    hashes = {f["path"]: f["sha256"] for f in m.get("files") or []}
-    targets: list[tuple[zipfile.ZipInfo, Path]] = []
-    with zipfile.ZipFile(_long(Path(zip_path))) as z:
-        for zi in z.infolist():
-            rel = _safe_member(zi.filename)
-            if rel is None or zi.is_dir():
-                continue
-            root = next((r for r in roots if zi.filename.startswith(r + "/")), None)
-            if root is not None:
-                out = dest / roots[root] / PurePosixPath(zi.filename[len(root) + 1:])
-            else:
-                out = dest / EXTRAS_DIR / rel
-            targets.append((zi, out))
-        taken = [str(t) for t in {dest / v for v in roots.values()} | {dest / EXTRAS_DIR, dest / "config.yaml"}
-                 if os.path.lexists(_long(t))]
-        if taken:
-            raise BundleError("unpack never replaces anything, and these exist already: " + ", ".join(sorted(taken))
-                              + ". Give an empty folder.")
-        bad = []
-        for zi, out in targets:
-            os.makedirs(_long(out.parent), exist_ok=True)
-            digest = hashlib.sha256()
-            with z.open(zi) as src, open(_long(out), "xb") as f:
-                for block in iter(lambda: src.read(1 << 20), b""):
-                    f.write(block)
-                    digest.update(block)
-            if zi.filename in hashes and hashes[zi.filename] != digest.hexdigest():
-                bad.append(zi.filename)
     notes: list[str] = []
+    jobs = [j for j in m.get("jobs") or [] if isinstance(j, dict) and isinstance(j.get("arc"), str)]
+    pairs = [(j["arc"], j.get("folder") or PurePosixPath(j["arc"]).name) for j in jobs]
+    if info["manifest"] is None:
+        pairs = [(j, PurePosixPath(j).name) for j in info["legacy"]["jobs"]]
+    roots: dict[str, str] = {}
+    for arc, folder in pairs:  # a folder name is the sender's word: one plain name, or the job is not unpacked
+        safe = _safe_folder(folder) if _safe_member(arc) is not None else None
+        if safe is None or safe.casefold() in {v.casefold() for v in roots.values()}:
+            notes.append(f"left out job {arc!r}: its folder name {folder!r} is not a plain folder name (or a "
+                         "second job has it)")
+            continue
+        roots[arc] = safe
+    hashes = {f["path"]: f["sha256"] for f in m.get("files") or []
+              if isinstance(f, dict) and isinstance(f.get("path"), str) and isinstance(f.get("sha256"), str)}
+    targets: list[tuple[zipfile.ZipInfo, Path]] = []
+    left_out: list[str] = []
+    seen: set[str] = set()
+    try:
+        with zipfile.ZipFile(_long(Path(zip_path))) as z:
+            for zi in z.infolist():
+                if zi.is_dir():
+                    continue
+                rel = _safe_member(zi.filename)
+                root = next((r for r in roots if zi.filename.startswith(r + "/")), None)
+                if rel is not None and root is not None:
+                    out = dest / roots[root] / PurePosixPath(zi.filename[len(root) + 1:])
+                elif rel is not None and not any(zi.filename.startswith(a + "/") for a, _f in pairs):
+                    out = dest / EXTRAS_DIR / rel
+                else:
+                    left_out.append(zi.filename)
+                    continue
+                if str(out).casefold() in seen:  # the same name twice, or twice as Windows sees names
+                    left_out.append(zi.filename)
+                    continue
+                seen.add(str(out).casefold())
+                targets.append((zi, out))
+            _bomb_check([zi for zi, _o in targets], dest)
+            taken = [str(t) for t in {dest / v for v in roots.values()} | {dest / EXTRAS_DIR, dest / "config.yaml"}
+                     if os.path.lexists(_long(t))]
+            if taken:
+                raise BundleError("unpack never replaces anything, and these exist already: "
+                                  + ", ".join(sorted(taken)) + ". Give an empty folder.")
+            bad = []
+            for zi, out in targets:
+                os.makedirs(_long(out.parent), exist_ok=True)
+                digest = hashlib.sha256()
+                written = 0
+                with z.open(zi) as src, open(_long(out), "xb") as f:
+                    for block in iter(lambda: src.read(1 << 20), b""):
+                        written += len(block)
+                        if written > zi.file_size:  # never more than the zip said (zipfile stops there too)
+                            raise BundleError(f"{zi.filename} holds more than its stated size: the zip is damaged")
+                        f.write(block)
+                        digest.update(block)
+                if zi.filename in hashes and hashes[zi.filename] != digest.hexdigest():
+                    bad.append(zi.filename)
+    except (zipfile.BadZipFile, zlib.error, EOFError, RuntimeError, ValueError) as exc:
+        raise BundleError(f"{zip_path} could not be unpacked, it is damaged ({exc}); what was unpacked so far is "
+                          f"in {dest}") from exc
+    except FileExistsError as exc:
+        raise BundleError(f"{exc.filename} exists already: unpack never replaces anything. Give an empty folder.") \
+            from exc
+    if left_out:
+        notes.append(f"left out {len(left_out)} file(s) whose names would land outside {dest} or are not "
+                     "plain file names: " + ", ".join(repr(n) for n in left_out[:5])
+                     + (" ..." if len(left_out) > 5 else ""))
     config = _unpacked_config(dest, notes)
     exps = [dest / v for v in roots.values()]
-    for j in m.get("jobs") or []:
+    for j in jobs:
         if j.get("reproducible") is False:
             notes.append(f"{j.get('folder')}: the analysis cannot be fully repeated: "
                          + ("; ".join(j.get("incomplete") or []) or "no result table in the bundle"))
@@ -2345,8 +2440,16 @@ def _unpacked_config(dest: Path, notes: list[str]) -> Path | None:
                         "fragpipe_exe": (lab / "fragpipe.exe").as_posix(),
                         "workflow_dir": (lab / "workflows").as_posix(), "fasta_dir": (lab / "fasta").as_posix(),
                         "database": (lab / "ionomos.db").as_posix(), "log_dir": (lab / "logs").as_posix()}
-        for block in ("notify", "assistant"):  # nothing unpacked may send or ask anything
+        for block in ("notify", "assistant", "library"):  # nothing unpacked may send, ask or scan anything
             raw.pop(block, None)
+        # nor start a program the sender's settings name (only the folders above are stand-ins)
+        for mcfg in (raw.get("methods") or {}).values() if isinstance(raw.get("methods"), dict) else ():
+            if isinstance(mcfg, dict):
+                for k in [k for k in mcfg if str(k) == "exe" or str(k).endswith("_exe")]:
+                    mcfg.pop(k)
+        if isinstance(raw.get("fragpipe"), dict):
+            for k in ("config_tools_folder", "config_diann", "config_python"):
+                raw["fragpipe"].pop(k, None)
         raw.setdefault("gui", {})
         if isinstance(raw["gui"], dict):
             raw["gui"]["enabled"] = False
