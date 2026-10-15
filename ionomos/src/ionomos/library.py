@@ -570,11 +570,15 @@ def _source_of(path: Path, ctx: Context | None) -> str:
 
 
 def _is_install_dir(d: Path) -> bool:
-    """A FragPipe installation: bin/fragpipe* beside lib/ (installer, 23 / 24) or the zip builds' fragpipe/."""
+    """A FragPipe installation: bin/fragpipe(.bat) (installer 23 / 24, the zip builds' fragpipe/) or
+    lib/fragpipe-<version>.jar inside. A folder merely named like one (C:/Fragpipe_Auto) is not."""
     try:
-        return (d / "bin").is_dir() and (any((d / "bin").glob("fragpipe*")) or any((d / "bin").glob("FragPipe*")))
+        for sub, pats in (("bin", ("fragpipe*", "FragPipe*")), ("lib", ("fragpipe*.jar", "FragPipe*.jar"))):
+            if (d / sub).is_dir() and any(any((d / sub).glob(pat)) for pat in pats):
+                return True
     except OSError:
-        return False
+        pass
+    return False
 
 
 _ALL_DONE = re.compile(r"ALL JOBS DONE IN")
@@ -979,10 +983,12 @@ def install_roots(cfg=None) -> list[Path]:
         r = fragpipe.fragpipe_root(launcher)
         if r is not None:
             out.append(r)
-    for pat in INSTALL_GLOBS:
+    for pat in INSTALL_GLOBS:   # C:/FragPipe* also matches C:/Fragpipe_Auto: only real installations count (#153)
         for hit in glob.glob(os.path.expanduser(pat)):
-            if os.path.isdir(hit):
-                out.append(Path(hit))
+            for d in (Path(hit), Path(hit) / "fragpipe"):   # the zip: FragPipe-jre-22.0/fragpipe/bin/fragpipe.bat
+                if _is_install_dir(d):
+                    out.append(d)
+                    break
     seen, uniq = set(), []
     for p in out:
         if p.is_dir() and _key(p) not in seen:
@@ -1079,21 +1085,34 @@ def _settings(cfg) -> dict:
         return settings_from(None)
 
 
-def default_roots(cfg) -> list[Path]:
+def default_roots(cfg, missing: list[str] | None = None) -> list[Path]:
     """Where a scan looks by default: workflow_dir, fasta_dir, every FragPipe installation, users_root and the
-    config's library.roots (UNC paths are plain folders). Only folders that exist, each once."""
-    cands = [Path(cfg.workflow_dir), Path(cfg.fasta_dir), *install_roots(cfg), Path(cfg.users_root)]
-    cands += [Path(os.path.expanduser(r)) for r in _settings(cfg)["roots"]]
+    config's library.roots (UNC paths are plain folders). Only folders that exist, each once; a configured folder
+    that does not exist is said in `missing` (a list of notes), never dropped silently (#153)."""
+    named = [(Path(cfg.workflow_dir), "paths.workflow_dir"), (Path(cfg.fasta_dir), "paths.fasta_dir")]
+    named += [(p, "") for p in install_roots(cfg)]
+    named += [(Path(cfg.users_root), "paths.users_root")]
+    named += [(Path(os.path.expanduser(r)), "library.roots") for r in _settings(cfg)["roots"]]
     seen, out = set(), []
-    for p in cands:
+    for p, where in named:
         try:
             ok = p.is_dir()
         except OSError:
             ok = False
-        if ok and _key(p) not in seen:
+        if not ok:
+            if where and missing is not None:
+                missing.append(missing_note(p, where))
+            continue
+        if _key(p) not in seen:
             seen.add(_key(p))
             out.append(p)
     return out
+
+
+def missing_note(p: str | Path, where: str = "") -> str:
+    """The note for a folder to look in that is not there."""
+    return (f"{p} does not exist on this PC: not looked at (a drive not plugged in, or a typo"
+            + (f" in {where}" if where else "") + ")")
 
 
 def _hidden(entry: os.DirEntry) -> bool:
@@ -1164,15 +1183,17 @@ def scan(roots: list[str | Path] | None = None, *, cfg=None, ctx: Context | None
     limit = float(lib["time_limit_s"] if time_limit_s is None else time_limit_s)
     if ctx is None:
         ctx = context_from(cfg) if cfg is not None else Context()
+    missing: list[str] = []
     if roots is None:
-        roots = default_roots(cfg) if cfg is not None else []
+        roots = default_roots(cfg, missing) if cfg is not None else []
     if previous is not None:
         for f in previous.fastas:
             if f.complete and not f.error and f.fingerprint and f.reader >= FASTA_READER:
                 _FASTA_CACHE.setdefault((_key(f.path), f.mtime, f.size), f)
     started = time.monotonic()
     deadline = started + limit
-    cat = Catalog(roots=[str(r) for r in roots], scanned_at=datetime.now().isoformat(timespec="seconds"))
+    cat = Catalog(roots=[str(r) for r in roots], scanned_at=datetime.now().isoformat(timespec="seconds"),
+                  notes=missing)
     queue: deque[tuple[Path, int]] = deque()
     seen: set[str] = set()
     for r in roots:
@@ -1184,7 +1205,7 @@ def scan(roots: list[str | Path] | None = None, *, cfg=None, ctx: Context | None
         if real in seen:
             continue
         if not p.is_dir():
-            cat.notes.append(f"{p} is not a folder on this PC; skipped")
+            cat.notes.append(missing_note(p))
             continue
         seen.add(real)
         queue.append((p, 0))
@@ -1409,6 +1430,62 @@ def load_catalog(cfg) -> Catalog:
         return Catalog.from_dict(data)
     except (OSError, ValueError, TypeError, KeyError) as exc:
         return Catalog(notes=[f"{p} could not be read ({exc}); run `ionomos library scan` again"])
+
+
+def _unchanged(x: WorkflowInfo | FastaInfo) -> bool:
+    try:
+        st = Path(x.path).stat()
+    except OSError:
+        return False
+    return st.st_size == x.size and abs(st.st_mtime - x.mtime) < 1e-3
+
+
+def covers(new: Catalog, prev: Catalog) -> bool:
+    """`new` replaces `prev`: it ran to the end and looked in every folder `prev` looked in."""
+    return new.complete and {_key(r) for r in prev.roots} <= {_key(r) for r in new.roots}
+
+
+def merge_scan(prev: Catalog, new: Catalog, ctx: Context | None = None) -> Catalog:
+    """A scan that stopped early or looked in fewer folders never loses what a fuller one found (#153): `new`, plus
+    every file of `prev` it did not see that is still on disk unchanged (their roots kept too), judged again as one
+    catalog. `new` itself when it covers `prev`."""
+    if covers(new, prev) or not (prev.workflows or prev.fastas):
+        return new
+    seen = {_key(x.path) for x in (*new.workflows, *new.fastas)}
+    kept_w = [w for w in prev.workflows if _key(w.path) not in seen and _unchanged(w)]
+    kept_f = [f for f in prev.fastas if _key(f.path) not in seen and _unchanged(f)]
+    if not kept_w and not kept_f:
+        return new
+    for w in kept_w:
+        if w.source != "run":
+            w.source = _source_of(Path(w.path), ctx)
+    new_roots = {_key(r) for r in new.roots}
+    others = [r for r in prev.roots if _key(r) not in new_roots]
+    new.workflows += kept_w
+    new.fastas += kept_f
+    new.roots += others
+    why = "stopped early" if not new.complete else "looked in fewer folders"
+    new.notes.append(f"kept {len(kept_w)} workflow(s) and {len(kept_f)} FASTA(s) from the scan of "
+                     f"{prev.scanned_at.replace('T', ' ') or 'before'}, because this one {why}"
+                     + (f" (not looked in now: {', '.join(others[:3])}{' …' if len(others) > 3 else ''})"
+                        if others else "") + "; `ionomos library scan --replace` keeps only this scan")
+    judge_catalog(new, ctx)
+    return new
+
+
+def save_scan(cfg, new: Catalog, prev: Catalog | None = None, *, replace: bool = False,
+              ctx: Context | None = None) -> tuple[Catalog, str]:
+    """Save a scan's catalog, merged with the previous one unless it covers it or `replace` (merge_scan).
+    Returns (the catalog saved, a line on what was saved)."""
+    prev = load_catalog(cfg) if prev is None else prev
+    found = len(new.workflows) + len(new.fastas)
+    cat = new
+    if not replace and not covers(new, prev) and (prev.workflows or prev.fastas):
+        cat = merge_scan(prev, new, ctx or context_from(cfg))
+    where = save_catalog(cfg, cat)
+    kept = len(cat.workflows) + len(cat.fastas) - found
+    return cat, f"saved in {where}" + (f"; kept {kept} file(s) from the last scan that this one did not look at"
+                                       if kept else "")
 
 
 # --------------------------------------------------------------- recommend --
@@ -1812,7 +1889,8 @@ def installed_version_of(cfg) -> str:
 CLI_HELP = """\
 Find, understand and adopt FragPipe workflows and FASTAs on this PC (docs/LIBRARY.md).
 
-  ionomos library scan [--root DIR ...]       look (read-only) and remember what was found
+  ionomos library scan [--root DIR ...] [--only] [--replace]
+                                              look (read-only) and remember what was found
   ionomos library list [workflows|fastas] [--kind TMT] [--flags]
   ionomos library show PATH                   one workflow or FASTA in plain words, with its flags
   ionomos library recommend [--apply]         the best candidates per method; --apply copies them in and
@@ -1830,8 +1908,11 @@ def add_parser(sub):
                        description=CLI_HELP, formatter_class=argparse.RawDescriptionHelpFormatter)
     ls = p.add_subparsers(dest="library_cmd", required=True)
     sc = ls.add_parser("scan", help="look for workflows and FASTAs (reads only) and remember them")
-    sc.add_argument("--root", action="append", metavar="DIR", help="a folder to look in (repeatable; default: the "
-                    "pinned folders, FragPipe installations, users_root and library.roots)")
+    sc.add_argument("--root", action="append", metavar="DIR", help="also look in this folder (repeatable), besides "
+                    "the pinned folders, FragPipe installations, users_root and library.roots")
+    sc.add_argument("--only", action="store_true", help="look only in the --root folders")
+    sc.add_argument("--replace", action="store_true", help="keep only this scan, even if it stopped early or looked "
+                    "in fewer folders than the last one (default: what it did not look at is kept)")
     sc.add_argument("--depth", type=int, default=None, help="folders deep (default: library.max_depth, 6)")
     sc.add_argument("--time", type=float, default=None, help="seconds at most (default: library.time_limit_s, 120)")
     sc.add_argument("--json", action="store_true")
@@ -1933,15 +2014,23 @@ def run_cli(args) -> int:
 
 
 def _cli_scan(args, cfg) -> int:
+    if args.only and not args.root:
+        print("--only needs at least one --root DIR", file=sys.stderr)
+        return 2
     prev = load_catalog(cfg)
-    roots = [Path(r) for r in args.root] if args.root else None
-    cat = scan(roots, cfg=cfg, max_depth=args.depth, time_limit_s=args.time, previous=prev,
+    ctx = context_from(cfg)
+    roots, missing = None, []
+    if args.root:   # --root adds to the default roots; --only looks in the --root folders alone (#153)
+        extra = [Path(os.path.expanduser(r)) for r in args.root]
+        roots = extra if args.only else default_roots(cfg, missing) + extra
+    cat = scan(roots, cfg=cfg, ctx=ctx, max_depth=args.depth, time_limit_s=args.time, previous=prev,
                progress=None if args.json else (lambda t: print(f"  {t}", file=sys.stderr)))
-    where = save_catalog(cfg, cat)
+    cat.notes[:0] = missing
+    cat, saved = save_scan(cfg, cat, prev, replace=args.replace, ctx=ctx)
     if args.json:
         print(json.dumps(cat.as_dict(), indent=1, ensure_ascii=False))
         return 0
-    print(f"{cat.how_far()}; saved in {where}")
+    print(f"{cat.how_far()}; {saved}")
     for kind in KINDS:
         ws = [w for w in cat.workflows if w.kind == kind]
         if ws:
@@ -1969,6 +2058,8 @@ def _cli_list(args, cat: Catalog) -> int:
         print(json.dumps([x.as_dict() for x in (*ws, *fs)], indent=1, ensure_ascii=False))
         return 0
     print(f"scanned {cat.scanned_at}: {cat.how_far()}")
+    for n in cat.notes:
+        print(f"  note: {n}")
     for w in sorted(ws, key=lambda w: (KINDS.index(w.kind) if w.kind in KINDS else 99, w.path.lower())):
         marks = "".join("✗" if f.severity == "error" else "!" if f.severity == "warn" else "" for f in w.flags)[:3]
         print(f"[{w.kind}] {w.path}  ({w.source}) {marks}")

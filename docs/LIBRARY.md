@@ -15,7 +15,7 @@ PC" (end of this page) are its interface.
 ## Commands
 
 ```
-ionomos library scan [--root DIR ...] [--depth N] [--time S] [--json]
+ionomos library scan [--root DIR ...] [--only] [--replace] [--depth N] [--time S] [--json]
 ionomos library list [workflows|fastas] [--kind TMT] [--flags] [--json]
 ionomos library show PATH [--json]
 ionomos library recommend [--apply] [--json]
@@ -25,7 +25,14 @@ ionomos library check [--json]
 
 - **scan** looks (read-only) and saves what it found in
   `<log_dir>/library.json` (`names.LIBRARY_FILE`). A FASTA that has not changed
-  since the last scan is not read again.
+  since the last scan is not read again. `--root DIR` *adds* a folder to the
+  default ones (below); `--only` looks in the `--root` folders alone. A scan
+  that stopped early (`--time`, Stop) or looked in fewer folders than the last
+  one does not replace the fuller catalog: the files of the last scan it did
+  not see, still on disk and unchanged, are kept (`library.save_scan`), and a
+  note says so; `--replace` keeps only the new scan. A configured folder that
+  does not exist (an unplugged drive in `library.roots`, a typo) is a note in
+  the output, the catalog and `list`.
 - **list** prints the last scan, one line per file plus its summary, and for a
   workflow that is not itself a run's, the finished searches with its settings
   ("used in 4 finished search(es), the latest 2026-10-15"); `--flags` adds
@@ -55,12 +62,17 @@ Restart the watcher after `--apply` or `adopt` (it reads the methods at start).
 
 ## Where it looks
 
-`default_roots(cfg)`, each folder once, only those that exist:
+`default_roots(cfg, missing)`, each folder once, only those that exist (a
+configured one that does not is added to `missing` as a note):
 
 1. `paths.workflow_dir` and `paths.fasta_dir` (the pinned folders);
 2. every FragPipe installation: the configured launcher's (`bin\..`), every
    launcher `fragpipe.launcher_candidates()` finds, `C:\FragPipe\*`,
-   `C:\FragPipe*` and `%USERPROFILE%\Downloads\FragPipe*` (the 22.0 zip);
+   `C:\FragPipe*` and `%USERPROFILE%\Downloads\FragPipe*` (the 22.0 zip). A
+   folder these patterns match counts only when it is an installation
+   (`bin\fragpipe.bat` or `lib\fragpipe-*.jar` inside, or in its `fragpipe\`
+   as in the zip): `C:\Fragpipe_Auto` and `C:\Fragpipe_General` are not, so their
+   workflows are never called *stock*;
 3. `paths.users_root`;
 4. `library.roots` from `config.yaml` — **`D:/` is not looked at unless it is
    added here** (or given with `--root`), because it is an 18 TB USB drive. A
@@ -351,8 +363,8 @@ whole interface it needs: `scan`, `load_catalog`, `save_catalog`, `recommend`,
 Tab 3 Methods has a panel **Workflows and FASTAs on this PC** under the method
 form. **Find on this PC…** opens a window that reads the last catalog (so it
 opens at once) or, when there is none, scans with a progress line and a
-**Stop** button; **Rescan** looks again. A scan stopped early does not replace
-a fuller catalog on disk. The table lists, for the selected method's kind, the
+**Stop** button; **Rescan** looks again. A scan stopped early keeps what the
+last one found that it did not look at (`library.save_scan`, as the CLI). The table lists, for the selected method's kind, the
 candidates `recommend` and `recommend_fastas` rank (kind, name, folder,
 summary, marks ✗ ! ·, why recommended); **Show all** adds every other file
 (other kinds, files with an error, copies), a filter box narrows by words.

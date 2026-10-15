@@ -255,7 +255,9 @@ def catalog_line(catalog) -> str:
     if not catalog.scanned_at:
         return "Not looked for yet on this PC: press Rescan (it only reads; nothing is moved)."
     when = catalog.scanned_at.replace("T", " ")[:16]
-    return f"Last looked {when}: {catalog.how_far()}."
+    notes = [n for n in catalog.notes if not n.startswith("no scan yet")]
+    return f"Last looked {when}: {catalog.how_far()}." + "".join(f" Note: {n}." for n in notes[:2]) \
+        + (f" (and {len(notes) - 2} more notes)" if len(notes) > 2 else "")
 
 
 def method_problems(cfg_dict: dict, catalog, describe_workflow: Callable | None = None) -> list[str]:
@@ -343,15 +345,13 @@ def proposals_summary(proposals: list) -> str:
 
 def run_scan(cfg, *, progress: Callable[[str], None] | None = None,
              stop: threading.Event | None = None) -> tuple[object, str]:
-    """library.scan with the previous catalog's FASTA readings, then save_catalog. A scan stopped early doesn't
-    replace a fuller one on disk. Returns (catalog, a line on what was saved)."""
+    """library.scan with the previous catalog's FASTA readings, then library.save_scan: a scan stopped early (or
+    one that looked in fewer folders) keeps what the last one found that it did not see. Returns (catalog, a line
+    on what was saved)."""
     prev = library.load_catalog(cfg)
-    cat = library.scan(cfg=cfg, progress=progress, stop=stop, previous=prev)
-    if cat.complete or not (prev.workflows or prev.fastas) \
-            or len(cat.workflows) + len(cat.fastas) >= len(prev.workflows) + len(prev.fastas):
-        where = library.save_catalog(cfg, cat)
-        return cat, f"saved in {where}"
-    return cat, "stopped early: the fuller list from the last scan is kept on disk"
+    ctx = library.context_from(cfg)
+    cat = library.scan(cfg=cfg, ctx=ctx, progress=progress, stop=stop, previous=prev)
+    return library.save_scan(cfg, cat, prev, ctx=ctx)
 
 
 def adopt_row(row: Row, method: str, cfg, catalog=None) -> dict:

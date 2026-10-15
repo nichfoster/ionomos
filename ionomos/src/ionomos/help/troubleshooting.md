@@ -1204,7 +1204,11 @@ and more replicates are the honest choices.
 
 `ionomos library scan` looks through the workflows folder, the FASTA folder,
 every FragPipe installation, the users folder and any folder added under
-`library: roots:` in config.yaml (for example `D:/`). It only reads. Each
+`library: roots:` in config.yaml (for example `D:/`), plus any `--root DIR`
+you give it. It only reads. A folder in `roots:` that is not there (a drive not
+plugged in) is named in a note, so "nothing found on E:" is never silence. A
+scan that stopped early, or looked in fewer folders than the last one, keeps
+what the last one found elsewhere; `--replace` keeps only the new scan. Each
 workflow and FASTA it finds gets a sentence saying what it is, and marks for
 what is wrong with it: ✗ means a search would fail or give wrong results, !
 means check it, a dot is for your information. `ionomos library recommend`

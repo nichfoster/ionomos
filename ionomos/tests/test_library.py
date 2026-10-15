@@ -648,6 +648,90 @@ def test_default_roots(pc):
     assert library.installed_version(cfg) == "24.0"
 
 
+def test_only_real_fragpipe_installations_count(pc, tmp_path, monkeypatch):
+    """#153: C:/FragPipe* also matches the lab's own C:/Fragpipe_Auto and C:/Fragpipe_General; only a folder with
+    bin/fragpipe.bat or lib/fragpipe-*.jar inside is an installation (the zip's is one level down, fragpipe/)."""
+    c = tmp_path / "C"
+    inst = c / "FragPipe-23.1"
+    (inst / "lib").mkdir(parents=True)
+    (inst / "lib" / "fragpipe-23.1.jar").write_text("x")
+    lab = c / "FragPipe_Auto"
+    write_wf(lab / "workflows" / "TMT10-MS3.workflow", "TMT")
+    (lab / "jobs").mkdir()
+    (c / "FragPipe_General").mkdir()
+    zipped = c / "FragPipe-jre-22.0" / "fragpipe"
+    (zipped / "bin").mkdir(parents=True)
+    (zipped / "bin" / "fragpipe.bat").write_text("x")
+    monkeypatch.setattr(library, "INSTALL_GLOBS", (str(c / "FragPipe*"),))
+    roots = library.install_roots()
+    assert inst in roots and zipped in roots
+    assert lab not in roots and c / "FragPipe_General" not in roots and c / "FragPipe-jre-22.0" not in roots
+    ctx = library.Context(install_roots=roots)
+    assert library.describe_workflow(lab / "workflows" / "TMT10-MS3.workflow", ctx).source == "other"
+    assert not library._is_install_dir(lab) and library._is_install_dir(inst)
+
+
+def test_a_partial_scan_never_replaces_a_fuller_catalog(pc, capsys):
+    """#153: `scan --time` that stops early, or `--only --root` one folder, keeps what the last full scan found
+    that it did not look at (files still on disk, unchanged); --replace keeps only the new scan; --root adds."""
+    cfg = str(pc["cfg_path"])
+    roots = [a for r in pc["roots"] for a in ("--root", str(r))]
+    assert cli.main(["--config", cfg, "library", "scan", "--only", *roots]) == 0
+    capsys.readouterr()
+    full = library.load_catalog(pc["cfg"])
+    n_full = (len(full.workflows), len(full.fastas))
+    assert cli.main(["--config", cfg, "library", "scan", "--only", "--root", str(pc["auto"] / "workflows")]) == 0
+    out = capsys.readouterr().out
+    after = library.load_catalog(pc["cfg"])
+    assert (len(after.workflows), len(after.fastas)) == n_full and "kept" in out
+    assert any("scan --replace` keeps only this scan" in n for n in after.notes)
+    stock = after.find(pc["stock_tmt"])
+    assert stock is not None and stock.source == "stock"
+    # a file deleted since is not kept
+    gone = pc["d"] / "Qian" / "QS_shotgunP3F_L1C14_100uM" / "Offset-search" / "fragpipe.workflow"
+    gone.unlink()
+    assert cli.main(["--config", cfg, "library", "scan", "--only", "--root", str(pc["auto"]), "--time", "5"]) == 0
+    capsys.readouterr()
+    assert library.load_catalog(pc["cfg"]).find(gone) is None
+    assert len(library.load_catalog(pc["cfg"]).workflows) == n_full[0] - 1
+    # a stopped scan (the time limit) keeps the rest too
+    assert cli.main(["--config", cfg, "library", "scan", "--time", "-1"]) == 0
+    capsys.readouterr()
+    assert len(library.load_catalog(pc["cfg"]).workflows) == n_full[0] - 1
+    # --replace: only what this scan found
+    assert cli.main(["--config", cfg, "library", "scan", "--only", "--root", str(pc["auto"]), "--replace"]) == 0
+    capsys.readouterr()
+    only = library.load_catalog(pc["cfg"])
+    assert only.workflows and all(library._inside(w.path, pc["auto"]) for w in only.workflows)
+    # --root adds to the default roots (the pinned folders, the installation, users_root)
+    assert cli.main(["--config", cfg, "library", "scan", "--root", str(pc["d"]), "--replace"]) == 0
+    capsys.readouterr()
+    cat = library.load_catalog(pc["cfg"])
+    assert cat.find(pc["stock_tmt"]) is not None and cat.find(pc["pax8"]) is not None
+    assert cli.main(["--config", cfg, "library", "scan", "--only"]) == 2
+    assert "--only needs" in capsys.readouterr().err
+
+
+def test_a_configured_root_that_does_not_exist_is_said(pc, capsys):
+    """#153: library.roots: [E:/not-plugged-in] (a USB drive unplugged, a typo) is a note in the scan's output, the
+    catalog and `list`, never dropped without a word."""
+    gone = pc["root"] / "not-plugged-in"
+    d = configio.read_config(pc["cfg_path"])
+    d["library"]["roots"] = [str(gone)]
+    configio.write_config(pc["cfg_path"], d, backup=False)
+    cfg = load(pc["cfg_path"], check_paths=False)
+    notes = []
+    assert gone not in library.default_roots(cfg, notes)
+    assert notes and str(gone) in notes[0] and "library.roots" in notes[0] and "does not exist" in notes[0]
+    assert any(str(gone) in n for n in library.scan(cfg=cfg).notes)
+    assert cli.main(["--config", str(pc["cfg_path"]), "library", "scan", "--root", str(pc["d"])]) == 0
+    assert f"note: {gone} does not exist" in capsys.readouterr().out
+    assert cli.main(["--config", str(pc["cfg_path"]), "library", "list"]) == 0
+    assert f"note: {gone} does not exist" in capsys.readouterr().out
+    from ionomos import library_tab
+    assert str(gone) in library_tab.catalog_line(library.load_catalog(cfg))
+
+
 # ----------------------------------------------------------------- catalog --
 
 
