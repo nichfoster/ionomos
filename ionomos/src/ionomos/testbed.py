@@ -17,6 +17,7 @@ contents, only names and sizes.
 """
 from __future__ import annotations
 
+import math
 import os
 import random
 import re
@@ -195,7 +196,69 @@ SAMPLES: dict[str, dict] = {
         shows="the fake FragPipe's psm.tsv has 20 % of N-termini unlabelled -> done, the TMT QC warns "
               "TMT_LOW_LABELLING",
     ),
+    # round 4: the other searches the lab runs, and what a healthy run on the PC also does
+    "lfq_good": dict(
+        folder="20260915_Chris_labelfree_AR-interactome",
+        raws=[f"{c}_{r}.raw" for c in ("DMSO", "Drug") for r in (1, 2, 3)],
+        shows="label-free DDA (method LFQ, LFQ-MBR.workflow): IonQuant's combined_protein.tsv -> done, Drug vs "
+              "DMSO from the MaxLFQ intensities",
+    ),
+    "phospho_lfq": dict(
+        folder="20260916_Isaac_lfqphospho_EGF-5min",
+        raws=[f"{c}_{r}.raw" for c in ("Ctrl", "EGF") for r in (1, 2, 3)],
+        yaml={"analysis": {"phospho": True, "phospho_min_localization": 0.75}},
+        shows="label-free phospho (method Phospho, 79.96633 STY): combined_site_STY_79.9663.tsv beside "
+              "combined_protein.tsv -> done, sites analysed",
+    ),
+    "dia_fractions": dict(
+        folder="20260917_Isaac_DIA_two-fraction",
+        raws=[f"{c}_{r}_F{f}.raw" for c in ("DMSO", "Drug") for r in (1, 2, 3) for f in (1, 2)],
+        yaml={"files": {f"{c}_{r}_F{f}.raw": {"experiment": c, "bioreplicate": r, "fraction": f}
+                        for c in ("DMSO", "Drug") for r in (1, 2, 3) for f in (1, 2)}},
+        shows="DIA in two gas-phase fractions per sample, mapped in experiment.yaml -> DIA-NN reports 12 runs for 6 "
+              "samples",
+    ),
+    "open_search": dict(
+        folder="20260918_EJQ_opensearch_mass-shifts",
+        raws=[f"HEK_{r}.raw" for r in (1, 2)],
+        shows="an open search (Open.workflow: -150 to +500 Da, PTM-Shepherd): psm.tsv with mass shifts and "
+              "ptm-shepherd-output/, no quantification table -> done, nothing to compare",
+    ),
+    "open_search_no_los": dict(
+        folder="20260918_EJQ_opensearch_no-localisation",
+        raws=[f"HEK_{r}.raw" for r in (1, 2)],
+        yaml={"workflow": "Open-noLOS.workflow"},
+        shows="the open search with 'Localize mass shift' off: FragPipe prints an ERROR line and searches anyway "
+              "-> done, the line not taken for a failure",
+    ),
+    "non_ascii_log": dict(
+        folder="20260919_EJQ_isoDTB_umlaut-log",
+        raws=_iso("EJQ_umlaut", reps=(1, 2), fracs=(1,)), mode="non-ascii",
+        shows="the tools print umlauts, µ and Japanese: '?' on FragPipe's console (cp1252), the real text in "
+              "log_<date>.txt -> done",
+    ),
+    "retry_previous": dict(
+        folder="20260920_EJQ_isoDTB_fails-once",
+        raws=_iso("EJQ_once", reps=(1, 2), fracs=(1,)), mode="fail-once",
+        shows="the first search fails in IonQuant -> failed; Retry -> done, the first attempt kept as "
+              "fragpipe_previous_<time>",
+    ),
 }
+
+
+def list_text() -> str:
+    """`ionomos testbed list`: every sample drop, its folder, the fake's fault mode for it, and what it shows."""
+    w = max(len(n) for n in SAMPLES)
+    lines = [f"  {'sample':<{w}}  {'folder':<42}  {'fake mode':<18}  what it shows"]
+    for n, spec in SAMPLES.items():
+        lines.append(f"  {n:<{w}}  {spec['folder']:<42}  {spec.get('mode') or '-':<18}  {spec['shows']}")
+    lines.append(f"\n{len(SAMPLES)} samples. The fake FragPipe's fault modes (IONOMOS_FAKE_FP_MODE, or "
+                 "fake_fragpipe_mode.txt in an experiment folder):")
+    from ionomos.fake_fragpipe import MODES
+
+    wm = max(len(m) for m in MODES)
+    lines += [f"  {m:<{wm}}  {what}" for m, what in MODES.items()]
+    return "\n".join(lines)
 
 
 def _write_raw(p: Path, size: int) -> None:
@@ -241,25 +304,46 @@ def fake_fragpipe(argv: list[str]) -> int:
 
 
 def _fake_results(wd: Path, rows: list[list[str]], workflow_name: str, annotations: dict | None = None,
-                  label: str = "TMT-10", props: dict | None = None, modes: set[str] | None = None) -> None:
+                  label: str = "TMT-10", props: dict | None = None, modes: set[str] | None = None,
+                  runs: dict[str, str] | None = None) -> None:
     """Realistic result tables with planted hits (ionomos.downstream.simulate), so reports have content.
 
     rows: the manifest as FragPipe read it (experiment names already FragPipe's). annotations (TMT):
     {plex: its annotation file or None}; a plex without one gets FragPipe's own names, <plex>_<channel>.
-    props: the workflow's settings (TMT: phospho adds the single-site table); modes: the fake's fault modes (TMT:
-    tmt-poor-labelling, tmt-low-purity, tmt-empty-channel change the psm.tsv files)."""
+    props: the workflow's settings (TMT: phospho adds the single-site table; label-free IonQuant without labels
+    writes combined_protein.tsv, and the phospho site report when the search has 79.96633 STY; no quantification
+    at all, as an open search, only psm.tsv); modes: the fake's fault modes (TMT: tmt-poor-labelling,
+    tmt-low-purity, tmt-empty-channel change the psm.tsv files). runs: raw path -> the run name DIA-NN reports
+    (FragPipe hands it <raw>_uncalibrated.mzML)."""
     import zlib
 
     from ionomos.downstream import simulate
     from ionomos.fake_fragpipe import TMT_CHANNELS
 
     seed = zlib.crc32("".join(r[0] for r in rows).encode())
+    p = props or {}
+    on = lambda k, d=False: p[k].strip().lower() == "true" if k in p else d  # noqa: E731
     if any(len(r) > 3 and r[3] == "DIA" for r in rows):
         out = wd / "dia-quant-output"  # FragPipe 24's folder (CmdDiann); earlier versions wrote diann-output
         out.mkdir(parents=True, exist_ok=True)
+        names = [(runs or {}).get(r[0], r[0]) for r in rows]
         (out / "report.tsv").write_text("Run\tProtein.Group\tPrecursor.Quantity\n", encoding="utf-8")
-        simulate.dia_pg_matrix(out / "report.pg_matrix.tsv", [(r[0], r[1]) for r in rows], seed)
-        fake_diann_stats(out / "report.stats.tsv", [r[0] for r in rows])
+        simulate.dia_pg_matrix(out / "report.pg_matrix.tsv", [(n, r[1]) for n, r in zip(names, rows, strict=True)],
+                               seed)
+        fake_diann_stats(out / "report.stats.tsv", names)
+        fake_psm(wd / "psm.tsv", [r[0] for r in rows])  # Philosopher's report in the one flat folder
+    elif props is not None and not on("ionquant.use-labeling") and not on("tmtintegrator.run-tmtintegrator") \
+            and "tmt" not in workflow_name.lower():
+        groups = _groups(rows)
+        lfq = on("quantitation.run-label-free-quant") and on("ionquant.run-ionquant", True)
+        if lfq:
+            prots = fake_combined_protein(wd / "combined_protein.tsv", [(g, g.rsplit("_", 1)[0]) for g in groups],
+                                          seed)
+            if re.search(r"79\.966\d*,\s*STY,\s*true", p.get("msfragger.table.var-mods", "")):
+                fake_site_report(wd / "combined_site_STY_79.9663.tsv", prots, list(groups), seed)
+        open_search = p.get("msfragger.precursor_mass_units", "1").strip() == "0"
+        for name, raws in groups.items():
+            fake_psm(wd / name / "psm.tsv", raws, open_search=open_search)
     elif annotations is not None or "tmt" in workflow_name.lower():
         plexes: dict[str, list[tuple[str, str]]] = {}
         for exp in dict.fromkeys(r[1] for r in rows):
@@ -329,9 +413,14 @@ def fake_diann_stats(path: Path, raws: list[str]) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def fake_psm(path: Path, raws: list[str], n_psms: int = 240) -> None:
+OPEN_SEARCH_SHIFTS = ((0.0, 60), (15.9949, 10), (0.984, 6), (1.0034, 6), (79.9663, 4), (-17.0265, 4), (42.0106, 3),
+                      (14.0157, 3), (-18.0106, 2), (114.0429, 2))  # mass shift (Da), weight: an open search's peaks
+
+
+def fake_psm(path: Path, raws: list[str], n_psms: int = 240, open_search: bool = False) -> None:
     """A FragPipe psm.tsv with its real columns: n_psms PSMs per run from a fixed pool of peptides (stable RTs,
-    ~2 ppm precursor error, ~10 % missed cleavages), so the instrument QC trend has DDA runs to read."""
+    ~2 ppm precursor error, ~10 % missed cleavages), so the instrument QC trend has DDA runs to read.
+    open_search: Delta Mass carries the mass shifts an open search finds (OPEN_SEARCH_SHIFTS), in Da."""
     pool = random.Random(7)
     aa = "ACDEFGHIKLMNPQRSTVWY"
     peptides = ["".join(pool.choice(aa) for _ in range(pool.randint(7, 18))) + pool.choice("KR") for _ in range(160)]
@@ -345,6 +434,8 @@ def fake_psm(path: Path, raws: list[str], n_psms: int = 240) -> None:
             z = 2 if rng.random() < 0.62 else 3
             calc = 110.0 * len(pep) + 18.0106
             obs = calc * (1 + rng.gauss(2.0, 1.5) * 1e-6)
+            if open_search:
+                obs += rng.choices([s for s, _w in OPEN_SEARCH_SHIFTS], [w for _s, w in OPEN_SEARCH_SHIFTS])[0]
             rt = base_rt[pep] + rng.gauss(0, 6)
             mc = 1 if rng.random() < 0.1 else 0
             scan = f"{k + 1:05d}"
@@ -356,6 +447,105 @@ def fake_psm(path: Path, raws: list[str], n_psms: int = 240) -> None:
                 f"P{k % 90:05d}", f"PROT{k % 90}_HUMAN", f"GENE{k % 90}")))
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def fake_combined_protein(path: Path, samples: list[tuple[str, str]], seed: int, n_proteins: int = 300) -> list[dict]:
+    """IonQuant's combined_protein.tsv for a label-free search, in the layout of a real FragPipe file
+    (tests/golden/example/AP-MS): the protein columns, then every sample's Spectral Count, Unique Spectral Count,
+    Total Spectral Count, Intensity and MaxLFQ Intensity, each block in sample order, then Indistinguishable
+    Proteins; intensities written as Java writes floats (1.6315267E7), 0.0 for missing; two contam_ rows first.
+    samples: [(<experiment>_<bioreplicate>, condition)]. Returns the proteins written (for a site report)."""
+    import tempfile
+
+    from ionomos.downstream import simulate
+    from ionomos.fake_fragpipe import _java_float
+
+    with tempfile.TemporaryDirectory() as td:
+        pg = Path(td) / "pg.tsv"
+        simulate.dia_pg_matrix(pg, samples, seed=seed, n_proteins=n_proteins)
+        _head, *rows = [ln.split("\t") for ln in pg.read_text(encoding="utf-8").splitlines()]
+    names = [s for s, _c in samples]
+    head = ["Protein", "Protein ID", "Entry Name", "Gene", "Protein Length", "Organism", "Protein Existence",
+            "Description", "Protein Probability", "Top Peptide Probability", "Combined Total Peptides",
+            "Combined Spectral Count", "Combined Unique Spectral Count", "Combined Total Spectral Count",
+            *[f"{s} {kind}" for kind in ("Spectral Count", "Unique Spectral Count", "Total Spectral Count",
+                                         "Intensity", "MaxLFQ Intensity") for s in names],
+            "Indistinguishable Proteins"]
+    contam = [["P00330", "ADH1_YEAST", "ADH1", "Saccharomyces cerevisiae (strain ATCC 204508 / S288c)",
+               "Alcohol dehydrogenase 1", "contam_sp"],
+              ["P00761", "TRYP_PIG", "", "Sus scrofa", "Trypsin", "contam_sp"]]
+    out, prots = ["\t".join(head)], []
+    rng = random.Random(seed)
+    for k, r in enumerate([None, None, *rows]):
+        if r is None:
+            acc, entry, gene, org, desc, db = contam[k]
+            vals = [rng.lognormvariate(16, 1) if rng.random() < 0.7 else 0.0 for _s in names]
+            peps = 1
+        else:
+            acc, entry, gene, org, desc, db = r[0], r[2], r[3], "Homo sapiens", r[4], "sp"
+            vals = [float(v) if v else 0.0 for v in r[7:]]
+            peps = int(r[5])
+        counts = [max(0, round(math.log2(v) - 14)) if v else 0 for v in vals]
+        uniq = [max(0, c - (k % 2)) for c in counts]
+        intensity = [v * 1.08 if v else 0.0 for v in vals]
+        out.append("\t".join([
+            f"{db}|{acc}|{entry}", acc, entry, gene, str(200 + k % 700), org, "1:Experimental evidence at protein level",
+            desc, "1.0000" if r is not None else "0.9093", "0.9990", str(peps), str(sum(counts)), str(sum(uniq)),
+            str(sum(counts)), *map(str, counts), *map(str, uniq), *map(str, counts),
+            *map(_java_float, intensity), *map(_java_float, vals), ""]))
+        if r is not None:
+            prots.append({"acc": acc, "entry": entry, "gene": gene, "values": vals})
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(out) + "\n", encoding="utf-8")
+    return prots
+
+
+def fake_site_report(path: Path, prots: list[dict], samples: list[str], seed: int) -> None:
+    """IonQuant's phosphosite report (combined_site_STY_79.9663.tsv) as downstream/phospho.py documents it: Index
+    (P12345_S142), Gene, Protein, Protein ID, Peptide, Best Localization Probability, then per sample
+    "<s> Localization Probability", "<s> Intensity" and "<s> MaxLFQ Intensity"; 0 = missing. One or two sites
+    per protein, following the protein's level with changes of their own; a fifth poorly localised."""
+    from ionomos.fake_fragpipe import _java_float
+
+    rng = random.Random(seed + 79)
+    aa = "ACDEFGHIKLMNPQRSTVWY"
+    head = ["Index", "Gene", "Protein", "Protein ID", "Peptide", "Best Localization Probability",
+            *[f"{s} {kind}" for s in samples for kind in ("Localization Probability", "Intensity", "MaxLFQ Intensity")]]
+    out = ["\t".join(head)]
+    for k, pr in enumerate(prots):
+        for j in range(1 + (k % 3 == 0)):
+            res = rng.choice("STY")
+            best = rng.uniform(0.4, 0.74) if rng.random() < 0.2 else rng.uniform(0.75, 1.0)
+            change = rng.choice((1.0, 1.0, 1.0, 2.5, 0.4)) if j else 1.0
+            cells = []
+            for i, v in enumerate(pr["values"]):
+                site = v * 0.05 * (change if i >= len(samples) // 2 else 1.0) * 2 ** rng.gauss(0, 0.2) if v else 0.0
+                cells += [f"{min(1.0, best + rng.uniform(-0.1, 0.0)):.4f}" if v else "0.0", _java_float(site * 1.05),
+                          _java_float(site)]
+            pep = "".join(rng.choice(aa) for _ in range(6)) + res + "".join(rng.choice(aa) for _ in range(5)) + "K"
+            out.append("\t".join([f"{pr['acc']}_{res}{rng.randint(5, 900)}", pr["gene"], f"sp|{pr['acc']}|{pr['entry']}",
+                                  pr["acc"], pep, f"{best:.4f}", *cells]))
+    path.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+
+def fake_ptm_shepherd(wd: Path, raws: list[str]) -> None:
+    """PTM-Shepherd's ptm-shepherd-output/ of an open search: global.profile.tsv and global.modsummary.tsv (the
+    folder and file names FragPipe's output guide gives; the columns are invented, short of the real ones)."""
+    out = wd / "ptm-shepherd-output"
+    out.mkdir(parents=True, exist_ok=True)
+    peaks = [s for s, _w in OPEN_SEARCH_SHIFTS]
+    names = {0.0: "None", 15.9949: "Oxidation/Hydroxylation", 0.984: "Deamidation", 1.0034: "First isotopic peak",
+             79.9663: "Phosphorylation", -17.0265: "Pyro-glu from Q/Loss of ammonia", 42.0106: "Acetylation",
+             14.0157: "Methylation", -18.0106: "Pyro-glu from E/Loss of water", 114.0429: "Ubiquitination"}
+    rows = ["peak_apex\tpeak_lower\tpeak_upper\tPSMs\tpercent_PSMs\tmapped_mass_1"]
+    for k, s in enumerate(peaks):
+        rows.append(f"{s:.4f}\t{s - 0.002:.4f}\t{s + 0.002:.4f}\t{240 * len(raws) // (k + 2)}\t{50 / (k + 1):.2f}\t"
+                    f"{names[s]}")
+    (out / "global.profile.tsv").write_text("\n".join(rows) + "\n", encoding="utf-8")
+    (out / "global.modsummary.tsv").write_text(
+        "Modification\tTheoretical Mass Shift\tdataset01_PSMs\n"
+        + "".join(f"{names[s]}\t{s:.4f}\t{240 * len(raws) // (k + 2)}\n" for k, s in enumerate(peaks) if s),
+        encoding="utf-8")
 
 
 TMT_FAKE_UNLABELLED = 0.02     # share of PSMs whose N-terminus carries no TMT (mode tmt-poor-labelling: 0.2)
@@ -939,7 +1129,13 @@ def workflow_text(kind: str, label: str = "TMT-10") -> str:
     """A small .workflow for the testbed: the switches Ionomos and the fake FragPipe read, with the values of
     FragPipe 24.0's stock chemprot-ABPP-isoDTB / TMT10-MS3 / TMT16 / DIA_SpecLib_Quant workflows (a real one has ~400
     keys). The isoDTB one has match-between-runs on, as the lab's SOP asks. label: a TMT workflow's label type
-    (TMT-16 / TMT-18 get TMTpro's mass and MS2 quantification, as the stock TMT16 workflow)."""
+    (TMT-16 / TMT-18 get TMTpro's mass and MS2 quantification, as the stock TMT16 workflow).
+    Also (round 4): LFQ (the stock LFQ-MBR: IonQuant MaxLFQ with match-between-runs), Phospho (LFQ-phospho:
+    79.96633 on STY searched, IonQuant's site report), Open (the stock Open search: -150 to +500 Da, PeptideProphet,
+    Crystal-C, PTM-Shepherd, mass-shift localisation, no quantification) and Open-noLOS (the same with
+    localisation off, which FragPipe answers with an ERROR line and runs anyway)."""
+    if kind in ("LFQ", "Phospho", "Open", "Open-noLOS"):
+        return _lfq_workflow_text(kind)
     tmt, dia = kind == "TMT", kind == "DIA"
     from ionomos.tmtkit import TMT_MASS, label_type
 
@@ -1003,6 +1199,65 @@ def workflow_text(kind: str, label: str = "TMT-10") -> str:
             + "".join(f"{k}={v}\n" for k, v in keys.items()) + "database.db-path=FAKE.fas\n")
 
 
+def _lfq_workflow_text(kind: str) -> str:
+    """The label-free and open-search workflows (FragPipe 24.0's stock LFQ-MBR, LFQ-phospho and Open, the keys the
+    fake and Ionomos read)."""
+    open_search = kind.startswith("Open")
+    keys = {
+        "crystalc.run-crystalc": str(open_search).lower(),
+        "database.decoy-tag": "rev_",
+        "diann.run-dia-nn": "false",
+        "diatracer.run-diatracer": "false",
+        "diaumpire.run-diaumpire": "false",
+        "freequant.run-freequant": "false",
+        "ionquant.heavy": "",
+        "ionquant.light": "",
+        "ionquant.maxlfq": "1",
+        "ionquant.mbr": "0" if open_search else "1",
+        "ionquant.run-ionquant": str(not open_search).lower(),
+        "ionquant.use-labeling": "false",
+        "ionquant.use-lfq": str(not open_search).lower(),
+        "msbooster.run-msbooster": str(not open_search).lower(),
+        "msfragger.calibrate_mass": "2",
+        "msfragger.localize_delta_mass": "0" if kind == "Open-noLOS" else ("1" if open_search else "0"),
+        "msfragger.misc.slice-db": "1",
+        "msfragger.precursor_mass_lower": "-150" if open_search else "-20",
+        "msfragger.precursor_mass_units": "0" if open_search else "1",
+        "msfragger.precursor_mass_upper": "500" if open_search else "20",
+        "msfragger.run-msfragger": "true",
+        "msfragger.search_enzyme_name_1": "stricttrypsin",
+        "msfragger.table.fix-mods": "57.02146,C (cysteine),true,-1",
+        "msfragger.table.var-mods": "15.9949,M,true,3; 42.0106,[^,true,1"
+                                    + ("; 79.96633,STY,true,3" if kind == "Phospho" else "; 79.96633,STY,false,3"),
+        "peptide-prophet.run-peptide-prophet": str(open_search).lower(),
+        "percolator.run-percolator": str(not open_search).lower(),
+        "phi-report.run-report": "true",
+        "protein-prophet.run-protein-prophet": "true",
+        "ptmprophet.run-ptmprophet": str(kind == "Phospho").lower(),
+        "ptmshepherd.run-shepherd": str(open_search).lower(),
+        "quantitation.run-label-free-quant": str(not open_search).lower(),
+        "run-psm-validation": "true",
+        "run-validation-tab": "true",
+        "speclibgen.run-speclibgen": "false",
+        "tab-run.delete_temp_files": "false",
+        "tmtintegrator.run-tmtintegrator": "false",
+        "workflow.input.data-type.im-ms": "false",
+        "workflow.input.data-type.regular-ms": "true",
+        "workflow.misc.save-sdrf": "false",
+        "workflow.misc.sdrf-type": "Default",
+        "workflow.saved-with-ver": "24.0-build27",
+    }
+    return (f"# Workflow: {kind} (Ionomos testbed)\n\n" + "".join(f"{k}={v}\n" for k, v in keys.items())
+            + "database.db-path=FAKE.fas\n")
+
+
+# the methods ionomos testbed init configures beyond isoDTB / TMT / DIA (round 4): key -> (keywords, workflow).
+# Keywords no test's folder name holds: 'lfq' or 'phospho' alone made 'isoDTB_sage-lfq' name two methods
+EXTRA_METHODS = {"LFQ": (["labelfree"], "LFQ-MBR.workflow"),
+                 "Phospho": (["lfqphospho"], "LFQ-phospho.workflow"),
+                 "Open": (["opensearch"], "Open.workflow")}
+
+
 def init(root: Path, slow_defaults: bool = False) -> Path:
     root = Path(root).resolve()
     auto = root / "Fragpipe_Auto"
@@ -1012,7 +1267,9 @@ def init(root: Path, slow_defaults: bool = False) -> Path:
     for u in USERS:
         (general / u).mkdir(parents=True, exist_ok=True)
     for wf, kind, label in (("isoDTB.workflow", "isoDTB", ""), ("TMT10-MS3.workflow", "TMT", "TMT-10"),
-                            ("TMT16.workflow", "TMT", "TMT-16"), ("DIA.workflow", "DIA", "")):
+                            ("TMT16.workflow", "TMT", "TMT-16"), ("DIA.workflow", "DIA", ""),
+                            ("LFQ-MBR.workflow", "LFQ", ""), ("LFQ-phospho.workflow", "Phospho", ""),
+                            ("Open.workflow", "Open", ""), ("Open-noLOS.workflow", "Open-noLOS", "")):
         p = auto / "workflows" / wf
         if not p.exists():
             p.write_text(workflow_text(kind, label or "TMT-10"), encoding="utf-8", newline="\n")
@@ -1045,7 +1302,11 @@ def init(root: Path, slow_defaults: bool = False) -> Path:
                     "data_type": "DDA", "postprocess": ["tmt_annotation"]},
             "DIA": {"aliases": ["dia", "diann", "dia-nn"], "workflow": "DIA.workflow",
                     "fasta": "human_reviewed_decoys.fas", "data_type": "DIA", "postprocess": []},
+            **{key: {"aliases": aliases, "workflow": wf, "fasta": "human_reviewed_decoys.fas", "data_type": "DDA",
+                     "postprocess": []} for key, (aliases, wf) in EXTRA_METHODS.items()},
         },
+        # the lab's own methods read their raw names as isoDTB's do: <sample>_<rep>[_<fraction>] (NAMING_CONVENTION)
+        "naming": {"methods": {key: {"files": "{sample}_{rep}[_{fraction}]"} for key in EXTRA_METHODS}},
     }
     cfg_path = auto / "config.yaml"
     cfg_path.write_text("# ionomos TESTBED config - generated by `ionomos testbed init`\n" + yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
@@ -1177,9 +1438,7 @@ def main(args) -> int:
         print(f"config: {cfg}")
         return 0
     if args.tb_cmd == "list":
-        w = max(len(n) for n in SAMPLES)
-        for n, spec in SAMPLES.items():
-            print(f"  {n:<{w}}  {spec['folder']:<40}  {spec['shows']}")
+        print(list_text())
         return 0
     if args.tb_cmd == "drop":
         dst = drop(Path(args.dir), args.name, slow=args.slow)

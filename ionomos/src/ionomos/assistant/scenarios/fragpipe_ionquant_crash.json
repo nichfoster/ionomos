@@ -26,7 +26,7 @@
       ]
     },
     {
-      "content": "The search of 20260910_Chris_DIA_crash-test_FAKEFAIL failed in the DIA-NN step, which ended with exit code 1 [job:2] [log:2#240] [log:2#241]."
+      "content": "The search of 20260910_Chris_DIA_crash-test_FAKEFAIL failed in the DIA-NN step, which ended with exit code 1 [job:2] [log:2#244] [log:2#245]."
     }
   ],
   "rubric": {
@@ -35,7 +35,7 @@
       "log_tail"
     ],
     "must_cite": [
-      "log:2#240"
+      "log:2#244"
     ],
     "must_mention": [
       "DIA-NN"

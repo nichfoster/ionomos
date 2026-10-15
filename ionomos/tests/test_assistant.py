@@ -444,12 +444,12 @@ def test_citations_are_valid_only_if_a_tool_returned_them():
 def test_a_grounded_answer_is_shown_with_its_sources_and_audited(bed):
     model = fake.ScriptedModel([
         {"tool_calls": [{"name": "search_help", "arguments": {"query": "search failed"}}]},
-        {"content": "FragPipe ran out of memory [log:1#257].\n\nLower Threads, then Retry [job:1] [help:attention.search_failed]."}])
+        {"content": "FragPipe ran out of memory [log:1#242].\n\nLower Threads, then Retry [job:1] [help:attention.search_failed]."}])
     ans = assistant.ask(bed["ready"], "Why did my search fail?\x1b[2J", experiment="1", transport=model,
                         audit_path=bed["audit"])
-    assert ans.grounded and ans.text.startswith("FragPipe ran out of memory [log:1#257].") and ans.rounds == 2
-    assert ans.citations == ["log:1#257", "job:1", "help:attention.search_failed"] and ans.job_id == 1
-    assert ans.sources[0].startswith("[log:1#257] Exception in thread") and "OutOfMemoryError" in ans.sources[0]
+    assert ans.grounded and ans.text.startswith("FragPipe ran out of memory [log:1#242].") and ans.rounds == 2
+    assert ans.citations == ["log:1#242", "job:1", "help:attention.search_failed"] and ans.job_id == 1
+    assert ans.sources[0].startswith("[log:1#242] Exception in thread") and "OutOfMemoryError" in ans.sources[0]
     # Ionomos looked the job up itself, as tool calls the model sees as data; then the model's own call
     assert [(c["name"], c["by"]) for c in ans.tool_calls] == [
         ("get_job", "ionomos"), ("list_attention", "ionomos"), ("log_tail", "ionomos"), ("search_help", "model")]
@@ -485,7 +485,7 @@ def test_not_set_up_is_a_normal_state_with_the_doctor_text(bed):
 
 def test_ask_about_an_attention_item_and_an_unknown_one(bed):
     (item,) = attention.items(bed["cfg"].log_dir)
-    model = fake.ScriptedModel([{"content": "It ran out of memory [log:1#257]."}])
+    model = fake.ScriptedModel([{"content": "It ran out of memory [log:1#242]."}])
     ans = assistant.ask(bed["ready"], "what happened?", item_id=item.id, transport=model, audit_path=bed["audit"])
     assert ans.grounded and ans.job_id == 1 and audit.read(bed["audit"])[0]["item"] == item.id
     ans = assistant.ask(bed["ready"], "what happened?", item_id="no-such-item", transport=fake.ScriptedModel([]),
@@ -527,11 +527,11 @@ def test_cli_ask_prints_the_fallback_when_not_set_up_and_a_grounded_answer_when_
     d = yaml.safe_load(bed["cfg_path"].read_text(encoding="utf-8"))
     d["assistant"] = {"enabled": True, "model": fake.MODEL, "maintainer": "Nick"}
     bed["cfg_path"].write_text(yaml.safe_dump(d), encoding="utf-8")
-    model = fake.ScriptedModel([{"content": "FragPipe ran out of memory [log:1#257]."}], stream=True)
+    model = fake.ScriptedModel([{"content": "FragPipe ran out of memory [log:1#242]."}], stream=True)
     monkeypatch.setattr(client, "_http", model)
     assert cli.main(argv) == 0
     out = capsys.readouterr().out
-    assert out.startswith("FragPipe ran out of memory [log:1#257].\n\nSources:\n  [log:1#257] Exception in thread")
+    assert out.startswith("FragPipe ran out of memory [log:1#242].\n\nSources:\n  [log:1#242] Exception in thread")
     assert f"(assistant: grounded, model {fake.MODEL})" in out
     assert model.requests[0]["messages"][1]["content"].startswith("why did it fail?")
 

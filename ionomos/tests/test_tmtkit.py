@@ -381,7 +381,7 @@ def test_tmt_commands_refuse_a_job_that_is_not_tmt(tmp_path, capsys):
     assert cli.main(["--config", str(cfg), "tmt", "plan", str(dia), "--method", "TMT"]) == 0
     capsys.readouterr()
     assert cli.main(["--config", str(cfg), "tmt", "plan", str(dia), "--method", "Foo"]) == 2
-    assert "--method Foo is not one of the lab's methods (isoDTB, TMT, DIA)" in capsys.readouterr().out
+    assert "--method Foo is not one of the lab's methods (isoDTB, TMT, DIA, LFQ, Phospho, Open)" in capsys.readouterr().out
 
     # a filed job: ionomos.json says what it was filed as
     filed = tmp_path / "20260914_Isaac_DIA_FLAG-AR-pulldown"
