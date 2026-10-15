@@ -6,7 +6,7 @@
   "experiment": "20260126_Aman_TMT_KL6159A-9plex",
   "model": [
     {
-      "content": "FragPipe could not find MSFragger [log:4#5].\n\nOpen the FragPipe GUI once, Config tab -> Download/Update MSFragger (accept the licence), then Retry [job:4]."
+      "content": "FragPipe could not find MSFragger [log:4#{is not valid but it is enabled}].\n\nOpen the FragPipe GUI once, Config tab -> Download/Update MSFragger (accept the licence), then Retry [job:4]."
     }
   ],
   "rubric": {
@@ -15,7 +15,7 @@
       "log_tail"
     ],
     "must_cite": [
-      "log:4#5",
+      "log:4#{is not valid but it is enabled}",
       "job:4"
     ],
     "must_mention": [

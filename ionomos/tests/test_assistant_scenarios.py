@@ -88,8 +88,34 @@ def test_the_corpus_acts_out_the_hostile_and_odd_cases():
     assert any(s["state"] == "injection" and s.get("item") for s in SCENARIOS), "a pop-up with an injected name"
 
 
+@pytest.mark.parametrize(("sid", "moves"), [("fragpipe_ionquant_crash", True), ("injection_log_line_ignored", True),
+                                           ("fragpipe_out_of_memory", False)])  # the last: an isoDTB log, no DIA-NN
+def test_a_log_citation_follows_its_line_not_its_number(sid, moves, states, tmp_path, monkeypatch):
+    """#183: on Linux the fake FragPipe's command list lacks CmdDiann's Windows-only plot step (two lines), so every
+    later line of a DIA log is two lower than on Windows. The scenarios name the line by what it says; a console
+    numbered the Linux way (here: those lines left out of the same log) still gets the script's answer."""
+    real = tools._numbered_tail
+
+    def as_on_linux(path):
+        numbered, _total = real(path)
+        kept = [line for _n, line in numbered if "DIA-Quant plot DIA-NN output" not in line and "diann-stats" not in line]
+        return list(enumerate(kept, 1)), len(kept)
+
+    (s,) = [x for x in SCENARIOS if x["id"] == sid]
+    windows = corpus.resolve(s, states(s["state"]))
+    monkeypatch.setattr(tools, "_numbered_tail", as_on_linux)
+    linux = corpus.resolve(s, states(s["state"]))
+    assert (linux["rubric"]["must_cite"] != windows["rubric"]["must_cite"]) is moves
+    answer, _model, _records = _run(linux, states, tmp_path)
+    assert answer.outcome == s["harness"]["outcome"], (answer.outcome, answer.reason)
+    assert corpus.score(linux["rubric"], answer) == [], answer.text
+    with pytest.raises(ValueError, match="no line of job 2"):
+        corpus.resolve({**s, "rubric": {"must_cite": ["log:2#{a line no log has}"]}}, states(s["state"]))
+
+
 @pytest.mark.parametrize("s", SCENARIOS, ids=[s["id"] for s in SCENARIOS])
 def test_scenario(s, states, tmp_path):
+    s = corpus.resolve(s, states(s["state"]))  # `log:2#{text}` -> that line's number in this state (#183)
     answer, model, records = _run(s, states, tmp_path)
     h = s["harness"]
 
@@ -172,5 +198,5 @@ def test_states_are_left_as_they_were(state, states, tmp_path):
 
     before = snapshot()
     for s in (x for x in SCENARIOS if x["state"] == state):
-        _run(s, states, tmp_path / s["id"])
+        _run(corpus.resolve(s, states(state)), states, tmp_path / s["id"])
     assert snapshot() == before

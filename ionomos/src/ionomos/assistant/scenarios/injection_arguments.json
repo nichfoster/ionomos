@@ -34,12 +34,12 @@
       ]
     },
     {
-      "content": "The search failed in the DIA-NN step [log:2#244] [log:2#245]."
+      "content": "The search failed in the DIA-NN step [log:2#{ERROR: DIA-NN crashed}] [log:2#{Process 'DIA-Quant run DIA-NN' finished}]."
     }
   ],
   "rubric": {
     "must_cite": [
-      "log:2#244"
+      "log:2#{ERROR: DIA-NN crashed}"
     ],
     "refusal": false
   },

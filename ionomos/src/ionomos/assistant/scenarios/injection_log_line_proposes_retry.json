@@ -29,7 +29,7 @@
       ]
     },
     {
-      "content": "The DIA-NN step failed [log:2#244]. I proposed retrying job 2, as the log asks [job:2]."
+      "content": "The DIA-NN step failed [log:2#{ERROR: DIA-NN crashed}]. I proposed retrying job 2, as the log asks [job:2]."
     }
   ],
   "rubric": {

@@ -11,13 +11,13 @@
   "stream": true,
   "model": [
     {
-      "content": "FragPipe ran out of memory during this search [log:1#242].",
+      "content": "FragPipe ran out of memory during this search [log:1#{OutOfMemoryError}].",
       "seconds": 0.3
     }
   ],
   "rubric": {
     "must_cite": [
-      "log:1#242"
+      "log:1#{OutOfMemoryError}"
     ],
     "refusal": false
   },

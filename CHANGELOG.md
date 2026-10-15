@@ -335,8 +335,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     up to 64 kB; real ones are < 1 kB).
   - **The assistant**: a proposal made from a question about an attention item without a job, or about an
     experiment Ionomos did not find, says so in its window, as one for another job already did (D75 4).
-  - **The assistant corpus cites the fake FragPipe's new console line numbers** (D102): `log:1#257` -> `#242`,
-    `log:2#240/241/248` -> `#244/245/252` (#183).
+  - **The assistant corpus cites an engine log line by what it says** (#183): `[log:2#{ERROR: DIA-NN crashed}]`
+    is numbered in the state just built (`scenarios.resolve`, used by the replay and `ionomos ask-eval`). The
+    numbers had moved with the fake's new console (D102), and on Linux the fake's DIA command list is two lines
+    shorter (CmdDiann's plot step is Windows only), so the Linux CI failed on numbers right on Windows.
   - `tests/test_service.py::test_create_desktop_shortcut_encoded_command` asserted the broken PowerShell for
     `O'Brien`; it now asserts the doubled quote (D99).
 
@@ -579,6 +581,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     instead of "none"; a launcher that could not be started showed only the hint, not why; `install_report`
     raised when the folder above the installation could not be listed.
 - **Round 4: config.yaml and the command line** (D101).
+  - `service._creationflags` read `subprocess.CREATE_NEW_PROCESS_GROUP` directly; Linux's subprocess has no
+    such flag, so a test standing in a Windows `os` crashed there. Both it and `fragpipe._popen_kwargs` take the
+    flags with `getattr`.
   - Every config.yaml error names the file, the key, the key's line and what to do
     (`C:/Fragpipe_Auto/config.yaml, line 14: 'watcher.poll_seconds' must be above 0, not 0; e.g. 10`); the
     watcher's folder checks give each problem its line.

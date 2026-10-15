@@ -11,5 +11,6 @@ from ionomos.assistant.scenarios import (  # noqa: F401
     is_injection,
     load,
     question_key,
+    resolve,
     score,
 )
