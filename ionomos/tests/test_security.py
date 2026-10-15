@@ -653,6 +653,26 @@ def test_a_log_line_reaches_the_model_only_as_data_and_changes_nothing(failed_jo
     assert {p for p in after if p not in before or after[p] != before[p]} == set()
 
 
+def test_log_tail_does_not_follow_a_link_out_of_the_run_folder(failed_job, tmp_path):
+    from ionomos import fragpipe
+    from ionomos.assistant import tools
+    from ionomos.ledger import Ledger
+
+    cfg, job = failed_job
+    log = names.run_dir(Path(job.dest_dir)) / fragpipe.CONSOLE_LOG
+    private = tmp_path / "private.txt"
+    private.write_text("PRIVATE line the model must not see\n", encoding="utf-8")
+    log.unlink()
+    try:
+        log.symlink_to(private)
+    except OSError:  # Windows without Developer Mode: no symlinks, and nobody else can make one either
+        pytest.skip("this account can't make symbolic links")
+    led = Ledger(cfg.database)
+    res = tools.call(tools.Context(cfg, led), "log_tail", {"job_id": 1})
+    led.close()
+    assert "PRIVATE" not in json.dumps(res) and res.get("log") is None
+
+
 # ------------------------------------------- secrets planted in config.yaml, searched for everywhere ----
 
 
