@@ -71,6 +71,9 @@ def _start(cmd: list[str], env: dict[str, str], out_file: Path, cwd: Path, timeo
     -> (exit code or None, output text, timed out)."""
     timed_out = False
     code: int | None = None
+    unsafe = fragpipe.batch_problem(cmd)
+    if unsafe:
+        return None, unsafe, False
     try:
         with open(out_file, "wb") as out:
             proc = subprocess.Popen(cmd, stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, cwd=str(cwd),

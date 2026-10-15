@@ -278,3 +278,115 @@ def test_redaction_leaves_the_rest_of_the_config_readable():
     out = notify.redact_config_text(text)
     assert "base_url: http://127.0.0.1:11434/v1" in out and "url_env: HOOK_URL" in out
     assert "{host: smtp.example.org, port: 587}" in out and "SECRET" not in out
+
+
+# ------------------------------------------------------- command lines Ionomos builds ----
+
+ODD_ARGS = ["C:/R&D/users/x.workflow", "C:/a|b", "C:/in<out", "C:/out>in", "C:/x^y", "C:/100%PATH%x",
+            'C:/say"hi', "C:/line\nbreak", "C:/line\rbreak"]
+
+
+@pytest.mark.parametrize("arg", ODD_ARGS)
+def test_a_batch_launcher_is_never_started_with_an_argument_cmd_would_read_as_a_command(arg):
+    from ionomos import fragpipe
+
+    why = fragpipe.batch_problem(["C:/FragPipe/bin/fragpipe.bat", "--headless", "--workflow", arg])
+    assert "batch file" in why and "Nothing was started" in why and "Rename" in why
+    assert fragpipe.batch_problem(["C:/R&D/FragPipe/bin/fragpipe.cmd", "--help"])  # the launcher's own path too
+    # a program that is not a batch file is started without a shell: every argument reaches it as written
+    assert fragpipe.batch_problem(["C:/DIA-NN/diann.exe", "--cfg", arg]) == ""
+    assert fragpipe.batch_problem(["/opt/fragpipe/bin/fragpipe", arg]) == ""
+    assert fragpipe.batch_problem(["C:/Fragpipe_Auto/users/EJQ/20260902_EJQ_x/fragpipe.bat", "--workflow",
+                                   "C:/Fragpipe_Auto/users/EJQ/20260902_EJQ_isoDTB_x-1.2_3/ionomos_run/a.workflow"]) == ""
+
+
+def test_a_search_in_a_folder_with_an_ampersand(tmp_path, monkeypatch):
+    """The testbed's fake FragPipe is fragpipe.bat on Windows: under C:/.../R&D/ cmd.exe would run `D/...` as a
+    command. The job fails before anything starts, saying what to rename. Elsewhere (fragpipe.sh, no shell) it runs."""
+    from ionomos import testbed
+    from ionomos.config import load
+    from ionomos.intake import intake
+    from ionomos.ledger import Ledger
+    from ionomos.worker import Worker
+
+    monkeypatch.setenv("IONOMOS_FAKE_FP_SECONDS", "0")
+    cfg = load(testbed.init(tmp_path / "R&D"))
+    ledger = Ledger(cfg.database)
+    d = cfg.inbox / "20260301_Isaac_DIA_BRD4"
+    (d / "raw").mkdir(parents=True)
+    for r in ("DMSO_1", "DMSO_2", "Drug_1", "Drug_2"):
+        (d / "raw" / f"{r}.raw").write_bytes(b"\0" * 256)
+    assert intake(d, cfg, ledger).value == "queued"
+    Worker(cfg, ledger).run_once()
+    job = ledger.list()[-1]
+    if Path(str(cfg.fragpipe_exe)).suffix.lower() in (".bat", ".cmd"):
+        assert job.status == "failed" and "batch file" in job.reason and "'&'" in job.reason
+        from ionomos import fragpipe
+
+        out = Path(job.dest_dir) / fragpipe.WORKDIR
+        assert not out.exists() or not any(out.iterdir())  # FragPipe never ran: it wrote nothing
+    else:
+        assert job.status == "done"
+    ledger.close()
+
+
+def test_preflight_never_starts_a_batch_launcher_in_such_a_folder(tmp_path):
+    from ionomos import preflight
+
+    bat = tmp_path / "R&D" / "fragpipe.bat"
+    bat.parent.mkdir()
+    bat.write_text("@echo off\r\necho started > started.txt\r\n", encoding="ascii")
+    code, text, timed_out = preflight._start([str(bat), "--help"], {}, tmp_path / "out.log", tmp_path, 30)
+    assert code is None and "batch file" in text and not timed_out
+    assert not (tmp_path / "started.txt").exists()
+
+
+QUOTES = ["O'Brien", "O\u2019Brien", "a\u2018b\u201ac\u201bd", "x';Start-Process calc;'", "$(calc)", "a&b;c"]
+
+
+@pytest.mark.parametrize("name", QUOTES)
+def test_the_desktop_shortcut_script_keeps_a_profile_path_one_string(name, tmp_path):
+    import base64
+
+    from ionomos import service
+
+    lit = service.ps_literal(f"C:/Users/{name}/Desktop/Ionomos.lnk")
+    body = lit[1:-1]
+    assert lit[0] == lit[-1] == "'"
+    for q in "'\u2018\u2019\u201a\u201b":  # every quote PowerShell ends a string at comes in pairs
+        assert body.replace(q * 2, "").count(q) == 0
+    script = base64.b64decode(service.shortcut_script(Path(f"C:/Users/{name}/Desktop/x.lnk"),
+                                                      Path("C:/Program Files/Ionomos/Ionomos.exe"))).decode("utf-16-le")
+    assert script.count("CreateShortcut(") == 1 and "$s.Save()" in script
+
+
+@pytest.mark.skipif(os.name != "nt" or not shutil.which("powershell"), reason="PowerShell parses the literal")
+def test_powershell_reads_the_literal_back_as_written():
+    import subprocess
+
+    from ionomos import service
+
+    for name in QUOTES:
+        text = f"C:\\Users\\{name}\\Desktop"
+        r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                            f"[Console]::OutputEncoding=[Text.Encoding]::UTF8; Write-Output {service.ps_literal(text)}"],
+                           capture_output=True, timeout=60)
+        assert r.stdout.decode("utf-8").strip() == text, (name, r.stdout, r.stderr)
+
+
+def test_the_startup_task_is_not_installed_with_a_percent_in_its_command(tmp_path, monkeypatch):
+    import subprocess
+    import types
+
+    from ionomos import service
+
+    monkeypatch.setattr(service, "os", types.SimpleNamespace(name="nt", environ=os.environ))
+    monkeypatch.setattr(service.subprocess, "CREATE_NEW_PROCESS_GROUP", 0, raising=False)
+    calls = []
+    monkeypatch.setattr(service.subprocess, "run",
+                        lambda cmd, *a, **k: calls.append(cmd) or subprocess.CompletedProcess(cmd, 0, "", ""))
+    ok, msg = service.install_task(tmp_path / "100%USERNAME%" / "config.yaml")
+    assert not ok and "%" in msg and "variable" in msg and calls == []
+    ok, _msg = service.install_task(tmp_path / "R&D" / "config.yaml")  # no shell between Task Scheduler and Ionomos
+    create = [c for c in calls if c[:2] == ["schtasks", "/Create"]]
+    assert ok and len(create) == 1 and str(tmp_path / "R&D" / "config.yaml") in create[0][create[0].index("/TR") + 1]

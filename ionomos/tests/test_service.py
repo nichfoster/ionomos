@@ -168,7 +168,8 @@ def test_create_desktop_shortcut_encoded_command(tmp_path, monkeypatch):
     assert calls and calls[0][:3] == ["powershell", "-NoProfile", "-EncodedCommand"]
     decoded = base64.b64decode(calls[0][3]).decode("utf-16-le")
     lnk = profile / "Desktop" / names.SHORTCUT
-    assert f"CreateShortcut('{lnk}')" in decoded  # apostrophe path unbroken
+    # apostrophe path unbroken: PowerShell reads '' inside a single-quoted string as one '
+    assert "O''Brien" in decoded and f"CreateShortcut('{str(lnk).replace(chr(39), chr(39) * 2)}')" in decoded
     assert f"$s.TargetPath='{sys.executable}'" in decoded
 
     # return-code contract: failure surfaces stderr, not the lnk path

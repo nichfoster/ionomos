@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -326,6 +327,12 @@ def remove_legacy_tasks() -> None:
         subprocess.run(["schtasks", "/Delete", "/TN", t, "/F"], capture_output=True, creationflags=_creationflags())
 
 
+def task_command(config: Path) -> str:
+    """The startup task's command line (schtasks /TR). Task Scheduler starts it without a shell, so only a space
+    needs quotes; Windows paths can't hold a double quote."""
+    return " ".join(f'"{c}"' if " " in c else c for c in [*ionomos_command(), "--config", str(config), "run"])
+
+
 def install_task(config: Path) -> tuple[bool, str]:
     """Register a logon task that runs the watcher interactively (so the resolver window can show).
 
@@ -333,8 +340,11 @@ def install_task(config: Path) -> tuple[bool, str]:
     """
     if os.name != "nt":
         return False, "Task Scheduler is Windows-only. On macOS use a LaunchAgent or just leave the app running."
+    cmd = task_command(config)
+    if "%" in cmd:  # Task Scheduler replaces %NAME% in an action with the variable's value when the task starts
+        return False, (f"the startup task can't run a command with a % in it ({cmd}): Task Scheduler would read "
+                       "%...% as a variable. Move config.yaml (or Ionomos) to a folder without % and try again")
     remove_legacy_tasks()
-    cmd = " ".join(f'"{c}"' if " " in c else c for c in [*ionomos_command(), "--config", str(config), "run"])
     user = f"{os.environ.get('USERDOMAIN', '')}\\{os.environ.get('USERNAME', '')}".strip("\\")
     r = subprocess.run(["schtasks", "/Create", "/TN", TASK_NAME, "/TR", cmd, "/SC", "ONLOGON", "/RU", user,
                         "/IT", "/RL", "LIMITED", "/F"], capture_output=True, text=True, creationflags=_creationflags())
@@ -386,6 +396,21 @@ def open_path(p: Path | str) -> None:
         subprocess.Popen(["xdg-open", str(p)])
 
 
+def ps_literal(s: str) -> str:
+    """`s` as a PowerShell single-quoted string. PowerShell ends such a string at ' and at the typographic quotes
+    ‘ ’ ‚ ‛ too; each is doubled, so C:\\Users\\O'Brien stays one path and never becomes code."""
+    return "'" + re.sub("(['\u2018\u2019\u201a\u201b])", r"\1\1", str(s)) + "'"
+
+
+def shortcut_script(lnk: Path, exe: Path) -> str:
+    """The PowerShell that makes the Desktop shortcut, for -EncodedCommand (base64 of UTF-16LE: no cmd.exe quoting
+    between here and PowerShell; the paths inside are ps_literal)."""
+    ps = (f"$s=(New-Object -ComObject WScript.Shell).CreateShortcut({ps_literal(lnk)});"
+          f"$s.TargetPath={ps_literal(exe)};$s.WorkingDirectory={ps_literal(exe.parent)};"
+          "$s.Description='Ionomos setup & control';$s.Save()")
+    return base64.b64encode(ps.encode("utf-16-le")).decode("ascii")
+
+
 def create_desktop_shortcut() -> tuple[bool, str]:
     """Windows: a .lnk on the Desktop pointing at the exe (GUI mode)."""
     if os.name != "nt" or not getattr(sys, "frozen", False):
@@ -397,13 +422,7 @@ def create_desktop_shortcut() -> tuple[bool, str]:
             (desktop / old).unlink(missing_ok=True)
         except OSError:
             pass
-    ps = (
-        f"$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{lnk}');"
-        f"$s.TargetPath='{sys.executable}';$s.WorkingDirectory='{Path(sys.executable).parent}';"
-        "$s.Description='Ionomos setup & control';$s.Save()"
-    )
-    # -EncodedCommand (base64 UTF-16LE) so paths containing apostrophes survive verbatim
-    encoded = base64.b64encode(ps.encode("utf-16-le")).decode("ascii")
+    encoded = shortcut_script(lnk, Path(sys.executable))
     r = subprocess.run(["powershell", "-NoProfile", "-EncodedCommand", encoded], capture_output=True, text=True,
                        creationflags=_creationflags())
     return r.returncode == 0, str(lnk) if r.returncode == 0 else (r.stderr or r.stdout)
