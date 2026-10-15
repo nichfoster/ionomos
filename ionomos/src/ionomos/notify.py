@@ -212,7 +212,6 @@ def secrets(s: dict, env=None) -> list[str]:
     """Every secret value in use: the webhook URLs and the SMTP password, from the file or the environment."""
     out = [_hook_url(s, n, env) for n in HOOKS] + [s[n]["url"] for n in HOOKS]
     out += [_password(s, env), s["email"]["password"]]
-    out += [part for url in out[:2 * len(HOOKS)] for part in _url_parts(url)]
     return sorted({v for v in out if v}, key=len, reverse=True)
 
 
@@ -260,10 +259,12 @@ def _hide_below(text: str) -> str:
 
 
 def scrub(text: str, secret_values=()) -> str:
-    """`text` with the given secret values, and anything that looks like a Slack / Teams hook address, hidden."""
-    for v in secret_values:
-        if v:
-            text = text.replace(v, HIDDEN)
+    """`text` with the given secret values, the pieces of a secret address that an error may quote on their own
+    (its user:password, path and query), and anything that looks like a Slack / Teams hook address, hidden."""
+    values = [v for v in secret_values if v]
+    values += [part for v in values if "://" in v for part in _url_parts(v)]
+    for v in sorted(set(values), key=len, reverse=True):
+        text = text.replace(v, HIDDEN)
     return _HOOK_URLS.sub(HIDDEN, text)
 
 
@@ -283,7 +284,6 @@ def raw_secrets(raw) -> list[str]:
             for k in ("url_env", "password_env"):
                 if isinstance(c.get(k), str) and os.environ.get(c[k]):
                     out.append(os.environ[c[k]])
-    out += [part for v in out if "://" in v for part in _url_parts(v)]
     return sorted({v for v in out if v.strip()}, key=len, reverse=True)
 
 
