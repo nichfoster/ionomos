@@ -1031,8 +1031,14 @@ def exit_code_reason(code: int | None, text: str) -> str:
     if not facts["error_lines"] and not facts["finished"] and not facts["started"] and not facts["commands"]:
         return ""  # it stopped before running anything: the last lines say why
     if not _FAILED_STEP.search(text) and not _CANCELLED_TASKS.search(text) and not explain(text):
+        if facts["error_lines"] or _TRACEBACK.search(text):  # an error is there, just not one Ionomos knows (#138)
+            return "stopped after an error that Ionomos does not recognise"
         return "stopped in the middle of a step without saying why"
     return ""
+
+
+_TRACEBACK = re.compile(r"^Traceback \(most recent call last\):|^Exception in thread |^(?:\w+\.)*\w+(?:Error|Exception)\b",
+                        re.MULTILINE)
 
 
 # The method's main tables: a file of these that exists must be a whole table (D69). Other engines: their own
@@ -1274,6 +1280,9 @@ EXPLANATIONS: list[tuple[str, str]] = [
      "Windows could not start a program of the search: a DLL it needs is missing, or is for another Windows "
      "(32/64-bit). Usually that is the Microsoft Visual C++ Redistributable (x64) — DIA-NN has VC_redist.x64.exe "
      "in its folder — or a .NET runtime: install it, then Retry"),
+    (r"(?:FragPipe|DIA-NN|MaxQuant|Sage) stopped after an error that Ionomos does not recognise",
+     "The search stopped on an error that Ionomos does not recognise: the last lines of its console log say what "
+     "(Open log). Send Report a problem so the next version can explain it"),
     (r"(?:FragPipe|DIA-NN|MaxQuant|Sage) crashed with ",
      "FragPipe or a tool it started crashed without a message (Windows reported the crash): Retry once; if it "
      "crashes again, send Report a problem"),
@@ -1336,6 +1345,13 @@ EXPLANATIONS: list[tuple[str, str]] = [
      "FragPipe ran out of memory: lower Threads or raise RAM (GB) in Advanced, and close other programs"),
     (r"not enough space on the disk|No space left on device|disk is full|\[Errno 28\]|\bENOSPC\b",
      "The disk is full: free space on the drive holding the experiment folders, then Retry"),
+    # a missing file whose path is 240+ characters: Windows' limit with long paths off, as on the lab PC (#138).
+    # Java says "FileNotFoundException: C:\... (The system cannot find the path specified)" or NoSuchFileException;
+    # Python's tools "FileNotFoundError: [Errno 2] No such file or directory: 'C:\...'"
+    (r"(?m)^(?=.*(?:FileNotFoundError|FileNotFoundException|NoSuchFileException|cannot find the path specified|"
+     r"No such file or directory)).*[A-Za-z]:[\\/][^\r\n'\"()]{240,}",
+     "A path got longer than Windows allows (260 characters with long paths off): shorten the experiment folder "
+     "and raw file names, or move the users folder nearer the drive root, then Retry"),
     (r"\berror=206\b|WinError 206|The filename or extension is too long|must be less than 260 characters",
      "A path or command line got longer than Windows allows: shorten the experiment folder and raw file names "
      "(or search fewer files at once), then Retry"),
@@ -1586,11 +1602,15 @@ def inspect_workflow(path: Path) -> dict:
     except OSError as exc:
         return {"error": str(exc)}
     db = props.get("database.db-path", "")
+    # every stock workflow carries tmtintegrator.channel_num: the label type is a fact only when TMT-Integrator
+    # runs, else an isoDTB or DIA workflow reads as "label type=TMT-6" (#143)
+    tmt_on = props.get("tmtintegrator.run-tmtintegrator", "").strip().lower() == "true"
     return {
         "database": db,
         "database_exists": bool(db) and not is_network_path(db) and Path(db).is_file(),
         "decoy_tag": props.get("database.decoy-tag", "rev_") or "rev_",
-        "settings": {label: props[k] for k, label in WORKFLOW_KEYS if k in props and props[k] != ""},
+        "settings": {label: props[k] for k, label in WORKFLOW_KEYS
+                     if k in props and props[k] != "" and (tmt_on or k != "tmtintegrator.channel_num")},
     }
 
 

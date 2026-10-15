@@ -3,6 +3,7 @@ the ways such files go wrong, and the promise that analysing a table never touch
 import json
 import math
 import random
+import re
 import zipfile
 from pathlib import Path
 
@@ -224,3 +225,43 @@ def test_analysing_a_table_never_touches_files_beside_it(tmp_path):
     assert json.loads((ws / "results" / "analysis.json").read_text(encoding="utf-8"))["method"] == "table"
     new = {p for p in tmp_path.rglob("*") if p.is_file()} - set(before)
     assert all(ws in p.parents for p in new)
+
+
+def test_long_condition_names_get_result_files_that_fit_windows_paths(tmp_path, monkeypatch):
+    """#140: a DIA condition carries the experiment prefix (the file rule reads 'L7355qyk_Aman_DIA_55qyk_DMSO_1.raw'
+    as that condition), so each per-comparison file name held it twice and the tables and volcano plots went
+    missing past Windows' limit. The shared part is dropped and a hash added; every file and analysis.json agree."""
+    from ionomos import downstream
+    from ionomos.downstream import PATH_BUDGET, fit_file_stem
+
+    rng = random.Random(7)
+    table = _write(tmp_path / "t.tsv", ["Gene", *[f"{c}_{r}" for c, r in SAMPLES]],
+                   [[g, *[round(_intensity(rng, c, g)) for c, _ in SAMPLES]] for g in GENES])
+    results = tmp_path / "t_ionomos" / "results"
+    monkeypatch.setattr(downstream, "PATH_BUDGET", len(str(results)) + 36)  # as if the folder were 214 deep
+    ws, out = _analyze(table)
+    comp = out.summary["comparisons"][0]
+    tsv = ws / comp["table"]
+    assert tsv.is_file() and out.summary["state"] != "failed"
+    assert re.fullmatch(r"Drug_vs[A-Za-z_]*-[0-9a-f]{6}_differential.tsv", tsv.name), tsv.name
+    assert comp["volcano"] and (ws / comp["volcano"]).is_file() and tsv.stem[:-len("_differential")] in comp["volcano"]
+    assert any("result files are named" in w and "paths stay under" in w for w in out.warnings)
+    d = json.loads((ws / "results" / "analysis.json").read_text(encoding="utf-8"))
+    assert d["comparisons"][0]["table"] == comp["table"]
+    assert all(len(str(p)) < len(str(results)) + 36 for p in results.glob("*_differential.tsv"))
+    # the short names in a fixture: deterministic, unique, and untouched when the full name fits
+    from ionomos.downstream.analysis import DiffResult, Settings
+
+    def diff(t, c):
+        return DiffResult(name=f"{t} vs {c}", treatment=t, control=c, kind="x", rows=[], settings=Settings(),
+                          y_threshold_p=None)
+
+    monkeypatch.setattr(downstream, "PATH_BUDGET", PATH_BUDGET)  # the real budget again
+    deep = Path("C:/" + "d" * 120) / "results"
+    a, b = diff("AAA_X", "AAA_Y"), diff("BBB_X", "BBB_Y")
+    assert fit_file_stem(deep, diff("Drug", "DMSO")) is None and diff("Drug", "DMSO").slug() == "Drug_vs_DMSO"
+    very = diff("Q" * 200 + "_Drug", "Q" * 200 + "_DMSO")
+    assert fit_file_stem(deep, very) and len(str(deep / f"volcano_{very.slug()}.svg")) <= PATH_BUDGET
+    short_a = fit_file_stem(Path("C:/" + "d" * 240), a) and a.slug()
+    short_b = fit_file_stem(Path("C:/" + "d" * 240), b) and b.slug()
+    assert short_a != short_b and short_a.startswith("X_vs_Y-")

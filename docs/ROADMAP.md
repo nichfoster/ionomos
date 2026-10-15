@@ -1129,9 +1129,9 @@ Collected from the other docs; resolve before/during Phase 1.
 - [ ] Statistics: a dose-response curve is fitted and called for a protein measured at only two doses (#162; check
       CurveCurator's per-curve `max_missing` rule first); `qc.pca` takes ~6 min on 500 samples (#163); knn
       imputation is quadratic in features (#164).
-- [ ] Intake: the watcher has no `log_dir`, so what only it can see (a dot-ended folder whose fixed name is taken, a
-      failing loose-file grouping) is logged but not raised as an attention item; pass `log_dir` (or an
-      `on_problem` callback) from `cli.cmd_run`. macOS / Linux: a folder is moved even while a copy still writes
+- [ ] Intake: what only the watcher can see (a dot-ended folder whose fixed name is taken, a failing loose-file
+      grouping) is logged but not raised as an attention item. Since #139 (D94) `cli.cmd_run` gives the watcher
+      its `log_dir`, as the too-long-path item uses: raise these the same way. macOS / Linux: a folder is moved even while a copy still writes
       into it (no open-file lock there; a longer `stable_seconds` is the guard). How intake tells the window's
       `resolved_by: gui` from a hand-written one (#173); `ionomos run`'s two start-up tracebacks (#172).
 - [ ] Engines (D97): stop what an engine leaves running after it exits on Windows (a Job Object or a Toolhelp

@@ -82,3 +82,19 @@ def test_init_creates_a_working_setup(tmp_path, monkeypatch, capsys):
         "stable_seconds: 60", "stable_seconds: 42"), encoding="utf-8")
     assert main(["init", "--root", str(root), "--users", str(users)]) == 0
     assert load(root / "config.yaml").stable_seconds == 42
+
+
+def test_checklist_on_a_config_that_does_not_parse(tmp_path, capsys):
+    """#136: a YAML slip in config.yaml used to crash setupcheck.run (and the app at start): now the first item
+    says the line and how to fix or restore the file, and `ionomos init` says it instead of a traceback."""
+    p = tmp_path / "Auto" / "config.yaml"
+    p.parent.mkdir()
+    p.write_text("paths:\n  inbox: [unclosed\n", encoding="utf-8")
+    items = setupcheck.run(p, probe_watcher=False)
+    assert items[0].key == "config" and items[0].status == "fail"
+    assert "line 2, column 10" in items[0].detail and "Restore a previous config" in items[0].fix
+    assert [i.key for i in items].count("config") == 1
+    assert "Settings saved" in setupcheck.summary(items)
+    assert main(["--config", str(p), "init"]) == 2  # D101: a config.yaml it needs can't be read
+    assert "line 2, column 10" in capsys.readouterr().err
+    assert p.read_text(encoding="utf-8") == "paths:\n  inbox: [unclosed\n"  # untouched

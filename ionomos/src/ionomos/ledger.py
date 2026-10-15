@@ -288,13 +288,13 @@ def _read_record(status_file: Path) -> tuple[dict, dict]:
     return rec, folder
 
 
-def _move_aside(p: Path) -> Path | None:
+def _move_aside(p: Path, kept_as: str = "broken") -> Path | None:
     """Move a broken ledger and its journal files aside (all or none). Raises LedgerError, with nothing changed,
     when one of them is open in another program (Windows: the Ionomos app, DB Browser): a ledger left without its
     journal, or a journal left beside a new ledger, would be worse than the broken one."""
     if not p.exists():
         return None
-    moved = p.with_name(f"{p.name}.broken-{datetime.now():%Y%m%d-%H%M%S}")
+    moved = p.with_name(f"{p.name}.{kept_as}-{datetime.now():%Y%m%d-%H%M%S}")
     pairs = [(p, moved)] + [(p.with_name(p.name + ext), moved.with_name(moved.name + ext))
                             for ext in ("-wal", "-shm", "-journal")]
     done: list[tuple[Path, Path]] = []
@@ -315,15 +315,18 @@ def _move_aside(p: Path) -> Path | None:
     return moved
 
 
-def rebuild_from_status_files(db_path: str | Path, users_root: str | Path) -> tuple[Path | None, int]:
+def rebuild_from_status_files(db_path: str | Path, users_root: str | Path, healthy: bool = False
+                              ) -> tuple[Path | None, int]:
     """Replace a broken ledger: move it aside, re-create jobs from every <user>/<exp>/ionomos.json.
 
     Each experiment folder carries its full intake record, so nothing about
     what was filed is lost with the database. Jobs that were running come
-    back queued. Returns (where the broken file was moved, jobs recovered).
+    back queued. Returns (where the old file was moved, jobs recovered). A
+    `healthy` ledger rebuilt on request (--force) is kept as .before-rebuild-,
+    not .broken- (#143).
     """
     p = Path(db_path)
-    moved = _move_aside(p)
+    moved = _move_aside(p, "before-rebuild" if healthy else "broken")  # #143: a healthy ledger is not "broken"
     led = Ledger(p)
     records = []
     root = Path(users_root)

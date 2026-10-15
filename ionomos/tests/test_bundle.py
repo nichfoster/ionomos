@@ -630,3 +630,63 @@ def test_the_windows_logic_needs_no_window(bed):
     kept = bundle.create(bed["cfg_path"], ["1"], Options(level="validate", keep_conditions=True), dest_dir=bed["out"])
     assert "jobs/1-exp001/results/Zanubrutinib_vs_DMSO_differential.tsv" in _members(kept.path)
     assert kept.manifest["anonymised"]["conditions"] == "keep" and _survivors(kept.path, ["Isaac", FOLDER, "BRD4"]) == []
+
+
+# ------------------------------------------------------ #135 / #142: escapes and plain words ----
+
+
+def test_a_name_after_a_json_escape_is_replaced_and_found():
+    """#135: attention.py writes items with json.dumps (ASCII escapes), so a curly quote before a name becomes
+    the six characters backslash-u201c, and the name followed the letters 'u201c'; it was neither replaced nor
+    found by the leak check."""
+    a = _anon(users={"EJQ": []}, folders=["EJQ_2027_mystery", "XYZ99_isoDTB_run"])
+    line = json.dumps({"title": "Couldn't take in “EJQ_2027_mystery”", "message": "XYZ99_isoDTB_run – 3 files"})
+    assert "\\u201c" in line and "\\u2013" in line
+    out = a.text(line)
+    assert "EJQ" not in out and "mystery" not in out and "XYZ99" not in out
+    assert "\\u201cexp001\\u201d" in out and "exp002\\u2013" in out.replace(" ", "")
+    odd = _anon(users={"Nich Foster": []}, folders=["2026 03 01 Zoë (redo)"])
+    assert odd.text(json.dumps("see “2026 03 01 Zoë (redo)” by Nich Foster")) == json.dumps("see “exp001” by user01")
+    assert odd.find(json.dumps("“Nich Foster”")) == ["Nich Foster"]
+    assert sorted(a.find(line)) == ["EJQ_2027_mystery", "XYZ99_isoDTB_run"]
+    assert a.find(out) == []
+
+
+def test_a_rejected_drop_with_a_curly_quoted_title_leaves_no_name_in_the_bundle(bed):
+    """#135 end to end: the inbox's rejected drop is named in an attention item's title between curly quotes."""
+    from ionomos import attention
+
+    _job(bed)
+    inbox = bed["cfg"].inbox
+    (inbox / "EJQ_2027_mystery").mkdir()
+    (inbox / "EJQ_2027_mystery" / "a.raw").write_bytes(b"\0" * 64)
+    (inbox / "EJQ_2027_mystery.REJECTED.txt").write_text("no method", encoding="utf-8")
+    attention.raise_item(bed["cfg"].log_dir, "intake_rejected", "Couldn't take in “EJQ_2027_mystery”",
+                         "The folder name EJQ_2027_mystery holds no method.", key="intake:EJQ_2027_mystery")
+    res = bundle.create(bed["cfg_path"], opts=Options(level="validate"), dest_dir=bed["out"])
+    items = [n for n in _members(res.path) if n.startswith("attention/")]
+    assert items and _survivors(res.path, ["EJQ_2027_mystery", "mystery", "EJQ"]) == []
+    check = bundle.self_check(res.path, bed["cfg_path"])
+    assert check["hits"] == 0, check
+
+
+def test_inspect_does_not_call_the_plain_words_of_a_name_leaks(bed):
+    """#142: `bundle inspect` registered the key file's name fragments (then, own, run, txt) as names of their
+    own and found them in Ionomos' own text. Its verdict must agree with the bundle's leak check."""
+    _job(bed)
+    inbox = bed["cfg"].inbox
+    for name in ("EJQ_isoDTB_then_TMT", "EJQ_isoDTB_own-map", "XYZ99_isoDTB_run"):
+        (inbox / name).mkdir()
+        (inbox / f"{name}.REJECTED.txt").write_text("no", encoding="utf-8")
+    res = bundle.create(bed["cfg_path"], opts=Options(level="validate"), dest_dir=bed["out"])
+    key = json.loads(res.key_path.read_text(encoding="utf-8"))
+    assert {"then", "own", "map", "run"} <= {v.casefold() for v in key["names"].values()}
+    text = "\n".join(d.decode("utf-8", "replace") for d in _members(res.path).values())
+    assert " run " in text or "run-" in text or "run:" in text  # Ionomos' own word 'run' is all over the zip
+    for config in (bed["cfg_path"], None):
+        check = bundle.self_check(res.path, config)
+        assert check["sources"] and check["hits"] == 0, [(f["path"], f["hits"]) for f in check["files"] if f["hits"]]
+    # the fragments still count inside the names they belong to
+    bad = _members(res.path)["README.txt"].decode() + "\nleft: EJQ_isoDTB_then_TMT\n"
+    anon, _src = bundle._checker(None, key)
+    assert anon.find(bad) == ["EJQ_isoDTB_then_TMT"] and anon.find("run then own txt") == []

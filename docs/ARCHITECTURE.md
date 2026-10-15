@@ -360,7 +360,7 @@ in QC_TREND.md; `library:` in LIBRARY.md; `assistant:` in ASSISTANT.md;
 | Ionomos stops between the move and the full `ionomos.json` | a first record (status queued, reason `ledger.FILING`) is written straight after the move; `adopt_orphans` takes it after a 10-minute grace (`FILING_GRACE_SECONDS`) |
 | Job list locked longer than the ledger's wait during intake | `sqlite3.OperationalError` → RETRY, never a note |
 | A file still open in a drop on another drive | no copy; RETRY until nothing is open (`intake._open_elsewhere`, Windows) |
-| Inbox folder name ending in a dot or a space (Windows) | renamed in the inbox to the name without them; a taken name is logged once with the `ren` command (`watcher._unreachable`) |
+| Inbox folder name ending in a dot or a space (Windows) | renamed in the inbox to the name without them; a taken name is logged once with the `ren` command (`watcher._trailing_dot`) |
 | A damaged `ionomos.json` (wrong shape) or job row | skipped by rebuild/adoption with a warning; `worker._read_status` falls back to the ledger's record; a row's record reads `{}` and that job fails |
 | An unexpected error preparing a search | that job fails with the reason; the queue goes on |
 | `repair-ledger` with the ledger open elsewhere | all-or-nothing move aside; `LedgerError` names what to close; exit 1 |

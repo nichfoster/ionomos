@@ -56,6 +56,15 @@ def _byte_at(data: bytes, i: int) -> str:
     return f"byte 0x{data[i]:02X} on line {line}"
 
 
+def parse_error(path: Path, exc: Exception) -> str:
+    """One line for a YAML error in a hand-edited file: the line and column first (#136), then what the parser saw."""
+    mark = getattr(exc, "context_mark", None) or getattr(exc, "problem_mark", None)  # where the construct began
+    where = f"line {mark.line + 1}, column {mark.column + 1}" if mark is not None else "no line given"
+    what = " ".join(f"{getattr(exc, 'context', None) or ''} {getattr(exc, 'problem', None) or ''}".split()) \
+        or " ".join(str(exc).split())
+    return f"could not parse {path}: {where}: {what}"
+
+
 def read_yaml_text(path: str | Path, error: type[Exception] = ConfigError, warnings: list[str] | None = None) -> str:
     """Text of a hand-edited YAML file (config.yaml, experiment.yaml, learned aliases), D86. UTF-8, with or without
     a BOM; UTF-16 with its BOM (Notepad's "Unicode"). Anything else is read as cp1252, what Notepad saves as "ANSI"
@@ -130,7 +139,8 @@ class Config:
     config_path: Path
     analysis: dict = field(default_factory=dict)  # downstream settings (see downstream/analysis.py); "enabled" too
     user_ignore: tuple[str, ...] = DEFAULT_USER_IGNORE  # users_root subfolders that aren't people (glob patterns)
-    warnings: tuple[str, ...] = ()  # non-fatal path problems (FragPipe bits missing, etc.)
+    warnings: tuple[str, ...] = ()
+    unknown_keys: tuple[str, ...] = ()  # keys config.yaml holds that nothing reads (#137); also in warnings  # non-fatal path problems (FragPipe bits missing, etc.)
     gui_popups: bool = True  # pop-up windows for analysis decisions / failed searches (attention.py)
     review_drops: bool = True  # show every drop in the review window before it is filed (when a display exists)
     condition_codes: dict = field(default_factory=lambda: dict(DEFAULT_CONDITION_CODES))  # DIA X_D1 -> DMSO rep 1
@@ -357,7 +367,7 @@ def _load(path: str | Path, check_paths: bool = True) -> Config:
     try:
         raw = yaml.safe_load(read_yaml_text(p, warnings=encoding_warnings)) or {}
     except yaml.YAMLError as exc:
-        raise ConfigError(f"could not parse {p}: {exc}") from exc
+        raise ConfigError(parse_error(p, exc)) from exc
     if not isinstance(raw, dict):
         raise ConfigError(f"{p} must be a YAML mapping")
 
@@ -480,13 +490,49 @@ def _load(path: str | Path, check_paths: bool = True) -> Config:
         user_ignore=tuple(str(x) for x in (users.get("ignore") if users.get("ignore") is not None else DEFAULT_USER_IGNORE)),
     )
 
-    warnings = space_warnings
+    unknown = unknown_settings(raw)
+    warnings = space_warnings + unknown
     if check_paths:
         errors, more = _check_paths(cfg)
         if errors:
             raise ConfigError("config problems:\n  - " + "\n  - ".join(errors))
         warnings += more
-    return replace(cfg, warnings=tuple(warnings)) if warnings else cfg
+    return replace(cfg, warnings=tuple(warnings), unknown_keys=tuple(unknown)) if warnings else cfg
+
+
+# keys a section reads beyond those configio.defaults() writes (none today; test_config checks the two agree)
+_SECTION_EXTRA: dict[str, set[str]] = {}
+_CHECKED_SECTIONS = ("paths", "watcher", "fragpipe", "gui", "users", "qc_trend", "library")  # notify checks its own
+
+
+def unknown_settings(raw: dict) -> list[str]:
+    """Keys in config.yaml that nothing reads (#137), each with the nearest known key. A typo such as
+    watcher.poll_secnds silently left the default in force while every check said all good. Warnings, not
+    errors, so an older config with a retired key still loads. analysis:, naming: and methods: check their own."""
+    import difflib
+
+    from ionomos import configio
+
+    base = configio.defaults()
+    out: list[str] = []
+
+    def say(where: str, key, known: set, what: str) -> None:
+        hint = difflib.get_close_matches(str(key), sorted(str(k) for k in known), n=1, cutoff=0.6)
+        out.append(f"{where}{key}: unknown {what}" + (f", did you mean {hint[0]}?" if hint else "") + " (ignored)")
+
+    sections = set(base) | {"assistant"}
+    for sec in raw:
+        if sec not in sections:
+            say("", sec, sections, "section")
+    for sec in _CHECKED_SECTIONS:
+        d = raw.get(sec)
+        if not isinstance(d, dict):
+            continue
+        known = set(base.get(sec) or {}) | _SECTION_EXTRA.get(sec, set())
+        for key in d:
+            if key not in known:
+                say(f"{sec}.", key, known, "setting")
+    return out
 
 
 _RULE_KEYS = ("like", "files", "pattern", "condition_codes")

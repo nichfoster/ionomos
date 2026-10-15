@@ -1,3 +1,4 @@
+import pytest
 import yaml
 
 from ionomos import configio
@@ -83,3 +84,18 @@ def test_app_save_keeps_the_lab_wide_tmt_settings(tmp_path):
     # not set: nothing is written, so the defaults stay the analysis's own
     p.write_text(dump_config(read_config(tmp_path / "none.yaml")), encoding="utf-8")
     assert "tmt_min_purity" not in p.read_text(encoding="utf-8")
+
+
+def test_a_file_that_does_not_parse_names_the_line(tmp_path):
+    """#136: the app, setupcheck and `ionomos init` read config.yaml through read_config; a hand-editing slip
+    must be a ConfigError with the line, the same message `ionomos check` prints, never a crash."""
+    from ionomos.config import ConfigError
+
+    p = tmp_path / "broken.yaml"
+    p.write_text("paths:\n  inbox: [unclosed\n", encoding="utf-8")
+    with pytest.raises(ConfigError) as ei:
+        configio.read_config(p)
+    assert str(ei.value).startswith(f"could not parse {p}: line 2, column 10")
+    with pytest.raises(ConfigError) as ei2:
+        load(p, check_paths=False)
+    assert str(ei2.value) == str(ei.value)

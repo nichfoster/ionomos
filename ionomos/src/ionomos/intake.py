@@ -100,6 +100,28 @@ class IntakeResult(enum.StrEnum):
     RETRY = "retry"
 
 
+WINDOWS_MAX_PATH = 260  # what Windows allows with long paths off, as on the lab PC
+
+
+def path_too_long(path, exc: OSError | None = None) -> str | None:
+    """Why Windows cannot open `path` when its length is the reason (#139): a sentence for the person, else None.
+    With long paths off, a path of 260 characters or more raises FileNotFoundError on every call, which looked
+    transient. `exc` is that error when it is already in hand; else the path is tried."""
+    s = str(path or "")
+    if os.name != "nt" or len(s) < WINDOWS_MAX_PATH:
+        return None
+    if exc is None:
+        try:
+            os.lstat(s)
+            return None  # long paths are on: it opens
+        except FileNotFoundError:
+            pass
+        except OSError:
+            return None
+    return (f"This path is {len(s)} characters long; Windows allows {WINDOWS_MAX_PATH - 1} here (long paths are "
+            "off). Shorten the folder or file names, or keep the inbox nearer the drive root.")
+
+
 @dataclass
 class ManifestLine:
     file: str  # relative to the experiment folder, after sanitising
@@ -730,6 +752,8 @@ def _write_note(note: Path, body: str) -> None:
     """Whole or not at all: a note that exists is never seen empty by a person or the app.
     The temp name starts with '.', which intake ignores."""
     tmp = note.with_name(f".{note.name}.tmp")
+    if os.name == "nt" and len(str(tmp)) >= WINDOWS_MAX_PATH:  # the note fits, its longer temp name would not (#139)
+        tmp = note.with_name(f".ionomos-note-{hashlib.sha1(note.name.encode()).hexdigest()[:8]}.tmp")
     tmp.write_text(body, encoding="utf-8")
     try:
         os.replace(tmp, note)
@@ -771,6 +795,10 @@ def intake(folder: Path, cfg: Config, ledger: Ledger, resolver: Resolver | None 
         _tell_a_person(folder, cfg, res)
         return res
     except (PermissionError, FileNotFoundError, BlockingIOError, InterruptedError) as exc:
+        why = path_too_long(getattr(exc, "filename", None), exc)
+        if why:  # not transient: Windows will never open it (#139)
+            _reject_too_long(folder, cfg, why)
+            return IntakeResult.REJECTED
         log.warning("transient problem with %s (%s); will retry", folder.name, exc)
         return _retrying(folder, cfg, exc)
     except sqlite3.OperationalError as exc:
@@ -827,6 +855,30 @@ def _retrying(folder: Path, cfg: Config, exc: BaseException) -> IntakeResult:
     except Exception:  # noqa: BLE001 - telling a person must never break intake
         log.exception("could not record that %s is stuck", folder.name)
     return IntakeResult.RETRY
+
+
+def _reject_too_long(folder: Path, cfg: Config, why: str) -> None:
+    """A folder, or a file in it, with a path Windows cannot open: the usual note when the note's own path fits,
+    else a needs-attention item in the log folder, so the drop is told about once instead of retried for ever
+    (#139). Never raises."""
+    reason = f"{why} The folder was left in the inbox as it is."
+    try:
+        _reject(folder, reason)
+    except OSError:
+        log.warning("REJECTED %s: %s (no note: its path would be too long as well)", folder.name, why)
+        try:
+            from ionomos import attention
+
+            attention.raise_item(
+                getattr(cfg, "log_dir", None), "intake_rejected", f"Couldn't take in “{folder.name}”", reason,
+                key=f"intake:{folder.name}", severity="error", dest=folder,
+                causes=["The folder's path, or a file's, is longer than Windows allows"],
+                fixes=["Rename the folder and its files to something shorter (Explorer can), then drop it again"],
+                data={"folder": str(folder)})
+        except Exception:  # noqa: BLE001 - telling a person must never break intake
+            log.exception("could not record the rejection of %s for the app", folder.name)
+        return
+    _tell_a_person(folder, cfg, IntakeResult.REJECTED)
 
 
 def _tell_a_person(folder: Path, cfg: Config, res: IntakeResult) -> None:

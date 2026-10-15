@@ -118,7 +118,7 @@ CASES = {
     "bundle": ("own", "test_bundle.py: a diagnose bundle is made with a broken config on purpose"),
     "library": ("config", ["list"]),
     "stop": ("config", []),
-    "init": ("own", "an existing unreadable config is kept and named: PR #145 (#136), test_setup.py"),
+    "init": ("config", []),  # an existing unreadable config is kept and named (#136, test_setup.py)
     "analyze": ("free", ["{tmp}/nothing-here"]),
     "check-folder": ("free", ["{tmp}"]),
     "export": ("free", ["{tmp}/nothing-here"]),

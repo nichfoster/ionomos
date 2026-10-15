@@ -17,7 +17,7 @@ from pathlib import Path
 
 import yaml
 
-from ionomos.config import read_yaml_text
+from ionomos.config import ConfigError, parse_error, read_yaml_text
 
 DEFAULT_ROOT_WIN = "C:/Fragpipe_Auto"
 DEFAULT_USERS_WIN = "C:/Fragpipe_General"
@@ -99,13 +99,17 @@ def _merge(base: dict, over: dict) -> dict:
 
 
 def read_config(path: str | Path) -> dict:
-    """Raw dict from disk with defaults filled in for missing keys. Missing file -> defaults."""
+    """Raw dict from disk with defaults filled in for missing keys. Missing file -> defaults. A file that does
+    not parse raises ConfigError naming the line (#136), the same message `ionomos check` prints."""
     p = Path(path)
     if not p.is_file():
         d = defaults()
         d["users"]["learned_aliases_file"] = (p.parent / "learned_aliases.yaml").as_posix()
         return d
-    raw = yaml.safe_load(read_yaml_text(p)) or {}  # cp1252 (Notepad "ANSI") read with a warning, D86
+    try:
+        raw = yaml.safe_load(read_yaml_text(p)) or {}  # cp1252 (Notepad "ANSI") read with a warning, D86
+    except yaml.YAMLError as exc:
+        raise ConfigError(parse_error(p, exc)) from exc
     if not isinstance(raw, dict):
         raw = {}
     if isinstance(raw.get("notify"), dict):

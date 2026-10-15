@@ -931,3 +931,37 @@ def test_a_folder_dropped_from_explorer_opens_the_check(app, tmp_path, monkeypat
     assert _pump_until(app, lambda: app.analysis.check_win is not None and app.analysis.check_win.alive()
                        and app.analysis.check_win.scan is not None and app.analysis.check_win.scan.picked == empty)
     app.analysis.check_win.close()
+
+
+def test_app_opens_on_a_config_that_does_not_parse(tmp_path, monkeypatch):
+    """#136: Ionomos.exe died at start on a YAML slip in config.yaml. Now it opens on the defaults, shows the
+    error and offers Restore a previous config when there are backups; the file is left as it is."""
+    import tkinter as tk
+    from tkinter import messagebox
+
+    from ionomos import configio
+    from ionomos.app import App
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    p = tmp_path / "Auto" / "config.yaml"
+    p.parent.mkdir()
+    p.write_text("paths:\n  inbox: [unclosed\n", encoding="utf-8")
+    good = configio.defaults(str(tmp_path / "Auto"), str(tmp_path / "General"))
+    (p.parent / configio.BACKUP_DIR).mkdir()
+    (p.parent / configio.BACKUP_DIR / "config-20260101-000000.yaml").write_text(configio.dump_config(good), encoding="utf-8")
+    asked, restored = [], []
+    monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: asked.append(a[1]) or False)
+    monkeypatch.setattr(messagebox, "showerror", lambda *a, **k: pytest.fail(f"dialog: {a}"))
+    root = make_tk_root()
+    root.withdraw()
+    try:
+        a = App(root, p)
+        monkeypatch.setattr(a, "restore_config", lambda: restored.append(True))
+        assert a.config_error and "line 2, column 10" in a.config_error
+        a._say_config_broken()
+        assert asked and "Restore a previous config" in asked[0] and "config-20260101-000000.yaml" in asked[0]
+        assert "line 2, column 10" in a.status_lbl.cget("text")
+        assert p.read_text(encoding="utf-8") == "paths:\n  inbox: [unclosed\n"
+    finally:
+        tk.Tk.destroy(root)

@@ -281,3 +281,44 @@ def test_raws_nested_deeper_than_top_level_or_raw_stabilize_then_intake_rejects(
     assert note.is_file()             # ...but intake rejects them
     assert "no .raw files" in note.read_text()
     assert d.is_dir()                 # rejected in place: the watcher keeps watching it
+
+
+def test_a_folder_windows_cannot_open_is_said_once_not_skipped_for_ever(lab, monkeypatch, caplog):
+    """#139: an inbox entry whose path is longer than Windows allows cannot be stat'ed, so is_dir() was False and
+    the loop skipped it in silence on every poll. It is now said once in the log and as a needs-attention item,
+    and the item is closed when the entry leaves the inbox."""
+    import ionomos.watcher as wmod
+    from ionomos import attention
+
+    d = make_drop(lab["inbox"], "20260919_Isaac_DIA_verylongname", ["S_1.raw"])
+    why = "This path is 328 characters long; Windows allows 259 here (long paths are off)."
+    monkeypatch.setattr(wmod, "path_too_long", lambda p: why if Path(p).name == d.name else None)
+    handed = []
+    w = Watcher(lab["inbox"], lambda f: handed.append(f) or IntakeResult.QUEUED, stable_seconds=0,
+                log_dir=lab["auto"] / "logs")
+    with caplog.at_level(logging.WARNING, logger="ionomos.watcher"):
+        for _ in range(3):
+            assert w.scan_once() == []
+    assert handed == [] and d not in w._pending
+    assert [r.message for r in caplog.records if "cannot read" in r.message] == [f"cannot read {d.name}: {why}"]
+    items = [i for i in attention.items(lab["auto"] / "logs") if i.key == f"intake:{d.name}"]
+    assert len(items) == 1 and "328 characters" in items[0].message and items[0].kind == "intake_rejected"
+    shutil.rmtree(d)  # renamed or pulled out: the item closes
+    w.scan_once()
+    assert [i for i in attention.items(lab["auto"] / "logs") if i.key == f"intake:{d.name}"] == []
+
+
+def test_a_rejection_without_a_note_waits_for_a_change_not_every_poll(lab):
+    """#139: when the rejection note could not be written (its path too long), the watcher used to read the
+    missing note as 'deleted by the person' and offer the folder again on every poll."""
+    d = make_drop(lab["inbox"], "20260920_Isaac_DIA_longrawpaths", ["S_1.raw"])
+    calls = []
+    w = Watcher(lab["inbox"], lambda f: calls.append(f) or IntakeResult.REJECTED, stable_seconds=0)
+    w.scan_once(now=0)
+    assert w.scan_once(now=1) == [d] and len(calls) == 1
+    for t in (2, 3, 4):
+        assert w.scan_once(now=t) == []
+    assert len(calls) == 1
+    (d / "S_2.raw").write_bytes(b"\0" * 64)  # a change: looked at again
+    w.scan_once(now=5)
+    assert w.scan_once(now=6) == [d] and len(calls) == 2

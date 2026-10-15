@@ -318,7 +318,7 @@ class App:
             log.info("moved the config from %s to %s", self.config_path, moved)
             self.config_path = moved
         self.first_run = not self.config_path.is_file()
-        self.data = configio.read_config(self.config_path)
+        self.data, self.config_error = self._read_config(self.config_path)
         self.proc = None  # child watcher process started from here
         self.proc_config: Path | None = None
         self.vars: dict[str, tk.Variable] = {}
@@ -363,7 +363,36 @@ class App:
         self.root.after(2500, self.check_downloaded_update)
         self._start_popups()
         self._start_drops()
+        if self.config_error:
+            self.root.after(400, self._say_config_broken)
         log.info("app started: %s, config %s", __import__("ionomos.buildinfo", fromlist=["x"]).one_line(), self.config_path)
+
+    @staticmethod
+    def _read_config(path: Path) -> tuple[dict, str | None]:
+        """config.yaml as a dict, plus the parse error when the file does not parse (#136): then the defaults,
+        so the app opens, shows the error and the file is left as it is."""
+        try:
+            return configio.read_config(path), None
+        except ConfigError as exc:
+            log.warning("%s", exc)
+            return configio.defaults(), str(exc)
+
+    def _say_config_broken(self) -> None:
+        """At start, on a config.yaml that does not parse: the error in the status bar and a dialog that offers
+        Restore a previous config when there are backups, else says how to fix the file."""
+        msg = self.config_error or ""
+        self.set_status(f"{msg} (the file is untouched; the settings shown are the defaults)", ok=False)
+        self.nb.select(self.tab_setup)
+        backups = sorted((self.config_path.parent / configio.BACKUP_DIR).glob("config-*.yaml"))
+        if backups and messagebox.askyesno(
+                "Config problem", f"{msg}\n\nThe file was left as it is, and the settings shown are the defaults.\n"
+                f"Restore a previous config now? ({len(backups)} saved in {configio.BACKUP_DIR}/; the newest is "
+                f"{backups[-1].name}.) Press Save afterwards to make it the active config."):
+            self.restore_config()
+        elif not backups:
+            messagebox.showerror("Config problem", f"{msg}\n\nThe file was left as it is, and the settings shown "
+                                 "are the defaults. Fix that line in a text editor and press Reload, or press Save "
+                                 "to write the settings shown over it (a backup of the file is kept).")
 
     def post(self, fn) -> None:
         """Thread-safe: run fn on the Tk thread soon."""
@@ -433,7 +462,7 @@ class App:
         self.v("config_path").set(str(self.config_path))
 
     def _collect(self) -> dict:
-        d = configio.read_config(self.config_path) if self.config_path.is_file() else configio.defaults()
+        d = self._read_config(self.config_path)[0] if self.config_path.is_file() else configio.defaults()
         d["paths"] = {k: self.v(f"paths.{k}").get().strip().replace("\\", "/") for k in d["paths"]}
         for sec, keys in (("watcher", ("poll_seconds", "stable_seconds", "min_raw_files")),
                           ("fragpipe", ("threads", "ram_gb", "timeout_minutes", "min_free_gb"))):
@@ -1476,7 +1505,11 @@ class App:
             return
         from ionomos import health
 
-        target_log = Path(configio.read_config(cfg)["paths"]["log_dir"])
+        try:
+            target_log = Path(configio.read_config(cfg)["paths"]["log_dir"])
+        except ConfigError as exc:
+            messagebox.showerror("Watcher", f"{exc}\nFix the file first; the watcher would not start on it.")
+            return
         if health.is_locked(target_log):
             messagebox.showinfo("Watcher", "A watcher is already running for this config (probably the startup task).")
             return
@@ -1522,7 +1555,10 @@ class App:
 
     def _follow_tick(self):
         cfg = self.proc_config if (self.proc is not None and self.proc.poll() is None) else self.config_path
-        log = names.log_file(Path(configio.read_config(cfg)["paths"]["log_dir"])) if cfg and cfg.is_file() else None
+        try:
+            log = names.log_file(Path(configio.read_config(cfg)["paths"]["log_dir"])) if cfg and cfg.is_file() else None
+        except ConfigError:
+            log = None
         if log and log.is_file():
             size = log.stat().st_size
             if size != self._last_log_size:
@@ -2462,17 +2498,23 @@ class App:
             return
         self.config_path = Path(r)
         self.first_run = not self.config_path.is_file()
-        self.data = configio.read_config(self.config_path)
+        self.data, self.config_error = self._read_config(self.config_path)
         self._load_vars()
         self._refresh_users()
         self._refresh_methods()
+        if self.config_error:
+            self.set_status(f"{self.config_error} (the settings shown are the defaults)", ok=False)
+            return
         self.set_status("switched config" + (" (new file — press Save to create it)" if self.first_run else ""))
 
     def reload(self):
-        self.data = configio.read_config(self.config_path)
+        self.data, self.config_error = self._read_config(self.config_path)
         self._load_vars()
         self._refresh_users()
         self._refresh_methods()
+        if self.config_error:
+            self.set_status(f"{self.config_error} (the settings shown are the defaults)", ok=False)
+            return
         self.set_status("reloaded from disk")
 
     def save(self) -> bool:
@@ -2546,7 +2588,16 @@ def _setup_app_log() -> None:
 def main(config_path: Path | None = None) -> int:
     _setup_app_log()
     root = tk.Tk()
-    App(root, config_path)
+    try:
+        App(root, config_path)
+    except Exception as exc:  # noqa: BLE001 - the windowed exe has no console: say it before dying
+        log.exception("the app could not start")
+        try:
+            messagebox.showerror("Ionomos could not start", f"{type(exc).__name__}: {exc}\n\nThe details are in "
+                                 f"{service.appdata_dir() / 'app.log'}.")
+        except tk.TclError:
+            pass
+        raise
     root.mainloop()
     return 0
 

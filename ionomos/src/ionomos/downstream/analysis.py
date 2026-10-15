@@ -725,6 +725,7 @@ class DiffResult:
     role: str = ""                # roles.KINDS: enrichment | competition | remaining ("" = no competition design)
     relaxed: int = 0              # features tested with fewer than min_valid values in the smaller group
     correction: dict = field(default_factory=dict)   # a site comparison corrected for protein abundance (D70)
+    file_stem: str = ""           # the file names' stem when the full name would pass Windows' path limit (#140)
 
     @property
     def up(self) -> int:
@@ -742,13 +743,19 @@ class DiffResult:
         """The comparison in file names (volcano_<slug>.svg, <slug>_differential.tsv, the report's downloads). A long
         one is cut, with a short hash of the whole so two stay apart: conditions named after their runs
         (CPTAC_CCRCC_W_JHU_20190112_LUMOS_C3N-01179_NAT vs ...) made paths longer than Windows opens, and every
-        volcano and table of the comparison was missing (#157)."""
-        s = re.sub(r"[^A-Za-z0-9._-]+", "_", self.name).strip("_") or "comparison"
+        volcano and table of the comparison was missing (#157). In a deep results folder `fit_file_stem` may give a
+        shorter stem still (#140)."""
+        if self.file_stem:
+            return self.file_stem
+        s = self.full_slug()
         if len(s) <= SLUG_MAX:
             return s
         import hashlib
 
         return s[:SLUG_MAX - 9].rstrip("._-") + "_" + hashlib.sha1(s.encode("utf-8")).hexdigest()[:8]
+
+    def full_slug(self) -> str:
+        return re.sub(r"[^A-Za-z0-9._-]+", "_", self.name).strip("_") or "comparison"
 
 def comparison_name(treatment: str, control: str | None) -> str:
     if control is None:

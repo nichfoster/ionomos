@@ -330,3 +330,12 @@ def test_the_next_analysis_shows_the_verdict_and_says_when_it_is_stale(tmp_path)
     out = downstream.analyze(tmp_path / "e", "DIA", analysis_cfg={**CFG, "imputation": "none"})
     assert out.summary["trust"]["compare"]["same_settings"] is False
     assert "<span class='pill warn'>other settings</span>" in out.report.read_text(encoding="utf-8")
+
+
+def test_ionomos_own_per_comparison_table_name_matches_by_name():
+    """#143: compare <exp> <exp>/results/DrugA_vs_DMSO_differential.tsv exited 2: the file stem did not match."""
+    from ionomos.downstream.compare import _split
+
+    assert _split("DrugA_vs_DMSO_differential") == ("druga", "dmso")
+    assert _split("DrugA_vs_DMSO_DIFFERENTIAL") == ("druga", "dmso")
+    assert _split("DrugA vs DMSO") == ("druga", "dmso") and _split("DrugA_vs_DMSO") == ("druga", "dmso")
