@@ -3,8 +3,12 @@ Command line.
 
     ionomos                                       no arguments -> the setup/control app
     ionomos setup    [--config PATH]              setup wizard / control panel (tkinter)
-    ionomos run      [--config PATH] [--no-gui]   watcher + intake, forever (worker: Phase 2)
+    ionomos run      [--config PATH] [--no-gui]   watcher + intake + worker, forever
     ionomos check    [--config PATH]              doctor: config, paths, users, GUI, ledger
+    ionomos preflight [--method M] [--raw PATH] [--no-dry-run] [--static]
+                                                   FragPipe checked without a search: --help, a dry run per method
+                                                   (preflight.py, D59)
+    ionomos stop     [--wait S] [--remember]      gracefully stop the running watcher (a running search is re-queued)
     ionomos status   [--config PATH] [--all]      jobs from the ledger
     ionomos dry-run  FOLDER [--config PATH]       parse + validate + show the plan; touches nothing
     ionomos names test NAME... [--method M]       how folder / .raw names are read with this config (naming:)
@@ -20,6 +24,8 @@ Command line.
     ionomos analyze  JOB_ID|FOLDER [--control C] [--compare 'A vs B'] [--de-type all] [--imputation none]
                      [--exclude SAMPLE] [--log2fc F] [--open]
                                                    statistics + volcano plots + results/report.html
+    ionomos check-folder FOLDER [--method M]      a folder of FragPipe output checked before it is analysed (fpfolder.py,
+                                                   D80): what it is, what is missing or wrong, what to do
     ionomos export   JOB_ID|FOLDER [--preset slide169|slide43|half|col1|col2] [--palette colorblind]
                      [--font-pt N] [--figures volcano,pca,dose,...] [--list] [--features EGFR,BTK] [--top N]
                      [--format svg|png|both] [--style FILE] [--out DIR]
@@ -47,6 +53,9 @@ Command line.
     ionomos ask-eval [--base-url URL] [--model NAME] [--out FILE] [--only IDS] [--scripted]
                                                    score a model on this PC over the scenario corpus: rubric
                                                    pass rate, injection failures, time to first token
+    ionomos attention [list | show ID | dismiss ID]
+                                                   what needs a person (the pop-ups' list: analysis decisions, failed
+                                                   searches, rejected drops)
     ionomos init    [--root DIR] [--users DIR]   create folders + a config without the app (headless setup)
     ionomos qc-trend [--rebuild] [--open]         instrument QC: the QC-standard runs trended (logs/qc_trend.html)
     ionomos cancel   JOB_ID                       stop a running search / drop a queued job
