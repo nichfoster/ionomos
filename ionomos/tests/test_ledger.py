@@ -1,6 +1,7 @@
 import json
 import logging
 import sqlite3
+import threading
 from datetime import datetime, timedelta
 
 import pytest
@@ -302,3 +303,72 @@ def test_adopt_orphans_logs_unreadable_status_file(tmp_path, caplog):
     assert [j.inbox_name for j in led.list()] == ["exp-good"]
     warns = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warns) == 1 and "20260903-TMT_EJQ-1-001" in warns[0].getMessage()
+
+
+# ------------------------------------------------------------------ threads (D104) -
+
+
+def _hammer(*targets, rounds: int) -> list[str]:
+    """Run each target(i) for i in range(rounds) on its own thread; return the first error of each, as text."""
+    errors: list[str] = []
+    start = threading.Barrier(len(targets))
+
+    def loop(fn):
+        start.wait()
+        try:
+            for i in range(rounds):
+                fn(i)
+        except Exception as exc:  # noqa: BLE001 - reported by the test
+            errors.append(f"{fn.__name__}: {exc!r}")
+
+    threads = [threading.Thread(target=loop, args=(fn,), daemon=True) for fn in targets]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=240)  # under faulthandler_timeout (300 s); a slow Windows runner took over 120 s for 300 rounds
+    assert not any(t.is_alive() for t in threads), "a ledger thread hung"
+    return errors
+
+
+def test_a_ledger_read_and_written_from_two_threads_returns_whole_rows(tmp_path):
+    # Master CI, py3.14: the worker thread's list() and the test's polling list() on one connection read
+    # parsed_json as None (`TypeError: the JSON object must be str ... not NoneType`) and returned short lists.
+    led = Ledger(tmp_path / "l.db")
+    n = 20
+    for i in range(n):
+        led.insert(Job(inbox_name=f"e{i}", user="EJQ", method="isoDTB", dest_dir=f"/x/e{i}",
+                       parsed={"i": i, "pad": "x" * 200}))
+
+    def worker(i):
+        jid = i % n + 1
+        led.start_attempt(jid)
+        assert len(led.list()) == n
+        led.set_status(jid, "done")
+        led.requeue(jid, "again", reset_attempts=True)
+
+    def watcher(i):
+        jobs = led.list()
+        assert [j.id for j in jobs] == list(range(1, n + 1))
+        assert all(j.parsed["pad"] == "x" * 200 for j in jobs)
+        assert led.get(i % n + 1).parsed["i"] == i % n
+        led.next_queued()
+        assert led.already_taken(f"e{i % n}")
+
+    assert _hammer(worker, watcher, rounds=100) == []
+    led.close()
+
+
+def test_start_attempt_counts_every_attempt_from_two_threads(tmp_path):
+    led = Ledger(tmp_path / "l.db")
+    led.insert(Job(inbox_name="a", user="EJQ", method="isoDTB", dest_dir="/x/a"))
+    seen: list[int] = []
+
+    def first(i):
+        seen.append(led.start_attempt(1))
+
+    def second(i):
+        seen.append(led.start_attempt(1))
+
+    assert _hammer(first, second, rounds=150) == []
+    assert sorted(seen) == list(range(1, 301)) and led.get(1).attempts == 300
+    led.close()
