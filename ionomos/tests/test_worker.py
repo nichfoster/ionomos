@@ -532,13 +532,13 @@ def test_fasta_falls_back_to_workflow_database(bed):
 
 @pytest.mark.parametrize(("reason", "expected"), [
     ("FASTA for isoDTB missing: C:/x/h.fas",
-     "The method's protein database (FASTA) isn't set or the file was moved — tab 3 Methods"),
+     "The method's protein database (FASTA) isn't set or the file was moved — the Methods tab"),
     ("workflow file for isoDTB missing: C:/x/workflows/isoDTB.workflow",
-     "The method's FragPipe workflow file isn't there — tab 3 Methods → Import workflow…"),
+     "The method's FragPipe workflow file isn't there — the Methods tab → Import workflow…"),
     ("low disk space: 12 GB free on C:, this search needs ~15 GB",
      "Not enough free disk space for FragPipe's output — free space on the data drive"),
     ("FragPipe launcher not found at C:/nope/fragpipe.bat",
-     "FragPipe isn't found — tab 1 Folders → Find FragPipe"),
+     "FragPipe isn't found — the Folders tab → Find FragPipe"),
     ("method 'isoDTB' is not in config.yaml any more", None),  # fallback: the raw reason, verbatim
 ])
 def test_waiting_causes_maps_hold_reasons_to_plain_english(reason, expected):

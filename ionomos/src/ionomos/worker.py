@@ -404,7 +404,7 @@ class Worker:
                   f"Reason: {reason}\n"
                   + (f"\nMost likely cause:\n{likely}" if likely else "")
                   + f"{log_hint}\n"
-                  f"After fixing the cause: Ionomos app -> Run & Test -> Retry a failed job, "
+                  f"After fixing the cause: Ionomos app -> Jobs -> select the job -> Retry, "
                   f"or  ionomos retry {job.id}\n")
         log.error("job %d failed: %s", job.id, reason)
         if reason != "cancelled by user":
@@ -481,8 +481,8 @@ def recover(cfg: Config, ledger: Ledger) -> list[tuple[int, str]]:
               fixes=["Look at the end of FragPipe's log, then press Retry (or Jobs tab → Retry)"])
         if dest.is_dir():
             _note(dest, FAILED_NOTE, f"ionomos could not finish this experiment ({datetime.now():%Y-%m-%d %H:%M}).\n\n"
-                                     f"Reason: {job.reason}\n\nAfter fixing the cause: Ionomos app -> Run & Test -> "
-                                     f"Retry a failed job, or  ionomos retry {jid}\n")
+                                     f"Reason: {job.reason}\n\nAfter fixing the cause: Ionomos app -> Jobs -> "
+                                     f"select the job -> Retry, or  ionomos retry {jid}\n")
     return out
 
 
@@ -500,24 +500,24 @@ def _waiting_causes(reason: str) -> list[str]:
                 "antivirus scanning it; the search starts by itself once it can be read"]
     if "has a space in its path" in r:
         return ["FragPipe can't use a path with a space in it: rename the file or folder named above (for a FASTA, "
-                "pick one without spaces on tab 3 Methods)"]
+                "pick one without spaces on the Methods tab)"]
     if "can't be moved aside" in r:
         return ["A file in the experiment's fragpipe folder is open (Excel, Explorer's preview pane): close it; "
                 "the earlier output is then kept as fragpipe_previous_<time> and the search starts"]
     if "window program" in r:
-        return ["The launcher set on tab 1 is FragPipe's window program (the .exe); searches need fragpipe.bat, "
-                "which FragPipe installs next to it — tab 1 Folders → Find FragPipe"]
+        return ["The launcher set on the Folders tab is FragPipe's window program (the .exe); searches need "
+                "fragpipe.bat, which FragPipe installs next to it — Folders tab → Find FragPipe"]
     if "can't be searched" in r:
         return ["FragPipe refuses this FASTA: it needs decoys for about half its entries — add them in "
-                "FragPipe's Database tab, then pick that file on tab 3 Methods"]
+                "FragPipe's Database tab, then pick that file on the Methods tab"]
     if "fasta" in r:
-        return ["The method's protein database (FASTA) isn't set or the file was moved — tab 3 Methods"]
+        return ["The method's protein database (FASTA) isn't set or the file was moved — the Methods tab"]
     if "workflow" in r:
-        return ["The method's FragPipe workflow file isn't there — tab 3 Methods → Import workflow…"]
+        return ["The method's FragPipe workflow file isn't there — the Methods tab → Import workflow…"]
     if "disk" in r or "space" in r:
         return ["Not enough free disk space for FragPipe's output — free space on the data drive"]
     if "fragpipe" in r or "launcher" in r:
-        return ["FragPipe isn't found — tab 1 Folders → Find FragPipe"]
+        return ["FragPipe isn't found — the Folders tab → Find FragPipe"]
     return [reason]
 
 

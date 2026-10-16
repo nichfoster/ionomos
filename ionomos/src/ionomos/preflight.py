@@ -94,7 +94,8 @@ def _launcher_checks(cfg: Config, scratch: Path, start: bool) -> tuple[list[Chec
     try:
         exe = fragpipe.resolve_launcher(cfg)
     except fragpipe.Hold as exc:
-        return [Check("launcher", "FragPipe launcher", "fail", str(exc), "Tab 1 → Find FragPipe, then Save.")], None, {}, []
+        return [Check("launcher", "FragPipe launcher", "fail", str(exc),
+                      "Folders tab → Find FragPipe, then Save.")], None, {}, []
     rows = fragpipe.install_report(cfg)
     for ok, label, detail in rows:
         fix = ""
@@ -139,7 +140,8 @@ def _launcher_checks(cfg: Config, scratch: Path, start: bool) -> tuple[list[Chec
             why = (f"exit code {fragpipe.code_text(probe['code'])}" + (f" ({how})" if how else "")
                    + f", output: {said or 'none'}")
         out.append(Check("starts", "FragPipe starts", "fail", f"`{exe.name} --help` did not answer as FragPipe: {why}",
-                         f"See {scratch / 'launcher_help.log'}. Tab 1 → Find FragPipe; the launcher is bin\\fragpipe.bat."))
+                         f"See {scratch / 'launcher_help.log'}. Folders tab → Find FragPipe; the launcher is "
+                         "bin\\fragpipe.bat."))
     return out, exe, probe, rows
 
 
@@ -170,7 +172,7 @@ def _pc_checks(cfg: Config, exe: Path | None) -> list[Check]:
     odd = [f"{k} ({v})" for k, v in paths.items() if v and not str(v).isascii()]
     if spaced:
         out.append(Check("spaces", "Paths without spaces", "fail" if os.name == "nt" else "warn", "; ".join(spaced),
-                         "FragPipe refuses a path with a space: move these (tab 1)."))
+                         "FragPipe refuses a path with a space: move these (Folders tab)."))
     else:
         out.append(Check("spaces", "Paths without spaces", "ok", "launcher, tools, workflows, FASTA and data folders"))
     if odd:
@@ -218,7 +220,7 @@ def _pc_checks(cfg: Config, exe: Path | None) -> list[Check]:
         ok, why = setupcheck.writable(Path(folder))
         out.append(Check(f"write:{label}", f"Can write to the {label}", "ok" if ok else "fail",
                          str(folder) if ok else f"{folder}: {why}",
-                         "" if ok else "Pick a folder this Windows account can write to (tab 1)."))
+                         "" if ok else "Pick a folder this Windows account can write to (Folders tab)."))
     return out
 
 
@@ -255,7 +257,7 @@ def _method_checks(cfg: Config, key: str, rows: list, probe: dict) -> tuple[list
     wf = fragpipe._find_file(m.workflow, cfg.workflow_dir, ".workflow") if m.workflow else None
     if wf is None:
         return [Check(f"method:{key}", f"{title}: workflow", "fail", lines[0][1],
-                      "Tab 3 → select the method → Import workflow… (from a run that worked).")], False
+                      "Methods tab → select the method → Import workflow… (from a run that worked).")], False
     try:
         props = fragpipe.read_properties(wf.read_text(encoding="utf-8", errors="replace"))
     except OSError as exc:
@@ -270,7 +272,7 @@ def _method_checks(cfg: Config, key: str, rows: list, probe: dict) -> tuple[list
         out.append(Check(f"method:{key}:workflow", f"{title}: workflow", "fail",
                          f"{wf.name} has {len(props)} settings and almost no <tool>.run-<tool> switches: it doesn't "
                          f"look like a workflow saved by FragPipe",
-                         "Tab 3 → Import workflow… → the fragpipe.workflow of a run that worked."))
+                         "Methods tab → Import workflow… → the fragpipe.workflow of a run that worked."))
     else:
         ver = probe.get("version", "")
         mismatch = bool(ver and saved) and saved.split(".")[0].split("-")[0] != ver.split(".")[0]
@@ -290,7 +292,8 @@ def _method_checks(cfg: Config, key: str, rows: list, probe: dict) -> tuple[list
                          "section there." if missing else ""))
     for ok, text_ in lines[1:]:  # the FASTA line(s)
         out.append(Check(f"method:{key}:fasta", f"{title}: FASTA", _status(ok), text_,
-                         "" if ok else "Tab 3: pick a FASTA with decoys (FragPipe's Database tab → Add decoys)."))
+                         "" if ok else ("Methods tab: pick a FASTA with decoys (FragPipe's Database tab → "
+                                        "Add decoys).")))
     ready = looks >= 3 and all(c.status != "fail" for c in out if c.key.endswith((":fasta", ":workflow")))
     return out, ready
 
@@ -350,7 +353,8 @@ def dry_run(cfg: Config, key: str, exe: Path, scratch: Path, raw: Path | None = 
     said = facts["error_lines"] or [ln.strip() for ln in text_.splitlines() if ln.strip()][-3:]
     return Check(f"method:{key}:dry", title, "fail",
                  f"FragPipe refused (exit code {code}): " + " | ".join(said)[-500:] + f"  Log: {log}",
-                 hints[0] if hints else "Read the log's first ERROR line; fix it in the FragPipe GUI or the method (tab 3).")
+                 hints[0] if hints else ("Read the log's first ERROR line; fix it in the FragPipe GUI or the "
+                                         "method (Methods tab)."))
 
 
 # --------------------------------------------------------------------- run --
@@ -363,7 +367,7 @@ def run(cfg: Config, dry: bool = True, methods: list[str] | None = None, raw: Pa
         scratch = scratch_dir(cfg) if start else Path(cfg.log_dir)
     except OSError as exc:
         return [Check("scratch", "Preflight folder", "fail", f"could not make a folder under {cfg.log_dir}: {exc}",
-                      "The log folder must exist and be writable (tab 1).")]
+                      "The log folder must exist and be writable (Folders tab).")]
     checks, exe, probe, rows = _launcher_checks(cfg, scratch, start)
     checks += _pc_checks(cfg, exe)
     for key in (methods or list(cfg.methods)):

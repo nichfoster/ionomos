@@ -144,7 +144,8 @@ class BundleDialog:
             def done():
                 if res is None:
                     self.on_status("no zip was saved")
-                    messagebox.showerror(TITLE, msg)
+                    messagebox.showerror(TITLE, msg + "\n\n→ Free some disk space if the drive is full, then press "
+                                                      "Report a problem… again.")
                     return
                 self.result = res
                 try:

@@ -2,7 +2,7 @@
 
 ## How do I re-run the analysis with other settings? {#faq.rerun}
 
-On the lab PC: app → tab 7 **Analysis** → **Analyse an experiment**, pick the
+On the lab PC: app → **Analysis** → **Analyse an experiment**, pick the
 experiment, change what you need (cut-offs, imputation, normalisation,
 comparisons), then **Run analysis**. The choices are saved in the experiment's
 `experiment.yaml` under `analysis:`, so later re-runs keep them. The Jobs tab
@@ -10,12 +10,12 @@ has **Re-run analysis** and **Analysis options…** for a finished job. The
 search is not repeated; only the statistics and the report are made again.
 
 On any computer: `ionomos analyze <folder> --log2fc 0.58 --imputation none`
-(see `ionomos analyze --help`). Lab-wide defaults are on tab 7 → **Lab
+(see `ionomos analyze --help`). Lab-wide defaults are on **Analysis** → **Lab
 defaults**.
 
 ## How do I analyse a search I ran in FragPipe myself? {#faq.own-fragpipe}
 
-App → tab 7 **Analysis** → **Folder…**, or drag the folder from Explorer onto
+App → **Analysis** → **Folder…**, or drag the folder from Explorer onto
 the app window. Pick the folder FragPipe wrote to (the one with
 `fragpipe.workflow` and `log_….txt`) or the folder above it. Ionomos checks it
 first. A window shows what it found, what it will analyse it as and why, and
@@ -30,7 +30,7 @@ output, which is left as it is. On the command line: `ionomos check-folder
 
 ## How do I change a sample's condition? {#faq.condition}
 
-In the experiment editor (tab 7, or the pop-up window): double-click the
+In the experiment editor (the Analysis tab, or the pop-up window): double-click the
 sample's condition, or select it and press **Change condition…**, then **Run
 analysis**. **Guess from names** fills in conditions from the file names. The
 change is saved in `experiment.yaml` as `sample_conditions`, for example:
@@ -54,7 +54,7 @@ line: `--control DMSO`, `--compare "Drug vs DMSO"`, `--de-type all`.
 
 ## How do I say which condition is DMSO, the compound or the competition? {#faq.roles}
 
-In the experiment editor (tab 7, or the pop-up window), **Roles** lists each
+In the experiment editor (the Analysis tab, or the pop-up window), **Roles** lists each
 condition with its number of samples and its [role](#glossary.role): control,
 compound, [competition](#glossary.competition) of a compound, pool /
 reference, QC standard, or background (a pull-down's negative control), and
@@ -103,7 +103,7 @@ so a figure on a slide can be traced back to its report.
 
 ## How do I set the lab's figure style? {#faq.figure-style}
 
-In the app: **7 Analysis** → **Figure style**, then **Save** (bottom right).
+In the app: **Analysis** → **Figure style**, then **Save** (bottom right).
 Every report's **Export…** starts from this style, and `ionomos export` uses it.
 
 - **Size**: a 16:9 or 4:3 slide, half a slide, a journal column (85 mm) or
@@ -213,7 +213,7 @@ with FragPipeAnalystR.
 
 ## Does Ionomos give the same result as my other analysis? {#faq.compare-reference}
 
-Check it on your own experiment: in the app, **7 Analysis** →
+Check it on your own experiment: in the app, **Analysis** →
 [Check accuracy](#faq.check-accuracy) → **Compare**, or `ionomos compare
 <experiment folder> <reference>`. It compares the Ionomos analysis with
 another result for the same experiment. The reference can be:
@@ -244,7 +244,7 @@ offset of …** (a normalisation difference), **differs: …** with the reason, 
 ## How accurate is the analysis? {#faq.benchmark}
 
 Two ways to measure it, both with `ionomos benchmark` or, in the app,
-**7 Analysis** → [Check accuracy](#faq.check-accuracy) → **Run benchmark**:
+**Analysis** → [Check accuracy](#faq.check-accuracy) → **Run benchmark**:
 
 - **On simulated data** (no data needed): `ionomos benchmark` runs the
   analysis on made-up protein tables where the changed proteins are known. It
@@ -289,7 +289,7 @@ shown under [How far to trust this](#report.trust) after the next analysis.
 
 ## How do I check the analysis from the app? {#faq.check-accuracy}
 
-**7 Analysis** → **Check accuracy** runs the same checks as `ionomos compare`
+**Analysis** → **Check accuracy** runs the same checks as `ionomos compare`
 and `ionomos benchmark`, with buttons. Both read results and change neither;
 the page they write opens by itself when they finish, and the verdict is
 shown in colour above the output (green: agrees or done, orange: differs,
@@ -346,7 +346,7 @@ Yes, if the person who looks after Ionomos turns it on. It is off by
 default, because nothing leaves the PC unless the lab asks for it
 ([what a message holds](#safety.notify)).
 
-To set it up, open the app's **8 Notifications** tab, tick **Send
+To set it up, open the app's **Notifications** tab, tick **Send
 notifications** and fill in at least one of:
 
 - **Slack**: a Slack incoming-webhook address
@@ -366,7 +366,7 @@ its name under "or variable".
 
 Press **Send test**: it sends a test message to each one and says which
 arrived (same as `ionomos notify-test`). Then **Save**, and restart the
-watcher (**5 Run & Test** → **Stop**, **Start**) so it uses the new
+watcher (**Run & Test** → **Stop watcher**, **Start watcher**) so it uses the new
 settings. Everything on the tab is also `notify:` in `config.yaml`. A message that can't be sent never fails or slows a
 search ([A notification did not arrive](#trouble.notify)).
 
@@ -457,17 +457,29 @@ welcome through **Report a problem…** or on GitHub.
 
 The app opens on **Today**: what needs you (a failed search, an analysis
 that needs a decision, a folder that couldn't be taken in), whether the
-watcher runs, the setup checklist's one line, and the recent jobs. Select a
-job and press **Open report**, **Open folder** or **Re-run analysis**;
-double-click opens the report. A new install opens on **✓ Setup** instead.
+watcher runs, the checks' one line, and the recent jobs. Select a job and
+press **Open report**, **Open folder** or **Re-run analysis**; double-click
+opens the report. A new install opens on **Setup** instead.
 
-The other tabs, left to right: **✓ Setup** (the checklist), **1 Folders**,
-**2 Users**, **3 Methods**, **4 Advanced** and **5 Run & Test** (setting up,
-mostly once), **Inbox** (what is waiting to be taken in), **6 Jobs** (every
-search, with a Find box), **7 Analysis** ([re-run an
-analysis](#faq.rerun), the lab's defaults, figure style, accuracy checks),
-**8 Notifications** ([messages](#faq.notify)) and **Help**. The app
-remembers its size and the tab you used last.
+The tabs come in three groups. Daily: **Today**, **Inbox** (what is waiting
+to be taken in), **Jobs** (every search, with a Find box) and **Analysis**
+([re-run an analysis](#faq.rerun), the lab's defaults, figure style,
+accuracy checks). Setting up, mostly once: **Setup** (Check everything: one
+list of what Ionomos needs, what FragPipe's files say, newer workflows and
+FASTAs, crash reports and what needs you, each line with what to do and a
+button where the app can do it), **Folders**, **Users**, **Methods**,
+**Advanced** (also Undo last save and Restore a previous config…), **Run &
+Test** (the watcher and the startup task; its Testing page has the testbed)
+and **Notifications** ([messages](#faq.notify)). Then **Help**. The app
+remembers its size and the tab you used last. The line under the bottom bar
+shows the watcher's state and the FragPipe queue on every tab.
+
+Nothing is written until you press **Save**. Save first shows what will
+change, in words; Cancel goes back. Every Save keeps the version before it
+(**Advanced → Undo last save**). A dot in the title means the window has
+changes that are not saved; closing, Reload and Change… ask before losing
+them. While the app works (a check, an import, a report), the bottom bar
+says what it is doing; the same work can't be started twice.
 
 Keys in the main window:
 
@@ -475,7 +487,8 @@ Keys in the main window:
 - **F5**: refresh the tab you are on
 - **Ctrl+S**: Save
 - **Ctrl+F**: find a job
-- **Ctrl+0**: Today; **Ctrl+1** … **Ctrl+8**: the tab with that number
+- **Ctrl+0**: Today; **Ctrl+1** … **Ctrl+9**: the tab in that position
+  (Ctrl+1 Inbox, Ctrl+2 Jobs, Ctrl+3 Analysis, Ctrl+4 Setup …)
 - **Ctrl+Tab**, **Ctrl+Shift+Tab**: the next or previous tab
 
 ## How do I get or update a FASTA? {#faq.fasta}
@@ -506,12 +519,12 @@ is the day it was made.
 Nothing is overwritten: a name that is taken gets `-2`. A new FASTA changes
 the results, so keep the old file for experiments already searched with it
 and switch at the start of a project, then choose the new file for the
-method (app, tab 3 Methods). Downloads need the internet; UniProt's data is
+method (app, Methods tab). Downloads need the internet; UniProt's data is
 free to use (CC BY 4.0).
 
 ## How do I find or update a workflow or FASTA? {#faq.library}
 
-In the app, tab **3 Methods**, select the method, then use the panel
+In the app, on the **Methods** tab, select the method, then use the panel
 **Workflows and FASTAs on this PC** under the form:
 
 - **Find on this PC…** looks through the workflows and FASTA folders, every

@@ -108,6 +108,7 @@ CASES = {
     "setup": ("own", "opens the app: test_app.py (a broken config opens it on the defaults, #136)"),
     "run": ("config", ["--no-gui"]),
     "check": ("config", []),
+    "doctor": ("own", "a check: an unreadable config is one of its ✗ rows, exit 1 (test_checks.py)"),
     "preflight": ("config", ["--static"]),
     "status": ("config", []),
     "dry-run": ("config", ["{tmp}"]),

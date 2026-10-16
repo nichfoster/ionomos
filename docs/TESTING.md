@@ -62,6 +62,7 @@ Three layers, all runnable on macOS and Windows:
 | FASTA readers (round 4) | `fasta_headers` and `_read_entries` equal a plain line reading on 264 random inputs in every chunk size from 1 byte; a 200 MB zero-filled file and a file with a 200 MB header read in < 1 s with a tracemalloc peak < 16 chunks; a BOM through Python and the Philosopher stand-in gives identical bytes to a BOM-less run; the library describes a BOM file like the BOM-less one | `tests/test_fastasource.py`, `tests/test_library.py` |
 | Library ranking and adopting (round 4, D101) | the MS1-labelled kinds (SILAC, isoTOP, ipIAA, PAL), stock ties, learned aliases on adopt, adopt `--no-config` and its refusals, the GENCODE organism, install globs, the partial-scan merge, missing roots, grammar, list `--kind`, representatives, a linear-time FASTA read; the app's Use asks and avoids the live file (CI only); `job_matches` "none", the Today snapshot of a damaged ledger | `tests/test_library.py`, `tests/test_library_tab.py`, `tests/test_ui_nav.py` |
 | TMT fixes (round 4) | a Retry after fixing `experiment.yaml` (fake FragPipe), an iTRAQ-4 drop searched end to end, two plexes' annotation files; long condition names cut to short file names (#157) | `tests/test_tmtkit.py`, `tests/test_downstream.py` |
+| Hidden-window UI tests (D93, docs/UI.md slice 4) | `tests/tkharness.py`: the app on a withdrawn root with every window it opens withdrawn, every message box / file / text / colour dialog recorded (answers queued with `expect`, strict mode fails at the call naming the dialog), exceptions from Tk and `App.post` callbacks captured, the open windows listed, a window's size against a 1366×768 screen; the fixtures `hidden_app`, `no_dialogs`, `tk_errors` (CI only, [below](#hidden-window-ui-tests)). Screenshots of every tab, Analysis sub-tab and window for a person to look at (`scripts/screenshots.py`, Windows) | `tests/conftest.py`, the smoke tests in `tests/test_ui_smoke.py`; `python scripts/screenshots.py` |
 
 ## One-shot setup
 
@@ -86,7 +87,7 @@ loader refuses paths with spaces — the FragPipe rule.)
 
 ## Driving the testbed from the app
 
-`ionomos setup` (or `Ionomos.exe`) → tab **5 Run & Test** → *Testbed*:
+`ionomos setup` (or `Ionomos.exe`) → the **Run & Test** tab → **Testing**:
 **Create testbed** → **Start TESTBED watcher** → pick a sample → **Drop** /
 **Drop slowly** → watch the output pane (tick *follow the watcher log*).
 **Resolver window demo** opens the dialog with sample data. **Reset testbed**
@@ -544,4 +545,58 @@ display). To run them locally:
 ```bash
 cd ionomos && IONOMOS_GUI_TESTS=1 .venv/bin/pytest tests/test_app.py tests/test_review.py tests/test_resolve.py
 ```
+
+## Hidden-window UI tests
+
+`tests/tkharness.py` (docs/UI.md S4.1) is what a test of the app's windows
+uses; its docstring lists every name. In short:
+
+- **Every window hidden.** `hide_all_windows()` withdraws each `Toplevel`
+  as it is made and turns `deiconify`, `lift`, `focus_force` and
+  `state("normal"/"zoomed")` into no-ops, on the windows and the root, so a
+  window the app shows later stays hidden. A withdrawn window still has its
+  widgets, its geometry and its requested size, so `fits_screen(win)`
+  (1366×768 by default) works on it. `toplevels(root)` lists the open ones,
+  newest last.
+- **Dialogs recorded.** A message box or file picker is a native dialog, not a
+  `Toplevel`: hiding cannot hide it and it would wait for a click. `NoDialogs`
+  replaces messagebox, simpledialog, filedialog and colorchooser with
+  recorders: `.calls`, `.expect("askyesno", True)` for the next answer,
+  `.unexpected()`, `.assert_none()`, and `strict=True` to fail at the call with
+  the dialog's title and text.
+- **Tk errors captured.** `TkErrors` takes the place of
+  `root.report_callback_exception` and `App._on_tk_error` (which `App.post`
+  callbacks reach too), records each exception and still lets the app write
+  its crash file, without its error box.
+
+The fixtures in `tests/conftest.py`: `hidden_app` (the app on a new config in
+`tmp_path`, HOME and APPDATA there, dialogs recorded; it skips where
+`gui_tests()` says no), `no_dialogs`, and `tk_errors` (the test fails at
+teardown if a callback raised; `tk_errors.clear()` after checking one the test
+meant to cause). `pump_until(app, cond)` runs the Tk loop until `cond()` holds.
+
+They open a real Tk interpreter, so they run in CI only, like
+`tests/test_app.py`. With the harness nothing appears on screen even with
+`IONOMOS_GUI_TESTS=1`, but the rule stays: one bug in the harness and the
+windows cover the screen of whoever is working.
+
+**Screenshots** (S4.4), for a person to look at before a UI pull request:
+
+```powershell
+python scripts/screenshots.py               # Windows; PNGs in C:\ionomos-screenshots\<timestamp>\
+python scripts/screenshots.py --out shots   # PNGs in .\shots
+python scripts/screenshots.py --no-small    # only the natural size, not 1366x768 as well
+```
+
+It builds a testbed in `C:\ionomos-screenshots\<timestamp>\bed` (no space,
+never under the profile folder; HOME and APPDATA there too), opens the app at
+the top left of the screen for about 20 seconds, and saves a PNG of every
+tab, every Analysis sub-tab, the attention list and Test names, at the
+window's natural size and again with the main window at 1366×768. Message
+boxes are printed, not shown. The capture is GDI through ctypes and the PNG is
+written with zlib, so nothing is installed; on macOS and Linux it says so and
+does nothing. CI runs it on Windows with Python 3.14 after the tests (also when
+they fail) and uploads the PNGs as the artifact `ui-screenshots-3.14` of the
+`tests` workflow (Actions → the run → Artifacts); a failure there never turns
+the run red.
 

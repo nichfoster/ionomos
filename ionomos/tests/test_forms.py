@@ -234,3 +234,66 @@ def test_run_test_is_what_notify_test_prints(monkeypatch):
     assert "notify.enabled is false" in text and "sending a test message by slack, email" in text
     assert " ✓ slack    sent: HTTP 200" in text and " ✗ email    NOT sent: could not connect" in text
     assert "1 of 2 could not be sent" in text and "secret-key" not in text
+
+
+# ----------------------------------------------- number fields as you type (S3.3) --
+
+
+@pytest.mark.parametrize("key, text, why", [
+    ("watcher.poll_seconds", "10", None),
+    ("watcher.poll_seconds", "0.5", None),
+    ("watcher.poll_seconds", " 30 ", None),
+    ("watcher.poll_seconds", "", None),                      # empty: Save says so
+    ("watcher.poll_seconds", "0", "must be more than 0"),
+    ("watcher.poll_seconds", "-1", "must be more than 0"),
+    ("watcher.poll_seconds", "3601", "can't be more than 3600"),
+    ("watcher.poll_seconds", "ten", "must be a number, not 'ten'"),
+    ("watcher.poll_seconds", "1,5", "use a point, not a comma: 1.5"),
+    ("watcher.poll_seconds", "1e3", "must be a number, not '1e3'"),  # the window's Save refuses it too
+    ("watcher.stable_seconds", "60", None),
+    ("watcher.stable_seconds", "86401", "can't be more than 86400"),
+    ("watcher.min_raw_files", "1", None),
+    ("watcher.min_raw_files", "999", None),
+    ("watcher.min_raw_files", "2.0", None),                  # written as 2.0, the loader reads 2
+    ("watcher.min_raw_files", "0", "must be a whole number from 1 to 999"),
+    ("watcher.min_raw_files", "1000", "must be a whole number from 1 to 999"),
+    ("watcher.min_raw_files", "1.5", "must be a whole number from 1 to 999"),
+    ("watcher.min_raw_files", "one", "must be a whole number, not 'one'"),
+    ("fragpipe.threads", "0", None),                         # 0 = FragPipe decides
+    ("fragpipe.threads", "28", None),
+    ("fragpipe.threads", "513", "must be a whole number from 0 to 512"),
+    ("fragpipe.threads", "-2", "must be a whole number from 0 to 512"),
+    ("fragpipe.ram_gb", "48", None),
+    ("fragpipe.ram_gb", "47.5", "must be a whole number from 0 to 4096"),
+    ("fragpipe.ram_gb", "-1", "must be a whole number from 0 to 4096"),
+    ("fragpipe.ram_gb", "5000", "must be a whole number from 0 to 4096"),
+    ("fragpipe.timeout_minutes", "0", None),                 # 0 = no limit
+    ("fragpipe.timeout_minutes", "100000", None),
+    ("fragpipe.timeout_minutes", "-5", "can't be negative"),
+    ("fragpipe.min_free_gb", "20", None),
+    ("fragpipe.min_free_gb", "-0.5", "can't be negative"),
+    ("fragpipe.min_free_gb", "lots", "must be a number, not 'lots'"),
+    ("gui.timeout_minutes", "0", None),
+    ("gui.timeout_minutes", "1e1", None),                    # this one is read with float(): 10 minutes
+    ("gui.timeout_minutes", "-1", "can't be negative"),
+    ("gui.timeout_minutes", "inf", "must be a number, not 'inf'"),
+    ("watcher.group_loose_files", "anything", None),         # not a number field
+])
+def test_check_setting(key, text, why):
+    assert forms.check_setting(key, text) == why
+
+
+def test_every_value_check_setting_accepts_loads(tmp_path):
+    """What the field calls fine, the window's Save writes and the real loader takes."""
+    p = tmp_path / "config.yaml"
+    for key, text in [("watcher.poll_seconds", "0.5"), ("watcher.min_raw_files", "2.0"), ("fragpipe.threads", "0"),
+                      ("fragpipe.ram_gb", "48"), ("fragpipe.timeout_minutes", "0"), ("gui.timeout_minutes", "2.5")]:
+        assert forms.check_setting(key, text) is None
+        sec, k = key.split(".")
+        d = configio.defaults(str(tmp_path / "A"), str(tmp_path / "G"))
+        d[sec][k] = float(text) if (key == "gui.timeout_minutes" or "." in text) else int(text)  # as app._collect
+        configio.write_config(p, d, backup=False)
+        load(p, check_paths=False)
+    assert set(forms.SETTING_LIMITS) == {"watcher.poll_seconds", "watcher.stable_seconds", "watcher.min_raw_files",
+                                         "fragpipe.threads", "fragpipe.ram_gb", "fragpipe.timeout_minutes",
+                                         "fragpipe.min_free_gb", "gui.timeout_minutes"}

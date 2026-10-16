@@ -61,15 +61,17 @@ class FolderCheckWindow:
         self._token = 0
         win = self.win = tk.Toplevel(parent)
         win.title("Check the folder before analysing")
-        win.geometry("860x640")
-        win.minsize(640, 460)
+        tkutil.fit_window(win, 110, 38)
+        win.minsize(*tkutil.text_size(80, 28))
+        wrap = tkutil.text_size(104, 1)[0]  # the window less its padding: nothing is cut off at any scaling
+        inner_wrap = tkutil.text_size(98, 1)[0]
         f = ttk.Frame(win, padding=10)
         f.pack(fill="both", expand=True)
         f.columnconfigure(0, weight=1)
         f.rowconfigure(5, weight=1)
-        self.title = ttk.Label(f, text="", font=("", 12, "bold"), wraplength=820, justify="left")
+        self.title = ttk.Label(f, text="", font=("", 12, "bold"), wraplength=wrap, justify="left")
         self.title.grid(row=0, column=0, sticky="w")
-        self.path = ttk.Label(f, text="", foreground="#666", wraplength=820, justify="left")
+        self.path = ttk.Label(f, text="", foreground="#666", wraplength=wrap, justify="left")
         self.path.grid(row=1, column=0, sticky="w")
 
         self.found = ttk.LabelFrame(f, text="What Ionomos found", padding=6)
@@ -83,18 +85,18 @@ class FolderCheckWindow:
         self.kind = ttk.Combobox(choose, state="readonly", width=46)
         self.kind.grid(row=0, column=1, sticky="w")
         self.kind.bind("<<ComboboxSelected>>", lambda e: self._kind_chosen())
-        self.why = ttk.Label(choose, text="", foreground="#555", wraplength=780, justify="left")
+        self.why = ttk.Label(choose, text="", foreground="#555", wraplength=inner_wrap, justify="left")
         self.why.grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 0))
         self.out_label = ttk.Label(choose, text="FragPipe output")
         self.out_box = ttk.Combobox(choose, state="readonly", width=70)
         self.out_box.bind("<<ComboboxSelected>>", lambda e: self._output_chosen())
-        self.dest = ttk.Label(choose, text="", foreground="#555", wraplength=780, justify="left")
+        self.dest = ttk.Label(choose, text="", foreground="#555", wraplength=inner_wrap, justify="left")
         self.dest.grid(row=3, column=0, columnspan=2, sticky="w", pady=(2, 0))
         self.guess = tkutil.BooleanVar(master=win, value=False)
         self.guess_box = ttk.Checkbutton(choose, text="Use the conditions guessed from the file names",
                                          variable=self.guess)
 
-        self.verdict = ttk.Label(f, text="", font=("", 10, "bold"), wraplength=820, justify="left")
+        self.verdict = ttk.Label(f, text="", font=("", 10, "bold"), wraplength=wrap, justify="left")
         self.verdict.grid(row=4, column=0, sticky="w", pady=(8, 2))
         self.issues = scrolledtext.ScrolledText(f, height=12, wrap="word", font=("Segoe UI" if _win() else
                                                                                  "Helvetica", 10))
@@ -185,7 +187,8 @@ class FolderCheckWindow:
             bad = "can't be read" in text or "failed" in text
             ttk.Label(self.found, text=("✗ " if bad else "✓ ") + label, foreground=COLOUR["error"] if bad else OK
                       ).grid(row=r, column=0, sticky="nw", padx=(0, 8))
-            ttk.Label(self.found, text=text, wraplength=620, justify="left").grid(row=r, column=1, sticky="w")
+            ttk.Label(self.found, text=text, wraplength=tkutil.text_size(80, 1)[0], justify="left").grid(
+                row=r, column=1, sticky="w")
         self.kind.configure(values=[kind_label(k) for k in sc.choices])
         self.kind.set(kind_label(sc.method) if sc.method else "")
         self.kind.state(["!disabled"] if len(sc.choices) > 1 else ["disabled"])

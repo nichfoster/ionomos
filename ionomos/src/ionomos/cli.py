@@ -5,6 +5,8 @@ Command line.
     ionomos setup    [--config PATH]              setup wizard / control panel (tkinter)
     ionomos run      [--config PATH] [--no-gui]   watcher + intake + worker, forever
     ionomos check    [--config PATH]              doctor: config, paths, users, GUI, ledger
+    ionomos doctor   [--config PATH]              check everything: setup, FragPipe (not started), the workflow
+                                                   library, health, what needs you (the Setup tab's list)
     ionomos preflight [--method M] [--raw PATH] [--no-dry-run] [--static]
                                                    FragPipe checked without a search: --help, a dry run per method
                                                    (preflight.py, D59)
@@ -78,7 +80,7 @@ then ./config.yaml (next to the exe when frozen).
 
 Exit codes, the same for every subcommand (tests/test_cli_contract.py checks each one):
     0    done; for a check, nothing is wrong. Cancelling a job that has already ended is 0 too.
-    1    it ran, and the answer is no: a check found a problem (check, preflight, check-folder, names test,
+    1    it ran, and the answer is no: a check found a problem (check, doctor, preflight, check-folder, names test,
          notify-test ...), the job, attention item or help topic named isn't there, the job's state doesn't
          allow it (retry of a job that didn't fail, repair-ledger while the watcher runs), the job ledger can't
          be read (run: ionomos repair-ledger), or the work itself failed (an analysis, a download)
@@ -245,7 +247,7 @@ def cmd_run(args) -> int:
         return 3
     except OSError as exc:  # a log folder this Windows account can't write (or a full disk): nothing started
         print(f"the watcher can't use its log folder (paths.log_dir = {cfg.log_dir}): {exc}. Pick a folder this "
-              f"account can write to (app: tab 1), or give it write access; nothing was started.", file=sys.stderr)
+              f"account can write to (app: Folders tab), or give it write access; nothing was started.", file=sys.stderr)
         return 2
     log.info("ionomos %s starting (config %s, pid %d)", __version__, cfg.config_path, os.getpid())
     ledger = _open_ledger(cfg)
@@ -505,6 +507,18 @@ def cmd_check(args) -> int:
     row(True if st == "ready" else None, "assistant", why if st != "not_set_up" else f"not set up: {why}")
     print("\nall good" if ok_all else "\nfix the ✗ items above")
     return 0 if ok_all else 1
+
+
+def cmd_doctor(args) -> int:
+    """Check everything (checks.py, docs/UI.md S3.1): setup, FragPipe without starting it, the workflow library,
+    health and what needs a person, as the app's Setup tab shows it. 1 when anything is broken (✗)."""
+    from ionomos import checks
+
+    print(f"ionomos {__version__}  check everything  config: {args.config}\n")
+    rows = checks.everything(Path(args.config))
+    print(checks.text(rows))
+    print("\n" + checks.summary(rows))
+    return 1 if any(r.status == "fail" for r in rows) else 0
 
 
 def cmd_preflight(args) -> int:
@@ -1313,6 +1327,8 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--no-gui", action="store_true", help="never open the resolver window")
     r.set_defaults(fn=cmd_run)
     sub.add_parser("check", help="verify config, folders, users, GUI").set_defaults(fn=cmd_check)
+    sub.add_parser("doctor", help="check everything: setup, FragPipe (no start), the workflow library, health, "
+                                  "what needs you").set_defaults(fn=cmd_doctor)
     pf = sub.add_parser("preflight", help="check FragPipe without a search: starts it for --help and a dry run "
                                           "of each method")
     pf.add_argument("--method", action="append", help="only this method (repeatable)")

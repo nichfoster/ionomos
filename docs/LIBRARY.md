@@ -407,7 +407,7 @@ whole interface it uses: `scan`, `load_catalog`, `save_catalog`, `recommend`,
 
 ### What the app does (`library_tab.py`)
 
-Tab 3 Methods has a panel **Workflows and FASTAs on this PC** under the method
+The Methods tab has a panel **Workflows and FASTAs on this PC** under the method
 form. **Find on this PC…** opens a window that reads the last catalog (so it
 opens at once) or, when there is none, scans with a progress line and a
 **Stop** button; **Rescan** looks again. A scan stopped early keeps what the

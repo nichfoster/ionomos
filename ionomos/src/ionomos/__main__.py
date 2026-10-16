@@ -50,7 +50,9 @@ def _report(exc: BaseException) -> None:
 
             r = tk.Tk()
             r.withdraw()
-            messagebox.showerror("Ionomos crashed", text[-1500:] + (f"\n\nSaved to {where}" if where else ""))
+            messagebox.showerror("Ionomos crashed", text[-1500:] + (f"\n\nSaved to {where}" if where else "")
+                                 + "\n\n→ Start Ionomos again. If it crashes again, send this text (or the saved "
+                                   "file) to whoever looks after Ionomos in your lab.")
             r.destroy()
         except Exception:  # noqa: BLE001 - tkinter itself may be what is broken
             pass

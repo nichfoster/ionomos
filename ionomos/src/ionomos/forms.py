@@ -5,6 +5,7 @@ The app's settings forms without Tk (D67): config.yaml blocks <-> the text and t
     block = export_block(fields, existing)                      # back; raises FormError, keeps unknown keys
     fields = notify_fields(cfg.get("notify"))                   # notify: -> {field: str | bool}
     block = notify_block(fields, existing)                      # back; checked by notify.settings_from
+    why = check_setting("fragpipe.threads", "ten")              # a number field as you type: words, or None
 
 Everything that decides what is valid lives in the module that uses the setting (downstream/charts.py
 style_layer, notify.settings_from), so the window, config.yaml and the command line accept the same things.
@@ -277,3 +278,67 @@ def notify_block(fields: dict, existing=None) -> dict:
 def notify_settings(fields: dict, existing=None) -> dict:
     """The complete settings notify.send_test takes, from the window's fields. Raises FormError."""
     return _notify().settings_from(notify_block(fields, existing))
+
+
+# --------------------------------------------------------- number settings --
+
+# The number fields the Advanced tab edits: key -> (kind, lowest, highest, lowest allowed?). The app reads each
+# field as the window's Save does (app._collect: a point makes it a decimal, otherwise a whole number) and the
+# loader (config.load) turns it into int/float without a range, so these are only the values that make sense:
+# a poll of 0 s would spin, more than 512 threads or 4 TB of RAM is a typo. None = no limit that side.
+SETTING_LIMITS: dict[str, tuple] = {
+    "watcher.poll_seconds": ("number", 0, 3600, False),
+    "watcher.stable_seconds": ("number", 0, 86400, False),
+    "watcher.min_raw_files": ("integer", 1, 999, True),
+    "fragpipe.threads": ("integer", 0, 512, True),
+    "fragpipe.ram_gb": ("integer", 0, 4096, True),  # the loader takes whole GB (D102)
+    "fragpipe.timeout_minutes": ("number", 0, None, True),
+    "fragpipe.min_free_gb": ("number", 0, None, True),
+    "gui.timeout_minutes": ("number", 0, None, True),
+}
+
+
+def _g(v) -> str:
+    return f"{v:g}"
+
+
+def _read_setting(key: str, s: str):
+    """The value the window's Save would write (app._collect), or None when it would refuse it."""
+    import math
+
+    try:
+        v = float(s) if (key == "gui.timeout_minutes" or "." in s) else int(s)
+    except ValueError:
+        return None
+    return v if math.isfinite(v) else None
+
+
+def check_setting(key: str, text: str) -> str | None:
+    """What is wrong with a number typed into an Advanced field, as a short sentence ('must be a whole number
+    from 1 to 999', "must be a number, not 'ten'", "can't be negative"); None when it is fine, when the field is
+    empty (Save checks it) or for a key without limits."""
+    spec = SETTING_LIMITS.get(key)
+    s = str(text or "").strip()
+    if spec is None or not s:
+        return None
+    kind, low, high, low_ok = spec
+    whole = kind == "integer"
+    v = _read_setting(key, s)
+    if v is None:
+        if "," in s and _read_setting(key, s.replace(",", ".")) is not None:
+            return f"use a point, not a comma: {s.replace(',', '.')}"
+        return f"must be a {'whole ' if whole else ''}number, not {s!r}"
+    if whole and not float(v).is_integer():
+        span = f" from {_g(low)} to {_g(high)}" if low is not None and high is not None else ""
+        return f"must be a whole number{span}"
+    too_low = low is not None and (v < low or (v == low and not low_ok))
+    too_high = high is not None and v > high
+    if not (too_low or too_high):
+        return None
+    if whole and low is not None and high is not None:
+        return f"must be a whole number from {_g(low)} to {_g(high)}"
+    if too_high:
+        return f"can't be more than {_g(high)}"
+    if low == 0 and low_ok:
+        return "can't be negative"
+    return f"must be more than {_g(low)}" if not low_ok else f"can't be less than {_g(low)}"

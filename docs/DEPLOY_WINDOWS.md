@@ -58,13 +58,17 @@ program never touches them.
 
 ### A3. Follow the tabs (10 min)
 
+The quickest way is the **Setup** tab: its **Check everything** list says what
+is missing, each item with a button, and **Auto-setup** does the standard
+layout in one click. By hand, tab by tab:
+
 | Tab | What to do |
 |---|---|
-| **1 Folders** | Check the paths in *Quick fill* (`C:/Fragpipe_Auto` and `C:/Fragpipe_General`) → **Apply layout** → **Create all missing folders**. Then set **Inbox** to the shared drop folder if it's somewhere else (Browse…), and **FragPipe launcher** to the exe under `C:\FragPipe\FragPipe-24.0\` (needed only for searches — fine to leave for later). Green dots = exists. |
-| **2 Users** | Type each lab member's name → **Add** (creates `C:\Fragpipe_General\<Name>`). Select a user, type their initials (`IJ, IJD`) → **Apply aliases**. |
-| **3 Methods** | For each method pick the **Workflow file** and **FASTA file** (dropdowns list what's in the folders — put files there first, see A4). |
-| **4 Advanced** | Usually nothing. Threads/RAM default to 28 / 48 GB for this PC. |
-| **5 Run & Test** | **Save & Check** → all ✓ (a `!` on the FragPipe launcher / a method means those jobs will *wait* until it's fixed) → **Install startup task** → **Start watcher**. Optional: **Desktop shortcut**. |
+| **Folders** | Check the paths in *Quick fill* (`C:/Fragpipe_Auto` and `C:/Fragpipe_General`) → **Apply layout** → **Create all missing folders**. Then set **Inbox** to the shared drop folder if it's somewhere else (Browse…), and **FragPipe launcher** to the exe under `C:\FragPipe\FragPipe-24.0\` (needed only for searches — fine to leave for later). Green dots = exists. |
+| **Users** | Type each lab member's name → **Add** (creates `C:\Fragpipe_General\<Name>`). Select a user, type their initials (`IJ, IJD`) → **Apply aliases**. |
+| **Methods** | For each method pick the **Workflow file** and **FASTA file** (dropdowns list what's in the folders — put files there first, see A4). |
+| **Advanced** | Usually nothing. Threads/RAM default to 28 / 48 GB for this PC. |
+| **Run & Test** | **Save & Check** (bottom bar) → all ✓ (a `!` on the FragPipe launcher / a method means those jobs will *wait* until it's fixed) → **Install startup task** → **Start watcher** (both on the *Watcher* page). Optional: **Desktop shortcut**. |
 
 Save writes `C:\Fragpipe_Auto\config.yaml`. Reopen Ionomos (Start menu or
 Desktop) any time to change anything; it remembers where the config is.
@@ -79,28 +83,28 @@ For each method, in the **FragPipe GUI**:
 4. **Workflow tab → Save to custom folder** → `C:\Fragpipe_Auto\workflows\isoDTB.workflow`.
 5. Copy the FASTA file into `C:\Fragpipe_Auto\fasta\`.
 
-Back in the app: tab 3 → select the method → pick the files → **Apply changes** → **Save**.
+Back in the app: **Methods** → select the method → pick the files → **Apply changes** → **Save**.
 
 ### A4b. First real search (15–60 min, once)
 
-0. Easiest way to get the workflow: tab 3 → select the method → **Import workflow…** → pick the `fragpipe.workflow` inside a recent run that worked. Its FASTA is copied in too.
-1. Tab 1 → **Find FragPipe** (fills `C:\FragPipe\FragPipe-24.0\bin\fragpipe.bat`) → **Save**. Tab 6 → **Check FragPipe install** (or `ionomos-cli.exe preflight`): it starts FragPipe, without a window or a search, for its version and a dry run of each method, and lists what would stop a search. The full checklist for the first real run is [FIRST_REAL_RUN.md](FIRST_REAL_RUN.md).
-2. Tab 5 → **Save & Check**: `FragPipe launcher` ✓ and `methods.isoDTB` ✓ (workflow + FASTA).
+0. Easiest way to get the workflow: **Methods** → select the method → **Import workflow…** → pick the `fragpipe.workflow` inside a recent run that worked. Its FASTA is copied in too.
+1. **Folders** → **Find FragPipe** (fills `C:\FragPipe\FragPipe-24.0\bin\fragpipe.bat`) → **Save**. **Jobs** → **Check FragPipe install** (or `ionomos-cli.exe preflight`): it starts FragPipe, without a window or a search, for its version and a dry run of each method, and lists what would stop a search. The full checklist for the first real run is [FIRST_REAL_RUN.md](FIRST_REAL_RUN.md).
+2. **Save & Check** (bottom bar): `FragPipe launcher` ✓ and `methods.isoDTB` ✓ (workflow + FASTA).
 3. Drop a *small* real isoDTB folder (e.g. one replicate, 2–3 fractions).
-4. Watch tab 5: *FragPipe: RUNNING job N* → *done*. In the experiment folder:
+4. Watch **Run & Test** (or the Jobs tab): *FragPipe: RUNNING job N* → *done*. In the experiment folder:
    `DONE.txt`, `fragpipe\` with the results, `ionomos_run\fragpipe_console.log`.
-5. If it says FAILED: open `FAILED.txt` / the console log, fix, **Retry a failed
-   job…**. Paste **Copy diagnostics** + the console log to Claude if it's unclear.
+5. If it says FAILED: open `FAILED.txt` / the console log, fix, then select the job on the
+   **Jobs** tab → **Retry**. Paste **Copy diagnostics** + the console log to Claude if it's unclear.
 
 Advanced → *Run FragPipe automatically* off = experiments are only filed (the
 Phase 1 behaviour).
 
 ### A5. Try it (3 min)
 
-Tab 5 → **Testbed** → **Create testbed** → **Start TESTBED watcher** → pick
+**Run & Test** → **Testing** → **Create testbed** → **Start TESTBED watcher** → pick
 `iso_good` → **Drop**. Watch the output pane: "detected … stable … queued job 1
 … FragPipe … done" (the testbed uses a fake FragPipe that takes a few seconds).
-`fp_fail` shows a failed search and **Retry a failed job…**.
+`fp_fail` shows a failed search and **Retry** on the Jobs tab.
 Try `gui_unknown_user` → the resolver window pops up. **Stop watcher** when done.
 
 Then a real one: make a folder `20260916_<yourinitials>_isoDTB_test` with two
@@ -153,39 +157,39 @@ py -3.14 -c "import tkinter; print('ok')"
 | Want to… | Do |
 |---|---|
 | change any setting | open `Ionomos.exe`, edit, **Save** (restart the watcher for timing changes) |
-| see the queue | tab 5 → **Show queue**, or `ionomos-cli.exe status` |
-| see the log | tab 5 → tick *follow the watcher log*, or `C:\Fragpipe_Auto\logs\ionomos.log` |
+| see the queue | **Run & Test** → **Show queue**, or `ionomos-cli.exe status` |
+| see the log | **Run & Test** → tick *follow the watcher log*, or `C:\Fragpipe_Auto\logs\ionomos.log` |
 | report a problem | **Report a problem…** (bottom right) → zip on the Desktop → send it, keep the `KEY` file (or `ionomos-cli.exe bundle`; `bundle 12 --level validate` adds job 12's result tables). Nothing is uploaded. Tick *detailed logging* for problems that come and go. |
-| see / retry / cancel jobs | tab **6 Jobs** (double-click = open the report; failed jobs show the likely cause) |
+| see / retry / cancel jobs | the **Jobs** tab (double-click = open the report; failed jobs show the likely cause) |
 | something needs you | a window pops up by itself (analysis decision, failed search, rejected folder) with the likely cause and the fix; the bottom bar shows **⚠ N need attention** until it's dealt with |
-| look at results | `results\report.html` in the experiment folder (interactive volcano, protein details, heatmap, enrichment, QC); tab 6 → **Open report** |
-| change comparisons / thresholds / sample groups | one experiment: tab **7 Analysis → Analyse an experiment** (pick it, edit, **Run analysis**); lab-wide: tab **7 Analysis → Lab defaults**, then **Save** |
-| analyse an old FragPipe run | tab 7 → **Analyse a folder…** or `ionomos-cli.exe analyze <folder>` |
-| get a message when a search is done / failed / waiting | off by default. The app's **8 Notifications** tab (Teams, Slack, a webhook or email; what is sent: ARCHITECTURE.md "Notifications"): fill in, **Send test**, **Save**, restart the watcher. Or edit `notify:` in `C:\Fragpipe_Auto\config.yaml` and run `ionomos-cli.exe notify-test` |
-| keep the PC free for a while | tab 6 → **Pause searches** (the running search finishes; nothing new starts) |
-| check FragPipe is installed right | tab 6 → **Check FragPipe install**, or `ionomos-cli.exe preflight` (launcher, Java, MSFragger / IonQuant / DIA-NN / Python, decoys in each FASTA, and a FragPipe dry run of each method; a few minutes) |
-| stop / start the watcher | tab 5 buttons; the startup task restarts it at next logon |
-| add a user | tab 2 → Add; or just create the folder under `C:\Fragpipe_General` |
+| look at results | `results\report.html` in the experiment folder (interactive volcano, protein details, heatmap, enrichment, QC); **Jobs** → **Open report** |
+| change comparisons / thresholds / sample groups | one experiment: **Analysis → Analyse an experiment** (pick it, edit, **Run analysis**); lab-wide: **Analysis → Lab defaults**, then **Save** |
+| analyse an old FragPipe run | **Analysis** → **Analyse a folder…** or `ionomos-cli.exe analyze <folder>` |
+| get a message when a search is done / failed / waiting | off by default. The app's **Notifications** tab (Teams, Slack, a webhook or email; what is sent: ARCHITECTURE.md "Notifications"): fill in, **Send test**, **Save**, restart the watcher. Or edit `notify:` in `C:\Fragpipe_Auto\config.yaml` and run `ionomos-cli.exe notify-test` |
+| keep the PC free for a while | **Jobs** → **Pause searches** (the running search finishes; nothing new starts) |
+| check FragPipe is installed right | **Jobs** → **Check FragPipe install**, or `ionomos-cli.exe preflight` (launcher, Java, MSFragger / IonQuant / DIA-NN / Python, decoys in each FASTA, and a FragPipe dry run of each method; a few minutes) |
+| stop / start the watcher | **Run & Test** → *Watcher* buttons; the startup task restarts it at next logon |
+| add a user | **Users** → Add; or just create the folder under `C:\Fragpipe_General` |
 | see what a folder would do | `ionomos-cli.exe dry-run "C:\path\to\folder"` |
-| check how names are read (after changing `naming:`) | tab 3 → **Test names…**, or `ionomos-cli.exe names test <folder name> <file.raw> …` |
-| upgrade | tab 5 → **Get the latest version** → download → **Install update** (bottom bar); config/data untouched |
+| check how names are read (after changing `naming:`) | **Methods** → **Test names…**, or `ionomos-cli.exe names test <folder name> <file.raw> …` |
+| upgrade | **Update to …** in the bottom bar, or **Run & Test** → **Check for updates** → **Update now**; config/data untouched |
 | uninstall | Settings → Apps → Ionomos → Uninstall (data stays). Full reset: `deploy\clean_slate.ps1`. |
 
 ## Troubleshooting
 
-- **Nothing happens after a drop.** Is the watcher running (tab 5 status line)?
+- **Nothing happens after a drop.** Is the watcher running (the Run & Test tab's status line)?
   The folder needs ≥1 `.raw` and must be unchanged for 60 s.
 - **`<name>.REJECTED.txt` in the inbox.** Open it — it says why. Fix the folder
   (or add an `experiment.yaml`); it's retried automatically. Deleting the note also retries.
-- **Job says "waiting: …"** (tab 5 or `status`). A setup file is missing — the
+- **Job says "waiting: …"** (the Jobs tab or `status`). A setup file is missing — the
   FragPipe launcher, or that method's workflow/FASTA. Fix it; the job starts by itself.
-- **Watcher says NOT RESPONDING** (tab 5). Stop watcher → Start watcher. Send the diagnostics bundle.
+- **Watcher says NOT RESPONDING** (Run & Test). Stop watcher → Start watcher. Send the diagnostics bundle.
 - **"another ionomos watcher is already running"**: the startup task already runs one — that's fine; use the app to see it.
 - **Job list damaged** (check says ledger ✗): the watcher rebuilds it automatically at start; or `ionomos-cli.exe repair-ledger`.
-- **Job FAILED.** Tab 6 shows the *most likely cause* in plain English. `FAILED.txt` in the experiment folder has the reason
+- **Job FAILED.** The Jobs tab shows the *most likely cause* in plain English. `FAILED.txt` in the experiment folder has the reason
   (the FragPipe step that failed and its last lines); `ionomos_run\fragpipe_console.log` has FragPipe's full output and
   `ionomos_run\run_fingerprint.json` a short record of the run to send along. Fix, then
-  tab 5 → **Retry a failed job…** (old output is kept as `fragpipe_previous_<time>\`).
+  select the job on the Jobs tab → **Retry** (old output is kept as `fragpipe_previous_<time>\`).
 - **"Failed to load Python DLL … \_MEI…\python314.dll"** after installing or
   updating: click OK. Ionomos is installed and works; open it from the Start
   menu. The installer's last step started the new Ionomos.exe with the old
@@ -198,9 +202,9 @@ py -3.14 -c "import tkinter; print('ok')"
   re-runs from the start when the watcher starts again.
 - **"cannot move … will retry"** in the log: Explorer/antivirus still had a
   file open. It retries with backoff.
-- **Resolver window never appears.** Tab 5 → Check → "resolver window" line must be ✓.
+- **Resolver window never appears.** **Save & Check** (bottom bar) → the "resolver window" line must be ✓.
   The startup task must be *interactive* (the app installs it that way). If
-  someone changed it to "run whether user is logged on or not", reinstall from tab 5.
+  someone changed it to "run whether user is logged on or not", reinstall it from Run & Test.
 - **PC sleeps mid-run.** Settings → System → Power → Sleep: Never (plugged in).
 - **"… is not UTF-8 (byte 0x97 on line 3); read it as Windows-1252"** for
   `config.yaml` or an `experiment.yaml`. The file was saved in Notepad as

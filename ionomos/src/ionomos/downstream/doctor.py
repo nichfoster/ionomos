@@ -368,7 +368,7 @@ def check(f: Findings) -> list[Issue]:
                       "Label quantification ran without the isoDTB labels, or found no labelled peptides",
                       "The search failed quietly (wrong FASTA or species) and the table is empty"]
             fixes = ["Open the table in fragpipe/ and check the modification masses and ratio columns",
-                     "Check the workflow for this method (tab 3), then Retry the job"]
+                     "Check the workflow for this method (Methods tab), then Retry the job"]
         add(Issue("UNUSABLE_TABLE", "error", "The result table has nothing Ionomos can use",
                   f"{f.read_problem}, so there are no statistics or volcano plot.", causes, fixes, {"method": method}))
         return out
@@ -382,7 +382,8 @@ def check(f: Findings) -> list[Issue]:
                       f"Ionomos looked for {want} in {f.workdir or 'the experiment folder'} and didn't find it, "
                       "so there are no statistics or volcano plot yet.",
                       causes, ["Open the FragPipe log from the Jobs tab and look at the last steps",
-                               "Check the workflow for this method (tab 3) has quantification on, then Retry the job",
+                               "Check the workflow for this method (Methods tab) has quantification on, then "
+                               "Retry the job",
                                "If the method is wrong, pick the right one and Re-run analysis"],
                       {"method": method, "tables_found": present}))
         return out
@@ -392,7 +393,7 @@ def check(f: Findings) -> list[Issue]:
                   ["The search found no proteins/peptides passing FDR (wrong FASTA or wrong species?)",
                    "The raw files are empty or from a failed acquisition",
                    "Wrong search settings (enzyme, modifications, mass tolerances) for this experiment"],
-                  ["Check the FASTA and workflow for this method (tab 3) and the raw files, then Retry"],
+                  ["Check the FASTA and workflow for this method (Methods tab) and the raw files, then Retry"],
                   {"source": m.source}))
         return out
     if m.meta.get("precomputed"):  # a results table: no samples to check, only what it plots

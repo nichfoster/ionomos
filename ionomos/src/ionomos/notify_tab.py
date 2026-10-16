@@ -164,7 +164,7 @@ class NotifyTab:
         except ConfigError as exc:
             self.result.configure(text="Not sent: a setting isn't valid", foreground="#c62828")
             self.out.write(str(exc), clear=True)
-            messagebox.showerror("Send test", str(exc))
+            messagebox.showerror("Send test", f"{exc}\n\n→ Fix the setting named above, then press Send test again.")
             return False
         if not notify.channels(s):
             self.result.configure(text="Nothing to send to", foreground="#c62828")

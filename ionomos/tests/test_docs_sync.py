@@ -65,7 +65,7 @@ def _md_files() -> list[Path]:
 # Hidden commands main() handles before argparse (testbed stand-ins, the Sage job, the display probe).
 HIDDEN = {"probe-gui", "sage-job", "fake-sage", "fake-rawparser", "fake-maxquant", "fake-diann", "fake-fragpipe"}
 # Commands a doc plans but that are not built: {command: where}. Remove an entry when the command exists.
-PLANNED = {"doctor": "docs/UI.md slice S3.1 (#125): one 'Check everything' list"}
+PLANNED: dict[str, str] = {}
 # README lists every command once the coordinator adds the line from round4/notes-docs-consistency.md (README is
 # edited only through notes this round). Empty this set when that line is in README.md.
 README_PENDING: set[str] = set()

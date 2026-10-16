@@ -124,7 +124,7 @@ Windows, macOS or Linux; no lab setup, no Tk. See [docs/QUICKSTART.md](docs/QUIC
 
 - **Any computer** (the pip install): `demo`, `example`, `analyze`, `check-folder`, `export`, `compare`,
   `benchmark`, `spectronaut-columns`, `help`.
-- **The lab PC**: `setup` (the app; also what a bare `ionomos` opens), `init`, `check`, `preflight`, `run`,
+- **The lab PC**: `setup` (the app; also what a bare `ionomos` opens), `init`, `check`, `doctor`, `preflight`, `run`,
   `stop`, `status`, `attention`, `dry-run`, `names test`, `retry`, `cancel`, `pause`, `resume`,
   `repair-ledger`, `qc-trend`, `library`, `fasta`, `tmt`, `notify-test`, `diagnose`, `bundle`, `ask`,
   `ask-eval`, `update`.

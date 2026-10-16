@@ -205,12 +205,12 @@ def resolve_launcher(cfg: Config) -> Path:
         return exe.parent / "fragpipe.bat"
     if not exe.is_file():
         found = detect_launcher()
-        hint = f" (found one at {found} — set it in the app, tab 1)" if found else ""
+        hint = f" (found one at {found} — set it in the app: Folders tab -> Find FragPipe)" if found else ""
         raise Hold(f"FragPipe launcher not found at {exe}{hint}")
     if is_window_exe(exe):
         raise Hold(f"FragPipe launcher {exe} is FragPipe's window program and can't run a search unattended; "
                    f"{exe.parent / 'fragpipe.bat'} is missing (FragPipe 23 and 24 install it next to the .exe). "
-                   f"Reinstall FragPipe, or set a launcher that has fragpipe.bat (tab 1)")
+                   f"Reinstall FragPipe, or set a launcher that has fragpipe.bat (Folders tab)")
     return exe
 
 
@@ -435,7 +435,7 @@ def space_problem(spec: RunSpec) -> str:
     for what, p in paths:
         if p and re.search(r"\s", str(p)):
             return (f"{what} has a space in its path ({p}); FragPipe can't use such a path — move or rename it "
-                    f"(a FASTA: pick a file without spaces on tab 3)")
+                    f"(a FASTA: pick a file without spaces on the Methods tab)")
     return ""
 
 
@@ -1298,7 +1298,8 @@ EXPLANATIONS: list[tuple[str, str]] = [
      "the results elsewhere. Look at the end of its log, then Retry; if it happens again, send Report a problem"),
     (r"without its 'ALL JOBS DONE' line and without any of its result tables",
      "FragPipe reported success but did not finish (no end line, no result tables): it was ended early, or the "
-     "launcher is not FragPipe's own fragpipe.bat (tab 1). Retry; if it happens again, send Report a problem"),
+     "launcher is not FragPipe's own fragpipe.bat (Folders tab). Retry; if it happens again, send Report a "
+     "problem"),
     (r"Ionomos hit an unexpected error while running the search",
      "Ionomos itself hit a problem while it ran the search (the reason names it; often a full disk or a folder "
      "it can't write): fix that, then Retry; if it is unclear, send Report a problem"),
@@ -1312,17 +1313,18 @@ EXPLANATIONS: list[tuple[str, str]] = [
      "folder is missing, so reinstall FragPipe (or install a 64-bit Java 17), then Retry"),
     (r"Cannot recognize the argument --|you did not add --headless flag",
      "This FragPipe doesn't know an option Ionomos passed: it is older than 23, or the launcher is not "
-     "FragPipe's own fragpipe.bat — tab 1 -> Find FragPipe, then Retry"),
+     "FragPipe's own fragpipe.bat — Folders tab -> Find FragPipe, then Retry"),
     (r"FASTA file path is empty|No FASTA file|Could not find fasta file at",
-     "No protein database: set this method's FASTA in the app (tab 3), or re-export the workflow after setting it"),
+     "No protein database: set this method's FASTA in the app (Methods tab), or re-export the workflow after "
+     "setting it"),
     (r"No decoys found in the FASTA file|All FASTA entries seem to be decoys|FASTA file contains [\d.,]+% decoys|"
      r"Decoy protein prefix(?:</b>)? is empty",
      "The FASTA's decoys are not what FragPipe needs (about half the entries, each starting with the decoy "
      "tag, usually rev_): add decoys once in FragPipe's Database tab, put that file in the FASTA folder and "
-     "pick it for the method (tab 3)"),
+     "pick it for the method on the Methods tab"),
     (r"path contains whitespace characters|There are spaces in the path",
      "A path has a space in it, which FragPipe can't use: move FragPipe, its tools folder or the data folders "
-     "to a path without spaces (tab 1), then Retry"),
+     "to a path without spaces (Folders tab), then Retry"),
     (r"No license file found\.|The license .{0,300}(has expired|is corrupted|is not valid for this product)",
      "MSFragger / IonQuant / diaTracer licence problem: open the FragPipe GUI, Config tab -> Download / Update "
      "(accept the licences); a commercial licence file (license.dat) that expired must be renewed"),
@@ -1395,7 +1397,7 @@ EXPLANATIONS: list[tuple[str, str]] = [
     (r"(Percolator|PeptideProphet) was enabled but MSFragger's output formats|"
      r"Both FreeQuant and TMT-Integrator were enabled|cannot be run in the same workflow",
      "The workflow's settings contradict each other (FragPipe's message says which): fix them in the FragPipe "
-     "GUI, save the workflow and import it again (tab 3)"),
+     "GUI, save the workflow and import it again (Methods tab)"),
     (r"Cannot deploy asset|Could not load file .{0,300}The file may be corrupted|"
      r"Did not get port information from server output",
      "A FragPipe tool could not write or start one of its own files: usually antivirus or a locked temp "
@@ -1421,9 +1423,10 @@ EXPLANATIONS: list[tuple[str, str]] = [
     (r"UnsupportedClassVersionError|Unsupported class file major version|requires Java 9\+",
      "Wrong Java version: FragPipe must use its bundled Java — reinstall FragPipe or set its launcher again"),
     (r"Could not find or load main class|Unable to access jarfile",
-     "The FragPipe installation looks broken: re-select fragpipe.bat (tab 1, Find FragPipe) or reinstall FragPipe"),
+     "The FragPipe installation looks broken: re-select fragpipe.bat (Folders tab -> Find FragPipe) or reinstall "
+     "FragPipe"),
     (r"is not recognized as an internal or external command",
-     "The FragPipe launcher path is wrong: tab 1 -> Find FragPipe"),
+     "The FragPipe launcher path is wrong: Folders tab -> Find FragPipe"),
     (r"Access is denied|Permission denied",
      "Windows refused access to a file or folder: check the experiment folder isn't read-only / open elsewhere"),
     (r"(?i)output directory.{0,40}not empty|workdir.{0,40}not empty",
