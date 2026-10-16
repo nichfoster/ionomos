@@ -75,8 +75,6 @@ def test_testbed_from_app(app, tmp_path):
     assert (tmp_path / "bed" / "Fragpipe_Auto" / "config.yaml").is_file()
     app.tb_sample.set("iso_good")
     app.tb_drop(False)
-    import time
-
     for _ in range(50):
         if (tmp_path / "bed" / "Fragpipe_Auto" / "inbox" / "20260902-isoDTB_EJQ-2-027").is_dir():
             break
