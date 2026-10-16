@@ -109,11 +109,8 @@ def test_dev_section_and_diagnostics(app, tmp_path, monkeypatch):
     app.create_all()
     assert app.save()
     app.copy_diagnostics()
-    for _ in range(50):
-        app.root.update()
-        if "=== check" in app.out.text.get("1.0", "end"):
-            break
-        time.sleep(0.05)
+    # collected off the Tk thread: 2.5 s was not always enough on a Windows runner
+    _pump_until(app, lambda: "=== check" in app.out.text.get("1.0", "end"), secs=30)
     shown = app.out.text.get("1.0", "end")
     assert "=== check" in shown and "=== config.yaml" in shown
     assert clip and "=== check" in clip[0]
@@ -125,11 +122,7 @@ def test_dev_section_and_diagnostics(app, tmp_path, monkeypatch):
     # ... and the real text is one button away
     clip.clear()
     app.copy_diagnostics(anonymise=False)
-    for _ in range(50):
-        app.root.update()
-        if clip:
-            break
-        time.sleep(0.05)
+    _pump_until(app, lambda: clip, secs=30)
     assert clip and "=== check" in clip[0] and str(tmp_path) in clip[0]
 
 
