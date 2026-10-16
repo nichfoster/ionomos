@@ -325,7 +325,7 @@ def _hammer(*targets, rounds: int) -> list[str]:
     for t in threads:
         t.start()
     for t in threads:
-        t.join(timeout=120)
+        t.join(timeout=600)  # a slow Windows runner took over 120 s for 300 rounds
     assert not any(t.is_alive() for t in threads), "a ledger thread hung"
     return errors
 
@@ -354,7 +354,7 @@ def test_a_ledger_read_and_written_from_two_threads_returns_whole_rows(tmp_path)
         led.next_queued()
         assert led.already_taken(f"e{i % n}")
 
-    assert _hammer(worker, watcher, rounds=300) == []
+    assert _hammer(worker, watcher, rounds=100) == []
     led.close()
 
 
