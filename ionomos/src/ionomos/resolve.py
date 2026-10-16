@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
-from ionomos import tkutil
+from ionomos import tkutil, uinav
 from ionomos.intake import Draft, DraftFile, Kind
 from ionomos.manifest import FileOverride, Overrides
 from ionomos.naming import DEFAULT_METHOD_ALIASES, NUMBER_WHY, NamingError, number_ok, parse_raw_name, tokens_of
@@ -234,7 +234,7 @@ def summarize(files: list[DraftFile], method: str, control: str, roles: dict[str
         if method == "isoDTB":
             role = "sample (heavy/light ratio vs 0)"
         elif method == "TMT":
-            role = "plex (conditions come from the TMT channel annotation)"
+            role = "plex (its channels and their conditions: TMT channels, below)"
         elif c == control:
             role = "CONTROL"
         elif roles and c in roles:
@@ -266,6 +266,8 @@ class Answer:
     remember_alias: str = ""
     control: str = ""
     roles: dict[str, str] | None = None  # the window's analysis.roles; None = the window has no role list
+    tmt: dict | None = None  # the TMT channel editor's experiment.yaml tmt: block ({} = no map); None = not shown
+    tmt_errors: list[str] | None = None  # what in that map stops the search (tmt_editor.ChannelMap.errors)
 
 
 def validate(a: Answer, known_methods: list[str], kinds: dict[str, str] | None = None) -> str:
@@ -308,6 +310,26 @@ def validate(a: Answer, known_methods: list[str], kinds: dict[str, str] | None =
             sets = {frozenset(s) for s in reps.values()}
             if len(sets) > 1:
                 return f"{e}: replicates have different fractions — fix, or tick 'accept uneven fractions'"
+    if a.tmt is not None and (kinds or {}).get(a.method, a.method) == "TMT":
+        return tmt_problem(a)
+    return ""
+
+
+def tmt_problem(a: Answer) -> str:
+    """The channel editor's map: what FragPipe would stop on (tmtkit's words), or a plex without an entry."""
+    from ionomos import tmtkit
+
+    if a.tmt_errors:
+        return f"TMT channels: {a.tmt_errors[0]} (fix it below, or Clear the channels to decide later)"
+    if not a.tmt:
+        return ""
+    problems = tmtkit.check_block(a.tmt)
+    if problems:
+        return f"TMT channels: {problems[0]}"
+    try:
+        tmtkit.maps_from_block(a.tmt, conditions_of(a.files))
+    except tmtkit.TmtError as exc:
+        return f"TMT channels: {exc}"
     return ""
 
 
@@ -340,6 +362,16 @@ def to_overrides(a: Answer, d: Draft) -> Overrides:
                 # conditions here were not shown, so they are kept as written; {} clears the rest
                 low = {c.lower() for c in conds}
                 ov.analysis["roles"] = {**{c: r for c, r in given.items() if c.lower() not in low}, **mine}
+    elif a.tmt is not None and d.kind_of(a.method) == "TMT":
+        # the channel editor's map is the whole tmt: block ({} removes it); its reference (bridge / pool) channels
+        # take the reference role, so the analysis uses them for IRS only and never compares them (D91)
+        from ionomos.tmt_editor import roles_with_references
+
+        ov.tmt, ov.tmt_set = dict(a.tmt), True
+        given = given_roles(d)
+        mine = roles_with_references(given, a.tmt)
+        if mine != given:
+            ov.analysis["roles"] = mine
     return ov
 
 
@@ -503,7 +535,9 @@ class TkResolver:
                 remove(source.parent, target)
                 refresh_files()
             except (OSError, ValueError) as exc:
-                messagebox.showerror("Could not remove file", str(exc), parent=win)
+                messagebox.showerror("Could not remove file", f"{exc}\n\n→ Close any program that has the file "
+                                     "open, then press Delete again. The file stays in the inbox until then.",
+                                     parent=win)
 
         def refresh_files():
             from ionomos.intake import _find_raws
@@ -523,6 +557,47 @@ class TkResolver:
                 update_summary()
             if not current:
                 skip()
+
+        # ---- TMT: which sample is on which channel of each plex (tmt_editor.py), under the files. Pre-filled from
+        # experiment.yaml's tmt:, else from a person's own annotation.txt in the drop (read only), else empty
+        tmt_ed: list = [None]
+
+        def tmt_editor(method_key: str):
+            from ionomos.tmt_editor import ChannelMap, TmtEditorFrame
+
+            info = d.tmt_workflows.get(method_key) or {}
+            kw = {k: info.get(k, "") for k in ("workflow", "ref_tag", "add_ref")}
+            if tmt_ed[0] is None:
+                plexes = conditions_of(current_files()) or ["plex"]
+                if (d.tmt or {}).get("channels") or (d.tmt or {}).get("plexes"):
+                    cm = ChannelMap.from_block(d.tmt, plexes, workflow_label=info.get("label", ""), **kw)
+                elif source is not None:
+                    cm = ChannelMap.from_folder(source, plexes, str((d.tmt or {}).get("tag") or ""),
+                                                info.get("label", ""), **kw)
+                else:
+                    cm = ChannelMap.empty(plexes, str((d.tmt or {}).get("tag") or ""), info.get("label", ""), **kw)
+                tmt_ed[0] = TmtEditorFrame(frm, cm, folder=lambda: source, on_change=tmt_changed)
+                tmt_ed[0].frame.grid(row=8, column=0, columnspan=4, sticky="ew", **pad)
+            ed = tmt_ed[0]
+            if (ed.model.workflow_label, ed.model.workflow) != (info.get("label", ""), kw["workflow"]):
+                ed.model.workflow_label, ed.model.workflow = info.get("label", ""), kw["workflow"]
+                ed.model.ref_tag, ed.model.add_ref = kw["ref_tag"], kw["add_ref"]
+                ed.refresh()
+            return ed
+
+        def tmt_changed() -> None:
+            try:
+                err_v.set("")  # an edit answers the last complaint; the next Accept checks again
+            except NameError:  # the first drawing, before the error line exists
+                pass
+
+        def sync_tmt(files: list[DraftFile], method: str) -> None:
+            if method == "TMT":
+                ed = tmt_editor(meth_v.get())
+                ed.frame.grid()
+                ed.set_plexes(conditions_of(files) or ["plex"])
+            elif tmt_ed[0] is not None:
+                tmt_ed[0].frame.grid_remove()
 
         # ---- what the search and the analysis will assume: conditions, roles, replicates, control
         ctl_v = tkutil.StringVar(value="")
@@ -652,9 +727,10 @@ class TkResolver:
                 else:
                     ctl_v.set("")
                     ctl_note.configure(text="isoDTB: every sample is its own heavy/light ratio vs 0 — no control"
-                                       if method == "isoDTB" else "TMT: conditions come from the channel annotation "
-                                       "(their roles can be set on the Analysis tab after the search)")
+                                       if method == "isoDTB" else "TMT: the conditions are the channel names (TMT channels, "
+                                       "below); a reference channel is used to join the plexes, never compared")
                     ctl_note.pack(side="left")
+                sync_tmt(files, method)
                 view = role_view(files, method, ctl_v.get(), d, chosen[0])
                 last_view[0] = view
                 fill_roles(view)
@@ -692,7 +768,14 @@ class TkResolver:
             return Answer(user=user_v.get(), method=meth_v.get(), date=date_v.get(),
                           allow_uneven=uneven_v.get(), files=current_files(),
                           remember_alias=alias_v.get().strip() if remember_v.get() else "", control=ctl_v.get(),
-                          roles=dict(chosen[0]) if has_control(d.kind_of(meth_v.get())) else None)
+                          roles=dict(chosen[0]) if has_control(d.kind_of(meth_v.get())) else None,
+                          **tmt_answer())
+
+        def tmt_answer() -> dict:
+            ed = tmt_ed[0]
+            if ed is None or d.kind_of(meth_v.get()) != "TMT":
+                return {}
+            return {"tmt": ed.model.block(), "tmt_errors": ed.model.errors()}
 
         def accept(*_):
             try:
@@ -727,7 +810,9 @@ class TkResolver:
             try:
                 remove(source.parent, source)
             except (OSError, ValueError) as exc:
-                messagebox.showerror("Could not remove folder", str(exc), parent=win)
+                messagebox.showerror("Could not remove folder", f"{exc}\n\n→ Close any program or Explorer "
+                                     "window that has the folder open, then press Delete from inbox again. The "
+                                     "folder stays in the inbox until then.", parent=win)
                 return
             skip()
 
@@ -786,7 +871,9 @@ class TkResolver:
         win.update_idletasks()
         w, h = win.winfo_reqwidth(), win.winfo_reqheight()
         sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
-        win.geometry(f"+{max((sw - w) // 2, 0)}+{max((sh - h) // 3, 0)}")
+        fw, fh = uinav.fit_size(w, h, sw, sh, min_w=1, min_h=1)  # never bigger than the screen (S1.10)
+        size = f"{fw}x{fh}" if (fw, fh) != (w, h) else ""
+        win.geometry(f"{size}+{max((sw - fw) // 2, 0)}+{max((sh - fh) // 3, 0)}")
         win.deiconify()
         win.lift()
         win.focus_force()

@@ -294,7 +294,8 @@ def match(a: Rows, b: Rows, by: str = "auto") -> tuple[list[tuple[int, int]], st
 def _split(name: str) -> tuple[str, str]:
     from ionomos.downstream.analysis import _split_name
 
-    t, c = _split_name(re.sub(r"\s*\(log2 H/L vs 0\)$", "", name))
+    # Ionomos' own per-comparison table given as the reference: DrugA_vs_DMSO_differential (#143)
+    t, c = _split_name(re.sub(r"(?i)_differential$|\s*\(log2 H/L vs 0\)$", "", name))
     return t.strip().lower(), c.strip().lower()
 
 

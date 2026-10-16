@@ -3940,7 +3940,333 @@ lab's confirmation of the words, the thresholds and the normalisation is in
 ROADMAP.md. A second agent reviewed the change before the PR; its findings
 (tag words in folder names, a "?" on every EV control, notes on plain
 proteomes, the preview not matching the analysis) are fixed above.
-### D89 — A Ledger can be shared across threads: one connection, one lock
+
+
+### D89 — Workflows and FASTAs are found, described and ranked on the PC; adopting copies them in
+**2026-10-15.** The Methods tab offered a combobox over the workflows folder and
+an "Import workflow…" file dialog. The 2026-09-15 inventory lists ~150
+`fragpipe.workflow` files on `D:\`, a custom `fragpipe_pax8.workflow` for
+Aman's 9-plex TMT, the stock `isoDTB-ABPP.workflow` in the 22.0 zip, three
+FragPipe installations, and one known FASTA. Nobody could say which workflow
+was the TMT one, whether its FASTA still existed, or whether it was current.
+`library.py` (no Tk), `ionomos library`.
+
+1. **A scan only reads, and it is bounded.** Breadth-first over all roots at
+   once (the small pinned folders finish first), at most `max_depth` (6)
+   folders deep and `time_limit_s` (120) seconds, stoppable; it records where
+   it stopped and why. Recycle bins, hidden and system folders, virtual
+   environments, Ionomos' own run folders (their per-job copies of the
+   pinned workflows would drown the rest), earlier attempts, Bruker `.d`
+   folders and a FragPipe installation's program folders are skipped and
+   listed. A folder reached twice through a junction or a link is looked at
+   once. `D:\` is not a default root (an 18 TB USB drive): it is one line in
+   `library.roots`.
+2. **The kind comes from the switches, then from the mods.** isoDTB / TMT /
+   DIA / LFQ as `fpfolder.workflow_kind` reads the `run-*` keys (D80), an
+   isoDTB mass among the enabled mods, then open / mass-offset (a precursor
+   window of 50 Da or more, or mass offsets), then phospho (79.9663 on STY);
+   phospho on a TMT or DIA workflow is a trait, not another kind, so it is
+   still a candidate for the TMT method.
+3. **Same settings count once.** A content hash leaves out the database, the
+   FragPipe version, the description, threads / RAM and every path-like key.
+   A run folder's `fragpipe.workflow` with the pinned settings adds evidence
+   to the pinned candidate instead of competing with it.
+4. **Evidence beats names.** A candidate's score is mostly the finished
+   searches that used its settings (a readable result table beside the
+   workflow, via `fpfolder.find_outputs`), the FragPipe version it was saved
+   with against the installed one, and whether its FASTA exists; error marks
+   sink it. The weights are Ionomos' choice and are printed with the reasons
+   in words, never as a bare number.
+5. **FASTAs are read as bytes, once.** Headers only, in 8 MB chunks (1 GB in
+   under 2 s), cached on path, modification time and size, also across scans
+   through the catalog. The decoy prefix is detected among `rev_`, `DECOY_`,
+   `REV_`, `decoy_`, not assumed. A fingerprint (size, entry count, sha1 of the
+   first and last 1 MB) finds copies. The decoy share uses FragPipe's 40–60 %
+   rule (`fragpipe.decoy_problem`), information only from 1 GB, as FragPipe.
+6. **Nothing changes config.yaml on its own.** `auto_assign` proposes a file
+   only for a method whose workflow or FASTA is missing or has an error; a
+   method that works is never touched. The caller applies (CLI `--apply`, the
+   app in wave 2) through `configio.write_config`, which backs up, after the
+   real loader accepted the new text.
+7. **Adopting copies.** Through `fragpipe.import_workflow` (the replaced pinned
+   file kept as `.bak-<time>`), as `<method>.workflow` with a FragPipe-safe
+   name; the workflow's FASTA is copied into `fasta_dir` first when it is
+   elsewhere, named without spaces, never over a different file (`-2`, `-3`),
+   and the copy's `database.db-path` points at it. Each adopt is recorded in
+   the catalog (origin, copy, fingerprint, when).
+8. **25 flag codes, each with a help entry** (`library.<code>`), a severity
+   (error: a search would fail or be wrong; warn; info) and what to do. A test
+   fails when a code has no help entry or is missing from docs/LIBRARY.md.
+
+**Verified**: `tests/test_library.py` (89 tests) on a fake PC built from the
+inventory's real names (paths with spaces, the recycle bin, the 22.0 zip, two
+of Chris's DIA folders with the same settings, an offset search), workflows
+abridged from FragPipe 24.0's stock ones; property names and formats checked
+on GitHub (`Nesvilab/FragPipe`, `workflows/` and the GUI source for
+`fragpipe-ui.cache`). **Not verified**: on the lab PC — how long a scan of
+`C:\` and `D:\` takes, how many old output folders still hold readable tables,
+whether the window's cache names the last FASTA, junctions on real drives. The
+meanings of TMT-Integrator's numeric codes shown as words are from its
+documentation, not its source.
+
+9. **The app (wave 2) is `library_tab.py`**: the logic without Tk in the same
+   module, tested everywhere; the dialogs drive it through `App.post` (D67
+   item 7). A scan stopped early does not replace a fuller catalog on disk;
+   the first-setup proposal reuses a catalog under 24 h old; the banner reads
+   only the catalog for FASTAs (never a 1 GB file on a tab switch); Download
+   refuses a `fasta_dir` with a space in it.
+
+
+### D90 — FASTAs come from UniProt and are made ready the way FragPipe's Database tab makes them
+**2026-10-14.** The lab's searches use one FASTA, `2026-01-30-decoys-contam-UP000005640_9606.fasta.fas`, made
+once in FragPipe's Database tab. Nobody had re-done it and nothing said when it was stale; the ROADMAP asked
+"Where are FASTA files kept, which ones, how often updated?". `fastasource.py` (no Tk, standard library) gets a
+proteome from UniProt, makes it FragPipe-ready, and says how old a FASTA is.
+
+1. **UniProt's REST API, two requests.** A `uniprotkb/search … size=0` request gives the count
+   (`X-Total-Results`) and the release (`X-UniProt-Release`, `X-UniProt-Release-Date`); the `uniprotkb/stream`
+   request with `compressed=true` gives the entries, which do not carry a count. The download must hold exactly
+   that many entries, or it is discarded with a message. Reviewed entries by default (what Philosopher's
+   `--reviewed` asks for); unreviewed and isoforms on request. The file is named `UP…_<taxon>.fasta`, the name of
+   UniProt's FTP file and the base of the lab's current FASTA.
+2. **Decoys and contaminants with FragPipe's Philosopher, as FragPipe runs it.** The steps of the Database tab's
+   Add decoys (FragPipe's `CmdDatabaseUpdate`): `workspace --clean`, `workspace --init --temp`, `database --custom
+   <fasta> --contam --contamprefix`, `workspace --clean`, in a new folder of its own, without a window, time-bounded.
+   Without Philosopher (no FragPipe on the computer, or it fails) the same steps run in Python, copied from
+   Philosopher's source (`dat.Create`, `dat.Save`): contaminants deduplicated by accession, decoys reversed with a
+   first M kept (including the loop that stops one swap early for odd lengths), entries sorted by header. Both ways
+   give the same entries, so where a file was made does not change a search.
+3. **Contaminants are never silently missing.** `auto` uses Philosopher's list; in Python, the `contam_` entries
+   of a FragPipe FASTA already on the PC, else Philosopher's list from its GitHub source, else the GPM's cRAP. With
+   none, the file has decoys only, its name has no `-contam`, and a note says the analysis can then not remove
+   keratins, trypsin or BSA (D87). The result says which list was used.
+4. **FragPipe's file name.** `<date>-decoys[-reviewed][-isoforms][-contam]-<source name>.fas`, Philosopher's own
+   pattern, so the library (D89) and lab members read Ionomos' files like FragPipe's.
+5. **Never overwrite, never double the decoys.** Files are written as `.part` and renamed; a taken name gets `-2`.
+   A source that already has decoys is refused (decoys twice stop the search, D59 item 3). The result is checked
+   with `fragpipe.decoy_problem` before it is reported as ready.
+6. **Staleness in words, without guessing.** UniProt's API gives the current release and its date, not a history,
+   so `staleness` says whether a release came out after the file was made and how many months later; it never
+   counts releases. The advice is to switch FASTA at the start of a project and keep the old file.
+7. **Stock workflows are fetched, not adopted.** FragPipe's release tags (`24.0`) and its `workflows/` folder
+   (`MSFragger-GUI/workflows/` up to 22.0) give any release's stock workflows; this is a source for the library and
+   the app, which rank and adopt.
+8. **The network is optional.** Requests are made only when a function is called, each with a timeout, none with
+   `IONOMOS_OFFLINE`; a failure is a sentence in the result, never an exception. Tests replace
+   `fastasource.urlopen`.
+
+**Checked** against UniProt's API help and live responses, Philosopher's wiki and source, and FragPipe's source
+and GitHub refs on 2026-10-14 (docs/FASTA.md has the table). **Not verified**: Philosopher bundled with FragPipe 24.0
+on the PC (its file name, and that it behaves as Philosopher's master source); a real download on the PC (whether
+it may reach rest.uniprot.org and GitHub); the lab's choice of reviewed vs. one-per-gene vs. isoforms.
+
+
+### D91 — TMT channel maps are planned and checked in one place; the search's TMT data is checked before the statistics
+**2026-10-15.** TMT had the pieces (the naming rule, `experiment.yaml` `tmt:`, `annotation.txt` per plex folder,
+FragPipe's rules in `fragpipe.annotation_problems`, the R port, IRS), but no single source for label types,
+no check that the kit in `experiment.yaml` is the workflow's, nothing for a person's own `annotation.txt`, and
+nothing that looked at the reporter ions, the labels or the precursors before the statistics.
+
+1. **`tmtkit.py` is the source of truth** for label types (FragPipe 24's `QuantLabel`: TMT-6, -10, -11, -16,
+   -18; TMT-6 is 126 127N 128C 129N 130C 131N), the masses (229.1629, 304.2071), and the channel-map rules.
+   FragPipe's rules (`CmdTmtIntegrator.configure`, `TmtiPanel.parseTmtAnnotationFile`, checked against the
+   source): two fields per line, every channel of the label type, a name once across plexes, and with
+   `add_Ref=-1` a non-empty ref tag contained in a name of every file. A map FragPipe would stop on, a
+   channel the kit does not have or listed twice, and a `tag:` that is not the workflow's
+   `tmtintegrator.channel_num` fail the job **before** the search (`JobError`), with the rule and the fix.
+   Everything else is a warning or a note (D32: a condition with one channel is compared, labelled).
+2. **The person's file wins and is never touched.** FragPipe uses the one `*annotation.txt` in a plex's
+   folder, so Ionomos reads it, checks it with the same rules, records it (`plan.tmt`), and writes nothing
+   beside it; a differing `experiment.yaml` map is a warning. Ionomos' own files are written in the kit's
+   order (YAML may sort the keys).
+3. **No new hold.** Every TMT problem is the job's (`JobError`) or a warning; nothing waits for a file.
+4. **The TMT QC reads `psm.tsv`, not the statistics.** TMT-Integrator's input (`Intensity <sample>` reporter
+   columns in the kit's order, `Intensity NA` for unused ones; confirmed from `PsmPreProcessor`), `Purity`,
+   `Assigned Modifications`. Labelling counts the N-terminus (acetyl and pyro-Glu excepted) and K; with TMT on
+   K fixed (the stock workflows) only the N-terminus is a real measurement, and that is said. Limits are
+   Ionomos' own and wide (fully labelled ≥ 95 %, a plex's median purity ≥ 0.7, a named channel with signal in
+   ≥ 50 % of PSMs and within 10-fold, a reference within 2-fold), settable as `analysis.tmt_min_labelling` /
+   `tmt_min_purity`; a plex needs 50 PSMs to be judged. Issues are warnings: the data may still be usable.
+5. **Never twice**: TMT-Integrator's tables (also `_None` and `ratio_*`, now read when `_MD` is absent) are
+   ratios to its reference, so IRS stays off for them (D48).
+6. **The SOP's pre-step** is MSConvertGUI with `peakPicking` + `zeroSamples removeExtra` (raw → mzML).
+   FragPipe 24 reads `.raw`, so Ionomos does not convert; the first real TMT run compares the two.
+
+**The channel editor (wave 2).** A TMT drop's channel map is entered where the drop is checked: the review window
+shows a grid per plex under the file table, and the Analysis tab shows the same grid for a filed TMT experiment
+(`tmt_editor.py`). The logic is a class without Tk (`ChannelMap`: state ↔ `experiment.yaml` `tmt:`, the lab's
+`<condition>_<plex>_<channel>` names with the plex's position as `tmtkit.suggest_channels` writes them, replicates
+counted rather than typed, `tmtkit.validate` passed through word for word); the frame only copies it in and out of
+its widgets. Nothing is written by the editor itself: the review window's Accept (the drop's `experiment.yaml`, the
+whole `tmt:` block, `Overrides.tmt_set`; a cleared grid removes the block) and the experiment editor's Save
+(through `save_overrides`, after `backup_experiment_yaml`). A map FragPipe would stop on keeps the review window
+open with tmtkit's reason; Clear lets the person decide later (the job then warns `TMT_NO_MAP` as before). A
+person's own `annotation.txt` is read and shown, never changed; FragPipe still uses it (the file wins,
+`TMT_ANNOTATION_DIFFERS`). **A reference channel is a role, not a condition**: the editor writes
+`analysis.roles: {<its condition>: reference}`; `postprocess.prepare` derives the same from the `tmt:` map when no
+role was given (`tmtkit.reference_conditions`; a condition also on sample channels is never made a reference); and
+`roles.kept_apart` leaves a reference out of the default comparisons when its role was given or the data are TMT,
+also with `analysis.control` set (the Analysis tab always writes it). This changes D61 item 7 for references only:
+"with control: set, every condition is still compared with that control" now excepts a given or TMT reference.
+Other data keep D61 (a pool read from its name is left out only of a competition design). The editor does not
+rename samples in a finished analysis: TMT-Integrator's tables carry the names used at search time, so a filed
+experiment's new map counts for the next search, and conditions for this analysis are changed in the sample list.
+**Verified**: `tests/test_tmt_editor.py` (every conversion, Suggest, Read, validation pass-through, roles),
+`test_resolve.py` / `test_review.py` (the answer, validate, to_overrides, intake end to end), `test_roles.py`
+(kept apart, derived roles), `test_tmtkit.py::test_two_plexes_with_a_bridge` (the testbed: only "Drug vs DMSO");
+the frame, the review window and the experiment editor smoke-run on Windows with every window withdrawn. **Not
+verified**: the windows on screen (layout with a TMT-18 grid and two plexes on a small screen), the GUI tests
+(skip locally, run in CI), any real TMT drop on the PC.
+
+**Verified**: by `tests/test_tmtkit.py` and `tests/test_tmtqc.py` on synthetic tables and the testbed's fake
+FragPipe (rules, flags, plans for every layout, the CLI, the job path, the QC issues, the report section and
+its exported figures, the analysis-off path). **Not verified**: anything on the PC: the real `psm.tsv`
+header and reporter order, that FragPipe finds Ionomos' `annotation.txt`, real labelling and purity numbers,
+`.raw` vs mzML, and the JS of the new report section (no `node_modules` here: `node --check` only).
+
+
+### D92 — Ionomos is a published tool: what that commits us to
+**2026-10-15.** Ionomos began as one lab's drop-folder automation (SCOPE.md, "Where it started"). Since D36 and
+D40 it is also an analysis anyone can `pip install`, and the plan is now to publish it: on PyPI, with a JOSS
+paper, a preprint and a technical note (ROADMAP 5D, docs/VISION.md). Strangers will use it without the
+maintainer seeing their PC, and reviewers will read the code and the claims. That commits the project to:
+
+1. **Claims follow VALIDATION.md.** No doc, paper, README or report says more than the tests and real runs show.
+   "Not verified" lines stay until real data verify them. The comparison with other tools in VISION.md says what
+   each of them does that Ionomos does not.
+2. **What users touch is versioned.** From 1.0, semantic versioning covers the command line, `config.yaml` and
+   `experiment.yaml` keys, the files in `results/` and the fields of `analysis.json`; module internals do not
+   count. A removed key or option warns for at least one minor release. A change that alters results is at least
+   a minor version, with a CHANGELOG "Changed" entry and a decision. The LabWatch-era names stay (D21).
+3. **Support is best effort and says so.** GitHub issues, one maintainer, no response time promised. The issue
+   template asks for the diagnostics text or a bundle (D63, D74), because a report without them usually can't be
+   reproduced.
+4. **The process that makes it trustworthy is public and kept.** Docs are the spec; every choice is a decision
+   here; agents open pull requests and a person merges them (D31, now also in CONTRIBUTING.md and the PR
+   template). Because most of the code is written by coding agents, the papers carry an AI usage disclosure that
+   says so and says how the output was checked; JOSS requires one.
+5. **Citation goes both ways.** `CITATION.cff` is how Ionomos is cited (no paper yet). It, the README and every
+   report keep asking users to cite the tools whose methods are ported (FragPipe-Analyst, limma, CurveCurator,
+   and the others in VALIDATION.md).
+6. **What does not change**: local, no server or account (D36, D49); never bundle a restricted engine or
+   database (D36, D79); the analysis keeps one dependency (D18, D40); the watcher stays Windows-first.
+
+Not decided here, for the maintainer: the PRIDE dataset for the example; how the documentation site is built;
+the name and a logo; the paper's authors and affiliations; whether to adopt the promises in point 2 now or at
+1.0 (VISION.md says "from 1.0").
+
+
+### D93 — The UI is organised for daily driving: a Today tab, the keyboard, the window remembered; the look stays
+**2026-10-15.** The maintainer asked to make the app "more robust and organized for daily driving" while keeping
+its look ("a robust lab tool for real scientists"). The app was looked at on screen for the first time on
+Windows at 150 % (docs/UI.md, "What we saw"): it always opened on the 13-row setup checklist, whose actionable
+rows were below the fold; what needs a person was spread over pop-ups, a badge and the Jobs colours; the daily
+tabs sat in the middle of eleven; the window's natural size (about 1760×940 at 100 %) is bigger than a laptop
+screen, and at 1366×768 the whole bottom bar with Save vanished; there were no keyboard shortcuts.
+
+1. **The look is fixed.** Plain ttk, the system theme, the existing colours and fonts. A UI change that needs a
+   new theme, icon or colour is out of scope; docs/UI.md says so per item.
+2. **Today is the first tab** and the first screen once set up; a new install opens on ✓ Setup. Today only
+   reads (attention items, ledger, the checklist's last summary) on a thread and offers the existing actions
+   (`job_action(..., job=)`, `popups.show`); it adds no new way to change anything.
+3. **Tabs are known by key, not position** (`uinav.TABS`). The remembered tab, F1's topic and Ctrl+<n> use the
+   key, so S1.6 (regrouping the tabs, dropping their numbers) can move tabs without breaking either. The numbers
+   stay for now because "tab 3" / "tab 7" appear in help text other agents own.
+4. **The window state is a UI preference, not a setting**: `ionomos-ui.json` beside `config.yaml`, never in
+   `config.yaml`, never backed up, written only into a folder that exists, read leniently (a bad file is
+   ignored), clamped to the current screen. Deleting it resets the window.
+5. **Keys are bound on the main window only** (`root.bind`, not `bind_all`), so a pop-up's own keys (Escape =
+   Cancel in a proposal, D75) are untouched, and no Ctrl+letter that Tk's Text/Entry already uses on Windows is
+   taken (Ctrl+S and Ctrl+F are free there).
+6. **The bottom bar outranks the tabs** in the pack order, and its buttons outrank the path: on a small screen
+   the tabs shrink and a long path is cut, never Save or the attention badge.
+
+**Verified**: `tests/test_ui_nav.py` (38 no-Tk tests everywhere; one hidden-window test, CI only, run once
+locally hidden); `tests/test_app.py`'s first-screen assertion now says "the Setup tab on a new install"; the app
+photographed on a testbed at its natural size and at 1366×768. **Not verified**: the PC's own screen and
+scaling; a lab member using Today; Ctrl+<n> on a non-US keyboard layout.
+
+### D94 — What the end-to-end test of 2026-10-15 changed as rules (#133–#143)
+**2026-10-15.** A testing agent drove every CLI command, the testbed, the watcher and the report and filed eleven
+issues against shipped code. Most are plain fixes (CHANGELOG, Fixed); four changed a rule.
+
+1. **The lab config applies to the lab's experiments, or when it is named** (#134). `ionomos analyze` and
+   `check-folder` on a folder or table use the config found on the PC (`C:\Fragpipe_Auto\config.yaml`,
+   the remembered path) only when the target is a job id or lies under the lab's `users_root`, or when
+   `--config` / `IONOMOS_CONFIG` names it; any other folder or table gets Ionomos' defaults, and the output
+   says which (`settings: …`). Only the lab's own experiments raise attention items. QUICKSTART's promise
+   ("it only writes in that results folder") held for a pip user's table before only when no lab config sat on
+   the PC.
+2. **A path Windows cannot open is not transient** (#139, #138). With long paths off, a FileNotFoundError on a
+   path of 260+ characters means the path, not a moment: intake rejects once (a note, or an attention item
+   when the note's own path is too long) and the watcher reports an inbox entry it cannot stat once and closes
+   the item when it leaves; a rejection without a note waits for the folder to change. A search log naming a
+   missing file at a 240+ character path is explained as the path limit, and a log that ends in an error
+   Ionomos does not know is never called "ended from outside, nothing in the search failed".
+3. **Result file names are budgeted, not derived blindly** (#140). A comparison's files use its full slug
+   while every path stays under 250 characters; past that, the part both condition names share is dropped and
+   a six-character hash of the comparison name keeps the stem unique (`DiffResult.file_stem`; `slug()` returns
+   it everywhere, so tables, volcano plots, figures, analysis.json and the report agree). The analysis notes
+   the renaming.
+4. **An unknown key in config.yaml is a warning, never an error** (#137): `Config.unknown_keys`, printed by
+   `ionomos check` and shown by the checklist, with the nearest known key. An error would stop an older config
+   with a retired key from loading; a silent drop was what the issue found. `analysis:`, `naming:`, `notify:`
+   and `methods:` keep their own stricter checks.
+
+**Verified**: a regression test per issue (tests/test_cli.py, test_bundle.py, test_watcher.py, test_intake.py,
+test_fragpipe_real.py, test_faults.py, test_failsafes.py, test_anytable.py, test_config.py, test_setup.py,
+test_configio.py, test_app.py). **Not verified**: a real 260+ character drop on the lab PC with long paths off
+(the tests stub the Windows gate), and a real FragPipe log on such a path.
+
+### D95 — The app is robust for daily driving: nothing slow on the Tk thread, Save explains itself, one checks list; windows are tested hidden
+**2026-10-15.** Slices 2–4 of docs/UI.md (issues #114–#132), after D93's slice 1. The rules below are what changed;
+the look stays (D93).
+
+1. **Tabs are grouped and unnumbered**: Today · Inbox · Jobs · Analysis, then Setup · Folders · Users · Methods ·
+   Advanced · Run & Test · Notifications, then Help (`uinav.TABS`; the app builds its tabs in any order and
+   `App._order_tabs` puts them in this one with these labels). Every text names a tab by name; a test fails on
+   "tab 3". Ctrl+<n> is the n-th tab of the row, so the numbers in the help are the keyboard's, not the tab's.
+2. **Nothing slow runs on the Tk thread.** Disks, FragPipe, the ledger, the lock file, schtasks and the network
+   are read on worker threads and come back through `App.post`; the 2 s ticks (status, inbox, log follow) read on
+   a thread and draw on the Tk thread, and the Inbox only while its tab is shown. `uinav.watcher_status` and
+   `uinav.inbox_listing` hold that logic without Tk.
+3. **One busy indicator, one rule.** `App.run_bg(label, fn, done, key=, button=)` is the one way to start work
+   from a click: the bottom bar says what runs, the button is disabled, and the same key cannot start twice
+   (D67's "a second click is refused", in one place). The 1.5 s log follow is a plain thread, not run_bg: a tick
+   is not work the indicator should show.
+4. **Save explains itself and can be undone.** Save computes `configio.diff_words(file, window)` first; nothing
+   changed writes nothing; the Save button and Ctrl+S show the changes in words and Cancel goes back
+   (programmatic saves — Auto-setup, a checklist Fix — do not ask: the click already said "do it"). Every Save
+   keeps the version before it, never two Saves in one backup name; Undo last save loads the newest backup into
+   the window and Save makes it active. "Don't ask for one change" is a UI preference in `ionomos-ui.json`
+   (D93.4), never in config.yaml.
+5. **Unsaved changes are never lost silently.** `App.dirty()` compares the window with the file as last read or
+   written (no disk read: the dict last loaded is the base); the title shows a dot; Quit, Reload and Change… ask
+   Save / Discard / Cancel.
+6. **Every error box says what to do** (D46), checked by reading the source: `tests/test_ui_words.py` parses
+   every `messagebox.showerror` and requires one of `uinav.ACTION_WORDS` in its literal text. A message built
+   from a variable alone fails the test: the step must be in the source.
+7. **One checks list, no Tk** (`checks.everything`): the setup checklist, `preflight.run(start=False)`,
+   `library.update_check`, health and the attention list, each source guarded so one that breaks is one ✗ row.
+   Rows the setup list already has are left out of the other sources. `Row.action` names what the app can do;
+   actions are tab keys, never positions. `ionomos doctor` prints the same list. The full preflight (FragPipe
+   started, dry runs; minutes) stays a separate button on Jobs, once at a time; it has no Stop yet.
+8. **Windows are sized in text units** (`tkutil.text_size`, `fit_window`): a column is n characters wide at any
+   display scaling, and every window is clamped to the screen. A window whose content is taller than a laptop
+   screen (the analysis pop-up's editor) scrolls inside (`tkutil.ScrolledFrame`) and is capped at 44 lines.
+9. **GUI tests run hidden.** `tests/tkharness.hide_all_windows` withdraws every Toplevel and makes showing a
+   window a no-op; dialogs are recorded (`NoDialogs`), Tk errors captured (`TkErrors`). The smoke test opens
+   every window of the inventory with fake data and checks it fits 1366×768 at the font's size; the layout test
+   maps the root fully transparent at 1366×768 and checks the main buttons are inside the window. The gating
+   stays as in D93: CI always, locally only with IONOMOS_GUI_TESTS=1 (even hidden, a bug would show a window).
+
+**Verified**: ruff clean; the no-Tk suites everywhere; every GUI test file run once locally with the windows
+hidden (260 tests; the resolver and review tests that drive a window with synthetic key events cannot run hidden
+and are CI's); `scripts/screenshots.py` run twice here (32 PNGs). **Not verified**: the lab PC's own screen;
+a lab member using Undo / the checks list; a Stop for the full preflight.
+
+
+### D104 — A Ledger can be shared across threads: one connection, one lock
 **2026-10-14.** Master CI (run 38039976679, ubuntu, Python 3.14, after PR
 #101) failed `test_the_worker_loop_runs_through_a_queue_of_faults` with
 `TypeError: the JSON object must be str, bytes or bytearray, not NoneType` in

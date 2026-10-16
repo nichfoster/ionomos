@@ -1,5 +1,10 @@
 """
-Tk variables that are safe to garbage-collect from any thread.
+Small Tk helpers shared by the app's windows.
+
+    StringVar / BooleanVar      Tk variables that are safe to garbage-collect from any thread (below)
+    char_width / line_height    the default font's size in pixels: windows are sized in text units (docs/UI.md S1.10)
+    text_size / fit_window      a box of cols x rows characters, clamped to the screen
+    ScrolledFrame               a frame that scrolls when its content is taller than the space (S1.8)
 
 tkinter.Variable.__del__ calls into Tcl. If Python's garbage collector happens
 to run on another thread (the FragPipe worker, the watcher, an app helper
@@ -12,6 +17,7 @@ from __future__ import annotations
 
 import threading
 import tkinter as tk
+from tkinter import ttk
 
 
 class _ThreadSafeDel:
@@ -29,3 +35,115 @@ class StringVar(_ThreadSafeDel, tk.StringVar):
 
 class BooleanVar(_ThreadSafeDel, tk.BooleanVar):
     pass
+
+
+# ------------------------------------------------------------- sizes in text units (docs/UI.md S1.10) --
+#
+# Windows are sized from the font, never in pixels: a column 40 characters wide is 40 characters at 100 % and
+# at 150 % scaling. Everything here runs on the Tk thread (it asks Tk for the font).
+
+
+def char_width() -> int:
+    """The width of one '0' of the default font, in pixels (7 at 100 %, about 10 at 150 %)."""
+    from tkinter import font as tkfont
+
+    try:
+        return max(tkfont.nametofont("TkDefaultFont").measure("0"), 1)
+    except (tk.TclError, RuntimeError):
+        return 7
+
+
+def line_height() -> int:
+    """One line of the default font, in pixels."""
+    from tkinter import font as tkfont
+
+    try:
+        return max(tkfont.nametofont("TkDefaultFont").metrics("linespace"), 1)
+    except (tk.TclError, RuntimeError):
+        return 16
+
+
+def text_size(cols: int, rows: int) -> tuple[int, int]:
+    """(width, height) in pixels of a box cols characters wide and rows lines tall, in the default font."""
+    return cols * char_width(), rows * line_height()
+
+
+def fit_window(win, cols: int, rows: int, min_cols: int = 60, min_rows: int = 18, place: bool = True) -> tuple[int, int]:
+    """Size a Toplevel to cols x rows of text, no bigger than the screen (uinav.fit_size), and put it near the
+    top centre of the screen. Returns the (width, height) in pixels that was used."""
+    from ionomos import uinav
+
+    w, h = text_size(cols, rows)
+    mw, mh = text_size(min_cols, min_rows)
+    sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
+    w, h = uinav.fit_size(w, h, sw, sh, min_w=mw, min_h=mh)
+    if place:
+        win.geometry(f"{w}x{h}+{max((sw - w) // 2, 0)}+{max((sh - h) // 4, 0)}")
+    else:
+        win.geometry(f"{w}x{h}")
+    return w, h
+
+
+class ScrolledFrame(ttk.Frame):
+    """A frame that scrolls vertically when its content is taller than the space it gets (docs/UI.md S1.8).
+
+    Put widgets in `.inner`. The scrollbar is shown only when needed; the mouse wheel scrolls while the pointer
+    is over the frame. Plain ttk, nothing restyled."""
+
+    def __init__(self, parent, **kw):
+        super().__init__(parent, **kw)
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(0, weight=1)
+        self.canvas = tk.Canvas(self, highlightthickness=0, borderwidth=0)
+        self.canvas.grid(row=0, column=0, sticky="nsew")
+        self.vbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=self.vbar.set)
+        self.inner = ttk.Frame(self.canvas)
+        self._win = self.canvas.create_window((0, 0), window=self.inner, anchor="nw")
+        self.inner.bind("<Configure>", self._fit)
+        self.canvas.bind("<Configure>", self._fit)
+        for w in (self.canvas, self.inner):
+            w.bind("<Enter>", self._bind_wheel)
+            w.bind("<Leave>", self._unbind_wheel)
+        self._bar_shown = False
+        try:  # the frame's own background, so the canvas is not a white box
+            bg = ttk.Style().lookup("TFrame", "background")
+            if bg:
+                self.canvas.configure(background=bg)
+        except tk.TclError:
+            pass
+
+    def _fit(self, _event=None) -> None:
+        try:
+            self.canvas.itemconfigure(self._win, width=self.canvas.winfo_width())
+            need = self.inner.winfo_reqheight()
+            self.canvas.configure(scrollregion=(0, 0, self.inner.winfo_reqwidth(), need))
+            show = need > self.canvas.winfo_height() + 2
+            if show and not self._bar_shown:
+                self.vbar.grid(row=0, column=1, sticky="ns")
+            elif not show and self._bar_shown:
+                self.vbar.grid_remove()
+                self.canvas.yview_moveto(0)
+            self._bar_shown = show
+        except tk.TclError:
+            pass
+
+    def _bind_wheel(self, _event=None) -> None:
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            self.canvas.bind_all(seq, self._wheel)
+
+    def _unbind_wheel(self, _event=None) -> None:
+        for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+            self.canvas.unbind_all(seq)
+
+    def _wheel(self, event) -> None:
+        if not self._bar_shown:
+            return
+        if getattr(event, "num", None) == 4 or getattr(event, "delta", 0) > 0:
+            self.canvas.yview_scroll(-1, "units")
+        elif getattr(event, "num", None) == 5 or getattr(event, "delta", 0) < 0:
+            self.canvas.yview_scroll(1, "units")
+
+    def scrolls(self) -> bool:
+        """Whether the content is taller than the frame right now (the scrollbar is shown)."""
+        return self._bar_shown

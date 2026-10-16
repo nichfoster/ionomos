@@ -141,43 +141,257 @@ bioreps 1–3 — output subfolders `EJQ_2_027_1/`, `_2/`, `_3/`.
 
 ## TMT
 
-**SOP summary** (`How-to-FragPipe-TMT`):
-1. *(Pre-step in a Thermo tool — "Peak Picking & zero Samples", ~15 min.)*
-   ⚠ This is a raw-file conversion step done outside FragPipe. Need to confirm
-   what tool this is and whether FragPipe 24 still needs it (MSFragger reads
-   `.raw` directly via the Thermo library; this step may be legacy).
-2. Load **TMT-10 MS3** workflow. "Just load the folder."
-3. Bioreplicate = 1 when replicates are within channels.
-4. Define replicates, select tag set (TMT-10 etc.).
-5. **Keep the channel token (126, 127N…) in each sample name**; save annotation
-   to the raw-file folder.
-6. Run. Then run the R annotation script; feed `abundance_gene_MD.tsv` +
-   `experimental_annotation.tsv` to FragPipe Analyst; filter 100% non-missing.
+How a TMT experiment goes from the SOP (`How-to-FragPipe-TMT`) to a headless
+search and a report (D91). Checked on 2026-10-14 against the source of
+FragPipe 24.0 (`CmdTmtIntegrator`, `TmtiPanel`, `QuantLabel`, `TmtiConfProps`),
+TMT-Integrator's source (`PsmPreProcessor`, `tmt-i_param.yml`), FragPipe's
+stock `TMT10-MS3`, `TMT16`, `TMT10-bridge` and `TMT18-Astral` workflows, the
+FragPipe output guide and ProteoWizard's filter documentation. **Not yet seen
+on the PC**: no TMT search has run there under Ionomos
+([REAL_RUNS.md](REAL_RUNS.md)); the list at the end of this section says what
+the first one must confirm.
 
-**Workflow file**: stock `TMT10-MS3` (FragPipe ships TMT10, TMT10-MS3,
-TMT10-phospho, TMT16…). Pin the lab's copy. Existing runs on D: used custom
-names (`fragpipe_pax8.workflow`) — check those for lab-specific settings.
+### The SOP, step by step
 
-**Manifest**: each raw = one plex (or one fraction of a plex). experiment =
-plex name, bioreplicate = 1 (per SOP) unless overridden. **Plus** an
-annotation file per plex, `<channel> <sample_name>` per line (any
-whitespace between them). How FragPipe finds it (`TmtiPanel`, 23.1 and
-24.0): the **one** file whose name ends in `annotation.txt` in the folder
-that holds all of the plex's LC-MS files. With none, or more than one, it
-writes its own `<workdir>\<plex>\<plex>_annotation.txt` naming the channels
-`<plex>_<channel>`. What it then requires (`CmdTmtIntegrator`), or the run
-stops: as many lines as the workflow's label type has channels
-(`tmtintegrator.channel_num`, e.g. `TMT-10`), `NA` as the name of an unused
-channel, no spaces in a name, no name twice across plexes, and, with a
-reference sample set in the workflow, a name containing its tag
-(`tmtintegrator.ref_tag`). Ionomos writes `annotation.txt` from
-`experiment.yaml` `tmt:` for one plex (not beside a user's own
-`*annotation.txt`), one per folder for plexes in their own folders, and
-none for plexes sharing a folder (a warning; D59). A channel map FragPipe
-would refuse fails the job before the search.
+| SOP | Headless | Ionomos |
+|---|---|---|
+| "Select Peak Picking & zero Samples … file conversion ~15 min" | not a FragPipe step: MSConvert (below) | not done; FragPipe 24 reads `.raw` |
+| Load the **TMT-10 MS3** workflow | `--workflow` | the method's pinned workflow (`TMT10-MS3.workflow`); `experiment.yaml` `workflow:` picks another (e.g. `TMT16`) |
+| "Just load the folder" | `--manifest`, one line per raw file | the manifest from the drop: experiment = plex, `DDA` |
+| Bioreplicate = 1 when the replicates are in the channels | manifest column 3 | always 1 for TMT (`naming.py`); another number is a warning (`TMT_BIOREPLICATE`) |
+| Select the tag set | `tmtintegrator.channel_num` | `tmt: tag:` must equal the workflow's label type, else the job fails before the search (`TMT_TAG_MISMATCH`) |
+| Define the samples; keep 126, 127N … in each name; save the annotation in the raw-file folder | one `*annotation.txt` per plex folder | written from `experiment.yaml` `tmt:` in the kit's order beside each plex's raw files, or the user's own file read as it is (never changed) |
+| Run | `fragpipe.bat --headless …` | the worker |
+| Run the R annotation script; FragPipe-Analyst on `abundance_gene_MD.tsv` + `experimental_annotation.tsv` | — | `downstream/tmt.py` (the R script, byte-identical), the analysis, `results/report.html`, the FragPipe-Analyst export in `results/fragpipe-analyst/` |
+| "Filter for 100 % non-missing values" | — | `analysis.filter_global_pct` / `filter_condition_pct`; set 100 for the SOP's filter |
 
-**Key output**: `<workdir>\tmt-report\abundance_gene_MD.tsv` (and `_MD` variants
-for peptide/site).
+### The pre-step: MSConvert "Peak Picking" and "Zero Samples"
+
+The SOP's first screenshots are **MSConvertGUI** (ProteoWizard), not a Thermo
+tool: two filters picked from its filter drop-down, then the `.raw` files
+converted to mzML (~15 min). Confirmed against ProteoWizard's filter
+documentation (proteowizard.sourceforge.io/tools/filters.html):
+
+- `peakPicking [vendor|cwt] msLevel=<levels>`: centroids the spectra (vendor:
+  Thermo's own algorithm, which must be the first filter);
+- `zeroSamples removeExtra [<levels>]`: drops runs of zero-intensity points
+  from profile spectra (it makes files smaller; it changes no peak).
+
+**Most likely legacy.** FragPipe 24 reads Thermo `.raw` itself (MSFragger and
+IonQuant through the Thermo library in MSFragger's `ext\` folder;
+`CmdTmtIntegrator.SUPPORTED_FORMATS` is `mzML`, `raw`, `d`), and the DIA
+searches on the PC ran on `.raw` directly ([REAL_RUNS.md](REAL_RUNS.md)). The
+Eclipse's TMT methods most likely record MS2 / MS3 centroided already, and then
+peak picking changes nothing (assumed: the raw files will tell). Ionomos does **not** convert, and searches the
+`.raw` files. A drop of only `.mzML` files is not taken in today (intake
+looks for `.raw`; open in ROADMAP). **To test on the first real TMT run**:
+search the same raws once as `.raw` (the Ionomos job) and once as MSConvert
+mzML (the SOP, by hand in FragPipe's window), and compare PSMs, proteins and
+`abundance_gene_MD.tsv`; if they agree, the step can leave the SOP.
+
+### Label types (`tmtkit.LABEL_TYPES`, FragPipe's `QuantLabel`)
+
+| Label type (`channel_num`) | Kit | Channels, in order | Mass on K and N-term |
+|---|---|---|---|
+| `TMT-6` | TMT 6-plex | 126 127N 128C 129N 130C 131N | 229.1629 |
+| `TMT-10` | TMT 10-plex | 126 127N 127C 128N 128C 129N 129C 130N 130C 131N | 229.1629 |
+| `TMT-11` | TMT 11-plex | TMT-10 + 131C | 229.1629 |
+| `TMT-16` | TMTpro 16-plex | TMT-11 + 132N 132C 133N 133C 134N | 304.2071 |
+| `TMT-18` | TMTpro 18-plex | TMT-16 + 134C 135N | 304.2071 |
+
+`tag:` accepts any common spelling (`TMT10`, `tmt-10`, `TMTpro`, `TMTpro-18`,
+Sage's `Tmt16`). FragPipe also knows TMT-0, TMT-2, TMT-35, iodoTMT, iTRAQ,
+DiLeu and others; Ionomos passes a map for those on unchecked
+(`TMT_LABEL_UNKNOWN`). Masses are the stock workflows' (229.16293, 304.20715).
+
+### The channel map: where it comes from
+
+1. **`experiment.yaml` `tmt:`** (NAMING_CONVENTION.md): `channels:` for one
+   plex (or the same names for every plex), `plexes:` for several. Ionomos
+   writes `annotation.txt` from it, in the kit's order, beside each plex's
+   raw files (the drop's top level, `raw\`, or `<plex>\`).
+2. **The user's own `*annotation.txt`** in the folder with a plex's raw files
+   (made in FragPipe's window, as the SOP does). FragPipe uses it, so Ionomos
+   reads it (`tmtkit.channel_map_from_folder`), checks it with the same rules,
+   records it in `ionomos.json` (`plan.tmt`) and writes nothing beside it; a
+   differing `experiment.yaml` map is a warning (`TMT_ANNOTATION_DIFFERS`):
+   the file wins.
+3. **Nothing**: FragPipe names the channels `<plex>_<channel>`; the job is
+   searched with a warning (`TMT_NO_MAP`), and the report's conditions are
+   unknown (`TMT_CONDITIONS_UNKNOWN`) until they are set on the Analysis tab.
+
+`ionomos tmt plan <folder>` shows the result for a drop or a filed
+experiment without changing anything; `ionomos tmt suggest --tag TMT-16
+--conditions DMSO,Drug --replicates 3 --reference 126` prints a `tmt:` block;
+`ionomos tmt annotation <folder> --write` writes the files (never over one).
+
+### FragPipe's rules and Ionomos' checks
+
+What FragPipe 24 stops on (`CmdTmtIntegrator.configure`,
+`TmtiPanel.parseTmtAnnotationFile`), each a `JobError` before the search with
+the rule in words (D59 item 4):
+
+| Code | Rule |
+|---|---|
+| `TMT_BAD_LINE` | a line is a channel and one sample name, split on whitespace ("Invalid line in annotation file"); an empty name is refused, `NA` leaves a channel out |
+| `TMT_CHANNEL_COUNT` | as many lines as the label type has channels |
+| `TMT_DUPLICATE_NAME` | a name (not `NA`) once across all plexes, case-sensitive |
+| `TMT_NO_REFERENCE`, `TMT_REF_TAG_EMPTY` | with *Define reference: Reference sample* (`tmtintegrator.add_Ref=-1`) the *Ref sample tag* (`ref_tag`) is set and every file has a name containing it (`String.contains`) |
+| `TMT_SHARED_FILE` | one annotation file in a folder shared by several plexes is used for all of them, so the names repeat |
+
+Ionomos' own (`tmtkit.validate` / `plan`): errors `TMT_TAG_MISMATCH` (the
+`tag:` is not the workflow's label type: change one; the message says which),
+`TMT_UNKNOWN_CHANNEL` and `TMT_CHANNEL_TWICE` (FragPipe's window refuses such
+a file; headless does not check, but the names would land on the wrong
+reporters), `TMT_BLOCK` (an unknown key or tag in `tmt:`); warnings
+`TMT_NAME_CHANNEL` (`127N: DMSO_1_126`), `TMT_ONE_CHANNEL` (a condition with
+one channel: compared anyway, low confidence, D32), `TMT_REFERENCE_MISSING`
+(several plexes, and one has no sample, or not its pool, on the reference
+channel), `TMT_FRACTIONS_DIFFER`, `TMT_BIOREPLICATE`, `TMT_ALL_NA`,
+`TMT_CHANNEL_ORDER` (a user's file not in the kit's order),
+`TMT_SEVERAL_FILES`, `TMT_ANNOTATION_DIFFERS`, `TMT_NO_MAP`,
+`TMT_SHARED_FOLDER`, `TMT_LABEL_UNSET`, `TMT_LABEL_UNKNOWN`; notes
+`TMT_NAME_PATTERN` (not `condition_1_channel`: the lab's R script skips the
+name, the report takes the text before the first `_`) and `TMT_NO_BRIDGE`.
+Intake records all of them in `ionomos.json` (`plan.tmt`, and the warnings in
+`plan.warnings`); nothing a TMT check finds refuses a drop.
+
+### Plexes and folders
+
+A plex is one FragPipe experiment (the raw files' `<sample>` before
+`_TMT_F<n>`); its fractions are combined. FragPipe takes a plex's annotation
+from the one folder holding all its files and only when exactly one file
+ending in `annotation.txt` is there, so several plexes need a folder each
+(`<plex>\*.raw`, D69): each gets its own `annotation.txt`. Plexes sharing a
+folder are searched with FragPipe's own channel names and a warning.
+
+### Reference channels
+
+Two different things:
+
+- **FragPipe's** (TMT-Integrator): with *Define reference: Virtual*
+  (`add_Ref=1`, the stock workflows) every ratio is to the mean of the plex's
+  channels; with *Reference sample* (`add_Ref=-1`, the stock `TMT10-bridge`)
+  to the channel whose name contains `ref_tag` (`Bridge`, `pool`).
+- **Ionomos'** (IRS, D48): `tmt.reference_channel` / a plex's own
+  `reference:` / `analysis.tmt_reference` name the bridge channel that joins
+  plexes. TMT-Integrator's tables are already ratios to a reference, so
+  Ionomos never applies IRS to them again; it does for MaxQuant, Sage,
+  Proteome Discoverer and MSstatsTMT input (ENGINES.md). The TMT QC uses the
+  reference to check that the bridge sits near the other channels.
+
+**How a reference channel is treated in the analysis.** A bridge / pooled
+channel is never a treatment, so its condition takes the existing
+*reference* role (`roles.py`, D61/D65/D88) and is left out of the
+comparisons: there is no "Pool vs DMSO". It is used only to join the plexes
+(IRS, which then drops it from the data) and by the TMT QC. The role comes
+from `analysis.roles` (the channel editor writes `{Pool: reference}` for a
+channel marked *reference (bridge, pooled)*), else from the `tmt:` map
+(`reference_channel` / a plex's `reference:`, or a name with a pool / bridge
+word or the workflow's ref tag: `tmtkit.reference_conditions`, applied by
+`postprocess.prepare` unless a person gave that condition another role), else
+from the name in TMT data (`roles.kept_apart`). It holds also when
+`analysis.control` is set (the Analysis tab always writes it) and in a
+competition design; only an explicit `comparisons:` list can still name it.
+A condition that is also on sample channels (DMSO on 126 in one plex) is not
+made a reference. In other data a pool read from its name alone keeps D61's
+rule (left out of a competition design's comparisons only).
+
+### The channel editor (`tmt_editor.py`)
+
+The review window (for a TMT drop, under the file table) and the Analysis
+tab's experiment editor (for a TMT experiment) show a grid per plex: channel,
+sample name, condition, replicate (counted: the k-th channel of a condition
+across the plexes) and role (sample, reference (bridge, pooled), NA). The
+label type is pre-set from the method's workflow (`tmtintegrator.channel_num`)
+or `experiment.yaml`'s `tag:`; another choice is said in orange (the job
+would fail before the search). Typing a condition names the channel
+`<condition>_<plex>_<channel>` (the plex's position, as `tmtkit.suggest_channels`);
+a name typed by hand is kept and its condition is the text before the first
+`_`. **Read annotation.txt from the folder** reads a person's own files
+(never changed); **Suggest…** asks for the conditions, replicates per
+condition and a reference channel; **Clear** empties the grid. Under the grid
+are `tmtkit.validate`'s own texts (what FragPipe would stop on in red) and a
+summary in words. The map is written as `experiment.yaml` `tmt:` only by the
+window's own Accept (review; the drop's experiment.yaml) or Save choices /
+Run analysis (editor; the old file kept in `experiment-backups/`), together
+with `analysis.roles` for the reference channels. In the review window a map
+FragPipe would stop on keeps the window open with the reason (Clear to
+decide later); a cleared grid removes an old `tmt:` block. For a filed
+experiment the map is used by the next search (Retry); this analysis reads the
+sample names in TMT-Integrator's tables, so a condition in it is changed in
+the sample list on the left.
+
+### After the search: the TMT QC (`downstream/tmtqc.py`)
+
+Read from each plex's `psm.tsv` (TMT-Integrator's own input; columns
+confirmed from its `PsmPreProcessor`): `Peptide`, `Assigned Modifications`
+(`N-term(229.1629), 7K(229.1629), 3C(57.0215)`), `Purity`, `Intensity` and the
+reporter block, one column per channel of the label type in the kit's order,
+named `Intensity <sample name>` (`Intensity NA` for an unused channel; older
+Philosopher tables used the bare sample name, which is also read). Then
+`results/tmt_qc.json`, `results/tmt_qc_<plex>.tsv`, `analysis.json` →
+`tmt_qc`, and the report section **TMT plexes and channels** (a channel chart
+per plex, labelling bars, a purity histogram; every figure exports).
+
+| Check | Measure | Issue (warning) and limit |
+|---|---|---|
+| Channels | PSMs with signal, log2 quantiles, median log2 to the PSM's median over the named channels | `TMT_CHANNEL_EMPTY`: a named channel with signal in < 50 % of PSMs or ≤ 10-fold below |
+| Reference | the same for the reference channel(s) | `TMT_REFERENCE_WEAK`: more than 2-fold from the median |
+| Labelling | N-termini labelled (acetyl / pyro-Glu excepted), K labelled, PSMs fully labelled, S/T/Y over-labelling | `TMT_LOW_LABELLING`: fully labelled < `analysis.tmt_min_labelling` (0.95). With TMT on K fixed (the stock workflows) every identified K carries it: only the N-terminus is a real measurement, and the report says so |
+| Purity | histogram, median per plex, share below `tmtintegrator.min_purity` | `TMT_LOW_PURITY`: a plex's median < `analysis.tmt_min_purity` (0.7); MS2 vs MS3 from `tmtintegrator.quant_level` |
+| Tables vs map | reporter columns vs label type, names vs the map | `TMT_LABEL_TYPE_MISMATCH` |
+| Names | `<plex>_<channel>` or no `_` | `TMT_CONDITIONS_UNKNOWN` |
+
+A plex needs 50 PSMs before its labelling or purity is judged. The limits
+are Ionomos' own, set wide; open for the lab (ROADMAP). Without `psm.tsv` (a
+TMT-Integrator table dropped in by hand) only the `tmt-report` header is
+checked. The QC runs for TMT kinds only, also when `analysis.enabled` is off
+(then without the report).
+
+### What the analysis reads
+
+TMT-Integrator's `tmt-report/` (`quant.TMT_TABLES`, in this order):
+`abundance_gene_MD`, `abundance_protein_MD`, then `_GN`, then `_None` (not
+normalised: Ionomos' normalisation is the only one), then `ratio_gene_*` /
+`ratio_protein_*` (log2 ratios to the reference, when no abundance table is
+there), then any other abundance table. Layout (FragPipe's output guide):
+`Index, NumberPSM, ProteinID | Gene, MaxPepProb, ReferenceIntensity`, a
+column per sample. The sample names are the annotation's; conditions come
+from the R script's `experimental_annotation.tsv` when the names follow
+`condition_1_channel`, else the text before the first `_`. Peptide tables are
+not analysed; single-site tables go through `analysis.phospho` (ENGINES.md).
+
+### Confirmed and assumed
+
+- **Confirmed from source / documentation**: the rules above; the label types
+  and their channel order; `add_Ref` −1 = reference sample, 1 = virtual;
+  `prot_norm` 0 None / 1 MD / 2 GN / −1 all; `groupby` 0 gene, 1 protein,
+  2 peptide, 3 multi-site, 4 single-site, −1 all; `quant_level` 2 / 3; the
+  stock workflows' `min_purity` 0.5, TMT on K fixed and on the N-terminus
+  variable; the `Intensity <sample>` reporter columns; the `tmt-report` file
+  names and column layouts; MSConvert's two filters.
+- **Assumed** (from the fake and the source, not a PC run): that FragPipe 24
+  on the PC writes exactly these `psm.tsv` columns with IonQuant as the
+  extraction tool; that `Assigned Modifications` lists the fixed K mod; that
+  the headless run writes `abundance_*_None.tsv` / `ratio_*` beside `_MD`
+  with the stock `prot_norm=1`; that the `.raw` search equals the mzML one.
+
+### Verified against the fake, not yet on the PC
+
+The testbed's fake FragPipe writes the TMT `psm.tsv` (reporter columns,
+Purity, the labels, a share unlabelled with mode `tmt-poor-labelling`;
+`tmt-low-purity`, `tmt-empty-channel`) and the `tmt-report` set (gene and
+protein abundance and ratio, `_None`, peptide; single-site when the workflow
+searches phospho), and stops as FragPipe does on a missing reference tag.
+Scenarios: `tmt_good`, `tmt_plexes`, `tmt_flat_plexes`, `tmt16_na` (TMTpro,
+NA channels), `tmt_tag_mismatch`, `tmt_own_annotation`, `tmt_bridge`,
+`tmt_poor_label` (`tests/test_tmtkit.py`, `tests/test_tmtqc.py`). **The first
+real TMT run must confirm**: the `psm.tsv` header (reporter columns and their
+order, `Purity`), that FragPipe found Ionomos' `annotation.txt` (the names in
+`abundance_gene_MD.tsv`), the labelling and purity numbers against what the
+lab expects, the `.raw` versus mzML comparison above, and how long a 10-plex
+with 8 fractions takes (`timeout_minutes`).
 
 **Post-processing** (`correct_experimental_annotation_for_Fragpipe-TMT.R`):
 - Reads only the header of `abundance_gene_MD.tsv`.
@@ -225,7 +439,10 @@ they do next (FragPipe Analyst upload?).
       files only — `*.tsv`, `*.workflow`, `*.fp-manifest`, `annotation.txt`,
       `log*.txt`) to develop parsers/post-proc against.
 - [ ] One R-script output per method to diff the Python port against.
-- [ ] Answer: what is the TMT "Peak Picking & zero Samples" pre-step tool?
+- [x] Answer: what is the TMT "Peak Picking & zero Samples" pre-step tool? →
+      MSConvertGUI (ProteoWizard), raw → mzML; most likely legacy (TMT section above).
+- [ ] Does the lab still convert TMT raws with MSConvert, and does a `.raw`
+      search give the same result (the first real TMT run)?
 - [x] Answer: how does FragPipe 24.0 headless locate `annotation.txt`? → the one
       `*annotation.txt` in the plex's folder (TMT section above).
 - [ ] The `run_fingerprint.json` of the first real search of each method.

@@ -37,7 +37,16 @@ depends on the method:
   `X_3_7.raw`. Every [replicate](#glossary.replicate) needs the same
   [fractions](#glossary.fraction).
 - **TMT**: `<sample>_TMT_F<fraction>.raw`. All replicates are in the channels,
-  so the replicate is always 1.
+  so the replicate is always 1. Say which sample is on which
+  [channel](#glossary.channel) in `experiment.yaml` (`tmt:`, every channel of
+  the kit, `NA` for unused ones, names like `DMSO_1_126`), or put FragPipe's
+  own `annotation.txt` beside the raw files (Ionomos reads it and never
+  changes it). Several [plexes](#glossary.plex): a folder each.
+  `ionomos tmt suggest --tag TMT-10 --conditions DMSO,Drug --replicates 3`
+  writes the `tmt:` block for you; `ionomos tmt plan <folder>` shows what
+  will be used and anything the search would stop on. Easiest: fill in the
+  **TMT channels** grid in the window that opens when you drop the folder
+  ([how](#faq.tmt-channels)).
 - **DIA**: `<condition>_<replicate>.raw`, e.g. `DMSO_1.raw`, `Drug_2.raw`. The
   part before the number is the [condition](#glossary.condition).
 

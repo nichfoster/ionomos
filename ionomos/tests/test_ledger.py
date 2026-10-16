@@ -305,7 +305,7 @@ def test_adopt_orphans_logs_unreadable_status_file(tmp_path, caplog):
     assert len(warns) == 1 and "20260903-TMT_EJQ-1-001" in warns[0].getMessage()
 
 
-# ------------------------------------------------------------------ threads (D89) --
+# ------------------------------------------------------------------ threads (D104) -
 
 
 def _hammer(*targets, rounds: int) -> list[str]:

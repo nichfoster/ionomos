@@ -170,9 +170,17 @@ found are under "Real runs" in the open questions below.
 
 - DIA: pin workflow, `data_type: DIA`, sort out DIA-NN version/`--config-diann`.
   No post-proc.
-- TMT: `experiment.yaml` `tmt:` block → `annotation.txt`; confirm how headless
-  24.0 finds it; port the annotation R script; resolve the "Peak Picking &
-  zero Samples" pre-step question.
+- TMT: `experiment.yaml` `tmt:` block → `annotation.txt` ✅; how headless 24.0
+  finds it ✅ (D59, from the source; not yet seen on the PC); the annotation R
+  script ported ✅; the "Peak Picking & zero Samples" pre-step identified ✅
+  (MSConvertGUI, D91; whether it is still needed is for the first real TMT
+  run). 2026-10-15 (D91): label types and channel-map rules in `tmtkit`; the
+  `tag:` checked against the workflow; a person's own `annotation.txt` read
+  and never changed; TMT QC (channels, labelling, purity) with a report
+  section, figures and doctor issues; `_None` / `ratio_*` tables read;
+  `ionomos tmt plan | annotation | suggest | qc`; five more testbed scenarios;
+  the channel editor in the review window and the experiment editor.
+  **Not run on a real TMT search yet**: see "Open questions".
 
 ## Phase 4 — Operations & niceties
 
@@ -183,7 +191,7 @@ found are under "Real runs" in the open questions below.
     failed / held, off by default, under `notify:` in `config.yaml`;
     `ionomos notify-test`. Not checked against a real Teams / Slack / SMTP
     server yet. Open: per-user recipients (each person told about their
-    own jobs). → 2026-10-02 (D67): the app's **8 Notifications** tab, with
+    own jobs). → 2026-10-02 (D67): the app's **Notifications** tab, with
     Send test and masked secrets; not yet seen on screen
   - log rotation: was there (5 MB, 5 files); now also safe when Windows
     refuses the rename
@@ -292,6 +300,59 @@ found are under "Real runs" in the open questions below.
   - Collect two or three real folders from searches the lab ran by hand
     (bundle them), and add their layouts to `tests/test_fpfolder.py`.
 
+2026-10-15 (D89, D90): **workflows and FASTAs are found, described, ranked
+and renewed.** `ionomos library scan | list | show | recommend [--apply] |
+adopt | check` ([LIBRARY.md](LIBRARY.md)) finds every FragPipe `.workflow`
+and FASTA on the PC, says what each is in words, flags what is wrong (25
+codes, each with help), ranks candidates per method from the finished
+searches that used them, and adopts by copying. `ionomos fasta search |
+download | prepare | release | stock-workflows` ([FASTA.md](FASTA.md)) gets
+a proteome from UniProt, makes it FragPipe-ready with Philosopher or in
+Python, and says when a FASTA is behind UniProt's release. The Methods tab
+has Find on this PC…, Choose…, a FASTA panel (Download from UniProt…, Add
+decoys and contaminants…, Check for updates) and a first-setup proposal
+(`library_tab.py`). Open / for the lab:
+  - Run `ionomos library scan --root D:/` on the PC (or add `D:/` to
+    `library: roots:`) and send `logs/library.json` (or a bundle): how long
+    it takes, what it finds, whether the TMT and DIA candidates it ranks
+    first are the ones the lab would choose; how the dialog feels with ~150
+    rows.
+  - Which TMT workflow is the lab's? `fragpipe_pax8.workflow` (Aman, saved
+    with 23.1?), Kosuke's `A549_nucleus_TMT-check`, Melissa's
+    `A549_EN3235_TMT`, or FragPipe 24's stock `TMT10-MS3`? `ionomos library
+    list workflows --kind TMT --flags` lists them with their differences.
+  - Is FragPipe 24's "Save SDRF" to be switched off in the lab's pinned
+    workflows (`WF_SDRF_ON`; D59 item 11)?
+  - FASTA policy: reviewed only (Ionomos' default, 20,416 at UniProt
+    2026_03), the one-protein-per-gene set the current file looks like
+    (20,698), or with isoforms? How often renewed (`FASTA_OLD` says after 12
+    months)? Other organisms or spike-ins (Philosopher's `--add` is not
+    offered yet)?
+  - Can the PC reach rest.uniprot.org, api.github.com and
+    raw.githubusercontent.com? Else: download elsewhere, `ionomos fasta
+    prepare` on the PC.
+  - On the PC: `ionomos fasta prepare` with the bundled Philosopher once, and
+    compare its entries with the Python way (`--no-philosopher`) on the same
+    file; note the Philosopher file name in PROTEOMICS_PC.md.
+  - The GUI tests of `library_tab.py` and the TMT editor skip locally and run
+    on Windows CI only; the dialogs were smoke-run with hidden windows.
+
+2026-10-15 (D93, [UI.md](UI.md)): **the app, looked at on screen and organised
+for daily driving.** A Today tab (what needs you, the watcher and queue, the
+setup line, the last jobs with Open report / Re-run analysis), the window size
+and last tab remembered, F1 and keyboard shortcuts, a Find box on Jobs, the
+bottom bar always on screen (#109–#113 done). The rest of the plan, issues
+#114–#132 in four slices, is done (D95): the tabs regrouped Daily / Setup /
+Help without numbers, a status strip, scrolling lists, Run & Test split;
+every failure says what to do, nothing slow on the Tk thread, one busy
+indicator, Undo last save, what changed before Save, an unsaved-changes guard;
+one "Check everything" list with Fix buttons (`ionomos doctor`) and a quick
+check on start; a hidden-window harness, a smoke test of every tab and window,
+a small-screen layout test and screenshots from CI. The look stays: plain ttk,
+no new theme, icons or colours. Open: a Stop button for the full FragPipe
+preflight (it has no cancellation yet), the assistant's proposal dialog in the
+smoke test (it has its own tests), and a look at the lab PC's own screen.
+
 ## Phase 5 — Beyond one lab (plan of 2026-09-30, D36)
 
 Goal: other labs can use Ionomos. Research (2026-09-30) found no open tool
@@ -341,7 +402,7 @@ installed.
   codes become editable config, with a "test your names" check (CLI + setup
   window), so another lab's convention needs no code change. Keep
   NAMING_CONVENTION.md ↔ naming.py in sync.
-- [ ] **Docs for a stranger:** (2026-09-30: QUICKSTART.md, ENGINES.md, the simulated demo and the "never done to your data" page (`help/safety.md`, #57) done; still to do: a real-data example)
+- [ ] **Docs for a stranger:** (2026-09-30: QUICKSTART.md, ENGINES.md, the simulated demo and the "never done to your data" page (`help/safety.md`, #57) done; 2026-10-15: [VISION.md](VISION.md), SCOPE.md rewritten for today, CITATION.cff, CONTRIBUTING.md, a code of conduct, issue and pull-request templates; still to do: a real-data example and a documentation site, 5D steps 4 and 7)
 - [x] **Help users can see** (2026-09-30, D46, #57; the report's help added for designs, dose-response and TMT in #58–#60): one help source shown in two
   places. In the report: a Help entry, "?" buttons on each section and QC tab, a glossary,
   and troubleshooting for the issues in that report. From the app and CLI: a full offline
@@ -524,15 +585,87 @@ Stay deterministic. The one credible published "AI interpretation"
 (GeneAgent, Nat Methods 2025) verifies every claim against databases. Plain
 templated summaries, like the key findings, are easier to trust.
 
-### 5D — Adoption
+### 5D — Adoption and publishing (checklist of 2026-10-15)
 
-- [ ] 2–3 pilot labs, ideally chemoproteomics groups already on FragPipe
-  isoDTB / ABPP workflows.
-- [ ] A J. Proteome Res. technical note once pilots exist. It should include
-  the limma / FragPipeAnalystR parity tests and real-data comparisons. JOSS
-  (2026 criteria) wants at least 6 months of public use.
-- [ ] Interoperate rather than compete: open in FragPipe-Analyst (already
-  exported), optional pmultiqc-compatible QC, SDRF.
+The aim, who it is for, the comparison with other tools and what "done for
+v1.0" means are in [VISION.md](VISION.md). In order; each step says who does
+it. "The maintainer" is @nichfoster (accounts, settings, the lab, authorship);
+"an agent" opens a pull request that the maintainer merges (D31). Steps 1–3
+need nothing from the lab.
+
+1. [ ] **PyPI** — *the maintainer*. Set up trusted publishing as the header of
+   `.github/workflows/publish-pypi.yml` says (pending publisher on pypi.org,
+   the `pypi` environment on GitHub, the `PYPI_PUBLISH` variable), then tag
+   the next release. On 2026-10-15 `ionomos` is not on PyPI.
+   *Then an agent* drops "until it is on PyPI" from README.md,
+   QUICKSTART.md and `ionomos/README.md`.
+2. [ ] **Repository settings** — *the maintainer*. Branch protection on
+   `master` requiring a code-owner review (D31 says it is not enforced yet);
+   the GitHub description and topics (the description still says it is for
+   one lab's PC); private vulnerability reporting on; Zenodo's GitHub
+   integration on, so each release gets a DOI (JOSS asks for an archive DOI
+   on acceptance), and the DOI into CITATION.cff.
+3. [x] **Community files** — *an agent*, 2026-10-15: VISION.md,
+   SCOPE.md for today's scope, CITATION.cff, CONTRIBUTING.md,
+   CODE_OF_CONDUCT.md (Contributor Covenant 2.1), issue templates that ask
+   for the diagnostics, a pull-request template.
+   - [ ] *an agent*: SECURITY.md (report privately; what is in scope: the
+     report's escaping of names, the bundle's anonymisation and leak check
+     (D63), the assistant's localhost gate (D57)).
+4. [ ] **A real-data example** — *the maintainer* picks a public PRIDE
+   dataset whose licence allows reuse, a mixed-species benchmark (human /
+   yeast / *E. coli*) if possible, so it serves step 5 too; *an agent* adds
+   how to fetch its tables (not bundled: the demo stays offline, D40), its
+   expected ratios for `ionomos benchmark --expected`, a test on a small
+   slice of it, and its report for the site.
+5. [ ] **The real-data evidence** — *the lab and the maintainer*; *an agent*
+   writes it up in VALIDATION.md. The open items of 5C #10: a mixed-species
+   sample on the lab's instrument (or step 4's dataset) benchmarked and the
+   imputation default decided from it; one `ionomos compare` against a real
+   FragPipe-Analyst export and one against a real MSstats or Perseus export;
+   real TMT and isoDTB searches through the watcher (REAL_RUNS.md).
+6. [ ] **Pilot labs** — *the maintainer*. 2–3 labs, ideally chemoproteomics
+   groups already on FragPipe isoDTB / ABPP workflows, or a core facility.
+   Their problems go to issues; what they needed to change goes to
+   NAMING_CONVENTION.md, ENGINES.md and QUICKSTART.md (*an agent*).
+7. [ ] **A documentation site** — *an agent*, after the maintainer chooses
+   how: GitHub Pages built in CI from `docs/` and the help files that
+   `ionomos help` already renders (no new dependency), or MkDocs (a dev
+   dependency only). It shows QUICKSTART, ENGINES, VALIDATION, the help and
+   step 4's report, so a reader sees a report before installing. Then the
+   `Documentation` URL in `ionomos/pyproject.toml` points at it.
+8. [ ] **Name and logo** — *the maintainer*. Keep "Ionomos" unless a
+   tool-name or trademark clash turns up (the PyPI name was free on
+   2026-09-30). No logo exists; decide whether the report and the app get
+   one.
+9. [ ] **A preprint and a J. Proteome Res. technical note** — *the
+   maintainer* writes, *an agent* drafts the methods and the validation
+   tables from VALIDATION.md. A technical note is at most 4,500 words and
+   must show an advantage over existing methods; the raw data are deposited
+   (ProteomeXchange preferred). Material: steps 4–6, the limma /
+   FragPipeAnalystR parity tests, and the D36 positioning. The preprint
+   (bioRxiv) goes up when the note is submitted.
+10. [ ] **A JOSS paper** — *an agent* drafts `paper/paper.md` and
+    `paper/paper.bib` (750–1,750 words: Summary, Statement of need, State of
+    the field, Software design, Research impact statement, AI usage
+    disclosure); *the maintainer* completes authors and affiliations and
+    submits. Not before 2027-03-17: JOSS wants a repository public for more
+    than six months with development across them (created 2026-09-16; *the
+    maintainer* confirms it was public from then), and evidence of research
+    use (step 9's preprint or a pilot lab's paper). The AI usage disclosure
+    says that coding agents wrote most of the code, and how it was checked:
+    reference tests against R and Python tools, pull requests merged by a
+    person (D31), the decision log.
+11. [ ] **Versioning and support promises** — *an agent* writes them into
+    README.md from VISION.md ("Versioning and support, from 1.0") once the
+    maintainer agrees to them: semantic versioning of the command line, the
+    YAML keys, `results/` and `analysis.json`; deprecations warn for one
+    minor release; best-effort support through GitHub issues.
+12. [ ] **v1.0** — *the maintainer* tags it when VISION.md's "done for v1.0"
+    holds.
+13. [ ] **Interoperate rather than compete** (ongoing): open in
+    FragPipe-Analyst (already exported), optional pmultiqc-compatible QC,
+    SDRF.
 
 ### Risks
 
@@ -543,6 +676,17 @@ templated summaries, like the key findings, are easier to trust.
   permissions.
 - **Trust in a Python limma.** Publish the parity tests against R, and keep
   real-data fixtures in CI.
+- **Mostly agent-written code** (2026-10-15). Reviewers and journals will ask
+  how it was checked. The answer has to stay true: every port against its
+  reference tool, every pull request merged by a person (D31), every choice
+  in DECISIONS.md. A change that skips one of these weakens the paper.
+- **Real data lag behind the code.** Every accuracy number is simulated or
+  from R on shared inputs (VALIDATION.md). A paper without 5D step 5 would
+  claim more than the evidence; keep the "Not verified" lines until they are.
+- **A published tool gets users the maintainer can't see.** Their reports
+  arrive without the PC, the config or the data. The diagnostics text and
+  the bundle (D63, D74) make them answerable; the issue template asks for
+  them.
 
 ## Phase 6 — An assistant on the proteomics PC (local AI, D49)
 
@@ -690,8 +834,29 @@ Collected from the other docs; resolve before/during Phase 1.
 - [ ] Is `USER` == folder under `C:\Fragpipe_General\`? Who has multiple folders?
 - [ ] Is plain `DDA` a real method in the lab or only isoDTB/TMT/DIA?
 - [ ] Which DIA workflow is used, and what happens after a DIA run?
-- [ ] What is the TMT "Peak Picking & zero Samples" pre-step (which app)? Still needed with FragPipe 24?
-- [ ] Where are FASTA files kept, which ones, how often updated?
+- [x] What is the TMT "Peak Picking & zero Samples" pre-step (which app)? → 2026-10-15 (D91): MSConvertGUI
+      (ProteoWizard) with the `peakPicking` and `zeroSamples removeExtra` filters, raw → mzML. FragPipe 24 reads
+      `.raw` (REAL_RUNS.md), so Ionomos does not convert. **Still for the lab**: search the same plex once from
+      `.raw` and once from the SOP's mzML; if they agree, drop the step from the SOP. A drop of only `.mzML` files
+      is not taken in by intake today (decide whether it should be).
+- [x] Where are FASTA files kept, which ones, how often updated? → 2026-10-15 (D89, D90): `ionomos library scan`
+      finds them; `ionomos fasta release` says how old each is. The policy questions are under Phase 4 above.
+- [ ] **The first real TMT run must confirm** (D91): the `psm.tsv` header (the `Intensity <sample>` reporter
+      block, its order, `Purity`, `Assigned Modifications` listing the fixed K mod); that FragPipe picked up
+      Ionomos' `annotation.txt` (the sample names in `abundance_gene_MD.tsv`); the labelling / purity numbers
+      against what the lab expects (are 95 % and 0.7 right?); the run time of a 10-plex × 8 fractions
+      (`timeout_minutes`); whether FragPipe 24 leaves `_None` / `ratio_*` tables beside `_MD`.
+- [ ] Which `annotation.txt` style do people prefer: FragPipe's window, `experiment.yaml`, or the app's channel
+      editor (all work now)?
+- [ ] Look at the review window with a TMT drop on the PC's screen (the grid adds ~250 px under the file table).
+- [ ] A filed experiment's renamed channels count only for the next search: should a re-analysis map
+        TMT-Integrator's default `<plex>_<channel>` names (a search run without a map) to the editor's names?
+- [ ] The lab's R script keeps only `condition_1_channel`; Suggest numbers plex 2 as `DMSO_2_127N` (tmtkit's
+        convention, flagged `TMT_NAME_PATTERN`): which do people want for multi-plex experiments?
+- [ ] A channel named `Pool…` is read as a reference even when marked sample (rename it to make it a sample); fine?
+- [ ] TMT-35 (hyperplexing), iTRAQ and DiLeu are passed to FragPipe unchecked. `downstream/plex.py`'s
+      `TMT_ORDERS` (Sage / MaxQuant channel order) is separate from `tmtkit.LABEL_TYPES` (FragPipe's); they
+      describe different engines' columns.
 
 **Machine**
 - [ ] FragPipe 24.0 launcher: from FragPipe's build it is `C:\FragPipe\FragPipe-24.0\bin\fragpipe.bat`, next to

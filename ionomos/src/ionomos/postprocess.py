@@ -8,7 +8,8 @@ and results/report.html run when config analysis.enabled is on (default).
 A failure here never fails the job — FragPipe's output is still good — it
 becomes a warning on the done job, and `ionomos analyze <folder>` re-runs it.
 Then, for a job with QC-standard runs, instrument QC trending (qctrend.after_job, D45),
-isolated the same way.
+isolated the same way. A TMT job always gets its TMT QC (downstream/tmtqc.py, D91): inside the
+analysis, or on its own (results/tmt_qc.json) when the analysis is off.
 """
 from __future__ import annotations
 
@@ -74,6 +75,17 @@ def prepare(dest: Path, cfg, method: str | None = None, extra: dict | None = Non
         if isinstance(tmt, dict) and tmt.get("reference_channel") not in (None, "") and \
                 "tmt_reference" not in overrides:  # experiment.yaml tmt.reference_channel = analysis.tmt_reference
             overrides = {**overrides, "tmt_reference": tmt["reference_channel"]}
+        if isinstance(tmt, dict) and tmt:  # the bridge / pool channels take the reference role: IRS only, not compared
+            from ionomos.downstream.roles import RoleError, normalise
+            from ionomos.tmtkit import reference_conditions
+
+            try:
+                given = {k.lower() for k in normalise(overrides.get("roles") or {})}
+            except RoleError:
+                given = None  # the analysis says what is wrong with them; nothing is added
+            refs = {c: "reference" for c in reference_conditions(tmt) if given is not None and c.lower() not in given}
+            if refs:  # a role a person gave (analysis.roles) always wins
+                overrides = {**overrides, "roles": {**(overrides.get("roles") or {}), **refs}}
         if current.tmt:  # the channel map as it is now names Sage's TMT channels (engines.load_sage_tmt)
             record.setdefault("plan", {}).setdefault("overrides", {})["tmt"] = current.tmt
         from ionomos.downstream.quant import run_stem
@@ -273,17 +285,37 @@ def run_all(job, spec, cfg) -> tuple[list[str], dict]:
     return warnings, summary
 
 
+def _tmt_qc_only(dest: Path, record: dict | None, notes: list[str]) -> list[Path]:
+    """results/tmt_qc.json and tmt_qc_<plex>.tsv when the analysis is off (downstream.tmtqc, D91); never raises.
+    With the analysis on, downstream.analyze makes them (its tmt_qc stage) and the report shows them."""
+    try:
+        from ionomos.downstream import tmtqc
+
+        res = tmtqc.run_folder(dest, record)
+        if not res.found:
+            notes.append(f"TMT QC: {res.reason}")
+            return []
+        notes += [f"TMT QC: {msg}" for _code, msg in res.problems]
+        return tmtqc.write(res, dest / "results")
+    except Exception as exc:  # noqa: BLE001 - a QC step must never fail a done job
+        log.exception("TMT QC failed for %s", dest)
+        notes.append(f"TMT QC failed: {exc}")
+        return []
+
+
 def _analyse(job, spec, cfg) -> tuple[list[str], dict]:
     if not (getattr(cfg, "analysis", {}) or {}).get("enabled", True):
         # statistics off: still write the lab's R-script outputs (site table / TMT annotation)
         from ionomos import downstream
 
         dest = Path(job.dest_dir)
+        reads = analysis_method(cfg, job.method, getattr(job, "parsed", None))
         try:
-            _m, files, notes = downstream.load_quantities(analysis_method(cfg, job.method, getattr(job, "parsed", None)),
-                                                          dest / "fragpipe", dest / downstream.RESULTS, None)
+            _m, files, notes = downstream.load_quantities(reads, dest / "fragpipe", dest / downstream.RESULTS, None)
         except Exception as exc:  # noqa: BLE001
             return [f"post-processing failed: {exc}"], {}
+        if reads == "TMT":  # the TMT QC is a search check, not statistics: it runs for TMT kinds only (D91)
+            files += _tmt_qc_only(dest, getattr(job, "parsed", None), notes)
         return [f"post-processing: {n}" for n in notes], {"files": [f"{downstream.RESULTS}/{f.name}" for f in files]}
     out = run_for_folder(Path(job.dest_dir), cfg, job.method)
     for w in out.warnings:

@@ -71,6 +71,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import traceback
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -105,7 +106,7 @@ def _find(root: Path, *patterns: str) -> Path | None:
 def detect_method(workdir: Path) -> str | None:
     if _find(workdir, isodtb.LABEL_FILE):
         return "isoDTB"
-    if _find(workdir, "abundance_*_MD.tsv", "abundance_*.tsv"):
+    if _find(workdir, "abundance_*_MD.tsv", "abundance_*.tsv", "ratio_gene_*.tsv", "ratio_protein_*.tsv"):
         return "TMT"
     if _find(workdir, "*pg_matrix.tsv"):
         return "DIA"
@@ -179,7 +180,14 @@ def _load_quantities(method: str | None, workdir: Path, results: Path, record: d
     if (rollup or "auto") != "auto":  # FragPipe's and any other table hold proteins (or sites) already
         notes += engines.rollup_unused(rollup, "this table holds proteins or sites already, not peptides")
     if table is not None or method == "table":
-        path = Path(table) if table is not None else anytable.find_table(workdir)
+        if table is not None:
+            path = Path(table)
+        else:
+            found = anytable.candidate_tables(workdir)
+            path = found[0][0] if found else None
+            others = anytable.others_note(workdir, found)  # several tables: say which was read (#141)
+            if others:
+                notes = notes + [others]
         if path is None:
             return None, files, [f"no protein or result table found in {workdir.name}/"]
         return anytable.load(path), files, notes
@@ -191,14 +199,11 @@ def _load_quantities(method: str | None, workdir: Path, results: Path, record: d
         files += site_files
         return _merge_ratio([quant.from_isodtb_sites(p) for p in site_files]), files, notes
     if method == "TMT":
-        from ionomos.fpfolder import TABLES
-
-        ab = _find(workdir, *TABLES["TMT"])  # _MD (the lab's) first; a search normalised otherwise writes _GN / _None
+        ab = _find(workdir, *quant.TMT_TABLES)  # _MD (the lab's) first, then _GN / _None, then the ratios (D91)
         if ab is None:
             return None, files, ["no tmt-report/abundance_*.tsv found (did TMT-Integrator run?)"]
-        if not ab.name.endswith("_MD.tsv"):
-            notes.append(f"read {ab.name}: TMT-Integrator was not set to median centring (MD), so its own "
-                         "normalisation is kept")
+        if quant.tmt_table_note(ab):
+            notes.append(quant.tmt_table_note(ab))
         ann_path = tmt.write_annotation(ab, results / "experimental_annotation.tsv")
         files.append(ann_path)
         ann = tmt.annotation_rows(read_header(ab))
@@ -494,6 +499,9 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
         say("plotting the results in " + m.meta.get("table", "the table"))
         for d in stage("statistics", analysis.precomputed_diffs, m, settings) or []:
             diffs.append(d)
+            fit = fit_file_stem(results, d)
+            if fit:
+                notes.append(fit)
             tsv = results / f"{d.slug()}_differential.tsv"
             if stage("tables", write_tsv, tsv, analysis.DIFF_COLUMNS, d.rows):
                 out.files.append(tsv)
@@ -608,6 +616,9 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
                                  f"measured values in {small} ({min(d.groups)} samples against {max(d.groups)}); "
                                  "their n is in the table. small_group_min_valid: same leaves them untested.")
                 diffs.append(d)
+                fit = fit_file_stem(results, d)
+                if fit:
+                    notes.append(fit)
                 tsv = results / f"{d.slug()}_differential.tsv"
                 if stage("tables", write_tsv, tsv, analysis.DIFF_COLUMNS, d.rows):
                     out.files.append(tsv)
@@ -697,6 +708,15 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     else:
         psm_info, psm_view, f.psm_problems, qnotes = searched
         notes += qnotes
+    tmtqc_info: dict = {"ran": False, "reason": "not a FragPipe TMT search"}
+    tmt_view: dict | None = None
+    if method == "TMT" and table is None:  # TMT QC from psm.tsv and tmt-report (tmtqc.py, D91)
+        got = stage("tmt_qc", _tmt_qc, dest, workdir, record, settings, results, out, say)
+        if got is None:
+            tmtqc_info = {"ran": False, "reason": "the TMT QC step failed (see analysis_error.txt)"}
+        else:
+            tmtqc_info, tmt_view, f.tmt_problems, tnotes = got
+            notes += tnotes
     ordered = stage("run_order", _run_order, processed, record, dest, insight, psm_view, say)
     if ordered is None:
         run_info = {"ran": False, "reason": "the run-order step failed (see analysis_error.txt)"}
@@ -726,6 +746,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
     ctx["sdrf"] = sdrf_info
     ctx["model"], ctx["ftest"] = model, ftest
     ctx["run_order"] = run_view  # the Run order QC tab and figure (runorder.py, D78)
+    ctx["tmt_qc"] = tmt_view     # the "TMT plexes and channels" section and its figures (tmtqc.py, D91)
     ctx["roles"], ctx["specific"] = design_plan, specific
     figure_files: list[Path] = []
     phos_view = stage("phospho", phospho.report_payload, (m.meta.get("phospho") if m is not None else None),
@@ -792,6 +813,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
         "roles": design_plan.as_dict() if design_plan is not None else {},
         "specific_targets": spec_info,
         "psm_qc": psm_info,
+        "tmt_qc": tmtqc_info,
         "run_order": run_info,
         "sdrf": sdrf_info,
         "figures": [f"{RESULTS}/{p.relative_to(results).as_posix()}" for p in figure_files],
@@ -879,6 +901,9 @@ def _protein_correction(p, diffs, settings, results: Path, out: Outcome, dest: P
         res = proteincorr.run(p, diffs, settings, proteome)
         cols = analysis.DIFF_COLUMNS + proteincorr.CORRECTION_COLUMNS
     for d, c in zip(res.diffs, [x for x in res.summary["conditions"] if x.get("proteome_comparison")], strict=True):
+        fit = fit_file_stem(results, d)
+        if fit:
+            res.notes.append(fit)
         tsv = write_tsv(results / f"{d.slug()}_differential.tsv", cols, d.rows)
         out.files.append(tsv)
         c["table"] = f"{RESULTS}/{tsv.name}"
@@ -964,6 +989,22 @@ def _psm_qc(workdir: Path, settings, results: Path, out: Outcome, say) -> tuple[
         table = f"{RESULTS}/psm_qc.tsv"
     return (psmqc.summary(res, table), psmqc.report_payload(res), res.problems,
             [f"search quality: {n}" for n in res.notes])
+
+def _tmt_qc(dest: Path, workdir: Path, record, settings, results: Path, out: Outcome, say
+            ) -> tuple[dict, dict | None, list, list[str]]:
+    """results/tmt_qc.json and tmt_qc_<plex>.tsv: channels, labelling, purity per plex (tmtqc.py, D91). Returns
+    (analysis.json summary, the report's payload or None, problems for the doctor, notes)."""
+    from ionomos.downstream import tmtqc
+
+    say("TMT QC (channels, labelling, purity)")
+    res = tmtqc.run_folder(dest, record, workdir, settings)
+    if not res.found:
+        return tmtqc.summary(res), None, [], []
+    written = tmtqc.write(res, results)
+    out.files += written
+    return (tmtqc.summary(res, [f"{RESULTS}/{p.name}" for p in written]), tmtqc.report_payload(res), res.problems,
+            [n for n in res.notes if "no psm.tsv" in n])
+
 
 def _run_order(processed, record, dest: Path, insight: dict, psm_view, say) -> tuple[dict, dict | None, list, list[str]]:
     """Each sample's QC numbers against the order of acquisition (runorder.py, D78). Returns (analysis.json
@@ -1087,6 +1128,43 @@ def _static_figures(results: Path, ctx: dict, m, processed, diffs, settings, qcd
     style = charts.style_from(settings.export, lenient=True)
     return slides.write(results / slides.FOLDER, d, style, style["figures"],
                         f"Ionomos {ctx.get('version', '')}".strip())
+
+PATH_BUDGET = 250  # the longest path a comparison's files may take (Windows stops at 260 with long paths off)
+_LONGEST_SUFFIX = len("figures/volcano_") + len(".svg.tmp")  # the most a file name adds around the stem
+
+
+def fit_file_stem(results: Path, d) -> str | None:
+    """Give a comparison a file stem whose paths stay under Windows' limit (#140). A DIA condition carries the
+    experiment prefix ('L7355qyk_Aman_DIA_55qyk_Drug'), so '<cond>_vs_<cond>_differential.tsv' held it twice on
+    top of the experiment folder, and the tables and volcano plots went missing on long names. When the full
+    name would pass the budget, the part both conditions share is dropped and a short hash of the comparison's
+    name keeps the stem unique; a note says so. Returns the note, or None when the full name fits."""
+    import hashlib
+
+    full = d.full_slug()
+    room = PATH_BUDGET - len(str(results)) - 1 - _LONGEST_SUFFIX
+    if len(full) <= room:
+        d.file_stem = ""
+        return None
+    digest = hashlib.sha1(d.name.encode("utf-8")).hexdigest()[:6]
+    t, c = str(d.treatment), str(d.control or "")
+    shared = ""
+    if c:
+        a, b = t.split("_"), c.split("_")
+        n = 0
+        while n < min(len(a), len(b)) - 1 and a[n] == b[n]:
+            n += 1
+        shared = "_".join(a[:n]) + ("_" if n else "")
+    short = full[len(shared):] if shared and full.startswith(shared) else full
+    short = short.replace(f"_{shared}", "_", 1) if shared and f"_{shared}" in short else short
+    stem = f"{short}-{digest}"
+    if len(stem) > room:
+        stem = f"{short[:max(8, room - 7)].rstrip('_-')}-{digest}"
+    d.file_stem = re.sub(r"[^A-Za-z0-9._-]+", "_", stem).strip("_")
+    what = f"the part the condition names share ({shared.rstrip('_')}) dropped" if shared else "the name cut"
+    return (f"{d.name}: its result files are named {d.file_stem}_differential.tsv and volcano_{d.file_stem}.svg "
+            f"({what}, a short hash added), so their paths stay under {PATH_BUDGET} characters")
+
 
 def _write_volcano(results: Path, d, stage) -> Path | None:
     """Every comparison gets a volcano file, checked after writing; an empty comparison gets an empty plot."""

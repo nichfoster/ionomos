@@ -600,3 +600,60 @@ def test_a_time_stamp_replicate_without_a_window_leaves_the_folder_with_a_note(l
     note = (lab["inbox"] / "CS_22rv1_FLAG_AR_MA25.REJECTED.txt").read_text(encoding="utf-8")
     assert "20260508180610" in note and "1-999" in note and "DIA-NN drops that run" in note
     assert d.is_dir() and len(list(d.glob("*.raw"))) == 6 and ledger.list() == []  # nothing moved
+
+
+def _windows_os(monkeypatch):
+    """intake's `os` with name 'nt' (never os.name globally, CLAUDE.md); everything else is the real module."""
+    import types
+
+    fake = types.SimpleNamespace(**{k: getattr(os, k) for k in dir(os) if not k.startswith("__")})
+    fake.name = "nt"
+    monkeypatch.setattr(ionomos.intake, "os", fake)
+    return fake
+
+
+def test_a_path_windows_cannot_open_is_rejected_once_not_retried_for_ever(lab, ledger, monkeypatch):
+    """#139: a FileNotFoundError on a path of 260+ characters was read as transient and retried every 15 s for
+    ever, with no note and no item. It is a rejection: a note when the note's path fits, else an attention item."""
+    from ionomos import attention
+
+    _windows_os(monkeypatch)
+    folder = make_drop(lab["inbox"], "20260920_Isaac_DIA_longrawpaths", ["S_1.raw"])
+    too_long = "C:/" + "x" * 300
+
+    def boom(*_a, **_k):
+        raise FileNotFoundError(2, "No such file or directory", too_long)
+
+    monkeypatch.setattr(ionomos.intake, "_intake", boom)
+    assert intake(folder, lab["cfg"], ledger) == IntakeResult.REJECTED
+    note = lab["inbox"] / f"{folder.name}.REJECTED.txt"
+    assert note.is_file() and "303 characters long; Windows allows 259" in note.read_text(encoding="utf-8")
+    assert folder.is_dir() and (folder / "S_1.raw").is_file()  # left as it is
+    items = [i for i in attention.items(lab["cfg"].log_dir) if i.key == f"intake:{folder.name}"]
+    assert len(items) == 1 and "303 characters" in items[0].message
+
+    # the note's own path is too long as well: the item alone says it
+    other = make_drop(lab["inbox"], "20260921_Isaac_DIA_evenlonger", ["S_1.raw"])
+
+    def no_note(*_a, **_k):
+        raise FileNotFoundError(2, "No such file or directory", str(other) + ".REJECTED.txt")
+
+    monkeypatch.setattr(ionomos.intake, "_reject", no_note)
+    assert intake(other, lab["cfg"], ledger) == IntakeResult.REJECTED
+    assert not (lab["inbox"] / f"{other.name}.REJECTED.txt").exists()
+    items = [i for i in attention.items(lab["cfg"].log_dir) if i.key == f"intake:{other.name}"]
+    assert len(items) == 1 and "no note" not in items[0].message and "characters long" in items[0].message
+
+    # a short missing path is still transient
+    monkeypatch.setattr(ionomos.intake, "_intake", lambda *a, **k: (_ for _ in ()).throw(FileNotFoundError(2, "gone", "C:/x")))
+    assert intake(folder, lab["cfg"], ledger) == IntakeResult.RETRY
+
+
+def test_the_note_gets_a_short_temp_name_when_its_own_is_near_the_limit(lab, monkeypatch):
+    """#139: the temp name '.<note>.tmp' passed 260 characters while the note itself fitted."""
+    _windows_os(monkeypatch)
+    note = lab["inbox"] / ("20260920_Isaac_DIA_" + "r" * 40 + ".REJECTED.txt")
+    monkeypatch.setattr(ionomos.intake, "WINDOWS_MAX_PATH", len(str(note)) + 3)
+    ionomos.intake._write_note(note, "hello")
+    assert note.read_text(encoding="utf-8") == "hello"
+    assert [p.name for p in lab["inbox"].iterdir()] == [note.name]  # no temp file left, under either name

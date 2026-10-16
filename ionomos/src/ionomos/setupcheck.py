@@ -7,7 +7,8 @@ status and what to do about it. Shared by the app's Setup tab and `ionomos init`
     for it in items: it.status in ("ok", "todo", "warn", "fail"), it.fix, it.action
 
 `action` names something the app can do in one click (create_folders,
-find_fragpipe, save, install_task, start_watcher, open_tab:<n>).
+find_fragpipe, save, install_task, start_watcher, open_tab:<tab key>, e.g.
+open_tab:methods; the app also takes the old open_tab:<n>).
 """
 from __future__ import annotations
 
@@ -59,10 +60,22 @@ def run(config_path: Path, data: dict | None = None, probe_watcher: bool = True)
     from ionomos.config import ConfigError, layout_problems, load
 
     config_path = Path(config_path)
-    d = data if data is not None else configio.read_config(config_path)
+    broken = None  # the saved file does not parse (#136): the checks run on the defaults and say so first
+    if data is not None:
+        d = data
+    else:
+        try:
+            d = configio.read_config(config_path)
+        except ConfigError as exc:
+            broken, d = str(exc), configio.defaults()
     p = {k: Path(v) for k, v in d["paths"].items() if v}
     items: list[Item] = []
     add = items.append
+    if broken:
+        add(Item("config", "Settings saved", "fail", broken,
+                 "The file was left as it is. Fix that line in a text editor and press Reload, or Advanced -> "
+                 f"Restore a previous config ({configio.BACKUP_DIR}/ next to it), then Save. The checks below "
+                 "use the default settings until then.", "open_tab:4"))
 
     # 1. folders exist and are writable
     missing, unwritable = [], []
@@ -76,7 +89,7 @@ def run(config_path: Path, data: dict | None = None, probe_watcher: bool = True)
             (missing if why == "does not exist" else unwritable).append(f"{key} ({f}: {why})" if why != "does not exist" else key)
     if unwritable:
         add(Item("folders", "Folders exist and are writable", "fail", "; ".join(unwritable),
-                 "Pick folders this Windows account can write to (tab 1).", "open_tab:1"))
+                 "Pick folders this Windows account can write to (Folders tab).", "open_tab:folders"))
     elif missing:
         add(Item("folders", "Folders exist and are writable", "todo", "missing: " + ", ".join(missing),
                  "One click creates them.", "create_folders"))
@@ -90,7 +103,8 @@ def run(config_path: Path, data: dict | None = None, probe_watcher: bool = True)
     spaces = [f"{k} = {v}" for k, v in d["paths"].items() if " " in str(v)]
     if spaces:
         (probs if os.name == "nt" else warn).append("a path contains a space, which FragPipe can't handle: "
-                                                    + "; ".join(spaces) + ". Pick a location without spaces (tab 1).")
+                                                    + "; ".join(spaces)
+                                                    + ". Pick a location without spaces (Folders tab).")
     if "inbox" in p and "users_root" in p and p["inbox"].exists() and p["users_root"].exists() \
             and _drive(p["inbox"]) != _drive(p["users_root"]):
         warn.append("inbox and users folder are on different drives: every drop is copied instead of moved "
@@ -98,9 +112,11 @@ def run(config_path: Path, data: dict | None = None, probe_watcher: bool = True)
     if any(not str(v).isascii() for v in d["paths"].values()):
         warn.append("non-English characters in a path; some FragPipe tools may not cope")
     if probs:
-        add(Item("layout", "Folder layout is safe", "fail", " ".join(probs), "Fix the paths on tab 1.", "open_tab:1"))
+        add(Item("layout", "Folder layout is safe", "fail", " ".join(probs), "Fix the paths on the Folders tab.",
+                 "open_tab:folders"))
     elif warn:
-        add(Item("layout", "Folder layout is safe", "warn", " ".join(warn), "Recommended: fix on tab 1.", "open_tab:1"))
+        add(Item("layout", "Folder layout is safe", "warn", " ".join(warn), "Recommended: fix on the Folders tab.",
+                 "open_tab:folders"))
     else:
         add(Item("layout", "Folder layout is safe", "ok", "inbox and users folder are separate, same drive"))
 
@@ -114,10 +130,11 @@ def run(config_path: Path, data: dict | None = None, probe_watcher: bool = True)
     skipped = [u for u in folders if u not in users]
     stale = [u for u in (d["users"].get("aliases") or {}) if u not in users]
     if not users:
-        add(Item("users", "Lab members added", "todo", "no user folders yet", "Add each person on tab 2.", "open_tab:2"))
+        add(Item("users", "Lab members added", "todo", "no user folders yet", "Add each person on the Users tab.",
+                 "open_tab:users"))
     elif stale:
         add(Item("users", "Lab members added", "warn", f"{len(users)} user(s); initials set for missing folder(s): "
-                 + ", ".join(stale), "Add or remove those on tab 2.", "open_tab:2"))
+                 + ", ".join(stale), "Add or remove those on the Users tab.", "open_tab:users"))
     else:
         n_alias = sum(1 for u in users if (d["users"].get("aliases") or {}).get(u))
         note = (f"; not treated as people: {', '.join(skipped)} (FragPipe copies, FASTA folders, names with "
@@ -129,10 +146,16 @@ def run(config_path: Path, data: dict | None = None, probe_watcher: bool = True)
     cfg = None
     if not saved:
         add(Item("config", "Settings saved", "todo", f"{config_path} doesn't exist yet", "Press Save.", "save"))
+    elif broken:
+        pass  # said first, above
     else:
         try:
             cfg = load(config_path, check_paths=True)
-            add(Item("config", "Settings saved", "ok", str(config_path)))
+            if cfg.unknown_keys:  # an unknown key (a typo) is ignored, so the lab PC runs with the default (#137)
+                add(Item("config", "Settings saved", "warn", "; ".join(cfg.unknown_keys),
+                         "Fix the key in config.yaml (a text editor), then Reload."))
+            else:
+                add(Item("config", "Settings saved", "ok", str(config_path)))
         except ConfigError as exc:
             add(Item("config", "Settings saved", "fail", str(exc).replace("\n", " "), "Fix it, then Save.", "save"))
             try:
@@ -145,8 +168,8 @@ def run(config_path: Path, data: dict | None = None, probe_watcher: bool = True)
         report = {label: (ok, detail) for ok, label, detail in fragpipe.install_report(cfg)}
         ok, detail = report.get("launcher", (False, "?"))
         if not ok:
-            add(Item("fragpipe", "FragPipe found", "todo", detail, "Find FragPipe (or Browse… on tab 1), then Save.",
-                     "find_fragpipe"))
+            add(Item("fragpipe", "FragPipe found", "todo", detail,
+                     "Find FragPipe (or Browse… on the Folders tab), then Save.", "find_fragpipe"))
         else:
             mf = report.get("MSFragger")
             if mf and mf[0] is not True and "not in a standard" not in str(report.get("install folder", ("", ""))[1]):
@@ -160,8 +183,10 @@ def run(config_path: Path, data: dict | None = None, probe_watcher: bool = True)
             worst = "fail" if any(o is False for o, _ in lines) else ("warn" if any(o is None for o, _ in lines) else "ok")
             status = {"fail": "todo", "warn": "warn", "ok": "ok"}[worst]
             add(Item(f"method:{key}", f"{key}: workflow + FASTA ready", status, "; ".join(t for _, t in lines),
-                     "Tab 3: select the method -> Import workflow… (from a run that worked)." if status != "ok" else "",
-                     "open_tab:3" if status != "ok" else None))
+                     "Methods tab: select the method -> Choose… / Find on this PC… (or Import workflow… from a "
+                     "run that worked)." if status != "ok" else "",
+                     "open_tab:methods" if status != "ok" else None))
+        add(library_item(cfg))
         # 7. disk
         free = health.disk_free_gb(cfg.users_root)
         if free is not None:
@@ -179,8 +204,8 @@ def run(config_path: Path, data: dict | None = None, probe_watcher: bool = True)
             if running and healthy:
                 add(Item("watcher", "Watcher running", "ok", hb))
             elif running:
-                add(Item("watcher", "Watcher running", "warn", f"running but {hb}", "Stop and start it (tab 5).",
-                         "open_tab:5"))
+                add(Item("watcher", "Watcher running", "warn", f"running but {hb}",
+                         "Stop and start it (Run & Test tab).", "open_tab:run"))
             else:
                 add(Item("watcher", "Watcher running", "todo", "not running", "Start watcher.", "start_watcher"))
         # 10. startup task (Windows)
@@ -192,6 +217,46 @@ def run(config_path: Path, data: dict | None = None, probe_watcher: bool = True)
                      "" if st == "installed" else "Install the startup task (replaces the LabWatch one).",
                      None if st == "installed" else "install_task"))
     return items
+
+
+def library_item(cfg) -> Item:
+    """'Workflows and FASTAs: N pinned, flags: …' from the last library scan (library.py, D89). Read-only: the
+    saved catalog is judged again in memory; nothing is scanned and no FASTA is read during a check."""
+    from ionomos import library
+
+    title = "Workflows and FASTAs"
+    try:
+        cat = library.load_catalog(cfg)
+        if not cat.scanned_at and not (cat.workflows or cat.fastas):
+            return Item("library", title, "ok", "not looked for on this PC yet (optional)",
+                        "Methods tab → Find on this PC… lists every workflow and FASTA with what is wrong with "
+                        "it.")
+        ctx = library.context_from(cfg, tools=False)
+        library.judge_catalog(cat, ctx)
+    except Exception as exc:  # noqa: BLE001 - a checklist line must never break the checklist
+        return Item("library", title, "warn", f"the last scan could not be read ({exc})",
+                    "Methods tab → Find on this PC… → Rescan.", "open_tab:methods")
+    pinned = [x for x in (*cat.workflows, *cat.fastas) if x.source == "pinned" and Path(x.path).is_file()]
+    marks = {"error": "✗", "warn": "!"}
+    seen, flags = set(), []
+    for x in sorted(pinned, key=lambda x: x.name.lower()):
+        for f in x.flags:
+            if f.severity in marks and (f.code, x.name) not in seen:
+                seen.add((f.code, x.name))
+                flags.append(f"{marks[f.severity]} {f.code} ({x.name})")
+    errors = any(f.startswith("✗") for f in flags)
+    flags.sort(key=lambda t: not t.startswith("✗"))
+    when = cat.scanned_at.replace("T", " ")[:16]
+    detail = (f"{len(pinned)} pinned, flags: " + ("; ".join(flags[:4]) + (f" … ({len(flags)})" if len(flags) > 4
+                                                                          else "") if flags else "none")
+              + f" (as of the scan of {when})")
+    if not flags:
+        return Item("library", title, "ok", detail)
+    return Item("library", title, "warn", detail,
+                "Methods tab → Find on this PC…: each mark says what to do; Check for updates for newer files."
+                if not errors else ("Methods tab → Find on this PC… → a ✗ file needs another; Review proposals… "
+                                    "picks one."),
+                "open_tab:methods")
 
 
 def summary(items: list[Item]) -> str:

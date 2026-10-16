@@ -889,3 +889,55 @@ def test_simulated_tables_are_unchanged_without_the_new_arguments(tmp_path):
     sizes, genes, planted, t2 = simulate.competition_design()
     assert sizes == {"DMSO": 2, "Probe": 4, "Probe_Comp": 4} and len(genes) == 600
     assert planted["Probe"]["TGT0"] == 3.0 and planted["Probe_Comp"]["TGT0"] == 0.0 and planted["Probe_Comp"]["STICKY0"] == 3.0
+
+
+# ------------------------------------- a TMT reference channel is never compared (D91) --
+
+
+def _tmt_matrix(sizes: dict[str, int]) -> QuantMatrix:
+    m = _matrix(sizes)
+    m.exp = "TMT"
+    return m
+
+
+def test_a_pooled_reference_is_left_out_of_the_comparisons_in_tmt_data():
+    sizes = {"Pool": 2, "DMSO": 6, "Drug": 6}
+    comps, notes = analysis.choose_comparisons(_tmt_matrix(sizes), Settings())
+    assert comps == [("Drug", "DMSO")] and "Not compared: Pool (a pooled reference, not a treatment)" in notes
+    # also when the Analysis tab wrote control: (it always does), and in a competition design
+    assert analysis.choose_comparisons(_tmt_matrix(sizes), settings_from({"control": "DMSO"}))[0] == [
+        ("Drug", "DMSO")]
+    comp = _tmt_matrix({"Pool": 2, "DMSO": 3, "Probe": 3, "Probe_Comp": 3})
+    got = analysis.choose_comparisons(comp, settings_from({"control": "DMSO"}))[0]
+    assert all("Pool" not in pair for pair in got) and ("Probe_Comp", "Probe") in got
+    # a reference named by a person (analysis.roles, which the channel editor writes) in any data
+    dia = _matrix({"Mix": 3, "DMSO": 3, "Drug": 3})
+    assert ("Mix", "DMSO") in analysis.choose_comparisons(dia, Settings())[0]
+    assert analysis.choose_comparisons(dia, settings_from({"roles": {"Mix": "reference"}}))[0] == [("Drug", "DMSO")]
+    # other data keep D61's rule: a pool read from its name alone is compared unless a competition design says no
+    assert ("Pool", "DMSO") in analysis.choose_comparisons(_matrix(sizes), Settings())[0]
+    # no control found: the pool is never the guessed control
+    assert analysis.choose_comparisons(_tmt_matrix({"Pool": 2, "A": 3, "B": 3}), Settings())[0] == [("B", "A")]
+    # the preview shows the same
+    v = roles.preview(sizes, Settings(), {}, exp="TMT")
+    assert v.pairs == [("Drug", "DMSO")] and "Not compared: Pool (a pooled reference, not a treatment)" in v.notes
+    # a reference IRS used and left out of the data is not "not a condition here"
+    plan = roles.infer(["DMSO", "Drug"], settings_from({"roles": {"Pool": "reference"}}))
+    assert not any("Pool" in n for n in plan.notes)
+
+
+def test_the_tmt_maps_reference_channel_takes_the_reference_role(tmp_path):
+    """postprocess.prepare: experiment.yaml tmt: -> analysis.roles {condition on the reference channel: reference},
+    unless a person gave that condition a role."""
+    from ionomos import postprocess
+
+    dest = tmp_path / "exp"
+    dest.mkdir()
+    tmt = {"tag": "TMT-10", "reference_channel": "126",
+           "channels": {"126": "Mix_1_126", "127N": "DMSO_1_127N", "127C": "Drug_1_127C"}}
+    (dest / "experiment.yaml").write_text(yaml.safe_dump({"tmt": tmt}), encoding="utf-8")
+    p = postprocess.prepare(dest, None, "TMT")
+    assert p["overrides"]["roles"] == {"Mix": "reference"} and p["overrides"]["tmt_reference"] == "126"
+    (dest / "experiment.yaml").write_text(yaml.safe_dump({"tmt": tmt, "analysis": {"roles": {"mix": "qc"}}}),
+                                          encoding="utf-8")
+    assert postprocess.prepare(dest, None, "TMT")["overrides"]["roles"] == {"mix": "qc"}

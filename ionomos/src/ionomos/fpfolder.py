@@ -588,13 +588,18 @@ def _nothing_here(sc: Scan, picked: Path) -> Scan:
         _writable(sc)
         _previous(sc)
         return sc
-    table = anytable.find_table(picked)
+    tables = anytable.candidate_tables(picked)
+    table = tables[0][0] if tables else None
     if table is not None:
         sc.dest = sc.workdir = picked
         sc.method = sc.recommended = "table"
         sc.choices = ["table"]
         sc.why = f"{table.name} looks like a protein or results table"
         sc.found.append(("Table", f"{_rel(table, picked)} ({_size(table)})"))
+        if len(tables) > 1:  # the others are not read: say so (#141)
+            sc.found.append(("Also here", ", ".join(_rel(p, picked) for p, _k, _n in tables[1:6])
+                             + (f" and {len(tables) - 6} more" if len(tables) > 6 else "")
+                             + " (name the file to analyse it instead)"))
         sc.findings.append(Finding(
             "ANY_TABLE", "warning", "No FragPipe output: a table is read instead",
             f"No FragPipe output folder was found, but {_rel(table, picked)} looks like a protein or results table. "

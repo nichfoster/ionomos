@@ -5,6 +5,8 @@ Command line.
     ionomos setup    [--config PATH]              setup wizard / control panel (tkinter)
     ionomos run      [--config PATH] [--no-gui]   watcher + intake, forever (worker: Phase 2)
     ionomos check    [--config PATH]              doctor: config, paths, users, GUI, ledger
+    ionomos doctor   [--config PATH]              check everything: setup, FragPipe (not started), the workflow
+                                                   library, health, what needs you (the Setup tab's list)
     ionomos status   [--config PATH] [--all]      jobs from the ledger
     ionomos dry-run  FOLDER [--config PATH]       parse + validate + show the plan; touches nothing
     ionomos names test NAME... [--method M]       how folder / .raw names are read with this config (naming:)
@@ -51,6 +53,15 @@ Command line.
     ionomos notify-test                           send a test message to the channels in config.yaml notify:
     ionomos repair-ledger [--force]               rebuild the job list from the experiment folders
     ionomos update                                git pull + reinstall (only when running from a git checkout)
+    ionomos library  scan | list | show | recommend [--apply] | adopt | check
+                                                   every FragPipe workflow and FASTA on the PC, described, flagged and
+                                                   ranked per method; adopt copies one in (docs/LIBRARY.md, D89)
+    ionomos fasta    search | download | prepare | release | stock-workflows
+                                                   a proteome from UniProt made FragPipe-ready (decoys, contaminants),
+                                                   how old a FASTA is, FragPipe's stock workflows (docs/FASTA.md, D90)
+    ionomos tmt      plan | annotation [--write] | suggest | qc
+                                                   TMT channel maps as FragPipe will read them, a tmt: block to paste,
+                                                   the TMT QC of a finished search (WORKFLOWS.md, D91)
 
 --config defaults to $IONOMOS_CONFIG, then the path last saved by the app (LabWatch-era paths too),
 then ./config.yaml (next to the exe when frozen).
@@ -105,6 +116,45 @@ def _load(args, check_paths: bool) -> Config:
     for w in cfg.warnings:
         log.warning("config: %s", w)
     return cfg
+
+
+def config_named(args) -> bool:
+    """True when the person named the config: --config on the command line, or IONOMOS_CONFIG."""
+    from ionomos.names import config_env
+
+    return bool(getattr(args, "config_given", False) or config_env())
+
+
+def _inside(folder: Path, root: Path | None) -> bool:
+    if root is None:
+        return False
+    try:
+        return Path(folder).resolve().is_relative_to(Path(root).resolve())
+    except OSError:
+        return False
+
+
+def analysis_config(args, dest: Path | None = None, job: bool = False) -> tuple[Config | None, bool, str]:
+    """Whose settings an analysis of `dest` runs with (#134): (config, lab's, a line saying which).
+
+    The lab's config.yaml applies to a job id, to anything when the person named the config (--config,
+    IONOMOS_CONFIG), and to a folder or table inside the lab's users folder. Any other folder or table gets
+    Ionomos' own defaults, so a scratch table on a PC that also holds a lab install is not analysed with the
+    lab's settings, and nothing about it is posted to the lab's attention list. Only the lab's own experiments
+    (a job id, a folder under users_root) raise attention items."""
+    cfg = None
+    try:
+        cfg = load(args.config, check_paths=False)
+    except ConfigError:
+        pass  # analysing a folder works without a lab config (defaults)
+    if cfg is None:
+        return None, False, "settings: Ionomos' defaults (no config.yaml)"
+    if job or (dest is not None and _inside(dest, cfg.users_root)):
+        return cfg, True, f"settings: {cfg.config_path} (a lab experiment)"
+    if config_named(args):
+        return cfg, False, f"settings: {cfg.config_path}"
+    return None, False, (f"settings: Ionomos' defaults ({cfg.config_path} is this PC's lab config, not used: "
+                         "--config applies it)")
 
 
 # ---------------------------------------------------------------- commands --
@@ -251,7 +301,7 @@ def cmd_run(args) -> int:
         return intake(folder, live.get(), intake_ledger, resolver)
 
     w = Watcher(cfg.inbox, on_stable, cfg.poll_seconds, cfg.stable_seconds, cfg.min_raw_files, heartbeat=hb,
-                group_loose=cfg.group_loose_files)
+                group_loose=cfg.group_loose_files, log_dir=cfg.log_dir)
 
     def shutdown(*_):
         if not stop.is_set():
@@ -346,6 +396,8 @@ def cmd_check(args) -> int:
         row(False, "config", str(exc))
         return 1
     row(True, "config parses")
+    for w in cfg.warnings:  # an unknown key (a typo), a file not saved as UTF-8 (#137, D86)
+        row(None, "config", w)
     for name in ("inbox", "users_root", "workflow_dir", "fasta_dir", "log_dir"):
         p = getattr(cfg, name)
         row(p.is_dir(), f"paths.{name}", str(p))
@@ -411,6 +463,18 @@ def cmd_check(args) -> int:
     return 0 if ok_all else 1
 
 
+def cmd_doctor(args) -> int:
+    """Check everything (checks.py, docs/UI.md S3.1): setup, FragPipe without starting it, the workflow library,
+    health and what needs a person, as the app's Setup tab shows it. 1 when anything is broken (✗)."""
+    from ionomos import checks
+
+    print(f"ionomos {__version__}  check everything  config: {args.config}\n")
+    rows = checks.everything(Path(args.config))
+    print(checks.text(rows))
+    print("\n" + checks.summary(rows))
+    return 1 if any(r.status == "fail" for r in rows) else 0
+
+
 def cmd_preflight(args) -> int:
     """Everything about FragPipe that can be checked without a search (preflight.py, D59)."""
     from ionomos import preflight
@@ -473,8 +537,9 @@ def cmd_dry_run(args) -> int:
         p = plan(folder, cfg, ledger)
     except IntakeError as exc:
         fixable = exc.kind.value in ("user", "method", "raws", "layout")
-        print(f"WOULD REJECT: {folder.name}\n  reason: {exc}\n  kind  : {exc.kind.value}"
-              + ("  (the resolver window would open for this)" if fixable else ""))
+        window = ("  (the resolver window would open for this)" if cfg.gui_enabled  # only when it is on (#143)
+                  else "  (gui.enabled is off: the watcher would reject it with a note)")
+        print(f"WOULD REJECT: {folder.name}\n  reason: {exc}\n  kind  : {exc.kind.value}" + (window if fixable else ""))
         return 1
     f = p.folder
     print(f"WOULD ACCEPT: {f.original}")
@@ -605,7 +670,12 @@ def cmd_init(args) -> int:
     cfg_path = Path(args.config if args.config_given else Path(root) / "config.yaml")
     if cfg_path.is_file() and not args.force:
         print(f"{cfg_path} already exists; keeping it (use --force to start from defaults).")
-        data = configio.read_config(cfg_path)
+        try:
+            data = configio.read_config(cfg_path)
+        except ConfigError as exc:
+            print(f"{exc}\nFix that line, or `ionomos init --force` to start from defaults (a backup is kept).",
+                  file=sys.stderr)
+            return 1
     else:
         data = configio.defaults(root, users)
         found = fragpipe.detect_launcher()
@@ -637,11 +707,9 @@ def cmd_analyze(args) -> int:
     """Re-run the downstream analysis for a job (by id) or any experiment / FragPipe folder."""
     from ionomos import postprocess
 
-    cfg = None
-    try:
-        cfg = load(args.config, check_paths=False)
-    except ConfigError:
-        pass  # analysing a folder works without a lab config (defaults)
+    target = args.target
+    cfg, lab_experiment, whose = analysis_config(args, Path(target) if not target.isdigit() else None,
+                                                  job=target.isdigit())
     if args.method and args.method not in ANALYZE_METHODS:
         # a method of the lab's own: postprocess.prepare reads it as its kind (like: / engine:, D54)
         own = list(cfg.methods) if cfg is not None else []
@@ -650,7 +718,6 @@ def cmd_analyze(args) -> int:
             print(f"--method {args.method!r} is not one of {', '.join([*ANALYZE_METHODS, *own])}", file=sys.stderr)
             return 2
         args.method = key
-    target = args.target
     if target.isdigit():
         if cfg is None or not cfg.database.is_file():
             print("no job ledger here; give a folder path instead", file=sys.stderr)
@@ -673,6 +740,7 @@ def cmd_analyze(args) -> int:
     if not dest.is_dir():
         print(f"not a folder or table: {dest}", file=sys.stderr)
         return 2
+    print(whose)
     extra = {}
     if args.control:
         extra["control"] = args.control
@@ -692,30 +760,68 @@ def cmd_analyze(args) -> int:
                                      progress=(lambda m: print(f"  … {m}", flush=True)) if not args.quiet else None,
                                      table=table, strict=bool(args.method))
     _print_outcome(out)
-    if cfg is not None:
+    if cfg is not None and lab_experiment:  # the lab's attention list is for the lab's experiments (#134)
         job_id = int(target) if target.isdigit() else None
         postprocess.record_issues(cfg.log_dir, dest, out, job_id)
     if out.report:
         print(f"report: {out.report}")
         if args.open:
             _open_report(out.report)
-    return 0 if out.report else 1
+    # a report that says the analysis failed (an unusable table) is still exit 1, so a script can tell (#143)
+    return 0 if out.report and out.summary.get("state") != "failed" else 1
 
 
 def cmd_check_folder(args) -> int:
     """What a folder of FragPipe output holds and what is wrong with it, before analysing it (fpfolder.py, D80)."""
     from ionomos import postprocess
 
-    cfg = None
-    try:
-        cfg = load(args.config, check_paths=False)
-    except ConfigError:
-        pass
-    sc = postprocess.check_folder(Path(args.folder), cfg, args.method)
+    picked = Path(args.folder)
+    if picked.is_file() and _is_loose_table(picked):  # a table of its own, not a FragPipe file in its folder (#141)
+        return _check_table(picked)
+    cfg, _lab, _whose = analysis_config(args, picked)
+    sc = postprocess.check_folder(picked, cfg, args.method)
     print(sc.text())
     if not sc.blocking:
         print(f"\nready: ionomos analyze \"{sc.dest}\"" + (f" --method {sc.method}" if args.method else ""))
     return 1 if sc.blocking else 0
+
+
+def _is_loose_table(path: Path) -> bool:
+    """A protein / results table of its own (check and analyse the file), as against one of FragPipe's own
+    tables (combined_protein.tsv, psm.tsv), which stands for the output folder around it."""
+    from ionomos.downstream import anytable
+
+    name = path.name.lower()
+    return (path.suffix.lower() in anytable.TABLE_SUFFIXES and name not in anytable.SKIP_NAMES
+            and not name.startswith("combined_"))
+
+
+def _check_table(table: Path) -> int:
+    """`check-folder` on a table file: what the file holds and the command that analyses that file, with its
+    results folder (<stem>_ionomos/results, where `analyze` puts them)."""
+    from ionomos.downstream import anytable
+
+    print(f"Table: {table}")
+    try:
+        d = anytable.describe(table)
+    except Exception as exc:  # noqa: BLE001 - anytable raises its own and the csv module's errors
+        print(f"  not readable as a table: {exc}")
+        return 1
+    kind, rows = d["kind"], d["rows"]
+    if kind == "differential":
+        comps = ", ".join(d["comparisons"])
+        print(f"  a results table: {rows} rows, comparisons: {comps}")
+    elif kind == "quantities":
+        n, how = len(d["samples"]), d["found_by"]
+        print(f"  a table of quantities: {rows} rows, {n} samples ({how})")
+    else:
+        print(f"  {rows} rows, but no sample columns and no fold-change / p-value columns Ionomos recognises")
+        return 1
+    results = table.parent / f"{table.stem}_ionomos" / "results"
+    quote = chr(34)
+    print(f"Results go to: {results}")
+    print(f"ready: ionomos analyze {quote}{table}{quote}")
+    return 0
 
 
 _EXPORT_SIZES = ("slide169", "slide43", "half", "col1", "col2")  # charts.SIZES without "custom" (a test compares them)
@@ -830,7 +936,9 @@ def _print_outcome(out) -> None:
     print(f"method: {out.method or 'unknown'}")
     for c in out.summary.get("comparisons", []):
         conf = {"low": "  [LOW CONFIDENCE]", "none": "  [FOLD CHANGE ONLY]"}.get(c.get("confidence"), "")
-        print(f"  {c['name']}: {c['up']} up, {c['down']} down of {c['tested']} tested  ({c['table']}){conf}")
+        counted = (f"of {c['tested']} tested" if c.get("tested") or c.get("confidence") != "none"
+                   else "by fold change alone (no replicates to test)")  # not "of 0 tested" (#143)
+        print(f"  {c['name']}: {c['up']} up, {c['down']} down {counted}  ({c['table']}){conf}")
         q = out.summary.get("quality") or {}
         more = []
         if (q.get("only_in_one_condition") or {}).get(c["name"]):
@@ -1088,8 +1196,10 @@ def cmd_cancel(args) -> int:
     from ionomos.worker import request_cancel
 
     cfg = _load(args, check_paths=False)
-    print(request_cancel(Ledger(cfg.database), args.job_id))
-    return 0
+    msg = request_cancel(Ledger(cfg.database), args.job_id)
+    ok = not msg.startswith(("no job", "could not"))  # a script can tell (#143), like retry
+    print(msg, file=sys.stdout if ok else sys.stderr)
+    return 0 if ok else 1
 
 
 def cmd_pause(args) -> int:
@@ -1126,7 +1236,7 @@ def cmd_repair_ledger(args) -> int:
     if state == "ok" and not args.force:
         print("ledger is fine; nothing to do (use --force to rebuild anyway)")
         return 0
-    moved, n = ledger_mod.rebuild_from_status_files(cfg.database, cfg.users_root)
+    moved, n = ledger_mod.rebuild_from_status_files(cfg.database, cfg.users_root, healthy=state == "ok")
     print(f"ledger rebuilt from the experiment folders: {n} job(s)" + (f"; old file kept as {moved}" if moved else ""))
     return 0
 
@@ -1169,6 +1279,8 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--no-gui", action="store_true", help="never open the resolver window")
     r.set_defaults(fn=cmd_run)
     sub.add_parser("check", help="verify config, folders, users, GUI").set_defaults(fn=cmd_check)
+    sub.add_parser("doctor", help="check everything: setup, FragPipe (no start), the workflow library, health, "
+                                  "what needs you").set_defaults(fn=cmd_doctor)
     pf = sub.add_parser("preflight", help="check FragPipe without a search: starts it for --help and a dry run "
                                           "of each method")
     pf.add_argument("--method", action="append", help="only this method (repeatable)")
@@ -1208,6 +1320,9 @@ def main(argv: list[str] | None = None) -> int:
     from ionomos import bundle
 
     bundle.add_parser(sub).set_defaults(fn=cmd_bundle)
+    from ionomos import library
+
+    library.add_parser(sub).set_defaults(fn=library.run_cli)  # `ionomos library …` (D89)
     sp = sub.add_parser("stop", help="gracefully stop the running watcher (re-queues a running search)")
     sp.add_argument("--wait", type=float, default=60, help="seconds to wait before forcing it (default 60)")
     sp.add_argument("--remember", action="store_true", help="start it again when the app next opens (updates)")
@@ -1233,7 +1348,9 @@ def main(argv: list[str] | None = None) -> int:
     az.add_argument("--de-type", dest="de_type", choices=["control", "all", "others"],
                     help="each condition vs the control | every pair | each vs the rest")
     az.add_argument("--imputation", choices=["auto", "none", "perseus", "min", "zero", "mindet", "minprob", "knn"])
-    az.add_argument("--normalize", choices=["median", "gn", "none"])
+    az.add_argument("--normalize", choices=["auto", "median", "gn", "ratio", "none"],
+                    help="auto (median, or ratio when median centring shifts the conditions against each other), "
+                         "median, gn, ratio, or none: every value analysis.normalize takes")
     az.add_argument("--filter-condition-pct", dest="filter_condition_pct", type=float,
                     help="keep features measured in >= this %% of one condition (default 50)")
     az.add_argument("--filter-global-pct", dest="filter_global_pct", type=float)
@@ -1404,6 +1521,12 @@ def main(argv: list[str] | None = None) -> int:
     from ionomos import testbed
 
     testbed.add_parser(sub).set_defaults(fn=cmd_testbed)
+    from ionomos import fastasource
+
+    fastasource.add_parser(sub)  # `ionomos fasta …`; sets its own fn (fastasource.run_cli)
+    from ionomos import tmtkit
+
+    tmtkit.add_parser(sub)  # `ionomos tmt plan | annotation | suggest | qc` (D91); sets its own fn (tmtkit.main)
 
     argv = sys.argv[1:] if argv is None else argv
     if "--version" in argv[:2]:

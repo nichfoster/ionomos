@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import os
 import random
+import re
 import shutil
 import stat
 import time
@@ -48,6 +49,7 @@ def _iso(prefix: str, reps=(1, 2, 3), fracs=(1, 2, 3)) -> list[str]:
 
 
 _TMT10 = ("126", "127N", "127C", "128N", "128C", "129N", "129C", "130N", "130C", "131N")
+_TMT16 = (*_TMT10, "131C", "132N", "132C", "133N", "133C", "134N")
 
 # name -> (folder name, files at top level, files in raw/, files in plex folders, other files, experiment.yaml
 # dict|None, the fake FragPipe's fault mode for it, what it shows)
@@ -148,6 +150,51 @@ SAMPLES: dict[str, dict] = {
         raws=_iso("EJQ_hang", reps=(1, 2), fracs=(1,)), mode="hang,child",
         shows="the fake FragPipe hangs in MSFragger -> killed with everything it started at the time limit",
     ),
+    # D91: TMT in depth (tmtkit.py, downstream/tmtqc.py)
+    "tmt16_na": dict(
+        folder="20260129_Aman_TMT_KL6162-TMTpro",
+        raws=[f"KL6162_TMT_F{i}.raw" for i in range(1, 4)],
+        yaml={"workflow": "TMT16.workflow", "tmt": {"tag": "TMT-16", "channels": {
+            ch: (f"{c}_1_{ch}" if c else "NA") for ch, c in zip(_TMT16, (
+                "DMSO", "DMSO", "DMSO", "DMSO", "Drug", "Drug", "Drug", "Drug", "Drug2", "Drug2", "Drug2",
+                "", "", "", "", ""), strict=True)}}},
+        shows="TMTpro 16 (TMT16.workflow), 11 channels named and 5 NA -> queued, annotation.txt with NA lines",
+    ),
+    "tmt_tag_mismatch": dict(
+        folder="20260130_Aman_TMT_KL6163-wrong-tag",
+        raws=["KL6163_TMT_F1.raw", "KL6163_TMT_F2.raw"],
+        yaml={"tmt": {"tag": "TMT-16", "channels": {ch: (f"{c}_1_{ch}" if c else "NA") for ch, c in zip(_TMT16, (
+            "DMSO", "DMSO", "DMSO", "Drug", "Drug", "Drug", "", "", "", "", "", "", "", "", "", ""), strict=True)}}},
+        shows="experiment.yaml says TMT-16 but the method's workflow is TMT-10 -> failed before the search, saying "
+              "which to change",
+    ),
+    "tmt_own_annotation": dict(
+        folder="20260131_Aman_TMT_KL6164-own-map",
+        raws=["KL6164_TMT_F1.raw", "KL6164_TMT_F2.raw"],
+        texts={"annotation.txt": "".join(f"{ch} {c}_1_{ch}\n" if c else f"{ch} NA\n" for ch, c in zip(_TMT10, (
+            "Veh", "Veh", "Veh", "Cmpd", "Cmpd", "Cmpd", "", "", "", ""), strict=True))},
+        shows="a TMT drop with the user's own annotation.txt and no tmt: block -> read (never written), FragPipe "
+              "uses it, the report knows Veh / Cmpd",
+    ),
+    "tmt_bridge": dict(
+        folder="20260201_Aman_TMT_KL6165-bridge",
+        plex_subs={"plexA": ["KL6165A_TMT_F1.raw", "KL6165A_TMT_F2.raw"],
+                   "plexB": ["KL6165B_TMT_F1.raw", "KL6165B_TMT_F2.raw"]},
+        yaml={"tmt": {"tag": "TMT-10", "reference_channel": "126", "plexes": {
+            p: {"channels": {ch: (f"{c}_{k}_{ch}" if c else "NA") for ch, c in zip(_TMT10, (
+                "Pool", "DMSO", "DMSO", "DMSO", "Drug", "Drug", "Drug", "", "", ""), strict=True)}}
+            for k, p in ((1, "plexA"), (2, "plexB"))}}},
+        shows="two TMT plexes in their own folders with a pooled bridge on 126 in each -> IRS on the bridge",
+    ),
+    "tmt_poor_label": dict(
+        folder="20260202_Aman_TMT_KL6166-poor-labelling",
+        raws=["KL6166_TMT_F1.raw", "KL6166_TMT_F2.raw"],
+        yaml={"tmt": {"tag": "TMT-10", "channels": {ch: (f"{c}_1_{ch}" if c else "NA") for ch, c in zip(_TMT10, (
+            "DMSO", "DMSO", "DMSO", "Drug", "Drug", "Drug", "", "", "", ""), strict=True)}}},
+        mode="tmt-poor-labelling",
+        shows="the fake FragPipe's psm.tsv has 20 % of N-termini unlabelled -> done, the TMT QC warns "
+              "TMT_LOW_LABELLING",
+    ),
 }
 
 
@@ -171,6 +218,9 @@ def build_sample(dest_parent: Path, name: str, size: int = 4096) -> Path:
             _write_raw(d / sub / f, size)
     for f in spec.get("others", []):
         (d / f).write_text("just a note\n", encoding="utf-8")
+    for f, text in (spec.get("texts") or {}).items():  # files with their own content (a user's annotation.txt)
+        (d / f).parent.mkdir(parents=True, exist_ok=True)
+        (d / f).write_text(text, encoding="utf-8")
     if spec.get("mode"):
         from ionomos.names import FAKE_FP_MODE_FILE
 
@@ -191,11 +241,13 @@ def fake_fragpipe(argv: list[str]) -> int:
 
 
 def _fake_results(wd: Path, rows: list[list[str]], workflow_name: str, annotations: dict | None = None,
-                  label: str = "TMT-10") -> None:
+                  label: str = "TMT-10", props: dict | None = None, modes: set[str] | None = None) -> None:
     """Realistic result tables with planted hits (ionomos.downstream.simulate), so reports have content.
 
     rows: the manifest as FragPipe read it (experiment names already FragPipe's). annotations (TMT):
-    {plex: its annotation file or None}; a plex without one gets FragPipe's own names, <plex>_<channel>."""
+    {plex: its annotation file or None}; a plex without one gets FragPipe's own names, <plex>_<channel>.
+    props: the workflow's settings (TMT: phospho adds the single-site table); modes: the fake's fault modes (TMT:
+    tmt-poor-labelling, tmt-low-purity, tmt-empty-channel change the psm.tsv files)."""
     import zlib
 
     from ionomos.downstream import simulate
@@ -209,17 +261,19 @@ def _fake_results(wd: Path, rows: list[list[str]], workflow_name: str, annotatio
         simulate.dia_pg_matrix(out / "report.pg_matrix.tsv", [(r[0], r[1]) for r in rows], seed)
         fake_diann_stats(out / "report.stats.tsv", [r[0] for r in rows])
     elif annotations is not None or "tmt" in workflow_name.lower():
-        names: list[str] = []
+        plexes: dict[str, list[tuple[str, str]]] = {}
         for exp in dict.fromkeys(r[1] for r in rows):
             ann = (annotations or {}).get(exp)
             if ann is not None and Path(ann).is_file():
                 pairs = [ln.split() for ln in Path(ann).read_text(encoding="utf-8").splitlines() if ln.strip()]
-                names += [p[1] for p in pairs if len(p) == 2 and p[1].lower() != "na"]
+                plexes[exp] = [(p[0], p[1]) for p in pairs if len(p) == 2]
             else:
-                names += [f"{exp}_{ch}" for ch in TMT_CHANNELS.get(label, TMT_CHANNELS["TMT-10"])]
-        simulate.tmt_abundance(wd / "tmt-report" / "abundance_gene_MD.tsv", names, seed)
+                plexes[exp] = [(ch, f"{exp}_{ch}") for ch in TMT_CHANNELS.get(label, TMT_CHANNELS["TMT-10"])]
+        names = [n for pairs in plexes.values() for _c, n in pairs if n.lower() != "na"]
+        fake_tmt_report(wd / "tmt-report", names, seed, props)
+        exp_of = {f"{r[1]}_{r[2]}": r[1] for r in rows}
         for name, raws in _groups(rows).items():
-            fake_psm(wd / name / "psm.tsv", raws)
+            fake_tmt_psm(wd / name / "psm.tsv", raws, plexes[exp_of[name]], label, modes)
     else:
         exps: dict[str, list[int]] = {}
         for r in rows:
@@ -302,6 +356,121 @@ def fake_psm(path: Path, raws: list[str], n_psms: int = 240) -> None:
                 f"P{k % 90:05d}", f"PROT{k % 90}_HUMAN", f"GENE{k % 90}")))
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+TMT_FAKE_UNLABELLED = 0.02     # share of PSMs whose N-terminus carries no TMT (mode tmt-poor-labelling: 0.2)
+TMT_FAKE_PURITY = 0.85         # median precursor purity (mode tmt-low-purity: 0.55)
+
+
+def fake_tmt_psm(path: Path, raws: list[str], channels: list[tuple[str, str]], label: str = "TMT-10",
+                 modes: set[str] | None = None, n_psms: int = 240) -> None:
+    """A TMT psm.tsv as FragPipe 24 writes it with IonQuant's isobaric extraction: fake_psm's columns, Purity after
+    Assigned Modifications (TMT on every K and on most peptide N-termini, carbamidomethyl C, oxidised M, a few
+    acetylated protein N-termini), and one "Intensity <sample>" column per channel of the label type in the kit's
+    order, "Intensity NA" for unused ones (TMT-Integrator's PsmPreProcessor.findChannels reads that block). The
+    numbers are invented: a loading factor per channel, a few proteins changed in the non-control conditions, the
+    reference near the median. modes: tmt-poor-labelling, tmt-low-purity, tmt-empty-channel (the second named
+    channel has almost no signal)."""
+    import zlib
+
+    from ionomos.tmtkit import LABEL_TYPES, condition_of, is_na, is_reference_name, label_type
+
+    modes = modes or set()
+    fake_psm(path, raws, n_psms)
+    lt = label_type(label) or LABEL_TYPES["TMT-10"]
+    mass = f"{lt.mass:.4f}"
+    by_ch = dict(channels)
+    cols = [(ch, by_ch.get(ch, "NA")) for ch in lt.channels]
+    rng = random.Random(zlib.crc32(str(Path(path).parent.name).encode()))
+    load = [2 ** rng.gauss(0, 0.12) for _ in cols]
+    named = [k for k, (_c, n) in enumerate(cols) if not is_na(n)]
+    empty = named[1] if "tmt-empty-channel" in modes and len(named) > 1 else None
+    conds = [condition_of(n) if not is_na(n) else "" for _c, n in cols]
+    ref = [not is_na(n) and is_reference_name(n) for _c, n in cols]
+    control = next((c for c in conds if c and c.lower() in ("dmso", "vehicle", "veh", "ctrl", "control")), None)
+    unlabelled = 0.2 if "tmt-poor-labelling" in modes else TMT_FAKE_UNLABELLED
+    purity_mu = 0.55 if "tmt-low-purity" in modes else TMT_FAKE_PURITY
+    lines = Path(path).read_text(encoding="utf-8").splitlines()
+    head = lines[0].split("\t")
+    at = head.index("Assigned Modifications") + 1
+    out_head = head[:at] + ["Purity"] + head[at:] + [f"Intensity {n}" for _c, n in cols]
+    out = ["\t".join(out_head)]
+    ipep, imod, iint, iprot = head.index("Peptide"), head.index("Modified Peptide"), head.index("Intensity"), \
+        head.index("Protein")
+    for ln in lines[1:]:
+        row = ln.split("\t")
+        pep = row[ipep]
+        mods, shown = [], ""
+        acetyl = rng.random() < 0.04
+        if acetyl:
+            mods.append("N-term(42.0106)")
+            shown = "n[43]"
+        elif rng.random() >= unlabelled:
+            mods.append(f"N-term({mass})")
+            shown = f"n[{round(lt.mass + 1.0078)}]"
+        for i, aa in enumerate(pep, 1):
+            if aa == "K":
+                mods.append(f"{i}K({mass})")
+            elif aa == "C":
+                mods.append(f"{i}C(57.0215)")
+            elif aa == "M" and rng.random() < 0.3:
+                mods.append(f"{i}M(15.9949)")
+        row[imod] = (shown + pep) if mods else ""
+        row[at - 1] = ", ".join(mods)
+        purity = max(0.15, min(1.0, rng.gauss(purity_mu, 0.12)))
+        k = int(re.sub(r"\D", "", row[iprot].split("|")[1]) or 0) if "|" in row[iprot] else 0
+        eff = 1.4 if k % 9 == 0 else (-1.2 if k % 11 == 0 else 0.0)
+        base = float(row[iint] or 1e6) / 12
+        vals = []
+        for j, (_c, _n) in enumerate(cols):
+            if rng.random() < 0.02:
+                vals.append("0")
+                continue
+            change = eff if conds[j] and conds[j] != control and not ref[j] else (eff / 2 if ref[j] else 0.0)
+            v = base * load[j] * 2 ** (change + rng.gauss(0, 0.2))
+            if j == empty:
+                v = 0 if rng.random() < 0.7 else v * 0.005
+            vals.append(f"{v:.1f}")
+        out.append("\t".join(row[:at] + [f"{purity:.3f}"] + row[at:] + vals))
+    Path(path).write_text("\n".join(out) + "\n", encoding="utf-8")
+
+
+def fake_tmt_report(out: Path, names: list[str], seed: int, props: dict | None = None) -> None:
+    """TMT-Integrator's tmt-report/ as FragPipe 24's stock workflows leave it with groupby -1 (every level):
+    abundance_ and ratio_ tables for gene and protein (MD, and gene also None: the normalisation is FragPipe's
+    tmtintegrator.prot_norm), the peptide table, and the single-site table when the workflow searches phospho
+    (79.96633 STY as a variable modification). Column layouts from FragPipe's output guide; the numbers are
+    simulate.tmt_abundance's (log2, ratio-like) and the ratio tables repeat them."""
+    from ionomos.downstream import simulate
+
+    out = Path(out)
+    simulate.tmt_abundance(out / "abundance_gene_MD.tsv", names, seed)
+    head, *rows = [ln.split("\t") for ln in (out / "abundance_gene_MD.tsv").read_text(encoding="utf-8").splitlines()]
+    rng = random.Random(seed)
+    k0 = head.index("ReferenceIntensity") + 1
+    offs = [rng.gauss(0, 0.35) for _ in head[k0:]]
+
+    def write(name: str, h: list[str], body: list[list[str]]) -> None:
+        (out / name).write_text("\n".join("\t".join(r) for r in [h, *body]) + "\n", encoding="utf-8")
+
+    write("ratio_gene_MD.tsv", head, rows)
+    write("abundance_gene_None.tsv", head, [r[:k0] + [f"{float(v) + o:.4f}" if v else "" for v, o in
+                                                      zip(r[k0:], offs, strict=True)] for r in rows])
+    prot_head = ["Index", "NumberPSM", "Gene", "MaxPepProb", "ReferenceIntensity", *head[k0:]]
+    prot = [[f"sp|{r[2]}|{r[0]}_HUMAN", r[1], r[0], r[3], r[4], *r[k0:]] for r in rows]
+    write("abundance_protein_MD.tsv", prot_head, prot)
+    write("ratio_protein_MD.tsv", prot_head, prot)
+    pep_head = ["Index", "Gene", "ProteinID", "Peptide", "MaxPepProb", "ReferenceIntensity", *head[k0:]]
+    aa = "ACDEFGHILMNPQRSTVWY"
+    pep = [[f"sp|{r[2]}|{r[0]}_HUMAN_{10 * j + 1}_{10 * j + 9}", r[0], r[2],
+            "".join(rng.choice(aa) for _ in range(8)) + "K", r[3], r[4], *r[k0:]] for r in rows[:200] for j in (0, 1)]
+    write("abundance_peptide_MD.tsv", pep_head, pep)
+    var = (props or {}).get("msfragger.table.var-mods", "")
+    if re.search(r"79\.966\d*,\s*STY,\s*true", var) or "phospho" in (props or {}).get("tmtintegrator.mod_tag", "").lower():
+        site_head = ["Index", "Gene", "Peptide", "SequenceWindow", "MaxPepProb", "ReferenceIntensity", *head[k0:]]
+        sites = [[f"{r[2]}_{rng.choice('STY')}{rng.randint(5, 400)}", r[0], "".join(rng.choice(aa) for _ in range(9)),
+                  "".join(rng.choice(aa) for _ in range(15)), r[3], r[4], *r[k0:]] for r in rows]
+        write("abundance_single-site_MD.tsv", site_head, sites)
 
 
 def fake_diann(argv: list[str]) -> int:
@@ -766,11 +935,17 @@ def write_fake_launcher(folder: Path) -> Path:
     return exe
 
 
-def workflow_text(kind: str) -> str:
+def workflow_text(kind: str, label: str = "TMT-10") -> str:
     """A small .workflow for the testbed: the switches Ionomos and the fake FragPipe read, with the values of
-    FragPipe 24.0's stock chemprot-ABPP-isoDTB / TMT10-MS3 / DIA_SpecLib_Quant workflows (a real one has ~400
-    keys). The isoDTB one has match-between-runs on, as the lab's SOP asks."""
+    FragPipe 24.0's stock chemprot-ABPP-isoDTB / TMT10-MS3 / TMT16 / DIA_SpecLib_Quant workflows (a real one has ~400
+    keys). The isoDTB one has match-between-runs on, as the lab's SOP asks. label: a TMT workflow's label type
+    (TMT-16 / TMT-18 get TMTpro's mass and MS2 quantification, as the stock TMT16 workflow)."""
     tmt, dia = kind == "TMT", kind == "DIA"
+    from ionomos.tmtkit import TMT_MASS, label_type
+
+    lt = label_type(label) if tmt else None
+    mass = f"{lt.mass:.5f}" if lt else f"{TMT_MASS:.5f}"
+    mass = {"229.16290": "229.16293", "304.20710": "304.20715"}.get(mass, mass)  # the stock workflows' digits
     keys = {
         "crystalc.run-crystalc": "false",
         "database.decoy-tag": "rev_",
@@ -801,7 +976,7 @@ def workflow_text(kind: str) -> str:
         "speclibgen.run-speclibgen": str(dia).lower(),
         "tab-run.delete_temp_files": "false",
         "tmtintegrator.add_Ref": "1" if tmt else "-1",
-        "tmtintegrator.channel_num": "TMT-10" if tmt else "TMT-6",
+        "tmtintegrator.channel_num": (lt.name if lt else "TMT-10") if tmt else "TMT-6",
         "tmtintegrator.extraction_tool": "IonQuant",
         "tmtintegrator.ref_tag": "Bridge",
         "tmtintegrator.run-tmtintegrator": str(tmt).lower(),
@@ -814,8 +989,18 @@ def workflow_text(kind: str) -> str:
         "workflow.misc.sdrf-type": "Default",
         "workflow.saved-with-ver": "24.0-build27",
     }
-    return (f"# Workflow: {kind} (Ionomos testbed)\n\n" + "".join(f"{k}={v}\n" for k, v in keys.items())
-            + "database.db-path=FAKE.fas\n")
+    if tmt:  # the stock TMT workflows' modifications and TMT-Integrator settings (TMT10-MS3 / TMT16, FragPipe 24.0)
+        keys.update({
+            "msfragger.table.fix-mods": f"57.02146,C (cysteine),true,-1; {mass},K (lysine),true,-1",
+            "msfragger.table.var-mods": f"15.9949,M,true,3; 42.0106,[^,true,1; 79.96633,STY,false,3; "
+                                        f"{mass},n^,true,1; 229.16293,S,false,1",
+            "tmtintegrator.groupby": "-1", "tmtintegrator.min_pep_prob": "0.9", "tmtintegrator.min_purity": "0.5",
+            "tmtintegrator.min_site_prob": "-1", "tmtintegrator.mod_tag": "none", "tmtintegrator.ms1_int": "true",
+            "tmtintegrator.prot_norm": "1", "tmtintegrator.quant_level": "2" if lt and lt.reagent == "TMTpro" else "3",
+        })
+        keys = dict(sorted(keys.items()))
+    return (f"# Workflow: {kind}{' ' + lt.name if lt and lt.name != 'TMT-10' else ''} (Ionomos testbed)\n\n"
+            + "".join(f"{k}={v}\n" for k, v in keys.items()) + "database.db-path=FAKE.fas\n")
 
 
 def init(root: Path, slow_defaults: bool = False) -> Path:
@@ -826,10 +1011,11 @@ def init(root: Path, slow_defaults: bool = False) -> Path:
         d.mkdir(parents=True, exist_ok=True)
     for u in USERS:
         (general / u).mkdir(parents=True, exist_ok=True)
-    for wf, kind in (("isoDTB.workflow", "isoDTB"), ("TMT10-MS3.workflow", "TMT"), ("DIA.workflow", "DIA")):
+    for wf, kind, label in (("isoDTB.workflow", "isoDTB", ""), ("TMT10-MS3.workflow", "TMT", "TMT-10"),
+                            ("TMT16.workflow", "TMT", "TMT-16"), ("DIA.workflow", "DIA", "")):
         p = auto / "workflows" / wf
         if not p.exists():
-            p.write_text(workflow_text(kind), encoding="utf-8", newline="\n")
+            p.write_text(workflow_text(kind, label or "TMT-10"), encoding="utf-8", newline="\n")
     (auto / "fasta" / "human_reviewed_decoys.fas").write_text(
         ">sp|FAKE1|FAKE1_HUMAN fake protein 1\nMKVLAAGIVGLLLAC\n>sp|FAKE2|FAKE2_HUMAN fake protein 2\nMSTNPKPQRKTKRNT\n"
         ">rev_sp|FAKE1|FAKE1_HUMAN\nCALLLGVIGAALVKM\n>rev_sp|FAKE2|FAKE2_HUMAN\nTNRKTKRQPKPNTSM\n", encoding="utf-8")
@@ -984,11 +1170,33 @@ def add_parser(sub):
     return p
 
 
+def path_room_note(root: Path) -> str | None:
+    """A note when Windows long paths are off and `root` is so deep that the testbed's own samples would pass
+    260 characters inside their experiment folders (#138); None otherwise (and off Windows)."""
+    from ionomos.preflight import _long_paths_enabled
+    from ionomos.stress import BELOW
+
+    if os.name != "nt" or _long_paths_enabled() is not False:
+        return None
+    longest = max(len(spec["folder"]) for spec in SAMPLES.values())
+    user = max(len(u) for u in USERS)
+    depth = len(str(Path(root).resolve()))
+    need = depth + len("/Fragpipe_General/") + user + 1 + longest + BELOW
+    if need < 260:
+        return None
+    return (f"note: Windows long paths are off and this folder is {depth} characters deep; the longest sample "
+            f"needs about {need}, past Windows' 260. A search of a long-named drop will fail on its paths: put "
+            "the testbed nearer the drive root, e.g. C:/bed.")
+
+
 def main(args) -> int:
     if args.tb_cmd == "init":
         cfg = init(Path(args.dir), args.slow_defaults)
         print((Path(args.dir).resolve() / "README.txt").read_text(encoding="utf-8"))
         print(f"config: {cfg}")
+        note = path_room_note(Path(args.dir))
+        if note:
+            print(note)
         return 0
     if args.tb_cmd == "list":
         w = max(len(n) for n in SAMPLES)

@@ -1,4 +1,5 @@
-"""Drive the setup/control app through a real Tk root (skipped without a display)."""
+"""Drive the setup/control app through a real Tk root (skipped without a display; the window and every window it
+opens are hidden: tests/tkharness.py, docs/UI.md S4.1)."""
 import hashlib
 import time
 
@@ -6,6 +7,7 @@ import pytest
 
 from ionomos.config import load
 from tests.conftest import gui_tests, make_tk_root
+from tests.tkharness import destroy_app, make_app, pump_until
 
 _ok, _why = gui_tests()
 pytestmark = pytest.mark.skipif(not _ok, reason=f"no GUI: {_why}")
@@ -13,20 +15,9 @@ pytestmark = pytest.mark.skipif(not _ok, reason=f"no GUI: {_why}")
 
 @pytest.fixture
 def app(tmp_path, monkeypatch):
-    import tkinter as tk
-
-    from ionomos.app import App
-
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("APPDATA", str(tmp_path))
-    root = make_tk_root()
-    root.withdraw()
-    a = App(root, tmp_path / "Auto" / "config.yaml")
+    a = make_app(tmp_path, monkeypatch)
     yield a
-    # Unbound call: the finalizer must destroy the real root even if a test
-    # monkeypatched app.root.destroy to a no-op (a patched instance attribute
-    # would otherwise leak this Tk interpreter into the rest of the session).
-    tk.Tk.destroy(root)
+    destroy_app(a)  # destroys the real root even if a test monkeypatched app.root.destroy (see tkharness)
 
 
 def test_first_run_wizard_flow(app, tmp_path):
@@ -256,26 +247,49 @@ def test_import_workflow_and_restore_config(app, tmp_path, monkeypatch):
     monkeypatch.setattr(messagebox, "showinfo", lambda *a, **k: None)
     app.mtree.selection_set("isoDTB")
     app._show_method()
-    app.import_workflow()
+    app.import_workflow()  # the copy runs on a worker thread (S2.2); the window takes the result
+    assert _pump_until(app, lambda: app.data["methods"]["isoDTB"]["fasta"] == "db.fas")
     assert app.data["methods"]["isoDTB"]["workflow"] == "isoDTB.workflow"
-    assert app.data["methods"]["isoDTB"]["fasta"] == "db.fas"
     assert (tmp_path / "Auto" / "fasta" / "db.fas").is_file()
     assert app.save()
     backups = sorted((tmp_path / "Auto" / "config-backups").glob("config-*.yaml"))
     assert backups
-    monkeypatch.setattr(filedialog, "askopenfilename", lambda **k: str(backups[0]))
-    app.restore_config()
+    assert app.restore_config(backups[0])  # Restore a previous config… with the backup picked
     assert app.data["methods"]["isoDTB"]["fasta"] == "human_reviewed_decoys.fas"  # the pre-import version
+    assert app.dirty()  # loaded into the window, not written
+    # Undo last save: the newest backup (the state before the last Save) comes back into the window
+    app.v("watcher.stable_seconds").set("77")
+    assert app.save()
+    assert load(tmp_path / "Auto" / "config.yaml", check_paths=False).stable_seconds == 77
+    assert app.undo_last_save()
+    assert app.v("watcher.stable_seconds").get() == "60" and app.dirty()
+    assert load(tmp_path / "Auto" / "config.yaml", check_paths=False).stable_seconds == 77  # nothing written yet
+    assert app.save()
+    assert load(tmp_path / "Auto" / "config.yaml", check_paths=False).stable_seconds == 60
+    # the picker window lists the backups with their time and what differs, read off the Tk thread
+    app.restore_config()
+    win = app.restore_win
+    assert _pump_until(app, lambda: any("newest first" in w.cget("text") for w in _labels(win)))
+    rows = [w for w in _widgets(app.restore_win) if w.winfo_class() == "Treeview"]
+    assert rows and len(rows[0].get_children()) >= 2
+    assert "Stable seconds" in rows[0].item(rows[0].get_children()[0])["values"][1]
+    win.destroy()
+
+
+def _widgets(w):
+    out = []
+    for c in w.winfo_children():
+        out.append(c)
+        out += _widgets(c)
+    return out
+
+
+def _labels(w):
+    return [c for c in _widgets(w) if c.winfo_class() == "TLabel"]
 
 
 def _pump_until(app, cond, secs=15):
-    end = time.monotonic() + secs
-    while time.monotonic() < end:
-        app.root.update()
-        if cond():
-            return True
-        time.sleep(0.05)
-    return False
+    return pump_until(app, cond, secs)
 
 
 def _update_release(sha256=None, size=1024):
@@ -304,18 +318,28 @@ def _installable_update(app, monkeypatch, shown, installed, downloaded):
 def test_setup_tab_checklist_and_auto_setup(app, tmp_path, monkeypatch):
     from ionomos import configio, fragpipe
 
-    assert app.nb.index(app.nb.select()) == 0  # the checklist is what you see first
+    assert app.nb.select() == str(app.tab_setup)  # a new install: the checklist is what you see first (uinav)
     d = configio.defaults(str(tmp_path / "Auto"), str(tmp_path / "General"))
     monkeypatch.setattr(configio, "defaults", lambda *a, **k: d)
     monkeypatch.setattr(fragpipe, "detect_launcher", lambda: None)
+    app.v("paths.inbox").set(str(tmp_path / "Auto" / "inbox"))  # not there yet (a dev PC may have C:/Fragpipe_Auto)
     app.auto_setup()
     assert (tmp_path / "Auto" / "inbox").is_dir() and (tmp_path / "Auto" / "config.yaml").is_file()
-    assert _pump_until(app, lambda: getattr(app, "setup_items", None))
+    assert _pump_until(app, lambda: any(i.key == "setup:config" and i.status == "ok"
+                                        for i in getattr(app, "setup_items", [])))
     keys = {i.key: i.status for i in app.setup_items}
-    assert keys["folders"] == "ok" and keys["config"] == "ok" and keys["users"] == "todo"
-    assert "ready" in app.setup_summary.cget("text")
-    app._setup_action("open_tab:2")
+    assert keys["setup:folders"] == "ok" and keys["setup:config"] == "ok" and keys["setup:users"] == "todo"
+    # Check everything (S3.1): one list from every source, each with a fix in words
+    sources = {i.source for i in app.setup_items}
+    assert {"setup", "fragpipe", "library", "health", "attention"} <= sources
+    assert all(i.fix for i in app.setup_items if i.status in ("fail", "todo", "warn"))
+    assert "problem" in app.setup_summary.cget("text") or "Next" in app.setup_summary.cget("text")
+    assert app.today_setup.cget("text").startswith("Checks:") or not app.today_setup.cget("text")
+    app._setup_action("open_tab:2")  # the checklist's old numbered actions still work
     assert app.nb.select() == str(app.tab_users)
+    app._setup_action("open_tab:methods")
+    assert app.nb.select() == str(app.tab_methods)
+    assert app.setup_scroll.winfo_exists()  # the list scrolls on a laptop (S1.8)
 
 
 def test_analysis_tab_round_trips(app, tmp_path):
@@ -720,7 +744,9 @@ def test_inbox_scan_displays_mixed_layout_rejection(app, tmp_path):
     (folder / 'raw').mkdir()
     (folder / 'raw' / 'EJQ_PK_EJQ-2-027_isoDTB_1uM_3h_1_1.raw').write_bytes(b'\0' * 64)
     app.v('paths.inbox').set(str(inbox))
-    app._inbox_tick()  # runs _refresh_inbox now and re-arms itself; must not raise
+    app.select_tab("inbox")
+    app._inbox_tick()  # reads on a thread while the Inbox tab is shown and re-arms itself; must not raise
+    assert _pump_until(app, lambda: app.inbox_tree.exists(str(folder)))
     children = app.inbox_tree.get_children(str(folder))
     assert len(children) == 1
     note = app.inbox_tree.item(children[0], 'text')
@@ -931,3 +957,282 @@ def test_a_folder_dropped_from_explorer_opens_the_check(app, tmp_path, monkeypat
     assert _pump_until(app, lambda: app.analysis.check_win is not None and app.analysis.check_win.alive()
                        and app.analysis.check_win.scan is not None and app.analysis.check_win.scan.picked == empty)
     app.analysis.check_win.close()
+
+
+# ------------------------------------------------- robustness (docs/UI.md slice 2) and the untested windows (S4.3) --
+
+
+def test_run_bg_shows_one_busy_indicator_and_refuses_a_second_start(app):
+    """S2.3: one indicator in the bottom bar while work runs; the same work can't start twice; done() gets the
+    result or the error on the Tk thread."""
+    import threading
+
+    gate, seen = threading.Event(), []
+    assert app.run_bg("waiting for the gate", gate.wait, lambda r, e: seen.append((r, e)), key="gate")
+    assert not app.run_bg("waiting for the gate", gate.wait, key="gate")  # refused while the first runs
+    assert "wait" in app.status_lbl.cget("text") and app.busy("gate")
+    app.root.update()
+    assert app.busy_lbl.winfo_manager() == "pack" and "waiting for the gate" in app.busy_lbl.cget("text")
+    gate.set()
+    assert _pump_until(app, lambda: seen)
+    assert seen == [(True, None)] and not app.busy("gate")
+    assert _pump_until(app, lambda: not app._bg)  # the start-up checks may still be running
+    app.root.update()
+    assert app.busy_lbl.winfo_manager() == ""  # hidden again when nothing works
+
+    def boom():
+        raise OSError("disk gone")
+
+    assert app.run_bg("exploding", boom, lambda r, e: seen.append((r, type(e).__name__)))
+    assert _pump_until(app, lambda: len(seen) == 2)
+    assert seen[1] == (None, "OSError")
+
+
+def test_slow_work_never_blocks_the_tk_thread(app, tmp_path, monkeypatch):
+    """S2.2: the FASTA copy of Import workflow…, the QC page, Reset testbed and the status tick run on threads: each
+    call returns at once while the slow part is still going, and the result arrives through App.post."""
+    import threading
+    import time as _t
+    from tkinter import filedialog, messagebox
+
+    from ionomos import fragpipe, qctrend, testbed
+
+    _lab_app(app, tmp_path)
+    slept = threading.Event()
+
+    def slow_import(src, key, wf_dir, fa_dir):
+        slept.wait(5)
+        return {"workflow": f"{key}.workflow", "fasta": "", "notes": ["(slow copy)"]}
+
+    monkeypatch.setattr(fragpipe, "import_workflow", slow_import)
+    monkeypatch.setattr(filedialog, "askopenfilename", lambda **k: str(tmp_path / "x.workflow"))
+    monkeypatch.setattr(messagebox, "showinfo", lambda *a, **k: None)
+    app.mtree.selection_set("isoDTB")
+    app._show_method()
+    t0 = _t.monotonic()
+    app.import_workflow()
+    assert _t.monotonic() - t0 < 1.0 and app.busy("import_workflow")  # back before the copy ended
+    slept.set()
+    assert _pump_until(app, lambda: not app.busy("import_workflow"))
+    # the QC page
+    monkeypatch.setattr(qctrend, "page_for", lambda cfg: (_t.sleep(0.5), tmp_path / "qc.html")[1])
+    opened = []
+    monkeypatch.setattr(app, "_open", lambda p: opened.append(p))
+    t0 = _t.monotonic()
+    app.open_qc_trend()
+    assert _t.monotonic() - t0 < 0.4
+    assert _pump_until(app, lambda: opened) and opened[-1].endswith("qc.html")
+    # Reset testbed
+    (tmp_path / "bed" / "Fragpipe_Auto").mkdir(parents=True)
+    app.v("tb.dir").set(str(tmp_path / "bed"))
+    monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: True)
+    monkeypatch.setattr(testbed, "reset", lambda d: _t.sleep(0.5))
+    t0 = _t.monotonic()
+    app.tb_reset()
+    assert _t.monotonic() - t0 < 0.4
+    assert _pump_until(app, lambda: "testbed reset" in app.out.text.get("1.0", "end"))
+    # the 2 s status tick: the ledger and lock file are read on a thread; the strip on every tab gets the line
+    app._refresh_status_once()
+    assert _pump_until(app, lambda: "Watcher" in app.strip_lbl.cget("text") and "FragPipe" in app.strip_lbl.cget("text"))
+    assert app.strip_lbl.cget("text").startswith(app.run_status.cget("text"))
+
+
+def test_inbox_tab_says_where_it_looks_and_scans_off_the_tk_thread(app, tmp_path):
+    from tests.conftest import make_drop
+
+    inbox = tmp_path / "inbox"
+    app.v("paths.inbox").set(str(inbox))
+    app._refresh_inbox()
+    assert "not there" in app.inbox_lbl.cget("text")
+    inbox.mkdir()
+    app._refresh_inbox()
+    assert "empty" in app.inbox_lbl.cget("text")
+    make_drop(inbox, "exp", ["a.raw"])
+    app.select_tab("inbox")
+    app._inbox_tick()  # reads on a thread; the tree fills through App.post
+    assert _pump_until(app, lambda: app.inbox_tree.exists(str(inbox / "exp")))
+    assert "1 item waiting" in app.inbox_lbl.cget("text")
+
+
+def test_save_shows_what_changes_and_cancel_writes_nothing(app, tmp_path, monkeypatch):
+    """S2.5: the Save button first lists the changes in words; Cancel leaves config.yaml alone; nothing to change
+    writes nothing."""
+    _lab_app(app, tmp_path)
+    p = tmp_path / "Auto" / "config.yaml"
+    before = p.read_text(encoding="utf-8")
+    assert app.save(confirm=True) and p.read_text(encoding="utf-8") == before
+    assert "nothing to save" in app.status_lbl.cget("text")
+    app.v("fragpipe.threads").set("12")
+    app.v("watcher.stable_seconds").set("45")
+    asked = []
+    monkeypatch.setattr(app, "_confirm_changes", lambda changes: asked.append(changes) or False)
+    assert app.save(confirm=True) is False
+    assert p.read_text(encoding="utf-8") == before and len(asked) == 1
+    assert any("Threads" in c and "28 → 12" in c for c in asked[0]) and any("45" in c for c in asked[0])
+    monkeypatch.setattr(app, "_confirm_changes", lambda changes: True)
+    assert app.save(confirm=True)
+    assert load(p, check_paths=False).threads == 12 and "2 settings changed" in app.status_lbl.cget("text")
+    # the window itself: closing it is Cancel
+    monkeypatch.undo()
+    app.v("fragpipe.threads").set("16")
+    app.root.after(300, lambda: app.confirm_win.destroy() if app.confirm_win.winfo_exists() else None)
+    assert app.save(confirm=True) is False and load(p, check_paths=False).threads == 12
+    assert "not saved" in app.status_lbl.cget("text")
+
+
+def test_unsaved_changes_are_not_lost_silently(app, tmp_path, monkeypatch):
+    """S2.6: a dot in the title; Quit, Reload and Change… ask Save / Discard / Cancel; nothing asks when clean."""
+    from tkinter import messagebox
+
+    _lab_app(app, tmp_path)
+    assert not app.dirty()
+    app._update_title()
+    assert "•" not in app.root.title()
+    app.v("fragpipe.threads").set("9")
+    assert app.dirty()
+    app._update_title()
+    assert app.root.title().endswith("•")
+    answers = []
+    monkeypatch.setattr(messagebox, "askyesnocancel", lambda *a, **k: answers.pop(0))
+    answers.append(None)  # Cancel: stay
+    assert app._guard_unsaved("quitting") is False
+    answers.append(False)  # Discard
+    assert app._guard_unsaved("quitting") is True
+    answers.append(True)  # Save
+    assert app._guard_unsaved("quitting") is True
+    assert load(tmp_path / "Auto" / "config.yaml", check_paths=False).threads == 9 and not app.dirty()
+    app.v("fragpipe.threads").set("10")
+    answers.append(None)
+    app.reload()  # Cancel: the edit stays
+    assert app.v("fragpipe.threads").get() == "10"
+    answers.append(False)
+    app.reload()  # Discard: back to the file
+    assert app.v("fragpipe.threads").get() == "9" and not app.dirty()
+    destroyed = []
+    monkeypatch.setattr(app.root, "destroy", lambda: destroyed.append(1))
+    app.on_close()  # clean: closes without asking
+    assert destroyed and not answers
+
+
+def test_change_config_switches_the_file(app, tmp_path):
+    _lab_app(app, tmp_path)
+    other = tmp_path / "Other" / "config.yaml"
+    app.change_config(other)
+    assert app.config_path == other and app.first_run and "new file" in app.status_lbl.cget("text")
+    assert app.v("config_path").get() == str(other)
+    app.v("quick.root").set(str(tmp_path / "Other"))
+    app.apply_quick()
+    app.create_all()
+    assert app.save() and other.is_file()
+
+
+def test_run_and_test_is_split_and_de_duplicated(app):
+    """S1.9: a Watcher page and a Testing page; the job-number prompts are gone; one Stop watcher."""
+    pages = [app.run_nb.tab(t, "text") for t in app.run_nb.tabs()]
+    assert pages == ["Watcher", "Testing"]
+    assert not hasattr(app, "retry_job") and not hasattr(app, "_pick_job")
+    texts = [w.cget("text") for w in _widgets(app.tab_run) if w.winfo_class() == "TButton"]
+    assert texts.count("Stop watcher") == 1 and "Save & Check" not in texts
+    assert "Create testbed" in texts and "Start watcher" in texts
+
+
+def test_test_names_window_reads_a_name(app, tmp_path):
+    _lab_app(app, tmp_path)
+    win = app.test_names()
+    assert win.winfo_exists() and win.title() == "Test your names"
+    app.names_in.delete("1.0", "end")
+    app.names_in.insert("1.0", "20260902_EJQ_isoDTB_EJQ-2-027\nEJQ_PK_EJQ-2-027_isoDTB_1uM_3h_1_1.raw\n")
+    app.names_run()
+    out = app.names_out.get("1.0", "end")
+    assert "isoDTB" in out and ("EJQ" in out or "user" in out)
+    win.destroy()
+
+
+def test_startup_task_buttons_with_the_service_stubbed(app, tmp_path, monkeypatch):
+    from tkinter import messagebox
+
+    from ionomos import service
+
+    calls = []
+    monkeypatch.setattr(service, "install_task", lambda cfg: calls.append(("install", cfg)) or (True, "installed ok"))
+    monkeypatch.setattr(service, "remove_task", lambda: calls.append(("remove",)) or (True, "removed ok"))
+    monkeypatch.setattr(service, "create_desktop_shortcut", lambda: calls.append(("shortcut",)) or (True, "x.lnk"))
+    shown = []
+    monkeypatch.setattr(messagebox, "showinfo", lambda *a, **k: shown.append(a))
+    monkeypatch.setattr(messagebox, "showerror", lambda *a, **k: shown.append(("error", *a)))
+    app.install_task()  # no saved config yet: says what to do, installs nothing
+    assert shown and shown[-1][0] == "error" and "Save" in shown[-1][2] and not calls
+    _lab_app(app, tmp_path)
+    app.install_task()
+    app.remove_task()
+    app.shortcut()
+    assert [c[0] for c in calls] == ["install", "remove", "shortcut"]
+    assert "installed ok" in app.out.text.get("1.0", "end") and "removed ok" in app.out.text.get("1.0", "end")
+
+
+def test_colour_picker_sets_the_field(app, monkeypatch):
+    from tkinter import colorchooser
+
+    monkeypatch.setattr(colorchooser, "askcolor", lambda **k: ((213, 94, 0), "#D55E00"))
+    app.analysis._pick_colour("up")
+    assert app.v("export.up").get() == "#d55e00"
+    monkeypatch.setattr(colorchooser, "askcolor", lambda **k: (None, None))  # cancelled: unchanged
+    app.analysis._pick_colour("up")
+    assert app.v("export.up").get() == "#d55e00"
+
+
+def test_number_fields_are_checked_as_you_type(app):
+    """S3.3: a red dot and the problem in the hint while a number field holds what the loader refuses."""
+    dot, hint = app.num_fields["watcher.poll_seconds"]
+    app.v("watcher.poll_seconds").set("ten")
+    assert str(dot.cget("foreground")) == "#c62828" and "number" in hint.cget("text")
+    app.v("watcher.poll_seconds").set("10")
+    assert str(dot.cget("foreground")) == "#2e7d32" and "scanned" in hint.cget("text")
+    dot, hint = app.num_fields["fragpipe.threads"]
+    app.v("fragpipe.threads").set("-1")
+    assert str(dot.cget("foreground")) == "#c62828"
+
+
+def test_quick_check_on_start_shows_a_problem_on_today(app, tmp_path):
+    """S3.2: the checks run when the app opens; Today's line says how many problems."""
+    _lab_app(app, tmp_path)
+    app.v("paths.inbox").set(str(tmp_path / "nowhere" / "inbox"))  # a broken path
+    app.refresh_setup()
+    assert _pump_until(app, lambda: app._last_setup_problems > 0)
+    app.select_tab("today")
+    app.refresh_today()
+    assert _pump_until(app, lambda: app.today_setup.cget("text").startswith("Checks:"))
+    assert str(app.today_setup.cget("foreground")) == "#c62828"
+
+def test_app_opens_on_a_config_that_does_not_parse(tmp_path, monkeypatch):
+    """#136: Ionomos.exe died at start on a YAML slip in config.yaml. Now it opens on the defaults, shows the
+    error and offers Restore a previous config when there are backups; the file is left as it is."""
+    import tkinter as tk
+    from tkinter import messagebox
+
+    from ionomos import configio
+    from ionomos.app import App
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    p = tmp_path / "Auto" / "config.yaml"
+    p.parent.mkdir()
+    p.write_text("paths:\n  inbox: [unclosed\n", encoding="utf-8")
+    good = configio.defaults(str(tmp_path / "Auto"), str(tmp_path / "General"))
+    (p.parent / configio.BACKUP_DIR).mkdir()
+    (p.parent / configio.BACKUP_DIR / "config-20260101-000000.yaml").write_text(configio.dump_config(good), encoding="utf-8")
+    asked, restored = [], []
+    monkeypatch.setattr(messagebox, "askyesno", lambda *a, **k: asked.append(a[1]) or False)
+    monkeypatch.setattr(messagebox, "showerror", lambda *a, **k: pytest.fail(f"dialog: {a}"))
+    root = make_tk_root()
+    root.withdraw()
+    try:
+        a = App(root, p)
+        monkeypatch.setattr(a, "restore_config", lambda: restored.append(True))
+        assert a.config_error and "line 2, column 10" in a.config_error
+        a._say_config_broken()
+        assert asked and "Restore a previous config" in asked[0] and "config-20260101-000000.yaml" in asked[0]
+        assert "line 2, column 10" in a.status_lbl.cget("text")
+        assert p.read_text(encoding="utf-8") == "paths:\n  inbox: [unclosed\n"
+    finally:
+        tk.Tk.destroy(root)

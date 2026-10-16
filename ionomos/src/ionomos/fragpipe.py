@@ -42,8 +42,6 @@ from ionomos.manifest import (
     OverridesError,
     fp_manifest_text,
     load_overrides,
-    parse_overrides,
-    tmt_annotation_files,
 )
 from ionomos.naming import NUMBER_WHY, NamingError, number_ok, sanitize
 
@@ -206,12 +204,12 @@ def resolve_launcher(cfg: Config) -> Path:
         return exe.parent / "fragpipe.bat"
     if not exe.is_file():
         found = detect_launcher()
-        hint = f" (found one at {found} — set it in the app, tab 1)" if found else ""
+        hint = f" (found one at {found} — set it in the app: Folders tab -> Find FragPipe)" if found else ""
         raise Hold(f"FragPipe launcher not found at {exe}{hint}")
     if is_window_exe(exe):
         raise Hold(f"FragPipe launcher {exe} is FragPipe's window program and can't run a search unattended; "
                    f"{exe.parent / 'fragpipe.bat'} is missing (FragPipe 23 and 24 install it next to the .exe). "
-                   f"Reinstall FragPipe, or set a launcher that has fragpipe.bat (tab 1)")
+                   f"Reinstall FragPipe, or set a launcher that has fragpipe.bat (Folders tab)")
     return exe
 
 
@@ -300,35 +298,16 @@ def decoy_problem(props: dict[str, str], fasta: Path) -> str:
     return ""
 
 
-def annotation_problems(per_exp: dict[str, str], label_type: str = "") -> list[str]:
-    """What FragPipe would reject in TMT annotation files ({plex: text}); [] when nothing.
+def annotation_problems(per_exp: dict[str, str], label_type: str = "", ref_tag: str = "", add_ref=None) -> list[str]:
+    """What FragPipe would reject in TMT annotation files ({plex: text}); [] when nothing. The rules live in
+    tmtkit.fragpipe_problems (CmdTmtIntegrator and TmtiPanel.parseTmtAnnotationFile, 24.0): a line is "<channel>
+    <sample>" split on whitespace, so a sample name can't hold a space or be empty (NA leaves a channel out); a file
+    lists as many channels as the workflow's label type (tmtintegrator.channel_num, e.g. TMT-10); a sample name is
+    used once across all plexes; with a reference sample (tmtintegrator.add_Ref=-1) a name contains the ref tag."""
+    from ionomos.tmtkit import annotation_rows, fragpipe_problems
 
-    From TmtiPanel.parseTmtAnnotationFile and CmdTmtIntegrator (24.0): a line is "<channel> <sample>" split on
-    whitespace, so a sample name can't hold a space or be empty (NA leaves a channel out); a file lists as many
-    channels as the workflow's label type (tmtintegrator.channel_num, e.g. TMT-10); a sample name is used once
-    across all plexes."""
-    out: list[str] = []
-    m = re.search(r"-(\d+)$", label_type.strip())
-    want = int(m.group(1)) if m else 0
-    seen: dict[str, str] = {}
-    for exp, text in per_exp.items():
-        rows = [ln.split() for ln in text.splitlines() if ln.strip()]
-        odd = [" ".join(r) for r in rows if len(r) != 2]
-        if odd:
-            out.append(f"plex {exp}: a channel needs one sample name without spaces (NA to leave it out), "
-                       f"got {odd[0]!r}")
-            continue
-        if want and len(rows) != want:
-            out.append(f"plex {exp} lists {len(rows)} channel(s) but the workflow's label type is {label_type} "
-                       f"({want}); list every channel, with NA for the unused ones")
-        for _ch, sample in rows:
-            if sample.upper() == "NA":
-                continue
-            if sample in seen:
-                out.append(f"sample name {sample} is used twice (plex {seen[sample]} and {exp}); FragPipe needs "
-                           f"every name once across all plexes")
-            seen.setdefault(sample, exp)
-    return out
+    rows = {exp: annotation_rows(text) for exp, text in per_exp.items()}
+    return [f.text for f in fragpipe_problems(rows, label_type, ref_tag, add_ref)]
 
 
 # ---------------------------------------------------------------- prepare --
@@ -455,7 +434,7 @@ def space_problem(spec: RunSpec) -> str:
     for what, p in paths:
         if p and re.search(r"\s", str(p)):
             return (f"{what} has a space in its path ({p}); FragPipe can't use such a path — move or rename it "
-                    f"(a FASTA: pick a file without spaces on tab 3)")
+                    f"(a FASTA: pick a file without spaces on the Methods tab)")
     return ""
 
 
@@ -515,38 +494,19 @@ def prepare(job: Job, cfg: Config) -> RunSpec:
     annotations: dict[str, str] = {}
     kind = cfg.kind(job.method)
     if kind == "TMT":
-        experiments = sorted({line[1] for line in lines})
-        try:
-            ov = parse_overrides({"tmt": overrides["tmt"]}) if overrides.get("tmt") else None
-            per_exp = tmt_annotation_files(ov, experiments) if ov else {}
-        except OverridesError as exc:
-            raise JobError(str(exc)) from exc
-        # FragPipe (TmtiPanel, 23.1 and 24.0) takes a plex's annotation from the one folder that holds all
-        # its files, and only when exactly one file ending in annotation.txt is in it.
-        folders = {exp: {str(Path(line[0]).parent) for line in lines if line[1] == exp} for exp in experiments}
-        own_folder = (all(len(fs) == 1 for fs in folders.values())
-                      and len({f for fs in folders.values() for f in fs}) == len(experiments))
-        if not per_exp:
-            warnings.append("TMT job without a tmt: channel map in experiment.yaml; FragPipe will use its "
-                            "default channel names")
-            if len(experiments) > 1 and not own_folder:
-                warnings.append(shared_plex_warning(len(experiments)))
-        elif own_folder:
-            # each plex's annotation.txt goes in the folder holding its files (the experiment folder, raw/, or
-            # the plex's own <plex>/ subfolder when the drop came laid out that way)
-            def where(exp: str) -> str:
-                folder = Path(next(iter(folders[exp])))
-                return "annotation.txt" if folder == raw_dir else str(folder / "annotation.txt")
+        # tmtkit.plan (D91): FragPipe (TmtiPanel, 23.1 and 24.0) takes a plex's annotation from the one folder that
+        # holds all its files, and only when exactly one file ending in annotation.txt is in it. Each plex's
+        # annotation.txt goes in that folder (the experiment folder, raw/, or the plex's own <plex>/ subfolder);
+        # a person's own file there is read, never written over; a map FragPipe would stop on, or a tag that is
+        # not the workflow's label type, fails the job here, before the search.
+        from ionomos import tmtkit
 
-            annotations = {where(exp): text for exp, text in per_exp.items()}
-        elif len(per_exp) == 1:
-            annotations["annotation.txt"] = next(iter(per_exp.values()))
-        else:
-            warnings.append(shared_plex_warning(len(per_exp)))
-        if annotations:
-            bad = annotation_problems(per_exp, props.get("tmtintegrator.channel_num", ""))
-            if bad:
-                raise JobError("experiment.yaml tmt: " + "; ".join(bad))
+        tp = tmtkit.plan(dest, {"tmt": overrides.get("tmt") or {}}, props, lines, raw_dir, wf.name)
+        if tp.errors():
+            raise JobError(tp.error_text())
+        annotations = tp.annotations
+        warnings += [f.text for f in tp.warnings()]
+        notes += [f"TMT: {f.text}" for f in tp.infos()]
 
     spec = RunSpec(
         job_id=job.id or 0, method=job.method, dest=dest, exe=exe, workflow_src=wf, fasta=fasta,
@@ -564,12 +524,10 @@ def prepare(job: Job, cfg: Config) -> RunSpec:
 
 
 def shared_plex_warning(n: int) -> str:
-    """Several TMT plexes whose raw files sit in one folder (D69). The layout is the lab's choice: Ionomos never
-    moves the files, it says what FragPipe will do."""
-    return (f"{n} TMT plexes share one folder: FragPipe reads one annotation file per folder, so Ionomos writes "
-            f"none and FragPipe will name the channels <plex>_<channel> (an annotation.txt of your own there would "
-            f"be used for every plex, and FragPipe stops on the repeated sample names). To get the sample names, "
-            f"drop the experiment with each plex's raw files in a folder of its own (<plex>\\*.raw)")
+    """Several TMT plexes whose raw files sit in one folder (D69): tmtkit.shared_plex_warning."""
+    from ionomos.tmtkit import shared_plex_warning as text
+
+    return text(n)
 
 
 def write_inputs(spec: RunSpec) -> str | None:
@@ -916,8 +874,14 @@ def exit_code_reason(code: int | None, text: str) -> str:
     if not facts["error_lines"] and not facts["finished"] and not facts["started"] and not facts["commands"]:
         return ""  # it stopped before running anything: the last lines say why
     if not _FAILED_STEP.search(text) and not _CANCELLED_TASKS.search(text) and not explain(text):
+        if facts["error_lines"] or _TRACEBACK.search(text):  # an error is there, just not one Ionomos knows (#138)
+            return "stopped after an error that Ionomos does not recognise"
         return "stopped in the middle of a step without saying why"
     return ""
+
+
+_TRACEBACK = re.compile(r"^Traceback \(most recent call last\):|^Exception in thread |^(?:\w+\.)*\w+(?:Error|Exception)\b",
+                        re.MULTILINE)
 
 
 # The method's main tables: a file of these that exists must be a whole table (D69). Other engines: their own
@@ -1135,6 +1099,9 @@ EXPLANATIONS: list[tuple[str, str]] = [
      "The search was ended from outside while it ran: Task Manager or another program, signing out, the PC "
      "shutting down or going to sleep, or Windows ending it for lack of memory. Nothing in the search itself "
      "failed: Retry, and keep the PC awake (Sleep: Never) while searches run"),
+    (r"(?:FragPipe|DIA-NN|MaxQuant|Sage) stopped after an error that Ionomos does not recognise",
+     "The search stopped on an error that Ionomos does not recognise: the last lines of its console log say what "
+     "(Open log). Send Report a problem so the next version can explain it"),
     (r"(?:FragPipe|DIA-NN|MaxQuant|Sage) crashed with ",
      "FragPipe or a tool it started crashed without a message (Windows reported the crash): Retry once; if it "
      "crashes again, send Report a problem"),
@@ -1143,7 +1110,8 @@ EXPLANATIONS: list[tuple[str, str]] = [
      "while it wrote. Free space on the drive holding the experiment folders, then Retry"),
     (r"without its 'ALL JOBS DONE' line and without any of its result tables",
      "FragPipe reported success but did not finish (no end line, no result tables): it was ended early, or the "
-     "launcher is not FragPipe's own fragpipe.bat (tab 1). Retry; if it happens again, send Report a problem"),
+     "launcher is not FragPipe's own fragpipe.bat (Folders tab). Retry; if it happens again, send Report a "
+     "problem"),
     (r"Ionomos hit an unexpected error while running the search",
      "Ionomos itself hit a problem while it ran the search (the reason names it; often a full disk or a folder "
      "it can't write): fix that, then Retry; if it is unclear, send Report a problem"),
@@ -1157,17 +1125,18 @@ EXPLANATIONS: list[tuple[str, str]] = [
      "folder is missing, so reinstall FragPipe (or install a 64-bit Java 17), then Retry"),
     (r"Cannot recognize the argument --|you did not add --headless flag",
      "This FragPipe doesn't know an option Ionomos passed: it is older than 23, or the launcher is not "
-     "FragPipe's own fragpipe.bat — tab 1 -> Find FragPipe, then Retry"),
+     "FragPipe's own fragpipe.bat — Folders tab -> Find FragPipe, then Retry"),
     (r"FASTA file path is empty|No FASTA file|Could not find fasta file at",
-     "No protein database: set this method's FASTA in the app (tab 3), or re-export the workflow after setting it"),
+     "No protein database: set this method's FASTA in the app (Methods tab), or re-export the workflow after "
+     "setting it"),
     (r"No decoys found in the FASTA file|All FASTA entries seem to be decoys|FASTA file contains [\d.,]+% decoys|"
      r"Decoy protein prefix is empty",
      "The FASTA's decoys are not what FragPipe needs (about half the entries, each starting with the decoy "
      "tag, usually rev_): add decoys once in FragPipe's Database tab, put that file in the FASTA folder and "
-     "pick it for the method (tab 3)"),
+     "pick it for the method on the Methods tab"),
     (r"path contains whitespace characters|There are spaces in the path",
      "A path has a space in it, which FragPipe can't use: move FragPipe, its tools folder or the data folders "
-     "to a path without spaces (tab 1), then Retry"),
+     "to a path without spaces (Folders tab), then Retry"),
     (r"No license file found\.|The license .{0,300}(has expired|is corrupted|is not valid for this product)",
      "MSFragger / IonQuant / diaTracer licence problem: open the FragPipe GUI, Config tab -> Download / Update "
      "(accept the licences); a commercial licence file (license.dat) that expired must be renewed"),
@@ -1190,6 +1159,13 @@ EXPLANATIONS: list[tuple[str, str]] = [
      "FragPipe ran out of memory: lower Threads or raise RAM (GB) in Advanced, and close other programs"),
     (r"not enough space on the disk|No space left on device|disk is full|\[Errno 28\]|\bENOSPC\b",
      "The disk is full: free space on the drive holding the experiment folders, then Retry"),
+    # a missing file whose path is 240+ characters: Windows' limit with long paths off, as on the lab PC (#138).
+    # Java says "FileNotFoundException: C:\... (The system cannot find the path specified)" or NoSuchFileException;
+    # Python's tools "FileNotFoundError: [Errno 2] No such file or directory: 'C:\...'"
+    (r"(?m)^(?=.*(?:FileNotFoundError|FileNotFoundException|NoSuchFileException|cannot find the path specified|"
+     r"No such file or directory)).*[A-Za-z]:[\\/][^\r\n'\"()]{240,}",
+     "A path got longer than Windows allows (260 characters with long paths off): shorten the experiment folder "
+     "and raw file names, or move the users folder nearer the drive root, then Retry"),
     (r"\berror=206\b|WinError 206|The filename or extension is too long|must be less than 260 characters",
      "A path or command line got longer than Windows allows: shorten the experiment folder and raw file names "
      "(or search fewer files at once), then Retry"),
@@ -1233,7 +1209,7 @@ EXPLANATIONS: list[tuple[str, str]] = [
     (r"(Percolator|PeptideProphet) was enabled but MSFragger's output formats|"
      r"Both FreeQuant and TMT-Integrator were enabled|cannot be run in the same workflow",
      "The workflow's settings contradict each other (FragPipe's message says which): fix them in the FragPipe "
-     "GUI, save the workflow and import it again (tab 3)"),
+     "GUI, save the workflow and import it again (Methods tab)"),
     (r"Cannot deploy asset|Could not load file .{0,300}The file may be corrupted|"
      r"Did not get port information from server output",
      "A FragPipe tool could not write or start one of its own files: usually antivirus or a locked temp "
@@ -1259,9 +1235,10 @@ EXPLANATIONS: list[tuple[str, str]] = [
     (r"UnsupportedClassVersionError|Unsupported class file major version|requires Java 9\+",
      "Wrong Java version: FragPipe must use its bundled Java — reinstall FragPipe or set its launcher again"),
     (r"Could not find or load main class|Unable to access jarfile",
-     "The FragPipe installation looks broken: re-select fragpipe.bat (tab 1, Find FragPipe) or reinstall FragPipe"),
+     "The FragPipe installation looks broken: re-select fragpipe.bat (Folders tab -> Find FragPipe) or reinstall "
+     "FragPipe"),
     (r"is not recognized as an internal or external command",
-     "The FragPipe launcher path is wrong: tab 1 -> Find FragPipe"),
+     "The FragPipe launcher path is wrong: Folders tab -> Find FragPipe"),
     (r"Access is denied|Permission denied",
      "Windows refused access to a file or folder: check the experiment folder isn't read-only / open elsewhere"),
     (r"(?i)output directory.{0,40}not empty|workdir.{0,40}not empty",
@@ -1429,11 +1406,15 @@ def inspect_workflow(path: Path) -> dict:
     except OSError as exc:
         return {"error": str(exc)}
     db = props.get("database.db-path", "")
+    # every stock workflow carries tmtintegrator.channel_num: the label type is a fact only when TMT-Integrator
+    # runs, else an isoDTB or DIA workflow reads as "label type=TMT-6" (#143)
+    tmt_on = props.get("tmtintegrator.run-tmtintegrator", "").strip().lower() == "true"
     return {
         "database": db,
         "database_exists": bool(db) and Path(db).is_file(),
         "decoy_tag": props.get("database.decoy-tag", "rev_") or "rev_",
-        "settings": {label: props[k] for k, label in WORKFLOW_KEYS if k in props and props[k] != ""},
+        "settings": {label: props[k] for k, label in WORKFLOW_KEYS
+                     if k in props and props[k] != "" and (tmt_on or k != "tmtintegrator.channel_num")},
     }
 
 

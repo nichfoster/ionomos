@@ -40,6 +40,13 @@ Three layers, all runnable on macOS and Windows:
 | GitHub Actions | the pytest suite and the JS report-harness on Linux **and Windows** on every push; on a version tag also the frozen exe (pipeline + stress) and the **installer**: install, retire a fake LabWatch, upgrade, uninstall, data kept | Actions tab |
 | Migration | an install from the LabWatch era (old status files, run folders, logs, lock, config pointer, env var) keeps working | `tests/test_migration.py` |
 | pip install / demo | `ionomos demo` finds what it planted (hits, on/off proteins, gene sets by both tests), never writes into an existing folder, is reproducible, works offline with no lab config; `demo` and `analyze <table\|folder>` run in a Python where `import tkinter` fails (a subprocess, so nothing Tk can creep into the analysis path); the demo gene sets and the LICENSE copy ship in the package | `tests/test_demo.py`, `tests/test_packaging.py`; the wheel itself: `publish-pypi` workflow (below) |
+| Workflow and FASTA library (D89) | a fake PC built from the 2026-09-15 inventory's real names (paths with spaces, the recycle bin, the 22.0 zip, three FragPipe installations, the UI cache, a junction): workflow kinds, settings and summaries; the content hash grouping identical settings; every flag code (a test fails when one has no help entry or is missing from LIBRARY.md); FASTA counts and decoy-tag detection at any chunk size, CRLF, no final newline, a 1 GB file; the cache; depth, time, stop and exclude limits; recommend ordering and reasons; `auto_assign` leaving working methods alone; adopt (copies, `.bak`, safe names, provenance); `update_check`; config round trip; every CLI subcommand. **Not covered**: the lab PC's real drives | `tests/test_library.py` |
+| FASTA sources (D90) | `urlopen` stubbed: UniProt request URLs and parameters, timeouts, the count check, release parsing; offline, HTTP errors, broken gzip and Stop each give a sentence, no exception, no `.part` left; never overwrite; a FASTA with decoys refused; Philosopher's file name reproduced from the PC's; the reversal quirk; contaminant fallbacks; the output passes `fragpipe.decoy_problem`; a fake Philosopher as a real subprocess (commands, order, its folder removed, fallback to Python); stock-workflow listing in both repo layouts; CLI smoke. **Not covered**: the real network, the Philosopher bundled with FragPipe 24 | `tests/test_fastasource.py` |
+| TMT kit and TMT QC (D91) | label types, name parsing, FragPipe's channel-map rules and every Ionomos flag, a user's own `annotation.txt`, suggestions, the plan for every drop layout (`<plex>\*.raw` too), `tmt:` block checks, the CLI; synthetic `psm.tsv` files for every QC issue code and the degraded paths (no `psm.tsv`, few PSMs), the report section and its exported figures, the analysis-off path. **Not covered**: a real FragPipe 24 `psm.tsv` | `tests/test_tmtkit.py`, `tests/test_tmtqc.py` |
+| Methods tab: Find on this PC, FASTA panel, proposals (D89) | the no-Tk logic (candidate rows, filtering, proposal text, the banner condition, the download dialog's states, the setup item never scanning or reading a FASTA); three hidden-window tests (CI only) | `tests/test_library_tab.py` |
+| TMT channel editor (D91) | the no-Tk state (block ↔ grid, validation pass-through, suggest, read from the folder), the reference role, `configio` round trip of the TMT analysis keys; a hidden-window test (CI only) | `tests/test_tmt_editor.py` |
+| UI navigation (D93) | tab keys, the Today snapshot off the Tk thread, the window state file (lenient read, clamped to the screen), shortcuts; one hidden-window test (CI only) | `tests/test_ui_nav.py` |
+| Hidden-window UI tests (D93, docs/UI.md slice 4) | `tests/tkharness.py`: the app on a withdrawn root with every window it opens withdrawn, every message box / file / text / colour dialog recorded (answers queued with `expect`, strict mode fails at the call naming the dialog), exceptions from Tk and `App.post` callbacks captured, the open windows listed, a window's size against a 1366×768 screen; the fixtures `hidden_app`, `no_dialogs`, `tk_errors` (CI only, [below](#hidden-window-ui-tests)). Screenshots of every tab, Analysis sub-tab and window for a person to look at (`scripts/screenshots.py`, Windows) | `tests/conftest.py`, the smoke tests in `tests/test_ui_smoke.py`; `python scripts/screenshots.py` |
 
 ## One-shot setup
 
@@ -64,7 +71,7 @@ loader refuses paths with spaces — the FragPipe rule.)
 
 ## Driving the testbed from the app
 
-`ionomos setup` (or `Ionomos.exe`) → tab **5 Run & Test** → *Testbed*:
+`ionomos setup` (or `Ionomos.exe`) → the **Run & Test** tab → **Testing**:
 **Create testbed** → **Start TESTBED watcher** → pick a sample → **Drop** /
 **Drop slowly** → watch the output pane (tick *follow the watcher log*).
 **Resolver window demo** opens the dialog with sample data. **Reset testbed**
@@ -131,6 +138,11 @@ init --slow-defaults` uses production timings (10 s / 60 s).
 | `tmt_flat_plexes` | two TMT plexes in one folder: filed as dropped, with a warning that FragPipe names the channels |
 | `fp_cut_table` | the fake leaves its main table cut off mid-row → `failed`, "not written to the end" |
 | `fp_hang` | the fake hangs in MSFragger with a child process → killed with it at the time limit (5 min) |
+| `tmt16_na` | TMTpro 16 (`workflow: TMT16.workflow`): 11 channels named, 5 `NA`; `annotation.txt` in the kit's order (D91) |
+| `tmt_tag_mismatch` | `tag: TMT-16` against the TMT-10 workflow → said at intake, the job fails before FragPipe starts, saying which to change |
+| `tmt_own_annotation` | the user's own `annotation.txt`, no `tmt:` block → read, never written; FragPipe uses it, the report knows the conditions |
+| `tmt_bridge` | two plexes in their own folders with a pool on 126 in each → the TMT QC finds the bridge near the median in both |
+| `tmt_poor_label` | the fake's `tmt-poor-labelling` mode (20 % of N-termini unlabelled) → done, `TMT_LOW_LABELLING` |
 
 After a GUI answer, look at `experiment.yaml` inside the moved folder: that is
 the persisted decision, and the same file can be hand-written by a user to
@@ -477,4 +489,58 @@ display). To run them locally:
 ```bash
 cd ionomos && IONOMOS_GUI_TESTS=1 .venv/bin/pytest tests/test_app.py tests/test_review.py tests/test_resolve.py
 ```
+
+## Hidden-window UI tests
+
+`tests/tkharness.py` (docs/UI.md S4.1) is what a test of the app's windows
+uses; its docstring lists every name. In short:
+
+- **Every window hidden.** `hide_all_windows()` withdraws each `Toplevel`
+  as it is made and turns `deiconify`, `lift`, `focus_force` and
+  `state("normal"/"zoomed")` into no-ops, on the windows and the root, so a
+  window the app shows later stays hidden. A withdrawn window still has its
+  widgets, its geometry and its requested size, so `fits_screen(win)`
+  (1366×768 by default) works on it. `toplevels(root)` lists the open ones,
+  newest last.
+- **Dialogs recorded.** A message box or file picker is a native dialog, not a
+  `Toplevel`: hiding cannot hide it and it would wait for a click. `NoDialogs`
+  replaces messagebox, simpledialog, filedialog and colorchooser with
+  recorders: `.calls`, `.expect("askyesno", True)` for the next answer,
+  `.unexpected()`, `.assert_none()`, and `strict=True` to fail at the call with
+  the dialog's title and text.
+- **Tk errors captured.** `TkErrors` takes the place of
+  `root.report_callback_exception` and `App._on_tk_error` (which `App.post`
+  callbacks reach too), records each exception and still lets the app write
+  its crash file, without its error box.
+
+The fixtures in `tests/conftest.py`: `hidden_app` (the app on a new config in
+`tmp_path`, HOME and APPDATA there, dialogs recorded; it skips where
+`gui_tests()` says no), `no_dialogs`, and `tk_errors` (the test fails at
+teardown if a callback raised; `tk_errors.clear()` after checking one the test
+meant to cause). `pump_until(app, cond)` runs the Tk loop until `cond()` holds.
+
+They open a real Tk interpreter, so they run in CI only, like
+`tests/test_app.py`. With the harness nothing appears on screen even with
+`IONOMOS_GUI_TESTS=1`, but the rule stays: one bug in the harness and the
+windows cover the screen of whoever is working.
+
+**Screenshots** (S4.4), for a person to look at before a UI pull request:
+
+```powershell
+python scripts/screenshots.py               # Windows; PNGs in C:\ionomos-screenshots\<timestamp>\
+python scripts/screenshots.py --out shots   # PNGs in .\shots
+python scripts/screenshots.py --no-small    # only the natural size, not 1366x768 as well
+```
+
+It builds a testbed in `C:\ionomos-screenshots\<timestamp>\bed` (no space,
+never under the profile folder; HOME and APPDATA there too), opens the app at
+the top left of the screen for about 20 seconds, and saves a PNG of every
+tab, every Analysis sub-tab, the attention list and Test names, at the
+window's natural size and again with the main window at 1366×768. Message
+boxes are printed, not shown. The capture is GDI through ctypes and the PNG is
+written with zlib, so nothing is installed; on macOS and Linux it says so and
+does nothing. CI runs it on Windows with Python 3.14 after the tests (also when
+they fail) and uploads the PNGs as the artifact `ui-screenshots-3.14` of the
+`tests` workflow (Actions → the run → Artifacts); a failure there never turns
+the run red.
 

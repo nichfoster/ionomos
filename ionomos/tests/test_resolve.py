@@ -441,3 +441,78 @@ def test_mixed_drop_accept_shows_rejection_note(lab):
     root.destroy()
     assert not escaped
     assert seen and "top level" in seen[0] and "raw/" in seen[0]
+
+
+# ----------------------------------------------------- TMT channel editor (D91) --
+
+
+def _tmt_drop(lab, name="20260201_Aman_TMT_KL6165-bridge", channel_num="TMT-10"):
+    """Two plexes, each in its own folder (D69), and the TMT method's workflow saying its label type."""
+    (lab["auto"] / "workflows" / "TMT10-MS3.workflow").write_text(
+        f"tmtintegrator.channel_num={channel_num}\ntmtintegrator.ref_tag=Pool\ntmtintegrator.add_Ref=1\n",
+        encoding="utf-8")
+    folder = lab["inbox"] / name
+    for p in ("plexA", "plexB"):
+        (folder / p).mkdir(parents=True)
+        for f in (1, 2):
+            (folder / p / f"KL6165{p[-1]}_TMT_F{f}.raw").write_bytes(b"\0" * 64)
+    return folder
+
+
+def _bridge_block():
+    from ionomos.tmt_editor import ChannelMap
+
+    cm = ChannelMap.empty(["plexA", "plexB"], workflow_label="TMT-10")
+    cm.suggest(["DMSO", "Drug"], 3, "126")
+    return cm
+
+
+def test_a_tmt_draft_carries_the_map_and_the_workflows_label_type(lab):
+    import yaml
+
+    folder = _tmt_drop(lab)
+    d = draft(folder, lab["cfg"], review=True)
+    assert d.tmt == {} and d.tmt_workflows["TMT"]["label"] == "TMT-10"
+    assert d.tmt_workflows["TMT"]["ref_tag"] == "Pool" and d.tmt_workflows["TMT"]["workflow"] == "TMT10-MS3"
+    assert {f.experiment for f in d.files} == {"plexA", "plexB"}
+    (folder / "experiment.yaml").write_text(yaml.safe_dump({"tmt": _bridge_block().block()}), encoding="utf-8")
+    assert draft(folder, lab["cfg"], review=True).tmt == _bridge_block().block()
+
+
+def test_the_editors_map_is_checked_and_written_with_the_reference_role(lab, tmp_path):
+    from ionomos.manifest import load_overrides, save_overrides
+
+    folder = _tmt_drop(lab)
+    d = draft(folder, lab["cfg"], review=True)
+    cm = _bridge_block()
+
+    def answer(block, errors=()):
+        return Answer(user="Aman", method="TMT", date="", allow_uneven=False, files=d.files, tmt=block,
+                      tmt_errors=list(errors))
+
+    assert validate(answer(cm.block()), d.known_methods, d.kinds) == ""
+    assert validate(answer({}), d.known_methods, d.kinds) == ""            # no map: decided later, as before
+    bad = _bridge_block()
+    bad.set_name("plexB", "127N", "DMSO_1_127N")
+    msg = validate(answer(bad.block(), bad.errors()), d.known_methods, d.kinds)
+    assert msg.startswith("TMT channels: sample name DMSO_1_127N is used twice") and "Clear the channels" in msg
+    one_plex = {"tag": "TMT-10", "plexes": {"plexA": {"channels": {"126": "A_1_126"}}}}
+    assert "no entry for experiment(s): plexB" in validate(answer(one_plex), d.known_methods, d.kinds)
+    assert validate(answer(None), d.known_methods, d.kinds) == ""          # a window without the editor
+
+    ov = to_overrides(answer(cm.block()), d)
+    assert ov.tmt == cm.block() and ov.tmt_set and ov.analysis == {"roles": {"Pool": "reference"}}
+    save_overrides(folder, ov, replace_files=True)
+    back = load_overrides(folder)
+    assert back.tmt == cm.block() and back.analysis["roles"] == {"Pool": "reference"}
+    # Clear in the window: the answer is "no map", and an old tmt: block goes (the rest of the file stays)
+    d2 = draft(folder, lab["cfg"], review=True)
+    ov2 = to_overrides(answer({}), d2)
+    assert ov2.tmt == {} and ov2.tmt_set and "roles" not in ov2.analysis   # nothing named: roles as they were
+    save_overrides(folder, ov2, replace_files=True)
+    back2 = load_overrides(folder)
+    assert back2.tmt == {} and back2.analysis["roles"] == {"Pool": "reference"} and back2.user == "Aman"
+    # a method that is not TMT never touches tmt:
+    dia = to_overrides(Answer(user="Aman", method="DIA", date="", allow_uneven=False, files=d.files, tmt={"x": 1}),
+                       d)
+    assert dia.tmt == {} and not dia.tmt_set

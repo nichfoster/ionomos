@@ -15,7 +15,7 @@ The same `parsed` dict stored here is what intake writes to ionomos.json.
 Missing-id contracts: get() returns None; set_status()/requeue() are silent no-ops
 (pinned by tests); start_attempt() raises LedgerError.
 
-Thread-safe (D89): one connection, and every use of it holds `_lock`, so one Ledger
+Thread-safe (D104): one connection, and every use of it holds `_lock`, so one Ledger
 may be shared across threads (a worker thread and its caller, as the test bed does).
 Unlocked, two threads stepping the same cached statement read NULL columns and short lists.
 """
@@ -97,7 +97,7 @@ class Job:
 class Ledger:
     def __init__(self, db_path: str | Path):
         self.path = Path(db_path)
-        # Every use of _conn holds this (D89). Re-entrant: recover_on_startup calls set_status.
+        # Every use of _conn holds this (D104). Re-entrant: recover_on_startup calls set_status.
         self._lock = threading.RLock()
         self._conn = sqlite3.connect(self.path, check_same_thread=False, timeout=30)
         self._conn.row_factory = sqlite3.Row
@@ -188,7 +188,7 @@ class Ledger:
             self._conn.commit()
 
     # ----------------------------------------------------------------- reads --
-    # Rows are fetched inside the lock; a cursor stepped after it is released can be torn (D89).
+    # Rows are fetched inside the lock; a cursor stepped after it is released can be torn (D104).
 
     def get(self, job_id: int) -> Job | None:
         with self._lock:
@@ -260,17 +260,21 @@ def backup(db_path: str | Path, backup_dir: str | Path, keep: int = 14) -> Path 
     return dest
 
 
-def rebuild_from_status_files(db_path: str | Path, users_root: str | Path) -> tuple[Path | None, int]:
+def rebuild_from_status_files(db_path: str | Path, users_root: str | Path, healthy: bool = False
+                              ) -> tuple[Path | None, int]:
     """Replace a broken ledger: move it aside, re-create jobs from every <user>/<exp>/ionomos.json.
 
     Each experiment folder carries its full intake record, so nothing about
     what was filed is lost with the database. Jobs that were running come
-    back queued. Returns (where the broken file was moved, jobs recovered).
+    back queued. Returns (where the old file was moved, jobs recovered). A
+    `healthy` ledger rebuilt on request (--force) is kept as .before-rebuild-,
+    not .broken- (#143).
     """
     p = Path(db_path)
     moved = None
     if p.exists():
-        moved = p.with_name(f"{p.name}.broken-{datetime.now():%Y%m%d-%H%M%S}")
+        kept_as = "before-rebuild" if healthy else "broken"
+        moved = p.with_name(f"{p.name}.{kept_as}-{datetime.now():%Y%m%d-%H%M%S}")
         p.replace(moved)
         for ext in ("-wal", "-shm", "-journal"):
             side = p.with_name(p.name + ext)

@@ -164,3 +164,13 @@ def test_tmt_annotations():
     with pytest.raises(OverridesError, match="no entry"):
         tmt_annotation_files(ov, ["plexA", "plexB"])
     assert tmt_annotation_files(Overrides(), ["p"]) == {}
+
+
+def test_tmt_block_is_checked_with_tmtkit():
+    """D91: a tag Ionomos does not know, or a typo in a key, is said at intake with the known values."""
+    with pytest.raises(OverridesError, match="tag 'TMT10plexx' is not a label type Ionomos knows; use one of TMT-6"):
+        parse_overrides({"tmt": {"tag": "TMT10plexx", "channels": {"126": "x"}}})
+    with pytest.raises(OverridesError, match=r"unknown key\(s\) reference \(known: tag, channels, plexes"):
+        parse_overrides({"tmt": {"channels": {"126": "x"}, "reference": 126}})
+    ov = parse_overrides({"tmt": {"tag": "TMTpro", "channels": {126: "DMSO_1_126", "127N": None}}})
+    assert tmt_annotation_files(ov, ["p"]) == {"p": "126\tDMSO_1_126\n127N\t\n"}  # empty: FragPipe refuses it

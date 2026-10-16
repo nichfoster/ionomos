@@ -663,3 +663,52 @@ def test_transient_disk_error_retries(bed, monkeypatch):
     f = testbed.drop(bed["root"], "iso_good")
     monkeypatch.setattr(intake_mod, "_plan", lambda *a, **k: (_ for _ in ()).throw(PermissionError("locked")))
     assert intake(f, bed["cfg"], bed["ledger"]).value == "retry"
+
+
+# ---------------------------------------------------------- #143: small CLI things --
+
+
+def test_cancel_of_a_missing_job_exits_1_and_a_healthy_ledger_rebuilt_on_request_is_not_called_broken(bed, capsys):
+    from ionomos.cli import main
+
+    _queue(bed)
+    bed["ledger"].close()
+    assert main(["--config", str(bed["cfg_path"]), "cancel", "999"]) == 1
+    assert "no job 999" in capsys.readouterr().err
+    assert main(["--config", str(bed["cfg_path"]), "cancel", "1"]) == 0
+    assert "cancelled" in capsys.readouterr().out
+    assert main(["--config", str(bed["cfg_path"]), "repair-ledger"]) == 0
+    assert "nothing to do" in capsys.readouterr().out
+    assert main(["--config", str(bed["cfg_path"]), "repair-ledger", "--force"]) == 0
+    out = capsys.readouterr().out
+    assert "before-rebuild" in out and "broken" not in out
+    kept = list(bed["cfg"].database.parent.glob("*.before-rebuild-*"))
+    assert len(kept) == 1 and not list(bed["cfg"].database.parent.glob("*.broken-*"))
+
+
+def test_a_workflow_shows_its_label_type_only_when_tmt_integrator_runs(tmp_path):
+    """#143: every stock workflow carries tmtintegrator.channel_num, so an isoDTB or DIA summary read as TMT-6."""
+    for kind, want in (("DIA", False), ("isoDTB", False), ("TMT", True)):
+        p = tmp_path / f"{kind}.workflow"
+        p.write_text(testbed.workflow_text(kind, "TMT-10"), encoding="utf-8", newline="\n")
+        settings = fragpipe.inspect_workflow(p)["settings"]
+        assert ("label type" in settings) is want, (kind, settings)
+        if want:
+            assert settings["label type"] == "TMT-10" and settings["TMT-Integrator"] == "true"
+
+
+def test_a_huge_volcano_is_thinned_for_slides():
+    """#143: 200,000 features made a 37 MB SVG that PowerPoint will not open; the significant points all stay."""
+    from ionomos.downstream import charts
+    from ionomos.downstream.analysis import DiffResult, Settings
+
+    rows = [{"label": f"G{i}", "log2fc": (i % 7) - 3.0, "pvalue": 0.5 if i % 50 else 1e-6, "qvalue": None,
+             "significant": "" if i % 50 else ("up" if i % 100 else "down"), "index": i} for i in range(60_000)]
+    d = DiffResult(name="A vs B", treatment="A", control="B", kind="x", rows=rows, settings=Settings(),
+                   y_threshold_p=0.05)
+    pts, note = charts.thin_points(rows)
+    assert sum(1 for r in pts if r["significant"]) == 1200 and len(pts) <= charts.MAX_POINTS + 1200
+    assert "non-significant points drawn" in note and "all 1,200 significant ones" in note
+    svg = charts.volcano(d, standalone=True)
+    assert svg.count("data-i=") == len(pts) and "non-significant points drawn" in svg  # (+ the legend's circles)
+    assert charts.thin_points(rows[:100]) == (rows[:100], "")

@@ -65,6 +65,7 @@ class Findings:
     phospho_problems: list = field(default_factory=list)  # [(code, severity, message)] from phospho.py (D79)
     psm_problems: list = field(default_factory=list)      # [(issue code, message)] from psmqc.run
     run_problems: list = field(default_factory=list)      # [(issue code, message)] from runorder.run (D78)
+    tmt_problems: list = field(default_factory=list)      # [(issue code, message)] from tmtqc.run (D91)
     model: object = None                # analysis.Model: the design used, or why an asked-for one wasn't
     roles: object = None                # roles.Plan: the conditions' roles and the comparisons they gave
     guards: list = field(default_factory=list)            # guards.statistics: p-values that may not mean what they say
@@ -199,6 +200,65 @@ def _phospho_checks(f: Findings, add) -> None:
 
 
 
+TMT_ISSUES = {
+    "TMT_LOW_LABELLING": (
+        "Part of the peptides carry no TMT label",
+        ["The labelling reaction was incomplete: too little reagent for the peptide amount, old or wet reagent "
+         "(TMT hydrolyses), a buffer with amines (Tris, ammonium) or a pH below 8",
+         "The peptide amount was measured wrong, so the reagent-to-peptide ratio was off",
+         "Quenching (hydroxylamine) came too early"],
+        ["Look at the TMT plexes and channels section: is it one plex or all of them, the N-termini or the lysines?",
+         "Unlabelled peptides carry no reporter ions, so the plex loses depth; the ratios of what was quantified "
+         "usually stand",
+         "For the next preparation, check the label check of a test aliquot before pooling the channels"]),
+    "TMT_LOW_PURITY": (
+        "The precursors were often not pure",
+        ["Other peptides were isolated with the precursor (a complex sample, a wide isolation window, a short "
+         "gradient), and their reporter ions add to its own",
+         "Quantification from MS2 (no SPS-MS3), where co-isolation compresses ratios toward 1"],
+        ["Fold changes are probably smaller than the truth; trust the direction more than the size",
+         "TMT-Integrator leaves out PSMs below the workflow's min purity (tmtintegrator.min_purity)",
+         "For the next runs: fractionate more, narrow the isolation window, or use SPS-MS3 on the Eclipse"]),
+    "TMT_CHANNEL_EMPTY": (
+        "A named channel has almost no signal",
+        ["The channel map names the wrong channel: the sample is on another one, or this one was never used",
+         "That sample's labelling failed, or the sample was lost before pooling",
+         "The label type in the workflow is not the kit that was used"],
+        ["Check the map (experiment.yaml tmt:, or annotation.txt beside the raw files) against the lab notebook",
+         "If the sample is really empty, mark the channel NA and Retry, or leave the sample out on the Analysis tab",
+         "Look at the channel chart in the TMT plexes and channels section"]),
+    "TMT_REFERENCE_WEAK": (
+        "The reference channel is far from the others",
+        ["Less (or more) of the pool was put in than of each sample",
+         "The reference channel in the map is not the one that holds the pool"],
+        ["A bridge only has to be the same in every plex, so a steady offset is harmless; check that it is "
+         "similar in every plex",
+         "If the map names the wrong channel, fix reference_channel (experiment.yaml tmt:) and Re-run analysis"]),
+    "TMT_LABEL_TYPE_MISMATCH": (
+        "The search's tables do not match the channel map",
+        ["The workflow's label type (tmtintegrator.channel_num) is not the kit in the map (TMT-10 against TMT-16)",
+         "An annotation file other than the one meant was used (a second *annotation.txt, or none, so FragPipe "
+         "named the channels itself)",
+         "The map was changed after the search"],
+        ["Compare the map with the workflow's label type: `ionomos tmt plan <folder>` lists both",
+         "Fix the map or pick the workflow made for the kit, then Retry the search"]),
+    "TMT_CONDITIONS_UNKNOWN": (
+        "The channel names carry no condition",
+        ["No channel map reached FragPipe, so it named the channels <plex>_<channel>",
+         "The names have no '_', so the text before the first '_' is the whole name"],
+        ["Give the channels names like DMSO_1_126 (condition_plex_channel) in experiment.yaml tmt: or an "
+         "annotation.txt beside the raw files, then Retry",
+         "Or set each sample's condition on the Analysis tab and Run analysis"]),
+}
+
+
+def _tmt_checks(f: Findings, add) -> None:
+    """Issues from the TMT QC (tmtqc.py, D91): a warning each, with what the numbers said."""
+    for code, msg in getattr(f, "tmt_problems", None) or []:
+        title, causes, fixes = TMT_ISSUES.get(code, ("A TMT check failed", [], []))
+        add(Issue(code, "warning", title, msg, list(causes), list(fixes), {"message": msg}))
+
+
 def suggest_conditions(samples: list[str]) -> dict[str, str]:
     """Best guess at each sample's condition from its name: drop the part every name shares,
     trailing replicate numbers and Xcalibur timestamps. 'CS_22rv1_MA25_DMSO_1' -> 'DMSO'."""
@@ -269,6 +329,9 @@ def check(f: Findings) -> list[Issue]:
                        "incompletely digested sample measures different peptides",
                        "Check the digestion for the next preparation"], {"message": msg}))
 
+    # ---- TMT QC (tmtqc.py, D91): reporter ions, labels and precursors per plex; said even without quantities
+    _tmt_checks(f, add)
+
     # ---- run order (runorder.py, D78): drift during the run, conditions acquired in blocks
     for code, msg in f.run_problems:
         if code == "RUN_ORDER_DRIFT":
@@ -305,7 +368,7 @@ def check(f: Findings) -> list[Issue]:
                       "Label quantification ran without the isoDTB labels, or found no labelled peptides",
                       "The search failed quietly (wrong FASTA or species) and the table is empty"]
             fixes = ["Open the table in fragpipe/ and check the modification masses and ratio columns",
-                     "Check the workflow for this method (tab 3), then Retry the job"]
+                     "Check the workflow for this method (Methods tab), then Retry the job"]
         add(Issue("UNUSABLE_TABLE", "error", "The result table has nothing Ionomos can use",
                   f"{f.read_problem}, so there are no statistics or volcano plot.", causes, fixes, {"method": method}))
         return out
@@ -319,7 +382,8 @@ def check(f: Findings) -> list[Issue]:
                       f"Ionomos looked for {want} in {f.workdir or 'the experiment folder'} and didn't find it, "
                       "so there are no statistics or volcano plot yet.",
                       causes, ["Open the FragPipe log from the Jobs tab and look at the last steps",
-                               "Check the workflow for this method (tab 3) has quantification on, then Retry the job",
+                               "Check the workflow for this method (Methods tab) has quantification on, then "
+                               "Retry the job",
                                "If the method is wrong, pick the right one and Re-run analysis"],
                       {"method": method, "tables_found": present}))
         return out
@@ -329,7 +393,7 @@ def check(f: Findings) -> list[Issue]:
                   ["The search found no proteins/peptides passing FDR (wrong FASTA or wrong species?)",
                    "The raw files are empty or from a failed acquisition",
                    "Wrong search settings (enzyme, modifications, mass tolerances) for this experiment"],
-                  ["Check the FASTA and workflow for this method (tab 3) and the raw files, then Retry"],
+                  ["Check the FASTA and workflow for this method (Methods tab) and the raw files, then Retry"],
                   {"source": m.source}))
         return out
     if m.meta.get("precomputed"):  # a results table: no samples to check, only what it plots

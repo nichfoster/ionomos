@@ -36,6 +36,10 @@ a = Analysis(
                    "ionomos.forms", "ionomos.accuracy", "ionomos.accuracy_page", "ionomos.notify_tab",
                    "ionomos.notify", "ionomos.downstream.compare", "ionomos.downstream.benchmark",
                    "ionomos.downstream.phospho",  # opt-in phosphosites, KSEA, STRING (D79)
+                   "ionomos.library", "ionomos.fastasource", "ionomos.library_tab",  # D89, D90 (Methods tab)
+                   "ionomos.tmtkit", "ionomos.tmt_editor",  # D91: the TMT channel editor (imported on demand)
+                   "ionomos.uinav",  # the Today tab, keys, the remembered window (docs/UI.md)
+                   "ionomos.checks",  # the Setup tab's Check everything list, `ionomos doctor` (D95)
                    "tkinter.colorchooser"],
     hookspath=[],
     runtime_hooks=[],

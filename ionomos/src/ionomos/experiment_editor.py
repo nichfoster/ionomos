@@ -13,7 +13,8 @@ Shows: what the data is, the doctor's current issues (from the last analysis), e
 its condition / replicate / used, the comparisons, each condition's role with its samples (and a list
 to change it; a guess from a weak keyword is marked to confirm), the comparisons that will be run in
 words and what uneven groups mean (downstream/roles.preview, which holds the logic), per-experiment
-cut-offs. After a run the issues are refreshed and the attention item for the experiment is closed
+cut-offs, and for a TMT experiment its channel map (tmt_editor.py: saved as experiment.yaml tmt: with a backup,
+used by the next search; a reference channel becomes the reference role). After a run the issues are refreshed and the attention item for the experiment is closed
 when nothing is left to decide.
 """
 from __future__ import annotations
@@ -64,32 +65,50 @@ class ExperimentEditor:
         self.last_outcome = None
         self.frame = f = ttk.Frame(parent)
         f.columnconfigure(0, weight=1)
-        f.rowconfigure(2, weight=1)
+        f.rowconfigure(3, weight=1)
+
+        # the buttons first, so they are on screen however small it is (docs/UI.md S1.8)
+        act = ttk.Frame(f)
+        act.grid(row=0, column=0, sticky="w", **PAD)
+        self.run_btn = ttk.Button(act, text="Run analysis", command=self.run)
+        self.run_btn.pack(side="left", padx=2)
+        ttk.Button(act, text="Save choices", command=self.save_choices).pack(side="left", padx=2)
+        ttk.Button(act, text="Open report", command=self.open_report).pack(side="left", padx=2)
+        ttk.Button(act, text="Results folder", command=self.open_results).pack(side="left", padx=2)
+        self.state = ttk.Label(act, text="", foreground="#2e7d32", wraplength=380, justify="left")
+        self.state.pack(side="left", padx=(8, 2))
 
         self.info = ttk.Label(f, text="", foreground="#555", wraplength=900, justify="left")
-        self.info.grid(row=0, column=0, sticky="w", **PAD)
+        self.info.grid(row=1, column=0, sticky="w", **PAD)
         self.issues = scrolledtext.ScrolledText(f, height=5 if not compact else 6, wrap="word",
                                                 font=("Segoe UI" if _win() else "Helvetica", 10))
-        self.issues.grid(row=1, column=0, sticky="ew", **PAD)
+        self.issues.grid(row=2, column=0, sticky="ew", **PAD)
         for sev, colour in SEV_COLOUR.items():
             self.issues.tag_configure(sev, foreground=colour)
         self.issues.tag_configure("b", font=("Segoe UI" if _win() else "Helvetica", 10, "bold"))
         self.issues.configure(state="disabled")
 
         body = ttk.Frame(f)
-        body.grid(row=2, column=0, sticky="nsew")
+        body.grid(row=3, column=0, sticky="nsew")
         body.columnconfigure(0, weight=3)
         body.columnconfigure(1, weight=2)
         body.rowconfigure(0, weight=1)
+        # a TMT experiment: which sample is on which channel (tmt_editor.py); shown only for TMT
+        self.tmt_holder = ttk.Frame(body)
+        self.tmt_holder.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        self.tmt_holder.columnconfigure(0, weight=1)
+        self.tmt_holder.grid_remove()
+        self.tmt = None                 # tmt_editor.TmtEditorFrame of the experiment, None when not TMT
         sf = ttk.LabelFrame(body, text="Samples", padding=6)
         sf.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
         sf.columnconfigure(0, weight=1)
         sf.rowconfigure(0, weight=1)
-        cols = (("sample", 200), ("condition", 150), ("rep", 45), ("used", 70), ("run file", 220))
+        cw = tkutil.char_width()
+        cols = (("sample", 28), ("condition", 21), ("rep", 6), ("used", 10), ("run file", 31))
         self.tree = ttk.Treeview(sf, columns=[c for c, _ in cols], show="headings", height=9, selectmode="extended")
-        for c, w in cols:
+        for c, n in cols:
             self.tree.heading(c, text=c)
-            self.tree.column(c, width=w, anchor="w", stretch=c in ("sample", "condition", "run file"))
+            self.tree.column(c, width=n * cw, anchor="w", stretch=c in ("sample", "condition", "run file"))
         self.tree.tag_configure("off", foreground="#999")
         self.tree.tag_configure("changed", foreground="#1565c0")
         self.tree.grid(row=0, column=0, sticky="nsew")
@@ -128,12 +147,12 @@ class ExperimentEditor:
         rf = ttk.LabelFrame(right, text="Roles (what each condition is)", padding=6)
         rf.grid(row=1, column=0, sticky="ew", pady=(8, 0))
         rf.columnconfigure(1, weight=1)
-        rcols = (("condition", 120), ("samples", 60), ("role", 150), ("from", 190))
+        rcols = (("condition", 17), ("samples", 9), ("role", 21), ("from", 27))
         self.roles_tree = ttk.Treeview(rf, columns=[c for c, _ in rcols], show="headings", height=4,
                                        selectmode="browse")
-        for c, w in rcols:
+        for c, n in rcols:
             self.roles_tree.heading(c, text=c)
-            self.roles_tree.column(c, width=w, anchor="w", stretch=c in ("role", "from"))
+            self.roles_tree.column(c, width=n * cw, anchor="w", stretch=c in ("role", "from"))
         self.roles_tree.tag_configure("ask", foreground=SEV_COLOUR["input"])
         self.roles_tree.tag_configure("set", foreground="#1565c0")
         self.roles_tree.grid(row=0, column=0, columnspan=3, sticky="ew")
@@ -167,18 +186,9 @@ class ExperimentEditor:
         ttk.Combobox(of, textvariable=self.var("normalize"), state="readonly", width=12,
                      values=[LAB_DEFAULT, *NORMALIZATION_CHOICES]).grid(row=2, column=1, columnspan=3, sticky="w", **PAD)
 
-        act = ttk.Frame(right)
-        act.grid(row=3, column=0, sticky="w", pady=(10, 0))
-        self.run_btn = ttk.Button(act, text="Run analysis", command=self.run)
-        self.run_btn.pack(side="left", padx=2)
-        ttk.Button(act, text="Save choices", command=self.save_choices).pack(side="left", padx=2)
-        ttk.Button(act, text="Open report", command=self.open_report).pack(side="left", padx=2)
-        ttk.Button(act, text="Results folder", command=self.open_results).pack(side="left", padx=2)
-        self.state = ttk.Label(right, text="", foreground="#2e7d32", wraplength=380, justify="left")
-        self.state.grid(row=4, column=0, sticky="w", pady=(6, 0))
         self.log = scrolledtext.ScrolledText(f, height=5 if not compact else 4, wrap="word",
                                              font=("Consolas" if _win() else "Menlo", 9))
-        self.log.grid(row=3, column=0, sticky="nsew", pady=(8, 0))
+        self.log.grid(row=4, column=0, sticky="nsew", pady=(8, 0))
         self.log.configure(state="disabled")
 
     # ------------------------------------------------------------- helpers --
@@ -240,6 +250,7 @@ class ExperimentEditor:
         def go():
             try:
                 info, err = postprocess.inspect_folder(dest, cfg, method, table), None
+                info["tmt_map"] = _tmt_map(dest, cfg, method, info)
             except Exception as exc:  # noqa: BLE001
                 info, err = None, f"{type(exc).__name__}: {exc}"
             self.host.post(lambda: self._show(dest, method, job_id, info, err, table, then))
@@ -299,6 +310,7 @@ class ExperimentEditor:
             text += "\nnote: " + info["notes"][0]
         self.info.configure(text=text, foreground="#333" if self._samples else "#c62828")
         self.show_issues(info.get("issues") or [])
+        self._show_tmt(dest, info.get("tmt_map"))
         self._fill()
         if then is not None:
             try:
@@ -427,7 +439,8 @@ class ExperimentEditor:
         try:
             self._roles = roles.set_role(self._roles, condition, value)
         except roles.RoleError as exc:
-            messagebox.showerror("Role", str(exc), parent=self.frame)
+            messagebox.showerror("Role", f"{exc}\n\n→ Pick another role for this condition, or leave it automatic.",
+                                 parent=self.frame)
             return
         if value == "control" and self.var("de_type").get() in ("control", "all"):
             self.var("control").set(condition)  # refreshes through the variable's trace
@@ -439,6 +452,49 @@ class ExperimentEditor:
         row = self._row(condition)
         if row is not None and row.confirmable:
             self.set_role(row.condition, row.role)
+
+    # ----------------------------------------------------------------- TMT --
+
+    def _show_tmt(self, dest: Path, model) -> None:
+        """The channel editor for a TMT experiment (tmt_editor.py); hidden for anything else."""
+        from ionomos.tmt_editor import TmtEditorFrame
+
+        for w in self.tmt_holder.winfo_children():
+            w.destroy()
+        self.tmt = None
+        if model is None:
+            self.tmt_holder.grid_remove()
+            return
+        self.tmt = TmtEditorFrame(self.tmt_holder, model, folder=lambda: dest, on_change=self._tmt_changed,
+                                  title="TMT channels (experiment.yaml tmt:, used by the next search; a reference "
+                                        "channel joins the plexes and is never compared)")
+        self.tmt.frame.grid(row=0, column=0, sticky="ew")
+        self.tmt_holder.grid()
+
+    def _tmt_changed(self) -> None:
+        """A reference channel is the reference role in analysis.roles (left out of the comparisons, D91)."""
+        from ionomos.tmt_editor import roles_with_references
+
+        if self.tmt is None or not self.target:
+            return
+        mine = roles_with_references(self._roles, self.tmt.model.block())
+        if mine != self._roles:
+            self._roles = mine
+            self.refresh_roles()
+
+    def _save_tmt(self, dest: Path) -> Path | None:
+        """Save: the channel map as the whole tmt: block of experiment.yaml, the old file kept in
+        experiment-backups/ first (manifest.backup_experiment_yaml). None when the map did not change."""
+        from ionomos.manifest import backup_experiment_yaml, load_overrides, save_overrides
+
+        if self.tmt is None or not self.tmt.model.changed():
+            return None
+        ov = load_overrides(dest)
+        ov.tmt, ov.tmt_set = self.tmt.model.block(), True
+        backup_experiment_yaml(dest)
+        path = save_overrides(dest, ov)
+        self.tmt.model.initial = self.tmt.model.block()
+        return path
 
     # --------------------------------------------------------------- edits --
 
@@ -573,11 +629,14 @@ class ExperimentEditor:
             # the editor shows the whole analysis: block; checked, and the old file kept in experiment-backups/
             # (the same save a confirmed proposal of the assistant goes through, D75)
             path, _backup = save_analysis(dest, self.choices(), self._lab())
+            path = self._save_tmt(dest) or path
         except (ValueError, AnalysisError, OverridesError) as exc:
-            messagebox.showerror("Analysis choices", str(exc), parent=self.frame)
+            messagebox.showerror("Analysis choices", f"{exc}\n\n→ Fix the choice named above, then press Save choices again.",
+                                 parent=self.frame)
             return False
         except OSError as exc:
-            messagebox.showerror("Analysis choices", f"Could not write experiment.yaml:\n{exc}", parent=self.frame)
+            messagebox.showerror("Analysis choices", f"Could not write experiment.yaml:\n{exc}\n\n→ Close experiment.yaml if "
+                                 "another program has it open, then press Save choices again.", parent=self.frame)
             return False
         if path is None:
             return True
@@ -679,6 +738,20 @@ class ExperimentEditor:
             title="A protein or results table (MaxQuant, Spectronaut, Perseus, limma, Excel, CSV …)", parent=self.frame,
             filetypes=[("Tables", "*.tsv *.csv *.txt *.xlsx *.tab"), ("All files", "*.*")])
         return Path(f) if f else None
+
+
+def _tmt_map(dest: Path, cfg, method: str | None, info: dict):
+    """The channel editor's state for a TMT experiment (tmt_editor.for_folder), else None. Off the Tk thread."""
+    from ionomos.tmt_editor import for_folder
+
+    kind = cfg.kind(method) if cfg is not None and method in getattr(cfg, "methods", {}) else method
+    if info.get("exp") != "TMT" and kind not in ("TMT", "MSstatsTMT") and info.get("method") != "TMT":
+        return None
+    try:
+        return for_folder(dest, cfg, method if cfg is not None and method in cfg.methods else None)
+    except Exception:  # noqa: BLE001 - the editor works without the channel map
+        log.exception("could not read the TMT channels of %s", dest)
+        return None
 
 
 def _win() -> bool:
