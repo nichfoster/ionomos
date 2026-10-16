@@ -4218,7 +4218,7 @@ test_fragpipe_real.py, test_faults.py, test_failsafes.py, test_anytable.py, test
 test_configio.py, test_app.py). **Not verified**: a real 260+ character drop on the lab PC with long paths off
 (the tests stub the Windows gate), and a real FragPipe log on such a path.
 
-### D95 — The example is real data a stranger can fetch; the demo stays simulated and offline
+### D96 — The example is real data a stranger can fetch; the demo stays simulated and offline
 
 **2026-10-15.** A stranger who tries `ionomos demo` sees a report on invented numbers (D40). Before trusting the
 tool, they want to see it on a real table, and VISION.md "the road to publishing" step 2 and ROADMAP 5A / 5D step 4
@@ -4253,7 +4253,7 @@ Not decided here: the mixed-species benchmark (ROADMAP 5D steps 4 and 5) is stil
 serve `ionomos benchmark --expected`. A PRIDE HYE dataset, or the lab's own, is still wanted for that.
 
 
-### D96 — Every table reader decides encodings, quotes and delimiters in one place; the engines' long readers read decimal commas
+### D97 — Every table reader decides encodings, quotes and delimiters in one place; the engines' long readers read decimal commas
 **2026-10-15.** Round 4 wrote one simulated experiment in every format Ionomos reads and damaged each copy in
 the ways files arrive from a lab: saved again from Excel (UTF-16, every cell in quotes, a comma or semicolon), on
 a German or French Windows (decimal commas, dots between thousands), cut off by a copy, or with a MaxQuant cell of
@@ -4286,7 +4286,7 @@ Excel's UTF-16 save of each engine's table, a Spectronaut report from a German W
 `.xlsx` export, DIA-NN 2.x `--out` names.
 
 
-### D97 — An engine run directly must leave its main table; Sage conversions are recorded; helper runs are bounded
+### D98 — An engine run directly must leave its main table; Sage conversions are recorded; helper runs are bounded
 **2026-10-15.** Round 4 drove the runners with a stand-in engine that hangs, prints garbage, exits with odd codes,
 writes partial tables and leaves processes behind. This amends D39, D50, D51 and D69 item 4.
 
@@ -4315,7 +4315,7 @@ engines; a process an engine leaves running after it exits is stopped on POSIX o
 search that can't be stopped does not hold the job yet (#175).
 
 
-### D98 — A path written inside a file Ionomos reads is never opened when it names another computer
+### D99 — A path written inside a file Ionomos reads is never opened when it names another computer
 **2026-10-15.** A workflow's `database.db-path`, a `fragpipe-ui.cache`, anything a drop can carry may hold
 `\\server\share\...`. Opening such a path makes Windows sign in to that server as the account Ionomos runs as,
 and its NTLM hash goes to whoever runs the server (docs/SECURITY_NOTES.md).
@@ -4332,7 +4332,7 @@ UNC root is faked with a blocking `is_dir`, so no SMB packet leaves the PC. **No
 network; a mapped drive letter (`Z:`) inside a scanned file is not recognised as a network path.
 
 
-### D99 — A batch launcher is never given an argument cmd.exe would read as code
+### D100 — A batch launcher is never given an argument cmd.exe would read as code
 **2026-10-15.** Windows runs a `.bat` / `.cmd` (fragpipe.bat) through cmd.exe, and Python quotes only arguments
 with spaces. A search under `C:/R&D/` ran part of its path as a second command.
 
@@ -4348,7 +4348,7 @@ round trip runs on Windows only). **Not verified**: the real fragpipe.bat under 
 `maxquant.create_template` and `sage.run_job` start programs without `batch_problem` (real installs are .exe).
 
 
-### D100 — The library's kinds come from the label; FragPipe's own stock workflow breaks ties; a partial scan keeps the catalog
+### D101 — The library's kinds come from the label; FragPipe's own stock workflow breaks ties; a partial scan keeps the catalog
 **2026-10-15.** The library proposed SILAC3-phospho for the isoDTB method and Nonspecific-HLA-TMT10 for TMT,
 replaced a live workflow behind config.yaml, and a scan that stopped early lost what the last one found
 (#148, #150, #153). This amends D89 items 2, 4, 7 and 9.
@@ -4385,7 +4385,7 @@ proposals status line. `fpfolder.workflow_kind` still calls SILAC / PAL / isoTOP
 for the analysis (#161).
 
 
-### D101 — The command line's exit codes are one table, and config.yaml errors point at the line
+### D102 — The command line's exit codes are one table, and config.yaml errors point at the line
 **2026-10-15.** Scripts (the installer, a lab's own batch file) and the app's Run & Test pane read the exit code
 of `ionomos …`, and it meant different things per command: `check` exited 1 for an unreadable config and `stop`
 2; `analyze 17` exited 2 and `retry 17` 1; `cancel 17` 0.
@@ -4414,7 +4414,7 @@ the Run & Test pane against the new codes on the PC. Two commands still disagree
 options outside `cli.py` have no `--help` text (#166).
 
 
-### D102 — The fake FragPipe follows FragPipe's source over earlier docs, and says where it can't
+### D103 — The fake FragPipe follows FragPipe's source over earlier docs, and says where it can't
 **2026-10-15.** Round 4 checked the fake against FragPipe 24.0's source (FragPipeMain, FragpipeRun, TabWorkflow,
 TabRun, CmdDiann, CmdIonquant, SwingUtils and others at tag 24.0), not its documentation. This amends D59 item 10.
 

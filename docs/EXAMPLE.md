@@ -5,7 +5,7 @@ shows Ionomos on real, published data. It downloads the example datasets
 of FragPipe-Analyst's own paper (20.9 MB), checks them, writes three
 experiment folders and analyses each one, in about a minute. Nothing is
 bundled with Ionomos: the data are fetched from Zenodo and keep their
-licence (D95).
+licence (D96).
 
 ```bash
 ionomos example --open          # ./ionomos_example/: three experiments, three reports

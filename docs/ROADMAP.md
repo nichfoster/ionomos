@@ -399,7 +399,7 @@ installed.
   codes become editable config, with a "test your names" check (CLI + setup
   window), so another lab's convention needs no code change. Keep
   NAMING_CONVENTION.md ↔ naming.py in sync.
-- [ ] **Docs for a stranger:** (2026-09-30: QUICKSTART.md, ENGINES.md, the simulated demo and the "never done to your data" page (`help/safety.md`, #57) done; 2026-10-15: [VISION.md](VISION.md), SCOPE.md rewritten for today, CITATION.cff, CONTRIBUTING.md, a code of conduct, issue and pull-request templates; 2026-10-15: a real-data example, `ionomos example` (FragPipe-Analyst's published LFQ / DIA / TMT data, D95, [EXAMPLE.md](EXAMPLE.md)); still to do: a documentation site, 5D step 7)
+- [ ] **Docs for a stranger:** (2026-09-30: QUICKSTART.md, ENGINES.md, the simulated demo and the "never done to your data" page (`help/safety.md`, #57) done; 2026-10-15: [VISION.md](VISION.md), SCOPE.md rewritten for today, CITATION.cff, CONTRIBUTING.md, a code of conduct, issue and pull-request templates; 2026-10-15: a real-data example, `ionomos example` (FragPipe-Analyst's published LFQ / DIA / TMT data, D96, [EXAMPLE.md](EXAMPLE.md)); still to do: a documentation site, 5D step 7)
 - [x] **Help users can see** (2026-09-30, D46, #57; the report's help added for designs, dose-response and TMT in #58–#60): one help source shown in two
   places. In the report: a Help entry, "?" buttons on each section and QC tab, a glossary,
   and troubleshooting for the issues in that report. From the app and CLI: a full offline
@@ -623,7 +623,7 @@ need nothing from the lab.
    how to fetch its tables (not bundled: the demo stays offline, D40), its
    expected ratios for `ionomos benchmark --expected`, a test on a small
    slice of it, and its report for the site.
-   Half done 2026-10-15 (D95): `ionomos example` fetches FragPipe-Analyst's
+   Half done 2026-10-15 (D96): `ionomos example` fetches FragPipe-Analyst's
    published AP-MS / ccRCC DIA / ccRCC TMT data from Zenodo (CC BY 4.0), with
    a test on a 240-row excerpt. Still open: a mixed-species PRIDE dataset
    with its expected ratios for `ionomos benchmark --expected`, and the
@@ -1120,8 +1120,8 @@ Collected from the other docs; resolve before/during Phase 1.
 - [x] Agent auto-merge: removed 2026-09-27; a person merges (D31).
 - [x] CI Python versions: 3.11 (floor), 3.12 (exe build), 3.14 (the PC) since 2026-09-27.
 
-**Round 4 (2026-10-15): left open by the robustness audit** (D96–D102; the fixes are in CHANGELOG [Unreleased])
-- [ ] Loaders (D96), not verified on real files: Excel's UTF-16 save of each engine's table, a Spectronaut report
+**Round 4 (2026-10-15): left open by the robustness audit** (D97–D103; the fixes are in CHANGELOG [Unreleased])
+- [ ] Loaders (D97), not verified on real files: Excel's UTF-16 save of each engine's table, a Spectronaut report
       from a German Windows, a Proteome Discoverer `.xlsx` export, DIA-NN 2.x `--out` names. A lab member's real
       exports would settle these. FragPipe's own tables saved again from Excel with thousands separators are still
       read as all missing (FragPipe never writes them). A MaxQuant TMT table without a design gets one condition
@@ -1134,18 +1134,18 @@ Collected from the other docs; resolve before/during Phase 1.
       its `log_dir`, as the too-long-path item uses: raise these the same way. macOS / Linux: a folder is moved even while a copy still writes
       into it (no open-file lock there; a longer `stable_seconds` is the guard). How intake tells the window's
       `resolved_by: gui` from a hand-written one (#173); `ionomos run`'s two start-up tracebacks (#172).
-- [ ] Engines (D97): stop what an engine leaves running after it exits on Windows (a Job Object or a Toolhelp
+- [ ] Engines (D98): stop what an engine leaves running after it exits on Windows (a Job Object or a Toolhelp
       walk, #174); check on the PC whether MSFragger's `BatmassIoThermoServer.exe` outlives MSFragger. A leftover
       search that can't be stopped must hold the job, not run a second search beside it, and the cancel result
       can't say the engine survived the kill (#175). The console log keeps every attempt (up to 2 GB each):
       move aside or truncate an attempt's log past the limit? Does a MaxQuant retry reuse its per-raw working
       folders next to the raws (stale results) or redo them? DIA-NN reads `diann.cfg` in an unknown encoding:
       check a path with µ or ü on the PC, or hold a job whose paths are not ASCII.
-- [ ] Config and CLI (D101): `LiveConfig` can read a config.yaml another editor is writing in place (6 of 138 cut
+- [ ] Config and CLI (D102): `LiveConfig` can read a config.yaml another editor is writing in place (6 of 138 cut
       points load as a valid config with fewer methods, put right by the next reload); a settle delay would close
       it. 24 options outside `cli.py` have no `--help` text (#166); `bundle 77` and `library show <missing>` exit
       the other way round from the table (#167).
-- [ ] Security (D98, D99, SECURITY_NOTES.md): `experiment.yaml`'s `workflow:` / `fasta:` accept any absolute or
+- [ ] Security (D99, D100, SECURITY_NOTES.md): `experiment.yaml`'s `workflow:` / `fasta:` accept any absolute or
       UNC path, `site_annotation:` a UNC one (#168); an Authenticode check of the downloaded installer (today:
       size + SHA-256 from the same GitHub answer); `maxquant.create_template` and `sage.run_job` start programs
       without `batch_problem`; `bundle inspect --key` reads a member with no line break whole; Teams Adaptive
@@ -1161,7 +1161,7 @@ Collected from the other docs; resolve before/during Phase 1.
       on exported TMT QC figures (#178); a user's own `/regex/` with catastrophic backtracking can still freeze the
       page (JS has no regex time-out). Not verified: a real screen reader, Safari / Firefox, a 100k-feature report
       in a real browser.
-- [ ] Library (D100): `fpfolder.workflow_kind` still calls SILAC / PAL / isoTOP / ipIAA search folders isoDTB for
+- [ ] Library (D101): `fpfolder.workflow_kind` still calls SILAC / PAL / isoTOP / ipIAA search folders isoDTB for
       the analysis (#161). On the PC: the merged catalog after a `--time`-limited scan of `D:\`, the app's "Use it
       anyway?" question and the Review proposals status line.
 - [ ] FASTA: four more readers (`bundle.fasta_facts`, `sdrf.fasta_organism`, `engines._fasta_names`,
@@ -1170,7 +1170,7 @@ Collected from the other docs; resolve before/during Phase 1.
 - [ ] TMT: if the lab has iTRAQ data, try FragPipe's stock iTRAQ4 workflow on the first real TMT run (only the fake
       has searched it). `_load_quantities` for non-FragPipe engines and `sdrf.py` still read the `tmt:` map
       saved at intake, not `tmtkit.current_block`.
-- [ ] Testbed (D102): does the lab run DIA in fractions? If so, sum the fractions per sample before the statistics
+- [ ] Testbed (D103): does the lab run DIA in fractions? If so, sum the fractions per sample before the statistics
       (#180). An open search's report could show PTM-Shepherd's `global.profile.tsv` instead of failing on
       NO_TABLE (#181). A FragPipe refusal with no explanation entry reads "ended from outside, nothing failed:
       Retry" (#179); plain analysis notes are shown as warnings on a done job (#182). To confirm on the PC: the
@@ -1178,5 +1178,5 @@ Collected from the other docs; resolve before/during Phase 1.
       CRLF; that `<raw>_uncalibrated.mzML` sits beside the raws of an Ionomos job; that a dry run writes
       `fragpipe.job` into the preflight folder.
 - [x] Docs: should `test_docs_sync.py`'s config check also require every key `analysis.Settings` accepts to be
-      written by `dump_config` (#159)? → 2026-10-15 (D101): every such key survives a Save now, and
+      written by `dump_config` (#159)? → 2026-10-15 (D102): every such key survives a Save now, and
       `tests/test_config_roundtrip.py` walks `Settings`' fields, so a new one is covered there.

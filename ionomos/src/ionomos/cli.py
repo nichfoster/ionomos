@@ -707,7 +707,7 @@ def cmd_init(args) -> int:
         except ConfigError as exc:
             print(f"{exc}\nFix that line, or `ionomos init --force` to start from defaults (a backup is kept).",
                   file=sys.stderr)
-            return 2  # D101: a config.yaml it needs can't be read
+            return 2  # D102: a config.yaml it needs can't be read
     else:
         data = configio.defaults(root, users)
         found = fragpipe.detect_launcher()

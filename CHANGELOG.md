@@ -149,7 +149,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Help: "How do I tell Ionomos which TMT channel is which sample?" (`faq.tmt-channels`); a line in the TMT
   paragraph of Getting started.
 - `tmtkit.reference_conditions(tmt, ref_tag)`.
-- **A real-data example: `ionomos example`** (D95, docs/EXAMPLE.md, `example.py`). It downloads the example
+- **A real-data example: `ionomos example`** (D96, docs/EXAMPLE.md, `example.py`). It downloads the example
   datasets of FragPipe-Analyst's own paper (Hsiao et al., J. Proteome Res. 2024; Zenodo
   doi:10.5281/zenodo.13147961, CC BY 4.0, 20.9 MB), checks the size, MD5 and SHA-256, and writes
   `./ionomos_example/` with three real experiments: a label-free cyclin D1 pull-down (CCND1 3 vs control 4), and
@@ -198,7 +198,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Round 4: tests against hostile and odd input** (2026-10-15). Each area was attacked with malformed, empty,
   huge, unicode, CRLF, concurrent, interrupted, read-only, missing and duplicated input; each round-4 fix under
   Fixed has a regression test.
-  - **Loaders** (D96): `tests/test_loader_formats.py` + `tests/loader_formats.py` (343 tests). One simulated
+  - **Loaders** (D97): `tests/test_loader_formats.py` + `tests/loader_formats.py` (343 tests). One simulated
     experiment written in every format (DIA-NN matrix / long / Parquet, FragPipe DIA and IonQuant, MaxQuant,
     Spectronaut long and pivot, AlphaDIA, MSstats, Proteome Discoverer, Sage, any table as tab / comma / semicolon
     / .xlsx) gives one hit list; each format with nine harmless differences reads to the same numbers; with ten
@@ -206,7 +206,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the TMT formats (PD, MSstatsTMT, Sage TMT, MaxQuant) take the same changes and find the planted hits;
     provenance on binary / empty / wrong-shaped logs and records for every method.
   - `tables.decode`, `tables.open_text`, `tables.unquote`, `tables.reader`, `tables.delimiter`: the one place text
-    encodings, quotes and delimiters are decided (D96).
+    encodings, quotes and delimiters are decided (D97).
   - **Statistics**: `tests/test_stats_edges.py` (232 cases, ~6 s): n = 1 and n = 0 groups, all-missing features,
     constant columns and tables, duplicate IDs, 0 / negative / inf / NaN intensities, one sample, 500 samples,
     values rounded to 3 decimals, a block with one level, self-comparisons, an empty sample under every
@@ -219,18 +219,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     200-character / trailing-dot names, a read-only inbox, every kind of wrong `experiment.yaml`, damaged history
     / status files / ledger rows, locked and held-open ledgers and `repair-ledger`, the lock of a killed watcher, a
     stop while filing, a restart mid-job with a damaged `ionomos.json`.
-  - **Engines run directly** (D97): `tests/standin_engine.py`, a stand-in engine (driven by `IONOMOS_STANDIN`)
+  - **Engines run directly** (D98): `tests/standin_engine.py`, a stand-in engine (driven by `IONOMOS_STANDIN`)
     that hangs, prints garbage or binary, exits with any code or signal, writes whole / partial / zero-byte /
     header-only tables, locks a table from a grandchild, leaves a process behind, or floods its log;
     `tests/test_engine_faults.py` (109 tests) runs it as FragPipe, DIA-NN, MaxQuant, Sage, ThermoRawFileParser and
     the preflight's launcher, and kill_tree / kill_pid_tree / stop_leftover for Windows and POSIX with the
     module's os / subprocess / signal stubbed. `fragpipe.code_text`, `fragpipe.move_aside`, `fragpipe.run_to_file`.
-  - **The command line's exit codes, the same for every subcommand** (D101), in `cli.py`'s docstring (so in
+  - **The command line's exit codes, the same for every subcommand** (D102), in `cli.py`'s docstring (so in
     `ionomos --help`): 0 done, 1 the answer is no, 2 nothing was done (usage, unreadable config, missing folder or
     file), 3 a watcher is already running, 70 crashed, 130 Ctrl-C. `cli.build_parser()`; a help text for every
     option `cli.py` defines (14 had none). Tests: `test_cli_contract.py`, `test_config_errors.py`,
     `test_config_roundtrip.py`, `test_check_agreement.py`, `test_hostile_pc.py`.
-  - **Security** (D98, D99): `docs/SECURITY_NOTES.md`, what each component protects against whom, what it does
+  - **Security** (D99, D100): `docs/SECURITY_NOTES.md`, what each component protects against whom, what it does
     not, the code and the tests. `tests/test_security.py` (90 tests): zip-slip and absolute members, a 10 GB
     zip-bomb entry, a manifest bomb, webhook credentials and redirects to a private address, `!!python` tags in
     every YAML reader, `& | < > ^ % "` and line breaks through the command lines, PowerShell quoting, a hostile log
@@ -251,13 +251,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     every chart (`svg role=img`, the heatmap canvas) has an `aria-label` naming what it shows; a `?` controls its
     panel (`aria-controls`) and Escape on it closes the panel. JS harness: `hostile.test.mjs`,
     `searchjunk.test.mjs`, `keyboard.test.mjs`, `exportall.test.mjs` (34 tests).
-  - **The library** (D100): `ionomos library scan --only`, `--replace`; `ionomos library adopt --force`;
+  - **The library** (D101): `ionomos library scan --only`, `--replace`; `ionomos library adopt --force`;
     `library.save_scan`, `merge_scan`, `adopt_problems`, `live_workflows`, `lab_taxon`, `CANONICAL_STOCK`,
     `LABEL_KINDS`; flag `WF_KIND_MISMATCH` with a help entry.
   - **FASTAs**: `fastasource.fasta_headers(fh, stop, deadline, chunk=…)`, `fastasource.text_before_first_header`;
     `prepare_for_fragpipe(…, fasta_dir=)` and `download_proteome(…, fasta_dir=)` (for the wording of the space
     note).
-  - **The testbed** (D102): methods LFQ (`LFQ-MBR.workflow`, keyword `labelfree`), Phospho (`LFQ-phospho.workflow`,
+  - **The testbed** (D103): methods LFQ (`LFQ-MBR.workflow`, keyword `labelfree`), Phospho (`LFQ-phospho.workflow`,
     keyword `lfqphospho`) and Open (`Open.workflow` / `Open-noLOS.workflow`, keyword `opensearch`), each with a
     `naming.methods` rule `{sample}_{rep}[_{fraction}]`. Scenarios `lfq_good` (label-free, `combined_protein.tsv`
     in a real file's layout), `phospho_lfq` (`combined_site_STY_79.9663.tsv`, sites analysed), `dia_fractions`
@@ -319,17 +319,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `deploy/ionomos.spec`: hidden imports `ionomos.tmtkit`, `ionomos.tmt_editor`.
 - build-exe.yml sets up Python 3.14, the version the exe was already built with.
 - **Round 4** (2026-10-15):
-  - **Loaders** (D96): `tables.read_tsv` (FragPipe's tables and Ionomos' own) now takes UTF-16 / cp1252, a comma
+  - **Loaders** (D97): `tables.read_tsv` (FragPipe's tables and Ionomos' own) now takes UTF-16 / cp1252, a comma
     or semicolon file, and cells in quotes; a quote still never spans cells or lines.
   - **Engines**: the time-limit hint says "the search hung", not "FragPipe hung" (it is shown for every engine).
-  - **Exit codes** (D101): `ionomos check` and `ionomos preflight` exit 2 (was 1) when config.yaml can't be read,
+  - **Exit codes** (D102): `ionomos check` and `ionomos preflight` exit 2 (was 1) when config.yaml can't be read,
     like every other command; `analyze` / `export` of a job that isn't in the ledger exit 1 (was 2), like `retry`
     and `cancel`; `cancel` of a job that doesn't exist exits 1 (was 0). An empty value in config.yaml
     (`poll_seconds:` with nothing after it) means the default.
   - **experiment.yaml**: the unknown-key message names the key probably meant (`methd (did you mean method?)`)
     and every key the file can have. A channel written twice in `tmt:` is REJECTED at intake (`TMT_BLOCK`), was
     taken with the last name; `TMT_ALL_NA` is an error (the job fails before the search), was a warning (#156).
-  - **The library** (D100): `library scan --root DIR` adds DIR to the default roots instead of replacing them
+  - **The library** (D101): `library scan --root DIR` adds DIR to the default roots instead of replacing them
     (`--only` for the old meaning). Kinds `SILAC`, `isoTOP`, `ipIAA`, `PAL`, `labelled` beside isoDTB / TMT / DIA
     / LFQ / phospho / open / other. `library._headers` delegates to `fastasource.fasta_headers` (a header is kept
     up to 64 kB; real ones are < 1 kB).
@@ -337,10 +337,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     experiment Ionomos did not find, says so in its window, as one for another job already did (D75 4).
   - **The assistant corpus cites an engine log line by what it says** (#183): `[log:2#{ERROR: DIA-NN crashed}]`
     is numbered in the state just built (`scenarios.resolve`, used by the replay and `ionomos ask-eval`). The
-    numbers had moved with the fake's new console (D102), and on Linux the fake's DIA command list is two lines
+    numbers had moved with the fake's new console (D103), and on Linux the fake's DIA command list is two lines
     shorter (CmdDiann's plot step is Windows only), so the Linux CI failed on numbers right on Windows.
   - `tests/test_service.py::test_create_desktop_shortcut_encoded_command` asserted the broken PowerShell for
-    `O'Brien`; it now asserts the doubled quote (D99).
+    `O'Brien`; it now asserts the doubled quote (D100).
 
 ### Fixed
 
@@ -541,7 +541,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`ionomos testbed stress` left its temp folder behind on Windows.** The
   ledger connections were never closed, and Windows can't remove an open
   `ionomos.db`.
-- **Round 4: tables from every engine, in every state they arrive in** (D96).
+- **Round 4: tables from every engine, in every state they arrive in** (D97).
   - A cell longer than 131,072 characters (MaxQuant's `Evidence IDs` / `MS/MS IDs` of an abundant protein on a
     big experiment, a long protein list) crashed every table reader (`CRASH_READ`: "field larger than field
     limit"). The limit is raised for the whole process (`tables.py`).
@@ -646,7 +646,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `PermissionError`; it now changes nothing, says to close the program, and exits 1.
   - Loose raw files named like a Windows device (`NUL_1.raw`, `NUL_2.raw`) asked for a folder named `NUL`; it is
     `NUL_files`.
-- **Round 4: DIA-NN, MaxQuant, Sage and FragPipe's run loop** (D97).
+- **Round 4: DIA-NN, MaxQuant, Sage and FragPipe's run loop** (D98).
   - DIA-NN, MaxQuant and Sage named an earlier attempt's output folder to the second only
     (`diann_previous_<time>`), so a second retry in the same second failed. All four runners now share
     `fragpipe.move_aside` (`-2`, `-3` …), as FragPipe had (D69).
@@ -688,7 +688,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Preflight: its time limits were bound when the module loaded; a launcher with no output said "output: "
     instead of "none"; a launcher that could not be started showed only the hint, not why; `install_report`
     raised when the folder above the installation could not be listed.
-- **Round 4: config.yaml and the command line** (D101).
+- **Round 4: config.yaml and the command line** (D102).
   - `service._creationflags` read `subprocess.CREATE_NEW_PROCESS_GROUP` directly; Linux's subprocess has no
     such flag, so a test standing in a Windows `os` crashed there. Both it and `fragpipe._popen_kwargs` take the
     flags with `getattr`.
@@ -721,7 +721,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     address, `size: big`) or a connection cut mid-answer; a download cut mid-file or a Downloads folder that
     can't be written is a `DownloadError`.
   - `health.LOCK_NAME` reads `names.LOCK_FILE`.
-- **Round 4: security and privacy** (D98, D99, docs/SECURITY_NOTES.md).
+- **Round 4: security and privacy** (D99, D100, docs/SECURITY_NOTES.md).
   - `ionomos bundle unpack` keeps every file inside the folder it is given: a job's folder name in BUNDLE.json
     (`../../x`, a drive, an absolute or UNC path) no longer chooses where files land; members with a colon (NTFS
     stream), a Windows device name, a trailing dot or space or a control character are left out and listed; two
@@ -739,12 +739,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Slack messages escape `&`, `<` and `>`: a reason can no longer `@channel` or make a link.
   - A search whose launcher is a `.bat` under a folder with `&`, `|`, `<`, `>`, `^`, `%` or `"` (e.g. `C:/R&D/`)
     ran part of the path as a second command; it now fails at once saying which folder to rename, and preflight
-    does not start such a launcher either (D99).
+    does not start such a launcher either (D100).
   - The Desktop shortcut failed for a Windows profile with an apostrophe (`C:\Users\O'Brien`); quotes (also the
     typographic ones) are doubled. The startup task refuses a command with `%`.
   - `ionomos library scan` (and adopt / Import workflow) no longer opens a network path written inside a
     workflow or fragpipe-ui.cache it finds; the workflow is flagged WF_DATABASE_MISSING "on another computer"
-    (D98). A scan root on a server that is off cost ~20 s each; now 5 s on a helper thread and a note.
+    (D99). A scan root on a server that is off cost ~20 s each; now 5 s on a helper thread and a note.
   - The assistant's `log_tail` no longer follows a console log that is a symbolic link out of the run folder.
   - `updates.download()` refuses a release without a published SHA-256, a non-https address and an asset name
     that is not `Ionomos-Setup-<version>.exe`; `check_latest()` no longer raises on an odd GitHub answer.
@@ -782,7 +782,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     text); no other colour changed.
   - `npm test` in `tests/js` ran nothing on Node 22; it is `node --test` now, which finds the same files on Node
     20 (CI) and 22.
-- **Round 4: the workflow and FASTA library** (D100).
+- **Round 4: the workflow and FASTA library** (D101).
   - The library no longer proposes SILAC3-phospho for the isoDTB method or Nonspecific-HLA-TMT10 for TMT when a
     method's workflow is missing: SILAC, isoTOP, ipIAA and PAL are their own kinds; FragPipe's own stock workflow
     for a kind ranks first; candidates that tie are never proposed and `recommend` / Review proposals… say why
@@ -846,7 +846,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - A comparison of conditions with long names (runs named after their files) gets its volcano and table: file
     names are cut at 80 characters plus a short hash (`analysis.SLUG_MAX`); the paths had passed Windows' 260 and
     the doctor said "the volcano plot wasn't written" per comparison (#157).
-- **Round 4: the testbed's fake FragPipe does what FragPipe 24's source does** (D102; each difference and its
+- **Round 4: the testbed's fake FragPipe does what FragPipe 24's source does** (D103; each difference and its
   source is in `fake_fragpipe.py`'s header).
   - A manifest file that does not exist stops a headless run ("Some loaded files don't exist. Please double
     check.", exit 1). It used to be dropped without a word, and WORKFLOWS.md said the same.
@@ -907,9 +907,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `downstream/`.
   - TESTING.md: the testbed's drops counted right (29 now), an interrupted job is re-queued, not failed, no stale
     test count, rows for the docs check and every round-4 test file. LIBRARY.md: "Wave 2: the app" is "The app".
-  - `docs/SECURITY_NOTES.md` (D98, D99): the threat model of each component, named in ARCHITECTURE's doc list and
+  - `docs/SECURITY_NOTES.md` (D99, D100): the threat model of each component, named in ARCHITECTURE's doc list and
     the README docs index.
-  - DECISIONS.md: D96–D102 (round 4).
+  - DECISIONS.md: D97–D103 (round 4).
 
 ## [0.18.1] - 2026-10-06
 

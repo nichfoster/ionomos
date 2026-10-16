@@ -8,7 +8,7 @@
 
 The data (docs/EXAMPLE.md): the example datasets of FragPipe-Analyst's own paper and tutorials (Hsiao et al.,
 J. Proteome Res. 2024, doi:10.1021/acs.jproteome.4c00294), one zip on Zenodo (doi:10.5281/zenodo.13147961, CC BY
-4.0). Ionomos never ships them (D36, D95): they are fetched from Zenodo, checked against the size and checksums
+4.0). Ionomos never ships them (D36, D96): they are fetched from Zenodo, checked against the size and checksums
 below, and only the tables used here are unpacked:
 
     ionomos_example/

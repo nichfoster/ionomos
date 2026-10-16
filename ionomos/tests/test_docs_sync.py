@@ -360,7 +360,7 @@ def test_the_slugs_are_githubs():
 
 # ---------------------------------------------------------------- decisions --
 
-# Decisions cited before their entry is written: {number: where}. The coordinator writes D95 from the round's
+# Decisions cited before their entry is written: {number: where}. The coordinator writes D96 from the round's
 # notes (docs/EXAMPLE.md, example.py: `ionomos example`); empty this when DECISIONS.md has it.
 DECISION_PENDING: dict[int, str] = {}
 # a number taken by a decision in a pull request that is not merged into this branch yet

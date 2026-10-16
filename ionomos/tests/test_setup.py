@@ -95,6 +95,6 @@ def test_checklist_on_a_config_that_does_not_parse(tmp_path, capsys):
     assert "line 2, column 10" in items[0].detail and "Restore a previous config" in items[0].fix
     assert [i.key for i in items].count("config") == 1
     assert "Settings saved" in setupcheck.summary(items)
-    assert main(["--config", str(p), "init"]) == 2  # D101: a config.yaml it needs can't be read
+    assert main(["--config", str(p), "init"]) == 2  # D102: a config.yaml it needs can't be read
     assert "line 2, column 10" in capsys.readouterr().err
     assert p.read_text(encoding="utf-8") == "paths:\n  inbox: [unclosed\n"  # untouched

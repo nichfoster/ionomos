@@ -1,4 +1,4 @@
-"""`ionomos example` (docs/EXAMPLE.md, D95): real published data, downloaded, checked, written as experiment folders
+"""`ionomos example` (docs/EXAMPLE.md, D96): real published data, downloaded, checked, written as experiment folders
 and analysed. No real network here: the download is stubbed (example.urlopen) with a zip built from the excerpt in
 tests/golden/example/ (CC BY 4.0, see its README.txt), and example.ARCHIVE is pointed at that zip's size and hashes."""
 import csv
