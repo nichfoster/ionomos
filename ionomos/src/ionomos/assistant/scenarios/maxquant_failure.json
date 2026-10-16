@@ -17,7 +17,7 @@
       ]
     },
     {
-      "content": "MaxQuant stopped with an error; this is the line of its log that says so [log:1#4] [job:1].\n\nFix what the log shows and press Retry, or use Report a problem to send the log [help:attention.search_failed]."
+      "content": "MaxQuant stopped with an error; this is the line of its log that says so [log:1#{ERROR: fake failure}] [job:1].\n\nFix what the log shows and press Retry, or use Report a problem to send the log [help:attention.search_failed]."
     }
   ],
   "rubric": {
@@ -26,7 +26,7 @@
       "log_tail"
     ],
     "must_cite": [
-      "log:1#4"
+      "log:1#{ERROR: fake failure}"
     ],
     "must_mention": [
       "MaxQuant",

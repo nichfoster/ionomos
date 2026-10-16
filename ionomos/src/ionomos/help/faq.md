@@ -419,7 +419,9 @@ the Jobs tab's **Retry**; an analysis change is the experiment editor's
 Save, and the old `experiment.yaml` is kept in the experiment's
 `experiment-backups` folder. Re-run the analysis to use it (Jobs tab →
 **Re-run analysis**). If the job or its `experiment.yaml` changed after the
-proposal was made, Confirm does nothing and says so; ask again.
+proposal was made, Confirm does nothing and says so; ask again. If the change
+is for another job than the one you asked about, the window says so: read
+the job number before you press **Confirm**.
 
 In a terminal, `ionomos ask` shows the same proposal and the command or the
 app's steps to make it; it never makes it. Every proposal, and whether it was
@@ -438,7 +440,9 @@ sends nothing.
 While a search runs, the lab may have set the assistant to use a smaller
 model, or to pause so the search keeps the computer to itself
 (`assistant.while_searching`). A paused assistant says so, and you get
-Ionomos's own explanation, as above. Before choosing a model, the person who
+Ionomos's own explanation, as above. "Not answering" also covers a model that
+took longer than `assistant.timeout_seconds` to finish its reply, or sent more
+than 2 MB: nothing it sent is shown. Before choosing a model, the person who
 looks after Ionomos measures it on this computer with `ionomos ask-eval`.
 
 ## Where is this help, and can I change it? {#faq.help}
@@ -507,7 +511,10 @@ is the day it was made.
 - **A FASTA you already have** (from UniProt, without decoys):
   `ionomos fasta prepare <file>` writes a new file beside it with decoys and
   contaminants. A file that already has decoys is refused, because decoys
-  added twice stop the search ([why](#search.hold-decoys)).
+  added twice stop the search ([why](#search.hold-decoys)). A file saved
+  from Notepad or Excel as "UTF-8 with BOM" is fine; one with text before
+  its first `>` header is refused with the line to fix, because that text
+  would cost the first protein.
 
 Nothing is overwritten: a name that is taken gets `-2`. A new FASTA changes
 the results, so keep the old file for experiments already searched with it
@@ -526,7 +533,10 @@ In the app, on the **Methods** tab, select the method, then use the panel
   marks (✗ must be fixed, ! check it) and why one is recommended for this
   method. **Use for** the method copies the file into the workflows or
   FASTA folder (the original stays where it is; a file it replaces is kept
-  as `.bak-<time>`). The list is remembered: the next time it opens at once,
+  as `.bak-<time>`, and the file a method searches with now is never
+  replaced before you Save: the copy then gets a `-2` name). A workflow of
+  another kind than the method's, or a file with a ✗ mark, asks first. The
+  list is remembered: the next time it opens at once,
   and **Rescan** looks again. The drive with the lab's data (`D:/`) is only
   looked at when it is added under `library: roots:` in config.yaml.
 - **Choose…** beside the workflow or FASTA box opens the same list with only

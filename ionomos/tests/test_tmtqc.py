@@ -233,6 +233,23 @@ def test_the_section_figures_export(analysed):
     assert "126 Pool_1_126" in texts and "130N NA" in texts and "TMT channels: plex KL6166" in texts
     assert len([r for r in ET.fromstring(figs["tmt_labelling.svg"]).iter(f"{SVG}rect") if r.get("fill") != "none"]) >= 3
     assert charts.catalog({}, ["tmt"]) == []  # nothing without the section
+    # #156: the footer said "hits: dashed: the limit 95% · limma moderated t-test; normalisation …" (cut with "…" on
+    # the channel chart), the <title> "TMT labelling efficiency: TMT labelling efficiency"
+    for n, s in figs.items():
+        root = ET.fromstring(s.encode("utf-8"))
+        foot = [t.text or "" for t in root.iter(f"{SVG}text")][-1]
+        desc = root.find(f"{SVG}desc").text
+        assert "hits:" not in s and "normalisation" not in foot and "Analysis:" not in desc, (n, foot)
+        assert not foot.endswith("…"), (n, foot)
+    title = {n: ET.fromstring(s.encode("utf-8")).find(f"{SVG}title").text for n, s in figs.items()}
+    assert title == {"tmt_channels_KL6166.svg": "TMT channels: plex KL6166", "tmt_labelling.svg":
+                     "TMT labelling efficiency", "tmt_purity.svg": "TMT precursor purity"}
+    foot = [t.text for t in ET.fromstring(figs["tmt_labelling.svg"]).iter(f"{SVG}text")][-1]
+    assert foot.endswith("· dashed: the limit 95%"), foot
+    d2 = {**d, "tmtqc": {**d["tmtqc"], "plexes": [{**d["tmtqc"]["plexes"][0], "name": "plexB"}]}}
+    figs = {n: s for n, _w, s in charts.figures(d2, charts.style_from(), ["tmt"])}
+    texts = [t.text for t in ET.fromstring(figs["tmt_channels_plexB.svg"]).iter(f"{SVG}text")]
+    assert "TMT channels: plexB" in texts   # not "plex plexB"
 
 
 def test_every_tmt_issue_has_help():
@@ -283,3 +300,24 @@ def test_the_analysis_off_path_still_writes_the_tmt_qc(tmp_path, monkeypatch):
     assert (dest / "results" / names.TMT_QC_FILE).is_file() and not (dest / "results" / "report.html").exists()
     assert "TMT QC: 1 of 1 plex(es) are labelled below 95%" in job.reason
     assert postprocess._tmt_qc_only(tmp_path / "nothing_here", {}, []) == []
+
+
+@pytest.mark.parametrize(("given", "said"), [
+    ({}, "conditions were taken from the text before the first '_'"),
+    ({"A1-00004_T": "Tumor", "A1-00005_N": "NAT", "A1-00006_T": "Tumor", "A1-00007_N": "NAT"}, None),
+    ({"A1-00004_T": "Tumor", "A1-00005_N": "NAT"}, "the conditions of 2 of 4 samples (e.g. A1-00006_T)"),
+])
+def test_the_name_note_only_when_a_condition_was_guessed(tmp_path, given, said):
+    """#158: "TMT sample names don't follow condition_1_channel ... conditions were taken from the text before the
+    first '_'" was printed although experiment.yaml's sample_conditions gave every sample its condition."""
+    dest = tmp_path / "e"
+    simulate.tmt_abundance(dest / "fragpipe" / "tmt-report" / "abundance_gene_MD.tsv",
+                           ["A1-00004_T", "A1-00005_N", "A1-00006_T", "A1-00007_N"], 3, n_genes=60)
+    out = analyze(dest, "TMT", {"enrichment": False, "sample_conditions": given})
+    a = json.loads((dest / "results" / "analysis.json").read_text(encoding="utf-8"))
+    everything = "\n".join(out.warnings) + json.dumps(a)
+    if said is None:
+        assert "follow condition_1_channel" not in everything
+        assert set(a["samples"].values()) == {"Tumor", "NAT"}
+    else:
+        assert said in everything

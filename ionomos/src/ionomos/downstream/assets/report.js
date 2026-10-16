@@ -5,7 +5,20 @@
   const SVGNS = "http://www.w3.org/2000/svg";
   const $ = (s, el) => (el || document).querySelector(s);
   const $$ = (s, el) => Array.from((el || document).querySelectorAll(s));
+  // A payload from an older Ionomos, or one a stage could only half fill, may lack any key that is not the
+  // features themselves: give each the empty value the page already knows how to draw.
+  const list = (x) => (Array.isArray(x) ? x : []);
+  D.f = D.f || {};
+  D.f.id = list(D.f.id); D.f.label = list(D.f.label); D.f.desc = list(D.f.desc);
+  ["samples", "cond", "conditions", "comps", "notes", "files", "v"].forEach((k) => (D[k] = list(D[k])));
+  D.settings = Object.assign({ log2fc: 1, alpha: 0.05, use_adjusted: true, top_labels: 10, normalize: "none", test: "limma" }, D.settings || {});
   const nF = D.f.id.length, nS = D.samples.length;
+  for (let i = 0; i < nF; i++) if (!Array.isArray(D.v[i])) D.v[i] = new Array(nS).fill(null);
+  D.comps.forEach((c, k) => {
+    ["fc", "p", "q", "ciL", "ciR", "nt", "nc", "a"].forEach((x) => { if (!Array.isArray(c[x])) c[x] = []; });
+    if (c.name == null) c.name = "Comparison " + (k + 1);
+    if (!c.slug) c.slug = String(c.name);
+  });
   D.qc = D.qc || {};
   D.gsea = D.gsea || [];
   D.enr = D.enr || [];
@@ -48,7 +61,8 @@
     const span = hi - lo, step0 = span / (n || 5), mag = Math.pow(10, Math.floor(Math.log10(step0)));
     const err = step0 / mag, step = mag * (err >= 7.5 ? 10 : err >= 3.5 ? 5 : err >= 1.5 ? 2 : 1);
     const out = [];
-    for (let v = Math.ceil(lo / step - 1e-9) * step; v <= hi + 1e-9 * step; v += step) out.push(+v.toFixed(10));
+    // at most 100: a step too small to move a huge value (1e17 + 2 == 1e17) would otherwise never end
+    for (let v = Math.ceil(lo / step - 1e-9) * step; v <= hi + 1e-9 * step && out.length < 100; v += step) out.push(+v.toFixed(10));
     return out;
   }
   const condIndex = {};
@@ -102,6 +116,10 @@
    * an SVG twin for export (the heatmap). While a figure is drawn for export, the chart is handed over here. */
   function svgTools(host, root, name, again) {
     if (EX && root) EX.cap.push({ host: host, root: root, name: name });
+    if (root && !EX) {  // a screen reader names the picture (frame() made it role=img) by what it is
+      const fi = figInfo(name);
+      root.setAttribute("aria-label", fi.what + (fi.c ? ": " + clean(fi.c.name) : fi.detail ? ": " + fi.detail : ""));
+    }
     let t = $(".tools", host);
     if (!t) { t = document.createElement("div"); t.className = "tools"; host.appendChild(t); }
     t.innerHTML = "";
@@ -142,6 +160,8 @@
   function fmtTick(v) { return Math.abs(v) >= 1000 ? v.toLocaleString() : String(+v.toFixed(3)); }
   function widthOf(host, fallback) { return EX ? EX.w : Math.max(320, Math.floor(host.clientWidth || fallback || 760)); }
   function heightOf(h) { return EX ? EX.h : h; }  // a chart that can take any height asks here, so an exported figure fills its size
+  /** [min, max] of the numbers in xs by a loop: Math.min(...xs) runs out of stack past about 150,000 values. */
+  function lohi(xs) { let lo = Infinity, hi = -Infinity; for (const v of xs) { if (v < lo) lo = v; if (v > hi) hi = v; } return [lo, hi]; }
   function median(xs) { if (!xs.length) return null; const s = xs.slice().sort((a, b) => a - b), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
   function pearson(a, b) {
     let n = 0, sa = 0, sb = 0;
@@ -164,6 +184,58 @@
     get(k, d) { try { const v = window.localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
     set(k, v) { try { window.localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* private mode: not remembered */ } },
   };
+
+  // ------------------------------------------------------------ keyboard
+  /** A column header that sorts: Tab reaches it, Enter or Space sorts as a click does, and it says how it sorts. */
+  const sortTh = (k, key, dir, label) => "<th data-k='" + k + "' tabindex='0'" + (k === key ? " data-dir='" + (dir > 0 ? "asc" : "desc") + "' aria-sort='" +
+    (dir > 0 ? "ascending" : "descending") + "'" : "") + ">" + esc(label) + "</th>";
+  /** Tabs (QC, enrichment) as a tab list: the chosen one is the list's Tab stop, the arrow keys, Home and End
+   * choose another. Called on the .tabs element after it is drawn. */
+  function tabList(bar) {
+    if (!bar) return;
+    const bs = $$("button", bar);
+    bar.setAttribute("role", "tablist");
+    bs.forEach((b) => { const on = b.classList.contains("on"); b.setAttribute("role", "tab"); b.setAttribute("aria-selected", String(on)); b.tabIndex = on ? 0 : -1; });
+    bar.onkeydown = (e) => {
+      const k = bs.indexOf(document.activeElement), n = bs.length;
+      const to = k < 0 ? -1 : e.key === "ArrowRight" ? (k + 1) % n : e.key === "ArrowLeft" ? (k + n - 1) % n : e.key === "Home" ? 0 : e.key === "End" ? n - 1 : -1;
+      if (to < 0) return;
+      e.preventDefault();
+      bs[to].focus();
+      bs[to].click();
+    };
+  }
+  // A section is drawn again when one of its own controls is used (a tab, a select, a pager or column button),
+  // which takes away the element that had the keyboard. Remember which control it was (its id, or its data-k
+  // inside the nearest element with an id) and, once the section is drawn, give the focus to its successor.
+  let kbd = null;  // { el, key }
+  function focusKey(el) {
+    if (!el || !el.tagName || el === document.body) return null;
+    if (el.id) return { id: el.id };
+    const a = el.hasAttribute("data-k") ? "data-k" : el.hasAttribute("data-m") ? "data-m" : null, host = el.parentElement && el.parentElement.closest("[id]");
+    if (!a || !host || !/^(BUTTON|TH)$/.test(el.tagName)) return null;
+    return { id: host.id, sel: el.tagName.toLowerCase() + "[" + a + "='" + String(el.getAttribute(a)).replace(/['\\]/g, "\\$&") + "']" };
+  }
+  document.addEventListener("focusin", (e) => { kbd = { el: e.target, key: focusKey(e.target) }; });
+  // a window without the focus fires no focusin: also note what has the keyboard as a key, click or change
+  // starts (capture: before the control draws its section again); a press on the page itself forgets it
+  const noteFocus = () => { const a = document.activeElement; kbd = a && a !== document.body && a !== document.documentElement ? { el: a, key: focusKey(a) } : null; };
+  ["keydown", "click", "change"].forEach((t) => document.addEventListener(t, noteFocus, true));
+  if (window.MutationObserver && document.body) {
+    new MutationObserver(() => {
+      if (!kbd || !kbd.key || kbd.el.isConnected) return;  // still there (or the user moved on): nothing to do
+      const a = document.activeElement;
+      if (a && a !== document.body && a !== document.documentElement) return;
+      const host = document.getElementById(kbd.key.id), n = host && (kbd.key.sel ? host.querySelector(kbd.key.sel) : host);
+      if (n && n.focus) n.focus({ preventScroll: true });
+    }).observe(document.body, { childList: true, subtree: true });
+  }
+  document.addEventListener("keydown", (e) => {
+    const t = e.target;
+    if ((e.key === "Enter" || e.key === " ") && t && t.tagName === "TH" && t.hasAttribute("tabindex")) { e.preventDefault(); t.click(); }
+  });
+  /** The two-way switches (Volcano / MA, Zoom / Select, Sites / Proteins, before / after) say which half is on. */
+  function pressed(root) { $$(".seg button, #dbefore, #dafter", root).forEach((b) => b.setAttribute("aria-pressed", String(b.classList.contains("on")))); }
 
   // ------------------------------------------------------- feature lookup
   const geneOf = (i) => (D.f.label[i] || "").trim().split(/[;\s]/)[0].replace(/\.\d+$/, "").toUpperCase();
@@ -202,7 +274,9 @@
     genes.forEach((g) => (K.get(String(g).toUpperCase()) || []).forEach((i) => set.add(i)));
     return set;
   }
-  function wildRe(tok) { return new RegExp("^" + tok.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".") + "$", "i"); }
+  const short = (t, n) => (t.length > (n || 60) ? t.slice(0, (n || 60) - 1) + "…" : t);  // what was typed, said back in a line
+  // a run of stars is one star: "a*****b" would otherwise backtrack for a very long time on every name
+  function wildRe(tok) { return new RegExp("^" + tok.replace(/\*+/g, "*").replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".") + "$", "i"); }
 
   /** Parse the search box: a word (substring), a list (exact names / accessions), wildcards, /regex/,
    * desc:words, term:gene set. Returns {set, found, missing, label, error}. */
@@ -219,18 +293,22 @@
       const use = hits.filter((e) => e.term.toLowerCase() === want).length ? hits.filter((e) => e.term.toLowerCase() === want) : hits.slice(0, 5);
       use.forEach((e) => indicesOfGenes(e.genes).forEach((i) => out.set.add(i)));
       out.label = use.length ? use.map((e) => e.term).join(", ") + (hits.length > use.length ? " (+" + (hits.length - use.length) + " more terms)" : "") : "";
-      if (!use.length) out.error = D.gsea.length || D.enr.length ? "no gene set matches “" + m[2].trim() + "”" : "no gene sets in this report (enrichment was off or offline)";
+      if (!use.length) out.error = D.gsea.length || D.enr.length ? "no gene set matches “" + short(m[2].trim()) + "”" : "no gene sets in this report (enrichment was off or offline)";
       return out;
     }
     if ((m = /^desc:\s*(.+)$/i.exec(s))) {
       const w = m[1].toLowerCase();
       for (let i = 0; i < nF; i++) if ((D.f.desc[i] || "").toLowerCase().includes(w)) out.set.add(i);
+      if (!out.set.size) out.error = "no description contains “" + short(m[1].trim()) + "”";
       return out;
     }
     if ((m = /^\/(.+)\/([a-z]*)$/.exec(s))) {
       let re;
-      try { re = new RegExp(m[1], m[2].includes("i") ? m[2] : m[2] + "i"); } catch (e) { out.error = "not a valid pattern: " + e.message; return out; }
+      // g and y make test() remember where it stopped, so the next name would be searched from the middle
+      const flags = m[2].replace(/[gy]/g, "");
+      try { re = new RegExp(m[1], flags.includes("i") ? flags : flags + "i"); } catch (e) { out.error = "not a valid pattern: " + e.message; return out; }
       for (let i = 0; i < nF; i++) if (re.test(D.f.label[i] || "") || re.test(D.f.id[i] || "") || FKEYS[i].some((k) => re.test(k))) out.set.add(i);
+      if (!out.set.size) out.error = "nothing matches " + short(s);
       return out;
     }
     const whole = KEYS.get(s.toUpperCase());
@@ -241,6 +319,7 @@
         if ((D.f.label[i] || "").toLowerCase().includes(q) || (D.f.id[i] || "").toLowerCase().includes(q) || (D.f.desc[i] || "").toLowerCase().includes(q)) out.set.add(i);
       }
       if (whole) out.found.push(s);
+      else if (!out.set.size) out.missing.push(s);  // a word found nowhere is said so, as a list's misses are
       return out;
     }
     if (whole && toks.length === 2 && !/[*?]/.test(s)) {  // "GAPDH C152": a site label with a space
@@ -317,7 +396,7 @@
     if (ST.highlight) return ST.highlight.has(i);
     return !!(ST.q && ST.q.set.has(i));
   }
-  const anyMark = () => !!(ST.highlight || (ST.q && (ST.q.set.size || ST.q.error)));
+  const anyMark = () => !!(ST.highlight || (ST.q && (ST.q.set.size || ST.q.error || ST.q.missing.length)));
   function onoffOf(c) {
     const m = new Map();
     (c.onoff || []).forEach((x) => m.set(x[0], x));
@@ -653,7 +732,7 @@
       if (!ST.highlight && q) {
         if (q.label) h += " in <i>" + esc(q.label) + "</i>";
         if (q.found.length + q.missing.length > 1) h += " · found " + q.found.length + " of " + (q.found.length + q.missing.length);
-        if (q.missing.length) h += " · not found: <span class='warnink'>" + esc(q.missing.slice(0, 12).join(", ")) + (q.missing.length > 12 ? "…" : "") + "</span>";
+        if (q.missing.length) h += " · not found: <span class='warnink'>" + esc(q.missing.slice(0, 12).map((t) => short(t, 40)).join(", ")) + (q.missing.length > 12 ? "…" : "") + "</span>";
       }
       const c = C();
       const sig = list.filter((i) => sigOf(c, i));
@@ -932,7 +1011,7 @@
     const c = C(), rows = tableRows(), per = 50;
     const pages = Math.max(1, Math.ceil(rows.length / per));
     ST.page = Math.min(ST.page, pages - 1);
-    let h = '<div class="tablewrap"><table><thead><tr>' + COLS.map((x) => "<th data-k='" + x.k + "'" + (x.k === ST.sortKey ? " data-dir='" + (ST.sortDir > 0 ? "asc" : "desc") + "'" : "") + ">" + esc(x.t) + "</th>").join("") + "</tr></thead><tbody>";
+    let h = '<div class="tablewrap"><table><thead><tr>' + COLS.map((x) => sortTh(x.k, ST.sortKey, ST.sortDir, x.t)).join("") + "</tr></thead><tbody>";
     rows.slice(ST.page * per, ST.page * per + per).forEach((i) => {
       h += "<tr data-i='" + i + "'" + (i === ST.focus ? " class='focus'" : "") + ">" + COLS.map((x) => "<td" + (x.n ? " class='n'" : x.cls ? " class='" + x.cls + "'" : "") + ">" + x.f(c, i) + "</td>").join("") + "</tr>";
     });
@@ -1178,6 +1257,7 @@
     const cv = document.createElement("canvas"), dpr = window.devicePixelRatio || 1;
     cv.width = (labW + cols.length * cellW + 10) * dpr; cv.height = H * dpr;
     cv.style.width = labW + cols.length * cellW + 10 + "px"; cv.style.height = H + "px";
+    cv.setAttribute("role", "img"); cv.setAttribute("aria-label", "Heatmap of " + rows.length + " significant features across " + cols.length + " samples");
     host.insertBefore(cv, host.firstChild);
     const ctx = cv.getContext("2d");
     ctx.scale(dpr, dpr);
@@ -1236,9 +1316,11 @@
     if (!host) return;
     if (!D.enr.length && !D.gsea.length) { host.innerHTML = '<div class="empty">' + esc(D.enrNote || "Enrichment was not run.") + "</div>"; return; }
     if (!enrMode) enrMode = D.enr.length ? "ora" : "rank";
-    host.innerHTML = "<div class='tabs'>" + (D.enr.length ? "<button data-m='ora'" + (enrMode === "ora" ? " class='on'" : "") + ">Among the hits (over-representation)</button>" : "") +
-      (D.gsea.length ? "<button data-m='rank'" + (enrMode === "rank" ? " class='on'" : "") + ">All " + esc(D.levelWord) + "s ranked (no cut-off)</button>" : "") + "</div><div id='enrbody'></div>";
+    host.innerHTML = "<div class='tabs' aria-label='Enrichment'>" + (D.enr.length ? "<button data-m='ora' id='enrtab-ora' aria-controls='enrbody'" + (enrMode === "ora" ? " class='on'" : "") + ">Among the hits (over-representation)</button>" : "") +
+      (D.gsea.length ? "<button data-m='rank' id='enrtab-rank' aria-controls='enrbody'" + (enrMode === "rank" ? " class='on'" : "") + ">All " + esc(D.levelWord) + "s ranked (no cut-off)</button>" : "") +
+      "</div><div id='enrbody' role='tabpanel' aria-labelledby='enrtab-" + enrMode + "'></div>";
     $$(".tabs button", host).forEach((b) => (b.onclick = () => { enrMode = b.dataset.m; renderEnrichment(); }));
+    tabList($(".tabs", host));
     const body = $("#enrbody");
     if (enrMode === "rank" && D.gsea.length) renderRank(body); else renderORA(body);
   }
@@ -1394,8 +1476,10 @@
     if (!host) return;
     const tabs = QC_TABS.filter(([k]) => (k !== "imp" || D.imp) && (k !== "card" || (D.qc.scorecard && D.qc.scorecard.length)) && (k !== "mnar" || D.qc.mnar) && (k !== "power" || D.qc.power) && (k !== "mv" || D.kind !== "ratio" || nS > 2) && (k !== "psm" || D.qc.psm) && (k !== "run" || D.qc.run));
     if (!qcTab || !tabs.some(([k]) => k === qcTab)) qcTab = tabs.some(([k]) => k === "card") ? "card" : "pca";
-    host.innerHTML = "<div class='tabs'>" + tabs.map(([k, t]) => "<button data-k='" + k + "' title='" + esc(QC_TIPS[k] || "") + "'" + (k === qcTab ? " class='on'" : "") + ">" + t + "</button>").join("") + "</div><div id='qcbody'></div>";
+    host.innerHTML = "<div class='tabs' aria-label='Quality control charts'>" + tabs.map(([k, t]) => "<button data-k='" + k + "' id='qctab-" + k + "' aria-controls='qcbody' title='" + esc(QC_TIPS[k] || "") + "'" + (k === qcTab ? " class='on'" : "") + ">" + t + "</button>").join("") +
+      "</div><div id='qcbody' role='tabpanel' aria-labelledby='qctab-" + qcTab + "'></div>";
     $$(".tabs button", host).forEach((b) => (b.onclick = () => { qcTab = b.dataset.k; renderQC(); }));
+    tabList($(".tabs", host));
     const body = $("#qcbody");
     safe(() => ({ card: qcCard, pca: qcPCA, corr: qcCorr, missing: qcMissing, mnar: qcMNAR, dist: qcDist, cv: qcCV, mv: qcMV, rank: qcRank, ids: qcIds, imp: qcImp, power: qcPower, psm: qcPsm, run: qcRun })[qcTab](body), body);
     addHelp($(":scope > .sub", body), "qc." + qcTab);
@@ -1419,10 +1503,15 @@
     host._st = st;
     const PB = D.qc.pcaBefore; // TMT plexes: the same PCA before they were put on one scale (plex.py)
     const P = st.when === "before" && PB ? PB : D.qc.pca;
-    if (!P || !P.scores.length) { host.innerHTML = "<div class='empty'>Not enough complete features for a PCA.</div>"; return; }
+    if (!P || !P.scores.length || !(P.percent || []).length) { host.innerHTML = "<div class='empty'>Not enough complete features for a PCA.</div>"; return; }
+    // two samples have one component: PC1 is drawn against itself (a line), and a component asked for that is
+    // not there (a link, an earlier report's choice) falls back to the first ones
+    const nPC = P.percent.length;
+    if (!(st.x < nPC)) st.x = 0;
+    if (!(st.y < nPC)) st.y = Math.min(1, nPC - 1);
     const hasRep = D.rep && D.rep.some((r) => r != null);
     const hasPlex = D.plex && D.plex.some((p) => p != null);
-    const opts = (sel) => P.percent.map((p, k) => "<option value='" + k + "'" + (k === sel ? " selected" : "") + ">PC" + (k + 1) + " (" + p.toFixed(1) + "%)</option>").join("");
+    const opts = (sel) => P.percent.map((p, k) => "<option value='" + k + "'" + (k === sel ? " selected" : "") + ">PC" + (k + 1) + " (" + fmt(p, 1) + "%)</option>").join("");
     const reps = hasRep ? [...new Set(D.rep.filter((r) => r != null))].sort((a, b) => a - b) : [];
     const plexes = hasPlex ? [...new Set(D.plex.filter((p) => p != null))] : [];
     const colorOf = (j) => (st.by === "replicate" && hasRep ? css("--c" + (reps.indexOf(D.rep[j]) % 8)) : st.by === "plex" && hasPlex ? css("--c" + (plexes.indexOf(D.plex[j]) % 8)) : condColor(D.cond[j]));
@@ -1457,7 +1546,7 @@
     const [x0, x1] = pad(xs), [y0, y1] = pad(ys);
     const X = (v) => L + ((v - x0) / (x1 - x0)) * (W - L - R), Y = (v) => H - B - ((v - y0) / (y1 - y0)) * (H - T - B);
     const root = frame(ch, W, H), g = svg("g", {}, root);
-    axes(g, X, Y, niceTicks(x0, x1, 6), niceTicks(y0, y1, 5), L, R, T, B, W, H, "PC" + (st.x + 1) + " (" + P.percent[st.x].toFixed(1) + "%)", "PC" + (st.y + 1) + " (" + P.percent[st.y].toFixed(1) + "%)");
+    axes(g, X, Y, niceTicks(x0, x1, 6), niceTicks(y0, y1, 5), L, R, T, B, W, H, "PC" + (st.x + 1) + " (" + fmt(P.percent[st.x], 1) + "%)", "PC" + (st.y + 1) + " (" + fmt(P.percent[st.y], 1) + "%)");
     const flagged = new Set((D.qc.scorecard || []).filter((r) => r.status !== "ok").map((r) => r.sample));
     P.scores.forEach((s, j) => {
       const c = svg("circle", { cx: X(s[st.x]), cy: Y(s[st.y]), r: 7, fill: colorOf(j), stroke: flagged.has(D.samples[j]) ? css("--text") : css("--surface"), "stroke-width": flagged.has(D.samples[j]) ? 2.5 : 1.5 }, g);
@@ -1578,7 +1667,7 @@
     const hasNorm = D.settings.normalize !== "none";
     host.innerHTML = "<p class='sub'>Measured log2 values per sample" + (hasNorm ? " — toggle to compare before/after " + esc(D.settings.normalize) + " normalisation" : "") +
       ". Medians should line up.</p>" + (hasNorm ? "<div class='row'><button id='dbefore'" + (!st.after ? " class='on'" : "") + ">before</button> <button id='dafter'" + (st.after ? " class='on'" : "") + ">after</button></div>" : "") + legend() + "<div class='chart card' id='distchart'></div>";
-    if (hasNorm) { $("#dbefore").onclick = () => { st.after = false; qcDist(host); }; $("#dafter").onclick = () => { st.after = true; qcDist(host); }; }
+    if (hasNorm) { $("#dbefore").onclick = () => { st.after = false; qcDist(host); }; $("#dafter").onclick = () => { st.after = true; qcDist(host); }; pressed(host); }
     boxes($("#distchart"), (st.after || !hasNorm ? D.qc.box_after : D.qc.box_before) || [], D.kind === "ratio" ? "log2 H/L" : "log2 value");
   }
   function qcCV(host) {
@@ -1655,7 +1744,9 @@
     const root = frame(ch, W, H), g = svg("g", {}, root);
     axes(g, X, Y, niceTicks(0, pts.length, 6), niceTicks(y0, y1, 6), L, R, T, B, W, H, "rank", "mean log2");
     const step = Math.max(1, Math.floor(pts.length / 1500));
-    svg("polyline", { points: pts.filter((_, k) => k % step === 0 || k === pts.length - 1).map((p) => X(pts.indexOf(p)).toFixed(1) + "," + Y(p[0]).toFixed(1)).join(" "), fill: "none", stroke: css("--ns"), "stroke-width": 2.5 }, g);
+    const line = [];  // every step-th point by its rank (not pts.indexOf: that is a search per point)
+    pts.forEach((p, k) => { if (k % step === 0 || k === pts.length - 1) line.push(X(k).toFixed(1) + "," + Y(p[0]).toFixed(1)); });
+    svg("polyline", { points: line.join(" "), fill: "none", stroke: css("--ns"), "stroke-width": 2.5 }, g);
     const screen = [];
     pts.forEach((p, k) => {
       const s = c ? sigOf(c, p[1]) : "", m = anyMark() && matches(p[1]);
@@ -1996,7 +2087,7 @@
     const root = frame(host, W, H);
     if (!ks.length) { text(root, W / 2, H / 2, "No curves in this class", { "text-anchor": "middle" }); return; }
     const xs = ks.map((k) => S.pec50[k]), ys = ks.map((k) => S.fc[k]).concat([D.dose.fcLim, -D.dose.fcLim]);
-    let x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs), y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
+    let [x0, x1] = lohi(xs), [y0, y1] = lohi(ys);
     const px = (x1 - x0) * 0.05 || 0.5, py = (y1 - y0) * 0.06 || 0.5;
     x0 -= px; x1 += px; y0 -= py; y1 += py;
     const X = (v) => L + ((v - x0) / (x1 - x0)) * (W - L - R), Y = (v) => T + (1 - (v - y0) / (y1 - y0)) * (H - T - B);
@@ -2066,7 +2157,7 @@
     const rows = doseRows(S, true), per = 50, pages = Math.max(1, Math.ceil(rows.length / per));
     DS.page = Math.min(DS.page, pages - 1);
     const mark = anyMark();
-    let h = "<div class='tablewrap'><table><thead><tr>" + DOSE_COLS.map((c) => "<th data-k='" + c.k + "'" + (c.k === DS.sortKey ? " data-dir='" + (DS.sortDir > 0 ? "asc" : "desc") + "'" : "") + ">" + esc(c.t) + "</th>").join("") + "</tr></thead><tbody>";
+    let h = "<div class='tablewrap'><table><thead><tr>" + DOSE_COLS.map((c) => sortTh(c.k, DS.sortKey, DS.sortDir, c.t)).join("") + "</tr></thead><tbody>";
     rows.slice(DS.page * per, DS.page * per + per).forEach((k) => {
       const hit = mark && matches(S.i[k]);
       h += "<tr data-k='" + k + "'" + (k === DS.focus ? " class='focus'" : "") + (hit ? " style='font-weight:650'" : "") + ">" + DOSE_COLS.map((c) => "<td" + (c.n ? " class='n'" : "") + ">" + c.f(S, k) + "</td>").join("") + "</tr>";
@@ -2270,7 +2361,7 @@
     const cols = timeCols(S), rows = timeRows(S, true), per = 25, pages = Math.max(1, Math.ceil(rows.length / per));
     TS.page = Math.min(TS.page, pages - 1);
     const mark = anyMark();
-    let h = "<div class='tablewrap'><table><thead><tr>" + cols.map((c) => "<th data-k='" + c.k + "'" + (c.k === TS.sortKey ? " data-dir='" + (TS.sortDir > 0 ? "asc" : "desc") + "'" : "") + ">" + esc(c.t) + "</th>").join("") + "</tr></thead><tbody>";
+    let h = "<div class='tablewrap'><table><thead><tr>" + cols.map((c) => sortTh(c.k, TS.sortKey, TS.sortDir, c.t)).join("") + "</tr></thead><tbody>";
     rows.slice(TS.page * per, TS.page * per + per).forEach((k) => {
       const hit = mark && matches(S.i[k]);
       h += "<tr data-k='" + k + "'" + (k === TS.focus ? " class='focus'" : "") + (hit ? " style='font-weight:650'" : "") + ">" + cols.map((c) => "<td" + (c.n ? " class='n'" : "") + ">" + c.f(S, k) + "</td>").join("") + "</tr>";
@@ -2460,6 +2551,7 @@
     if (comp) comp.onchange = (e) => { CS.c = +e.target.value; CS.page = 0; renderCys(); };
     $("#cshow").onchange = (e) => { CS.show = e.target.value; CS.page = 0; safe(renderCysTable, "#cystable"); };
     $("#cq").oninput = (e) => { CS.q = e.target.value; CS.page = 0; safe(renderCysTable, "#cystable"); };
+    pressed(host);
     $("#csites").onclick = () => { CS.rows = "sites"; renderCys(); };
     $("#cprot").onclick = () => { CS.rows = "proteins"; renderCys(); };
     safe(renderCysRank, "#cysrank");
@@ -2507,7 +2599,7 @@
     CS.page = Math.min(CS.page, pages - 1);
     const mark = anyMark();
     const sortKey = CS.sortKey === "r" ? "c" + CS.c : CS.sortKey;
-    let h = "<div class='tablewrap'><table><thead><tr>" + cols.map((c) => "<th data-k='" + c.k + "'" + (c.k === sortKey ? " data-dir='" + (CS.sortDir > 0 ? "asc" : "desc") + "'" : "") + ">" + esc(c.t) + "</th>").join("") + "</tr></thead><tbody>";
+    let h = "<div class='tablewrap'><table><thead><tr>" + cols.map((c) => (c.k === "desc" ? "<th data-k='desc'>" + esc(c.t) + "</th>" : sortTh(c.k, sortKey, CS.sortDir, c.t))).join("") + "</tr></thead><tbody>";
     rows.slice(CS.page * per, CS.page * per + per).forEach((k) => {
       const i = X.i[k], hit = mark && matches(i);
       h += "<tr data-k='" + k + "'" + (i === ST.focus ? " class='focus'" : "") + (hit ? " style='font-weight:650'" : "") + ">" + cols.map((c) => {
@@ -2783,6 +2875,7 @@
     b.title = "What is this?"; b.setAttribute("aria-label", "Help: " + e.t); b.setAttribute("aria-expanded", "false");
     b.dataset.help = id;
     b.onclick = (ev) => { ev.stopPropagation(); toggleHelp(b, id, after || host); };
+    b.onkeydown = (ev) => { if (ev.key === "Escape" && b._panel && b._panel.isConnected) { ev.stopPropagation(); toggleHelp(b, id, after || host); } };
     host.appendChild(b);
   }
   function toggleHelp(b, id, after) {
@@ -2790,11 +2883,15 @@
     if (old && old.isConnected) { old.remove(); b._panel = null; b.setAttribute("aria-expanded", "false"); return; }
     const e = H.entries[id], p = document.createElement("div");
     p.className = "helppanel"; p.setAttribute("role", "note");
+    p.id = "hp-" + (toggleHelp.n = (toggleHelp.n || 0) + 1);
     p.innerHTML = "<div class='hh'><b>" + esc(e.t) + "</b> <button type='button' class='hclose' aria-label='Close help'>×</button></div>" +
       e.h + "<p class='muted'><a href='#help-" + esc(id) + "' data-help='" + esc(id) + "'>More in the Help section</a></p>";
-    $(".hclose", p).onclick = () => toggleHelp(b, id, after);
+    // closed with × or Escape, the keyboard goes back to the ? that opened it (the × it was on is gone)
+    const shut = () => { toggleHelp(b, id, after); b.focus(); };
+    $(".hclose", p).onclick = shut;
+    p.addEventListener("keydown", (ev) => { if (ev.key === "Escape") { ev.stopPropagation(); shut(); } });
     after.insertAdjacentElement("afterend", p);
-    b._panel = p; b.setAttribute("aria-expanded", "true");
+    b._panel = p; b.setAttribute("aria-expanded", "true"); b.setAttribute("aria-controls", p.id);
     wireHelpLinks(p);
   }
   function openHelp(id) {
@@ -3510,6 +3607,13 @@
     addHelp($(".hh h3", dlg), "report.export", $(".hh", dlg));
     $("#xclose").onclick = closeExport;
     dlg.addEventListener("mousedown", (e) => { if (e.target === dlg) closeExport(); });
+    dlg.addEventListener("keydown", (e) => {  // a modal dialog keeps the keyboard: Tab past the last control comes back to the first
+      if (e.key !== "Tab") return;
+      const f = $$("button, select, input, textarea, a[href]", dlg).filter((x) => !x.disabled && !x.closest("[hidden]"));
+      if (!f.length) return;
+      if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f[f.length - 1].focus(); }
+      else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
+    });
     let timer = null;
     const changed = (e) => {
       if (e.target.id === "xload") return;
@@ -3613,7 +3717,7 @@
     if (chart) { const f = figOfChart(chart); f.label = "This chart: " + f.label; figs.unshift(f); }
     else if (C()) at = Math.max(0, figs.findIndex((f) => f.label === "Volcano: " + C().name));
     if (!figs.length) figs.push({ label: "The charts on this page", draw: redraw });
-    XD = { figs: figs, fig: figs[at], last: null };
+    XD = { figs: figs, fig: figs[at], last: null, back: document.activeElement, host: chart && chart.host };
     $("#xfig").innerHTML = figs.map((f, k) => "<option value='" + k + "'>" + esc(f.label) + "</option>").join("");
     $("#xfig").value = String(figs.indexOf(XD.fig));
     $("#xmsg").textContent = "";
@@ -3622,7 +3726,16 @@
     renderPreview();
     $("#xclose").focus();
   }
-  function closeExport() { const d = $("#xdlg"); if (d) d.hidden = true; XD = null; }
+  function closeExport() {
+    const d = $("#xdlg"), x = XD;
+    if (d) d.hidden = true;
+    XD = null;
+    // the keyboard goes back to what opened the dialog; a chart's buttons are drawn again by the preview, so
+    // then to that chart's Export… button
+    let back = x && x.back;
+    if (back && !back.isConnected && x.host) back = $$(".tools button", x.host).find((b) => b.textContent === "Export…") || null;
+    if (back && back.isConnected && back.focus && back !== document.body) back.focus();
+  }
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && XD) closeExport(); });
 
   // ------------------------------------------------------------- controls
@@ -3736,11 +3849,12 @@
       $("#csv").onclick = exportCSV;
       $("#copyup").onclick = () => copyGenes("up");
       $("#copydown").onclick = () => copyGenes("down");
-      const seg = (a, b, key, val, after) => { $("#" + a).onclick = () => { ST[key] = val[0]; $("#" + a).className = "on"; $("#" + b).className = ""; after(); }; $("#" + b).onclick = () => { ST[key] = val[1]; $("#" + b).className = "on"; $("#" + a).className = ""; after(); }; };
+      const seg = (a, b, key, val, after) => { $("#" + a).onclick = () => { ST[key] = val[0]; $("#" + a).className = "on"; $("#" + b).className = ""; pressed(); after(); }; $("#" + b).onclick = () => { ST[key] = val[1]; $("#" + b).className = "on"; $("#" + a).className = ""; pressed(); after(); }; };
       seg("volc", "ma", "mode", ["volcano", "ma"], () => { renderVolcano(); writeHash(); });
       seg("dzoom", "dsel", "drag", ["zoom", "select"], renderVolcano);
       if ($("#rsites")) seg("rsites", "rprot", "rows", ["features", "proteins"], () => renderTable(true));
       if (ST.mode === "ma") { $("#ma").className = "on"; $("#volc").className = ""; }
+      pressed();
       $("#reset").onclick = () => { ST.lfc = D.settings.log2fc; ST.alpha = D.settings.alpha; ST.adj = D.settings.use_adjusted; syncControls(); renderDiff(); };
       $("#opts").onclick = () => openOptions();
       const opt = (id, key, parse, what) => { const el = $("#" + id); if (!el) return; el.oninput = el.onchange = () => { ST.opt[key] = parse(el); (what || renderDiff)(); }; };
@@ -3803,7 +3917,10 @@
   }
   let rt = null;
   window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(redraw, 150); });
-  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", redraw);
+  try {  // Safari before 14 has only addListener; a throw here would stop the page before setup() is wired
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    if (mq.addEventListener) mq.addEventListener("change", redraw); else if (mq.addListener) mq.addListener(redraw);
+  } catch (e) { /* the charts keep their colours until the page is reloaded */ }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", setup);
   else setup();
 })();

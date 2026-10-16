@@ -31,6 +31,10 @@ from pathlib import Path
 
 STATUSES = ("queued", "running", "done", "failed")
 MAX_ATTEMPTS = 3  # FragPipe starts per job before an interrupted job is failed instead of re-queued
+# The reason of the first ionomos.json intake writes right after the move (intake._provisional). adopt_orphans leaves
+# such a record alone while it is young — intake is still filing it and inserts the job itself.
+FILING = "being filed: if this stays, Ionomos stopped while filing the folder; it is picked up within the hour"
+FILING_GRACE_SECONDS = 600
 
 log = logging.getLogger("ionomos.ledger")
 
@@ -89,9 +93,27 @@ class Job:
             created_at=row["created_at"],
             started_at=row["started_at"],
             finished_at=row["finished_at"],
-            parsed=json.loads(row["parsed_json"]),
+            parsed=_parsed(row),
             attempts=row["attempts"] if "attempts" in row.keys() else 0,
         )
+
+
+def _parsed(row: sqlite3.Row) -> dict:
+    """A row's intake record; {} when a hand edit or a damaged page left it unreadable, so one bad row costs its own
+    job (the worker fails it) instead of every list() — the worker's, the app's, `ionomos status`."""
+    try:
+        rec = json.loads(row["parsed_json"])
+    except (TypeError, ValueError):
+        rec = None
+    if isinstance(rec, dict):
+        return rec
+    if row["id"] not in _SAID_UNREADABLE:  # list() runs every few seconds: say it once
+        _SAID_UNREADABLE.add(row["id"])
+        log.error("job %s: its record in the job list is unreadable", row["id"])
+    return {}
+
+
+_SAID_UNREADABLE: set[int] = set()
 
 
 class Ledger:
@@ -260,6 +282,57 @@ def backup(db_path: str | Path, backup_dir: str | Path, keep: int = 14) -> Path 
     return dest
 
 
+def _younger_than(stamp, seconds: float) -> bool:
+    """True if the ISO time stamp is less than `seconds` old; False for anything unreadable."""
+    try:
+        t = datetime.fromisoformat(str(stamp))
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=UTC)
+        return (datetime.now(UTC) - t).total_seconds() < seconds
+    except (TypeError, ValueError):
+        return False
+
+
+def _read_record(status_file: Path) -> tuple[dict, dict]:
+    """(the ionomos.json record, its plan's folder) — raises TypeError for valid JSON of the wrong shape (a list,
+    null, a folder that is not a mapping), so a hand-edited or damaged file is skipped with a warning by the
+    rebuild and the hourly adoption instead of stopping them for every other experiment."""
+    rec = json.loads(status_file.read_text(encoding="utf-8"))
+    if not isinstance(rec, dict) or not isinstance(rec.get("plan"), dict):
+        raise TypeError("not an Ionomos status record (no plan)")
+    folder = rec["plan"].get("folder")
+    if not isinstance(folder, dict):
+        raise TypeError("its plan has no folder")
+    return rec, folder
+
+
+def _move_aside(p: Path, kept_as: str = "broken") -> Path | None:
+    """Move a broken ledger and its journal files aside (all or none). Raises LedgerError, with nothing changed,
+    when one of them is open in another program (Windows: the Ionomos app, DB Browser): a ledger left without its
+    journal, or a journal left beside a new ledger, would be worse than the broken one."""
+    if not p.exists():
+        return None
+    moved = p.with_name(f"{p.name}.{kept_as}-{datetime.now():%Y%m%d-%H%M%S}")
+    pairs = [(p, moved)] + [(p.with_name(p.name + ext), moved.with_name(moved.name + ext))
+                            for ext in ("-wal", "-shm", "-journal")]
+    done: list[tuple[Path, Path]] = []
+    try:
+        for src, dst in pairs:
+            if src.exists():
+                src.replace(dst)
+                done.append((src, dst))
+    except OSError as exc:
+        for src, dst in reversed(done):
+            try:
+                dst.replace(src)
+            except OSError:
+                log.error("could not put %s back as %s", dst, src)
+        raise LedgerError(f"the job list {p} could not be moved aside ({exc}). It is probably open in another "
+                          "program: close the Ionomos app and any database viewer, stop the watcher, then run "
+                          "`ionomos repair-ledger` again. Nothing was changed.") from exc
+    return moved
+
+
 def rebuild_from_status_files(db_path: str | Path, users_root: str | Path, healthy: bool = False
                               ) -> tuple[Path | None, int]:
     """Replace a broken ledger: move it aside, re-create jobs from every <user>/<exp>/ionomos.json.
@@ -271,15 +344,7 @@ def rebuild_from_status_files(db_path: str | Path, users_root: str | Path, healt
     not .broken- (#143).
     """
     p = Path(db_path)
-    moved = None
-    if p.exists():
-        kept_as = "before-rebuild" if healthy else "broken"
-        moved = p.with_name(f"{p.name}.{kept_as}-{datetime.now():%Y%m%d-%H%M%S}")
-        p.replace(moved)
-        for ext in ("-wal", "-shm", "-journal"):
-            side = p.with_name(p.name + ext)
-            if side.exists():
-                side.replace(moved.with_name(moved.name + ext))
+    moved = _move_aside(p, "before-rebuild" if healthy else "broken")  # #143: a healthy ledger is not "broken"
     led = Ledger(p)
     records = []
     root = Path(users_root)
@@ -287,9 +352,8 @@ def rebuild_from_status_files(db_path: str | Path, users_root: str | Path, healt
 
     for status_file in status_files(root):
         try:
-            rec = json.loads(status_file.read_text(encoding="utf-8"))
-            folder = rec["plan"]["folder"]
-            records.append((rec.get("queued_at") or "", status_file.parent, rec, folder))
+            rec, folder = _read_record(status_file)
+            records.append((str(rec.get("queued_at") or ""), status_file.parent, rec, folder))
         except (OSError, ValueError, KeyError, TypeError) as exc:
             log.warning("rebuild: skipping unreadable status file %s: %s", status_file, exc)
             continue
@@ -332,13 +396,14 @@ def adopt_orphans(ledger: Ledger, users_root: str | Path) -> list[int]:
         if dest in known:
             continue
         try:
-            rec = json.loads(status_file.read_text(encoding="utf-8"))
-            folder = rec["plan"]["folder"]
+            rec, folder = _read_record(status_file)
         except (OSError, ValueError, KeyError, TypeError) as exc:
             log.warning("adopt: skipping unreadable status file %s: %s", status_file, exc)
             continue
         if rec.get("status") not in ("queued", "running"):
             continue
+        if rec.get("reason") == FILING and _younger_than(rec.get("queued_at"), FILING_GRACE_SECONDS):
+            continue  # intake is filing it right now (this runs hourly beside the watcher)
         name = folder.get("safe") or dest.name
         if name in known_names:
             log.warning("adopt: skipping %s — inbox name %r is already taken", dest, name)

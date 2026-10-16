@@ -550,7 +550,8 @@ def test_cli_prepare_and_release_offline(tmp_path, monkeypatch, capsys):
     assert "-decoys-UP000005640_9606.fasta.fas: 6 entries = 3 proteins + 0 contaminants" in out
     assert cli.main(nocfg + ["fasta", "prepare", str(src), "--no-contam", "--no-philosopher", "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["decoy_share"] == 0.5
-    assert cli.main(nocfg + ["fasta", "release", "2026-01-30-decoys-contam-x.fas"]) == 1
+    made = _src(tmp_path, name="2026-01-30-decoys-contam-x.fas")
+    assert cli.main(nocfg + ["fasta", "release", str(made)]) == 1
     out = capsys.readouterr().out
     assert "UniProt: unknown" in out and "made 2026-01-30" in out
 
@@ -569,3 +570,213 @@ def test_no_network_at_import(monkeypatch):
         importlib.reload(fastasource)
     assert fastasource.urlopen is __import__("urllib.request").request.urlopen
     assert sys.modules["ionomos.fastasource"] is fastasource
+
+
+# --- fix-fasta (round 4)
+
+BOM = b"\xef\xbb\xbf"
+
+
+def _ref_headers(data: bytes) -> list[bytes]:
+    """The headers by the plainest reading there is (split on \\n): what `fasta_headers` must give in any chunks."""
+    data = data[len(BOM):] if data.startswith(BOM) else data
+    return [ln[1:].rstrip(b"\r") for ln in data.split(b"\n") if ln.startswith(b">")]
+
+
+def _ref_entries(data: bytes) -> list[tuple[bytes, bytes]]:
+    """The reader before round 4 (whole lines), with the BOM skipped: what `_read_entries` must give in any pieces."""
+    data = data[len(BOM):] if data.startswith(BOM) else data
+    out: list[tuple[bytes, bytearray]] = []
+    for line in io.BytesIO(data):
+        line = line.rstrip(b"\r\n")
+        if line.startswith(b">"):
+            out.append((line[1:].replace(b"\t", b" "), bytearray()))
+        elif out:
+            out[-1][1].extend(line.strip())
+    return [(h, bytes(s)) for h, s in out]
+
+
+def _random_fastas(n: int = 250):
+    import random
+
+    rnd = random.Random(152156)
+    atoms = [b">", b"\n", b"\r\n", b"\r", b"MKT", b"A", b" ", b"\t", b"sp|P1|X", b"contam_", b"\n>", b"\n\n"]
+    cases = [b"", BOM, BOM + b">", b">", b"\n", BOM + b"\n>a\nMK", b">a", b">a\r\n", HUMAN, BOM + HUMAN,
+             HUMAN.replace(b"\n", b"\r\n"), HUMAN.rstrip(b"\n"), b"junk\n" + HUMAN, b"MK>notaheader\n>h\nMK\n"]
+    for _ in range(n):
+        body = b"".join(rnd.choice(atoms) for _ in range(rnd.randint(0, 40)))
+        cases.append((BOM if rnd.random() < 0.3 else b"") + body)
+    return cases
+
+
+@pytest.mark.parametrize("chunk", [1, 2, 3, 5, 8, 64, 1 << 16])
+def test_fasta_headers_match_a_line_by_line_reading_in_any_chunks(chunk):
+    for data in _random_fastas():
+        assert list(fastasource.fasta_headers(io.BytesIO(data), chunk=chunk)) == _ref_headers(data), (chunk, data)
+
+
+@pytest.mark.parametrize("chunk", [1, 2, 3, 5, 8, 64])
+def test_read_entries_match_the_whole_line_reader_in_any_pieces(chunk, monkeypatch):
+    monkeypatch.setattr(fastasource, "CHUNK", chunk)
+    for data in _random_fastas():
+        assert fastasource._read_entries(io.BytesIO(data)) == _ref_entries(data), (chunk, data)
+    keep = fastasource._read_entries(io.BytesIO(b">contam_a x\nMK\nTT\n>b\nQQ\n>contam_c\nW"),
+                                     keep=lambda start: start.startswith(b"contam_"))
+    assert keep == [(b"contam_a x", b"MKTT"), (b"contam_c", b"W")]
+
+
+def test_a_bom_fasta_keeps_its_first_protein_in_python(tmp_path, monkeypatch):
+    """#152: the Python way read b'\\xef\\xbb\\xbf>sp|P68871…' as text before the first header and dropped it."""
+    monkeypatch.setenv("IONOMOS_OFFLINE", "1")
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    plain = fastasource.prepare_for_fragpipe(_src(tmp_path / "a"), contaminants=None, date=date(2026, 10, 15))
+    src = _src(tmp_path / "b", BOM + HUMAN)
+    res = fastasource.prepare_for_fragpipe(src, contaminants=None, date=date(2026, 10, 15))
+    assert res.ok and res.method == "python"
+    assert (res.entries, res.targets, res.decoys) == (6, 3, 3)
+    assert res.path.read_bytes() == plain.path.read_bytes(), "the same file as from the file saved without a BOM"
+    assert b"P68871" in res.path.read_bytes()
+    assert any("byte-order mark" in n for n in res.notes)
+    assert src.read_bytes().startswith(BOM), "the source is never changed"
+    assert fastasource.read_fasta(src)[0][0].startswith(b"sp|P68871")
+    assert fastasource._scan(src, "rev_")["entries"] == 3
+    mine = _src(tmp_path, BOM + CRAP, name="my_contaminants.fasta")  # a contaminant file of your own, with a BOM
+    res = fastasource.prepare_for_fragpipe(src, tmp_path / "c", contaminants=mine)
+    assert res.ok and res.contaminants == 2, "ALBU_BOVIN (the first entry) is kept"
+
+
+def test_a_bom_fasta_reaches_philosopher_without_the_bom(tmp_path, philosopher):
+    """#152: the bundled Philosopher crashes on the BOM. It is given a copy without it, so its result is the one of
+    the file saved without a BOM (the stand-in, like a plain reader, would otherwise lose the first protein)."""
+    exe, log = philosopher
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    plain = fastasource.prepare_for_fragpipe(_src(tmp_path / "a"), tmp_path / "out-a", philosopher=exe,
+                                             date=date(2026, 10, 15))
+    src = _src(tmp_path / "b", BOM + HUMAN)
+    res = fastasource.prepare_for_fragpipe(src, tmp_path / "out-b", philosopher=exe, date=date(2026, 10, 15))
+    assert res.ok and res.method == "philosopher", (res.error, res.notes)
+    assert res.path.name == plain.path.name and res.path.read_bytes() == plain.path.read_bytes()
+    assert (res.entries, res.contaminants) == (8, 1)
+    custom = [ln for ln in log.read_text().splitlines() if "database --custom" in ln][-1]
+    assert str(src.resolve()) not in custom and custom.split("--custom ")[1].startswith(str(tmp_path / "out-b"))
+    assert _files(tmp_path / "out-b") == [res.path.name], "the copy went with Philosopher's folder"
+    assert src.read_bytes() == BOM + HUMAN
+
+
+@pytest.mark.parametrize("data, line, words", [
+    (b"x>sp|P68871|HBB_HUMAN Hemoglobin\nMVHL\n>sp|P2|B\nMK\n", 1, "x>sp|P68871"),
+    (b"\r\n\r\nMVHLTPEEK\n>sp|P2|B\nMK\n", 3, "MVHLTPEEK"),
+    (BOM + b" >sp|P1|A\nMK\n>sp|P2|B\nMK\n", 1, ">sp|P1|A"),
+])
+def test_text_before_the_first_header_is_refused_not_dropped(tmp_path, monkeypatch, data, line, words):
+    monkeypatch.setenv("IONOMOS_OFFLINE", "1")
+    src = _src(tmp_path, data)
+    assert fastasource.text_before_first_header(src)[0] == line
+    res = fastasource.prepare_for_fragpipe(src, tmp_path / "out", contaminants=None)
+    assert not res.ok and f"line {line}" in res.error and words in res.error and "first protein" in res.error
+    assert not (tmp_path / "out").exists() or _files(tmp_path / "out") == []
+    for fine in (HUMAN, b"\n\n" + HUMAN, BOM + HUMAN, b""):
+        assert fastasource.text_before_first_header(_src(tmp_path, fine, name="ok.fasta")) == (0, "")
+
+
+def test_a_utf16_fasta_is_refused_with_how_to_save_it(tmp_path, monkeypatch):
+    monkeypatch.setenv("IONOMOS_OFFLINE", "1")
+    src = _src(tmp_path, HUMAN.decode().encode("utf-16"))
+    res = fastasource.prepare_for_fragpipe(src, tmp_path / "out")
+    assert not res.ok and "UTF-16" in res.error and "UTF-8" in res.error
+
+
+def test_bom_in_fragpipe_fasta_info(tmp_path):
+    p = _src(tmp_path, BOM + b">rev_a\nKM\n>b\nMK\n", name="x.fas")
+    assert fragpipe.fasta_info(p) == {"entries": 2, "decoys": 1, "gb": p.stat().st_size / 1e9}
+    assert fragpipe.decoy_problem({"percolator.run-percolator": "true"}, p) == ""
+
+
+def test_a_go_crash_report_is_said_in_words(tmp_path):
+    log = tmp_path / "philosopher.log"
+    log.write_text("INFO[10:00:00] Executing Database\n"
+                   "panic: runtime error: index out of range [0] with length 0\n\n"
+                   "goroutine 1 [running]:\n"
+                   "github.com/Nesvilab/philosopher/lib/dat.ProcessDB(...)\n"
+                   "\tE:/Projects/philosopher/phi-5.1.1_RC/philosopher/lib/dat/dat.go:120 +0x85\n"
+                   "github.com/spf13/cobra.(*Command).Execute(...)\n"
+                   "\tE:/Projects/philosopher/vendor/github.com/spf13/cobra/command.go:968\n"
+                   "main.main()\n\t.../main.go:23 +0x85\n")
+    text = fastasource._last_lines(log)
+    assert ".go:" not in text and "cobra" not in text and "main.main" not in text
+    assert "panic: runtime error" in text and "Philosopher crashed" in text
+    log.write_text("ERRO[0000] something went wrong\n")
+    assert fastasource._last_lines(log) == "ERRO[0000] something went wrong"
+
+
+def _zero_file(path: Path, size: int, head: bytes = b"") -> Path:
+    """`size` bytes, no line break: `head`, then zeros (sparse where the file system allows; written in no time)."""
+    with open(path, "wb") as fh:
+        fh.write(head)
+        fh.truncate(size)
+    return path
+
+
+def test_a_200_mb_file_without_line_breaks_is_read_in_linear_time(tmp_path, monkeypatch):
+    """#156 item 5: a file with no line break used to be kept whole between chunks (quadratic; 60 s for 1 GB)."""
+    import time
+    import tracemalloc
+
+    monkeypatch.setenv("IONOMOS_OFFLINE", "1")
+    zeros = _zero_file(tmp_path / "zeros.fasta", 200 << 20)
+    one_header = _zero_file(tmp_path / "header.fasta", 200 << 20, b">sp|P1|A ")
+    started = time.monotonic()
+    tracemalloc.start()
+    try:
+        assert fastasource._scan(zeros, "rev_") == {"entries": 0, "decoys": 0, "contaminants": 0}
+        assert fragpipe.fasta_info(zeros)["entries"] == 0
+        assert fastasource.contaminants_from_fasta(zeros) == []
+        assert fastasource.text_before_first_header(zeros)[0] == 1
+        res = fastasource.prepare_for_fragpipe(zeros, tmp_path / "out")
+        with open(one_header, "rb") as fh:
+            heads = list(fastasource.fasta_headers(fh))
+        assert fastasource.contaminants_from_fasta(one_header) == []
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert not res.ok and "no FASTA entries" in res.error
+    assert len(heads) == 1 and len(heads[0]) == fastasource.HEADER_MAX and heads[0].startswith(b"sp|P1|A ")
+    assert peak < 16 * fastasource.CHUNK, f"bounded memory: a few chunks, not the file ({peak / 1e6:.0f} MB)"
+    assert time.monotonic() - started < 15, "linear: a few seconds for 200 MB, not minutes"
+
+
+def test_spaces_in_the_source_name_never_reach_the_new_name(tmp_path, monkeypatch):
+    """#156 item 7: 'name with space.fasta' gave '…-decoys-contam-name with space.fasta.fas', which FragPipe refuses."""
+    monkeypatch.setenv("IONOMOS_OFFLINE", "1")
+    src = _src(tmp_path, name="name with  space.fasta")
+    res = fastasource.prepare_for_fragpipe(src, tmp_path / "out", contaminants=None, date=date(2026, 10, 15))
+    assert res.ok and res.path.name == "2026-10-15-decoys-name_with_space.fasta.fas"
+    assert any("spaces in its name" in n and "name_with_space.fasta" in n for n in res.notes)
+    spaced = tmp_path / "my fastas"
+    res = fastasource.prepare_for_fragpipe(src, spaced, contaminants=None, fasta_dir=tmp_path / "fasta")
+    assert res.ok and any(f"fasta_dir ({tmp_path / 'fasta'})" in n for n in res.notes)
+    res = fastasource.prepare_for_fragpipe(src, spaced, contaminants=None)
+    assert any("a folder without spaces" in n for n in res.notes)
+
+
+def test_cli_release_says_when_a_fasta_is_not_there(tmp_path, monkeypatch, capsys):
+    """#156 item 6: `fasta release C:\\nope.fas` said the name has no date, exit 0."""
+    monkeypatch.setenv("IONOMOS_OFFLINE", "1")
+    nocfg = ["--config", str(tmp_path / "no-config.yaml")]
+    monkeypatch.setattr(fastasource, "uniprot_release", lambda **k: {"release": "2026_03", "date": "2026-09-02"})
+    nope = tmp_path / "nope.fas"
+    assert cli.main(nocfg + ["fasta", "release", str(nope)]) == 1
+    out = capsys.readouterr().out
+    assert f"{nope}: no such file" in out and "no date" not in out
+    folder = tmp_path / "fasta"
+    folder.mkdir()
+    _src(folder, name="2026-01-30-decoys-contam-UP000005640_9606.fasta.fas")
+    assert cli.main(nocfg + ["fasta", "release", str(folder)]) == 0
+    assert "2026-01-30-decoys-contam-UP000005640_9606.fasta.fas: made 2026-01-30" in capsys.readouterr().out
+    assert cli.main(nocfg + ["fasta", "release", str(tmp_path / "empty"), "--json"]) == 1
+    assert json.loads(capsys.readouterr().out)["missing"] == [str(tmp_path / "empty")]
+    (tmp_path / "empty").mkdir()
+    assert cli.main(nocfg + ["fasta", "release", str(tmp_path / "empty")]) == 0
+    assert "no FASTA files" in capsys.readouterr().out

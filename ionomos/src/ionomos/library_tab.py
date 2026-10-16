@@ -147,14 +147,14 @@ def _ranked(by_path: dict, extra: Callable) -> Callable:
 
 
 def candidate_rows(catalog, kind: str, *, what: str = "both", show_all: bool = False, installed_version: str = "",
-                   pinned=None, taxon: str | None = None) -> list[Row]:
+                   pinned=None, taxon: str | None = None, prefer: str = "", taxon_from: str = "") -> list[Row]:
     """The table of the Find on this PC dialog. By default the candidates library.recommend ranks for the method's
     kind (one per set of settings, no file with an error) and every usable FASTA (recommend_fastas), best first.
     `show_all`: every workflow and FASTA of the catalog, recommended ones first, then the rest (other kinds, files
     with problems, copies) by name. `what`: 'both' | 'workflow' | 'fasta'."""
     rows: list[Row] = []
     if what in ("both", "workflow"):
-        cands = library.recommend(catalog, kind, installed_version, pinned)
+        cands = library.recommend(catalog, kind, installed_version, pinned, prefer)
         if show_all:
             by_path = {library._key(c.info.path): c for c in cands}
             ws = sorted(catalog.workflows, key=_ranked(by_path, lambda w: (w.kind.lower() != kind.lower(),)))
@@ -162,7 +162,7 @@ def candidate_rows(catalog, kind: str, *, what: str = "both", show_all: bool = F
         else:
             rows += [_row(c.info, c) for c in cands]
     if what in ("both", "fasta"):
-        cands = library.recommend_fastas(catalog, taxon, kind)
+        cands = library.recommend_fastas(catalog, taxon, kind, taxon_from)
         if show_all:
             by_path = {library._key(c.info.path): c for c in cands}
             fs = sorted(catalog.fastas, key=_ranked(by_path, lambda f: ()))
@@ -223,14 +223,20 @@ def filter_rows(rows: list[Row], text: str) -> list[Row]:
     return [r for r in rows if all(w in f"{r.kind} {r.name} {r.where} {r.summary}".lower() for w in words)]
 
 
-def method_taxon(catalog, fasta_path: Path | None, fasta_dir: Path | None) -> str | None:
-    """The organism to rank FASTAs for: the method's current FASTA's, else the commonest in the FASTA folder."""
+def method_taxon_from(catalog, fasta_path: Path | None, fasta_dir: Path | None) -> tuple[str | None, str]:
+    """(the organism to rank FASTAs for, where it came from in words): the method's current FASTA's, else the
+    commonest in the FASTA folder; (None, '') when neither says."""
     if fasta_path is not None:
         cur = catalog.find(fasta_path)
         if cur is not None and cur.taxon:
-            return cur.taxon
+            return cur.taxon, "the method's current FASTA"
     n = Counter(f.taxon for f in catalog.fastas if f.taxon and library._inside(f.path, fasta_dir))
-    return n.most_common(1)[0][0] if n else None
+    return (n.most_common(1)[0][0], "the FASTA folder's files") if n else (None, "")
+
+
+def method_taxon(catalog, fasta_path: Path | None, fasta_dir: Path | None) -> str | None:
+    """The organism to rank FASTAs for (method_taxon_from without the words)."""
+    return method_taxon_from(catalog, fasta_path, fasta_dir)[0]
 
 
 def catalog_age_hours(catalog, now: datetime | None = None) -> float | None:
@@ -255,7 +261,9 @@ def catalog_line(catalog) -> str:
     if not catalog.scanned_at:
         return "Not looked for yet on this PC: press Rescan (it only reads; nothing is moved)."
     when = catalog.scanned_at.replace("T", " ")[:16]
-    return f"Last looked {when}: {catalog.how_far()}."
+    notes = [n for n in catalog.notes if not n.startswith("no scan yet")]
+    return f"Last looked {when}: {catalog.how_far()}." + "".join(f" Note: {n}." for n in notes[:2]) \
+        + (f" (and {len(notes) - 2} more notes)" if len(notes) > 2 else "")
 
 
 def method_problems(cfg_dict: dict, catalog, describe_workflow: Callable | None = None) -> list[str]:
@@ -333,32 +341,46 @@ def proposal_text(p) -> str:
     return "\n".join(out)
 
 
-def proposals_summary(proposals: list) -> str:
+def proposals_summary(proposals: list, notes: list[str] = ()) -> str:
+    """The Review proposals window's status: how many, and what was not proposed and why (auto_assign's notes:
+    candidates that tie, none found)."""
+    why_not = "".join(f" Not proposed: {n}." for n in notes)
     if not proposals:
-        return ("Nothing to propose: every method's workflow and FASTA is usable, or nothing better was found on "
-                "this PC (Find on this PC… lists everything).")
+        return ("Nothing to propose" + (":" + why_not if notes else
+                ": every method's workflow and FASTA is usable, or nothing better was found on this PC (Find on "
+                "this PC… lists everything)."))
     return (f"{len(proposals)} proposal(s). Nothing is changed until you press Apply; config.yaml is backed up "
-            f"first.")
+            f"first.{why_not}")
 
 
 def run_scan(cfg, *, progress: Callable[[str], None] | None = None,
              stop: threading.Event | None = None) -> tuple[object, str]:
-    """library.scan with the previous catalog's FASTA readings, then save_catalog. A scan stopped early doesn't
-    replace a fuller one on disk. Returns (catalog, a line on what was saved)."""
+    """library.scan with the previous catalog's FASTA readings, then library.save_scan: a scan stopped early (or
+    one that looked in fewer folders) keeps what the last one found that it did not see. Returns (catalog, a line
+    on what was saved)."""
     prev = library.load_catalog(cfg)
-    cat = library.scan(cfg=cfg, progress=progress, stop=stop, previous=prev)
-    if cat.complete or not (prev.workflows or prev.fastas) \
-            or len(cat.workflows) + len(cat.fastas) >= len(prev.workflows) + len(prev.fastas):
-        where = library.save_catalog(cfg, cat)
-        return cat, f"saved in {where}"
-    return cat, "stopped early: the fuller list from the last scan is kept on disk"
+    ctx = library.context_from(cfg)
+    cat = library.scan(cfg=cfg, ctx=ctx, progress=progress, stop=stop, previous=prev)
+    return library.save_scan(cfg, cat, prev, ctx=ctx)
 
 
-def adopt_row(row: Row, method: str, cfg, catalog=None) -> dict:
-    """Copy the row's file into the pinned folders for `method` (library.adopt / adopt_fasta). Returns
+def use_problems(row: Row, kind: str) -> str:
+    """Why Use for <method> should ask first (library.adopt_problems: a workflow of another kind than the method's,
+    a file with an error mark such as a FASTA without decoys), as the question's text; '' = nothing to ask (#150)."""
+    flags = library.adopt_problems(row.info, kind) if row.info is not None else []
+    if not flags:
+        return ""
+    lines = [f"{row.name} has a problem for this method:", ""] + flag_lines(flags, "") + [
+        "", "Use it anyway? (No leaves everything as it is.)"]
+    return "\n".join(lines)
+
+
+def adopt_row(row: Row, method: str, cfg, catalog=None, avoid: set[str] | None = None) -> dict:
+    """Copy the row's file into the pinned folders for `method` (library.adopt / adopt_fasta). `avoid`: the workflow
+    files the saved config's methods search with (library.live_workflows), never replaced before Save. Returns
     {'workflow': name or None, 'fasta': name or '', 'notes': [...]}; the caller sets them in the form."""
     if row.type == "workflow":
-        res = library.adopt(row.info, method, cfg, catalog)
+        res = library.adopt(row.info, method, cfg, catalog, avoid=avoid)
         return {"workflow": res["workflow"], "fasta": res.get("fasta") or "", "notes": list(res["notes"])}
     res = library.adopt_fasta(row.info, cfg, catalog)
     return {"workflow": None, "fasta": res["fasta"], "notes": list(res["notes"])}
@@ -739,9 +761,11 @@ class LibraryDialog(_Window):
         wf = resolve_file(paths.get("workflow_dir"), str(m.get("workflow") or ""), library.WORKFLOW_SUFFIX)
         fa = resolve_file(paths.get("fasta_dir"), str(m.get("fasta") or ""))
         pinned = self.catalog.find(wf) if wf else None
-        taxon = method_taxon(self.catalog, fa, Path(paths["fasta_dir"]) if paths.get("fasta_dir") else None)
+        taxon, taxon_from = method_taxon_from(self.catalog, fa,
+                                              Path(paths["fasta_dir"]) if paths.get("fasta_dir") else None)
         rows = candidate_rows(self.catalog, self.kind or "other", what=self._what(), show_all=self.show_all.get(),
-                              installed_version=self.installed, pinned=pinned, taxon=taxon)
+                              installed_version=self.installed, pinned=pinned, taxon=taxon,
+                              prefer=str(m.get("workflow") or ""), taxon_from=taxon_from)
         self.rows = filter_rows(rows, self.filter.get())
         self.tree.delete(*self.tree.get_children())
         for i, r in enumerate(self.rows):
@@ -779,13 +803,19 @@ class LibraryDialog(_Window):
             messagebox.showinfo("Use", f"The Methods form now shows another method. Select {self.method} again "
                                        f"and reopen this window.", parent=self.win)
             return
+        ask = use_problems(r, self.kind)
+        if ask and not messagebox.askyesno(f"Use for {self.method}?", ask, icon="warning", default="no",
+                                           parent=self.win):
+            return
         self.use_btn.configure(state="disabled")
         self.status.configure(text=f"copying {r.name} into the pinned folder…")
         cfg, cat, method = self.cfg, self.catalog, self.method
+        # the files the watcher searches with now (the saved config.yaml): Use copies beside them, Save switches
+        avoid = library.live_workflows(getattr(self.app, "config_path", None) or "")
 
         def work():
             try:
-                res = adopt_row(r, method, cfg, cat)
+                res = adopt_row(r, method, cfg, cat, avoid)
             except (OSError, ValueError) as exc:
                 self.post(lambda exc=exc: (self.status.configure(text=f"Not copied: {exc}",
                                                                  foreground=COLORS["error"]),
@@ -862,20 +892,22 @@ class ProposalDialog(_Window):
                     cat, saved = run_scan(cfg, progress=lambda t: self.post(lambda t=t: self.status.configure(text=t)),
                                           stop=ev)
                 inst = library.installed_version(cfg)
-                props = library.auto_assign(d, cat, inst)
+                notes: list[str] = []
+                props = library.auto_assign(d, cat, inst, notes)
             except Exception as exc:  # noqa: BLE001 - shown in the window
                 log.exception("library proposals failed")
                 self.post(lambda exc=exc: self.status.configure(text=f"Could not make proposals: {exc}",
                                                                 foreground=COLORS["error"]))
                 return
-            self.post(lambda: self._show(cat, props, saved))
+            self.post(lambda: self._show(cat, props, saved, notes))
 
         _thread(work)
 
-    def _show(self, cat, props: list, saved: str) -> None:
+    def _show(self, cat, props: list, saved: str, notes: list[str] = ()) -> None:
         self.stop_btn.configure(state="disabled")
         self.catalog, self.proposals = cat, props
-        self.status.configure(text=f"{catalog_line(cat)} {proposals_summary(props)}" + (f" ({saved})" if saved else ""))
+        self.status.configure(text=f"{catalog_line(cat)} {proposals_summary(props, notes)}"
+                                   + (f" ({saved})" if saved else ""))
         self.tree.delete(*self.tree.get_children())
         for i, p in enumerate(props):
             self.tree.insert("", "end", iid=str(i), values=proposal_values(p))

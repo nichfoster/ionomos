@@ -213,7 +213,8 @@ def job_matches(job, query: str) -> bool:
     if not words:
         return True
     hay = " ".join(str(x) for x in (job_state(job), job.status, job.user, job.method, job.inbox_name,
-                                     job.reason or "", job.dest_dir)).lower()  # the number is matched exactly
+                                     job.reason, job.dest_dir)
+                   if x is not None).lower()  # the number is matched exactly; no field is 'None' (#156)
     for w in words:
         if w.lstrip("#").isdigit() and job.id == int(w.lstrip("#")):
             continue
@@ -287,7 +288,14 @@ def snapshot(log_dir: Path | None, database: str | Path | None, limit: int = 15)
     try:
         from ionomos.ledger import Ledger, integrity
 
-        if integrity(database) != "ok":
+        state = integrity(database)
+        if state == "missing":   # a new install: no job yet
+            return snap
+        if state != "ok":   # #156: never an empty, healthy-looking list
+            snap.problem = (snap.problem + "; " if snap.problem else "") + (
+                f"the job list ({Path(database).name}) can't be read ({state}). The experiment folders are "
+                f"untouched: run `ionomos repair-ledger`, which rebuilds the list from them and keeps the damaged "
+                f"file (the watcher does the same when it starts)")
             return snap
         led = Ledger(database)
         try:

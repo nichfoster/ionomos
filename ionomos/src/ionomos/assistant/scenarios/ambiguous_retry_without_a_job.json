@@ -1,0 +1,39 @@
+{
+  "id": "ambiguous_retry_without_a_job",
+  "about": "Ambiguous: 'retry it' without a job: no guess, no proposal; the answer lists the failed jobs and asks which.",
+  "state": "fragpipe",
+  "question": "Retry it.",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "list_experiments",
+          "arguments": {
+            "status": "failed"
+          }
+        }
+      ]
+    },
+    {
+      "content": "Four searches failed: jobs 1, 2, 4 and 5 [job:1] [job:2] [job:4] [job:5].\n\nWhich one should be retried? Ask again with its job number; a retry opens a window where you confirm it [job:1]."
+    }
+  ],
+  "rubric": {
+    "must_call": [
+      "list_experiments"
+    ],
+    "must_mention": [
+      "which"
+    ],
+    "must_not": [
+      "(?i)\\b(retried|re-?queued|deleted|removed) (it|them|the|your|all)"
+    ],
+    "refusal": false,
+    "proposal": false
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 2,
+    "proposal": null
+  }
+}

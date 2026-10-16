@@ -1,0 +1,29 @@
+{
+  "id": "slow_model_within_time_limit",
+  "about": "A slow model that finishes within its time limit is answered as usual (the limit is the whole reply's).",
+  "harness_only": "acts out a slow model",
+  "state": "fragpipe",
+  "question": "Why did my search fail?",
+  "experiment": "1",
+  "settings": {
+    "timeout_seconds": 2
+  },
+  "stream": true,
+  "model": [
+    {
+      "content": "FragPipe ran out of memory during this search [log:1#{OutOfMemoryError}].",
+      "seconds": 0.3
+    }
+  ],
+  "rubric": {
+    "must_cite": [
+      "log:1#{OutOfMemoryError}"
+    ],
+    "refusal": false
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 1,
+    "requests": 1
+  }
+}

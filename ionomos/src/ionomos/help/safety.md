@@ -35,7 +35,10 @@ When a search runs again (Retry, or after an interruption), the previous
 output is moved aside as `fragpipe_previous_<time>\` (or
 `diann_previous_<time>\`), never deleted. Importing a workflow keeps the
 previous copy. Every change to the settings keeps a backup of the old
-`config.yaml`.
+`config.yaml`, and the new one replaces it whole: a crash, a full disk or a
+power cut during a Save leaves the old file as it was. Settings the app has
+no field for (one you typed in `config.yaml`, even a misspelt one) are
+written back as they were.
 
 ## Where it writes {#safety.where}
 

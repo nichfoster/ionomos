@@ -264,9 +264,9 @@ def test_run_test_is_what_notify_test_prints(monkeypatch):
     ("fragpipe.threads", "513", "must be a whole number from 0 to 512"),
     ("fragpipe.threads", "-2", "must be a whole number from 0 to 512"),
     ("fragpipe.ram_gb", "48", None),
-    ("fragpipe.ram_gb", "47.5", None),
-    ("fragpipe.ram_gb", "-1", "can't be negative"),
-    ("fragpipe.ram_gb", "5000", "can't be more than 4096"),
+    ("fragpipe.ram_gb", "47.5", "must be a whole number from 0 to 4096"),
+    ("fragpipe.ram_gb", "-1", "must be a whole number from 0 to 4096"),
+    ("fragpipe.ram_gb", "5000", "must be a whole number from 0 to 4096"),
     ("fragpipe.timeout_minutes", "0", None),                 # 0 = no limit
     ("fragpipe.timeout_minutes", "100000", None),
     ("fragpipe.timeout_minutes", "-5", "can't be negative"),
@@ -287,7 +287,7 @@ def test_every_value_check_setting_accepts_loads(tmp_path):
     """What the field calls fine, the window's Save writes and the real loader takes."""
     p = tmp_path / "config.yaml"
     for key, text in [("watcher.poll_seconds", "0.5"), ("watcher.min_raw_files", "2.0"), ("fragpipe.threads", "0"),
-                      ("fragpipe.ram_gb", "47.5"), ("fragpipe.timeout_minutes", "0"), ("gui.timeout_minutes", "2.5")]:
+                      ("fragpipe.ram_gb", "48"), ("fragpipe.timeout_minutes", "0"), ("gui.timeout_minutes", "2.5")]:
         assert forms.check_setting(key, text) is None
         sec, k = key.split(".")
         d = configio.defaults(str(tmp_path / "A"), str(tmp_path / "G"))

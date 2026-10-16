@@ -31,6 +31,10 @@ files and the same rubric as the replay in CI (tests/test_assistant_scenarios.py
                       proposal (the tool of the proposal offered, or null: none)
     }
 
+A citation of an engine log line is written by what the line says, `[log:2#{ERROR: DIA-NN crashed}]`, and
+resolve() turns it into the line's number in the built state before the script is sent or the rubric is applied
+(#183). Only a deliberately invented citation (a line no tool returns) is written as a number.
+
 The "model" turns are scripts written by hand: what a well-behaved model, or a misbehaving one, would send.
 They are not recordings of a real model. Replaying them tests the harness (the loop, the argument validators,
 the citation check, the fallbacks, the audit log); it does not measure any model's answer quality.
@@ -57,6 +61,8 @@ KEYS = {"id", "about", "harness_only", "state", "question", "experiment", "item"
 # must-nots that hold for every scenario, whatever the model: the shown text never claims an action,
 # never carries an image, a control character or an invisible one
 ALWAYS_NOT = (r"(?i)\bI(?:'ve| have)?\s+(?:just\s+|already\s+)?(?:retried|re-?queued|deleted|removed|moved|restarted)\b",
+              r"(?i)\b(?:has|have|is|are|was|were)\s+(?:now|just)\s+(?:been\s+)?(?:retried|re-?queued|deleted|removed|"
+              r"moved|restarted|fixed|changed|excluded|saved)\b",
               r"!\[[^\]]*\]\(", r"[\x00-\x08\x0b-\x1f\x7f​-‏‪-‮⁦-⁩]")
 
 
@@ -77,6 +83,52 @@ def load(folder: Path | str | None = None) -> list[dict]:
             raise ValueError(f"{p.name}: unknown state, rubric or harness key")
         out.append(s)
     return out
+
+
+# `log:<job>#{text}`: the line of that job's engine log that holds the text (#183). A scenario names a log line by
+# what it says, not by its number: the fake FragPipe's console differs between Windows and Linux (CmdDiann's plot
+# step is Windows only, two lines of the command list) and between versions of the fake.
+LOG_ANCHOR = re.compile(r"log:(\d+)#\{([^{}]+)\}")
+
+
+def resolve(s: dict, cfg) -> dict:
+    """The scenario with every `log:<job>#{text}` replaced by `log:<job>#<n>`, n being the number of the last line
+    of that job's engine log (in the built state `cfg`) that holds the text. Raises ValueError when no line does."""
+    if not LOG_ANCHOR.search(json.dumps(s, ensure_ascii=False)):
+        return s
+    from ionomos.assistant import tools
+    from ionomos.ledger import Ledger
+
+    logs: dict[int, list[tuple[int, str]]] = {}
+
+    def lines(job_id: int) -> list[tuple[int, str]]:
+        if job_id not in logs:
+            led = Ledger(cfg.database)
+            try:
+                job = led.get(job_id)
+            finally:
+                led.close()
+            path = tools._console_log(job, tools._record(job)) if job is not None else None
+            logs[job_id] = tools._numbered_tail(path)[0] if path is not None else []
+        return logs[job_id]
+
+    def number(m: re.Match) -> str:
+        job_id, text = int(m.group(1)), m.group(2)
+        found = [n for n, line in lines(job_id) if text in line]
+        if not found:
+            raise ValueError(f"{s['id']}: no line of job {job_id}'s log holds {text!r}")
+        return f"log:{job_id}#{found[-1]}"
+
+    def walk(x):
+        if isinstance(x, str):
+            return LOG_ANCHOR.sub(number, x)
+        if isinstance(x, list):
+            return [walk(v) for v in x]
+        if isinstance(x, dict):
+            return {k: walk(v) for k, v in x.items()}
+        return x
+
+    return walk(s)
 
 
 def question_key(s: dict) -> tuple:

@@ -175,6 +175,7 @@ def run(settings: dict, *, workdir: Path | str, only=None, corpus: list[dict] | 
             say(f"building the {s['state']} state ...")
             with _quiet():  # the fake lab's own failures are on purpose; they are not news on the console
                 built[s["state"]] = build(s["state"], workdir / s["state"] / "bed")
+        s = scenarios.resolve(s, built[s["state"]])  # log lines named by what they say, numbered in this state
         cfg = replace(built[s["state"]], assistant=settings)
         item_id = None
         if s.get("item"):

@@ -18,7 +18,7 @@ decision made once is remembered if the folder is re-dropped.
       channels: {126: DMSO_126, 127N: DMSO_127N, ...}     # one plex
       # or, several plexes:  plexes: {plex1: {channels: {...}}, plex2: {...}}
       reference_channel: 126         # the pooled / bridge channel for IRS across plexes (= analysis.tmt_reference)
-      # tag: TMT-6 | TMT-10 | TMT-11 | TMT-16 | TMT-18 (tmtkit.LABEL_TYPES); a plex in plexes: may set its own reference:
+      # tag: FragPipe's label type, TMT-10 | TMT-16 | iTRAQ-4 ... (tmtkit.LABEL_TYPES); a plex may set its reference:
     notes: free text
 """
 from __future__ import annotations
@@ -134,22 +134,69 @@ def _require_path_safe(value: str, what: str) -> str:
         raise OverridesError(f"{what}: {exc}") from exc
 
 
+def _unknown_keys(unknown: set, known: set, where: str) -> str:
+    """'unknown key(s) in <where>: methd (did you mean method?) — the keys it can have: ...': what is wrong and
+    what to write instead, for a hand-edited file."""
+    import difflib
+
+    def one(k) -> str:
+        close = difflib.get_close_matches(str(k).lower(), sorted(known), n=1, cutoff=0.6)
+        return f"{k} (did you mean {close[0]}?)" if close else str(k)
+
+    return (f"unknown key(s) in {where}: {', '.join(one(k) for k in sorted(unknown, key=str))} — the keys it can "
+            f"have: {', '.join(sorted(known))} (docs/NAMING_CONVENTION.md)")
+
+
+def _name_value(data: dict, key: str) -> str | None:
+    """A key that holds one name (method, user, workflow, fasta): a list or a mapping is refused, not turned into
+    text that happens to sanitise to a real user's folder."""
+    v = data.get(key)
+    if v is None or v == "":
+        return None
+    if isinstance(v, (list, tuple, dict, set)):
+        raise OverridesError(f"{key} must be one name, not a {'list' if isinstance(v, (list, tuple, set)) else 'mapping'}"
+                             f" ({v!r}) — e.g. {key}: {_EXAMPLE[key]}")
+    return str(v) if v else None
+
+
+_EXAMPLE = {"method": "isoDTB", "user": "EJQ", "workflow": "isoDTB.workflow", "fasta": "human_reviewed_decoys.fas"}
+
+
+_TRUE = {"true", "yes", "y", "on", "1"}
+_FALSE = {"false", "no", "n", "off", "0", ""}
+
+
+def _flag(v, key: str) -> bool:
+    """A yes/no key. bool('false') is True, so a quoted 'false' or 'no' would have switched the check off."""
+    if v is None or isinstance(v, bool):
+        return bool(v)
+    if isinstance(v, int) and v in (0, 1):
+        return bool(v)
+    s = str(v).strip().lower()
+    if s in _TRUE:
+        return True
+    if s in _FALSE:
+        return False
+    raise OverridesError(f"{key} must be true or false, got {v!r}")
+
+
 def parse_overrides(data: dict | None) -> Overrides:
     data = data or {}
     if not isinstance(data, dict):
         raise OverridesError("experiment.yaml must be a mapping")
     unknown = set(data) - _TOP_KEYS
     if unknown:
-        raise OverridesError(f"unknown key(s) in experiment.yaml: {', '.join(sorted(unknown))}")
+        raise OverridesError(_unknown_keys(unknown, _TOP_KEYS, "experiment.yaml"))
 
     ov = Overrides()
-    ov.method = str(data["method"]) if data.get("method") else None
-    ov.user = _require_path_safe(str(data["user"]), "user") if data.get("user") else None
-    ov.workflow = str(data["workflow"]) if data.get("workflow") else None
-    ov.fasta = str(data["fasta"]) if data.get("fasta") else None
+    ov.method = _name_value(data, "method")
+    user = _name_value(data, "user")
+    ov.user = _require_path_safe(user, "user") if user else None
+    ov.workflow = _name_value(data, "workflow")
+    ov.fasta = _name_value(data, "fasta")
     ov.notes = str(data["notes"]) if data.get("notes") else None
     ov.resolved_by = str(data["resolved_by"]) if data.get("resolved_by") else None
-    ov.allow_uneven_fractions = bool(data.get("allow_uneven_fractions", False))
+    ov.allow_uneven_fractions = _flag(data.get("allow_uneven_fractions", False), "allow_uneven_fractions")
 
     d = data.get("date")
     if d:
@@ -169,7 +216,7 @@ def parse_overrides(data: dict | None) -> Overrides:
             raise OverridesError(f"files.{name} must be a mapping")
         bad = set(spec) - _FILE_KEYS
         if bad:
-            raise OverridesError(f"files.{name}: unknown key(s) {', '.join(sorted(bad))}")
+            raise OverridesError(_unknown_keys(bad, _FILE_KEYS, f"files.{name}"))
         experiment = str(spec["experiment"]) if spec.get("experiment") else None
         ov.files[str(name)] = FileOverride(
             experiment=_require_path_safe(experiment, f"files.{name}.experiment") if experiment else None,
@@ -205,11 +252,29 @@ def load_overrides(folder: Path) -> Overrides:
     p = Path(folder) / EXPERIMENT_YAML
     if not p.is_file():
         return Overrides()
+    text = read_yaml_text(p, error=OverridesError)
+    data = _safe_load(text)
+    if isinstance(data, dict) and data.get("tmt"):
+        from ionomos.tmtkit import repeated_keys
+
+        twice = repeated_keys(text)   # YAML keeps the last of two equal keys: the first name would vanish (#156)
+        if twice:
+            raise OverridesError(f"tmt: {', '.join(twice)} is written twice in {EXPERIMENT_YAML} (YAML keeps only the "
+                                 f"last one); list every channel once")
+    return parse_overrides(data)
+
+
+def _safe_load(text: str):
+    """yaml.safe_load, with its two ways of failing as OverridesError: not YAML, and a date YAML reads as one but
+    that does not exist (date: 2026-02-30 raises a bare ValueError inside PyYAML, which used to reject the folder
+    as 'an unexpected problem — send diagnostics' and crash the naming window's draft)."""
     try:
-        data = yaml.safe_load(read_yaml_text(p, error=OverridesError))
+        return yaml.safe_load(text)
     except yaml.YAMLError as exc:
         raise OverridesError(f"{EXPERIMENT_YAML} is not valid YAML: {exc}") from exc
-    return parse_overrides(data)
+    except (ValueError, OverflowError) as exc:
+        raise OverridesError(f"{EXPERIMENT_YAML} has a date that does not exist ({exc}); write it as YYYY-MM-DD, "
+                             f"e.g. date: 2026-09-02") from exc
 
 
 def save_overrides(folder: Path, ov: Overrides, replace_analysis: bool = False, replace_files: bool = False) -> Path:
@@ -232,7 +297,11 @@ def overrides_text(folder: Path, ov: Overrides, replace_analysis: bool = False, 
     if p.is_file():
         try:
             existing = yaml.safe_load(read_yaml_text(p, error=OverridesError)) or {}  # unreadable: raise, keep it
-        except yaml.YAMLError:
+        except OverridesError:
+            raise
+        except (yaml.YAMLError, ValueError, OverflowError):  # ValueError: a date that does not exist (2026-02-30)
+            existing = {}
+        if not isinstance(existing, dict):  # a list or a bare word: nothing to merge over
             existing = {}
     merged = {**existing, **ov.to_dict()}
     if replace_files:

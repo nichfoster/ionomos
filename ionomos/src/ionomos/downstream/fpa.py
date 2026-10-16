@@ -545,6 +545,9 @@ def impute(m: QuantMatrix, method: str, shift: float = 1.8, scale: float = 0.3,
     if method == "none" or not any(any(r) for r in mask):
         return _copy(m, feats, vals), [[False] * ns for _ in vals], dropped, notes
     cols = [[r[j] for r in vals] for j in range(ns)]
+    # a sample without a single value has no distribution of its own to draw from or a neighbour to copy: mindet
+    # and minprob would write NaN (R: NA) and knn the log2 value 0. Its values stay missing (as perseus does below)
+    empty = [j for j in range(ns) if all(v is None for v in cols[j])] if method in ("mindet", "minprob", "knn") else []
     if method == "perseus":  # FragPipeAnalystR manual_impute(scale = 0.3, shift = 1.8), seed 123
         rng = RRandom(seed)
         for j in sorted(range(ns), key=lambda j: m.samples[j].encode("utf-8")):  # dplyr group_by order
@@ -585,6 +588,8 @@ def impute(m: QuantMatrix, method: str, shift: float = 1.8, scale: float = 0.3,
         sd = stats.median(sds) if sds else 0.0
         mins = [stats.quantile([v for v in c if v is not None], 0.01) for c in cols]
         for j in range(ns):
+            if j in empty:  # its mean is NA: R's rnorm (and RRandom's) draws nothing for it
+                continue
             draws = rng.rnorm(len(vals), mins[j], sd)
             for i, r in enumerate(vals):
                 if r[j] is None:
@@ -595,6 +600,11 @@ def impute(m: QuantMatrix, method: str, shift: float = 1.8, scale: float = 0.3,
                      "large-table clustering step")
     else:
         raise ValueError(f"unknown imputation {method!r}")
+    for j in empty:
+        for i, r in enumerate(vals):
+            r[j] = None
+            mask[i][j] = False
+        notes.append(f"sample {m.samples[j]} has no values at all; it is not imputed and stays missing")
     return _copy(m, feats, vals), mask, dropped, notes
 
 
@@ -744,12 +754,13 @@ class ContrastResult:
 
 def _group_fit(values: Matrix, groups: list[list[int]]):
     """lmFit with a group-means design (~ 0 + group), row by row, missing values dropped:
-    per-group n and mean, residual variance and df."""
+    per-group n and mean, residual variance and df. NaN and ±inf count as missing, as in lmFit (and
+    guards.check_input): an infinite value would otherwise give an infinite fold change with p = 0."""
     ns, means, s2, df = [], [], [], []
     for row in values:
         n_r, m_r, rss, nobs, rank = [], [], 0.0, 0, 0
         for g in groups:
-            xs = [row[j] for j in g if row[j] is not None]
+            xs = [row[j] for j in g if row[j] is not None and math.isfinite(row[j])]
             n_r.append(len(xs))
             if xs:
                 mu = sum(xs) / len(xs)
@@ -806,8 +817,8 @@ def spend_df(s2: list[float], df: list[int], spent: list[int] | None) -> tuple[l
 def _toptable(coef, su, post, dft, level: float = 0.95):
     t, p, lo, hi = [], [], [], []
     qcache: dict[float, float] = {}
-    for c, u, v, d in zip(coef, su, post, dft, strict=True):
-        if math.isnan(c) or math.isnan(u) or math.isnan(v) or v <= 0 or math.isnan(d) or d <= 0:
+    for c, u, v, d in zip(coef, su, post, dft, strict=True):  # u <= 0: a contrast of nothing (A vs A), untested
+        if math.isnan(c) or math.isnan(u) or u <= 0 or math.isnan(v) or v <= 0 or math.isnan(d) or d <= 0:
             t.append(math.nan)
             p.append(math.nan)
             lo.append(math.nan)
@@ -829,7 +840,7 @@ def se_df(coef, su, post, dft) -> tuple[list[float], list[float]]:
     columns, which the protein correction (proteincorr.py, D70) combines."""
     se, df = [], []
     for c, u, v, d in zip(coef, su, post, dft, strict=True):
-        ok = not (math.isnan(c) or math.isnan(u) or math.isnan(v) or v <= 0 or math.isnan(d) or d <= 0)
+        ok = not (math.isnan(c) or math.isnan(u) or u <= 0 or math.isnan(v) or v <= 0 or math.isnan(d) or d <= 0)
         se.append(math.sqrt(v) * u if ok else math.nan)
         df.append(d if ok else math.nan)
     return se, df
@@ -856,8 +867,8 @@ def limma_contrasts(values: Matrix, samples: list[str], condition: dict[str, str
         ia, ib = conds.index(a), conds.index(b)
         va, vb = (needs or {}).get((a, b), (min_valid, min_valid))
         coef, su = [], []
-        for n_r, m_r in zip(ns, means, strict=True):
-            ok = n_r[ia] > 0 and n_r[ib] > 0 and (not min_valid or (n_r[ia] >= va and n_r[ib] >= vb))
+        for n_r, m_r in zip(ns, means, strict=True):  # a condition against itself (ia == ib) is never tested
+            ok = ia != ib and n_r[ia] > 0 and n_r[ib] > 0 and (not min_valid or (n_r[ia] >= va and n_r[ib] >= vb))
             coef.append(m_r[ia] - m_r[ib] if ok else math.nan)
             su.append(math.sqrt(1 / n_r[ia] + 1 / n_r[ib]) if ok else math.nan)
         t, p, lo, hi, q = _toptable(coef, su, post, dft)

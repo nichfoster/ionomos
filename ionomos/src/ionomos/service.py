@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -36,19 +37,26 @@ def appdata_dir() -> Path:
 
 
 def remembered_config_path() -> Path | None:
-    """The config the app last saved: Ionomos's pointer, else the one LabWatch left behind."""
-    cands = [appdata_dir() / "config_path.txt"]
-    cands += [_appdata_base() / old / "config_path.txt" for old in names.LEGACY_APPDATA_DIRS]
+    """The config the app last saved: Ionomos's pointer, else the one LabWatch left behind. Every command asks
+    this before it starts (the default of --config), so it never raises: an app-data folder that can't be made
+    or read, or a pointer file that isn't text, counts as no pointer."""
+    base = _appdata_base()
+    cands = [base / (APP_NAME if os.name == "nt" else names.SLUG) / "config_path.txt"]
+    cands += [base / old / "config_path.txt" for old in names.LEGACY_APPDATA_DIRS]
     for p in cands:
-        if p.is_file():
-            s = p.read_text(encoding="utf-8").strip()
-            if s:
-                return Path(s)
+        try:
+            s = p.read_text(encoding="utf-8").strip() if p.is_file() else ""
+        except (OSError, UnicodeDecodeError):
+            continue
+        if s and "\0" not in s:
+            return Path(s)
     return None
 
 
 def remember_config_path(path: Path) -> None:
-    (appdata_dir() / "config_path.txt").write_text(str(Path(path).resolve()), encoding="utf-8")
+    from ionomos.config import write_text_atomic
+
+    write_text_atomic(appdata_dir() / "config_path.txt", str(Path(path).resolve()))
 
 
 def default_config_path() -> Path:
@@ -136,8 +144,8 @@ def ionomos_command(console: bool = False) -> list[str]:
 
 
 def _creationflags() -> int:
-    if os.name == "nt":
-        return subprocess.CREATE_NEW_PROCESS_GROUP | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    if os.name == "nt":  # getattr: tests stand in a Windows `os` on Linux, whose subprocess has no such flags
+        return getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "CREATE_NO_WINDOW", 0)
     return 0
 
 
@@ -304,26 +312,47 @@ def kill_pid(pid: int) -> None:
 # ------------------------------------------------------- task scheduler ----
 
 
+def _schtasks(*args: str, timeout: float = 30) -> tuple[int, str]:
+    """Run schtasks.exe: (exit code, output). A PC without it (removed, not on PATH, a locked-down image) or with
+    the Task Scheduler service hung gives (-1, why) instead of an exception, so a check or a diagnostics report
+    never dies on it."""
+    try:
+        r = subprocess.run(["schtasks", *args], capture_output=True, text=True, creationflags=_creationflags(),
+                           timeout=timeout, errors="replace")
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return -1, f"schtasks could not be run: {exc}"
+    return r.returncode, (r.stdout or "") + (r.stderr or "")
+
+
 def _task_exists(name: str) -> bool:
-    r = subprocess.run(["schtasks", "/Query", "/TN", name], capture_output=True, text=True,
-                       creationflags=_creationflags())
-    return r.returncode == 0
+    return _schtasks("/Query", "/TN", name)[0] == 0
 
 
 def task_status() -> str:
-    """'installed' | 'legacy' (only the old LabWatch task) | 'missing' | 'n/a' (non-Windows)."""
+    """'installed' | 'legacy' (only the old LabWatch task) | 'missing' | 'unavailable' (schtasks can't be run, or
+    the Task Scheduler doesn't answer: nothing can be installed) | 'n/a' (non-Windows)."""
     if os.name != "nt":
         return "n/a"
     if _task_exists(TASK_NAME):
         return "installed"
-    return "legacy" if any(_task_exists(t) for t in names.LEGACY_TASKS) else "missing"
+    if any(_task_exists(t) for t in names.LEGACY_TASKS):
+        return "legacy"
+    # not found: is it really missing, or is the Task Scheduler itself not there? (its message depends on the
+    # Windows language, so ask for the whole list: that fails only when the service can't be asked)
+    return "missing" if _schtasks("/Query", "/FO", "CSV", "/NH")[0] == 0 else "unavailable"
 
 
 def remove_legacy_tasks() -> None:
     if os.name != "nt":
         return
     for t in names.LEGACY_TASKS:
-        subprocess.run(["schtasks", "/Delete", "/TN", t, "/F"], capture_output=True, creationflags=_creationflags())
+        _schtasks("/Delete", "/TN", t, "/F")
+
+
+def task_command(config: Path) -> str:
+    """The startup task's command line (schtasks /TR). Task Scheduler starts it without a shell, so only a space
+    needs quotes; Windows paths can't hold a double quote."""
+    return " ".join(f'"{c}"' if " " in c else c for c in [*ionomos_command(), "--config", str(config), "run"])
 
 
 def install_task(config: Path) -> tuple[bool, str]:
@@ -333,29 +362,30 @@ def install_task(config: Path) -> tuple[bool, str]:
     """
     if os.name != "nt":
         return False, "Task Scheduler is Windows-only. On macOS use a LaunchAgent or just leave the app running."
+    cmd = task_command(config)
+    if "%" in cmd:  # Task Scheduler replaces %NAME% in an action with the variable's value when the task starts
+        return False, (f"the startup task can't run a command with a % in it ({cmd}): Task Scheduler would read "
+                       "%...% as a variable. Move config.yaml (or Ionomos) to a folder without % and try again")
     remove_legacy_tasks()
-    cmd = " ".join(f'"{c}"' if " " in c else c for c in [*ionomos_command(), "--config", str(config), "run"])
     user = f"{os.environ.get('USERDOMAIN', '')}\\{os.environ.get('USERNAME', '')}".strip("\\")
-    r = subprocess.run(["schtasks", "/Create", "/TN", TASK_NAME, "/TR", cmd, "/SC", "ONLOGON", "/RU", user,
-                        "/IT", "/RL", "LIMITED", "/F"], capture_output=True, text=True, creationflags=_creationflags())
-    return r.returncode == 0, (r.stdout or "") + (r.stderr or "")
+    code, out = _schtasks("/Create", "/TN", TASK_NAME, "/TR", cmd, "/SC", "ONLOGON", "/RU", user, "/IT", "/RL", "LIMITED",
+                          "/F")
+    return code == 0, out
 
 
 def remove_task() -> tuple[bool, str]:
     if os.name != "nt":
         return False, "n/a"
     remove_legacy_tasks()
-    r = subprocess.run(["schtasks", "/Delete", "/TN", TASK_NAME, "/F"], capture_output=True, text=True,
-                       creationflags=_creationflags())
-    return r.returncode == 0, (r.stdout or "") + (r.stderr or "")
+    code, out = _schtasks("/Delete", "/TN", TASK_NAME, "/F")
+    return code == 0, out
 
 
 def run_task() -> tuple[bool, str]:
     if os.name != "nt":
         return False, "n/a"
-    r = subprocess.run(["schtasks", "/Run", "/TN", TASK_NAME], capture_output=True, text=True,
-                       creationflags=_creationflags())
-    return r.returncode == 0, (r.stdout or "") + (r.stderr or "")
+    code, out = _schtasks("/Run", "/TN", TASK_NAME)
+    return code == 0, out
 
 
 # ------------------------------------------------------------- desktop ----
@@ -386,6 +416,21 @@ def open_path(p: Path | str) -> None:
         subprocess.Popen(["xdg-open", str(p)])
 
 
+def ps_literal(s: str) -> str:
+    """`s` as a PowerShell single-quoted string. PowerShell ends such a string at ' and at the typographic quotes
+    ‘ ’ ‚ ‛ too; each is doubled, so C:\\Users\\O'Brien stays one path and never becomes code."""
+    return "'" + re.sub("(['\u2018\u2019\u201a\u201b])", r"\1\1", str(s)) + "'"
+
+
+def shortcut_script(lnk: Path, exe: Path) -> str:
+    """The PowerShell that makes the Desktop shortcut, for -EncodedCommand (base64 of UTF-16LE: no cmd.exe quoting
+    between here and PowerShell; the paths inside are ps_literal)."""
+    ps = (f"$s=(New-Object -ComObject WScript.Shell).CreateShortcut({ps_literal(lnk)});"
+          f"$s.TargetPath={ps_literal(exe)};$s.WorkingDirectory={ps_literal(exe.parent)};"
+          "$s.Description='Ionomos setup & control';$s.Save()")
+    return base64.b64encode(ps.encode("utf-16-le")).decode("ascii")
+
+
 def create_desktop_shortcut() -> tuple[bool, str]:
     """Windows: a .lnk on the Desktop pointing at the exe (GUI mode)."""
     if os.name != "nt" or not getattr(sys, "frozen", False):
@@ -397,13 +442,7 @@ def create_desktop_shortcut() -> tuple[bool, str]:
             (desktop / old).unlink(missing_ok=True)
         except OSError:
             pass
-    ps = (
-        f"$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{lnk}');"
-        f"$s.TargetPath='{sys.executable}';$s.WorkingDirectory='{Path(sys.executable).parent}';"
-        "$s.Description='Ionomos setup & control';$s.Save()"
-    )
-    # -EncodedCommand (base64 UTF-16LE) so paths containing apostrophes survive verbatim
-    encoded = base64.b64encode(ps.encode("utf-16-le")).decode("ascii")
+    encoded = shortcut_script(lnk, Path(sys.executable))
     r = subprocess.run(["powershell", "-NoProfile", "-EncodedCommand", encoded], capture_output=True, text=True,
                        creationflags=_creationflags())
     return r.returncode == 0, str(lnk) if r.returncode == 0 else (r.stderr or r.stdout)

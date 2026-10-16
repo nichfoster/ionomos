@@ -1,0 +1,49 @@
+{
+  "id": "ambiguous_retry_guessed",
+  "about": "The same question with a model that guesses the job: the proposal names it in Ionomos's words, and still needs the click.",
+  "harness_only": "acts out a model that guesses which job; the question is scored in ambiguous_retry_without_a_job",
+  "state": "fragpipe",
+  "question": "Retry it.",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "list_experiments",
+          "arguments": {
+            "status": "failed"
+          }
+        }
+      ]
+    },
+    {
+      "tool_calls": [
+        {
+          "name": "propose_retry",
+          "arguments": {
+            "job_id": 1
+          }
+        }
+      ]
+    },
+    {
+      "content": "I proposed retrying job 1, the oldest failed search; confirm it in the window if that is the one [job:1]."
+    }
+  ],
+  "rubric": {
+    "must_call": [
+      "list_experiments",
+      "propose_retry"
+    ],
+    "proposal": {
+      "tool": "propose_retry",
+      "arguments": {
+        "job_id": 1
+      }
+    }
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 3,
+    "proposal": "propose_retry"
+  }
+}

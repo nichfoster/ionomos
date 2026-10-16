@@ -35,12 +35,13 @@ stale; this module does both.
 | `ionomos fasta search human` | UniProt's reference proteomes for a word, a Latin name, a taxon (`9606`) or an id: id, organism, taxon, number of entries. `--all` includes non-reference proteomes |
 | `ionomos fasta download UP000005640` | Downloads the reviewed entries (`--unreviewed` for all, `--isoforms` to add isoforms) as `UP000005640_9606.fasta`, then prepares it (below) into `<date>-decoys-reviewed-contam-UP000005640_9606.fasta.fas`. Default folder: `fasta_dir` from config.yaml; `--dest DIR` otherwise. `--raw-only` stops after the download |
 | `ionomos fasta prepare FILE` | Adds decoys and contaminants to a FASTA without decoys: a new file beside it (or in `--dest`). `--no-contam`, `--contam FILE` (your own list), `--no-philosopher`, `--decoy-tag` |
-| `ionomos fasta release [FASTA …]` | UniProt's current release, and for each FASTA (default: those in `fasta_dir`) how old it is against it |
+| `ionomos fasta release [FASTA …]` | UniProt's current release, and for each FASTA (default: those in `fasta_dir`; a folder stands for the FASTAs in it) how old it is against it. A path that doesn't exist is said so, and the exit code is 1 |
 | `ionomos fasta stock-workflows 24.0 [--get NAME --dest DIR]` | FragPipe's stock workflows of a release, from its source on GitHub; `--get` saves one |
 
 All of them take `--json`. Nothing is ever overwritten: a file is written as `<name>.part` and renamed, and a name
-that is taken gets `-2`, `-3`, …. The source FASTA is never changed. A path with a space gets a note (FragPipe
-can't use it).
+that is taken gets `-2`, `-3`, …. The source FASTA is never changed. A destination folder with a space gets a note
+(FragPipe can't use it) that suggests `fasta_dir` from config.yaml; spaces in the source's *name* become `_` in the
+new file's name (`my human.fasta` → `<date>-decoys-contam-my_human.fasta.fas`), with a note.
 
 ### Download (`download_proteome`)
 
@@ -69,14 +70,20 @@ philosopher workspace --clean --nocheck
 ```
 
 Philosopher writes its `.fas` into the folder it runs in; that file is moved to its final name and the folder is
-removed. If Philosopher fails (exit code, time limit, no file), the note quotes its last lines and the file is made
-in Python instead.
+removed. If Philosopher fails (exit code, time limit, no file), the note quotes its last lines (the frames of a Go
+crash report are left out: "then Philosopher crashed") and the file is made in Python instead.
+
+A source saved as "UTF-8 with BOM" (Notepad's and Excel's UTF-8 option on Windows: `EF BB BF` before the first `>`)
+crashes the Philosopher bundled with FragPipe (5.1.3-RC9; #152). Philosopher is then given a copy without the
+byte-order mark, made in its hidden folder and removed with it, rather than the file being refused: Philosopher's
+output depends only on the entries, so the result is byte for byte the one of the file saved without a BOM, and
+the lab member has nothing to re-save. The Python way skips the mark too, and a note says it was there.
 
 **In Python** (no FragPipe on this computer, `--no-philosopher`, or your own contaminant file), the same as
 Philosopher's `dat.Create` + `dat.Save`:
 
 - the file is read as Philosopher reads it (tabs in headers become spaces; sequence lines stripped and joined;
-  `\r\n` accepted); a header that appears twice keeps the later sequence;
+  `\r\n` accepted; a leading UTF-8 byte-order mark skipped); a header that appears twice keeps the later sequence;
 - each contaminant is added as `contam_<header>` unless its accession (between the first two `|`) is already a
   target's: human keratins in a human proteome stay targets;
 - every entry gets a decoy `rev_<header>` with its sequence reversed. Philosopher keeps a first `M` in place, and its
@@ -97,8 +104,27 @@ says which was used. A given contaminant file is always used in Python (Philosop
 them when it downloads by itself.
 
 **Checks**: a source that already has decoys is refused (decoys twice break the search), as is a file with no
-entries; a source of 1 GB or more gets a note. The result is checked with `fragpipe.decoy_problem` (the same 40–60 %
-rule as the search) and the counts are in the result: entries, targets, decoys, contaminants, decoy share.
+entries (one saved as UTF-16, Notepad's "Unicode", is told to be saved as UTF-8), and a file with text before its
+first header (`text_before_first_header`: a stray character before the first `>`, or sequence lines with no
+header; the message names the line). Such text belongs to no entry, so Philosopher and a plain reader drop it, and
+with it the first protein: refusing is the only way not to lose a protein silently. Blank lines and a byte-order
+mark before the first header are fine. A source of 1 GB or more gets a note. The result is checked with
+`fragpipe.decoy_problem` (the same 40–60 % rule as the search) and the counts are in the result: entries, targets,
+decoys, contaminants, decoy share.
+
+### Reading a FASTA
+
+Every reader of a FASTA here skips a leading UTF-8 byte-order mark (so a file saved with one is counted in full)
+and reads in bounded pieces, so a file of any size, including one without a single line break (a zero-filled or
+binary file named `.fasta`), is read in linear time and with the memory of a few chunks (#156: a 1 GB zero-filled
+file took 60 s and its size in memory):
+
+- `fastasource.fasta_headers(fh, stop, deadline, chunk=…)`: the headers only, found with a byte search in big
+  chunks and never split into lines; at most `HEADER_MAX` (64 kB) of one header is kept. It is the one header
+  reader of `prepare_for_fragpipe`'s counts, `library.describe_fasta` (the library and `ionomos library show`) and
+  `fragpipe.fasta_info` (`decoy_problem`, the fingerprint and the fake FragPipe);
+- `fastasource.read_fasta` / `contaminants_from_fasta`: the entries, Philosopher's way, read in pieces of 64 kB;
+  text that belongs to no kept entry is never held.
 
 ### Release and staleness
 

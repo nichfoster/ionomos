@@ -94,14 +94,14 @@ def test_an_item_without_a_job_is_named_to_the_model_without_its_names(bed):
 
 
 def test_a_grounded_answer_is_shown_with_its_sources(bed):
-    model = fake.ScriptedModel([{"content": "FragPipe ran out of memory [log:1#257].\n\nRetry after closing other "
+    model = fake.ScriptedModel([{"content": "FragPipe ran out of memory [log:1#242].\n\nRetry after closing other "
                                             "programs [job:1] [help:attention.search_failed]."}])
     ans = assistant.ask(bed["ready"], askui.default_question(bed["failed"]), item_id=bed["failed"].id,
                         transport=model, audit_path=bed["audit"], searching=True)
     shown = askui.render(ans)
     assert shown.outcome == "grounded" and shown.heading == askui.HEADINGS["grounded"]
-    assert shown.text.startswith(askui.HEADINGS["grounded"] + "\n\nFragPipe ran out of memory [log:1#257].")
-    assert "\nSources:\n  [log:1#257] Exception in thread" in shown.text
+    assert shown.text.startswith(askui.HEADINGS["grounded"] + "\n\nFragPipe ran out of memory [log:1#242].")
+    assert "\nSources:\n  [log:1#242] Exception in thread" in shown.text
     assert f"(model {fake.MODEL}, while a search ran, " in shown.footer and askui.NOTE in shown.footer
     assert model.requests[0]["messages"][1]["content"].endswith("(This question is about job 1.)")
 
@@ -247,7 +247,7 @@ def test_gui_ask_about_this_in_a_popup_answers_off_the_tk_thread(bed, tk_popups,
     root, pops, _opened = tk_popups
     _set_up(bed)
     seen = []
-    model = fake.ScriptedModel([{"content": "FragPipe ran out of memory [log:1#257]."}])
+    model = fake.ScriptedModel([{"content": "FragPipe ran out of memory [log:1#242]."}])
 
     def transport(*a):
         seen.append(threading.current_thread())
@@ -261,7 +261,7 @@ def test_gui_ask_about_this_in_a_popup_answers_off_the_tk_thread(bed, tk_popups,
     assert _pump_until(root, lambda: aw.shown is not None)
     assert aw.shown.outcome == "grounded" and seen and seen[0] is not threading.main_thread()
     text = aw.answer.get("1.0", "end")
-    assert "FragPipe ran out of memory [log:1#257]." in text and "Sources:" in text
+    assert "FragPipe ran out of memory [log:1#242]." in text and "Sources:" in text
     assert str(aw.answer.cget("state")) == "disabled" and str(aw.ask_btn.cget("state")) == "normal"
     # ask again with an edited question
     model.turns.append({"content": "It needs more memory [job:1]."})

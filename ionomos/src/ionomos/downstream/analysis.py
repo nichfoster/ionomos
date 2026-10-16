@@ -232,11 +232,20 @@ class AnalysisError(ValueError):
 
 def parse_comparison(c) -> tuple[str, str]:
     if isinstance(c, (list, tuple)) and len(c) == 2:
-        return str(c[0]).strip(), str(c[1]).strip()
-    m = re.match(r"^\s*(.+?)\s+(?:vs\.?|versus|/|-vs-)\s+(.+?)\s*$", str(c), re.IGNORECASE)
-    if not m:
-        raise AnalysisError(f"comparison {c!r} must look like 'Drug vs DMSO' or [Drug, DMSO]")
-    return m.group(1), m.group(2)
+        out = str(c[0]).strip(), str(c[1]).strip()
+    else:
+        m = re.match(r"^\s*(.+?)\s+(?:vs\.?|versus|/|-vs-)\s+(.+?)\s*$", str(c), re.IGNORECASE)
+        if not m:
+            raise AnalysisError(f"comparison {c!r} must look like 'Drug vs DMSO' or [Drug, DMSO]")
+        out = m.group(1), m.group(2)
+    _not_itself(*out)
+    return out
+
+def _not_itself(treatment: str, control: str) -> None:
+    """A condition against itself has no difference to test: every p-value would be 1 (D32: none is invented)."""
+    if treatment == control:
+        raise AnalysisError(f"comparison '{treatment} vs {control}' compares {treatment} with itself; name two "
+                            "different conditions, e.g. 'Drug vs DMSO'")
 
 def _bool(v) -> bool:
     return v if isinstance(v, bool) else str(v).strip().lower() in ("1", "true", "yes", "on")
@@ -670,6 +679,7 @@ def choose_comparisons(m: QuantMatrix, s: Settings) -> tuple[list[tuple[str, str
         return [(c, None) for c in conds], notes
     if s.comparisons:
         for t, c in s.comparisons:
+            _not_itself(t, c)
             for x in (t, c):
                 if x not in conds:
                     raise AnalysisError(f"comparison uses {x!r}, which is not a condition here "
@@ -695,6 +705,8 @@ def choose_comparisons(m: QuantMatrix, s: Settings) -> tuple[list[tuple[str, str
                      f"Choose it on the Analysis tab or set analysis.control in experiment.yaml.")
     notes += [f"Not compared: {c} (a pooled reference, not a treatment)" for c in apart if c != ctrl]
     return [(c, ctrl) for c in conds if c != ctrl and c not in apart], notes
+
+SLUG_MAX = 80   # DiffResult.slug: with "volcano_" / "_differential.tsv" a file name stays under 100 characters
 
 @dataclass
 class DiffResult:
@@ -728,7 +740,19 @@ class DiffResult:
         return sum(1 for r in self.rows if r["pvalue"] is not None and not math.isnan(r["pvalue"]))
 
     def slug(self) -> str:
-        return self.file_stem or self.full_slug()
+        """The comparison in file names (volcano_<slug>.svg, <slug>_differential.tsv, the report's downloads). A long
+        one is cut, with a short hash of the whole so two stay apart: conditions named after their runs
+        (CPTAC_CCRCC_W_JHU_20190112_LUMOS_C3N-01179_NAT vs ...) made paths longer than Windows opens, and every
+        volcano and table of the comparison was missing (#157). In a deep results folder `fit_file_stem` may give a
+        shorter stem still (#140)."""
+        if self.file_stem:
+            return self.file_stem
+        s = self.full_slug()
+        if len(s) <= SLUG_MAX:
+            return s
+        import hashlib
+
+        return s[:SLUG_MAX - 9].rstrip("._-") + "_" + hashlib.sha1(s.encode("utf-8")).hexdigest()[:8]
 
     def full_slug(self) -> str:
         return re.sub(r"[^A-Za-z0-9._-]+", "_", self.name).strip("_") or "comparison"
@@ -756,7 +780,7 @@ def _classic(p: fpa.Processed, a: str, b: str, s: Settings) -> fpa.ContrastResul
         nb.append(len(xb))
         ma.append(stats.mean(xa))
         mb.append(stats.mean(xb))
-        if len(xa) >= s.min_valid and len(xb) >= s.min_valid:
+        if len(xa) >= s.min_valid and len(xb) >= s.min_valid and a != b:  # a condition against itself: untested
             tv, dfv, pp = (stats.welch_t if s.test == "welch" else stats.student_t)(xa, xb)
             diff.append(stats.mean(xa) - stats.mean(xb))
         else:

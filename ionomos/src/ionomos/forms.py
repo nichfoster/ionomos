@@ -291,7 +291,7 @@ SETTING_LIMITS: dict[str, tuple] = {
     "watcher.stable_seconds": ("number", 0, 86400, False),
     "watcher.min_raw_files": ("integer", 1, 999, True),
     "fragpipe.threads": ("integer", 0, 512, True),
-    "fragpipe.ram_gb": ("number", 0, 4096, True),
+    "fragpipe.ram_gb": ("integer", 0, 4096, True),  # the loader takes whole GB (D102)
     "fragpipe.timeout_minutes": ("number", 0, None, True),
     "fragpipe.min_free_gb": ("number", 0, None, True),
     "gui.timeout_minutes": ("number", 0, None, True),

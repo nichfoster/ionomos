@@ -189,6 +189,10 @@ def test_proposals_are_listed_with_reasons_and_nothing_is_applied(pc):
     assert "1 proposal(s)" in library_tab.proposals_summary(props)
     assert "Nothing to propose" in library_tab.proposals_summary([])
     assert sorted(p.name for p in (pc["auto"] / "workflows").iterdir()) == before
+    # #148: what was not proposed (a tie) is said in the window's status
+    tie = "TMT: 2 workflows fit equally well (a, b); none is proposed"
+    assert f"Not proposed: {tie}" in library_tab.proposals_summary([], [tie])
+    assert f"Not proposed: {tie}" in library_tab.proposals_summary(props, [tie])
 
 
 # ------------------------------------------------------------------ workers --
@@ -215,6 +219,27 @@ def test_use_copies_into_the_pinned_folders_and_never_moves(pc):
     row = next(r for r in library_tab.candidate_rows(cat, "TMT", show_all=True) if r.name == NO_DECOYS)
     res = library_tab.adopt_row(row, "TMT", pc["cfg"], cat)
     assert res["workflow"] is None and (pc["auto"] / "fasta" / res["fasta"]).is_file() and pc["raw_fasta"].is_file()
+
+
+def test_use_asks_first_and_never_replaces_the_live_workflow_before_save(pc):
+    """#150 in the app: Use for <method> asks before a workflow of another kind or a file with a ✗ mark, and copies
+    beside the files the saved config.yaml's methods search with, so closing without Save changes no search."""
+    cat = _cat(pc)
+    iso_row = next(r for r in library_tab.candidate_rows(cat, "isoDTB", what="workflow"))
+    ask = library_tab.use_problems(iso_row, "TMT")
+    assert "WF_KIND_MISMATCH" in ask and "isoDTB workflow" in ask and "Use it anyway?" in ask
+    assert library_tab.use_problems(iso_row, "isoDTB") == ""
+    nodecoys = next(r for r in library_tab.candidate_rows(cat, "TMT", show_all=True) if r.name == NO_DECOYS)
+    assert "FASTA_NO_DECOYS" in library_tab.use_problems(nodecoys, "TMT")
+    # the TMT method searches with TMT10-MS3.workflow (saved); Use of another TMT workflow as TMT10-MS3 ...
+    live = pc["auto"] / "workflows" / "TMT10-MS3.workflow"
+    before = live.read_bytes()
+    avoid = library.live_workflows(pc["cfg_path"])
+    assert {"tmt10-ms3.workflow", "isodtb.workflow"} <= avoid
+    run_row = next(r for r in library_tab.candidate_rows(cat, "TMT", what="workflow") if r.path == str(pc["run_wf"]))
+    res = library_tab.adopt_row(run_row, "TMT10-MS3", pc["cfg"], cat, avoid)
+    assert res["workflow"] == "TMT10-MS3-2.workflow" and live.read_bytes() == before
+    assert any("left as it is" in n for n in res["notes"])
 
 
 def test_fasta_panel_text(pc):

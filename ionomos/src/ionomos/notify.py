@@ -75,6 +75,9 @@ def _check_url(where: str, url: str) -> None:
         u, host = None, None
     if u is None or not host or u.scheme not in ("http", "https"):
         raise NotifyError(f"{where} must be an https:// address")
+    if "@" in u.netloc:  # urllib would send user:password@ nowhere useful, and its errors would show the password
+        raise NotifyError(f"{where} has a user name or password before the host (user:password@): webhook "
+                          "addresses carry their key in the path; copy the address the service gave without it")
     if u.scheme == "http" and host not in _LOOPBACK:
         raise NotifyError(f"{where} must start with https:// (http:// is only accepted for this computer, localhost)")
 
@@ -212,17 +215,56 @@ def secrets(s: dict, env=None) -> list[str]:
     return sorted({v for v in out if v}, key=len, reverse=True)
 
 
+def _url_parts(url: str) -> list[str]:
+    """The pieces of a hook address an error message may quote on their own: the user:password before the host,
+    the path and the query (where hooks keep their key). Short pieces ("/", "/hook") are not secrets."""
+    try:
+        u = urllib.parse.urlsplit(url)
+    except ValueError:
+        return []
+    parts = [u.netloc.rpartition("@")[0], u.path, u.query, u.path + ("?" + u.query if u.query else "")]
+    return [p for p in parts if len(p) >= 12] + [p for p in (u.password,) if p and len(p) >= 4]
+
+
 # hook addresses carry their key in the path; hide any that turn up in a text we did not write
 _HOOK_URLS = re.compile(r"https://(?:hooks\.slack\.com/|[\w.-]*webhook\.office\.com/|[\w.-]*logic\.azure\.com[:/])[^\s\"'<>]+")
-_SECRET_LINE = re.compile(r"^(\s*[\"']?(?:url|password)[\"']?\s*:[ \t]*)(\S[^\n]*)$", re.MULTILINE)
+_SECRET_LINE = re.compile(r"^(\s*(?:-\s+)?[\"']?(?:url|password)[\"']?\s*:[ \t]*)(\S[^\n]*)$", re.MULTILINE)
 _EMPTY_VALUE = re.compile(r"(\"\"|'')(\s+#.*)?\s*")
+# the value on the lines below the key: `url:` / `password: |` / `url: >-` (YAML block and plain multi-line values)
+_SECRET_BLOCK = re.compile(r"^(\s*)(?:-\s+)?[\"']?(?:url|password)[\"']?\s*:[ \t]*(?:[|>][-+0-9]*)?[ \t]*(?:#.*)?$")
+# inside a flow mapping: {url: https://..., password: x}  (a config that doesn't parse is redacted by its text alone)
+_SECRET_FLOW = re.compile(r"([{,][ \t]*)([\"']?)(url|password)\2([ \t]*:[ \t]*)"
+                          r"(\"[^\"\n]*\"?|'[^'\n]*'?|[^\s\[{,}\]#][^,}\]\n]*)")
+
+
+def _hide_below(text: str) -> str:
+    """Lines more indented than a secret key whose value starts on the next line, replaced by ***."""
+    out, indent = [], None
+    for line in text.splitlines(keepends=True):
+        body = line.rstrip("\r\n")
+        if indent is not None:
+            if not body.strip():
+                out.append(line)
+                continue
+            lead = len(body) - len(body.lstrip())
+            if lead > indent:
+                out.append(body[:lead] + HIDDEN + line[len(body):])
+                continue
+            indent = None
+        m = _SECRET_BLOCK.match(body)
+        if m:
+            indent = len(m.group(1))
+        out.append(line)
+    return "".join(out)
 
 
 def scrub(text: str, secret_values=()) -> str:
-    """`text` with the given secret values, and anything that looks like a Slack / Teams hook address, hidden."""
-    for v in secret_values:
-        if v:
-            text = text.replace(v, HIDDEN)
+    """`text` with the given secret values, the pieces of a secret address that an error may quote on their own
+    (its user:password, path and query), and anything that looks like a Slack / Teams hook address, hidden."""
+    values = [v for v in secret_values if v]
+    values += [part for v in values if "://" in v for part in _url_parts(v)]
+    for v in sorted(set(values), key=len, reverse=True):
+        text = text.replace(v, HIDDEN)
     return _HOOK_URLS.sub(HIDDEN, text)
 
 
@@ -245,16 +287,29 @@ def raw_secrets(raw) -> list[str]:
     return sorted({v for v in out if v.strip()}, key=len, reverse=True)
 
 
+BACKUPS_READ = 30  # configio keeps 30 backups
+
+
 def file_secrets(config_path: Path | str) -> list[str]:
-    """`raw_secrets` of a config file; [] if it can't be read or parsed."""
+    """`raw_secrets` of a config file and of its backups (config-backups/config-*.yaml: a hook address replaced
+    last week is still in last week's log lines); [] for a file that can't be read or parsed."""
+    import yaml
+
+    from ionomos.config import read_yaml_text
+    from ionomos.configio import BACKUP_DIR
+
+    out: set[str] = set()
+    p = Path(config_path)
     try:
-        import yaml
-
-        from ionomos.config import read_yaml_text
-
-        return raw_secrets(yaml.safe_load(read_yaml_text(config_path)))
-    except Exception:  # noqa: BLE001 - redaction must never crash diagnostics
-        return []
+        backups = sorted((p.parent / BACKUP_DIR).glob("config-*.yaml"))[-BACKUPS_READ:]
+    except OSError:
+        backups = []
+    for f in (p, *backups):
+        try:
+            out.update(raw_secrets(yaml.safe_load(read_yaml_text(f))))
+        except Exception:  # noqa: BLE001 - redaction must never crash diagnostics
+            continue
+    return sorted(out, key=len, reverse=True)
 
 
 def redact_config_text(text: str, secret_values=()) -> str:
@@ -269,7 +324,8 @@ def redact_config_text(text: str, secret_values=()) -> str:
         comment = re.search(r"\s+#.*$", value)
         return m.group(1) + HIDDEN + (comment.group(0) if comment else "")
 
-    return _SECRET_LINE.sub(hide, scrub(text, secret_values))
+    text = _SECRET_LINE.sub(hide, _hide_below(scrub(text, secret_values)))
+    return _SECRET_FLOW.sub(lambda m: m.group(1) + m.group(2) + m.group(3) + m.group(2) + m.group(4) + HIDDEN, text)
 
 
 # ----------------------------------------------------------------- message --
@@ -344,9 +400,16 @@ def sample_message(s: dict) -> Message:
     return Message(title, tuple(facts), {**fields, "text": msg.text})
 
 
+def _slack_text(s: str) -> str:
+    """Slack reads <...> as a link or a mention (<!channel> pings everyone): &, < and > are escaped, as its
+    message-formatting rules ask, so a name or a reason is shown as written."""
+    return str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def slack_payload(msg: Message) -> dict:
     """Slack incoming webhook: {"text": ...} (mrkdwn)."""
-    return {"text": "\n".join([f"*{msg.title}*", *(f"{k}: {v}" for k, v in msg.facts)])}
+    return {"text": "\n".join([f"*{_slack_text(msg.title)}*",
+                               *(f"{_slack_text(k)}: {_slack_text(v)}" for k, v in msg.facts)])}
 
 
 def teams_payload(msg: Message) -> dict:

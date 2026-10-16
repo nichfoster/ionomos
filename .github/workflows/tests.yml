@@ -1,8 +1,11 @@
 # Runs the test suite on every push, on Linux AND Windows — so Windows-only
 # bugs (cp1252 encodings, path separators, schtasks) show up here before they
 # show up on the lab PC. Python versions: 3.14 is what the lab PC's git install
-# runs (docs/PROTEOMICS_PC.md), 3.12 is what the frozen .exe is built with
-# (build-exe.yml), 3.11 is the floor in pyproject.toml.
+# runs (docs/PROTEOMICS_PC.md) and what the frozen .exe is built with (build-exe.yml;
+# build_exe.ps1 takes the newest `py` it finds), 3.12 on Windows is the middle of the range,
+# 3.11 is the floor in pyproject.toml, 3.13 is there because pyproject.toml's classifiers promise it
+# to pip users (tests/test_packaging.py keeps the classifiers and this matrix equal).
+# The `package` job builds what `pip install ionomos` gets and runs it from a fresh venv, on every push.
 name: tests
 on:
   push:
@@ -18,9 +21,10 @@ jobs:
           - {os: windows-latest, python: "3.12"}
           - {os: ubuntu-latest, python: "3.14"}
           - {os: ubuntu-latest, python: "3.11"}
+          - {os: ubuntu-latest, python: "3.13"}
     name: test (${{ matrix.os }}, py${{ matrix.python }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25  # Windows took up to 14m46s at 0.16.0 (D73)
+    timeout-minutes: 75  # Windows: 14m46s at 0.16.0 (D73), 24 min for ~2,400 tests (#108), past 25 at 49% of ~4,100 (#184)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -58,3 +62,53 @@ jobs:
         working-directory: ionomos/tests/js
       - run: npm test
         working-directory: ionomos/tests/js
+  package:
+    # The wheel and sdist as PyPI would get them (publish-pypi.yml repeats this on three OSes before an upload):
+    # twine's checks, only the package inside, then the wheel alone in a fresh venv, run from an empty folder.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install build twine
+      - run: python -m build ionomos --outdir dist
+      - run: python -m twine check --strict dist/*
+      - name: The wheel holds the package and its data, the sdist no tests
+        run: |
+          python - <<'EOF'
+          import glob, sys, tarfile, zipfile
+          sys.path.insert(0, "deploy")
+          from check_frozen import expected
+          mods, data = expected()
+          names = zipfile.ZipFile(glob.glob("dist/*.whl")[0]).namelist()
+          have = {n[:-3].replace("/", ".").removesuffix(".__init__") for n in names if n.endswith(".py")}
+          gaps = sorted(mods - have) + sorted(data - set(names))
+          extra = [n for n in names if not n.startswith("ionomos/") and ".dist-info/" not in n]
+          sdist = tarfile.open(glob.glob("dist/*.tar.gz")[0]).getnames()
+          junk = [n for n in sdist if "/tests/" in n or "__pycache__" in n or ".venv" in n]
+          print(f"wheel: {len(names)} files; sdist: {len(sdist)} files")
+          assert not gaps, f"the wheel lacks {gaps}"
+          assert not extra, f"the wheel holds files outside the package: {extra}"
+          assert not junk, f"the sdist holds {junk[:10]}"
+          EOF
+      - name: The wheel alone, in a fresh venv, from an empty folder
+        env:
+          IONOMOS_OFFLINE: "1"
+        run: |
+          python -m venv "$RUNNER_TEMP/fresh"
+          bin="$RUNNER_TEMP/fresh/bin"
+          "$bin/python" -m pip install dist/*.whl
+          mkdir "$RUNNER_TEMP/try" && cd "$RUNNER_TEMP/try"
+          "$bin/python" -I -c "import ionomos, ionomos.cli"
+          "$bin/ionomos" --version
+          "$bin/ionomos" demo d --quiet
+          test -f d/results/report.html
+          "$bin/ionomos" analyze d/fragpipe/diann-output/report.pg_matrix.tsv --quiet
+          test -f d/fragpipe/diann-output/report.pg_matrix_ionomos/results/report.html
+          "$bin/ionomos" export --list d
+          "$bin/ionomos" help --out "$RUNNER_TEMP/help" > /dev/null
+          test -f "$RUNNER_TEMP/help/help.html"
+          "$bin/ionomos" spectronaut-columns > /dev/null
+          for c in library fasta tmt; do "$bin/ionomos" $c --help > /dev/null; done

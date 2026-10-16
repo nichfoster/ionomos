@@ -140,7 +140,7 @@ def test_every_scored_scenario_over_real_http_with_the_ci_rubric(built, tmp_path
     assert json.loads(j.read_text(encoding="utf-8"))["summary"]["passed"] == len(SCORED)
     table = t.read_text(encoding="utf-8")
     assert f"Passed {len(SCORED)} of {len(SCORED)} (100%)" in table and "it asks for 0: met" in table
-    assert "fragpipe_out_of_memory" in table and "Sources:" in table and "[log:1#257]" in table
+    assert "fragpipe_out_of_memory" in table and "Sources:" in table and "[log:1#242]" in table
     # a second scorecard in the same second gets its own name; an existing file is never written over
     assert evaluate.out_paths(None, "20261003-120000")[0].name.endswith("-120000-2.json")
     before = j.read_bytes()
@@ -158,7 +158,7 @@ def test_a_model_that_misbehaves_fails_the_rubric_and_the_exit_criteria(built, t
                             build=built, before=lambda sc: srv.use(bad))
     sm = card["summary"]
     assert sm["scenarios"] == len([s for s in SCORED if s["state"] in ("injection", "empty")])
-    assert sm["injection_failures"] == sm["injection_scenarios"] == 3
+    assert sm["injection_failures"] == sm["injection_scenarios"] == sum(scenarios.is_injection(s) for s in SCORED) >= 5
     assert not sm["exit_criteria"]["no_injection_failures"] and not evaluate.meets_exit_criteria(card)
     assert sm["outcomes"] == {"fallback": sm["scenarios"]}, "nothing it said was shown"
     assert all("I have retried" not in r["answer"] for r in card["results"])
@@ -231,6 +231,27 @@ def test_cli_ask_eval_scripted_checks_the_runner_without_a_model(tmp_path, capsy
     assert cli.main(argv) == 2, "the scorecard is there: not written over"
     assert "does not write over" in capsys.readouterr().err
     assert not (tmp_path / "w2").exists()
+
+
+ROUND4_SCORED = ["ambiguous_which_search_failed", "ambiguous_experiment_name", "ambiguous_retry_without_a_job",
+                 "no_log_waiting_job", "injection_experiment_name_ignored", "injection_attention_item_ignored",
+                 "propose_unlisted_change"]
+
+
+def test_cli_ask_eval_scripted_scores_the_round_4_scenarios(tmp_path, capsys, monkeypatch):
+    """The scenarios round 4 added for real models run through `ionomos ask-eval --scripted` and pass with their
+    well-behaved scripts; the harness-only ones are left out, as the corpus says."""
+    assert set(ROUND4_SCORED) <= {s["id"] for s in SCORED}
+    monkeypatch.setenv("IONOMOS_FAKE_FP_SECONDS", "0")
+    cfg_path = testbed.init(tmp_path / "lab")
+    out = tmp_path / "card.json"
+    argv = ["--config", str(cfg_path), "ask-eval", "--scripted", "--only", ",".join(ROUND4_SCORED),
+            "--out", str(out), "--workdir", str(tmp_path / "w"), "--mode", "idle"]
+    assert cli.main(argv) == 0, capsys.readouterr().out
+    card = json.loads(out.read_text(encoding="utf-8"))
+    assert sorted(r["id"] for r in card["results"]) == sorted(ROUND4_SCORED)
+    assert all(r["passed"] for r in card["results"]), [r["problems"] for r in card["results"]]
+    assert {"slow_model_past_time_limit", "huge_reply", "unknown_tool_names"} <= set(card["left_out"])
 
 
 def test_the_runner_starts_nothing_and_connects_only_through_the_client():

@@ -29,11 +29,11 @@ see below.
 | Engine | What Ionomos reads | Quantity used | Filters applied by Ionomos | Version from |
 |---|---|---|---|---|
 | **FragPipe** (run by Ionomos) | isoDTB `combined_modified_peptide_label_quant.tsv`, TMT-Integrator `abundance_*_MD.tsv` (else `_GN`, `_None`, `ratio_*`; below), DIA-NN `*pg_matrix.tsv`, IonQuant `combined_protein.tsv` | per method (see WORKFLOWS.md) | none (FragPipe's own FDR) | `log_*.txt`, `fragpipe.workflow` (plus MSFragger / IonQuant / DIA-NN versions and the FASTA) |
-| **DIA-NN** standalone | `*pg_matrix.tsv` (preferred), else the long report `report.tsv` (1.x) or `report.parquet` (2.x) | pg_matrix values, or `PG.MaxLFQ` | long report: `Q.Value` ≤ 1% and `PG.Q.Value` ≤ 1% | `*.log.txt` |
+| **DIA-NN** standalone | `*pg_matrix.tsv` (preferred), else the long report `report.tsv` (1.x) or `report.parquet` (2.x) | pg_matrix values, or `PG.MaxLFQ` | long report: `Q.Value` ≤ 1% and `PG.Q.Value` ≤ 1% (a row with a blank q-value is left out) | `*.log.txt` |
 | **MaxQuant** | `combined/txt/proteinGroups.txt` | `LFQ intensity`, else `Intensity`; `Reporter intensity corrected` for TMT | rows marked `+` in Reverse / Potential contaminant / Only identified by site are left out; `CON__` contaminants removed | `parameters.txt`, `mqpar.xml` |
 | **Sage** | `lfq.tsv` (a row per peptide ion, a column per file); `results.sage.tsv` and `results.json` beside it when they are there | proteins summarised per sample by Tukey median polish of the ion intensities; proteins grouped by razor peptides (below) | `q_value` ≤ 1% per peptide; with `results.sage.tsv`, the peptide's best `protein_q` ≤ 1% too; decoys left out | `results.json` (also the FASTA and every search setting) |
 | **Sage TMT** | `tmt.tsv` (a row per spectrum, a column per reporter channel) with `results.sage.tsv` beside it; read instead of `lfq.tsv` when both are there | proteins summarised per plex and channel as the MSstatsTMT format is (below); several plexes joined by IRS | PSMs: targets of `rank` 1 with `spectrum_q`, `peptide_q` and `protein_q` ≤ 1%; spectra with more than one such PSM left out | `results.json` |
-| **Spectronaut** | a protein pivot report (`<run>.PG.Quantity`) or the long BGS report (`R.FileName`, `R.Condition`, `R.Replicate`, `PG.ProteinGroups`, `PG.Quantity`) | `PG.Quantity` | long report: `PG.Qvalue` and `EG.Qvalue` ≤ 1% | not in the export |
+| **Spectronaut** | a protein pivot report (`<run>.PG.Quantity`) or the long BGS report (`R.FileName`, `R.Condition`, `R.Replicate`, `PG.ProteinGroups`, `PG.Quantity`) | `PG.Quantity` | long report: `PG.Qvalue` and `EG.Qvalue` ≤ 1% (a row with a blank q-value is left out) | not in the export |
 | **AlphaDIA** | `pg.matrix.tsv` | protein-group matrix | none | `frozen_config.yaml` |
 | **MSstats format** (quantms, Skyline, any MSstats converter) | `ProteinName, PeptideSequence, PrecursorCharge, FragmentIon, ProductCharge, IsotopeLabelType, Condition, BioReplicate, Run, Intensity` | proteins summarised per run by Tukey median polish (MSstats' default) | heavy / reference rows left out; intensities ≤ 1 count as missing | not in the file |
 | **MSstatsTMT format** (MSstatsTMT's converters, quantms / OpenMS, FragPipe) | `ProteinName, PeptideSequence, Charge, PSM, Mixture, TechRepMixture, Run, Channel, Condition, BioReplicate, Intensity` (`Fraction` optional) | proteins summarised as MSstatsTMT's `proteinSummarization(method = "MedianPolish")`: fractions of a mixture combined, global median normalisation, median polish per run, reference normalisation on the `Norm` channels; one sample per mixture × channel (technical replicates averaged) | `Norm` and `Empty` channels left out after the normalisation; intensities < 1 count as missing | not in the file |
@@ -231,8 +231,18 @@ Each job then writes `ionomos_run/diann.cfg` and runs
 reproducible settings: every raw file, FASTA / library, output, threads and
 options. Results go to `<experiment>/diann/`. Watching, holding, cancel,
 Retry, pop-ups and the analysis work exactly as for FragPipe. A second run
-keeps the first as `diann_previous_<time>/`. An experiment can pick another
+keeps the first as `diann_previous_<time>/` (`-2`, `-3` … for runs within
+one second, as for FragPipe). An experiment can pick another
 `fasta` in its `experiment.yaml`, as for FragPipe.
+
+What a finished DIA-NN, MaxQuant or Sage run must leave is its main table
+under the name Ionomos gave it (`report.pg_matrix.tsv`,
+`combined/txt/proteinGroups.txt`, `lfq.tsv` or `tmt.tsv`): exit code 0
+without it fails the job ("exited 0 but did not write its result table"),
+as a table that is empty, cut off or only a header does. A table another
+program holds open is named as such. A Windows exit status is shown as a
+person knows it (`-1`, `0xC0000005`); `0xC0000135` (a DLL missing, usually
+the Visual C++ Redistributable DIA-NN ships) gets its own cause.
 
 Ionomos' defaults are close to DIA-NN's GUI defaults for a tryptic search:
 - 1% q-value
@@ -270,7 +280,13 @@ Ionomos never writes an `mqpar.xml` from scratch, because its layout
 changes between MaxQuant versions. A job starts from one of two templates:
 - the lab's own parameters (`mqpar:`), saved from a run that worked
 - MaxQuant's default template, made by the installed MaxQuant itself
-  (`MaxQuantCmd --create`) with label-free quantification switched on
+  (`MaxQuantCmd --create`) with label-free quantification switched on.
+  Its output is kept in `ionomos_run/maxquant_create.log`; one that fails or
+  runs past 5 minutes (it is then ended with what it started) fails the job
+  with what to check
+
+A lab `mqpar:` that is not XML or not MaxQuant's (`<MaxQuantParams>`) holds
+the job, before an attempt is counted, until it is saved again.
 
 Only the job's parts are replaced:
 - the raw files
@@ -318,8 +334,14 @@ A job has two steps, both in `ionomos_run/sage_console.log`:
    [ThermoRawFileParser](https://github.com/compomics/ThermoRawFileParser)
    (`-f=2`, indexed mzML with Thermo's own peak picking) into
    `<experiment>/sage_mzml/`. A file is written to `sage_mzml/converting/`
-   and moved into place only when it is complete. A retry reuses what is
-   already converted. The raw files are never touched. mzML files and Bruker
+   and moved into place only when it is complete; what a killed conversion
+   left in `converting/` is removed before that file is converted again.
+   Beside each finished mzML, `<name>.mzML.source.json` records the raw
+   file's size and time stamp: a retry reuses an mzML whose raw file is
+   unchanged (also one stamped in the future by an instrument PC's clock)
+   and converts again one whose raw file was replaced, even by a copy with
+   an older time stamp. An mzML without a record is reused when it is newer
+   than its raw file. The raw files are never touched. mzML files and Bruker
    `.d` folders in a drop are searched as they are, and need no converter.
 2. **Search.** `sage ionomos_run/sage.json`, with results in
    `<experiment>/sage/`: `results.sage.tsv`, `lfq.tsv`, `results.json`. A
@@ -447,7 +469,12 @@ FragPipe search of the same files.
 
 The formats were built from each vendor's documentation and tested with files
 using the real column names (`tests/test_engines.py`, `tests/test_plexes.py`); the MSstatsTMT summary is checked against MSstatsTMT 2.20 itself. The Proteome Discoverer
-column naming comes from the documentation, not from a real export. If a real
+column naming comes from the documentation, not from a real export. A table
+saved again from Excel (UTF-16 "Unicode text", cells in quotes, commas
+instead of tabs) and a report written with decimal commas (Spectronaut on a
+German Windows) are read to the same numbers; a cut-off, empty or damaged file
+is named and refused, or read with a note ([VALIDATION.md](VALIDATION.md),
+"Messy input"). If a real
 file from your engine isn't recognised, please send its header line with
 **Report a problem**. For checking a search itself, `ionomos bundle 12
 --include diann-report,peptides` also puts DIA-NN's main report

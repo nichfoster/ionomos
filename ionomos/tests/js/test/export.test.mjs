@@ -535,10 +535,12 @@ test("the page theme does not leak into a figure; 10,000 features export in good
   assert.equal(root.querySelector("rect").getAttribute("fill"), "#ffffff", "a light figure from a dark page");
   assert.equal(root.querySelectorAll("circle").length, nF + 3, "every feature and the three legend dots");
   document.querySelector("#slides").click();
-  await until(() => window.__downloads.length === 2, 20000);
+  // "good time" is 60 s: about 7 s here, 20.9 s once on a shared Windows CI runner (two jobs at once); a bound
+  // that a slow runner can cross by a second only says the runner was busy, while a threefold slowdown still fails
+  await until(() => window.__downloads.length === 2, 60000);
   const files = unzip(await blobBytes(window, lastDownload(window).blob));
   assert.ok(files.every((f) => f.crcOk));
   assert.ok(files.some((f) => f.name.endsWith("tables/results_Drug_vs_DMSO.csv") && f.data.length > 1e6), "the full table");
-  assert.ok(Date.now() - t0 < 20000, `took ${Date.now() - t0} ms`);
+  assert.ok(Date.now() - t0 < 60000, `took ${Date.now() - t0} ms`);
   assert.deepEqual(errors, []);
 });

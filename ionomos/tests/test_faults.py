@@ -308,7 +308,7 @@ def test_a_taskkill_that_never_returns_does_not_hold_the_worker(monkeypatch):
     is given up after a time limit, so the worker, `ionomos run`'s shutdown and the app's Stop go on (D73)."""
     from ionomos import service
 
-    calls = []
+    calls, terminated = [], []
 
     def hung_run(cmd, **kw):
         calls.append((cmd, kw.get("timeout")))
@@ -323,6 +323,9 @@ def test_a_taskkill_that_never_returns_does_not_hold_the_worker(monkeypatch):
         def wait(self, timeout=None):
             raise subprocess.TimeoutExpired("fragpipe", timeout)
 
+        def kill(self):  # kill_tree's last resort (TerminateProcess) after taskkill: it hangs too
+            terminated.append(self.pid)
+
     monkeypatch.setattr(fragpipe, "os", _FakeOs(os, name="nt"))
     monkeypatch.setattr(service, "os", _FakeOs(os, name="nt"))
     monkeypatch.setattr(service, "_creationflags", lambda: 0)  # Windows-only constants
@@ -331,7 +334,7 @@ def test_a_taskkill_that_never_returns_does_not_hold_the_worker(monkeypatch):
     fragpipe.kill_pid_tree(4242, group=False)
     service.kill_pid(4242)
     assert service._alive(4242) is False  # can't tell: never reported as running
-    assert len(calls) == 4 and all(timeout and timeout <= 60 for _cmd, timeout in calls)
+    assert len(calls) == 4 and all(timeout and timeout <= 60 for _cmd, timeout in calls) and terminated == [4242]
     assert [c[0][0] for c in calls] == ["taskkill", "taskkill", "taskkill", "tasklist"]
 
 

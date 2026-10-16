@@ -1,0 +1,5 @@
+# The sdist holds what the wheel is built from: the package (with the package data in pyproject.toml), README and
+# LICENSE. The tests stay in the repository: they read files outside this folder (../deploy, ../docs, ../reference)
+# and golden files, so a copy in the sdist could not run (tests/test_packaging.py, .github/workflows/tests.yml).
+prune tests
+global-exclude *.py[cod] __pycache__

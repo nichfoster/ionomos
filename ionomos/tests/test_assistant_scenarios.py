@@ -71,8 +71,54 @@ def test_the_corpus_is_big_enough_and_covers_what_the_roadmap_asks():
     assert kinds == {"issue", "log", "help", "analysis", "job"}
 
 
+def test_the_corpus_acts_out_the_hostile_and_odd_cases():
+    """Round 4: every tool's bad-argument path, a tool that does not exist, injections in a log line, a sample, an
+    experiment's name and a pop-up, a job with no log, ambiguous questions, a slow and a huge model, a change off
+    the whitelist and a proposal for another job are each acted out by some script."""
+    refused = {t for s in SCENARIOS for t in s["harness"].get("rejected_calls", [])}
+    assert READ_ONLY | PROPOSE <= refused, "every tool is called with bad arguments by some script"
+    assert refused - READ_ONLY - PROPOSE, "and some script calls a tool that does not exist"
+    ids = {s["id"] for s in SCENARIOS}
+    for prefix in ("injection_log_line", "injection_sample_name", "injection_experiment_name",
+                   "injection_attention_item", "ambiguous_", "no_log_", "slow_model_", "huge_reply",
+                   "propose_unlisted_change", "proposal_for_another_job", "unknown_tool_names"):
+        assert any(i.startswith(prefix) for i in ids), prefix
+    turns = [t for s in SCENARIOS for t in s["model"]]
+    assert any(t.get("seconds") for t in turns) and any(t.get("pad", 0) >= 10_000_000 for t in turns)
+    assert any(s["state"] == "injection" and s.get("item") for s in SCENARIOS), "a pop-up with an injected name"
+
+
+@pytest.mark.parametrize("sid", ["fragpipe_ionquant_crash", "injection_log_line_ignored", "fragpipe_out_of_memory"])
+def test_a_log_citation_follows_its_line_not_its_number(sid, states, tmp_path, monkeypatch):
+    """#183: the fake FragPipe's console is not numbered alike everywhere (on Linux its DIA command list lacks
+    CmdDiann's Windows-only plot step, two lines), so the scenarios name a line by what it says. The same log with
+    two lines more near its top, on any OS, moves every cited line by two, and the script still gets its answer."""
+    real = tools._numbered_tail
+
+    def two_lines_more(path):
+        numbered, _total = real(path)
+        lines = [line for _n, line in numbered]
+        lines[3:3] = ["Some tool's banner", "printed in another version"]
+        return list(enumerate(lines, 1)), len(lines)
+
+    def numbers(sc):
+        return [int(c.split("#")[1]) for c in sc["rubric"]["must_cite"] if c.startswith("log:")]
+
+    (s,) = [x for x in SCENARIOS if x["id"] == sid]
+    here = corpus.resolve(s, states(s["state"]))
+    monkeypatch.setattr(tools, "_numbered_tail", two_lines_more)
+    moved = corpus.resolve(s, states(s["state"]))
+    assert numbers(here) and numbers(moved) == [n + 2 for n in numbers(here)]
+    answer, _model, _records = _run(moved, states, tmp_path)
+    assert answer.outcome == s["harness"]["outcome"], (answer.outcome, answer.reason)
+    assert corpus.score(moved["rubric"], answer) == [], answer.text
+    with pytest.raises(ValueError, match="no line of job 2"):
+        corpus.resolve({**s, "rubric": {"must_cite": ["log:2#{a line no log has}"]}}, states(s["state"]))
+
+
 @pytest.mark.parametrize("s", SCENARIOS, ids=[s["id"] for s in SCENARIOS])
 def test_scenario(s, states, tmp_path):
+    s = corpus.resolve(s, states(s["state"]))  # `log:2#{text}` -> that line's number in this state (#183)
     answer, model, records = _run(s, states, tmp_path)
     h = s["harness"]
 
@@ -96,6 +142,14 @@ def test_scenario(s, states, tmp_path):
     got = answer.proposal.tool if answer.proposal is not None else None
     assert got == h.get("proposal"), (got, answer.withheld)
     assert answer.proposal is None or answer.grounded, "a proposal is offered only with an answer that passed"
+    p = answer.proposal  # D75 4: a proposal for another job than the one asked about says so in its window
+    if p is not None and answer.job_id is not None and p.job_id != answer.job_id:
+        assert p.note == f"the question was about job {answer.job_id}; this proposal changes job {p.job_id}."
+        assert p.note in proposals.text(p) and p.note in proposals.cli_text(p)
+    elif p is not None and answer.job_id is None and (s.get("item") or s.get("experiment")):
+        assert p.note.startswith("the question was about an ") and f"changes job {p.job_id}" in p.note
+    elif p is not None:
+        assert p.note == ""
     assert sum(c["ok"] for c in answer.tool_calls if c["name"] in PROPOSE) <= 1, "one proposal per question"
     assert answer.grounded == bool(answer.citations) == bool(answer.sources)
     assert "\x1b" not in answer.text and "\x07" not in answer.text
@@ -147,5 +201,5 @@ def test_states_are_left_as_they_were(state, states, tmp_path):
 
     before = snapshot()
     for s in (x for x in SCENARIOS if x["state"] == state):
-        _run(s, states, tmp_path / s["id"])
+        _run(corpus.resolve(s, states(state)), states, tmp_path / s["id"])
     assert snapshot() == before

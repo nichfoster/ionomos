@@ -402,7 +402,7 @@ installed.
   codes become editable config, with a "test your names" check (CLI + setup
   window), so another lab's convention needs no code change. Keep
   NAMING_CONVENTION.md ↔ naming.py in sync.
-- [ ] **Docs for a stranger:** (2026-09-30: QUICKSTART.md, ENGINES.md, the simulated demo and the "never done to your data" page (`help/safety.md`, #57) done; 2026-10-15: [VISION.md](VISION.md), SCOPE.md rewritten for today, CITATION.cff, CONTRIBUTING.md, a code of conduct, issue and pull-request templates; still to do: a real-data example and a documentation site, 5D steps 4 and 7)
+- [ ] **Docs for a stranger:** (2026-09-30: QUICKSTART.md, ENGINES.md, the simulated demo and the "never done to your data" page (`help/safety.md`, #57) done; 2026-10-15: [VISION.md](VISION.md), SCOPE.md rewritten for today, CITATION.cff, CONTRIBUTING.md, a code of conduct, issue and pull-request templates; 2026-10-15: a real-data example, `ionomos example` (FragPipe-Analyst's published LFQ / DIA / TMT data, D96, [EXAMPLE.md](EXAMPLE.md)); still to do: a documentation site, 5D step 7)
 - [x] **Help users can see** (2026-09-30, D46, #57; the report's help added for designs, dose-response and TMT in #58–#60): one help source shown in two
   places. In the report: a Help entry, "?" buttons on each section and QC tab, a glossary,
   and troubleshooting for the issues in that report. From the app and CLI: a full offline
@@ -593,10 +593,15 @@ it. "The maintainer" is @nichfoster (accounts, settings, the lab, authorship);
 "an agent" opens a pull request that the maintainer merges (D31). Steps 1–3
 need nothing from the lab.
 
-1. [ ] **PyPI** — *the maintainer*. Set up trusted publishing as the header of
-   `.github/workflows/publish-pypi.yml` says (pending publisher on pypi.org,
-   the `pypi` environment on GitHub, the `PYPI_PUBLISH` variable), then tag
-   the next release. On 2026-10-15 `ionomos` is not on PyPI.
+1. [ ] **PyPI** — *the maintainer*. Release readiness checked 2026-10-15 (the
+   wheel and sdist build, `twine check --strict`, the wheel alone in a fresh
+   venv runs demo / analyze / help / export; CI's `package` job repeats it on
+   every push). One-time setup, exact steps in DEV_LOOP.md "Releasing": a
+   pending publisher on pypi.org (project `ionomos`, owner `nichfoster`, repo
+   `ionomos`, workflow `publish-pypi.yml`, environment `pypi`), the `pypi`
+   environment on GitHub (required reviewer, tag rule `v*`), the repository
+   variable `PYPI_PUBLISH=true`; then tag the next release. On 2026-10-15
+   `ionomos` is not on PyPI (a pending publisher does not reserve the name).
    *Then an agent* drops "until it is on PyPI" from README.md,
    QUICKSTART.md and `ionomos/README.md`.
 2. [ ] **Repository settings** — *the maintainer*. Branch protection on
@@ -609,21 +614,32 @@ need nothing from the lab.
    SCOPE.md for today's scope, CITATION.cff, CONTRIBUTING.md,
    CODE_OF_CONDUCT.md (Contributor Covenant 2.1), issue templates that ask
    for the diagnostics, a pull-request template.
-   - [ ] *an agent*: SECURITY.md (report privately; what is in scope: the
-     report's escaping of names, the bundle's anonymisation and leak check
-     (D63), the assistant's localhost gate (D57)).
+   - [x] *an agent*, 2026-10-15: SECURITY.md (GitHub private vulnerability
+     reporting, which the maintainer must switch on in Settings → Code
+     security before the file is true; scope: the report's escaping of
+     names, the bundle's anonymisation and leak check (D63), the assistant's
+     localhost gate (D57), intake never deleting; supported versions: the
+     latest minor).
 4. [ ] **A real-data example** — *the maintainer* picks a public PRIDE
    dataset whose licence allows reuse, a mixed-species benchmark (human /
    yeast / *E. coli*) if possible, so it serves step 5 too; *an agent* adds
    how to fetch its tables (not bundled: the demo stays offline, D40), its
    expected ratios for `ionomos benchmark --expected`, a test on a small
    slice of it, and its report for the site.
+   Half done 2026-10-15 (D96): `ionomos example` fetches FragPipe-Analyst's
+   published AP-MS / ccRCC DIA / ccRCC TMT data from Zenodo (CC BY 4.0), with
+   a test on a 240-row excerpt. Still open: a mixed-species PRIDE dataset
+   with its expected ratios for `ionomos benchmark --expected`, and the
+   reports on the documentation site.
 5. [ ] **The real-data evidence** — *the lab and the maintainer*; *an agent*
    writes it up in VALIDATION.md. The open items of 5C #10: a mixed-species
    sample on the lab's instrument (or step 4's dataset) benchmarked and the
    imputation default decided from it; one `ionomos compare` against a real
    FragPipe-Analyst export and one against a real MSstats or Perseus export;
    real TMT and isoDTB searches through the watcher (REAL_RUNS.md).
+   Also: FragPipe-Analyst's own result for the example data (its web app or
+   FragPipeAnalystR), then `ionomos compare` and a VALIDATION.md row
+   (EXAMPLE.md says how).
 6. [ ] **Pilot labs** — *the maintainer*. 2–3 labs, ideally chemoproteomics
    groups already on FragPipe isoDTB / ABPP workflows, or a core facility.
    Their problems go to issues; what they needed to change goes to
@@ -663,7 +679,11 @@ need nothing from the lab.
     minor release; best-effort support through GitHub issues.
 12. [ ] **v1.0** — *the maintainer* tags it when VISION.md's "done for v1.0"
     holds.
-13. [ ] **Interoperate rather than compete** (ongoing): open in
+13. [ ] **Dead code**: `ionomos/src/ionomos/runners/` is imported by nothing
+    in the program, only by `tests/test_downstream.py`, and the exe build's
+    `deploy/check_frozen.py` lists it as an exception; remove it or wire it
+    in (*the maintainer decides*, 2026-10-15).
+14. [ ] **Interoperate rather than compete** (ongoing): open in
     FragPipe-Analyst (already exported), optional pmultiqc-compatible QC,
     SDRF.
 
@@ -797,6 +817,11 @@ that scorecard, not leaderboards.
   - **Remains (the box stays open):** nothing has run against a real model or runtime,
     so none of the exit criteria is measured. Needs 6.0 first (a model to try), then
     `ionomos ask-eval` on the PC, idle and during a search, and the settings it suggests.
+  - **Round 4 (2026-10-15):** 19 scenarios (85, 53 scored) and `tests/test_assistant_robustness.py`
+    (the audit log under concurrent writers, a trickling model, a 10 MB reply, every tool's bad arguments, an
+    injected help entry, whitelist smuggling); still nothing against a real model. #170 lists what a real model
+    must be scored on (ambiguous questions, the new injections, near-miss tool names, the passive-claim net,
+    whether 120 s for a whole reply fits).
 - [ ] **6.2 Confirmed actions (2–3 weeks).** The proposal tools and the native
   diff-and-confirm dialog. *Exit:* no path runs an action without a click (tested), and
   3 lab members finish the tasks unaided.
@@ -856,7 +881,9 @@ Collected from the other docs; resolve before/during Phase 1.
 - [ ] A channel named `Pool…` is read as a reference even when marked sample (rename it to make it a sample); fine?
 - [ ] TMT-35 (hyperplexing), iTRAQ and DiLeu are passed to FragPipe unchecked. `downstream/plex.py`'s
       `TMT_ORDERS` (Sage / MaxQuant channel order) is separate from `tmtkit.LABEL_TYPES` (FragPipe's); they
-      describe different engines' columns.
+      describe different engines' columns. → 2026-10-15 (#154): iTRAQ-4, iTRAQ-8, TMT-35, TMT-2, TMT-0 and
+      iodoTMT-6 are planned and checked by their channels; sCLIP-6, IBT-16, DiLeu-12, DiLeu-1, DeAla-13 and Trp-2
+      are still passed on unchecked (`TMT_LABEL_UNKNOWN`).
 
 **Machine**
 - [ ] FragPipe 24.0 launcher: from FragPipe's build it is `C:\FragPipe\FragPipe-24.0\bin\fragpipe.bat`, next to
@@ -1095,3 +1122,64 @@ Collected from the other docs; resolve before/during Phase 1.
 - [ ] Phase 5: publish on PyPI as `ionomos` (needs a PyPI account / trusted publisher set up by the maintainer).
 - [x] Agent auto-merge: removed 2026-09-27; a person merges (D31).
 - [x] CI Python versions: 3.11 (floor), 3.12 (exe build), 3.14 (the PC) since 2026-09-27.
+
+**Round 4 (2026-10-15): left open by the robustness audit** (D97–D103; the fixes are in CHANGELOG [Unreleased])
+- [ ] Loaders (D97), not verified on real files: Excel's UTF-16 save of each engine's table, a Spectronaut report
+      from a German Windows, a Proteome Discoverer `.xlsx` export, DIA-NN 2.x `--out` names. A lab member's real
+      exports would settle these. FragPipe's own tables saved again from Excel with thousands separators are still
+      read as all missing (FragPipe never writes them). A MaxQuant TMT table without a design gets one condition
+      per channel; it should be `unassigned` and ask, as Sage TMT does (#165).
+- [ ] Statistics: a dose-response curve is fitted and called for a protein measured at only two doses (#162; check
+      CurveCurator's per-curve `max_missing` rule first); `qc.pca` takes ~6 min on 500 samples (#163); knn
+      imputation is quadratic in features (#164).
+- [ ] Intake: what only the watcher can see (a dot-ended folder whose fixed name is taken, a failing loose-file
+      grouping) is logged but not raised as an attention item. Since #139 (D94) `cli.cmd_run` gives the watcher
+      its `log_dir`, as the too-long-path item uses: raise these the same way. macOS / Linux: a folder is moved even while a copy still writes
+      into it (no open-file lock there; a longer `stable_seconds` is the guard). How intake tells the window's
+      `resolved_by: gui` from a hand-written one (#173); `ionomos run`'s two start-up tracebacks (#172).
+- [ ] Engines (D98): stop what an engine leaves running after it exits on Windows (a Job Object or a Toolhelp
+      walk, #174); check on the PC whether MSFragger's `BatmassIoThermoServer.exe` outlives MSFragger. A leftover
+      search that can't be stopped must hold the job, not run a second search beside it, and the cancel result
+      can't say the engine survived the kill (#175). The console log keeps every attempt (up to 2 GB each):
+      move aside or truncate an attempt's log past the limit? Does a MaxQuant retry reuse its per-raw working
+      folders next to the raws (stale results) or redo them? DIA-NN reads `diann.cfg` in an unknown encoding:
+      check a path with µ or ü on the PC, or hold a job whose paths are not ASCII.
+- [ ] Config and CLI (D102): `LiveConfig` can read a config.yaml another editor is writing in place (6 of 138 cut
+      points load as a valid config with fewer methods, put right by the next reload); a settle delay would close
+      it. 24 options outside `cli.py` have no `--help` text (#166); `bundle 77` and `library show <missing>` exit
+      the other way round from the table (#167).
+- [ ] Security (D99, D100, SECURITY_NOTES.md): `experiment.yaml`'s `workflow:` / `fasta:` accept any absolute or
+      UNC path, `site_annotation:` a UNC one (#168); an Authenticode check of the downloaded installer (today:
+      size + SHA-256 from the same GitHub answer); `maxquant.create_template` and `sage.run_job` start programs
+      without `batch_problem`; `bundle inspect --key` reads a member with no line break whole; Teams Adaptive
+      Cards render a little Markdown from a failure reason; a mapped drive letter (`Z:`) inside a scanned file is
+      not recognised as a network path. An attention item id with `../` reads and rewrites a JSON file outside the
+      attention folder (#169; the assistant checks the id itself now).
+- [ ] Assistant: should a whole question have a time limit? It can make 6 requests of `timeout_seconds` each (12
+      minutes by default, #171). Should a proposal for another job than the one asked about be refused rather than
+      shown with a note (D75 4)? Round 4 kept the note and extended it to items without a job and unknown
+      experiments; an injected line can still aim a proposal at another job, which a person then has to read.
+- [ ] Report: rows, chart points and chips cannot be opened from the keyboard (#176); text in palette colours and
+      help.html / charts.py's `#898781` are below 4.5:1 (#177); `composeFigure` still puts the statistics footer
+      on exported TMT QC figures (#178); a user's own `/regex/` with catastrophic backtracking can still freeze the
+      page (JS has no regex time-out). Not verified: a real screen reader, Safari / Firefox, a 100k-feature report
+      in a real browser.
+- [ ] Library (D101): `fpfolder.workflow_kind` still calls SILAC / PAL / isoTOP / ipIAA search folders isoDTB for
+      the analysis (#161). On the PC: the merged catalog after a `--time`-limited scan of `D:\`, the app's "Use it
+      anyway?" question and the Review proposals status line.
+- [ ] FASTA: four more readers (`bundle.fasta_facts`, `sdrf.fasta_organism`, `engines._fasta_names`,
+      `benchmark.read_fasta_species`) still miss the first entry of a BOM file and read a line-free file as one
+      line (#160).
+- [ ] TMT: if the lab has iTRAQ data, try FragPipe's stock iTRAQ4 workflow on the first real TMT run (only the fake
+      has searched it). `_load_quantities` for non-FragPipe engines and `sdrf.py` still read the `tmt:` map
+      saved at intake, not `tmtkit.current_block`.
+- [ ] Testbed (D103): does the lab run DIA in fractions? If so, sum the fractions per sample before the statistics
+      (#180). An open search's report could show PTM-Shepherd's `global.profile.tsv` instead of failing on
+      NO_TABLE (#181). A FragPipe refusal with no explanation entry reads "ended from outside, nothing failed:
+      Retry" (#179); plain analysis notes are shown as warnings on a done job (#182). To confirm on the PC: the
+      "badly formatted lines" ERROR line in job 1's console log (REAL_RUNS.md); that the console is cp1252 with
+      CRLF; that `<raw>_uncalibrated.mzML` sits beside the raws of an Ionomos job; that a dry run writes
+      `fragpipe.job` into the preflight folder.
+- [x] Docs: should `test_docs_sync.py`'s config check also require every key `analysis.Settings` accepts to be
+      written by `dump_config` (#159)? → 2026-10-15 (D102): every such key survives a Save now, and
+      `tests/test_config_roundtrip.py` walks `Settings`' fields, so a new one is covered there.

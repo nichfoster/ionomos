@@ -1,0 +1,58 @@
+{
+  "id": "unknown_tool_names",
+  "about": "Tools that do not exist, the way real models get names wrong (a prefix, capitals, an invisible character, an invented proposal): each is 'no such tool', with the list of tools there are.",
+  "harness_only": "acts out tool names that do not exist; the question is scored in fragpipe_out_of_memory",
+  "state": "fragpipe",
+  "question": "Why did my search fail?",
+  "experiment": "1",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "functions.get_job",
+          "arguments": {
+            "job_id": 1
+          }
+        },
+        {
+          "name": "GET_JOB",
+          "arguments": {
+            "job_id": 1
+          }
+        },
+        {
+          "name": "get_job​",
+          "arguments": {
+            "job_id": 1
+          }
+        },
+        {
+          "name": "propose_delete_raw_folder",
+          "arguments": {
+            "job_id": 1
+          }
+        }
+      ]
+    },
+    {
+      "content": "FragPipe ran out of memory during this search [log:1#{OutOfMemoryError}] [job:1]."
+    }
+  ],
+  "rubric": {
+    "must_cite": [
+      "log:1#{OutOfMemoryError}"
+    ],
+    "refusal": false,
+    "proposal": false
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 2,
+    "rejected_calls": [
+      "functions.get_job",
+      "GET_JOB",
+      "get_job",
+      "propose_delete_raw_folder"
+    ]
+  }
+}

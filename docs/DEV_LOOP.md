@@ -153,7 +153,14 @@ diff -r lab_results work/exp001/results     # the .tsv files should be identical
 ```
 
 `unpack` checks every file against the SHA-256 in `BUNDLE.json` and never
-writes over anything. With the bundled config the lab's `analysis:` defaults
+writes over anything. It reads the zip as someone else's file: a member
+whose name would land outside `work/` (`..`, a drive, an absolute or UNC
+path, a colon, a Windows device name such as `CON`) is left out and listed,
+as is a job whose folder name in `BUNDLE.json` is not one plain name; a zip
+bomb (a member over 1 GB that deflated more than 100:1) or a bundle bigger
+than the disk's free space is refused before anything is written; and the
+unpacked `config.yaml` keeps no notify, assistant or library block and no
+engine program path of the sender's (docs/SECURITY_NOTES.md). With the bundled config the lab's `analysis:` defaults
 and method definitions apply; without `--config`, Ionomos' defaults do. The
 re-run matches the lab's tables byte for byte when the same Ionomos version
 is used and the bundle says "analysis can be repeated: yes". It can differ
@@ -189,6 +196,51 @@ it to a Release on GitHub. Or *Actions → build-exe → Run workflow* for a
 one-off build without tagging (zip under "Artifacts"). Install per
 [DEPLOY_WINDOWS.md](DEPLOY_WINDOWS.md) Way A. The dev install and the exe
 install can coexist; they share the same `config.yaml`.
+
+## Releasing (the installer and PyPI, from one tag)
+
+1. Bump `__version__` (`ionomos/src/ionomos/__init__.py`) and `version` in
+   `ionomos/pyproject.toml`, CHANGELOG, push, wait for the `tests` workflow
+   (its `package` job builds and smoke-tests the wheel on every push).
+2. Optional, on a Windows machine: `powershell -ExecutionPolicy Bypass -File
+   deploy\build_exe.ps1 -NoInstaller`. `deploy/check_frozen.py` fails the
+   build if a module or data file of the package is missing from the exe.
+3. `git tag vX.Y.Z && git push --tags`. Two workflows run: `build-exe`
+   (installer + zip, tested, attached to the GitHub Release) and
+   `publish-pypi` (checks the tag is the pyproject version, builds, `twine
+   check`, installs the wheel on Windows / macOS / Linux, then uploads only
+   when step 4 is done).
+
+### One-time setup for PyPI (the maintainer; no token is stored anywhere)
+
+`.github/workflows/publish-pypi.yml` uses trusted publishing
+(`pypa/gh-action-pypi-publish`, `id-token: write`): PyPI trusts that one
+workflow of this repository instead of a password.
+
+4. a. **pypi.org**: an account with two-factor authentication on. *Account
+      settings → Publishing → Add a new pending publisher → GitHub*:
+      PyPI project name `ionomos`, owner `nichfoster`, repository `ionomos`,
+      workflow name `publish-pypi.yml`, environment name `pypi`. A pending
+      publisher does not reserve the name: the first upload creates the
+      project, so do the rest soon after.
+   b. **GitHub → Settings → Environments → New environment** `pypi`. Under
+      *Deployment protection rules* tick *Required reviewers* and add
+      yourself (each upload then waits for a click); under *Deployment
+      branches and tags* choose *Selected branches and tags* and add the tag
+      rule `v*`. With that rule a manual run (*Actions → publish-pypi → Run
+      workflow*, "publish" ticked) uploads only when started from a tag.
+   c. **GitHub → Settings → Secrets and variables → Actions → Variables →
+      New repository variable** `PYPI_PUBLISH` = `true`. Until it exists a
+      tag builds and checks the packages and uploads nothing.
+   d. The next tag publishes. Check `pip install ionomos==X.Y.Z` in a fresh
+      venv, then the project page's links (pyproject's `[project.urls]`).
+      PyPI never takes the same version twice: a failed upload is fixed by
+      a new patch version, not by re-running the tag.
+
+### One-time repository settings that belong to a release
+
+- **Settings → Code security → Private vulnerability reporting → Enable**:
+  [SECURITY.md](../SECURITY.md) sends reporters there.
 
 ## Optional: Claude Code on the PC too
 

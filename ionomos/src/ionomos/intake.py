@@ -27,6 +27,7 @@ import json
 import logging
 import os
 import shutil
+import sqlite3
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -35,7 +36,7 @@ from typing import Protocol
 
 from ionomos import __version__
 from ionomos.config import Config
-from ionomos.ledger import Job, Ledger, now_iso
+from ionomos.ledger import FILING, Job, Ledger, now_iso
 from ionomos.manifest import (
     EXPERIMENT_YAML,
     NumberOutOfRange,
@@ -67,7 +68,7 @@ log = logging.getLogger("ionomos.intake")
 NAMING_DOC = "docs/NAMING_CONVENTION.md"
 # NamingError texts that mean "one file's name doesn't fit its method's rule" (fixable per file in the window)
 RAW_NAME_PROBLEMS = ("must end", "must look like", "must match the pattern", "not a .raw", "is not a number",
-                     "no sample name left")
+                     "no sample name left", "no letters FragPipe can use")
 REJECT_SUFFIX = ".REJECTED.txt"
 
 
@@ -606,6 +607,12 @@ def _move_tree(src: Path, dst: Path) -> str:
     except OSError as exc:
         if exc.errno != errno.EXDEV:  # Windows maps "different drive" to EXDEV too
             raise
+    busy = _open_elsewhere(src)
+    if busy is not None:
+        # The same-volume rename above fails by itself while a file is open (Windows); a copy would not: it would
+        # file the half-written file, and the clean-up after it would delete the finished ones from the inbox.
+        raise PermissionError(errno.EACCES, f"{busy.relative_to(src)} is still open in another program (a copy "
+                                            f"still running, Xcalibur, antivirus)", str(busy))
     log.warning("inbox and users_root are on different volumes; copying %s (slow)", src.name)
     free = shutil.disk_usage(dst.parent).free
     need = sum(p.stat().st_size for p in src.rglob("*") if p.is_file())
@@ -645,6 +652,33 @@ def _move_tree(src: Path, dst: Path) -> str:
     return "copy"
 
 
+def _open_elsewhere(folder: Path) -> Path | None:
+    """The first file under folder that another program has open (Windows: it can't be opened without sharing),
+    else None. Elsewhere None: POSIX has no such lock, and a rename there moves an open file safely."""
+    if os.name != "nt":
+        return None
+    import ctypes
+    from ctypes import wintypes
+
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.CreateFileW.restype = wintypes.HANDLE
+    k32.CreateFileW.argtypes = (wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID, wintypes.DWORD,
+                                wintypes.DWORD, wintypes.HANDLE)
+    k32.CloseHandle.argtypes = (wintypes.HANDLE,)
+    generic_read, open_existing, sharing_violation, lock_violation = 0x80000000, 3, 32, 33
+    invalid = wintypes.HANDLE(-1).value
+    for p in sorted(folder.rglob("*")):
+        if not p.is_file():
+            continue
+        h = k32.CreateFileW(str(p), generic_read, 0, None, open_existing, 0, None)  # share mode 0: alone or not at all
+        if h == invalid:
+            if ctypes.get_last_error() in (sharing_violation, lock_violation):
+                return p
+            continue  # another problem (permissions, a long path): the copy says what it is
+        k32.CloseHandle(h)
+    return None
+
+
 def _discard_partial_copy(dst: Path) -> str:
     """Remove a half-made copy at dst (ours, not user data). Returns "" or a note naming the leftover."""
     if not dst.exists():
@@ -679,6 +713,13 @@ def _acquisition(dest: Path, p: Plan) -> dict:
     except Exception:  # noqa: BLE001
         log.exception("could not read the acquisition times of %s", dest)
         return {}
+
+
+def _provisional(p: Plan, how: str, reason: str = FILING) -> dict:
+    """The smallest ionomos.json a filed folder can have: queued, with its plan, so ledger.adopt_orphans and
+    rebuild_from_status_files find it whatever happens next."""
+    return {"ionomos_version": __version__, "status": "queued", "reason": reason, "queued_at": now_iso(),
+            "moved_by": how, "plan": p.to_json()}
 
 
 def write_status(dest: Path, record: dict) -> None:
@@ -749,6 +790,8 @@ def intake(folder: Path, cfg: Config, ledger: Ledger, resolver: Resolver | None 
     folder = Path(folder)
     try:
         res = _intake(folder, cfg, ledger, resolver)
+        if res != IntakeResult.RETRY:
+            _RETRYING.pop(str(folder), None)
         _tell_a_person(folder, cfg, res)
         return res
     except (PermissionError, FileNotFoundError, BlockingIOError, InterruptedError) as exc:
@@ -757,7 +800,13 @@ def intake(folder: Path, cfg: Config, ledger: Ledger, resolver: Resolver | None 
             _reject_too_long(folder, cfg, why)
             return IntakeResult.REJECTED
         log.warning("transient problem with %s (%s); will retry", folder.name, exc)
-        return IntakeResult.RETRY
+        return _retrying(folder, cfg, exc)
+    except sqlite3.OperationalError as exc:
+        # The job list locked by another program for longer than the ledger waits (a database viewer with an
+        # unsaved edit, a long backup): nothing is wrong with the folder. It used to get a "send diagnostics" note
+        # and then stay rejected after the lock was gone.
+        log.warning("the job list is busy (%s); will retry %s", exc, folder.name)
+        return _retrying(folder, cfg, exc)
     except Exception as exc:
         log.exception("unexpected error while taking in %s", folder.name)
         if not folder.is_dir():
@@ -765,10 +814,47 @@ def intake(folder: Path, cfg: Config, ledger: Ledger, resolver: Resolver | None 
         try:
             _reject(folder, f"ionomos hit an unexpected problem with this folder ({type(exc).__name__}: {exc}). "
                             f"It was left untouched. Please send diagnostics (Ionomos app -> Run & Test).")
-        except OSError:
-            return IntakeResult.RETRY
+        except OSError as exc2:
+            return _retrying(folder, cfg, exc2)
+        _RETRYING.pop(str(folder), None)
         _tell_a_person(folder, cfg, IntakeResult.REJECTED)
         return IntakeResult.REJECTED
+
+
+# A RETRY is for what clears by itself (Explorer letting go of a file). One that never clears — an inbox Ionomos may
+# read but not change, a file some program keeps open — used to be retried every 5 minutes for ever with only a log
+# line. After STUCK_AFTER seconds of RETRYs in a row a person is told (D17: fail visible).
+STUCK_AFTER = 600.0
+_RETRYING: dict[str, float] = {}  # folder -> time.monotonic() of the first RETRY in a row
+
+
+def _retrying(folder: Path, cfg: Config, exc: BaseException) -> IntakeResult:
+    if not folder.is_dir():  # gone (moved by a person, removed): nothing to tell
+        _RETRYING.pop(str(folder), None)
+        return IntakeResult.RETRY
+    first = _RETRYING.setdefault(str(folder), time.monotonic())
+    if time.monotonic() - first < STUCK_AFTER:
+        return IntakeResult.RETRY
+    log.error("%s has been retried for %.0f minutes and still can't be taken in: %s", folder.name,
+              (time.monotonic() - first) / 60, exc)
+    try:
+        from ionomos import attention
+
+        attention.raise_item(
+            getattr(cfg, "log_dir", None), "intake_rejected", f"Can't take in “{folder.name}” yet",
+            f"Ionomos has been trying for over {STUCK_AFTER / 60:.0f} minutes, and the computer keeps refusing: {exc}",
+            key=f"intake:{folder.name}", severity="error", dest=folder,
+            causes=["A file in the folder is still open in another program (a copy still running, Xcalibur, "
+                    "Excel, antivirus)",
+                    "Ionomos is not allowed to change the inbox: the folder is read-only, or on a share it can only "
+                    "read"],
+            fixes=["Close the program that has the file open; Ionomos keeps trying by itself and this message "
+                   "closes when the folder is filed",
+                   "Check that the account Ionomos runs as may create, rename and delete files in the inbox"],
+            data={"folder": str(folder)})
+    except Exception:  # noqa: BLE001 - telling a person must never break intake
+        log.exception("could not record that %s is stuck", folder.name)
+    return IntakeResult.RETRY
 
 
 def _reject_too_long(folder: Path, cfg: Config, why: str) -> None:
@@ -894,7 +980,7 @@ def _intake(folder: Path, cfg: Config, ledger: Ledger, resolver: Resolver | None
     except PermissionError as exc:
         # Windows: Explorer / antivirus still has a handle on a just-copied file. Try again later.
         log.warning("cannot move %s yet (%s); will retry", folder.name, exc.strerror or exc)
-        return IntakeResult.RETRY  # pre-move: a RETRY is still honest
+        return _retrying(folder, cfg, exc)  # pre-move: a RETRY is still honest
     except IntakeError as exc:
         _reject(folder, str(exc))
         return IntakeResult.REJECTED
@@ -903,6 +989,13 @@ def _intake(folder: Path, cfg: Config, ledger: Ledger, resolver: Resolver | None
     # folders no longer in the inbox, and both sweeps look for a status file that
     # does not exist yet. File it best-effort instead.
     raw_base = dest / p.raw_dir if p.raw_dir else dest
+    try:
+        # First a record the sweeps can see: Ionomos stopped (a reboot, the task killed) while the renames ran or
+        # the raw headers were read used to leave a moved folder with no ionomos.json — in no list, never searched,
+        # and nobody told. The full record below replaces it.
+        write_status(dest, _provisional(p, how))
+    except OSError:
+        log.warning("could not write the first status record of %s; carrying on", dest)
     try:
         for old, new in p.subdir_renames.items():
             _rename_retry(dest / old, dest / new)
@@ -933,14 +1026,7 @@ def _intake(folder: Path, cfg: Config, ledger: Ledger, resolver: Resolver | None
     except Exception as exc:  # noqa: BLE001 - the folder is already moved; don't report a retry
         log.exception("trouble finishing intake for %s; filing a minimal record instead", dest)
         try:
-            write_status(dest, {
-                "ionomos_version": __version__,
-                "status": "queued",
-                "reason": f"intake hit {type(exc).__name__} after the move: {exc}",
-                "queued_at": now_iso(),
-                "moved_by": how,
-                "plan": p.to_json(),
-            })
+            write_status(dest, _provisional(p, how, f"intake hit {type(exc).__name__} after the move: {exc}"))
         except OSError:
             log.critical("%s is moved but untracked: no status file could be written, "
                          "so the reconciliation sweeps cannot see it", dest)

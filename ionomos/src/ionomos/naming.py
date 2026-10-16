@@ -57,6 +57,7 @@ def number_ok(value) -> bool:
 
 # What a sanitised name may contain. FragPipe cannot handle spaces in paths.
 _SAFE = re.compile(r"[^A-Za-z0-9._-]+")
+_KEPT = re.compile(r"[A-Za-z0-9]")  # a name part with none of these is lost entirely by sanitize()
 _TOKEN_SPLIT = re.compile(r"[\s_\-.()\[\]{}+&,;]+")
 
 _SEP = r"[_-]"
@@ -617,6 +618,13 @@ def parse_raw_name(filename: str, method: str, codes: dict[str, str] | None = No
                           "to config.yaml (e.g. files: '{sample}_{rep}', or like: DIA)")
     stem = filename[: -len(RAW_SUFFIX)]
     safe_stem = sanitize(stem)
+    lost = [t for t in tokens_of(stem) if any(c.isalnum() for c in t) and not _KEPT.search(t)]
+    if lost:
+        # a word written only in letters FragPipe can't take (実験, α, Проба) would vanish from the name, and the
+        # numbers after it would be read as the sample: 実験_1_1.raw became sample "1" without a word (round 4)
+        raise NamingError(f"{filename!r}: {' '.join(lost)} has no letters FragPipe can use, so it would vanish from "
+                          f"the sample name — rename the file with letters A-Z and digits (e.g. alpha for α), or "
+                          f"give the sample its name in the naming window")
     read_stem, setting = mask_setting(strip_acq_stamp(safe_stem), codes)
     m = rule.regex.match(read_stem)
     if not m:  # built-in rules: only reachable for isoDTB (the others accept a bare stem)

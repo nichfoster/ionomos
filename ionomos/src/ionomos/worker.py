@@ -104,9 +104,12 @@ def _read_status(dest: Path, fallback: dict) -> dict:
     try:
         from ionomos.names import status_path
 
-        return json.loads(status_path(dest).read_text(encoding="utf-8"))
+        rec = json.loads(status_path(dest).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return dict(fallback)
+    # valid JSON of the wrong shape (null, a list: a hand edit) is as unreadable as broken JSON; a status update
+    # must never raise, or recover() stops the watcher from starting
+    return rec if isinstance(rec, dict) else dict(fallback)
 
 
 def _update_status(job: Job, **changes) -> None:
@@ -114,7 +117,7 @@ def _update_status(job: Job, **changes) -> None:
     if not dest.is_dir():
         return
     rec = _read_status(dest, job.parsed)
-    run = dict(rec.get("run") or {})
+    run = dict(rec["run"]) if isinstance(rec.get("run"), dict) else {}
     run.update(changes.pop("run", {}))
     rec.update(changes)
     if run:
@@ -197,6 +200,14 @@ class Worker:
             except fragpipe.JobError as exc:
                 self._fail(job, str(exc), hints=fragpipe.explain(str(exc)))
                 return True
+            except Exception as exc:  # noqa: BLE001 - a bug or a damaged job record: fail this job, not the queue
+                # it used to escape run_once, and the same first queued job raised again every poll: no job behind
+                # it was ever searched
+                log.exception("job %d: could not prepare the search", job.id)
+                self._held.pop(job.id, None)
+                reason = f"Ionomos could not prepare the search: {type(exc).__name__}: {exc}"
+                self._fail(job, reason, hints=fragpipe.explain(reason))
+                return True
             self._held.pop(job.id, None)
             return self._run(job, spec)
         return False
@@ -276,6 +287,10 @@ class Worker:
             self._fail(job, f"could not prepare {spec.engine_name} inputs: {exc}", spec,
                        fragpipe.explain(str(exc)))
             return True
+        except fragpipe.JobError as exc:  # e.g. MaxQuant could not make its parameter template: the reason says why
+            self.current = None
+            self._fail(job, str(exc), spec, fragpipe.explain(str(exc)))
+            return True
         if moved:
             spec.warnings.append(f"previous attempt's output kept as {moved}/")
         log.info("job %d: %s %s on %s (%d raw files, attempt %d)", job.id, spec.engine_name, job.method, dest,
@@ -290,6 +305,7 @@ class Worker:
             "fasta": str(spec.fasta) if spec.fasta else None, "manifest": str(spec.manifest),
             "workdir": str(spec.workdir), "console_log": str(spec.console_log),
             "command": spec.command(), "warnings": list(spec.warnings), "notes": list(getattr(spec, "notes", ())),
+            **({"tmt_map": spec.tmt_map} if getattr(spec, "tmt_map", None) else {}),  # the map searched (#147)
         })
         try:
             (dest / FAILED_NOTE).unlink(missing_ok=True)
@@ -430,7 +446,9 @@ def _input_hold(spec: fragpipe.RunSpec, exc: OSError) -> str:
     The workflow or FASTA vanished since prepare() looked (setup: held like a missing one), or the previous
     attempt's output can't be moved aside because a file in it is open (Excel, Explorer's preview): Ionomos never
     writes a new search into it, so it waits (D69)."""
-    if not spec.workflow_src.is_file():
+    # DIA-NN, and MaxQuant / Sage without a lab file, have no source workflow: their workflow_src is only the name
+    # of the file Ionomos writes (diann.cfg), never on disk, and must not turn every write error into this hold
+    if len(spec.workflow_src.parts) > 1 and not spec.workflow_src.is_file():
         return f"workflow file for {spec.method} missing: {spec.workflow_src} (it disappeared just before the search)"
     if spec.fasta is not None and not spec.fasta.is_file():
         return f"FASTA for {spec.method} missing: {spec.fasta} (it disappeared just before the search)"

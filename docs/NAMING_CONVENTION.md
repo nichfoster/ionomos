@@ -31,7 +31,10 @@ e.g. `20260902_EJQ_isoDTB_EJQ-2-027_1uM-3h`.
 **Spaces and punctuation are tolerated** — the folder is renamed on the way in
 (`20260902-isoDTB_EJQ-2-027 (1uM 3h)` → `20260902-isoDTB_EJQ-2-027-1uM-3h`)
 because FragPipe cannot handle spaces in paths. The original name is kept in
-`ionomos.json`.
+`ionomos.json`. On Windows a folder whose name ends in a dot or a space (made
+on a Mac or in WSL; Windows programs can't open it by that name) is first
+renamed in the inbox without them; if that name is taken, the log says so once
+and how to rename it.
 
 Rejected, with a `<name>.REJECTED.txt` note left next to the folder:
 
@@ -60,6 +63,14 @@ depends on the method: an **isoDTB** file must end in a valid
 outright; **DIA and TMT** also accept a bare stem, so a date-like tail is
 absorbed into the condition/sample name (`DMSO_20260902.raw` → condition
 `DMSO_20260902`, bioreplicate 1 — no phantom number is minted).
+
+**Letters FragPipe can't take.** Names are cleaned to `A-Z a-z 0-9 . _ -`; a
+character outside that becomes `-` inside a word (`Müller_1_1.raw` → sample
+`M-ller`, `10µM` → `10-M`). A whole word written only in such letters (`実験`,
+`α`, `Проба`) would vanish and the numbers after it would be read as the sample
+(`実験_1_1.raw` was filed as sample `1`), so such a file is not filed: the
+naming window opens for it (or the note says to rename it, e.g. `alpha` for
+`α`). Symbols on their own (`🧪`) are dropped as before.
 
 The same bound holds wherever a number comes from (D85): `files:` in
 `experiment.yaml`, the naming window, the naming history and a queued job's
@@ -326,7 +337,8 @@ CS_22rv1_FLAG-AR_MA25-10uM_MA25_2.raw  ┘
 
 Files sharing at least the first two name parts go together; trailing
 replicate/fraction numbers and Xcalibur timestamps are left out of the folder
-name; method keywords stay in it. From there it's an ordinary folder drop, so
+name; method keywords stay in it (a name Windows keeps for a device, such as
+`NUL` or `CON`, gets `_files` added). From there it's an ordinary folder drop, so
 the same rules apply: initials and a method keyword somewhere in the file
 names (or the window asks). A folder is still the better habit — it keeps
 unrelated runs apart for sure. Non-raw loose files are left alone.
@@ -427,7 +439,8 @@ analysis:                   # results/report.html for this experiment (lab defau
                             #   (rep 1 of every condition prepared together; pairs, patients), or
                             #   {DMSO_1: A, Drug_1: A, DMSO_2: B, Drug_2: B} (every sample listed), or
   # block_from: '_(P\d+)_'  #   a regex on the sample names: group "block" if named, else group 1
-  covariates:               # optional, one value per sample: numbers -> a slope, text -> a factor
+  covariates:               # optional, one value per sample: numbers -> a slope, text -> a factor (NA / not
+                            #   available is no value: the design is then not used, and the issue says which)
     age: {DMSO_1: 54, DMSO_2: 61, DMSO_3: 47, Drug_1: 49, Drug_2: 66, Drug_3: 58}
   variance_prior: deqms     # limma (default) | deqms: each protein's prior variance from its peptide count
   sdrf:                     # sample metadata for results/sdrf.tsv (lab-wide values: config.yaml analysis.sdrf)
@@ -461,6 +474,15 @@ analysis:                   # results/report.html for this experiment (lab defau
 notes: "24 h treatment, 1 µM"   # copied into ionomos.json for provenance
 ```
 
+A key Ionomos doesn't know rejects the folder with a note that names it, the
+key it was probably meant to be (`methd (did you mean method?)`) and every key
+the file can have. `method`, `user`, `workflow` and `fasta` take one name (a
+list is refused, not turned into text); `allow_uneven_fractions` takes
+`true`/`false` (also `yes`/`no`, `on`/`off`, `1`/`0`, quoted or not; anything
+else is refused, so a quoted `'false'` no longer switches the check off); a
+date YAML reads as one but that doesn't exist (`2026-02-30`) is refused as a
+date, not as an unexpected problem.
+
 The sample names in `block:` and `covariates:` are the analysis' samples:
 `condition_replicate` for DIA / LFQ (`DMSO_1`), the TMT sample names
 (`DMSO_1_126`), a table's column names. Names that aren't samples are ignored
@@ -481,15 +503,16 @@ block).
 
 | Key | What | |
 |---|---|---|
-| `tag` | the kit: `TMT-6`, `TMT-10`, `TMT-11`, `TMT-16` (TMTpro), `TMT-18` (also `TMT10`, `TMTpro`, `TMTpro-18`) | must be the workflow's label type (`tmtintegrator.channel_num`), or the job fails before the search saying which to change; optional (the workflow's is used) |
+| `tag` | the kit, as FragPipe names it: `TMT-6`, `TMT-10`, `TMT-11`, `TMT-16` (TMTpro), `TMT-18`, `TMT-35`, `TMT-2`, `TMT-0`, `iTRAQ-4`, `iTRAQ-8`, `iodoTMT-6` (also `TMT10`, `TMTpro`, `TMTpro-18`, `iTRAQ4plex`); FragPipe's sCLIP-6, IBT-16, DiLeu-12, DiLeu-1, DeAla-13 and Trp-2 are accepted and passed on unchecked | must be the workflow's label type (`tmtintegrator.channel_num`), or the job fails before the search saying which to change; optional (the workflow's is used); a name FragPipe does not know is refused at intake |
 | `channels` | `{channel: sample name}` for one plex, or the same names for every plex | **every** channel of the kit, `NA` for an unused one; a name has no spaces and is used once; keep the channel in the name (`DMSO_1_126`); listed in any order (Ionomos writes them in the kit's) |
 | `plexes` | `{plex: {channels: {...}, reference: 126}}`, the plex being its folder (`<plex>\*.raw`) or its file name before `_TMT_F<n>` | every plex of the drop needs an entry; names unique across plexes (`DMSO_1_126`, `DMSO_2_126`) |
 | `reference_channel` | the bridge / pool channel (or sample name) in every plex; a list for several | joins the plexes (IRS, D48; the same as `analysis.tmt_reference`); a plex's own `reference:` wins |
 
 Names follow `condition_plex_channel`: the condition is one word (the text
 before the first `_`), the plex a number, the channel the reporter. The lab's
-annotation script keeps only `condition_1_channel`; other names still work in
-the report (a note says so). `ionomos tmt suggest` writes the block from a few
+annotation script keeps only `condition_1_channel`; with several plexes
+Ionomos' port also keeps `condition_2_channel` … (WORKFLOWS.md, "Multi-plex
+extension"); other names still work in the report (a note says so). `ionomos tmt suggest` writes the block from a few
 answers; `ionomos tmt plan <folder>` shows what will be used. The **TMT
 channels** grid in the review window and on the Analysis tab (`tmt_editor.py`)
 writes the same block (the reference channel as `reference_channel`, or a
@@ -530,6 +553,15 @@ tmt:
   channels: {126: DMSO_1_126, 127N: DMSO_1_127N, 127C: DMSO_1_127C, 128N: DMSO_1_128N, 128C: Drug_1_128C,
              129N: Drug_1_129N, 129C: Drug_1_129C, 130N: Drug_1_130N, 130C: NA, 131N: NA, 131C: NA,
              132N: NA, 132C: NA, 133N: NA, 133C: NA, 134N: NA}
+```
+
+iTRAQ 4-plex with FragPipe's stock `iTRAQ4` workflow:
+
+```yaml
+workflow: iTRAQ4.workflow
+tmt:
+  tag: iTRAQ-4
+  channels: {114: DMSO_1_114, 115: DMSO_1_115, 116: Drug_1_116, 117: Drug_1_117}
 ```
 
 With the workflow's *Define reference: Reference sample* (`add_Ref=-1`),

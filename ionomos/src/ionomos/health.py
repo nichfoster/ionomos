@@ -26,9 +26,11 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
+from ionomos import names
+
 log = logging.getLogger("ionomos.health")
 
-LOCK_NAME = "ionomos.lock"  # names.LOCK_FILE; a LabWatch-era watcher holds labwatch.lock
+LOCK_NAME = names.LOCK_FILE  # a LabWatch-era watcher holds one of names.LEGACY_LOCK_FILES (checked in acquire)
 HEARTBEAT_NAME = "heartbeat.json"
 CRASH_PREFIX = "crash-"
 STALE_AFTER = 90  # seconds without a heartbeat -> "not responding"

@@ -56,8 +56,8 @@ def _drive(p: Path) -> str:
 
 
 def run(config_path: Path, data: dict | None = None, probe_watcher: bool = True) -> list[Item]:
-    from ionomos import configio, fragpipe, health, service
-    from ionomos.config import ConfigError, layout_problems, load
+    from ionomos import configio, fragpipe, health
+    from ionomos.config import ConfigError, load
 
     config_path = Path(config_path)
     broken = None  # the saved file does not parse (#136): the checks run on the defaults and say so first
@@ -97,20 +97,7 @@ def run(config_path: Path, data: dict | None = None, probe_watcher: bool = True)
         add(Item("folders", "Folders exist and are writable", "ok", str(p.get("inbox", ""))))
 
     # 2. layout is safe
-    probs = layout_problems(p.get("inbox", Path(".")), p.get("users_root", Path(".")),
-                            p.get("log_dir", Path(".")), p.get("database", Path("x")))
-    warn = []
-    spaces = [f"{k} = {v}" for k, v in d["paths"].items() if " " in str(v)]
-    if spaces:
-        (probs if os.name == "nt" else warn).append("a path contains a space, which FragPipe can't handle: "
-                                                    + "; ".join(spaces)
-                                                    + ". Pick a location without spaces (Folders tab).")
-    if "inbox" in p and "users_root" in p and p["inbox"].exists() and p["users_root"].exists() \
-            and _drive(p["inbox"]) != _drive(p["users_root"]):
-        warn.append("inbox and users folder are on different drives: every drop is copied instead of moved "
-                    "(slow for big experiments, needs double the space while copying)")
-    if any(not str(v).isascii() for v in d["paths"].values()):
-        warn.append("non-English characters in a path; some FragPipe tools may not cope")
+    probs, warn = layout_findings(d["paths"], d["users"].get("default") or "")
     if probs:
         add(Item("layout", "Folder layout is safe", "fail", " ".join(probs), "Fix the paths on the Folders tab.",
                  "open_tab:folders"))
@@ -188,11 +175,7 @@ def run(config_path: Path, data: dict | None = None, probe_watcher: bool = True)
                      "open_tab:methods" if status != "ok" else None))
         add(library_item(cfg))
         # 7. disk
-        free = health.disk_free_gb(cfg.users_root)
-        if free is not None:
-            low = free < max(cfg.min_free_gb, 1)
-            add(Item("disk", "Enough free disk space", "warn" if low else "ok", f"{free:.0f} GB free on the data drive",
-                     "Free space or lower 'Min free disk' in Advanced." if low else ""))
+        add(Item("disk", "Enough free disk space", *disk_finding(cfg)))
         # 8. analysis
         add(Item("analysis", "Analysis settings", "ok",
                  "on: statistics, volcano plots, report after each search" if cfg.analysis.get("enabled", True)
@@ -210,13 +193,63 @@ def run(config_path: Path, data: dict | None = None, probe_watcher: bool = True)
                 add(Item("watcher", "Watcher running", "todo", "not running", "Start watcher.", "start_watcher"))
         # 10. startup task (Windows)
         if os.name == "nt" or sys.platform == "win32":
-            st = service.task_status()
-            detail = {"installed": "installed", "legacy": "the old LabWatch task is still registered",
-                      "missing": "not installed"}.get(st, st)
-            add(Item("task", "Starts automatically at logon", "ok" if st == "installed" else "todo", detail,
-                     "" if st == "installed" else "Install the startup task (replaces the LabWatch one).",
-                     None if st == "installed" else "install_task"))
+            st, detail, fix = task_finding()
+            add(Item("task", "Starts automatically at logon", st, detail, fix, "install_task" if st == "todo" else None))
     return items
+
+
+def layout_findings(paths: dict, default_user: str = "") -> tuple[list[str], list[str]]:
+    """(problems, warnings) of the folder layout: the same for the app's checklist and `ionomos check`, so the two
+    never disagree. Problems stop the watcher (it refuses to start); warnings only slow or risk FragPipe."""
+    from ionomos.config import layout_problems
+
+    p = {k: Path(v) for k, v in paths.items() if v}
+    probs = layout_problems(p.get("inbox", Path(".")), p.get("users_root", Path(".")),
+                            p.get("log_dir", Path(".")), p.get("database", Path("x")))
+    warn = []
+    spaces = [f"{k} = {v}" for k, v in paths.items() if " " in str(v)]
+    if spaces:
+        (probs if os.name == "nt" else warn).append("a path contains a space, which FragPipe can't handle: "
+                                                    + "; ".join(spaces)
+                                                    + ". Pick a location without spaces (Folders tab).")
+    if "inbox" in p and "users_root" in p and p["inbox"].exists() and p["users_root"].exists() \
+            and _drive(p["inbox"]) != _drive(p["users_root"]):
+        warn.append("inbox and users folder are on different drives: every drop is copied instead of moved "
+                    "(slow for big experiments, needs double the space while copying)")
+    if any(not str(v).isascii() for v in paths.values()):
+        warn.append("non-English characters in a path; some FragPipe tools may not cope")
+    if default_user and "users_root" in p and p["users_root"].is_dir() and not (p["users_root"] / default_user).is_dir():
+        probs.append(f"users.default: folder does not exist: {p['users_root'] / default_user} (create it on the Users tab, "
+                     f"or clear 'default user'); the watcher refuses to start without it")
+    return probs, warn
+
+
+def disk_finding(cfg) -> tuple[str, str, str]:
+    """(status ok | warn, detail, fix) of the free space on the data drive, for the checklist and `ionomos check`."""
+    from ionomos import health
+
+    free = health.disk_free_gb(cfg.users_root)
+    if free is None:
+        return "warn", f"free space on the drive of {cfg.users_root} could not be read", \
+            "Check that the drive is there (a network drive may be disconnected)."
+    if free < max(cfg.min_free_gb, 1):
+        return "warn", (f"{free:.0f} GB free on the data drive, below fragpipe.min_free_gb {cfg.min_free_gb:g}: "
+                        "searches will wait"), "Free space or lower 'Min free disk' in Advanced."
+    return "ok", f"{free:.0f} GB free on the data drive", ""
+
+
+def task_finding() -> tuple[str, str, str]:
+    """(status, detail, fix) of the logon task (Windows), for the checklist and `ionomos check`."""
+    from ionomos import service
+
+    st = service.task_status()
+    if st == "installed":
+        return "ok", "installed", ""
+    if st == "unavailable":
+        return "warn", "Task Scheduler can't be asked on this PC (schtasks is missing or its service is off)", \
+            "Start the watcher from the app after each logon, or ask IT to enable the Task Scheduler service."
+    return "todo", {"legacy": "the old LabWatch task is still registered", "missing": "not installed"}.get(st, st), \
+        "Install the startup task (replaces the LabWatch one)."
 
 
 def library_item(cfg) -> Item:

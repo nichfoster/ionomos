@@ -405,6 +405,9 @@ def infer(conditions: list[str], s, sizes: dict[str, int] | None = None, sources
             plan.roles[c] = Role(c, "compound", "default (not a control)", n=sizes.get(c, 0))
     if control is None:
         control = next((c for c, r in plan.roles.items() if r.role == "control"), None)
+    elif control in given and given[control][0] != "control":
+        plan.notes.append(f"analysis.control is {control}, which analysis.roles makes a {given[control][0]}: it is "
+                          f"used as the control all the same. Set one of the two so that they agree")
     plan.control = control
     for c, r in plan.roles.items():  # a background word that wasn't taken: say what it would take
         word = _keyword(tokens(c, {str(w).lower() for w in bg_words}), bg_words)
@@ -521,7 +524,9 @@ def plan(m, s) -> Plan:
     done: set[str] = set()
 
     def add(t: str, c: str, kind: str) -> None:
-        if (t, c) not in out.kinds:
+        # t == c: analysis.control names a condition analysis.roles makes a compound, which would be compared
+        # with itself (every p-value 1, D32)
+        if t != c and (t, c) not in out.kinds:
             out.comparisons.append((t, c))
             out.kinds[(t, c)] = kind
 

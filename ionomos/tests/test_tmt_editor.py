@@ -147,7 +147,36 @@ def test_label_type_change_keeps_shared_channels_and_warns_against_the_workflow(
     cm.set_label("nonsense")
     assert cm.label == "TMT-6"
     cm.set_label("TMT10")
-    assert cm.label_warning() == "" and cm.maps()["plexA"]["127C"] == "NA"  # gone with TMT-6, not brought back
+    # #156: put aside by TMT-6 (said in the summary) and brought back by TMT-10
+    assert cm.label_warning() == "" and cm.maps()["plexA"]["127C"] == "DMSO_1_127C"
+
+
+def test_a_label_switch_says_which_names_it_put_aside():
+    """#156: TMT-16 -> TMT-10 dropped the names on 131C-134N silently and for good."""
+    cm = ChannelMap.empty(["p"], workflow_label="TMT-16")
+    cm.suggest(["DMSO", "Drug"], 7)
+    assert cm.maps()["p"]["133N"] == "Drug_1_133N"
+    assert cm.set_label("TMT-10") == ["131C", "132N", "132C", "133N"]
+    assert "131C" not in cm.maps()["p"]
+    assert cm.summary()[1] == ("the names on 131C, 132N, 132C, 133N were put aside: TMT-10 has no such channels "
+                               "(pick TMT-16 again to get them back)")
+    assert cm.set_label("TMT-16") == [] and cm.maps()["p"]["133N"] == "Drug_1_133N"
+    assert not any("put aside" in line for line in cm.summary())
+    cm.set_label("TMT-10")
+    cm.clear()
+    cm.set_label("TMT-16")
+    assert cm.is_empty()   # Clear empties what was put aside too
+
+
+def test_an_itraq_map_stays_itraq():
+    """#154: the editor turned an iTRAQ-4 map into TMT-10 (its label type was unknown, so the default won)."""
+    block = {"tag": "iTRAQ-4", "channels": {114: "DMSO_1_114", 115: "DMSO_1_115", 116: "Drug_1_116", 117: "NA"}}
+    cm = ChannelMap.from_block(block, ["KL7001"], workflow_label="iTRAQ-4")
+    assert cm.label == "iTRAQ-4" and [r.channel for r in cm.plexes["KL7001"]] == ["114", "115", "116", "117"]
+    assert cm.block()["tag"] == "iTRAQ-4" and not cm.changed() and cm.errors() == []
+    assert cm.summary()[0] == "iTRAQ-4 (iTRAQ, 4 channels), as the workflow"
+    other = ChannelMap.from_block({"tag": "DiLeu-12", "channels": {"115a": "A_1_115a"}}, ["p"])
+    assert other.label == "DiLeu-12" and other.block()["tag"] == "DiLeu-12"   # FragPipe's, passed on
 
 
 def test_validation_is_tmtkits_word_for_word():

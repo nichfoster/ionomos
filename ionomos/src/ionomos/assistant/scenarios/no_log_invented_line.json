@@ -1,0 +1,40 @@
+{
+  "id": "no_log_invented_line",
+  "about": "The same, with a model that quotes a log line the job does not have: refused, corrected once.",
+  "harness_only": "acts out a model that invents a log line; the question is scored in no_log_waiting_job",
+  "state": "fragpipe",
+  "question": "Show me the end of the log.",
+  "experiment": "6",
+  "model": [
+    {
+      "tool_calls": [
+        {
+          "name": "log_tail",
+          "arguments": {
+            "job_id": 6
+          }
+        }
+      ]
+    },
+    {
+      "content": "The log ends with 'workflow not found' [log:6#12]."
+    },
+    {
+      "content": "Job 6 has no engine log; its search never started [job:6]."
+    }
+  ],
+  "rubric": {
+    "must_cite": [
+      "job:6"
+    ],
+    "must_not": [
+      "(?i)workflow not found"
+    ],
+    "refusal": false
+  },
+  "harness": {
+    "outcome": "grounded",
+    "rounds": 3,
+    "requests": 3
+  }
+}

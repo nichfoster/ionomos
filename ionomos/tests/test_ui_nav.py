@@ -136,6 +136,14 @@ def test_job_matches(query, hit):
     assert uinav.job_matches(_job(12), query) is hit
 
 
+def test_none_is_not_a_word_of_every_job():
+    """#156: an empty reason or folder is not the text 'None', so the Find box's 'none' matches no such job."""
+    job = _job(3, "queued", None)
+    job.dest_dir = None
+    assert not uinav.job_matches(job, "none")
+    assert uinav.job_matches(_job(4, "failed", "none of the raws could be read"), "none")
+
+
 def test_job_state_matches_the_jobs_tab():
     assert uinav.job_state(_job(1, "queued", "waiting: no FASTA")) == "waiting"
     assert uinav.job_state(_job(1, "done", "analysis needs a decision: one condition")) == "needs a look"
@@ -178,6 +186,9 @@ def test_snapshot_never_raises(tmp_path):
     bad.write_bytes(b"not a database")
     snap = uinav.snapshot(tmp_path / "no-logs", bad)
     assert snap.jobs == [] and snap.attention == []
+    # #156: a job list that can't be read is said, never an empty healthy-looking tab; a missing one is a new install
+    assert "the job list (bad.db) can't be read" in snap.problem and "ionomos repair-ledger" in snap.problem
+    assert uinav.snapshot(None, tmp_path / "none-yet.db").problem == ""
     from ionomos.worker import pause
 
     pause(tmp_path / "logs", "test")

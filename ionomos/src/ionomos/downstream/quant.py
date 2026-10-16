@@ -123,7 +123,7 @@ def from_isodtb_sites(path: Path) -> QuantMatrix:
         feats.append(Feature(id=f"{r.get('Protein', '')}|{residue}{pos}", label=f"{name} {residue}{pos}",
                              description=r.get("Protein Description", "") if r.get("Protein Description") != "NA" else ""))
         vals.append([num(r.get(c)) for c in cols])
-    rep = {s: int(s.rsplit("_", 1)[1]) for s in samples if s.rsplit("_", 1)[-1].isdigit()}
+    rep = {s: int(s.rsplit("_", 1)[1]) for s in samples if s.rsplit("_", 1)[-1].isdecimal()}
     return QuantMatrix("ratio", "site", feats, samples, vals, {s: prefix for s in samples}, str(path),
                        exp="isoDTB", replicate=rep)
 
@@ -153,6 +153,12 @@ def from_pg_matrix(path: Path, sample_map: dict[str, tuple[str, int]] | None = N
         return ok == len(vals) if strict else ok >= 0.9 * len(vals)  # an all-blank run is still a run
 
     runs = [h for h in header if h not in _PG_META and (match_run(run_stem(h)) is not None or numeric(h, strict=False))]
+    if len(set(runs)) < len(runs):  # read_tsv keeps one column per name: a repeat would read that column twice
+        twice = list(dict.fromkeys(h for h in runs if runs.count(h) > 1))
+        runs = list(dict.fromkeys(runs))
+        notes.append("the table has more than one column named " + ", ".join(run_stem(h) for h in twice[:6]) +
+                     ("…" if len(twice) > 6 else "") + "; only one of each could be read, so the repeats were left "
+                     "out. Give each run its own name")
     samples, cond, reps, colmap = [], {}, {}, {}
     run_of: dict[str, str] = {}  # sample -> the manifest run (file stem) it was matched to
     unmatched: list[str] = []
@@ -195,7 +201,7 @@ def from_pg_matrix(path: Path, sample_map: dict[str, tuple[str, int]] | None = N
         notes.append("Expected runs missing from the DIA protein matrix: " + ", ".join(missing) +
                      ". Check the original pg_matrix.tsv and DIA-NN logs before interpreting comparisons.")
     for s in samples:
-        if s not in reps and s.rsplit("_", 1)[-1].isdigit():
+        if s not in reps and s.rsplit("_", 1)[-1].isdecimal():
             reps[s] = int(s.rsplit("_", 1)[1])
     return QuantMatrix("intensity", "protein", feats, samples, vals, cond, str(path), notes=notes, exp="DIA",
                        replicate=reps, columns=colmap, meta={"missing_runs": missing, "unmatched_runs": unmatched,
@@ -227,7 +233,7 @@ def from_combined_protein(path: Path) -> QuantMatrix:
                      description=r.get("Description") or r.get("Protein Description") or "",
                      peptides=_count(r.get(peps)) if peps else None) for r in rows]
     vals = [[_log2(num(r.get(c))) for c in cols] for r in rows]
-    reps = {x: int(x.rsplit("_", 1)[1]) for x in samples if x.rsplit("_", 1)[-1].isdigit()}
+    reps = {x: int(x.rsplit("_", 1)[1]) for x in samples if x.rsplit("_", 1)[-1].isdecimal()}
     return QuantMatrix("intensity", "protein", feats, samples, vals, cond, str(path),
                        notes=[f"quantity: {suffix.strip()}"], exp="LFQ", replicate=reps,
                        columns=dict(zip(samples, cols, strict=True)), meta={"evidence": "peptides"} if peps else {})
@@ -277,14 +283,16 @@ def from_tmt_abundance(path: Path, annotation: list[dict] | None = None) -> Quan
     cols = [h for h in header[start:] if h not in _TMT_META]
     cols = [c for c in cols if sum(num(r.get(c)) is not None for r in rows[:200]) > 0] or cols
     cond = {c: (by_sample[c]["condition"] if c in by_sample else condition_of(c)) for c in cols}
-    feats = [Feature(id=r.get("Index") or r.get("ProteinID", ""), label=r.get("Index") or r.get("Gene") or "",
+    # the gene tables: Index is the gene, ProteinID the accession; the protein tables: Index is the accession and
+    # Gene the gene, which is the label (the volcano's names, enrichment by gene symbol)
+    feats = [Feature(id=r.get("Index") or r.get("ProteinID", ""), label=r.get("Gene") or r.get("Index") or "",
                      description=r.get("ProteinID", ""), peptides=_count(r.get("NumberPSM"))) for r in rows]
     vals = [[num(r.get(c)) for c in cols] for r in rows]
     reps = {}
     for c in cols:
         a = by_sample.get(c) or {}
         r = a.get("replicate") or (c.split("_")[1] if len(c.split("_")) > 2 else "")
-        if str(r).isdigit():
+        if str(r).isdecimal():
             reps[c] = int(r)
     # ratio_to_reference: TMT-Integrator already put every plex on its reference (or virtual reference) channel,
     # so the plex normalisation (plex.py, IRS) must not be applied a second time

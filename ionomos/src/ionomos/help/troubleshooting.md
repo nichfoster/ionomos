@@ -100,6 +100,14 @@ or add an `experiment.yaml`; Ionomos tries again by itself. Deleting the note
 also makes it try again. The reasons are explained under
 [Why a folder is not taken in](#trouble.intake).
 
+**"Can't take in … yet"** (no note) means Ionomos has been trying for over
+ten minutes and the computer keeps refusing to move the folder. Either a file
+in it is still open in another program (a copy still running, Xcalibur, Excel,
+an antivirus scan): close it. Or Ionomos may not change the inbox (a read-only
+folder, a share it can only read): give the account it runs as the right to
+create, rename and delete files there. Ionomos keeps trying by itself, and the
+message closes when the folder is filed.
+
 ## The instrument QC standard looks off {#attention.qc_trend}
 
 Your lab's recurring QC standard (a HeLa or K562 run, for example) came
@@ -247,7 +255,9 @@ starts by itself once it is found.
 ## MaxQuant parameter file missing {#search.hold-mqpar}
 
 The method names a lab MaxQuant parameter file (`mqpar:`) that isn't in the
-workflow folder. In the MaxQuant GUI, set up the search you normally use,
+workflow folder, or one that can't be used: not XML (cut off, or a different
+file under that name) or not MaxQuant's (its first element is not
+`<MaxQuantParams>`). In the MaxQuant GUI, set up the search you normally use,
 then **File → Save parameters**, and put the file in the workflow folder
 under that name. Or remove `mqpar:` to use MaxQuant's defaults with
 label-free quantification.
@@ -379,7 +389,8 @@ pop-up. After fixing the cause, press **Retry**; the earlier output is kept.
 - **experiment.yaml tmt: ...** (TMT): the channel list doesn't fit what
   FragPipe accepts. List every channel of the label type once, with one
   sample name without spaces per channel, `NA` for an unused channel, and
-  no name twice.
+  no name twice. Fix `tmt:` in the experiment folder's `experiment.yaml` (or
+  on the Analysis tab), then Retry: the Retry reads the file again.
 - **A path has a space in it** (DIA-NN): DIA-NN can't take spaces in paths.
   Rename the folder or file.
 - **The experiment folder is gone**: it was moved or renamed after filing.
@@ -1046,7 +1057,9 @@ blocks). The message says why. Common causes:
   condition, e.g. a batch processed one condition at a time. Then the batch
   and the treatment can't be told apart, and no model can fix that.
 - **A sample has no block or covariate value:** a typo in a sample name, or
-  samples renamed or left out since the design was written.
+  samples renamed or left out since the design was written. `NA`, `NaN`,
+  `not available` and an empty cell all count as no value: a sample without
+  one can't be fitted, and an unknown is never a block or level of its own.
 - **Too many blocks or covariates for the number of samples.**
 
 Fix the `analysis:` settings in `experiment.yaml` and re-run. In a paired
@@ -1160,8 +1173,11 @@ report; they update live. See [Why are there no hits?](#faq.no-hits)
 ## The volcano plot wasn't written {#issue.NO_VOLCANO}
 
 The statistics exist, but the plot file is missing: the results folder is
-read-only or the disk is full. Check free space and that `results\` can be
-written, then **Re-run analysis**.
+read-only, the disk is full, or the path is longer than Windows opens (260
+characters, a deeply nested experiment folder). Check free space and that
+`results\` can be written, move a deeply nested folder up, then **Re-run
+analysis**. (Long condition names, such as runs named after their files, are
+shortened in file names since #157, so they alone no longer cause it.)
 
 ## Enrichment was incomplete {#issue.ENRICHMENT}
 
@@ -1204,7 +1220,11 @@ and more replicates are the honest choices.
 
 `ionomos library scan` looks through the workflows folder, the FASTA folder,
 every FragPipe installation, the users folder and any folder added under
-`library: roots:` in config.yaml (for example `D:/`). It only reads. Each
+`library: roots:` in config.yaml (for example `D:/`), plus any `--root DIR`
+you give it. It only reads. A folder in `roots:` that is not there (a drive not
+plugged in) is named in a note, so "nothing found on E:" is never silence. A
+scan that stopped early, or looked in fewer folders than the last one, keeps
+what the last one found elsewhere; `--replace` keeps only the new scan. Each
 workflow and FASTA it finds gets a sentence saying what it is, and marks for
 what is wrong with it: ✗ means a search would fail or give wrong results, !
 means check it, a dot is for your information. `ionomos library recommend`
@@ -1281,6 +1301,17 @@ its FASTA uses another. FragPipe would find no decoys and stop. Set the decoy
 tag on FragPipe's Database tab to the FASTA's prefix, or use a FASTA made by
 FragPipe, then save the workflow again.
 
+## The workflow is of another kind than the method {#library.wf_kind_mismatch}
+
+You asked to adopt, for example, a DIA workflow (DIA-NN, no TMT-Integrator)
+for the TMT method. Every search of that method would then be a DIA search.
+`ionomos library adopt` refuses it and copies nothing; the app's **Use for
+<method>** asks first. Pick a workflow of the method's kind (`ionomos library
+recommend` lists them, best first). If it really is meant (a method you are
+changing on purpose), `--force` adopts it anyway; the app's **Yes** does the
+same. A FASTA or workflow with a ✗ mark (no decoys, no label type, a decoy tag
+that doesn't match) is refused the same way.
+
 ## No finished search used these settings {#library.wf_no_runs}
 
 Either the search in that folder left no result table (it failed, was
@@ -1338,6 +1369,10 @@ contaminants on FragPipe's Database tab.
 Less than 90 % of the proteins come from one organism. That is right for a
 mixed-species benchmark (human, yeast and E. coli together) and wrong for an
 ordinary experiment: use a FASTA of your organism alone.
+
+When most headers name no organism at all (GENCODE or Ensembl FASTAs, like
+the human one that comes with FragPipe), the library says *organism unknown*
+instead of naming the organism of the few that do (often the contaminants).
 
 ## Most of the FASTA is unreviewed UniProt {#library.fasta_unreviewed}
 

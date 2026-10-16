@@ -17,7 +17,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          # build_exe.ps1 takes the newest of py -3.14 / 3.13 / 3.12 / 3.11 the runner has: 3.14 (PyInstaller's
+          # log of v0.18.1 says "Python: 3.14.7"; it was set to 3.12 here, which the script never used)
+          python-version: "3.14"
       - name: Build
         shell: pwsh
         run: powershell -ExecutionPolicy Bypass -File deploy\build_exe.ps1

@@ -118,8 +118,14 @@ filters the table. It understands:
 - **`desc:`** words in the description only: `desc:ubiquitin ligase`,
 - **`term:`** a gene set from the enrichment: `term:apoptosis`.
 
-Suggestions appear as you type; use the arrow keys and Enter. After a search:
-**Copy names**, **Save as group**, **Pin all**, **Clear**.
+Suggestions appear as you type; use the arrow keys and Enter. A search that
+finds nothing says so under the box ("0 matches · not found"), and the table
+is then empty rather than showing every hit. After a search: **Copy names**,
+**Save as group**, **Pin all**, **Clear**.
+
+The report works from the keyboard too: Tab reaches every control, the arrow
+keys move between the QC tabs, Enter or Space sorts a table by a column, and
+Escape closes a help panel or the Export dialog.
 
 ## Zoom, box select and pins {#report.select}
 

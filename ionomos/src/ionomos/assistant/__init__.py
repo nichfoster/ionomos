@@ -70,12 +70,21 @@ Rules:
 REPAIR_PROMPT = ("Ionomos could not show that answer: {why}. Write it again. Every paragraph must end with sources "
                  "that a tool returned in this conversation; leave out anything you cannot cite.")
 _IMAGE = re.compile(r"!\[([^\]]*)\]\([^)]*\)")
+_ITEM_ID = re.compile(r"[A-Za-z0-9._\-]{1,200}")
+MAX_CALL_ARGS = 4000      # a tool call's arguments as JSON text; the longest valid call is well under 1,000
+MAX_CALL_ID = 64
 # The assistant has no tool that changes anything, so an answer that says it did is wrong whatever it cites.
 # A coarse net (first person + a verb of change), not a proof: the scorecard on real models is the real check.
 _ACTION_CLAIM = re.compile(
     r"(?i)\b(?:I|I've|I have|we|we've|we have)\s+(?:(?:have|had|just|already|now|successfully)\s+)*"
     r"(?:retried|re-?queued|restarted|re-?started|deleted|removed|moved|renamed|edited|changed|updated|fixed|"
     r"re-?ran|started|cancell?ed|set|excluded)\b")
+# ... and the same claim without a person, only with "now" / "just" ("job 2 has now been retried"): a model that
+# obeys an injected line says it that way. "Job 1 was retried twice" (attempts, from get_job) stays allowed.
+_DONE_CLAIM = re.compile(
+    r"(?i)\b(?:has|have|is|are|was|were)\s+(?:now|just)\s+(?:been\s+)?(?:retried|re-?queued|restarted|re-?started|"
+    r"deleted|removed|moved|renamed|edited|changed|updated|fixed|re-?ran|re-?run|cancell?ed|excluded|left out|"
+    r"applied|saved|confirmed)\b")
 
 
 class AssistantError(ValueError):
@@ -195,11 +204,14 @@ def _open_ledger(cfg):
 
 def find_job(ledger, experiment) -> tuple[int | None, str]:
     """--experiment: a job id, or an experiment's name (as dropped, or its folder). Returns (job id, note)."""
-    if experiment in (None, "") or ledger is None:
-        return None, "" if experiment in (None, "") else "there is no job ledger yet"
-    text = str(experiment).strip()
-    if text.lstrip("#").isdigit():
-        job = ledger.get(int(text.lstrip("#")))
+    text = "" if experiment is None else str(experiment).strip()
+    if not text or ledger is None:
+        return None, "" if not text else "there is no job ledger yet"
+    number = text.lstrip("#")
+    if number.isdecimal():  # not isdigit(): int("²") raises. A job id fits SQLite's integer; 5000 digits do not
+        if len(number) > 9:
+            return None, f"there is no job {tools.clean(text, 20)}"
+        job = ledger.get(int(number))
         return (job.id, "") if job else (None, f"there is no job {text}")
     hits = [j for j in ledger.list() if text.lower() in (j.inbox_name.lower(), Path(j.dest_dir).name.lower())]
     if not hits:
@@ -275,7 +287,8 @@ def ask(cfg, question: str, *, experiment=None, item_id: str | None = None, tran
     ledger = _open_ledger(cfg)
     try:
         ctx = tools.Context(cfg, ledger)
-        item = attention.get(cfg.log_dir, item_id) if item_id else None
+        # an item id is a file name in the attention folder (attention._slug): nothing else is looked up
+        item = attention.get(cfg.log_dir, item_id) if item_id and _ITEM_ID.fullmatch(str(item_id)) else None
         job_id, note = find_job(ledger, experiment if experiment not in (None, "") else (item.job_id if item else None))
         if item_id and item is None:
             note = f"there is no attention item {tools.clean(item_id, 80)} (ionomos attention lists them)"
@@ -284,9 +297,14 @@ def ask(cfg, question: str, *, experiment=None, item_id: str | None = None, tran
             ans.text = f"Note: {note}.\n\n{ans.text}"
         ans.job_id = job_id
         ans.mode = s["mode"]
-        if ans.proposal is not None and job_id is not None and ans.proposal.job_id != job_id:
-            ans.proposal.note = (f"the question was about job {job_id}; this proposal changes job "
-                                 f"{ans.proposal.job_id}.")
+        p = ans.proposal
+        if p is not None and job_id is not None and p.job_id != job_id:
+            p.note = f"the question was about job {job_id}; this proposal changes job {p.job_id}."
+        elif p is not None and job_id is None and (item is not None or item_id or experiment not in (None, "")):
+            # D75 4 for a question that was about something, but not about a job Ionomos found
+            what = ("an attention item that names no job in the job list" if item is not None else
+                    "an attention item Ionomos does not have" if item_id else "an experiment Ionomos did not find")
+            p.note = f"the question was about {what}; this proposal changes job {p.job_id}."
         ans.seconds = round(time.monotonic() - started, 3)
         audit.append({
             "question": question, "job": job_id, "item": item.id if item else None,
@@ -341,25 +359,27 @@ def _answer(ctx: tools.Context, s: dict, question: str, job_id, item, transport)
             ans.model = reply.model or s.get("model", "")
             ans.ttft = reply.ttft if ans.ttft is None else ans.ttft
             if reply.tool_calls:
-                messages.append({"role": "assistant", "content": reply.content, "tool_calls": [
+                got = _calls(reply.tool_calls, ans.rounds)
+                messages.append({"role": "assistant", "content": plain(reply.content), "tool_calls": [
                     {"id": c["id"], "type": "function",  # sent back as valid JSON even if the model's was not
-                     "function": {"name": tools.clean(c["name"], 60), "arguments": _json_or_empty(c["arguments"])}}
-                    for c in reply.tool_calls]})
-                for n, c in enumerate(reply.tool_calls):
+                     "function": {"name": c["name"], "arguments": _json_or_empty(c["arguments"])}} for c in got]})
+                for n, c in enumerate(got):
                     made = sum(1 for x in calls if x["by"] == "model")
                     if n >= MAX_CALLS_PER_ROUND or made >= MAX_CALLS:
                         res = {"error": "too many tool calls; answer from what you have"}
+                    elif c["too_long"]:
+                        res = {"error": f"the arguments are too long (at most {MAX_CALL_ARGS} characters)"}
                     else:
-                        res = call(ctx, c["name"], c["arguments"])
-                    calls.append({"name": tools.clean(c["name"], 60), "arguments": c["arguments"],
-                                  "ok": "error" not in res, "by": "model"})
+                        res = call(ctx, c["raw_name"], c["arguments"])
+                    calls.append({"name": c["name"], "arguments": c["arguments"], "ok": "error" not in res,
+                                  "by": "model"})
                     messages.append({"role": "tool", "tool_call_id": c["id"],
                                      "content": json.dumps(res, ensure_ascii=False)})
                 continue
             text = plain(reply.content)
             verdict = citations.check(text, ctx.registry)
             ans.citations, ans.rejected_citations = verdict.valid, verdict.invalid
-            claim = _ACTION_CLAIM.search(text)
+            claim = _ACTION_CLAIM.search(text) or _DONE_CLAIM.search(text)
             if verdict.ok and not claim:
                 ans.text, ans.outcome, ans.reason = text, "grounded", ""
                 ans.sources = citations.sources(verdict.valid, ctx.registry)
@@ -370,7 +390,7 @@ def _answer(ctx: tools.Context, s: dict, question: str, job_id, item, transport)
             if not repairs or not text:
                 break
             repairs -= 1
-            messages += [{"role": "assistant", "content": reply.content},
+            messages += [{"role": "assistant", "content": text},
                          {"role": "user", "content": REPAIR_PROMPT.format(why=ans.reason)}]
         else:
             ans.reason = f"no answer after {MAX_ROUNDS} rounds of tool calls"
@@ -404,6 +424,23 @@ def about_item(item) -> str:
     when = re.sub(r"[^0-9T:-]", "", str(item.created or ""))[:19]
     return (f"This question is about an attention item of kind {kind}" + (f", raised {when}" if when else "")
             + "; list_attention returns it.")
+
+
+def _calls(raw: list[dict], round_no: int) -> list[dict]:
+    """The model's tool calls as Ionomos passes them on: a short, unique id; the name cleaned for the messages
+    (the raw one is what is looked up, so a name with an invisible character is no tool); arguments longer
+    than MAX_CALL_ARGS kept only in part (they are refused, and "{}" goes back to the runtime)."""
+    out, seen = [], set()
+    for n, c in enumerate(raw):
+        cid = re.sub(r"\s", "_", tools.clean(c.get("id"), MAX_CALL_ID))
+        if not cid or cid in seen:
+            cid = f"call_{round_no}_{n}"
+        seen.add(cid)
+        args = c.get("arguments") if isinstance(c.get("arguments"), str) else "{}"
+        long = len(args) > MAX_CALL_ARGS
+        out.append({"id": cid, "raw_name": c.get("name"), "name": tools.clean(c.get("name"), 60),
+                    "arguments": args[:MAX_CALL_ARGS] + "…" if long else args, "too_long": long})
+    return out
 
 
 def _json_or_empty(text: str) -> str:

@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import os
 import re
-import subprocess
 import sys
 import time
 from dataclasses import dataclass
@@ -68,38 +67,26 @@ def scratch_dir(cfg: Config) -> Path:
 
 def _start(cmd: list[str], env: dict[str, str], out_file: Path, cwd: Path, timeout: float) -> tuple[int | None, str, bool]:
     """Run `cmd` with its output in a file (never a pipe), kill its process tree at the time limit.
-    -> (exit code or None, output text, timed out)."""
-    timed_out = False
-    code: int | None = None
-    try:
-        with open(out_file, "wb") as out:
-            proc = subprocess.Popen(cmd, stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, cwd=str(cwd),
-                                    env={**os.environ, **env} if env else None, **fragpipe._popen_kwargs())
-            try:
-                code = proc.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                timed_out = True
-                fragpipe.kill_tree(proc)
-    except OSError as exc:
-        return None, f"could not start: {exc}", False
-    return code, fragpipe.read_tail_text(out_file, 2_000_000), timed_out
+    -> (exit code or None, output text, timed out). fragpipe.run_to_file."""
+    return fragpipe.run_to_file(cmd, out_file, cwd, timeout, env)
 
 
 # ------------------------------------------------------------ the launcher --
 
 
-def probe_launcher(exe: Path, scratch: Path, timeout: float = HELP_TIMEOUT) -> dict:
+def probe_launcher(exe: Path, scratch: Path, timeout: float | None = None) -> dict:
     """Start the launcher with --help. FragPipe prints its version, the OS, Java and .NET lines and its usage,
     then exits with code 1 (FragPipeMain: yes, 1), without opening a window.
     -> {'ok', 'version', 'java', 'dotnet', 'code', 'timed_out', 'text'}"""
     env = fragpipe.launcher_env(exe)
+    timeout = HELP_TIMEOUT if timeout is None else timeout  # read when called: a test can shorten it
     code, text, timed_out = _start([str(exe), "--help"], env, scratch / "launcher_help.log", scratch, timeout)
     ver = re.search(r"^FragPipe v(\S+)", text, re.MULTILINE)
     java = re.search(r"^Java Info: (.*)$", text, re.MULTILINE)
     dotnet = re.search(r"^\.NET Core Info: (.*)$", text, re.MULTILINE)
     return {"ok": bool(ver) and "--headless" in text and not timed_out, "version": ver.group(1) if ver else "",
             "java": java.group(1).strip() if java else "", "dotnet": dotnet.group(1).strip() if dotnet else "",
-            "code": code, "timed_out": timed_out, "text": text, "java_home": env.get("JAVA_HOME", "")}
+            "code": code, "timed_out": timed_out, "text": text, "java_home": env.get("JAVA_HOME", ""), "timeout": timeout}
 
 
 def _launcher_checks(cfg: Config, scratch: Path, start: bool) -> tuple[list[Check], Path | None, dict, list]:
@@ -140,10 +127,18 @@ def _launcher_checks(cfg: Config, scratch: Path, start: bool) -> tuple[list[Chec
                              "FragPipe found no `dotnet` command. Its documentation doesn't ask for .NET on Windows; "
                              "if a search stops on a .NET message, install the runtime that message names"))
     else:
-        hints = fragpipe.explain(probe["text"])
-        why = (f"no answer within {HELP_TIMEOUT:.0f} s" if probe["timed_out"] else
-               hints[0] if hints else f"exit code {probe['code']}, output: " + " | ".join(
-                   ln.strip() for ln in probe["text"].splitlines() if ln.strip())[-300:] or "no output")
+        how = fragpipe.exit_code_reason(probe["code"], probe["text"])
+        hints = fragpipe.explain(probe["text"]) or (fragpipe.explain(f"FragPipe {how}") if how else [])
+        said = " | ".join(ln.strip() for ln in probe["text"].splitlines() if ln.strip())[-300:]
+        if probe["timed_out"]:
+            why = f"no answer within {probe['timeout']:.0f} s"
+        elif probe["code"] is None:  # it never ran: Windows or the OS said why
+            why = probe["text"] + (f" — {hints[0]}" if hints else "")
+        elif hints:
+            why = hints[0]
+        else:
+            why = (f"exit code {fragpipe.code_text(probe['code'])}" + (f" ({how})" if how else "")
+                   + f", output: {said or 'none'}")
         out.append(Check("starts", "FragPipe starts", "fail", f"`{exe.name} --help` did not answer as FragPipe: {why}",
                          f"See {scratch / 'launcher_help.log'}. Folders tab → Find FragPipe; the launcher is "
                          "bin\\fragpipe.bat."))
@@ -304,7 +299,7 @@ def _method_checks(cfg: Config, key: str, rows: list, probe: dict) -> tuple[list
 
 
 def dry_run(cfg: Config, key: str, exe: Path, scratch: Path, raw: Path | None = None,
-            timeout: float = DRY_RUN_TIMEOUT) -> Check:
+            timeout: float | None = None) -> Check:
     """`fragpipe --headless --dry-run` for one method, on files of its own under scratch/<method>/."""
     m = cfg.methods[key]
     title = f"{key}: FragPipe dry run"
@@ -335,6 +330,7 @@ def dry_run(cfg: Config, key: str, exe: Path, scratch: Path, raw: Path | None = 
     cmd.insert(2, "--dry-run")
     log = spec.run_dir / "dry_run_console.log"
     started = time.monotonic()
+    timeout = DRY_RUN_TIMEOUT if timeout is None else timeout
     code, text_, timed_out = _start(cmd, spec.env, log, spec.run_dir, timeout)
     took = time.monotonic() - started
     facts = fragpipe.console_facts(text_)

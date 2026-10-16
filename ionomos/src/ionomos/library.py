@@ -50,6 +50,7 @@ SEARCH_PROTEIN_LIST = "protein.fas"                  # Philosopher's per-group o
 MAX_WORKFLOW_BYTES = 5_000_000                       # a FragPipe workflow is ~20 kB; bigger is something else
 CHUNK = 8 << 20
 HASH_BYTES = 1 << 20                                 # the fingerprint hashes the first and last 1 MB
+MAX_HEADER = 64 << 10                                # a header line longer than this is cut (a FASTA's are < 1 kB)
 DECOY_TAGS = ("rev_", "DECOY_", "REV_", "decoy_")    # detected, never assumed
 CONTAM_TAGS = (b"contam_", b"CON__")
 OLD_DAYS = 365
@@ -59,7 +60,17 @@ SKIP_NAMES = {"$recycle.bin", "system volume information", ".venv", "venv", "nod
 INSTALL_SKIP = {"jre", "lib", "tools", "python", "ext", "fonts", "images", "jobs"}   # inside a FragPipe install
 INSTALL_GLOBS = ("C:/FragPipe/*", "C:/FragPipe*", "~/Downloads/FragPipe*")
 SEVERITIES = ("error", "warn", "info")
-KINDS = ("isoDTB", "TMT", "DIA", "LFQ", "phospho", "open", "other")
+KINDS = ("isoDTB", "TMT", "DIA", "LFQ", "SILAC", "isoTOP", "ipIAA", "PAL", "labelled", "phospho", "open", "other")
+# MS1-labelled workflows (ionquant.use-labeling) by the light / heavy masses FragPipe 24.0's stock workflows set in
+# ionquant.light / .heavy (chemprot-ABPP-isoDTB, -isoTOP, -ipIAA, chemprot-PAL); K/R labels are SILAC (SILAC3)
+LABEL_KINDS = (("isoDTB", (561.3387, 567.3462)), ("isoTOP", (464.28596, 470.29977)), ("ipIAA", (463.2366, 467.2529)),
+               ("PAL", (436.2256, 442.2633)))
+LABELLED_KINDS = ("isoDTB", "SILAC", "isoTOP", "ipIAA", "PAL", "labelled")
+# FragPipe's own stock workflow for a method kind, the usual one first (#148): a tie between stock workflows of the
+# kind is broken by this, never by the file name
+CANONICAL_STOCK = {"isoDTB": ("chemprot-ABPP-isoDTB", "isoDTB-ABPP"), "TMT": ("TMT10-MS3", "TMT10", "TMT16"),
+                   "DIA": ("DIA_SpecLib_Quant",), "LFQ": ("LFQ-MBR",)}
+TIE = 0.5                                            # candidates closer than this are a tie: nothing is proposed
 
 
 class LibraryError(ValueError):
@@ -158,6 +169,8 @@ class FastaInfo:
     fragpipe_style: bool = False
     fingerprint: str = ""
     complete: bool = True                     # False: the time ran out before the end of the file
+    ox_share: float = 0.0                     # share of the proteins whose header names an organism (OX=)
+    reader: int = 0                           # FASTA_READER that read it; an older reading is read again
     summary: str = ""
     source: str = "other"                     # pinned | cache | other
     error: str = ""
@@ -320,6 +333,16 @@ def _day(ts: float) -> str:
         return ""
 
 
+def _a(word: str) -> str:
+    """'A' or 'An' before a word: 'An iTRAQ-4 search', 'A TMT-10 search', 'An isoDTB search'."""
+    return "An" if word[:1].lower() in "aeio" else "A"
+
+
+def plural(n: int, word: str, many: str = "") -> str:
+    """'1 protein', '20,698 proteins'."""
+    return f"{n:,} {word if n == 1 else (many or word + 's')}"
+
+
 def safe_name(name: str) -> str:
     """A FragPipe-safe file name: no spaces, only letters, digits and . _ - (FragPipe refuses spaces in paths)."""
     out = re.sub(r"[^A-Za-z0-9._-]+", "_", name.strip()).strip("_")
@@ -334,7 +357,8 @@ MOD_NAMES = (
     (229.16293, "TMT"), (304.20715, "TMTpro"), (561.3387, "isoDTB light"), (567.3462, "isoDTB heavy"),
     (-17.0265, "pyro-glu"), (-18.0106, "pyro-glu"), (114.04293, "GG (ubiquitin)"), (0.98402, "deamidation"),
     (144.10207, "iTRAQ-4"), (28.0313, "dimethyl"), (14.01565, "methyl"), (8.0142, "Lys8 (SILAC)"),
-    (10.00827, "Arg10 (SILAC)"),
+    (10.00827, "Arg10 (SILAC)"), (4.025107, "Lys4 (SILAC)"), (6.020129, "Arg6 (SILAC)"),
+    (464.28596, "isoTOP light"), (470.29977, "isoTOP heavy"), (463.2366, "ipIAA light"), (467.2529, "ipIAA heavy"),
 )
 _SITES = {"[^": "protein N-term", "n^": "peptide N-term", "c^": "peptide C-term", "]^": "protein C-term",
           "n-term peptide": "peptide N-term", "c-term peptide": "peptide C-term",
@@ -370,8 +394,30 @@ def parse_mods(value: str, fixed: bool = False) -> list[tuple[float, str, bool]]
     return out
 
 
+def _label_kind(props: dict, var: list) -> str:
+    """What an MS1-labelled workflow (ionquant.use-labeling) labels, from ionquant.light / .medium / .heavy
+    ('C561.3387', 'K0;R0', 'K8.014199;R10.008269', '*436.2256'): isoDTB / isoTOP / ipIAA / PAL by their masses,
+    SILAC for labels on K and R only; without labels set, an isoDTB mass among the variable mods; else labelled."""
+    masses, sites = [], set()
+    for key in ("ionquant.light", "ionquant.medium", "ionquant.heavy"):
+        for part in re.split(r"[;,\s]+", props.get(key, "")):
+            m = re.match(r"^([A-Za-z*\[\]^]*)(-?\d+(?:\.\d+)?)$", part.strip())
+            if m:
+                sites.add(m.group(1).upper())
+                masses.append(float(m.group(2)))
+    for kind, label in LABEL_KINDS:
+        if any(abs(x - y) < 0.002 for x in masses for y in label):
+            return kind
+    if sites and sites <= {"K", "R"}:
+        return "SILAC"
+    if not masses and any(abs(m - x) < 0.002 for m, _s, _e in var for x in (561.3387, 567.3462)):
+        return "isoDTB"
+    return "labelled"
+
+
 def workflow_kind(props: dict) -> tuple[str, list[str]]:
-    """(kind, traits) of a workflow. Kind: fpfolder.workflow_kind's isoDTB / TMT / DIA / LFQ, then an isoDTB label
+    """(kind, traits) of a workflow. Kind: fpfolder.workflow_kind's TMT / DIA / LFQ, or for MS1-labelled
+    quantification which label (isoDTB, SILAC, isoTOP, ipIAA, PAL, else labelled: _label_kind), then an isoDTB label
     in the variable mods, then open / mass-offset (a wide precursor window in Da, or mass offsets), then phospho
     (79.9663 on STY switched on), else other."""
     from ionomos.fpfolder import workflow_kind as quant_kind
@@ -389,10 +435,12 @@ def workflow_kind(props: dict) -> tuple[str, list[str]]:
     if (offsets and offsets not in ("0", "0.0")) or props.get("msfragger.mass_offsets_detailed", "").strip():
         traits.append("mass-offset")
     base = quant_kind(props)
+    if base == "isoDTB":   # fpfolder: MS1 quant with labelling on, whatever the label (#148)
+        base = _label_kind(props, var)
     if base in (None, "LFQ") and any(abs(m - x) < 0.002 for m, _s, _e in var for x in (561.3387, 567.3462)):
         base = "isoDTB" if base == "LFQ" else base
         traits.append("isoDTB label")
-    if base in ("isoDTB", "TMT", "DIA"):
+    if base in ("TMT", "DIA", *LABELLED_KINDS):
         return base, traits
     if "open" in traits or "mass-offset" in traits:
         return "open", traits
@@ -510,10 +558,16 @@ def _kind_words(info: WorkflowInfo, props: dict) -> str:
     if info.kind == "TMT":
         lt = info.label_type or "TMT (label type not set)"
         ms3 = " MS3" if "ms3" in info.name.lower() or "MS3" in info.description else ""
-        return f"A {lt}{ms3} search with TMT-Integrator"
-    if info.kind == "isoDTB":
+        return f"{_a(lt)} {lt}{ms3} search with TMT-Integrator"
+    if info.kind in LABELLED_KINDS:
         mbr = st.get("match-between-runs")
-        return "An isoDTB search (light/heavy labelled cysteines, IonQuant)" + (f", MBR {mbr}" if mbr else "")
+        what = {"isoDTB": "An isoDTB search (light/heavy labelled cysteines, IonQuant)",
+                "SILAC": "A SILAC search (heavy lysine and arginine, IonQuant)",
+                "isoTOP": "An isoTOP-ABPP search (light/heavy TEV tags on cysteines, IonQuant)",
+                "ipIAA": "An ipIAA search (light/heavy isopropyl iodoacetamide on cysteines, IonQuant)",
+                "PAL": "A photoaffinity labelling (PAL) search (light/heavy probe, IonQuant)",
+                }.get(info.kind, "A light/heavy labelled search (IonQuant)")
+        return what + (f", MBR {mbr}" if mbr else "")
     if info.kind == "DIA":
         lib = " with a spectral library from MSFragger" if "spectral library" in st else ""
         return f"A DIA search with DIA-NN{lib}"
@@ -568,11 +622,15 @@ def _source_of(path: Path, ctx: Context | None) -> str:
 
 
 def _is_install_dir(d: Path) -> bool:
-    """A FragPipe installation: bin/fragpipe* beside lib/ (installer, 23 / 24) or the zip builds' fragpipe/."""
+    """A FragPipe installation: bin/fragpipe(.bat) (installer 23 / 24, the zip builds' fragpipe/) or
+    lib/fragpipe-<version>.jar inside. A folder merely named like one (C:/Fragpipe_Auto) is not."""
     try:
-        return (d / "bin").is_dir() and (any((d / "bin").glob("fragpipe*")) or any((d / "bin").glob("FragPipe*")))
+        for sub, pats in (("bin", ("fragpipe*", "FragPipe*")), ("lib", ("fragpipe*.jar", "FragPipe*.jar"))):
+            if (d / sub).is_dir() and any(any((d / sub).glob(pat)) for pat in pats):
+                return True
     except OSError:
-        return False
+        pass
+    return False
 
 
 _ALL_DONE = re.compile(r"ALL JOBS DONE IN")
@@ -620,7 +678,8 @@ def describe_workflow(path: str | Path, ctx: Context | None = None, *, evidence:
     info.description = _clean_description(props.get("workflow.description", ""))
     db = props.get("database.db-path", "").strip()
     info.database = db
-    info.database_exists = bool(db) and Path(db).is_file()
+    # a path written in a file is never opened when it names another computer: the file may be anyone's (a drop)
+    info.database_exists = bool(db) and not is_network_path(db) and Path(db).is_file()
     info.decoy_tag = props.get("database.decoy-tag", "rev_").strip() or "rev_"
     info.needs = fragpipe.workflow_needs(props)
     info.settings = workflow_settings(props, info.kind)
@@ -654,8 +713,10 @@ def workflow_flags(info: WorkflowInfo, ctx: Context | None = None) -> list[Flag]
             "Adopt it (Ionomos copies it into the workflows folder under a name without spaces); don't point "
             "FragPipe at it where it is.")
     if info.database and not info.database_exists:
-        add("WF_DATABASE_MISSING", "warn", f"The FASTA this workflow was saved with ({info.database}) is not on "
-            f"this PC", "Ionomos searches with the method's FASTA instead; check that it is the same organism "
+        where = ("is on another computer (a network path, which Ionomos does not open when a file names it)"
+                 if is_network_path(info.database) else "is not on this PC")
+        add("WF_DATABASE_MISSING", "warn", f"The FASTA this workflow was saved with ({info.database}) {where}",
+            "Ionomos searches with the method's FASTA instead; check that it is the same organism "
             "and pick one in the method's FASTA box.")
     elif info.database and ctx.fasta_dir is not None and not _inside(info.database, ctx.fasta_dir):
         add("WF_DATABASE_ELSEWHERE", "info", f"Its FASTA {info.database} is outside the FASTA folder "
@@ -700,6 +761,8 @@ _ISOFORM = re.compile(rb"^(?:sp|tr)\|[A-Za-z0-9]+-\d+\|")
 _NAME_DATE = re.compile(r"^(\d{4}-\d{2}-\d{2})")
 _PROTEOME = re.compile(r"(UP\d{9})(?:_(\d+))?")
 _FP_STYLE = re.compile(r"^\d{4}-\d{2}-\d{2}-(?:td-|decoys-)(?:[a-z]+-)*UP\d{9}(?:_\d+)?\.fasta\.fas$", re.I)
+FASTA_READER = 2                                     # 2: organism and reviewed share judged on every protein (#151)
+ORGANISM_MIN_SHARE = 0.5                             # the organism is named only when this share of proteins says it
 SPECIES_WORDS = {"9606": "Human", "10090": "Mouse", "10116": "Rat", "559292": "Yeast", "4932": "Yeast",
                  "83333": "E. coli", "562": "E. coli", "7227": "Fly", "6239": "Worm", "7955": "Zebrafish",
                  "3702": "Arabidopsis", "9913": "Cow", "9823": "Pig", "9031": "Chicken"}
@@ -707,31 +770,11 @@ SPECIES_WORDS = {"9606": "Human", "10090": "Mouse", "10116": "Rat", "559292": "Y
 
 def _headers(fh, stop: threading.Event | None, deadline: float | None):
     """Every header line (without '>') of a FASTA opened in binary mode, read in big chunks: a 1 GB file is
-    never decoded or split into lines. Raises TimeoutError when stopped or out of time."""
-    carry = b"\n"
-    while True:
-        if (stop is not None and stop.is_set()) or (deadline is not None and time.monotonic() > deadline):
-            raise TimeoutError
-        chunk = fh.read(CHUNK)
-        if not chunk:
-            break
-        buf = carry + chunk
-        pos = 0
-        carry = b""
-        while True:
-            i = buf.find(b"\n>", pos)
-            if i < 0:
-                k = buf.rfind(b"\n", pos)
-                carry = buf[k:] if k >= 0 else b""
-                break
-            j = buf.find(b"\n", i + 1)
-            if j < 0:
-                carry = buf[i:]
-                break
-            yield buf[i + 2:j].rstrip(b"\r")
-            pos = j
-    if carry.startswith(b"\n>"):
-        yield carry[2:].rstrip(b"\r\n")
+    never decoded or split into lines. Raises TimeoutError when stopped or out of time. `fastasource.fasta_headers`:
+    a UTF-8 byte-order mark skipped, linear time and bounded memory on a file without line breaks."""
+    from ionomos.fastasource import fasta_headers
+
+    yield from fasta_headers(fh, stop, deadline, chunk=CHUNK, max_header=MAX_HEADER)
 
 
 def _fingerprint(p: Path, size: int, entries: int) -> str:
@@ -810,16 +853,20 @@ def describe_fasta(path: str | Path, ctx: Context | None = None, *, stop: thread
     info.contaminants, info.reviewed, info.unreviewed, info.isoforms = contam, reviewed, unreviewed, isoforms
     info.species = [[ox, species_name.get(ox, ""), n] for ox, n in species.most_common(8)]
     total = sum(species.values())
-    if total:
+    info.ox_share = total / info.proteins if info.proteins else 0.0
+    if total and info.ox_share >= ORGANISM_MIN_SHARE:
         ox, n = species.most_common(1)[0]
         info.top_species = SPECIES_WORDS.get(ox) or species_name.get(ox) or f"taxon {ox}"
         info.top_share = n / total
         info.taxon = info.taxon or ox
-    elif info.taxon:
+    elif info.taxon:   # from the file name (UP000005640_9606)
         info.top_species = SPECIES_WORDS.get(info.taxon, f"taxon {info.taxon}")
+    # else: most targets name no organism (GENCODE / Ensembl / smORF headers carry no OX=): the few that do, often
+    # its contaminants, don't say what the file is (#151)
     if entries == 0 and info.complete:
         info.error = "no protein entries (no line starts with '>'): not a FASTA"
     info.fingerprint = _fingerprint(p, info.size, entries) if info.complete else ""
+    info.reader = FASTA_READER
     info.summary = _fasta_summary(info)
     if info.complete and not info.error:
         _FASTA_CACHE[key] = FastaInfo.from_dict(info.as_dict())
@@ -847,26 +894,34 @@ def _mix_words(info: FastaInfo) -> str:
                       for o, n, c in info.species[:3])
 
 
+def _mostly_not_uniprot(info: FastaInfo) -> bool:
+    """Fewer than half of the proteins have UniProt headers (sp| / tr|): their reviewed share says little."""
+    return (info.reviewed + info.unreviewed) < 0.5 * info.proteins
+
+
 def _fasta_summary(info: FastaInfo) -> str:
     if info.error:
         return f"{info.name}: {info.error}."
-    who = info.top_species or "Unknown organism"
-    if len(info.species) > 1 and info.top_share < 0.9:
+    who = info.top_species or ("Organism unknown (most headers name none: no OX=)" if info.species
+                               else "Unknown organism")
+    if info.top_species and len(info.species) > 1 and info.top_share < 0.9:
         who = "Mixed: " + _mix_words(info)
     uni = info.reviewed + info.unreviewed
     if uni == 0:
         src = "not UniProt-style headers"
+    elif _mostly_not_uniprot(info):
+        src = f"mostly not UniProt-style headers ({uni:,} UniProt-style)"
     elif info.unreviewed == 0:
         src = "reviewed UniProt"
     elif info.reviewed == 0:
         src = "unreviewed UniProt (TrEMBL)"
     else:
         src = f"UniProt, {100 * info.unreviewed / uni:.0f} % unreviewed"
-    iso = f", {info.isoforms:,} isoforms" if info.isoforms else ""
+    iso = f", {plural(info.isoforms, 'isoform')}" if info.isoforms else ""
     what = []
     what.append(f"decoys ({info.decoy_tag})" if info.decoys else "NO decoys")
-    what.append(f"{info.contaminants} contaminants" if info.contaminants else "no contaminants")
-    text = f"{who}, {src} ({info.proteins:,} proteins{iso}) with {' and '.join(what)}"
+    what.append(plural(info.contaminants, "contaminant") if info.contaminants else "no contaminants")
+    text = f"{who}, {src} ({plural(info.proteins, 'protein')}{iso}) with {' and '.join(what)}"
     if info.name_date:
         text += f", made {info.name_date}"
     if info.proteome:
@@ -914,10 +969,10 @@ def fasta_flags(info: FastaInfo, ctx: Context | None = None) -> list[Flag]:
         add("FASTA_NO_CONTAMINANTS", "warn", f"{info.name} has no contaminant entries (contam_ / CON__)",
             "Keratins, trypsin and BSA then end up as hits of your organism. Make the FASTA with contaminants "
             "(FragPipe's Database tab: Add contaminants).")
-    if len(info.species) > 1 and info.top_share < 0.9:
+    if info.top_species and len(info.species) > 1 and info.top_share < 0.9:
         add("FASTA_MIXED_SPECIES", "warn", f"{info.name} mixes organisms: {_mix_words(info)}",
             "Fine on purpose (a mixed-species benchmark); otherwise use a FASTA of your organism alone.")
-    if info.unreviewed > info.reviewed and info.unreviewed:
+    if info.unreviewed > info.reviewed and info.unreviewed > 0.5 * info.proteins:
         add("FASTA_UNREVIEWED", "warn", f"Most entries of {info.name} are unreviewed UniProt (tr|, TrEMBL)",
             "The lab's searches use reviewed (Swiss-Prot) proteomes; unreviewed entries make the search slower and "
             "the protein groups larger. Use a reviewed FASTA unless you need TrEMBL.")
@@ -963,10 +1018,12 @@ def install_roots(cfg=None) -> list[Path]:
         r = fragpipe.fragpipe_root(launcher)
         if r is not None:
             out.append(r)
-    for pat in INSTALL_GLOBS:
+    for pat in INSTALL_GLOBS:   # C:/FragPipe* also matches C:/Fragpipe_Auto: only real installations count (#153)
         for hit in glob.glob(os.path.expanduser(pat)):
-            if os.path.isdir(hit):
-                out.append(Path(hit))
+            for d in (Path(hit), Path(hit) / "fragpipe"):   # the zip: FragPipe-jre-22.0/fragpipe/bin/fragpipe.bat
+                if _is_install_dir(d):
+                    out.append(d)
+                    break
     seen, uniq = set(), []
     for p in out:
         if p.is_dir() and _key(p) not in seen:
@@ -1063,21 +1120,57 @@ def _settings(cfg) -> dict:
         return settings_from(None)
 
 
-def default_roots(cfg) -> list[Path]:
-    """Where a scan looks by default: workflow_dir, fasta_dir, every FragPipe installation, users_root and the
-    config's library.roots (UNC paths are plain folders). Only folders that exist, each once."""
-    cands = [Path(cfg.workflow_dir), Path(cfg.fasta_dir), *install_roots(cfg), Path(cfg.users_root)]
-    cands += [Path(os.path.expanduser(r)) for r in _settings(cfg)["roots"]]
-    seen, out = set(), []
-    for p in cands:
+ROOT_ANSWER_S = 5.0   # a folder that takes longer to say whether it exists (a share whose server is off) is skipped
+
+
+is_network_path = fragpipe.is_network_path
+
+
+def folder_answers(p: Path, seconds: float | None = None) -> bool | None:
+    """Whether `p` is a folder, asked on a helper thread: True / False, or None when there was no answer in
+    `seconds` (a UNC path to a server that is off blocks for about 20 s on Windows)."""
+    box: list[bool] = []
+
+    def ask() -> None:
         try:
-            ok = p.is_dir()
+            box.append(Path(p).is_dir())
         except OSError:
-            ok = False
-        if ok and _key(p) not in seen:
+            box.append(False)
+
+    t = threading.Thread(target=ask, name="library-root", daemon=True)
+    t.start()
+    t.join(ROOT_ANSWER_S if seconds is None else seconds)
+    return box[0] if box else None
+
+
+def default_roots(cfg, missing: list[str] | None = None) -> list[Path]:
+    """Where a scan looks by default: workflow_dir, fasta_dir, every FragPipe installation, users_root and the
+    config's library.roots (UNC paths are plain folders). Only folders that exist (and say so within
+    ROOT_ANSWER_S), each once; a configured folder that does not exist, or does not answer, is said in `missing`
+    (a list of notes), never dropped silently (#153)."""
+    named = [(Path(cfg.workflow_dir), "paths.workflow_dir"), (Path(cfg.fasta_dir), "paths.fasta_dir")]
+    named += [(p, "") for p in install_roots(cfg)]
+    named += [(Path(cfg.users_root), "paths.users_root")]
+    named += [(Path(os.path.expanduser(r)), "library: roots") for r in _settings(cfg)["roots"]]
+    seen, out = set(), []
+    for p, where in named:
+        ok = folder_answers(p)
+        if not ok:
+            if where and missing is not None:
+                missing.append(missing_note(p, where) if ok is False else
+                               f"{p} did not answer within {ROOT_ANSWER_S:g} s (a network folder whose computer is "
+                               f"off or unreachable?): not looked at. Check the address in {where}")
+            continue
+        if _key(p) not in seen:
             seen.add(_key(p))
             out.append(p)
     return out
+
+
+def missing_note(p: str | Path, where: str = "") -> str:
+    """The note for a folder to look in that is not there."""
+    return (f"{p} does not exist on this PC: not looked at (a drive not plugged in, or a typo"
+            + (f" in {where}" if where else "") + ")")
 
 
 def _hidden(entry: os.DirEntry) -> bool:
@@ -1148,27 +1241,34 @@ def scan(roots: list[str | Path] | None = None, *, cfg=None, ctx: Context | None
     limit = float(lib["time_limit_s"] if time_limit_s is None else time_limit_s)
     if ctx is None:
         ctx = context_from(cfg) if cfg is not None else Context()
+    missing: list[str] = []
     if roots is None:
-        roots = default_roots(cfg) if cfg is not None else []
+        roots = default_roots(cfg, missing) if cfg is not None else []
     if previous is not None:
         for f in previous.fastas:
-            if f.complete and not f.error and f.fingerprint:
+            if f.complete and not f.error and f.fingerprint and f.reader >= FASTA_READER:
                 _FASTA_CACHE.setdefault((_key(f.path), f.mtime, f.size), f)
     started = time.monotonic()
     deadline = started + limit
-    cat = Catalog(roots=[str(r) for r in roots], scanned_at=datetime.now().isoformat(timespec="seconds"))
+    cat = Catalog(roots=[str(r) for r in roots], scanned_at=datetime.now().isoformat(timespec="seconds"),
+                  notes=missing)
     queue: deque[tuple[Path, int]] = deque()
     seen: set[str] = set()
     for r in roots:
         p = Path(r)
+        there = folder_answers(p, min(ROOT_ANSWER_S, max(limit - (time.monotonic() - started), 0.5)))
+        if there is None:  # asked first: realpath() of a dead share blocks as long as is_dir() does
+            cat.notes.append(f"{p} did not answer within {ROOT_ANSWER_S:g} s (a network folder whose computer is "
+                             "off or unreachable?); skipped. Check the address, or take it out of library.roots")
+            continue
+        if not there:
+            cat.notes.append(f"{p} is not a folder on this PC; skipped")
+            continue
         try:
             real = _key(os.path.realpath(p))
         except OSError:
             real = _key(p)
         if real in seen:
-            continue
-        if not p.is_dir():
-            cat.notes.append(f"{p} is not a folder on this PC; skipped")
             continue
         seen.add(real)
         queue.append((p, 0))
@@ -1270,7 +1370,7 @@ def scan(roots: list[str | Path] | None = None, *, cfg=None, ctx: Context | None
     # FragPipe's window remembers the last FASTA: describe it when the walk didn't pass it
     for hint in cat.hints:
         db = hint.get("database")
-        if db and Path(db).is_file() and _key(db) not in fa_seen and not out_of_time():
+        if db and not is_network_path(db) and Path(db).is_file() and _key(db) not in fa_seen and not out_of_time():
             fa_seen.add(_key(db))
             info = describe_fasta(db, ctx, stop=stop, deadline=deadline)
             info.source = "cache"
@@ -1395,6 +1495,62 @@ def load_catalog(cfg) -> Catalog:
         return Catalog(notes=[f"{p} could not be read ({exc}); run `ionomos library scan` again"])
 
 
+def _unchanged(x: WorkflowInfo | FastaInfo) -> bool:
+    try:
+        st = Path(x.path).stat()
+    except OSError:
+        return False
+    return st.st_size == x.size and abs(st.st_mtime - x.mtime) < 1e-3
+
+
+def covers(new: Catalog, prev: Catalog) -> bool:
+    """`new` replaces `prev`: it ran to the end and looked in every folder `prev` looked in."""
+    return new.complete and {_key(r) for r in prev.roots} <= {_key(r) for r in new.roots}
+
+
+def merge_scan(prev: Catalog, new: Catalog, ctx: Context | None = None) -> Catalog:
+    """A scan that stopped early or looked in fewer folders never loses what a fuller one found (#153): `new`, plus
+    every file of `prev` it did not see that is still on disk unchanged (their roots kept too), judged again as one
+    catalog. `new` itself when it covers `prev`."""
+    if covers(new, prev) or not (prev.workflows or prev.fastas):
+        return new
+    seen = {_key(x.path) for x in (*new.workflows, *new.fastas)}
+    kept_w = [w for w in prev.workflows if _key(w.path) not in seen and _unchanged(w)]
+    kept_f = [f for f in prev.fastas if _key(f.path) not in seen and _unchanged(f)]
+    if not kept_w and not kept_f:
+        return new
+    for w in kept_w:
+        if w.source != "run":
+            w.source = _source_of(Path(w.path), ctx)
+    new_roots = {_key(r) for r in new.roots}
+    others = [r for r in prev.roots if _key(r) not in new_roots]
+    new.workflows += kept_w
+    new.fastas += kept_f
+    new.roots += others
+    why = "stopped early" if not new.complete else "looked in fewer folders"
+    new.notes.append(f"kept {len(kept_w)} workflow(s) and {len(kept_f)} FASTA(s) from the scan of "
+                     f"{prev.scanned_at.replace('T', ' ') or 'before'}, because this one {why}"
+                     + (f" (not looked in now: {', '.join(others[:3])}{' …' if len(others) > 3 else ''})"
+                        if others else "") + "; `ionomos library scan --replace` keeps only this scan")
+    judge_catalog(new, ctx)
+    return new
+
+
+def save_scan(cfg, new: Catalog, prev: Catalog | None = None, *, replace: bool = False,
+              ctx: Context | None = None) -> tuple[Catalog, str]:
+    """Save a scan's catalog, merged with the previous one unless it covers it or `replace` (merge_scan).
+    Returns (the catalog saved, a line on what was saved)."""
+    prev = load_catalog(cfg) if prev is None else prev
+    found = len(new.workflows) + len(new.fastas)
+    cat = new
+    if not replace and not covers(new, prev) and (prev.workflows or prev.fastas):
+        cat = merge_scan(prev, new, ctx or context_from(cfg))
+    where = save_catalog(cfg, cat)
+    kept = len(cat.workflows) + len(cat.fastas) - found
+    return cat, f"saved in {where}" + (f"; kept {kept} file(s) from the last scan that this one did not look at"
+                                       if kept else "")
+
+
 # --------------------------------------------------------------- recommend --
 
 
@@ -1405,21 +1561,38 @@ def _penalty(flags: list[Flag]) -> tuple[float, list[str]]:
     return -40.0 * len(errs) - 3.0 * len(warns), words
 
 
+def _stem(name: str) -> str:
+    return name[:-len(WORKFLOW_SUFFIX)] if name.lower().endswith(WORKFLOW_SUFFIX) else name
+
+
+def canonical_rank(name: str, kind: str, prefer: str = "") -> int | None:
+    """0 for the stock workflow FragPipe names for this kind of experiment (or the one the method asks for by name,
+    `prefer`), 1, 2 ... for the next ones (CANONICAL_STOCK); None for any other."""
+    names = ([_stem(prefer)] if prefer else []) + list(CANONICAL_STOCK.get(kind, ()))
+    stem = _stem(name).lower()
+    return next((i for i, n in enumerate(names) if n.lower() == stem), None)
+
+
 def recommend(catalog: Catalog, kind: str, installed_version: str = "",
-              pinned: WorkflowInfo | None = None) -> list[Candidate]:
+              pinned: WorkflowInfo | None = None, prefer: str = "") -> list[Candidate]:
     """Workflows of this kind, one candidate per set of settings (the same settings under several names count
     once), best first. The score and its reasons, in words: finished searches that used the settings, the
-    FragPipe version it was saved with against the installed one, whether its FASTA exists, pinned / stock."""
+    FragPipe version it was saved with against the installed one, whether its FASTA exists, pinned / stock, and
+    whether it is FragPipe's own stock workflow for this kind (CANONICAL_STOCK; `prefer`: the workflow name the
+    method asks for). Candidates of equal score are in no meaningful order: auto_assign proposes none of them."""
     inst = _ver(installed_version)
     groups = _groups([w for w in catalog.workflows if w.kind.lower() == kind.lower() and not w.error
                       and Path(w.path).is_file()])   # a catalog can be older than the disk
     out: list[Candidate] = []
     for members in groups.values():
         order = {"pinned": 0, "stock": 1, "run": 2, "cache": 3, "other": 4}
+        def newest(w):   # the newest FragPipe version first, then the newest file (#156)
+            v = _ver(w.saved_with) or (-1, -1)
+            return (-v[0], -v[1], -w.mtime)
         if pinned is not None:
-            members.sort(key=lambda w: (_key(w.path) != _key(pinned.path), order.get(w.source, 9), -w.mtime))
+            members.sort(key=lambda w: (_key(w.path) != _key(pinned.path), order.get(w.source, 9), *newest(w)))
         else:
-            members.sort(key=lambda w: (order.get(w.source, 9), -w.mtime))
+            members.sort(key=lambda w: (order.get(w.source, 9), *newest(w)))
         rep = members[0]
         score, reasons = 0.0, []
         runs = [w for w in members if w.finished]
@@ -1455,6 +1628,14 @@ def recommend(catalog: Catalog, kind: str, installed_version: str = "",
         if any(w.source == "stock" for w in members):
             score += 2
             reasons.append("a stock workflow of the FragPipe installation")
+            ranks = [(r, w) for w in members if w.source == "stock"
+                     for r in [canonical_rank(w.name, kind, prefer)] if r is not None]
+            if ranks:
+                r, w = min(ranks, key=lambda x: x[0])
+                score += max(4.0 - r, 1.0)
+                reasons.append(f"FragPipe's own {_stem(w.name)}, "
+                               + ("the workflow name the method asks for" if prefer and r == 0
+                                  else f"the usual stock workflow for {kind}"))
         flags = [f for f in rep.flags if f.code not in ("WF_NO_RUNS",)]
         pen, words = _penalty(flags)
         score += pen
@@ -1473,10 +1654,12 @@ def _used_fastas(catalog: Catalog) -> Counter:
     return used
 
 
-def recommend_fastas(catalog: Catalog, taxon: str | None = None, kind: str | None = None) -> list[Candidate]:
+def recommend_fastas(catalog: Catalog, taxon: str | None = None, kind: str | None = None,
+                     taxon_from: str = "") -> list[Candidate]:
     """FASTAs (one per content), best first: usable decoys, contaminants, reviewed, the organism asked for,
     made recently, used by finished searches, already in the FASTA folder. `kind` is not used yet: every search
-    kind takes the same database (kept so the picker can ask per method)."""
+    kind takes the same database (kept so the picker can ask per method). `taxon_from`: where the organism came
+    from, in words ('the FASTA folder's files'), for the reason; '' = the caller asked for it."""
     used = _used_fastas(catalog)
     groups: dict[str, list[FastaInfo]] = {}
     for f in catalog.fastas:
@@ -1485,13 +1668,17 @@ def recommend_fastas(catalog: Catalog, taxon: str | None = None, kind: str | Non
         groups.setdefault(f.fingerprint or _key(f.path), []).append(f)
     out = []
     for members in groups.values():
-        members.sort(key=lambda f: ({"pinned": 0, "cache": 1}.get(f.source, 2), " " in f.path, -f.mtime))
+        members.sort(key=lambda f: ({"pinned": 0, "cache": 1}.get(f.source, 2), " " in f.path,
+                                    not f.fragpipe_style, not f.name_date, -f.mtime))   # #156: not dup-human.fas
         rep = members[0]
         score, reasons = 0.0, []
         if taxon:
-            if rep.taxon == str(taxon) or (rep.species and rep.species[0][0] == str(taxon)):
+            if rep.taxon == str(taxon) or (rep.top_species and rep.species and rep.species[0][0] == str(taxon)):
                 score += 15
-                reasons.append(f"{rep.top_species or 'the organism'} as asked")
+                who = rep.top_species or "the organism"
+                reasons.append(f"{who}, the organism of {taxon_from}" if taxon_from else f"{who} as asked")
+            elif not rep.top_species:
+                reasons.append("its organism can't be read from its headers (no OX=) or its name")
             else:
                 score -= 30
                 reasons.append(f"another organism ({rep.top_species or 'unknown'})")
@@ -1529,29 +1716,54 @@ def _age_days(day: str) -> int:
         return 0
 
 
-def _lab_taxon(catalog: Catalog, fasta_dir: Path | None) -> str | None:
-    """The organism of the FASTAs already in the FASTA folder, else of the FASTAs finished searches used."""
+def lab_taxon(catalog: Catalog, fasta_dir: Path | None) -> tuple[str | None, str]:
+    """(taxon, where it came from in words): the organism of the FASTAs already in the FASTA folder, else of the
+    FASTAs finished searches used; (None, '') when neither says."""
     pinned = Counter(f.taxon for f in catalog.fastas if f.taxon and _inside(f.path, fasta_dir))
     if pinned:
-        return pinned.most_common(1)[0][0]
+        return pinned.most_common(1)[0][0], "the FASTA folder's files"
     used = _used_fastas(catalog)
     counts = Counter()
     for f in catalog.fastas:
         if f.taxon:
             counts[f.taxon] += used.get(_key(f.path), 0)
     best = counts.most_common(1)
-    return best[0][0] if best and best[0][1] else None
+    return (best[0][0], "the FASTAs finished searches used") if best and best[0][1] else (None, "")
 
 
-def auto_assign(cfg_dict: dict, catalog: Catalog, installed_version: str = "") -> list[Proposal]:
+def _lab_taxon(catalog: Catalog, fasta_dir: Path | None) -> str | None:
+    return lab_taxon(catalog, fasta_dir)[0]
+
+
+def _clear_best(cands: list[Candidate]) -> tuple[Candidate | None, list[Candidate]]:
+    """(the best candidate, []) when it is clearly ahead; (None, the tied ones) when the score can't tell (#148)."""
+    if not cands:
+        return None, []
+    tied = [c for c in cands if cands[0].score - c.score < TIE]
+    return (cands[0], []) if len(tied) == 1 else (None, tied)
+
+
+def _tie_note(key: str, what: str, tied: list[Candidate], kind: str) -> str:
+    names = ", ".join(c.info.name for c in tied[:4]) + (f" and {len(tied) - 4} more" if len(tied) > 4 else "")
+    how = (f"`ionomos library list workflows --kind {kind}`" if what == "workflow"
+           else "`ionomos library list fastas`")
+    return (f"{key}: {len(tied)} {what}s fit equally well ({names}); none is proposed, so as not to pick by file "
+            f"name. Pick one: {how}, then `ionomos library adopt PATH --method {key}` (or Find on this PC… in the "
+            f"Methods tab)")
+
+
+def auto_assign(cfg_dict: dict, catalog: Catalog, installed_version: str = "",
+                notes: list[str] | None = None) -> list[Proposal]:
     """For every FragPipe method whose workflow or FASTA is missing or has an error, the best candidate.
-    A method whose files are fine is left alone. Nothing is changed: the caller applies the proposals
+    A method whose files are fine is left alone. When candidates tie (the score can't tell them apart) or there is
+    none, nothing is proposed and `notes` says why. Nothing is changed: the caller applies the proposals
     (apply_proposals, then configio.write_config, which keeps a backup)."""
+    notes = [] if notes is None else notes
     paths = cfg_dict.get("paths") or {}
     wf_dir = Path(paths["workflow_dir"]) if paths.get("workflow_dir") else None
     fa_dir = Path(paths["fasta_dir"]) if paths.get("fasta_dir") else None
     ctx = Context(workflow_dir=wf_dir, fasta_dir=fa_dir, installed_version=installed_version)
-    taxon = _lab_taxon(catalog, fa_dir)
+    taxon, taxon_from = lab_taxon(catalog, fa_dir)
     out: list[Proposal] = []
     for key, m in (cfg_dict.get("methods") or {}).items():
         if not isinstance(m, dict):
@@ -1571,10 +1783,16 @@ def auto_assign(cfg_dict: dict, catalog: Catalog, installed_version: str = "") -
                 if errs:
                     why = errs[0].text
             if why:
-                cands = [c for c in recommend(catalog, kind, installed_version)
+                cands = [c for c in recommend(catalog, kind, installed_version, prefer=name)
                          if not any(f.severity == "error" for f in c.flags)]
-                if cands:
-                    out.append(Proposal(key, "workflow", name, why, cands[0]))
+                best, tied = _clear_best(cands)
+                if best is not None:
+                    out.append(Proposal(key, "workflow", name, why, best))
+                elif tied:
+                    notes.append(_tie_note(key, "workflow", tied, kind))
+                else:
+                    notes.append(f"{key}: no {kind} workflow without a problem was found on this PC; nothing "
+                                 f"proposed (Find on this PC… lists every workflow)")
         fname = str(m.get("fasta") or "")
         current_fa = _pinned_file(fa_dir, fname) if (fa_dir and fname) else None
         why = ""
@@ -1586,10 +1804,16 @@ def auto_assign(cfg_dict: dict, catalog: Catalog, installed_version: str = "") -
             if errs:
                 why = errs[0].text
         if why:
-            cands = [c for c in recommend_fastas(catalog, taxon, kind)
+            cands = [c for c in recommend_fastas(catalog, taxon, kind, taxon_from)
                      if not any(f.severity == "error" for f in c.flags)]
-            if cands:
-                out.append(Proposal(key, "fasta", fname, why, cands[0]))
+            best, tied = _clear_best(cands)
+            if best is not None:
+                out.append(Proposal(key, "fasta", fname, why, best))
+            elif tied:
+                notes.append(_tie_note(key, "FASTA", tied, kind))
+            else:
+                notes.append(f"{key}: no usable FASTA was found on this PC; nothing proposed (Download from UniProt… "
+                             f"or `ionomos fasta download` makes one)")
     return out
 
 
@@ -1664,10 +1888,60 @@ def adopt_fasta(info: FastaInfo | str | Path, cfg, catalog: Catalog | None = Non
     return {"fasta": target.name, "path": str(target), "copied": copied, "notes": notes}
 
 
-def adopt(info: WorkflowInfo | str | Path, method: str, cfg, catalog: Catalog | None = None) -> dict:
+def _wf_name(name: str) -> str:
+    n = Path(str(name or "").strip()).name
+    return (n if not n or n.lower().endswith(WORKFLOW_SUFFIX) else n + WORKFLOW_SUFFIX).lower()
+
+
+def live_workflows(cfg_or_path, but: str | None = None) -> set[str]:
+    """The workflow file names (lower case) the methods of the SAVED config.yaml use, which the watcher searches
+    with: a copy must not replace one before the config says so (#150). `cfg_or_path`: a Config read from disk or
+    the config.yaml path; `but`: leave out this method's own file (its config is written right after)."""
+    if isinstance(cfg_or_path, (str, Path)):
+        path = Path(cfg_or_path)
+        if not path.is_file():
+            return set()
+        from ionomos import configio
+
+        try:
+            methods = configio.read_config(path).get("methods") or {}
+        except Exception:  # noqa: BLE001 - unreadable: nothing to protect that we can name
+            return set()
+        names = {k: str((m or {}).get("workflow") or "") for k, m in methods.items() if isinstance(m, dict)}
+    else:
+        names = {k: str(m.workflow or "") for k, m in cfg_or_path.methods.items()}
+    return {_wf_name(n) for k, n in names.items() if n and k != but} - {""}
+
+
+def adopt_problems(info: WorkflowInfo | FastaInfo, method_kind: str = "", ctx: Context | None = None) -> list[Flag]:
+    """Why a file should not be adopted for a method without a second thought (#150): a workflow of another kind
+    than the method's (WF_KIND_MISMATCH), and every error flag the file carries (FASTA_NO_DECOYS,
+    FASTA_DECOY_SHARE, WF_LABEL_TYPE_UNSET, WF_TOOL_MISSING ...), for a workflow also WF_DECOY_TAG_MISMATCH against
+    the FASTA it was saved with. [] = fine. The CLI refuses without --force, the app asks."""
+    out = [f for f in info.flags if f.severity == "error"]
+    if isinstance(info, WorkflowInfo) and not info.error:
+        if method_kind in KINDS and info.kind != method_kind:
+            out.insert(0, Flag("WF_KIND_MISMATCH", "error", f"{info.name} is a {info.kind} workflow "
+                               f"({info.summary.split(':')[0].rstrip('.')}), not a {method_kind} one",
+                               f"Pick a {method_kind} workflow (`ionomos library recommend` lists them; Find on this "
+                               f"PC… in the app), or adopt it anyway if this is meant (--force).", info.path))
+        if info.database_exists and not any(f.code == "WF_DECOY_TAG_MISMATCH" for f in out):
+            fa = describe_fasta(info.database, ctx)
+            if fa.decoy_tag and fa.decoy_tag != info.decoy_tag:
+                out.append(Flag("WF_DECOY_TAG_MISMATCH", "error", f"The workflow's decoy tag is '{info.decoy_tag}', "
+                                f"but the decoys of {fa.name} start with '{fa.decoy_tag}'", "FragPipe would find no "
+                                "decoys and stop. Set the decoy tag on FragPipe's Database tab to match the FASTA, "
+                                "then save the workflow again.", info.path))
+    return out
+
+
+def adopt(info: WorkflowInfo | str | Path, method: str, cfg, catalog: Catalog | None = None, *,
+          avoid: set[str] | None = None) -> dict:
     """Copy a workflow into workflow_dir as <method>.workflow (a FragPipe-safe name), the way
-    fragpipe.import_workflow does: the pinned file it replaces is kept as .bak-<time>. Its FASTA is copied into
-    fasta_dir too when it exists and is elsewhere (adopt_fasta), and the copy's database.db-path points at it.
+    fragpipe.import_workflow does: the pinned file it replaces is kept as .bak-<time>. `avoid`: file names (any
+    case) never to replace, the files the saved config's methods search with (live_workflows): then the copy gets
+    a name of its own (<method>-2.workflow ...). Its FASTA is copied into fasta_dir too when it exists and is
+    elsewhere (adopt_fasta), and the copy's database.db-path points at it.
     Changes no setting: returns {'workflow', 'fasta', 'notes', 'origin'} for the caller to put in config.yaml."""
     if not isinstance(info, WorkflowInfo):
         info = describe_workflow(info, evidence=False)
@@ -1682,13 +1956,22 @@ def adopt(info: WorkflowInfo | str | Path, method: str, cfg, catalog: Catalog | 
     text = src.read_bytes().decode("utf-8", errors="replace")
     fasta_name = ""
     db = info.database
-    if db and Path(db).is_file() and not _inside(db, fasta_dir):
+    if db and is_network_path(db):
+        notes.append(f"its FASTA {db} is on another computer: not copied (Ionomos does not open a network path a "
+                     "file names). Copy it into the FASTA folder yourself if it is the one you want")
+    elif db and Path(db).is_file() and not _inside(db, fasta_dir):
         res = adopt_fasta(describe_fasta(db), cfg, catalog)
         notes += res["notes"]
         fasta_name = res["fasta"]
         text = fragpipe.patch_workflow(text, fasta_dir / fasta_name)
     dest = workflow_dir / f"{stem}{WORKFLOW_SUFFIX}"
-    if dest.is_file() and dest.read_bytes().decode("utf-8", errors="replace") == text:
+    same = dest.is_file() and dest.read_bytes().decode("utf-8", errors="replace") == text
+    if not same and dest.exists() and dest.name.lower() in {a.lower() for a in (avoid or ())}:
+        live = dest.name
+        dest = _free_name(workflow_dir, dest.name)
+        stem = dest.name[:-len(WORKFLOW_SUFFIX)]
+        notes.append(f"{live} is what a method searches with now, so it is left as it is; the copy is {dest.name}")
+    if same:
         out = {"workflow": dest.name, "fasta": fasta_name or (Path(db).name if db and _inside(db, fasta_dir) else ""),
                "notes": notes + [f"{dest.name} already holds exactly this workflow; nothing copied"],
                "origin": str(src)}
@@ -1698,7 +1981,7 @@ def adopt(info: WorkflowInfo | str | Path, method: str, cfg, catalog: Catalog | 
         staged.write_text(text, encoding="utf-8", newline="")
         res = fragpipe.import_workflow(staged, stem, workflow_dir, fasta_dir)
     notes += res["notes"]
-    if stem != method:
+    if stem != method and stem == safe_name(method):
         notes.append(f"saved as {dest.name} (FragPipe-safe name for method {method})")
     notes.append(f"copied from {src}")
     _record(catalog, cfg, {"type": "workflow", "method": method, "origin": str(src), "copy": str(dest),
@@ -1753,7 +2036,10 @@ def update_check(catalog: Catalog, cfg, installed_version: str = "") -> list[Fla
             else:
                 info = describe_workflow(wf, ctx, evidence=False)
                 saved = _ver(info.saved_with)
-                for s in catalog.workflows:
+                order = sorted(catalog.workflows, key=lambda s: (
+                    canonical_rank(s.name, info.kind, m.workflow) is None, canonical_rank(s.name, info.kind,
+                                                                                          m.workflow) or 0, s.name))
+                for s in order:
                     sv = _ver(s.saved_with)
                     if s.source == "stock" and s.kind == info.kind and sv and saved and sv > saved \
                             and (not _ver(installed_version) or sv[0] == _ver(installed_version)[0]):
@@ -1794,13 +2080,15 @@ def installed_version_of(cfg) -> str:
 CLI_HELP = """\
 Find, understand and adopt FragPipe workflows and FASTAs on this PC (docs/LIBRARY.md).
 
-  ionomos library scan [--root DIR ...]       look (read-only) and remember what was found
+  ionomos library scan [--root DIR ...] [--only] [--replace]
+                                              look (read-only) and remember what was found
   ionomos library list [workflows|fastas] [--kind TMT] [--flags]
   ionomos library show PATH                   one workflow or FASTA in plain words, with its flags
   ionomos library recommend [--apply]         the best candidates per method; --apply copies them in and
                                               updates config.yaml (backed up first) for methods whose files
                                               are missing or broken
-  ionomos library adopt PATH --method KEY     copy a workflow (and its FASTA) into the pinned folders and use it
+  ionomos library adopt PATH --method KEY [--no-config] [--force]
+                                              copy a workflow (and its FASTA) into the pinned folders and use it
   ionomos library check                       newer stock workflows, old or superseded FASTAs
 """
 
@@ -1812,8 +2100,11 @@ def add_parser(sub):
                        description=CLI_HELP, formatter_class=argparse.RawDescriptionHelpFormatter)
     ls = p.add_subparsers(dest="library_cmd", required=True)
     sc = ls.add_parser("scan", help="look for workflows and FASTAs (reads only) and remember them")
-    sc.add_argument("--root", action="append", metavar="DIR", help="a folder to look in (repeatable; default: the "
-                    "pinned folders, FragPipe installations, users_root and library.roots)")
+    sc.add_argument("--root", action="append", metavar="DIR", help="also look in this folder (repeatable), besides "
+                    "the pinned folders, FragPipe installations, users_root and library.roots")
+    sc.add_argument("--only", action="store_true", help="look only in the --root folders")
+    sc.add_argument("--replace", action="store_true", help="keep only this scan, even if it stopped early or looked "
+                    "in fewer folders than the last one (default: what it did not look at is kept)")
     sc.add_argument("--depth", type=int, default=None, help="folders deep (default: library.max_depth, 6)")
     sc.add_argument("--time", type=float, default=None, help="seconds at most (default: library.time_limit_s, 120)")
     sc.add_argument("--json", action="store_true")
@@ -1834,7 +2125,10 @@ def add_parser(sub):
     ad.add_argument("--method", required=True)
     ad.add_argument("--with-fasta", action="store_true", help="also switch the method to the workflow's own FASTA "
                     "(default: only when the method's FASTA is missing)")
-    ad.add_argument("--no-config", action="store_true", help="copy only; leave config.yaml as it is")
+    ad.add_argument("--no-config", action="store_true", help="copy only, under a name no method uses; leave "
+                    "config.yaml as it is")
+    ad.add_argument("--force", action="store_true", help="adopt even a workflow of another kind than the method's, "
+                    "or a file with an error mark (a FASTA without decoys ...)")
     ck = ls.add_parser("check", help="newer stock workflows, old or superseded FASTAs (changes nothing)")
     ck.add_argument("--json", action="store_true")
     return p
@@ -1915,15 +2209,23 @@ def run_cli(args) -> int:
 
 
 def _cli_scan(args, cfg) -> int:
+    if args.only and not args.root:
+        print("--only needs at least one --root DIR", file=sys.stderr)
+        return 2
     prev = load_catalog(cfg)
-    roots = [Path(r) for r in args.root] if args.root else None
-    cat = scan(roots, cfg=cfg, max_depth=args.depth, time_limit_s=args.time, previous=prev,
+    ctx = context_from(cfg)
+    roots, missing = None, []
+    if args.root:   # --root adds to the default roots; --only looks in the --root folders alone (#153)
+        extra = [Path(os.path.expanduser(r)) for r in args.root]
+        roots = extra if args.only else default_roots(cfg, missing) + extra
+    cat = scan(roots, cfg=cfg, ctx=ctx, max_depth=args.depth, time_limit_s=args.time, previous=prev,
                progress=None if args.json else (lambda t: print(f"  {t}", file=sys.stderr)))
-    where = save_catalog(cfg, cat)
+    cat.notes[:0] = missing
+    cat, saved = save_scan(cfg, cat, prev, replace=args.replace, ctx=ctx)
     if args.json:
         print(json.dumps(cat.as_dict(), indent=1, ensure_ascii=False))
         return 0
-    print(f"{cat.how_far()}; saved in {where}")
+    print(f"{cat.how_far()}; {saved}")
     for kind in KINDS:
         ws = [w for w in cat.workflows if w.kind == kind]
         if ws:
@@ -1943,6 +2245,13 @@ def _cli_list(args, cat: Catalog) -> int:
         return 1
     ws = [w for w in cat.workflows if args.kind is None or w.kind.lower() == args.kind.lower()]
     fs = [] if args.kind else cat.fastas
+    if args.kind and not ws:   # #156: not the scan header and nothing else
+        known = args.kind.lower() in (k.lower() for k in KINDS)
+        found = sorted({w.kind for w in cat.workflows}, key=lambda k: KINDS.index(k) if k in KINDS else 99)
+        print(f"no workflows of kind {args.kind} in the last scan"
+              + ("" if known else f" ({args.kind} is not a kind; kinds: {', '.join(KINDS)})")
+              + (f"; found: {', '.join(found)}" if found else ""), file=sys.stderr)
+        return 0 if known else 2
     if args.what == "workflows":
         fs = []
     elif args.what == "fastas":
@@ -1951,6 +2260,8 @@ def _cli_list(args, cat: Catalog) -> int:
         print(json.dumps([x.as_dict() for x in (*ws, *fs)], indent=1, ensure_ascii=False))
         return 0
     print(f"scanned {cat.scanned_at}: {cat.how_far()}")
+    for n in cat.notes:
+        print(f"  note: {n}")
     for w in sorted(ws, key=lambda w: (KINDS.index(w.kind) if w.kind in KINDS else 99, w.path.lower())):
         marks = "".join("✗" if f.severity == "error" else "!" if f.severity == "warn" else "" for f in w.flags)[:3]
         print(f"[{w.kind}] {w.path}  ({w.source}) {marks}")
@@ -2014,18 +2325,20 @@ def _cli_recommend(args, cfg, cat: Catalog) -> int:
     ctx = context_from(cfg, tools=False)
     judge_catalog(cat, Context(workflow_dir=ctx.workflow_dir, fasta_dir=ctx.fasta_dir, installed_version=inst,
                                pinned=ctx.pinned, install_roots=ctx.install_roots))
-    taxon = _lab_taxon(cat, Path(cfg.fasta_dir))
+    taxon, taxon_from = lab_taxon(cat, Path(cfg.fasta_dir))
     report = {}
     for key in cfg.methods:
         kind = cfg.kind(key)
         pin = cat.find(ctx.pinned[kind]) if kind in ctx.pinned else None
-        report[key] = {"kind": kind, "workflows": recommend(cat, kind, inst, pin)[:3],
-                       "fastas": recommend_fastas(cat, taxon, kind)[:3]}
-    proposals = auto_assign(d, cat, inst)
+        report[key] = {"kind": kind, "workflows": recommend(cat, kind, inst, pin, cfg.methods[key].workflow)[:3],
+                       "fastas": recommend_fastas(cat, taxon, kind, taxon_from)[:3]}
+    notes: list[str] = []
+    proposals = auto_assign(d, cat, inst, notes)
     if args.json:
         print(json.dumps({"methods": {k: {"kind": v["kind"], "workflows": [c.as_dict() for c in v["workflows"]],
                                           "fastas": [c.as_dict() for c in v["fastas"]]} for k, v in report.items()},
-                          "proposals": [p.as_dict() for p in proposals]}, indent=1, ensure_ascii=False))
+                          "proposals": [p.as_dict() for p in proposals], "not_proposed": notes},
+                         indent=1, ensure_ascii=False))
     else:
         for key, v in report.items():
             print(f"{key} ({v['kind']}):")
@@ -2039,8 +2352,12 @@ def _cli_recommend(args, cfg, cat: Catalog) -> int:
             print("Proposed (methods whose files are missing or broken):")
             for p in proposals:
                 print(f"  {p.text()}")
-        else:
+        elif not notes:
             print("Every method's workflow and FASTA is there and usable: nothing proposed.")
+        if notes:
+            print("Not proposed:")
+            for n in notes:
+                print(f"  {n}")
     if args.apply and proposals:
         lines = apply_proposals(cfg, d, proposals, cat)
         _write_cfg(cfg, d)
@@ -2059,16 +2376,38 @@ def _cli_adopt(args, cfg) -> int:
         print(f"no method {args.method!r} in config.yaml (methods: {', '.join(cfg.methods)})", file=sys.stderr)
         return 2
     p = Path(args.path)
-    if not p.name.lower().endswith(WORKFLOW_SUFFIX):
-        res = adopt_fasta(p, cfg)
+    if not p.is_file():
+        print(f"{p} is not a file on this PC", file=sys.stderr)
+        return 1
+    is_wf = p.name.lower().endswith(WORKFLOW_SUFFIX)
+    ctx = context_from(cfg)
+    info = describe_workflow(p, ctx, evidence=False) if is_wf else describe_fasta(p, ctx)
+    problems = adopt_problems(info, cfg.kind(args.method), ctx)
+    if problems and not args.force:   # #150: never a DIA workflow for TMT or a FASTA FragPipe refuses, silently
+        print(f"not adopted for {args.method}: nothing copied, config.yaml not changed", file=sys.stderr)
+        for f in problems:
+            print(f"  ✗ [{f.code}] {f.text}", file=sys.stderr)
+            print(f"      → {f.fix}", file=sys.stderr)
+        print("  (--force adopts it anyway)", file=sys.stderr)
+        return 1
+    for f in problems:
+        print(f"  adopted although: [{f.code}] {f.text}")
+    current = getattr(cfg.methods[args.method], "workflow" if is_wf else "fasta", "") or ""
+    if not is_wf:
+        res = adopt_fasta(info, cfg)
         field_, value = "fasta", res["fasta"]
     else:
-        res = adopt(p, args.method, cfg)
+        res = adopt(info, args.method, cfg, avoid=live_workflows(cfg, None if args.no_config else args.method))
         field_, value = "workflow", res["workflow"]
     for n in res["notes"]:
         print(f"  {n}")
     if args.no_config:
-        print(f"copied; config.yaml not changed (set {args.method}.{field_} to {value} to use it)")
+        if value == current:
+            print(f"copied; config.yaml not changed: {args.method} uses {value}, which already held exactly this file")
+        else:
+            print(f"copied as {value}; config.yaml not changed: {args.method} still uses {current or '(nothing)'}. To "
+                  f"use the copy, run this again without --no-config, or set methods: {args.method}: {field_}: "
+                  f"{value} in config.yaml (the app's Methods tab)")
         return 0
     d = configio.read_config(cfg.config_path)
     m = d["methods"][args.method]

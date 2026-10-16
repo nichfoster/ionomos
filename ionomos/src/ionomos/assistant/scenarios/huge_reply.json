@@ -1,0 +1,26 @@
+{
+  "id": "huge_reply",
+  "about": "A model that returns 10 MB: refused at the size limit, nothing of it shown.",
+  "harness_only": "acts out a model that returns 10 MB",
+  "state": "fragpipe",
+  "question": "Why did my search fail?",
+  "experiment": "1",
+  "model": [
+    {
+      "content": "FragPipe ran out of memory during this search [log:1#{OutOfMemoryError}]. ",
+      "pad": 10000000
+    }
+  ],
+  "rubric": {
+    "refusal": true,
+    "must_mention": [
+      "not answering",
+      "ran out of memory"
+    ]
+  },
+  "harness": {
+    "outcome": "unavailable",
+    "reason": "larger than 2 MB",
+    "requests": 1
+  }
+}

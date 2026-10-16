@@ -725,9 +725,10 @@ def _text(x: float, y: float, s, size: float = 12, fill: str = "", **attrs) -> s
 
 def _compose(style: dict, d: dict, plot, what: str, title: str, subtitle: str,
              legend: list[tuple[str | None, str]], cuts: str = "", warn: str = "", comparison: str = "",
-             generator: str = "", about: str = "") -> str:
+             generator: str = "", about: str = "", stats: bool = True) -> str:
     """The finished figure around a plot: title, subtitle, legend, the plot, the cut-offs line, and a <desc>
-    that says where it came from (report.js composeFigure). `plot` is (body, w, h) for a plot with a size of
+    that says where it came from (report.js composeFigure). stats=False: a QC figure the statistics did not make
+    (the TMT QC's), so the footer and the <desc> leave the hits and the analysis settings out. `plot` is (body, w, h) for a plot with a size of
     its own (it is made smaller to fit, never stretched), or a function (w, h) -> body for one that fills
     the room that is left."""
     ink = _inks(style)
@@ -745,7 +746,8 @@ def _compose(style: dict, d: dict, plot, what: str, title: str, subtitle: str,
     exp = clean_text(d.get("title") or "Experiment")
     ttl = cut(clean_text(title), 16) if style["title"] else ""
     sub = cut(clean_text(subtitle), 12) if style["subtitle"] else ""
-    note = cut(clean_text(exp + (f" · hits: {cuts}" if cuts else "") + " · " + analysis_text(d)), 10) if style["note"] else ""
+    tail = (f" · hits: {cuts}" if cuts else "") + " · " + analysis_text(d) if stats else (f" · {cuts}" if cuts else "")
+    note = cut(clean_text(exp + tail), 10) if style["note"] else ""
     rows: list[list[tuple[float, str | None, str]]] = [[]]
     lx = 0.0
     for col, label in (legend if style["legend"] else []):
@@ -776,7 +778,8 @@ def _compose(style: dict, d: dict, plot, what: str, title: str, subtitle: str,
     unit = "mm" if mm else ""
     desc = [f"Figure: {what}" + (f" ({clean_text(about)})" if about else ""), f"Experiment: {exp}",
             f"Comparison: {clean_text(comparison)}" if comparison else "",
-            f"Cut-offs: {cuts}" if cuts else "", warn, f"Analysis: {analysis_text(d)}",
+            (f"Cut-offs: {cuts}" if stats else cuts) if cuts else "", warn,
+            f"Analysis: {analysis_text(d)}" if stats else "",
             f"Source table: {clean_text(d.get('sourceName'))}" if d.get("sourceName") else "",
             f"Export style: {style_text(style)}", generator]
     b = [f'<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="{_n(ow * per)}{unit}" '

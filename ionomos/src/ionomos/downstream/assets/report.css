@@ -1,4 +1,4 @@
-:root{color-scheme:light;--page:#f9f9f7;--surface:#fcfcfb;--sunk:#f1f0ec;--text:#0b0b0b;--text2:#52514e;--muted:#898781;
+:root{color-scheme:light;--page:#f9f9f7;--surface:#fcfcfb;--sunk:#f1f0ec;--text:#0b0b0b;--text2:#52514e;--muted:#6f6d68;
 --line:#e1e0d9;--ring:rgba(11,11,11,.10);--accent:#2a78d6;--warnbg:#fff6e0;--warnink:#6b4a00;
 --up:#e34948;--down:#2a78d6;--ns:#c3c2b7;--grid:#e1e0d9;--axis:#c3c2b7;--sel:#0b0b0b;
 --c0:#2a78d6;--c1:#eb6834;--c2:#1baf7a;--c3:#eda100;--c4:#e87ba4;--c5:#008300;--c6:#4a3aa7;--c7:#e34948}
@@ -115,7 +115,8 @@ box-shadow:0 8px 24px rgba(0,0,0,.16);z-index:30;max-height:380px;overflow:auto;
 padding:5px 9px;font:inherit;color:var(--text)}
 .optpanel p{margin:4px 0;font-size:12px}
 .filebtn{border:1px solid var(--line);border-radius:8px;padding:5px 11px;cursor:pointer;background:var(--surface);font-size:13px}
-.filebtn input{display:none}
+.filebtn{position:relative}.filebtn input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
+.filebtn:focus-within{outline:2px solid var(--accent);outline-offset:2px}
 .grow{display:flex;align-items:center;gap:6px;font-size:13px;margin:3px 0}.grow label{flex:1}
 .grow button{font-size:11.5px;padding:1px 7px}
 #searchinfo{margin:0 2px 6px;font-size:13px}#searchinfo button{font-size:12px;padding:1px 8px;margin-left:2px}

@@ -84,6 +84,7 @@ lab: [docs/ROADMAP.md](docs/ROADMAP.md).
 | [ASSISTANT.md](docs/ASSISTANT.md) | The local assistant (`ionomos ask`): what it reads, how answers are checked against their sources, how to set it up, and what is and is not tested yet |
 | [VISION.md](docs/VISION.md) | What Ionomos is for and who it is for, its principles (with decision numbers), what it is not, how it compares with FragPipe-Analyst, MSstats, Perseus and others, the road to publishing, and what v1.0 means |
 | [QUICKSTART.md](docs/QUICKSTART.md) | **New here?** `pip install ionomos`, `ionomos demo`, then `ionomos analyze` on your own table: what it reads and what the report shows |
+| [EXAMPLE.md](docs/EXAMPLE.md) | The real-data example (`ionomos example`): FragPipe-Analyst's published LFQ, DIA and TMT datasets downloaded from Zenodo (CC BY 4.0) and analysed; a walk through the three reports, and what Ionomos does differently |
 | [SCOPE.md](docs/SCOPE.md) | Problem statement, in/out of scope today and what moved, users, constraints, and the v1 lab plan it started from |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, data flow, job state machine, on-disk layout |
 | [NAMING_CONVENTION.md](docs/NAMING_CONVENTION.md) | The folder/file naming spec users must follow + the optional `experiment.yaml` |
@@ -102,18 +103,32 @@ lab: [docs/ROADMAP.md](docs/ROADMAP.md).
 | [LIBRARY.md](docs/LIBRARY.md) | The workflow and FASTA library (`ionomos library`): where it looks on the PC, what it says about each workflow and FASTA, how it ranks them per method and pins the chosen ones |
 | [UI.md](docs/UI.md) | The app's UI: its rules, every tab and window and who uses it, what was seen on screen, and the plan for daily driving (#109–#132) |
 | [FASTA.md](docs/FASTA.md) | Getting, preparing and refreshing FASTAs (`ionomos fasta`): UniProt downloads, decoys and contaminants, how old a FASTA is |
+| [SECURITY_NOTES.md](docs/SECURITY_NOTES.md) | The threat model, per component: what each part that faces an inbox, a drop, an engine's output, a bundle, a webhook or the network protects against, what it does not, and the test that attacks it (reporting a problem: SECURITY.md) |
 
 ## Try the analysis on any computer
 
 ```bash
 pip install ionomos        # until it is on PyPI: pip install "git+https://github.com/nichfoster/ionomos#subdirectory=ionomos"
 ionomos demo --open        # a simulated experiment and its report, offline
+ionomos example --open     # real published data (20.9 MB download): label-free, DIA and TMT reports
 ionomos analyze path/to/your/table.tsv --open
 ionomos compare path/to/experiment old_result.tsv   # does it agree with your other analysis?
 ionomos benchmark --grid quick     # sensitivity and false discoveries on simulated data
 ```
 
 Windows, macOS or Linux; no lab setup, no Tk. See [docs/QUICKSTART.md](docs/QUICKSTART.md).
+
+## Commands
+
+`ionomos --help` lists every command with its options; `ionomos <command> --help` the details.
+
+- **Any computer** (the pip install): `demo`, `example`, `analyze`, `check-folder`, `export`, `compare`,
+  `benchmark`, `spectronaut-columns`, `help`.
+- **The lab PC**: `setup` (the app; also what a bare `ionomos` opens), `init`, `check`, `doctor`, `preflight`, `run`,
+  `stop`, `status`, `attention`, `dry-run`, `names test`, `retry`, `cancel`, `pause`, `resume`,
+  `repair-ledger`, `qc-trend`, `library`, `fasta`, `tmt`, `notify-test`, `diagnose`, `bundle`, `ask`,
+  `ask-eval`, `update`.
+- **Testing**: `testbed` (a fake lab with a fake FragPipe; docs/TESTING.md).
 
 ## Quick start (dev, on this Mac)
 

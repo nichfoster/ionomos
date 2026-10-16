@@ -38,6 +38,8 @@ sits next to it for PCs where installers aren't allowed.
 
 To build by hand instead (Windows, Python 3.11+ incl. tcl/tk, Inno Setup 6):
 `powershell -ExecutionPolicy Bypass -File deploy\build_exe.ps1` → `dist\Ionomos-Setup-<version>.exe`.
+Without Inno Setup the script installs it with winget or choco; add `-NoInstaller` to stop after the portable
+zip instead (about a minute once the build venv exists). Making a release: [DEV_LOOP.md](DEV_LOOP.md), "Releasing".
 
 ### A2. Install (2 min)
 
