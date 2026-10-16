@@ -512,6 +512,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   packed before the tabs, and its buttons before the config path. (#111)
 - 4 Advanced: the hint "Needs the watcher to run in the logged-in session" covered the "Pop up a window when
   something needs you" checkbox. The Jobs tab's method column was too narrow ("isoDTI"). (#111)
+- **A job ledger shared by two threads no longer returns torn rows** (D104).
+  Reading the ledger on one thread while another read or wrote it could
+  return a job with no `parsed` data (`TypeError … not NoneType` in
+  `Job._from_row`), a short job list, or `InterfaceError`. This made master
+  CI's `test_the_worker_loop_runs_through_a_queue_of_faults` fail now and
+  then. Every use of the ledger's connection now holds one lock, and
+  `start_attempt` counts each attempt once when two threads call it.
+  `ionomos run` already gave the worker its own ledger.
 - **A protein seen in one condition only no longer vanishes when a global
   missing-value filter removes it** (D84). With `filter_global_pct: 66` and
   three conditions of three, a protein in every FPS run and no other was

@@ -14,12 +14,17 @@ The same `parsed` dict stored here is what intake writes to ionomos.json.
 
 Missing-id contracts: get() returns None; set_status()/requeue() are silent no-ops
 (pinned by tests); start_attempt() raises LedgerError.
+
+Thread-safe (D104): one connection, and every use of it holds `_lock`, so one Ledger
+may be shared across threads (a worker thread and its caller, as the test bed does).
+Unlocked, two threads stepping the same cached statement read NULL columns and short lists.
 """
 from __future__ import annotations
 
 import json
 import logging
 import sqlite3
+import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -114,6 +119,8 @@ _SAID_UNREADABLE: set[int] = set()
 class Ledger:
     def __init__(self, db_path: str | Path):
         self.path = Path(db_path)
+        # Every use of _conn holds this (D104). Re-entrant: recover_on_startup calls set_status.
+        self._lock = threading.RLock()
         self._conn = sqlite3.connect(self.path, check_same_thread=False, timeout=30)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
@@ -123,20 +130,22 @@ class Ledger:
             self._conn.commit()
 
     def close(self) -> None:
-        self._conn.close()
+        with self._lock:
+            self._conn.close()
 
     # ---------------------------------------------------------------- writes --
 
     def insert(self, job: Job) -> int:
         job.created_at = job.created_at or now_iso()
-        cur = self._conn.execute(
-            "INSERT INTO jobs (inbox_name, user, method, dest_dir, status, reason, created_at, parsed_json)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (job.inbox_name, job.user, job.method, job.dest_dir, job.status, job.reason,
-             job.created_at, json.dumps(job.parsed)),
-        )
-        self._conn.commit()
-        job.id = cur.lastrowid
+        with self._lock:
+            cur = self._conn.execute(
+                "INSERT INTO jobs (inbox_name, user, method, dest_dir, status, reason, created_at, parsed_json)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (job.inbox_name, job.user, job.method, job.dest_dir, job.status, job.reason,
+                 job.created_at, json.dumps(job.parsed)),
+            )
+            self._conn.commit()
+            job.id = cur.lastrowid
         return job.id
 
     def set_status(self, job_id: int, status: str, reason: str | None = None) -> None:
@@ -145,13 +154,14 @@ class Ledger:
             raise ValueError(f"bad status {status!r}")
         ts = now_iso()
         col = {"running": "started_at", "done": "finished_at", "failed": "finished_at"}.get(status)
-        if col:
-            self._conn.execute(
-                f"UPDATE jobs SET status=?, reason=?, {col}=? WHERE id=?", (status, reason, ts, job_id)
-            )
-        else:
-            self._conn.execute("UPDATE jobs SET status=?, reason=? WHERE id=?", (status, reason, job_id))
-        self._conn.commit()
+        with self._lock:
+            if col:
+                self._conn.execute(
+                    f"UPDATE jobs SET status=?, reason=?, {col}=? WHERE id=?", (status, reason, ts, job_id)
+                )
+            else:
+                self._conn.execute("UPDATE jobs SET status=?, reason=? WHERE id=?", (status, reason, job_id))
+            self._conn.commit()
 
     def start_attempt(self, job_id: int) -> int:
         """queued -> running and count the attempt. Returns the new attempt number.
@@ -159,12 +169,13 @@ class Ledger:
         Raises LedgerError if the job row doesn't exist (e.g. the ledger was rebuilt
         underneath a running watcher); get()/requeue()/set_status() stay silent no-ops.
         """
-        row = self._conn.execute("SELECT attempts FROM jobs WHERE id=?", (job_id,)).fetchone()
-        if row is None:
-            raise LedgerError(f"job {job_id} is not in the ledger; cannot start an attempt")
-        self._conn.execute("UPDATE jobs SET status='running', reason=NULL, started_at=?, finished_at=NULL,"
-                           " attempts=attempts+1 WHERE id=?", (now_iso(), job_id))
-        self._conn.commit()
+        with self._lock:  # the read and the update are one step: another thread can't count in between
+            row = self._conn.execute("SELECT attempts FROM jobs WHERE id=?", (job_id,)).fetchone()
+            if row is None:
+                raise LedgerError(f"job {job_id} is not in the ledger; cannot start an attempt")
+            self._conn.execute("UPDATE jobs SET status='running', reason=NULL, started_at=?, finished_at=NULL,"
+                               " attempts=attempts+1 WHERE id=?", (now_iso(), job_id))
+            self._conn.commit()
         return row["attempts"] + 1
 
     def recover_on_startup(self) -> list[tuple[int, str]]:
@@ -174,16 +185,17 @@ class Ledger:
         started MAX_ATTEMPTS times (then failed, so a job that kills the PC
         can't loop forever). Returns [(job id, new status)].
         """
-        rows = self._conn.execute("SELECT id, attempts FROM jobs WHERE status='running'").fetchall()
         out = []
-        for r in rows:
-            if r["attempts"] >= MAX_ATTEMPTS:
-                self.set_status(r["id"], "failed", f"interrupted {r['attempts']} times; not restarting it again "
-                                                   f"(ionomos retry {r['id']} to try once more)")
-                out.append((r["id"], "failed"))
-            else:
-                self.set_status(r["id"], "queued", "interrupted (ionomos restarted); will run again")
-                out.append((r["id"], "queued"))
+        with self._lock:
+            rows = self._conn.execute("SELECT id, attempts FROM jobs WHERE status='running'").fetchall()
+            for r in rows:
+                if r["attempts"] >= MAX_ATTEMPTS:
+                    self.set_status(r["id"], "failed", f"interrupted {r['attempts']} times; not restarting it "
+                                                       f"again (ionomos retry {r['id']} to try once more)")
+                    out.append((r["id"], "failed"))
+                else:
+                    self.set_status(r["id"], "queued", "interrupted (ionomos restarted); will run again")
+                    out.append((r["id"], "queued"))
         return out
 
     def requeue(self, job_id: int, reason: str | None = None, reset_attempts: bool = False,
@@ -193,28 +205,34 @@ class Ledger:
         must not count towards MAX_ATTEMPTS."""
         sql = "UPDATE jobs SET status='queued', reason=?, finished_at=NULL" + (
             ", attempts=0" if reset_attempts else ", attempts=MAX(attempts-1, 0)" if undo_attempt else "")
-        self._conn.execute(sql + " WHERE id=?", (reason, job_id))
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(sql + " WHERE id=?", (reason, job_id))
+            self._conn.commit()
 
     # ----------------------------------------------------------------- reads --
+    # Rows are fetched inside the lock; a cursor stepped after it is released can be torn (D104).
 
     def get(self, job_id: int) -> Job | None:
-        row = self._conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
         return Job._from_row(row) if row else None
 
     def list(self, status: str | None = None) -> list[Job]:
-        if status:
-            rows = self._conn.execute("SELECT * FROM jobs WHERE status=? ORDER BY id", (status,))
-        else:
-            rows = self._conn.execute("SELECT * FROM jobs ORDER BY id")
-        return [Job._from_row(r) for r in rows.fetchall()]
+        with self._lock:
+            if status:
+                rows = self._conn.execute("SELECT * FROM jobs WHERE status=? ORDER BY id", (status,)).fetchall()
+            else:
+                rows = self._conn.execute("SELECT * FROM jobs ORDER BY id").fetchall()
+        return [Job._from_row(r) for r in rows]
 
     def next_queued(self) -> Job | None:
-        row = self._conn.execute("SELECT * FROM jobs WHERE status='queued' ORDER BY id LIMIT 1").fetchone()
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM jobs WHERE status='queued' ORDER BY id LIMIT 1").fetchone()
         return Job._from_row(row) if row else None
 
     def already_taken(self, inbox_name: str) -> bool:
-        row = self._conn.execute("SELECT 1 FROM jobs WHERE inbox_name=?", (inbox_name,)).fetchone()
+        with self._lock:
+            row = self._conn.execute("SELECT 1 FROM jobs WHERE inbox_name=?", (inbox_name,)).fetchone()
         return row is not None
 
 
