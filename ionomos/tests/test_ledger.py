@@ -325,7 +325,7 @@ def _hammer(*targets, rounds: int) -> list[str]:
     for t in threads:
         t.start()
     for t in threads:
-        t.join(timeout=600)  # a slow Windows runner took over 120 s for 300 rounds
+        t.join(timeout=240)  # under faulthandler_timeout (300 s); a slow Windows runner took over 120 s for 300 rounds
     assert not any(t.is_alive() for t in threads), "a ledger thread hung"
     return errors
 
