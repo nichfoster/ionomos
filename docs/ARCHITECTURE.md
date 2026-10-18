@@ -395,7 +395,7 @@ FragPipe faults (D69; each acted out by the fake FragPipe in `tests/test_faults.
 
 | Threat | Defence |
 |---|---|
-| Ionomos is ended (Task Manager, a crash) while FragPipe runs; FragPipe lives on in its own process group | `ionomos_run\engine_pid.json` holds the pid and the OS's start time of the process; the next start (`worker.recover`) and every attempt stop a recorded process that is still running **and** started then (never one that only has its number), before the job runs again; the folder says `queued` / `failed` |
+| Ionomos is ended (Task Manager, a crash) while FragPipe runs; FragPipe lives on in its own process group | `ionomos_run\engine_pid.json` holds the pid and the OS's start time of the process; the next start (`worker.recover`) and every attempt stop a recorded process that is still running **and** started then (never one that only has its number), before the job runs again; the folder says `queued` / `failed`. One that won't stop keeps its record and holds the job (and the queue) until it has ended (D107) |
 | FragPipe hangs | the time limit kills the process tree; the cause names the limit and the step it was at |
 | FragPipe is ended from outside, or crashes without a message | a POSIX signal, a Windows NTSTATUS, or a run that stopped mid-step without a word gets a cause ("ended from outside", "crashed") |
 | Exit code 0, but the main result table is empty, binary or cut off mid-row | failed ("not written to the end"); a header alone: "no identifications"; `psm.tsv` problems: a note; no end line and no table: failed |

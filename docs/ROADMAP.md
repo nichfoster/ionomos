@@ -1139,8 +1139,8 @@ Collected from the other docs; resolve before/during Phase 1.
       `resolved_by: gui` from a hand-written one (#173); `ionomos run`'s two start-up tracebacks (#172).
 - [ ] Engines (D98): stop what an engine leaves running after it exits on Windows (a Job Object or a Toolhelp
       walk, #174); check on the PC whether MSFragger's `BatmassIoThermoServer.exe` outlives MSFragger. A leftover
-      search that can't be stopped must hold the job, not run a second search beside it, and the cancel result
-      can't say the engine survived the kill (#175). The console log keeps every attempt (up to 2 GB each):
+      search that can't be stopped holds the queue until it ends (#175, D107): should jobs of other folders run
+      beside it instead? Today "one search at a time" wins. The console log keeps every attempt (up to 2 GB each):
       move aside or truncate an attempt's log past the limit? Does a MaxQuant retry reuse its per-raw working
       folders next to the raws (stale results) or redo them? DIA-NN reads `diann.cfg` in an unknown encoding:
       check a path with µ or ü on the PC, or hold a job whose paths are not ASCII.
