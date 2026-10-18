@@ -31,7 +31,8 @@ What CurveCurator does, and so what this does (its defaults: OLS, "standard" spe
 
 Doses come from analysis.doses (condition -> "10 nM"), else from condition names (Cmpd_10nM, 0p1uM,
 10 µM); the control (DMSO / vehicle, analysis.find_control) is dose 0. A series (one compound) needs
-analysis.dose_min_doses distinct doses above zero (default 4) or it is skipped with a note.
+analysis.dose_min_doses distinct doses above zero (default 4) or it is skipped with a note; so does each
+feature, counting the doses it was measured at (else "not fitted", counted in a note).
 Checked against CurveCurator 0.6.0 itself (tests/golden/dose_response/, tests/test_dose_response.py).
 """
 from __future__ import annotations
@@ -558,9 +559,11 @@ def _ec50(pec50: float, unit: str) -> float:
     return 10 ** (-pec50) / MOLAR[unit] if math.isfinite(pec50) and abs(pec50) < 300 else math.nan
 
 
-def fit_series(m, measured, sr: Series, alpha: float, fc_lim: float, progress=None) -> Curves:
+def fit_series(m, measured, sr: Series, alpha: float, fc_lim: float, progress=None, min_doses: int = 4) -> Curves:
     """Every feature of one series. m: the QuantMatrix (features, samples, conditions, kind); measured: its
-    values before imputation (log2; None = missing)."""
+    values before imputation (log2; None = missing). A feature needs min_doses (analysis.dose_min_doses) distinct
+    measured doses, as its series does (#162): replicates of two doses are four points, but a 4-parameter curve
+    through two doses puts its step anywhere between them, and the fit still gave a p-value and a tight pEC50."""
     cols = [j for j, x in enumerate(m.samples) if m.condition[x] in sr.dose_of or m.condition[x] in sr.controls]
     dose = {j: sr.dose_of.get(m.condition[m.samples[j]], 0.0) for j in cols}
     ctrl = [j for j in cols if dose[j] == 0]
@@ -579,7 +582,8 @@ def fit_series(m, measured, sr: Series, alpha: float, fc_lim: float, progress=No
         ref = sum(cv) / len(cv) if cv else 1.0
         lref = math.log2(ref)
         pts = [(math.log10(dose[j]), 2.0 ** (row[j] - lref)) for j in order if row[j] is not None]
-        fit = fit_curve([a for a, _ in pts], [b for _, b in pts], xs_all) if len(pts) >= 4 else None
+        enough = len(pts) >= 4 and len({a for a, _ in pts}) >= min_doses
+        fit = fit_curve([a for a, _ in pts], [b for _, b in pts], xs_all) if enough else None
         if fit is None:
             out.too_few += 1
             continue
@@ -616,14 +620,16 @@ def run(p, s, control: str | None, progress=None) -> tuple[DoseResult | None, Pl
         return None, plan
     alpha = getattr(s, "dose_alpha", DEFAULT_ALPHA)
     fc_lim = getattr(s, "dose_fc_lim", DEFAULT_FC_LIM)
-    curves = [fit_series(m, p.measured, sr, alpha, fc_lim, progress) for sr in plan.series]
+    min_doses = max(1, int(getattr(s, "dose_min_doses", 4)))
+    curves = [fit_series(m, p.measured, sr, alpha, fc_lim, progress, min_doses) for sr in plan.series]
     notes = list(plan.notes)
     for c in curves:
         label = f" ({c.series.name})" if c.series.name else ""
         if c.no_control:
             notes.append(f"dose-response{label}: {c.no_control} features never measured in the control were left out")
         if c.too_few:
-            notes.append(f"dose-response{label}: {c.too_few} features measured at fewer than 4 doses were not fitted")
+            notes.append(f"dose-response{label}: {c.too_few} features measured at fewer than {min_doses} doses "
+                         f"(analysis.dose_min_doses) were not fitted")
     return DoseResult(curves, notes, alpha, fc_lim), plan
 
 

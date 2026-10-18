@@ -931,6 +931,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     messages get their explanation; the `<b>` tags kept them from matching (`fragpipe.EXPLANATIONS`).
   - `ionomos testbed stress`: the TMT drops carry a whole TMT-10 channel map. Since D91 every TMT drop failed
     before the search, so the stress run searched no TMT.
+- **A dose-response curve is no longer fitted for a protein measured at fewer than `dose_min_doses` doses
+  (#162, D106).** Replicates of two doses counted as four points, so a protein missing at the low doses got a
+  4-parameter fit, an "up" call and a tight pEC50 the data could not give. It is now "not fitted" and counted
+  in the stage's note, which names `analysis.dose_min_doses`.
 
 ### Documentation
 

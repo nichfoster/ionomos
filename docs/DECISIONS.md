@@ -4546,3 +4546,28 @@ network path, which Ionomos doesn't open: copy the file into the experiment
 folder". Refusing it at intake was the other option; it was not taken because
 the same key is also set in the app's Analysis tab for a folder searched
 outside Ionomos, where the warning is enough.
+
+### D106 — A dose-response curve needs `dose_min_doses` distinct measured doses for each feature, not only per compound
+**2026-10-18.** Issue #162: `doseresponse.fit_series` fitted a feature when
+it had 4 measured *points*, so a protein measured only at the two highest of
+five doses (3 replicates each, missing below: the usual case for a
+low-abundance protein without imputation) was fitted with the 4-parameter
+curve, called "up", and given a pEC50 with a ±0.4 interval. Through two
+doses and the control the step can sit anywhere between them; the interval
+came from the Jacobian, not from the data. The note already said "features
+measured at fewer than 4 doses were not fitted", which was not the rule the
+code applied.
+
+A feature now needs as many distinct measured doses as its compound does
+(`analysis.dose_min_doses`, default 4), and 4 points; otherwise it is "not
+fitted" and counted in the note, which now names the setting. A lab that
+lowers `dose_min_doses` lowers both: one setting, one rule.
+
+CurveCurator's own per-curve filter is `max_missing`, a count of missing
+values per curve; the golden comparison (tests/golden/dose_response/,
+CurveCurator 0.6.0) switches it off (`max_missing = n`), so it does not pin
+a rule here. A count of missing values doesn't say how many doses are left
+(three missing replicates of one dose vs one of three doses), so distinct
+doses it is. The golden designs' features all keep at least 4 doses and are
+unchanged. **Not verified**: against CurveCurator with its default
+`max_missing`.

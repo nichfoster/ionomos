@@ -1129,8 +1129,8 @@ Collected from the other docs; resolve before/during Phase 1.
       exports would settle these. FragPipe's own tables saved again from Excel with thousands separators are still
       read as all missing (FragPipe never writes them). A MaxQuant TMT table without a design gets one condition
       per channel; it should be `unassigned` and ask, as Sage TMT does (#165).
-- [ ] Statistics: a dose-response curve is fitted and called for a protein measured at only two doses (#162; check
-      CurveCurator's per-curve `max_missing` rule first); `qc.pca` takes ~6 min on 500 samples (#163); knn
+- [ ] Statistics: ~~a dose-response curve is fitted and called for a protein measured at only two doses (#162)~~
+      (done, D106); `qc.pca` takes ~6 min on 500 samples (#163); knn
       imputation is quadratic in features (#164).
 - [ ] Intake: what only the watcher can see (a dot-ended folder whose fixed name is taken, a failing loose-file
       grouping) is logged but not raised as an attention item. Since #139 (D94) `cli.cmd_run` gives the watcher

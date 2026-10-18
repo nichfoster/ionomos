@@ -454,7 +454,7 @@ analysis:                   # results/report.html for this experiment (lab defau
     Cmpd_mid: 100 nM
     Cmpd_high: 1 uM
     Cmpd_top: 10 uM
-  dose_min_doses: 4         # doses above 0 a compound needs before curves are fitted (default 4)
+  dose_min_doses: 4         # doses above 0 a compound, and each protein, needs before a curve is fitted (default 4)
   times:                    # a time course (D53); default: read from the condition names (Drug_0h, Drug_30min,
     Drug_start: 0           #   Drug_4h, 2d; units s, min, h, d). 3+ time points per series get the time-course
     Drug_early: 30 min      #   tests; a bare number needs time_unit
