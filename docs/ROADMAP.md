@@ -1153,8 +1153,8 @@ Collected from the other docs; resolve before/during Phase 1.
       size + SHA-256 from the same GitHub answer); `maxquant.create_template` and `sage.run_job` start programs
       without `batch_problem`; `bundle inspect --key` reads a member with no line break whole; Teams Adaptive
       Cards render a little Markdown from a failure reason; a mapped drive letter (`Z:`) inside a scanned file is
-      not recognised as a network path. An attention item id with `../` reads and rewrites a JSON file outside the
-      attention folder (#169; the assistant checks the id itself now).
+      not recognised as a network path. ~~An attention item id with `../` reads and rewrites a JSON file outside the
+      attention folder (#169)~~ (done: `attention.py` checks every id).
 - [ ] Assistant: should a whole question have a time limit? It can make 6 requests of `timeout_seconds` each (12
       minutes by default, #171). Should a proposal for another job than the one asked about be refused rather than
       shown with a note (D75 4)? Round 4 kept the note and extended it to items without a job and unknown

@@ -393,6 +393,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `workflow:` and `fasta:` are file names in `workflow_dir` / `fasta_dir`, as documented; a path (absolute,
   `..`, a drive, or a `//server/share` that made Windows sign in to that server as the watcher's account) is
   refused at intake with what to do. A network `analysis.site_annotation:` is never opened; the analysis warns.
+- `ionomos attention show / dismiss / snooze / resolve` with an id such as `../../outside` read, and rewrote, a
+  JSON file outside the attention folder (#169). `attention.py` now takes only an id it could have made
+  (`[A-Za-z0-9._-]`) for every caller; anything else is "no item".
 - The Advanced tab's RAM (GB) field refuses a decimal (47.5) as config.yaml's loader does (D102); it used to
   accept it and the next start stopped on `fragpipe.ram_gb must be a whole number`.
 - **TMT-Integrator protein tables are labelled by gene.** In `ratio_protein_*.tsv` / `abundance_protein_*.tsv`,
