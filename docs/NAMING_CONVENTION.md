@@ -415,8 +415,8 @@ validated at intake and its values override what was parsed.
 method: TMT                 # override the keyword match
 user: Isaac                 # override the initials match
 date: 2026-09-02
-workflow: TMT10-MS3-phospho # file under config workflow_dir
-fasta: human_reviewed_2025-01_decoys.fas
+workflow: TMT10-MS3-phospho # a file name in config workflow_dir (a path is refused: D105)
+fasta: human_reviewed_2025-01_decoys.fas  # a file name in fasta_dir
 allow_uneven_fractions: true   # accept reps with different fraction sets
 
 files:                      # per-file overrides; numbers 1–999 (fraction: -1 = single-shot)

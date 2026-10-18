@@ -1148,8 +1148,8 @@ Collected from the other docs; resolve before/during Phase 1.
       points load as a valid config with fewer methods, put right by the next reload); a settle delay would close
       it. 24 options outside `cli.py` have no `--help` text (#166); `bundle 77` and `library show <missing>` exit
       the other way round from the table (#167).
-- [ ] Security (D99, D100, SECURITY_NOTES.md): `experiment.yaml`'s `workflow:` / `fasta:` accept any absolute or
-      UNC path, `site_annotation:` a UNC one (#168); an Authenticode check of the downloaded installer (today:
+- [ ] Security (D99, D100, SECURITY_NOTES.md): ~~`experiment.yaml`'s `workflow:` / `fasta:` accept any absolute or
+      UNC path, `site_annotation:` a UNC one (#168)~~ (done, D105); an Authenticode check of the downloaded installer (today:
       size + SHA-256 from the same GitHub answer); `maxquant.create_template` and `sage.run_job` start programs
       without `batch_problem`; `bundle inspect --key` reads a member with no line break whole; Teams Adaptive
       Cards render a little Markdown from a failure reason; a mapped drive letter (`Z:`) inside a scanned file is

@@ -4521,3 +4521,28 @@ convention, which the test bed already broke. On-disk names and the schema are
 unchanged. `test_ledger.py` hammers one Ledger from two threads (both tests
 failed 5 runs out of 5 on the old code). **Not verified**: CI's Linux
 runners, where the original failure was seen.
+
+### D105 — experiment.yaml's `workflow:` and `fasta:` are file names; a network `site_annotation:` is never opened
+**2026-10-18.** Issue #168: `workflow:` and `fasta:` in experiment.yaml
+reached `fragpipe._find_file`, which takes an absolute path as it is. Whoever
+drops a folder writes experiment.yaml (the inbox is often a network share), so
+a drop could make the search use a workflow or FASTA from anywhere the
+watcher's account can read, and a `//server/share` value made Windows sign in
+to that server as the watcher's account. The docs already said "file under
+workflow_dir".
+
+`manifest.parse_overrides` now refuses, at intake, a `workflow:` or `fasta:`
+with `/`, `\`, `:` (a drive, `C:x` included), a bare `..`, or a control
+character, with an OverridesError that says to put the file in
+`workflow_dir` / `fasta_dir` and give its name; the drop stays in the inbox
+with its `.REJECTED.txt`. Names are not sanitised: a file name with spaces or
+dots is kept as written, since it has to match the file. config.yaml's
+`methods:` still take a full path: the lab's own config is trusted, a drop is
+not (SECURITY_NOTES.md).
+
+`analysis.site_annotation:` keeps its full path (WORKFLOWS.md), but
+`cys.find_annotation` never opens a network path; the analysis warns "a
+network path, which Ionomos doesn't open: copy the file into the experiment
+folder". Refusing it at intake was the other option; it was not taken because
+the same key is also set in the app's Analysis tab for a folder searched
+outside Ionomos, where the warning is enough.

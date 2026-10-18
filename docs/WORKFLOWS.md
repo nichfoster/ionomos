@@ -949,7 +949,7 @@ analysis:                      # config.yaml (lab) or experiment.yaml (one exper
   liganded_ratio: 4            # R a replicate must reach
   liganded_min_replicates: 2   # ... in at least this many replicates
   liganded_direction: high     # high: R = heavy / light (treated sample = light tag) | low: R = light / heavy
-  site_annotation: cysdb.csv   # optional: a site table you downloaded (CysDB), in the experiment folder or a full path
+  site_annotation: cysdb.csv   # optional: a site table you downloaded (CysDB), in the experiment folder or a full path (not a network one)
   liganded: true               # false: no calls
 ```
 
