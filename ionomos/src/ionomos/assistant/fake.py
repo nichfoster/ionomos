@@ -18,6 +18,9 @@ and, with any of them but "error":
     "seconds": 1.5      the reply takes this long, spread over its pieces (a slow model, a trickling stream)
     "pad": 10000000     the content is repeated until it is this many characters (a model that returns 10 MB)
 
+ScriptedModel(turns, clock=Clock()) moves that fake clock on by "seconds" instead of sleeping; pass the same
+clock to assistant.ask(clock=...) and a question's time limit is tested without waiting (#171).
+
 Like the testbed's fake FragPipe it checks what the real thing would: the URL, that the request is a
 chat completion with a model, a system prompt first, and a tool message for every tool call. With
 stream=True it answers in server-sent events, content and tool-call arguments in pieces.
@@ -44,21 +47,38 @@ from ionomos.assistant.client import ChatError
 MODEL = "scripted-fake"
 
 
+class Clock:
+    """A clock for tests: clock() is the time now, sleep(s) moves it on at once. Passed to ScriptedModel(clock=)
+    and assistant.ask(clock=), a turn's "seconds" pass without the test waiting for them (#171)."""
+
+    def __init__(self, start: float = 1000.0):
+        self.now = float(start)
+
+    def __call__(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += float(seconds)
+
+
 class ScriptedModel:
-    def __init__(self, turns: list[dict], stream: bool = False):
+    def __init__(self, turns: list[dict], stream: bool = False, clock: Clock | None = None):
         self.turns = list(turns)
         self.stream = stream
+        self.clock = clock      # a fake clock: "seconds" move it on instead of sleeping
         self.requests: list[dict] = []
+        self.timeouts: list[float] = []   # the timeout each request was given (the socket's, over HTTP)
 
     def __call__(self, url: str, data: bytes, headers: dict, timeout: float) -> Iterator[bytes]:
         body = json.loads(data.decode("utf-8"))
         self._check(url, body)
         self.requests.append(body)
+        self.timeouts.append(timeout)
         turn = self.turns[len(self.requests) - 1] if len(self.requests) <= len(self.turns) else {"content": ""}
         if "error" in turn:
             raise ChatError(str(turn["error"]))
         if "raw" in turn:
-            return self._paced([str(turn["raw"]).encode("utf-8")], turn.get("seconds", 0))
+            return self._paced([str(turn["raw"]).encode("utf-8")], turn.get("seconds", 0), self.clock)
         calls = [{"id": c.get("id", f"call_{len(self.requests)}_{n}"), "type": "function",
                   "function": {"name": c["name"], "arguments": c["arguments"] if isinstance(c.get("arguments"), str)
                                else json.dumps(c.get("arguments") or {})}}
@@ -67,17 +87,19 @@ class ScriptedModel:
         if turn.get("pad") and content:
             content = (content * (int(turn["pad"]) // len(content) + 1))[: int(turn["pad"])]
         chunks = self._events(content, calls) if self.stream else [self._whole(content, calls)]
-        return self._paced(chunks, turn.get("seconds", 0))
+        return self._paced(chunks, turn.get("seconds", 0), self.clock)
 
     @staticmethod
-    def _paced(chunks: list[bytes], seconds: float) -> Iterator[bytes]:
-        """The pieces of a reply, each after its share of `seconds` (none: all at once)."""
+    def _paced(chunks: list[bytes], seconds: float, clock: Clock | None = None) -> Iterator[bytes]:
+        """The pieces of a reply, each after its share of `seconds` (none: all at once). With a fake clock the
+        time passes on it, not in the test."""
         if not seconds:
             return iter(chunks)
+        sleep = clock.sleep if clock is not None else time.sleep
 
         def slow():
             for c in chunks:
-                time.sleep(float(seconds) / len(chunks))
+                sleep(float(seconds) / len(chunks))
                 yield c
         return slow()
 

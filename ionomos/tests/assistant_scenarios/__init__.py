@@ -10,6 +10,7 @@ from ionomos.assistant.scenarios import (  # noqa: F401
     for_models,
     is_injection,
     load,
+    log_line,
     question_key,
     resolve,
     score,

@@ -159,7 +159,7 @@ assistant:
                                         # llama-server: http://127.0.0.1:8080/v1). Any other computer is refused.
   model: ""                   # the model's name in that runtime; none is recommended yet (ROADMAP Phase 6.0)
   maintainer: ""              # who "ask the maintainer" names, e.g. "Nick (nick@lab.example)"
-  timeout_seconds: 120        # how long to wait for the model
+  timeout_seconds: 120        # how long one request waits for the model; a whole question, twice this
   stream: true                # false if the runtime can't stream tool calls
   allow_cloud: false          # reserved for ROADMAP 6.4; a non-local base_url is refused whatever this says
   keep_alive: ""              # how long the runtime keeps the model loaded after a question: Ollama reads it

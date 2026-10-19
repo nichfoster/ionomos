@@ -29,6 +29,8 @@ log = logging.getLogger("ionomos.assistant")
 BUTTON = "Ask about this"
 TITLE = "Ionomos — Ask about this"
 ASKING = "Asking the assistant … a model on this computer can take a minute or two."
+ASKING_LIMIT = ("Asking the assistant … a model on this computer can take a minute or two. Ionomos waits at most "
+                "{limit} for this question, then shows its own explanation.")
 NOTE = ("The assistant changes nothing itself. It can propose one change, which opens in a window of its own "
         "with Confirm and Cancel; typing yes here does nothing.")
 PROPOSAL_TITLE = "Ionomos — the assistant proposes a change"
@@ -93,6 +95,31 @@ def default_question(item) -> str:
     """The question the window starts with. Fixed per kind: nothing from the item's title, message, folder or
     sample names (untrusted) goes into the question; the item is named to the assistant by ask(item_id=...)."""
     return QUESTIONS.get(getattr(item, "kind", ""), DEFAULT_QUESTION)
+
+
+def duration(seconds: float) -> str:
+    """240 -> "4 minutes", 90 -> "90 seconds", 150 -> "2.5 minutes"."""
+    if seconds < 120:
+        return f"{seconds:.0f} seconds"
+    return f"{seconds / 60:.1f}".removesuffix(".0") + " minutes"
+
+
+def asking(load_cfg: Callable[[], object]) -> str:
+    """The line the window shows while it waits: how long the question may take with the settings in force
+    (assistant.question_limit; while_searching's while a search runs, #171). Never raises: ASKING when the config
+    does not load, or when no model will be asked (not set up, refused, paused), so the answer comes at once."""
+    try:
+        from ionomos import assistant
+        from ionomos.assistant import runtime
+
+        cfg = load_cfg()
+        s = runtime.effective(assistant.settings_of(cfg), runtime.search_running(getattr(cfg, "log_dir", None))[0])
+        if assistant.state(s)[0] != "ready" or s.get("pause"):
+            return ASKING
+        return ASKING_LIMIT.format(limit=duration(assistant.question_limit(s)))
+    except Exception:  # noqa: BLE001 - the answer itself says what is wrong
+        log.debug("Ask about this: no time limit to show", exc_info=True)
+        return ASKING
 
 
 def render(answer) -> Shown:

@@ -529,7 +529,7 @@ class AskWindow:
         self.pending = True
         question = self.question.get().strip() or askui.default_question(self.item)
         self.ask_btn.configure(state="disabled")
-        self.status.configure(text=askui.ASKING)
+        self.status.configure(text=askui.asking(self.pops.load_config))  # says how long it may take (#171)
         # the worker thread holds only these: the long-lived Popups and host, the token, plain values
         pops, token, item_id, load = self.pops, self.token, self.item.id, self.pops.load_config
         askui.start(lambda: askui.answer_for(load, question, item_id),
