@@ -38,18 +38,6 @@ def _options(p):
     return [a for a in p._actions if not isinstance(a, (argparse._HelpAction, argparse._SubParsersAction))]
 
 
-# options defined outside cli.py (bundle.py, library.py, testbed.py, fastasource.py, tmtkit.py) with no help text
-# yet (#166): this list may only shrink (a new option without help fails the test)
-NO_HELP_YET = {
-    "library scan --json", "library list what", "library list --json", "library show path", "library show --json",
-    "library recommend --json", "library adopt path", "library adopt --method", "library check --json",
-    "testbed init dir", "testbed list dir", "testbed drop name", "testbed drop dir", "testbed reset dir",
-    "testbed stress --seed", "testbed stress --no-chaos", "fasta search --limit", "fasta prepare fasta",
-    "fasta prepare --no-philosopher", "tmt plan folder", "tmt plan --json", "tmt annotation folder",
-    "tmt qc folder", "tmt qc --json",
-}
-
-
 def _name(path, a) -> str:
     return " ".join([*path, a.option_strings[-1] if a.option_strings else a.dest])
 
@@ -70,9 +58,9 @@ def test_every_option_of_every_subcommand_is_explained_in_its_help():
             shown = a.option_strings or [p._get_formatter()._format_args(a, a.dest).strip("[]. ")]
             for s in shown:
                 assert s in text, f"`ionomos {' '.join(path)} --help` does not mention {s}"
-            if not a.help:
+            if not (a.help or "").strip():  # every option and positional, in cli.py or a module's add_parser (#166)
                 lacking.add(_name(path, a))
-    assert lacking <= NO_HELP_YET, f"options without a help text: {sorted(lacking - NO_HELP_YET)}"
+    assert not lacking, f"options without a help text: {sorted(lacking)}"
 
 
 def test_the_docstring_has_the_exit_code_table():
