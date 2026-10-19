@@ -746,7 +746,8 @@ condition) only draw it; a choice goes through `roles.set_role` into
 
 `results/dose_response.tsv` (`downstream/doseresponse.py`, D44) is made when
 the conditions are a titration: names like `Cmpd_10nM` (or
-`analysis.doses`) and at least `dose_min_doses` (4) doses above the control.
+`analysis.doses`) and at least `dose_min_doses` (4) doses above the control; each feature needs that many
+measured doses too (D106).
 It runs after the insights stage, isolated like it, on the processed
 matrix's *measured* values (no imputed ones):
 

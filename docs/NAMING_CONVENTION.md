@@ -415,8 +415,8 @@ validated at intake and its values override what was parsed.
 method: TMT                 # override the keyword match
 user: Isaac                 # override the initials match
 date: 2026-09-02
-workflow: TMT10-MS3-phospho # file under config workflow_dir
-fasta: human_reviewed_2025-01_decoys.fas
+workflow: TMT10-MS3-phospho # a file name in config workflow_dir (a path is refused: D105)
+fasta: human_reviewed_2025-01_decoys.fas  # a file name in fasta_dir
 allow_uneven_fractions: true   # accept reps with different fraction sets
 
 files:                      # per-file overrides; numbers 1–999 (fraction: -1 = single-shot)
@@ -454,7 +454,7 @@ analysis:                   # results/report.html for this experiment (lab defau
     Cmpd_mid: 100 nM
     Cmpd_high: 1 uM
     Cmpd_top: 10 uM
-  dose_min_doses: 4         # doses above 0 a compound needs before curves are fitted (default 4)
+  dose_min_doses: 4         # doses above 0 a compound, and each protein, needs before a curve is fitted (default 4)
   times:                    # a time course (D53); default: read from the condition names (Drug_0h, Drug_30min,
     Drug_start: 0           #   Drug_4h, 2d; units s, min, h, d). 3+ time points per series get the time-course
     Drug_early: 30 min      #   tests; a bare number needs time_unit
