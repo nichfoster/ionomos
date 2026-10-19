@@ -25,6 +25,19 @@ from ionomos.downstream.tables import NA_STRINGS, num, read_tsv
 RAW_EXTS = (".raw", ".mzml", ".mzxml", ".d", ".dia", ".wiff", ".mgf")
 
 
+class Info(str):
+    """A note that only says what was read or done as planned (the quantity, the table kind, how many sites passed
+    the localisation filter, fractions added up): the report and analysis.json list it with the other notes, but it
+    is not a warning, so it never becomes the job's reason or run.warnings (postprocess.job_warnings, #182). A plain
+    str note is a warning. It stays an Info in lists and their copies; an f-string around it is a plain str again."""
+
+    __slots__ = ()
+
+
+def is_info(note) -> bool:
+    return isinstance(note, Info)
+
+
 @dataclass
 class Feature:
     id: str
@@ -208,6 +221,57 @@ def from_pg_matrix(path: Path, sample_map: dict[str, tuple[str, int]] | None = N
                                                              "evidence": "peptides", "manifest_run": run_of})
 
 
+def sum_fractions(m: QuantMatrix, sample_map: dict[str, tuple[str, int]],
+                  fractionated: set[tuple[str, int]]) -> QuantMatrix:
+    """The runs of a matrix that are fractions of one sample (its experiment + bioreplicate is in fractionated,
+    from the manifest's plan) -> one column, their intensities added, as Sage's lfq.tsv (engines.load_sage) and
+    isoDTB / TMT fractions are (#180). A run the manifest doesn't name, or one of a sample without fractions, is
+    left as it is (two runs of such a sample stay two, and the doctor asks). m itself when nothing is summed."""
+    if m.kind != "intensity" or not fractionated or not sample_map:
+        return m
+    groups: dict[str, list[int]] = {}
+    keys: dict[str, list[str]] = {}
+    fractions: set[str] = set()
+    for j, s in enumerate(m.samples):
+        key = match_run_stem(run_stem(m.columns.get(s, s)), sample_map)
+        frac = key is not None and (str(sample_map[key][0]), int(sample_map[key][1])) in fractionated
+        name = f"{sample_map[key][0]}_{sample_map[key][1]}" if frac else s
+        if name in groups and not (frac and name in fractions):  # a name that isn't one sample's fractions: as read
+            return m
+        if frac:
+            fractions.add(name)
+        groups.setdefault(name, []).append(j)
+        keys.setdefault(name, []).append(key if key is not None else run_stem(m.columns.get(s, s)))
+    summed = {name: idx for name, idx in groups.items() if len(idx) > 1}
+    if not summed:
+        return m
+    samples = list(groups)
+    first = {name: m.samples[idx[0]] for name, idx in groups.items()}
+    values = []
+    for row in m.values:
+        out = []
+        for idx in groups.values():
+            got = [2.0 ** row[j] for j in idx if row[j] is not None]
+            out.append(math.log2(sum(got)) if got else None)
+        values.append(out)
+    condition = {name: m.condition[first[name]] for name in samples}
+    replicate = {name: m.replicate[first[name]] for name in samples if first[name] in m.replicate}
+    for name in summed:
+        key = keys[name][0]
+        replicate[name] = int(sample_map[key][1])
+    columns = {name: m.columns[first[name]] for name in samples if first[name] in m.columns}
+    meta = dict(m.meta)
+    if "manifest_run" in meta:
+        meta["manifest_run"] = {name: keys[name][0] for name in samples if keys[name][0] in sample_map}
+    meta["runs"] = {name: list(keys[name]) for name in samples}
+    meta["fractions"] = {name: list(keys[name]) for name in summed}
+    n = [len(idx) for idx in summed.values()]
+    notes = [*m.notes, Info(f"the intensities of each sample's fractions were added ({len(summed)} sample(s) with "
+                            f"{min(n)}–{max(n)} runs; fractions from the manifest / experiment.yaml)")]
+    return QuantMatrix(m.kind, m.level, m.features, samples, values, condition, m.source, notes=notes, exp=m.exp,
+                       replicate=replicate, columns=columns, meta=meta)
+
+
 def _dia_condition(stem: str) -> str:
     from ionomos.naming import NamingError, parse_raw_name
 
@@ -235,7 +299,7 @@ def from_combined_protein(path: Path) -> QuantMatrix:
     vals = [[_log2(num(r.get(c))) for c in cols] for r in rows]
     reps = {x: int(x.rsplit("_", 1)[1]) for x in samples if x.rsplit("_", 1)[-1].isdecimal()}
     return QuantMatrix("intensity", "protein", feats, samples, vals, cond, str(path),
-                       notes=[f"quantity: {suffix.strip()}"], exp="LFQ", replicate=reps,
+                       notes=[Info(f"quantity: {suffix.strip()}")], exp="LFQ", replicate=reps,
                        columns=dict(zip(samples, cols, strict=True)), meta={"evidence": "peptides"} if peps else {})
 
 
@@ -256,8 +320,13 @@ TMT_TABLES = ("abundance_gene_MD.tsv", "abundance_protein_MD.tsv", "abundance_ge
 
 
 def tmt_table_note(path: Path) -> str:
-    """What reading this TMT-Integrator table means, '' for the lab's own (abundance_gene_MD / protein_MD)."""
-    n = Path(path).name
+    """What reading this TMT-Integrator table means (an Info: the table kind read), '' for the lab's own
+    (abundance_gene_MD / protein_MD)."""
+    note = _tmt_table_note(Path(path).name)
+    return Info(note) if note else ""
+
+
+def _tmt_table_note(n: str) -> str:
     if n.startswith("ratio_"):
         return (f"read {n}: TMT-Integrator's log2 ratios to the reference (no abundance table was found); the "
                 "comparisons are the same, without the reference intensity added back")
@@ -297,6 +366,6 @@ def from_tmt_abundance(path: Path, annotation: list[dict] | None = None) -> Quan
     # ratio_to_reference: TMT-Integrator already put every plex on its reference (or virtual reference) channel,
     # so the plex normalisation (plex.py, IRS) must not be applied a second time
     return QuantMatrix("intensity", "gene" if "gene" in Path(path).name else "protein", feats, cols, vals, cond,
-                       str(path), notes=["TMT-Integrator values are log2 ratios to the reference channel"],
+                       str(path), notes=[Info("TMT-Integrator values are log2 ratios to the reference channel")],
                        exp="TMT", replicate=reps, columns={c: c for c in cols},
                        meta={"evidence": "PSMs", "ratio_to_reference": "TMT-Integrator"})

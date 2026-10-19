@@ -525,7 +525,7 @@ features × samples matrix of log2 values and runs the same statistics:
 | Method | Table read | Level | Test |
 |---|---|---|---|
 | isoDTB | `<prefix>_sites.tsv` (from the R port) | site | each sample's replicate log2 H/L vs 0 |
-| DIA | DIA-NN `*pg_matrix.tsv` (runs mapped to conditions via the manifest) | protein | condition vs control |
+| DIA | DIA-NN `*pg_matrix.tsv` (runs mapped to conditions via the manifest; the runs of a sample the plan has in fractions, from its file names or `experiment.yaml` `fraction:`, are added up into one sample, #180) | protein | condition vs control |
 | TMT | `tmt-report/abundance_gene_MD.tsv` (+ R-port annotation) | gene | condition vs control |
 | label-free DDA (future) | `combined_protein.tsv` (MaxLFQ if present) | protein | condition vs control |
 | any of these with `phospho: true` (D79) | the search's phosphosite table: IonQuant `combined_site_STY_79.9663.tsv`, TMT-Integrator `abundance_single-site_MD.tsv`, DIA-NN `report.phosphosites_90.tsv` | site | condition vs control |
@@ -654,7 +654,7 @@ features × samples matrix of log2 values and runs the same statistics:
   the report; *decide* and *problem* ones also pop up a window with the fix):
   | code | severity | when |
   |---|---|---|
-  | NO_TABLE / EMPTY_TABLE | problem | FragPipe produced no (or an empty) result table for the method |
+  | NO_TABLE / EMPTY_TABLE | problem | FragPipe produced no (or an empty) result table for the method. Not when the search's `fragpipe.workflow` quantifies nothing by design (IonQuant, TMT-Integrator and DIA-NN all off, as in an open search): that is done with a note pointing at `ptm-shepherd-output/`, no statistics and no pop-up (#181) |
   | UNUSABLE_TABLE | problem | the table exists but holds nothing usable (isoDTB: no probe-labelled peptides / ratio columns) |
   | NO_QUANTITIES | problem | rows but not one measured value in the sample columns |
   | ONE_SAMPLE | problem | a single sample of intensity data was quantified — nothing to compare |
