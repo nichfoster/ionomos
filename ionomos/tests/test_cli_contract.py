@@ -254,6 +254,14 @@ def test_run_with_a_log_folder_it_cannot_write_is_exit_2(lab, monkeypatch, capsy
     assert "Access is denied" in err and "log_dir" in err
 
 
+def _app_traceback(err: str) -> bool:
+    """A traceback from Ionomos itself; logging's own "--- Logging error ---" report of a handler an earlier
+    test left on a closed stream (seen in the full suite only) is not one."""
+    import re
+
+    return "Traceback" in re.sub(r"--- Logging error ---.*?\nArguments: [^\n]*\n", "", err, flags=re.S)
+
+
 def _run_keeping_log_handlers(argv):
     root, before = logging.getLogger(), list(logging.getLogger().handlers)
     try:
@@ -290,7 +298,7 @@ def test_run_with_a_read_only_lock_file_is_exit_2_with_the_fix(lab, capsys):
         os.chmod(lock, stat.S_IREAD | stat.S_IWRITE)
     err = capsys.readouterr().err
     assert str(lock) in err and "read-only" in err and "Nothing was started" in err
-    assert "Traceback" not in err
+    assert not _app_traceback(err), err
     assert lock.read_bytes() == b""
 
 
@@ -315,7 +323,7 @@ def test_run_with_a_damaged_ledger_open_elsewhere_is_exit_1_and_changes_nothing(
     assert _run_keeping_log_handlers(["--config", str(lab["cfg_path"]), "run", "--no-gui"]) == 1
     err = capsys.readouterr().err
     assert str(db) in err and "open in another program" in err and "Nothing was changed" in err
-    assert "Traceback" not in err
+    assert not _app_traceback(err), err
     assert db.read_bytes() == b"this is not a database" * 100
     assert [p.name for p in db.parent.iterdir() if p.name.startswith(db.name + ".")] == []
     with health.InstanceLock(lab["cfg"].log_dir):  # released: the next start is not "already running"
