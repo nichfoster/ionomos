@@ -1091,16 +1091,17 @@ def _sage_protein_q(path: Path) -> dict[str, float]:
 
 
 def _fasta_names(path: Path, limit_bytes: int = 1024**3) -> dict[str, tuple[str, str]]:
-    """UniProt accession -> (gene name, description) from a FASTA's header lines; {} when it can't be read."""
+    """UniProt accession -> (gene name, description) from a FASTA's header lines; {} when it can't be read. Headers
+    are read by fastasource.fasta_headers: a leading UTF-8 byte-order mark skipped, bounded memory on any file."""
+    from ionomos.fastasource import fasta_headers
+
     out: dict[str, tuple[str, str]] = {}
     try:
         if not path.is_file() or path.stat().st_size > limit_bytes:
             return out
-        with open(path, encoding="utf-8", errors="replace") as fh:
-            for line in fh:
-                if not line.startswith(">"):
-                    continue
-                m = re.match(r"^>(?:sp|tr)\|([^|]+)\|\S+\s*(.*)$", line.rstrip())
+        with open(path, "rb") as fh:
+            for raw in fasta_headers(fh):
+                m = re.match(r"^(?:sp|tr)\|([^|]+)\|\S+\s*(.*)$", raw.decode("utf-8", "replace").rstrip())
                 if not m:
                     continue
                 rest = m.group(2)
