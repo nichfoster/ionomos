@@ -25,6 +25,19 @@ from ionomos.downstream.tables import NA_STRINGS, num, read_tsv
 RAW_EXTS = (".raw", ".mzml", ".mzxml", ".d", ".dia", ".wiff", ".mgf")
 
 
+class Info(str):
+    """A note that only says what was read or done as planned (the quantity, the table kind, how many sites passed
+    the localisation filter, fractions added up): the report and analysis.json list it with the other notes, but it
+    is not a warning, so it never becomes the job's reason or run.warnings (postprocess.job_warnings, #182). A plain
+    str note is a warning. It stays an Info in lists and their copies; an f-string around it is a plain str again."""
+
+    __slots__ = ()
+
+
+def is_info(note) -> bool:
+    return isinstance(note, Info)
+
+
 @dataclass
 class Feature:
     id: str
@@ -235,7 +248,7 @@ def from_combined_protein(path: Path) -> QuantMatrix:
     vals = [[_log2(num(r.get(c))) for c in cols] for r in rows]
     reps = {x: int(x.rsplit("_", 1)[1]) for x in samples if x.rsplit("_", 1)[-1].isdecimal()}
     return QuantMatrix("intensity", "protein", feats, samples, vals, cond, str(path),
-                       notes=[f"quantity: {suffix.strip()}"], exp="LFQ", replicate=reps,
+                       notes=[Info(f"quantity: {suffix.strip()}")], exp="LFQ", replicate=reps,
                        columns=dict(zip(samples, cols, strict=True)), meta={"evidence": "peptides"} if peps else {})
 
 
@@ -256,8 +269,13 @@ TMT_TABLES = ("abundance_gene_MD.tsv", "abundance_protein_MD.tsv", "abundance_ge
 
 
 def tmt_table_note(path: Path) -> str:
-    """What reading this TMT-Integrator table means, '' for the lab's own (abundance_gene_MD / protein_MD)."""
-    n = Path(path).name
+    """What reading this TMT-Integrator table means (an Info: the table kind read), '' for the lab's own
+    (abundance_gene_MD / protein_MD)."""
+    note = _tmt_table_note(Path(path).name)
+    return Info(note) if note else ""
+
+
+def _tmt_table_note(n: str) -> str:
     if n.startswith("ratio_"):
         return (f"read {n}: TMT-Integrator's log2 ratios to the reference (no abundance table was found); the "
                 "comparisons are the same, without the reference intensity added back")
@@ -297,6 +315,6 @@ def from_tmt_abundance(path: Path, annotation: list[dict] | None = None) -> Quan
     # ratio_to_reference: TMT-Integrator already put every plex on its reference (or virtual reference) channel,
     # so the plex normalisation (plex.py, IRS) must not be applied a second time
     return QuantMatrix("intensity", "gene" if "gene" in Path(path).name else "protein", feats, cols, vals, cond,
-                       str(path), notes=["TMT-Integrator values are log2 ratios to the reference channel"],
+                       str(path), notes=[Info("TMT-Integrator values are log2 ratios to the reference channel")],
                        exp="TMT", replicate=reps, columns={c: c for c in cols},
                        meta={"evidence": "PSMs", "ratio_to_reference": "TMT-Integrator"})

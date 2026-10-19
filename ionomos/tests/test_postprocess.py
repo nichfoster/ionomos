@@ -264,3 +264,29 @@ def test_load_quantities_notes_empty_tmt_annotation(tmp_path):
     assert [f.name for f in files] == ["experimental_annotation.tsv"]
     _header, ann_rows = read_tsv(dest / "results" / "experimental_annotation.tsv")
     assert ann_rows == []  # the lab's annotation file is written, but empty
+
+
+# ------------------------------------------------- notes that are not warnings (#182) --
+
+
+def test_job_warnings_leaves_out_the_notes_that_only_say_what_was_read():
+    from ionomos.downstream.quant import Info, is_info
+
+    notes = [Info("quantity: MaxLFQ Intensity"), "Drug vs DMSO: Low confidence: Drug has 1 sample"]
+    assert postprocess.job_warnings(notes) == ["Drug vs DMSO: Low confidence: Drug has 1 sample"]
+    assert is_info(list(notes)[0]) and json.dumps(notes) == json.dumps([str(n) for n in notes])
+
+
+def test_a_tmt_jobs_reason_does_not_carry_the_table_kind_but_analysis_json_does(tmp_path, lab):
+    dest = tmp_path / "20260914_EJQ_TMT"
+    samples = [f"{c}_{r}_{ch}" for c, chs in (("DMSO", ("126", "127N", "127C")), ("Drug", ("128N", "128C", "129N")))
+               for r, ch in enumerate(chs, 1)]
+    simulate.tmt_abundance(dest / "fragpipe" / "tmt-report" / "abundance_gene_MD.tsv", samples, seed=4)
+    job = SimpleNamespace(id=8, method="TMT", dest_dir=dest)
+
+    warnings, summary = postprocess.run_all(job, None, _cfg(lab, tmp_path, {}))
+
+    said = "TMT-Integrator values are log2 ratios to the reference channel"
+    assert summary["method"] == "TMT" and said in summary["notes"]
+    assert not any(said in w for w in warnings), warnings
+    assert said in json.loads((dest / "results" / "analysis.json").read_text(encoding="utf-8"))["notes"]

@@ -304,6 +304,8 @@ def _tmt_qc_only(dest: Path, record: dict | None, notes: list[str]) -> list[Path
 
 
 def _analyse(job, spec, cfg) -> tuple[list[str], dict]:
+    from ionomos.downstream.quant import is_info
+
     if not (getattr(cfg, "analysis", {}) or {}).get("enabled", True):
         # statistics off: still write the lab's R-script outputs (site table / TMT annotation)
         from ionomos import downstream
@@ -316,11 +318,21 @@ def _analyse(job, spec, cfg) -> tuple[list[str], dict]:
             return [f"post-processing failed: {exc}"], {}
         if reads == "TMT":  # the TMT QC is a search check, not statistics: it runs for TMT kinds only (D91)
             files += _tmt_qc_only(dest, getattr(job, "parsed", None), notes)
-        return [f"post-processing: {n}" for n in notes], {"files": [f"{downstream.RESULTS}/{f.name}" for f in files]}
+        return [f"post-processing: {n}" for n in job_warnings(notes)], {"files": [f"{downstream.RESULTS}/{f.name}" for f in files]}
     out = run_for_folder(Path(job.dest_dir), cfg, job.method)
+    warnings = job_warnings(out.warnings)
     for w in out.warnings:
-        log.warning("job %s analysis: %s", job.id, w)
+        log.log(logging.INFO if is_info(w) else logging.WARNING, "job %s analysis: %s", job.id, w)
     if out.report:
         log.info("job %s: report %s", job.id, out.report)
     record_issues(getattr(cfg, "log_dir", None), Path(job.dest_dir), out, job.id)
-    return [f"analysis: {w}" for w in out.warnings], out.summary
+    return [f"analysis: {w}" for w in warnings], out.summary
+
+
+def job_warnings(notes: list[str]) -> list[str]:
+    """The notes that are warnings: what reaches the job's reason, ionomos.json run.warnings and DONE.txt. A note that
+    only says what was read (downstream.quant.Info: the quantity, the table kind, how many sites passed the filter) is
+    left to the report and analysis.json (#182)."""
+    from ionomos.downstream.quant import is_info
+
+    return [n for n in notes if not is_info(n)]

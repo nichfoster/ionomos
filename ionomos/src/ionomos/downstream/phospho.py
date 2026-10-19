@@ -222,8 +222,8 @@ def _load_lfq(path: Path, settings) -> QuantMatrix:
             "sites_in_table": len(rows), "sites_kept": len(feats), "sites_below": below,
             "values_dropped": dropped_values, "residues": residues, "hist": _hist(best_all)}
     return QuantMatrix("intensity", "site", feats, samples, vals, {s: _cond(s) for s in samples}, str(path),
-                       notes=[f"phosphosites: {len(feats):,} of {len(rows):,} sites with best localisation "
-                              f"probability ≥ {thr:g}; quantity: {info['quantity']}"],
+                       notes=[quant.Info(f"phosphosites: {len(feats):,} of {len(rows):,} sites with best "
+                                         f"localisation probability ≥ {thr:g}; quantity: {info['quantity']}")],
                        exp="LFQ", replicate=_reps(samples), columns=dict(zip(samples, cols, strict=True)),
                        meta={"phospho": info})
 
@@ -267,7 +267,7 @@ def _load_tmt(path: Path, settings, workdir: Path, record) -> QuantMatrix:
                            f"here; TMT-Integrator filtered {'with min_site_prob ' + format(used, 'g') if used is not None else 'with a threshold not found in fragpipe.workflow'}"
                            ". Set tmtintegrator.min_site_prob in the workflow and search again for a stricter filter")
     m.meta["phospho"] = info
-    m.notes.append(f"phosphosites: {len(feats):,} sites from TMT-Integrator; localisation filter: {filt}")
+    m.notes.append(quant.Info(f"phosphosites: {len(feats):,} sites from TMT-Integrator; localisation filter: {filt}"))
     return m
 
 
@@ -321,7 +321,7 @@ def _load_diann(path: Path, settings, sample_map: dict | None) -> QuantMatrix:
         info["problem"] = (f"{path.name} keeps sites localised with confidence ≥ {level:g}, below the "
                            f"phospho_min_localization of {thr:g}; DIA-NN writes no stricter matrix than 0.99")
     missing = sorted(set(sample_map) - matched)
-    notes = [f"phosphosites: {len(feats):,} sites from {path.name} (localisation confidence ≥ {level:g})"]
+    notes = [quant.Info(f"phosphosites: {len(feats):,} sites from {path.name} (localisation confidence ≥ {level:g})")]
     if missing:
         notes.append("Expected runs missing from the phosphosite matrix: " + ", ".join(missing))
     for s in samples:
