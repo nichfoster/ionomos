@@ -153,6 +153,15 @@ def test_an_open_search_is_done_and_leaves_its_mass_shifts(bed, sample):
     los = "ERROR - Mass-offset or open search with 'Localize mass shift (LOS)` was disabled."
     assert (los in console) == (sample == "open_search_no_los")
     assert "ALL JOBS DONE IN" in console
+    # nothing is quantified by design (#181): done, no "analysis had a problem", no attention item
+    a = _analysis(dest)
+    assert a["state"] == "ok" and "NO_TABLE" not in {i["code"] for i in a["issues"]}
+    said = "this search quantifies nothing (an open search): no statistics; PTM-Shepherd's mass shifts are in " \
+           "fragpipe/ptm-shepherd-output/"
+    assert said in a["notes"] and a["quantification"] == {"ran": False, "reason": said}
+    assert "analysis had a problem" not in (job.reason or "") and said in (job.reason or "")
+    from ionomos import attention
+    assert not [it for it in attention.items(bed["cfg"].log_dir) if it.kind == "analysis_failed"]
 
 
 def test_tools_printing_non_ascii_text_reach_the_console_in_the_code_page_and_the_log_in_utf8(bed):

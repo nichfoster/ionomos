@@ -461,6 +461,10 @@ stopped before it. Open the FragPipe log (Jobs tab) and look at the last
 steps; check the method's workflow has quantification on, then Retry. If the
 method is wrong, pick the right one and **Re-run analysis**.
 
+A search whose workflow quantifies nothing on purpose (an open search: no
+IonQuant, TMT-Integrator or DIA-NN) never shows this: it is done, with a note
+that PTM-Shepherd's mass shifts are in `fragpipe\ptm-shepherd-output\`.
+
 ## The result table is empty {#issue.EMPTY_TABLE}
 
 The search found nothing that passed its filters. Check the FASTA is the right

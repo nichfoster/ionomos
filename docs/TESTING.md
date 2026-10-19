@@ -162,7 +162,7 @@ init --slow-defaults` uses production timings (10 s / 60 s).
 | `lfq_good` | label-free DDA (method LFQ): IonQuant's `combined_protein.tsv` in a real file's layout (blocks per quantity, Java floats, `contam_` rows), `experiment_annotation.tsv` type 0 → Drug vs DMSO |
 | `phospho_lfq` | label-free phospho (method Phospho, `analysis.phospho: true`): `combined_site_STY_79.9663.tsv` → a site-level analysis, EGF vs Ctrl |
 | `dia_fractions` | DIA in two fractions per sample (fractions in `experiment.yaml`): DIA-NN gets 12 `_uncalibrated.mzML` runs for 6 samples; the analysis asks (`DUPLICATE_SAMPLES`, #180) |
-| `open_search` | an open search (-150 to +500 Da, Crystal-C, PTM-Shepherd): `psm.tsv` with mass shifts, `ptm-shepherd-output/`, no quantification → done; the analysis reports NO_TABLE (#181) |
+| `open_search` | an open search (-150 to +500 Da, Crystal-C, PTM-Shepherd): `psm.tsv` with mass shifts, `ptm-shepherd-output/`, no quantification → done, with a note pointing at `ptm-shepherd-output/`, no NO_TABLE and no attention item (#181) |
 | `open_search_no_los` | the same with "Localize mass shift" off (`workflow: Open-noLOS.workflow`): FragPipe's non-fatal ERROR line → still done |
 | `non_ascii_log` | tools printing non-ASCII: `?` on the cp1252 console, the real text in `log_<date>.txt` → done |
 | `retry_previous` | fake mode `fail-once`: IonQuant fails the first attempt; Retry → done, the first attempt kept as `fragpipe_previous_<time>` |

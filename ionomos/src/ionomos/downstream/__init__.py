@@ -147,6 +147,34 @@ def _merge_ratio(mats: list[quant.QuantMatrix]) -> quant.QuantMatrix:
     cond = {s: c for m in mats for s, c in m.condition.items()}
     return quant.QuantMatrix("ratio", "site", feats, samples, values, cond, mats[0].source)
 
+# the switches of FragPipe's quantification steps: IonQuant (MS1, label-free and isoDTB), TMT-Integrator, DIA-NN
+QUANT_SWITCHES = ("quantitation.run-label-free-quant", "tmtintegrator.run-tmtintegrator", "diann.run-dia-nn")
+
+
+def no_quantification(record: dict | None, workdir: Path) -> str:
+    """The note for a search whose fragpipe.workflow quantifies nothing by design (every one of QUANT_SWITCHES it
+    has is false; an open search), else ''. Such a search has no table to compare: it is done, with no statistics
+    and nothing to fix (#181). A workflow that can't be read, or names none of the switches, gives ''."""
+    from ionomos.downstream.sdrf import workflow
+
+    try:
+        props, _name = workflow(record, Path(workdir))
+    except Exception:  # noqa: BLE001 - a workflow that can't be read: the missing table is a problem, as before
+        return ""
+    if not any(k in props for k in QUANT_SWITCHES) or \
+            any(props.get(k, "").strip().lower() == "true" for k in QUANT_SWITCHES):
+        return ""
+    workdir = Path(workdir)
+    where = f"{workdir.name}/ptm-shepherd-output/"
+    shepherd = (workdir / "ptm-shepherd-output").is_dir() or \
+        props.get("ptmshepherd.run-shepherd", "").strip().lower() == "true"
+    if shepherd:
+        return (f"this search quantifies nothing (an open search): no statistics; PTM-Shepherd's mass shifts are in "
+                f"{where}")
+    return ("this search quantifies nothing (no IonQuant, TMT-Integrator or DIA-NN in its fragpipe.workflow): no "
+            f"statistics; the identifications are in {workdir.name}/ (psm.tsv, protein.tsv)")
+
+
 def load_quantities(method: str | None, workdir: Path, results: Path, record: dict | None,
                     mod_mass: str = "561.3387", table: Path | None = None, sdrf_factor=None,
                     dest: Path | None = None, rollup: str = "auto"
@@ -158,6 +186,10 @@ def load_quantities(method: str | None, workdir: Path, results: Path, record: di
     analysis.rollup, how peptide / precursor tables become proteins (rollup.py, D76)."""
     workdir = Path(workdir)
     m, files, notes = _load_quantities(method, workdir, results, record, mod_mass, table, rollup)
+    if m is None and table is None and method != "table":
+        nothing = no_quantification(record, workdir)
+        if nothing:  # an open search: no table by design, not a missing one (#181)
+            return None, files, [nothing]
     if m is not None:
         if dest is None:
             dest = workdir.parent if workdir.name == "fragpipe" else workdir
@@ -494,6 +526,8 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
         if m is not None:
             notes += m.notes
             notes += stage("input-check", guards.check_input, m) or []  # implausible values, repeated names (D60)
+        elif table is None and method != "table":
+            f.no_quantification = no_quantification(record, workdir)  # by design: done, not NO_TABLE (#181)
     tmt_info = None
     if m is not None and m.features and not m.meta.get("precomputed"):  # TMT plexes on one scale (plex.py, D48)
         bridged = stage("plex", plex.normalise, m, settings)
@@ -836,6 +870,8 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
         "ionomos_version": __version__,
         "notes": out.warnings,
     }
+    if f.no_quantification:  # an open search: done, with nothing to compare (#181)
+        out.summary["quantification"] = {"ran": False, "reason": f.no_quantification}
     for name, (msg, _tb) in f.stage_errors.items():
         out.warnings.append(f"analysis step {name} failed: {msg}")
     try:

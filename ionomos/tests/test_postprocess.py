@@ -290,3 +290,45 @@ def test_a_tmt_jobs_reason_does_not_carry_the_table_kind_but_analysis_json_does(
     assert summary["method"] == "TMT" and said in summary["notes"]
     assert not any(said in w for w in warnings), warnings
     assert said in json.loads((dest / "results" / "analysis.json").read_text(encoding="utf-8"))["notes"]
+
+
+# ------------------------------------------------- a search that quantifies nothing (#181) --
+
+
+def _workflow(dest: Path, switches: dict | None = None) -> None:
+    (dest / "fragpipe").mkdir(parents=True, exist_ok=True)
+    keys = {"quantitation.run-label-free-quant": False, "tmtintegrator.run-tmtintegrator": False,
+            "diann.run-dia-nn": False, **(switches or {})}
+    (dest / "fragpipe" / "fragpipe.workflow").write_text(
+        "".join(f"{k}={str(v).lower()}\n" for k, v in keys.items()), encoding="utf-8")
+
+
+def test_no_quantification_reads_the_workflows_switches(tmp_path):
+    dest = tmp_path / "20260918_EJQ_open"
+    assert downstream.no_quantification(None, dest / "fragpipe") == ""  # no workflow: the missing table is a problem
+    _workflow(dest)
+    assert downstream.no_quantification(None, dest / "fragpipe").startswith(
+        "this search quantifies nothing (no IonQuant, TMT-Integrator or DIA-NN")
+    (dest / "fragpipe" / "ptm-shepherd-output").mkdir()
+    assert "PTM-Shepherd's mass shifts are in fragpipe/ptm-shepherd-output/" in \
+        downstream.no_quantification(None, dest / "fragpipe")
+    _workflow(dest, {"diann.run-dia-nn": True})
+    assert downstream.no_quantification(None, dest / "fragpipe") == ""
+
+
+def test_an_open_search_is_analysed_as_done_with_no_attention_item(tmp_path, lab):
+    dest = tmp_path / "20260918_EJQ_opensearch"
+    _workflow(dest, {"ptmshepherd.run-shepherd": True})
+    out = downstream.analyze(dest, "LFQ")
+    assert out.summary["state"] == "ok" and not [i for i in out.issues if i.code == "NO_TABLE"]
+    assert out.summary["quantification"] == {
+        "ran": False, "reason": "this search quantifies nothing (an open search): no statistics; PTM-Shepherd's mass "
+                                "shifts are in fragpipe/ptm-shepherd-output/"}
+    assert not any("don't know how to analyse" in w for w in out.warnings)
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    postprocess.record_issues(logs, dest, out, job_id=3)
+    assert attention.items(logs) == []
+    job = SimpleNamespace(id=7, method="LFQ", dest_dir=dest)  # with the analysis off too: the note, not a problem
+    warnings, _summary = postprocess.run_all(job, None, _cfg(lab, tmp_path, {"enabled": False}))
+    assert len(warnings) == 1 and "this search quantifies nothing" in warnings[0]

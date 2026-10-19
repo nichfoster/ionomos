@@ -654,7 +654,7 @@ features × samples matrix of log2 values and runs the same statistics:
   the report; *decide* and *problem* ones also pop up a window with the fix):
   | code | severity | when |
   |---|---|---|
-  | NO_TABLE / EMPTY_TABLE | problem | FragPipe produced no (or an empty) result table for the method |
+  | NO_TABLE / EMPTY_TABLE | problem | FragPipe produced no (or an empty) result table for the method. Not when the search's `fragpipe.workflow` quantifies nothing by design (IonQuant, TMT-Integrator and DIA-NN all off, as in an open search): that is done with a note pointing at `ptm-shepherd-output/`, no statistics and no pop-up (#181) |
   | UNUSABLE_TABLE | problem | the table exists but holds nothing usable (isoDTB: no probe-labelled peptides / ratio columns) |
   | NO_QUANTITIES | problem | rows but not one measured value in the sample columns |
   | ONE_SAMPLE | problem | a single sample of intensity data was quantified — nothing to compare |
