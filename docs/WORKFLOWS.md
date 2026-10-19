@@ -527,7 +527,7 @@ features × samples matrix of log2 values and runs the same statistics:
 | Method | Table read | Level | Test |
 |---|---|---|---|
 | isoDTB | `<prefix>_sites.tsv` (from the R port) | site | each sample's replicate log2 H/L vs 0 |
-| DIA | DIA-NN `*pg_matrix.tsv` (runs mapped to conditions via the manifest; the runs of a sample the plan has in fractions, from its file names or `experiment.yaml` `fraction:`, are added up into one sample, #180) | protein | condition vs control |
+| DIA | DIA-NN `*pg_matrix.tsv` (runs mapped to conditions via the manifest; the runs of a sample the plan has in fractions, from its file names or `experiment.yaml` `fraction:`, are added up into one sample, #180; also in DIA-NN's long report and phosphosite matrix, D119) | protein | condition vs control |
 | TMT | `tmt-report/abundance_gene_MD.tsv` (+ R-port annotation) | gene | condition vs control |
 | label-free DDA (future) | `combined_protein.tsv` (MaxLFQ if present) | protein | condition vs control |
 | any of these with `phospho: true` (D79) | the search's phosphosite table: IonQuant `combined_site_STY_79.9663.tsv`, TMT-Integrator `abundance_single-site_MD.tsv`, DIA-NN `report.phosphosites_90.tsv` | site | condition vs control |
