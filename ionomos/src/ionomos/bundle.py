@@ -1665,18 +1665,30 @@ def _put(z: zipfile.ZipFile, arc: str, lines, scrub: _Scrub) -> tuple[int, str]:
 
 
 def fasta_facts(path: Path) -> dict | None:
-    """Name, size, entry count, decoy count and SHA-256 of a FASTA file: what a bundle says instead of holding it."""
+    """Name, size, entry count, decoy count and SHA-256 of a FASTA file: what a bundle says instead of holding it.
+    Headers are read by fastasource.fasta_headers (a leading UTF-8 byte-order mark skipped, bounded memory on a file
+    without line breaks); the size and SHA-256 are of every byte, the mark included."""
+    from ionomos.fastasource import fasta_headers
+
+    class _Hashed:  # every byte fasta_headers reads goes through the digest too: one pass over the file
+        def __init__(self, fh):
+            self.fh, self.digest, self.size = fh, hashlib.sha256(), 0
+
+        def read(self, n: int = -1) -> bytes:
+            block = self.fh.read(n)
+            self.digest.update(block)
+            self.size += len(block)
+            return block
+
     try:
-        digest, entries, decoys, size = hashlib.sha256(), 0, 0, 0
+        entries = decoys = 0
         with open(_long(path), "rb") as f:
-            for line in f:
-                digest.update(line)
-                size += len(line)
-                if line.startswith(b">"):
-                    entries += 1
-                    decoys += line[1:6].lower().startswith((b"rev_", b"decoy"))
-        return {"name": Path(path).name, "bytes": size, "entries": entries, "decoys": decoys,
-                "sha256": digest.hexdigest()}
+            h = _Hashed(f)
+            for head in fasta_headers(h):
+                entries += 1
+                decoys += head[:5].lower().startswith((b"rev_", b"decoy"))
+        return {"name": Path(path).name, "bytes": h.size, "entries": entries, "decoys": decoys,
+                "sha256": h.digest.hexdigest()}
     except OSError:
         return None
 
