@@ -362,7 +362,11 @@ crashed}]`; `scenarios.resolve()` numbers it in the state just built, before
 the script is sent and the rubric applied (#183). The fake's console is not
 numbered alike everywhere: on Linux its DIA command list lacks CmdDiann's
 Windows-only plot step, two lines. Only a citation a scenario invents on
-purpose is a bare number.
+purpose is a bare number. The unit tests that cite a fake's line do the same:
+`scenarios.log_line(cfg, 1, "OutOfMemoryError")` gives `log:1#<n>` in their
+bed. When no line holds the text, the error names the scenario and the fake
+whose console was read (`fragpipe_console.log, printed by the testbed's fake
+FragPipe`), so a change to the fake's output points at the fake.
 
 ```bash
 cd ionomos && .venv/bin/pytest tests/test_assistant_scenarios.py   # ~6 s

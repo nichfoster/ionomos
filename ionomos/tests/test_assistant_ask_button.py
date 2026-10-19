@@ -15,7 +15,7 @@ import pytest
 
 from ionomos import assistant, attention, popups, testbed
 from ionomos import help as helpdoc
-from ionomos.assistant import askui, client, fake
+from ionomos.assistant import askui, client, fake, scenarios
 from ionomos.assistant.scenarios.states import INJECTED_SAMPLE
 from ionomos.config import ConfigError, load
 from ionomos.intake import intake
@@ -49,7 +49,8 @@ def bed(tmp_path, monkeypatch):
     items = {i.kind: i for i in attention.items(cfg.log_dir)}
     ready = replace(cfg, assistant=assistant.settings_from({"enabled": True, "model": fake.MODEL, "stream": False}))
     return {"cfg": cfg, "ready": ready, "cfg_path": cfg_path, "failed": items["search_failed"],
-            "hostile": items["intake_rejected"], "audit": tmp_path / "audit.jsonl"}
+            "hostile": items["intake_rejected"], "audit": tmp_path / "audit.jsonl",
+            "oom": scenarios.log_line(cfg, 1, "OutOfMemoryError")}  # its number read from the fake's console (#183)
 
 
 # ---------------------------------------------------------------- the question --
@@ -94,14 +95,15 @@ def test_an_item_without_a_job_is_named_to_the_model_without_its_names(bed):
 
 
 def test_a_grounded_answer_is_shown_with_its_sources(bed):
-    model = fake.ScriptedModel([{"content": "FragPipe ran out of memory [log:1#242].\n\nRetry after closing other "
+    oom = bed["oom"]
+    model = fake.ScriptedModel([{"content": f"FragPipe ran out of memory [{oom}].\n\nRetry after closing other "
                                             "programs [job:1] [help:attention.search_failed]."}])
     ans = assistant.ask(bed["ready"], askui.default_question(bed["failed"]), item_id=bed["failed"].id,
                         transport=model, audit_path=bed["audit"], searching=True)
     shown = askui.render(ans)
     assert shown.outcome == "grounded" and shown.heading == askui.HEADINGS["grounded"]
-    assert shown.text.startswith(askui.HEADINGS["grounded"] + "\n\nFragPipe ran out of memory [log:1#242].")
-    assert "\nSources:\n  [log:1#242] Exception in thread" in shown.text
+    assert shown.text.startswith(askui.HEADINGS["grounded"] + f"\n\nFragPipe ran out of memory [{oom}].")
+    assert f"\nSources:\n  [{oom}] Exception in thread" in shown.text
     assert f"(model {fake.MODEL}, while a search ran, " in shown.footer and askui.NOTE in shown.footer
     assert model.requests[0]["messages"][1]["content"].endswith("(This question is about job 1.)")
 
@@ -247,7 +249,7 @@ def test_gui_ask_about_this_in_a_popup_answers_off_the_tk_thread(bed, tk_popups,
     root, pops, _opened = tk_popups
     _set_up(bed)
     seen = []
-    model = fake.ScriptedModel([{"content": "FragPipe ran out of memory [log:1#242]."}])
+    model = fake.ScriptedModel([{"content": f"FragPipe ran out of memory [{bed['oom']}]."}])
 
     def transport(*a):
         seen.append(threading.current_thread())
@@ -261,7 +263,7 @@ def test_gui_ask_about_this_in_a_popup_answers_off_the_tk_thread(bed, tk_popups,
     assert _pump_until(root, lambda: aw.shown is not None)
     assert aw.shown.outcome == "grounded" and seen and seen[0] is not threading.main_thread()
     text = aw.answer.get("1.0", "end")
-    assert "FragPipe ran out of memory [log:1#242]." in text and "Sources:" in text
+    assert f"FragPipe ran out of memory [{bed['oom']}]." in text and "Sources:" in text
     assert str(aw.answer.cget("state")) == "disabled" and str(aw.ask_btn.cget("state")) == "normal"
     # ask again with an edited question
     model.turns.append({"content": "It needs more memory [job:1]."})
