@@ -10,6 +10,7 @@ from ionomos.cli import main
 from ionomos.downstream import simulate
 
 RUNS = [(f"D:/raw/HeLa_{c}_{r}.raw", c) for c in ("DMSO", "Drug") for r in (1, 2, 3)]
+LABELLING = {"quantitation.run-label-free-quant": "true", "ionquant.use-labeling": "true"}
 DONE = "FragPipe v23.1\nProcess 'DIA-NN' finished, exit code: 0\n=====ALL JOBS DONE IN 12.3 MINUTES=====\n"
 
 
@@ -175,13 +176,47 @@ def test_a_chosen_kind_with_no_table_is_refused(tmp_path):
 @pytest.mark.parametrize("props,kind", [
     ({"tmtintegrator.run-tmtintegrator": "true", "diann.run-dia-nn": "false"}, "TMT"),
     ({"diann.run-dia-nn": "true"}, "DIA"),
-    ({"quantitation.run-label-free-quant": "true", "ionquant.use-labeling": "true"}, "isoDTB"),
     ({"quantitation.run-label-free-quant": "true", "ionquant.use-labeling": "false"}, "LFQ"),
+    # #161: MS1 labelling is isoDTB only for isoDTB's masses (FragPipe 24.0's stock workflows' ionquant keys)
+    ({**LABELLING, "ionquant.light": "C561.3387", "ionquant.heavy": "C567.3462"}, "isoDTB"),  # chemprot-ABPP-isoDTB
+    ({**LABELLING, "msfragger.table.var-mods": "15.9949,M,true,2; 561.3387,C,true,1; 567.3462,C,true,1"}, "isoDTB"),
+    ({**LABELLING, "ionquant.light": "K0;R0", "ionquant.medium": "K4.025107;R6.020129",
+      "ionquant.heavy": "K8.014199;R10.008269"}, "SILAC"),                                     # SILAC3
+    ({**LABELLING, "ionquant.light": "*436.2256", "ionquant.heavy": "*442.2633"}, "PAL"),     # chemprot-PAL
+    ({**LABELLING, "ionquant.light": "C464.28596", "ionquant.heavy": "C470.29977"}, "isoTOP"),  # chemprot-ABPP-isoTOP
+    ({**LABELLING, "ionquant.light": "C463.2366", "ionquant.heavy": "C467.2529"}, "ipIAA"),   # chemprot-ABPP-ipIAA
+    ({**LABELLING, "ionquant.light": "C100.0", "ionquant.heavy": "C106.0"}, "labelled"),
+    (LABELLING, "labelled"),  # labelling with no label: not isoDTB either
     ({"ionquant.run-ionquant": "true"}, None),  # true in workflows that never run it (fragpipe.workflow_needs)
     ({}, None),
 ])
 def test_workflow_kind(props, kind):
     assert fpfolder.workflow_kind(props) == kind
+    assert kind is None or kind in fpfolder.KIND_WORDS
+
+
+@pytest.mark.parametrize("labels,kind", [
+    ("ionquant.light=K0;R0\nionquant.medium=K4.025107;R6.020129\nionquant.heavy=K8.014199;R10.008269\n", "SILAC"),
+    ("ionquant.light=*436.2256\nionquant.heavy=*442.2633\n", "PAL"),
+])
+def test_a_label_other_than_isodtb_is_not_analysed_as_isodtb(tmp_path, labels, kind):
+    """#161: a SILAC or PAL search writes IonQuant's label table, which the isoDTB analysis would read as labelled
+    cysteine sites: the scan says the label is not handled and offers neither isoDTB nor label-free."""
+    out = tmp_path / "silac"
+    simulate.isodtb_label_quant(out / "combined_modified_peptide_label_quant.tsv", {"DMSO": [1, 2], "Drug": [1, 2]},
+                                n_sites=40)
+    (out / "fragpipe.workflow").write_text("quantitation.run-label-free-quant=true\nionquant.use-labeling=true\n"
+                                           + labels, encoding="utf-8")
+    (out / "log_2026.txt").write_text("FragPipe v24.0\n=====ALL JOBS DONE IN 3.1 MINUTES=====\n", encoding="utf-8")
+    sc = fpfolder.scan(out)
+    assert sc.method is None and sc.blocking and "isoDTB" not in sc.choices
+    assert codes(sc) == {"LABEL_NOT_HANDLED": "error"}
+    f = sc.findings[0]
+    assert fpfolder.KIND_WORDS[kind] in f.title and "combined_modified_peptide_label_quant.tsv" in f.message
+    assert ("Workflow", f"fragpipe.workflow: {fpfolder.KIND_WORDS[kind]}") in sc.found
+    sc = fpfolder.scan(out, method="isoDTB")  # asked for by name: still refused, and it says why
+    assert sc.method is None and "workflow quantified" in next(
+        f.message for f in sc.findings if f.code == "METHOD_UNREADABLE")
 
 
 def test_manifest_lines():
