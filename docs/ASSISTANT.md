@@ -95,7 +95,7 @@ assistant:
   base_url: http://127.0.0.1:11434/v1   # the runtime, on this PC
   model: "<the model's name in the runtime>"
   maintainer: "Nick (nick@lab.example)"  # who "ask the maintainer" names
-  timeout_seconds: 120  # the longest one request may take, to the end of its reply
+  timeout_seconds: 120  # the longest one request may take, to the end of its reply; a question, twice it
   stream: true          # false if the runtime can't stream tool calls
   allow_cloud: false    # reserved for Phase 6.4; see below
   keep_alive: 2m        # Ollama: unload the model 2 minutes after a question
@@ -113,13 +113,25 @@ what would be sent that Phase 6.4 describes, and neither exists.
 
 **Limits on what the model sends.** `timeout_seconds` is the whole request,
 from sending it to the end of the reply: a model that trickles a token every
-few seconds is stopped there too (the socket's own timeout bounds each wait
-for data, so a reply that stalls just before the limit can take up to about
-twice it). A reply over 2 MB is dropped; it is read in pieces of 64 KB, so it
-is never held whole. Either way the outcome is `unavailable` and Ionomos's
-own text is shown. A question makes at most 6 requests. A tool call's
-arguments over 4,000 characters are refused, and `{}` goes back to the
+few seconds is stopped there too. The socket's timeout is what is left of the
+request, set again before each read, so a reply that stalls just before the
+limit stops at the limit. A reply over 2 MB is dropped; it is read in pieces
+of 64 KB, so it is never held whole. Either way the outcome is `unavailable`
+and Ionomos's own text is shown. A question makes at most 6 requests. A tool
+call's arguments over 4,000 characters are refused, and `{}` goes back to the
 runtime in their place.
+
+**A limit for the whole question** (#171). One question may take twice
+`timeout_seconds` in all (4 minutes with the default 120 s; while a search
+runs, twice `while_searching.timeout_seconds`). Each request gets what is
+left, at most `timeout_seconds`, and so does its socket. When the time runs
+out, during a request or between two, no more requests are made: the outcome
+is `unavailable`, and the text starts "The assistant ran out of time for this
+question" before Ionomos's own explanation. The **Ask about this** window
+says how long it may wait ("Ionomos waits at most 4 minutes for this
+question"). Twice is a guess until a real model is measured on the PC
+(ROADMAP 6.0). Tests pass `assistant.fake.Clock` to `ask(clock=...)` and to
+the scripted model, so a slow script costs no time.
 
 ## Sharing the PC with a search
 

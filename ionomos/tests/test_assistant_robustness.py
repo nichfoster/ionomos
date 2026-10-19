@@ -143,6 +143,98 @@ def test_a_model_that_trickles_over_real_http_is_stopped_at_the_limit():
         assert time.perf_counter() - t < 2.5, "stopped at the limit, not when the model finished"
 
 
+def test_a_reply_that_stalls_just_before_its_limit_is_stopped_at_the_limit_over_real_http():
+    """#171: the socket's timeout is the time left of the request, not the whole setting again. Two lines come at
+    once and at 0.8 s, then nothing: the request stops at 1 s, not at 0.8 + 1 s."""
+    import http.server
+
+    class Stall(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802 - http.server's name
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            try:
+                for pause in (0, 0.8):
+                    time.sleep(pause)
+                    self.wfile.write(b'data: {"choices":[{"index":0,"delta":{"content":"x"}}]}\n\n')
+                    self.wfile.flush()
+                time.sleep(3)
+            except OSError:
+                pass
+
+        def log_message(self, *_a):
+            pass
+
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Stall)
+    httpd.daemon_threads = True
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        s = assistant.settings_from({**SETTINGS, "stream": True, "timeout_seconds": 1,
+                                     "base_url": f"http://127.0.0.1:{httpd.server_address[1]}/v1"})
+        t = time.perf_counter()
+        with pytest.raises(client.ChatError, match=r"took longer than 1 s .*assistant.timeout_seconds"):
+            client.chat(s, [{"role": "system", "content": "s"}, {"role": "user", "content": "q"}], [])
+        assert time.perf_counter() - t < 1.5, "stopped at the request's limit, not one socket timeout after a line"
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def _slow_loop(seconds: float, n: int = 6) -> list[dict]:
+    """A model that answers every request with one more tool call, each reply taking `seconds`."""
+    return [{"tool_calls": [{"name": "get_job", "arguments": {"job_id": 1}}], "seconds": seconds}] * n
+
+
+def test_a_question_has_one_time_limit_and_each_request_gets_what_is_left(fp, tmp_path):
+    """#171: tool_loop_capped at 110 s a turn, timeout_seconds 120: once 6 x 120 s could pass. The question may
+    take 2 x 120 s; the third request gets the 20 s left (the socket too), is dropped, and Ionomos's own text is
+    shown. A fake clock: the 330 s pass without the test waiting."""
+    cfg = replace(fp, assistant=assistant.settings_from({**SETTINGS, "timeout_seconds": 120}))
+    assert assistant.question_limit(cfg.assistant) == 240 == assistant.QUESTION_TIMEOUTS * 120
+    clock = fake.Clock()
+    model = fake.ScriptedModel(_slow_loop(110), clock=clock)
+    t = time.perf_counter()
+    ans = assistant.ask(cfg, "Why did my search fail?", experiment="1", transport=model, clock=clock,
+                        audit_path=tmp_path / "audit.jsonl")
+    assert time.perf_counter() - t < 30, "no real waiting"
+    assert model.timeouts == [120, 120, 20] and ans.rounds == 2 and clock() == 1000 + 330
+    assert ans.outcome == "unavailable" and not ans.grounded and ans.sources == []
+    assert "took longer than 20 s to reply (the time left of the 240 s a question may take)" in ans.reason
+    assert ans.text.startswith("The assistant ran out of time for this question: the model took longer than 20 s")
+    assert "likely: FragPipe ran out of memory" in ans.text, "Ionomos's own explanation follows"
+    (rec,) = audit.read(tmp_path / "audit.jsonl")
+    assert rec["outcome"] == "unavailable" and rec["rounds"] == 2
+
+
+def test_a_question_whose_time_is_used_up_between_requests_asks_no_more(fp, tmp_path):
+    clock = fake.Clock()
+    model = fake.ScriptedModel(_slow_loop(120), clock=clock)  # each reply just within its own limit
+    cfg = replace(fp, assistant=assistant.settings_from({**SETTINGS, "timeout_seconds": 120}))
+    ans = assistant.ask(cfg, "Why did my search fail?", experiment="1", transport=model, clock=clock,
+                        audit_path=tmp_path / "audit.jsonl")
+    assert len(model.requests) == 2 and ans.rounds == 2 and ans.outcome == "unavailable"
+    assert ans.reason == ("the question took longer than 240 s in all (2 x assistant.timeout_seconds), so it was "
+                          "stopped after 2 request(s) to the model")
+    assert ans.text.startswith("The assistant ran out of time for this question: the question took longer than 240 s")
+    # a quick model is not affected: the same loop without the wait is capped by rounds, as before
+    quick = fake.ScriptedModel(_slow_loop(0), clock=fake.Clock())
+    ans = assistant.ask(cfg, "Why did my search fail?", experiment="1", transport=quick, clock=quick.clock,
+                        audit_path=tmp_path / "audit.jsonl")
+    assert ans.outcome == "fallback" and "no answer after 6 rounds" in ans.reason and quick.timeouts == [120] * 6
+
+
+def test_while_a_search_runs_the_question_limit_follows_its_timeout(fp, tmp_path):
+    clock = fake.Clock()
+    cfg = replace(fp, assistant=assistant.settings_from({**SETTINGS, "timeout_seconds": 120,
+                                                          "while_searching": {"timeout_seconds": 30}}))
+    model = fake.ScriptedModel(_slow_loop(25), clock=clock)
+    ans = assistant.ask(cfg, "Why did my search fail?", experiment="1", transport=model, clock=clock,
+                        audit_path=tmp_path / "audit.jsonl", searching=True)
+    assert model.timeouts == [30, 30, 10] and ans.outcome == "unavailable" and ans.mode == "searching"
+    assert "the time left of the 60 s a question may take" in ans.reason
+
+
 def test_a_10_mb_reply_on_one_line_is_stopped_at_the_limit_without_reading_it_all(monkeypatch):
     big = json.dumps({"choices": [{"message": {"content": "A" * 10_000_000}}]}).encode()
     read = []

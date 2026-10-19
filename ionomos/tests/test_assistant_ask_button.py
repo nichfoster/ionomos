@@ -108,6 +108,25 @@ def test_a_grounded_answer_is_shown_with_its_sources(bed):
     assert model.requests[0]["messages"][1]["content"].endswith("(This question is about job 1.)")
 
 
+def test_the_window_says_how_long_the_question_may_take(bed):
+    """#171: while it waits, the window names the question's limit (2 x timeout_seconds), from the settings in
+    force; with no model to ask (not set up, a config that will not load) it says only that it is asking."""
+    assert askui.asking(lambda: bed["ready"]) == askui.ASKING_LIMIT.format(limit="4 minutes")
+    assert "waits at most 4 minutes for this question" in askui.asking(lambda: bed["ready"])
+    slow = replace(bed["ready"], assistant={**bed["ready"].assistant, "timeout_seconds": 45.0})
+    assert askui.asking(lambda: slow).endswith("waits at most 90 seconds for this question, then shows its own "
+                                               "explanation.")
+    assert askui.asking(lambda: bed["cfg"]) == askui.ASKING  # not set up: Ionomos answers at once
+
+    def broken():
+        raise ConfigError("no config.yaml")
+
+    assert askui.asking(broken) == askui.ASKING
+    assert [askui.duration(x) for x in (30, 119, 120, 150, 240, 7200)] == [
+        "30 seconds", "119 seconds", "2 minutes", "2.5 minutes", "4 minutes", "120 minutes"]
+    assert "askui.asking(self.pops.load_config)" in inspect.getsource(popups.AskWindow.ask)
+
+
 def test_not_set_up_is_a_normal_state_with_ionomos_own_text_and_the_setup_help(bed):
     shown = askui.answer_for(lambda: load(bed["cfg_path"]), askui.default_question(bed["failed"]), bed["failed"].id,
                              audit_path=bed["audit"])

@@ -376,7 +376,8 @@ Yes, if your lab has set up the assistant. In a window that says something
 needs attention, or in the **needs attention** list, press **Ask about this**.
 A window opens with a question already written for that problem; change it if
 you like and press **Ask**. A model on this computer can take a minute or two;
-the rest of Ionomos keeps working meanwhile. In a terminal: `ionomos ask "why
+the window says how long Ionomos waits at most (4 minutes as set up), and the
+rest of Ionomos keeps working meanwhile. In a terminal: `ionomos ask "why
 did my search fail?" --experiment 12` (the job number is in the Jobs tab; an
 experiment's name works too).
 
@@ -442,7 +443,8 @@ model, or to pause so the search keeps the computer to itself
 (`assistant.while_searching`). A paused assistant says so, and you get
 Ionomos's own explanation, as above. "Not answering" also covers a model that
 took longer than `assistant.timeout_seconds` to finish its reply, or sent more
-than 2 MB: nothing it sent is shown. Before choosing a model, the person who
+than 2 MB: nothing it sent is shown. "Ran out of time for this question" means
+the whole question took longer than twice `assistant.timeout_seconds`. Before choosing a model, the person who
 looks after Ionomos measures it on this computer with `ionomos ask-eval`.
 
 ## Where is this help, and can I change it? {#faq.help}
