@@ -417,6 +417,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A long value no longer breaks config.yaml on Save** (D125): the writer folded a value with a space past column
+  80 (a long Dropbox folder in `atlas.handoff_dir`, any long path) onto the next line, and the comment after it
+  made the file unreadable; every value is written on one line now.
+
 - **Round 5 issue sweep (D108–D117):**
   - **PCA of a large study takes seconds, not minutes** (D108, #163): above 60 samples only the 6 components
     the report shows, from the smaller Gram matrix; up to 60, Jacobi as before. 500 samples × 300 proteins:
