@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 import pytest
+import yaml
 
 import ionomos.intake
 from ionomos.intake import IntakeError, IntakeResult, Kind, _move_tree, draft, intake, plan
@@ -173,6 +174,23 @@ def test_traversal_user_is_rejected_with_note_and_nothing_escaped(lab, ledger):
     assert d.is_dir()  # left untouched in the inbox
     assert not (lab["root"].parent / "outside").exists()  # nothing outside users_root
     assert ledger.list() == []
+
+
+@pytest.mark.parametrize("key,value", [
+    ("workflow", "{outside}"), ("workflow", "//server/share/planted.workflow"), ("fasta", "{outside}"),
+    ("fasta", "../planted.workflow"),
+])
+def test_a_workflow_or_fasta_outside_the_lab_folders_is_rejected_and_never_used(lab, ledger, tmp_path, key, value):
+    """#168: a drop chose the search's workflow from anywhere the watcher could read (a share: Windows signs in)."""
+    outside = tmp_path / "elsewhere" / "planted.workflow"
+    outside.parent.mkdir()
+    outside.write_text("# PLANTED-FROM-OUTSIDE\n")
+    d = make_drop(lab["inbox"], "EJQ_isoDTB_x", ["S_1_1.raw"])
+    (d / "experiment.yaml").write_text(yaml.safe_dump({key: value.format(outside=outside)}), encoding="utf-8")
+    assert intake(d, lab["cfg"], ledger, resolver=_Never()) == IntakeResult.REJECTED
+    note = (lab["inbox"] / "EJQ_isoDTB_x.REJECTED.txt").read_text()
+    assert f"{key}_dir, not a path" in note and "give its name" in note
+    assert d.is_dir() and ledger.list() == []
 
 
 def test_gui_resolved_traversal_cannot_create_directories(lab, ledger):

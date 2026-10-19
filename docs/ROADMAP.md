@@ -1145,8 +1145,8 @@ Collected from the other docs; resolve before/during Phase 1.
       read as all missing (FragPipe never writes them). A MaxQuant TMT table without a design is `unassigned`
       since round 5 (D109, #165): should experiment.yaml's `tmt:` map also name MaxQuant channels, as it does
       Sage's `tmt.tsv`? Its note is still added when an SDRF or `sample_conditions` then gives the conditions.
-- [ ] Statistics: a dose-response curve is fitted and called for a protein measured at only two doses (#162; check
-      CurveCurator's per-curve `max_missing` rule first). PCA and knn are fast since round 5 (D108, #163, #164):
+- [ ] Statistics: ~~a dose-response curve is fitted and called for a protein measured at only two doses (#162)~~
+      (done, D106). PCA and knn are fast since round 5 (D108, #163, #164):
       port impute.knn's `maxp` clustering for tables over 1,500 rows (needs an R golden for knn first)? The QC
       correlation heatmap is now the slowest QC step at 500 samples (10–17 s): accept a non-bit-identical faster
       distance, or cap the clustered heatmap?
@@ -1159,8 +1159,8 @@ Collected from the other docs; resolve before/during Phase 1.
       tracebacks are messages (#172).
 - [ ] Engines (D98): stop what an engine leaves running after it exits on Windows (a Job Object or a Toolhelp
       walk, #174); check on the PC whether MSFragger's `BatmassIoThermoServer.exe` outlives MSFragger. A leftover
-      search that can't be stopped must hold the job, not run a second search beside it, and the cancel result
-      can't say the engine survived the kill (#175). The console log keeps every attempt (up to 2 GB each):
+      search that can't be stopped holds the queue until it ends (#175, D107): should jobs of other folders run
+      beside it instead? Today "one search at a time" wins. The console log keeps every attempt (up to 2 GB each):
       move aside or truncate an attempt's log past the limit? Does a MaxQuant retry reuse its per-raw working
       folders next to the raws (stale results) or redo them? DIA-NN reads `diann.cfg` in an unknown encoding:
       check a path with µ or ü on the PC, or hold a job whose paths are not ASCII.
@@ -1168,13 +1168,13 @@ Collected from the other docs; resolve before/during Phase 1.
       points load as a valid config with fewer methods, put right by the next reload); a settle delay would close
       it. (Every option has `--help` text, #166, and `bundle` / `library show` follow the exit-code table, #167,
       since round 5.)
-- [ ] Security (D99, D100, SECURITY_NOTES.md): `experiment.yaml`'s `workflow:` / `fasta:` accept any absolute or
-      UNC path, `site_annotation:` a UNC one (#168); an Authenticode check of the downloaded installer (today:
+- [ ] Security (D99, D100, SECURITY_NOTES.md): ~~`experiment.yaml`'s `workflow:` / `fasta:` accept any absolute or
+      UNC path, `site_annotation:` a UNC one (#168)~~ (done, D105); an Authenticode check of the downloaded installer (today:
       size + SHA-256 from the same GitHub answer); `maxquant.create_template` and `sage.run_job` start programs
       without `batch_problem`; `bundle inspect --key` reads a member with no line break whole; Teams Adaptive
       Cards render a little Markdown from a failure reason; a mapped drive letter (`Z:`) inside a scanned file is
-      not recognised as a network path. An attention item id with `../` reads and rewrites a JSON file outside the
-      attention folder (#169; the assistant checks the id itself now).
+      not recognised as a network path. ~~An attention item id with `../` reads and rewrites a JSON file outside the
+      attention folder (#169)~~ (done: `attention.py` checks every id).
 - [ ] Assistant: is 2 × `timeout_seconds` the right limit for a whole question (D117, #171)? Measure on the PC
       with `ionomos ask-eval`: how many requests a real answer takes and how long each takes, idle and while
       searching (6.0); should it be a setting? Should a proposal for another job than the one asked about be refused rather than

@@ -172,14 +172,26 @@ def items(log_dir: Path | None, open_only: bool = True) -> list[Item]:
     return out
 
 
+_ID = re.compile(r"[A-Za-z0-9._-]{1,200}")  # what _slug and uuid make
+
+
+def _path(log_dir: Path, item_id: str) -> Path | None:
+    """The item's file, or None when the id isn't a file name in the attention folder (#169): an id with ../ from
+    the command line read, and dismiss rewrote, a JSON file outside it."""
+    item_id = str(item_id)
+    if not _ID.fullmatch(item_id) or item_id.strip(".") == "":
+        return None
+    return folder(log_dir) / f"{item_id}.json"
+
+
 def get(log_dir: Path, item_id: str) -> Item | None:
-    p = folder(log_dir) / f"{item_id}.json"
-    return _read(p) if p.is_file() else None
+    p = _path(log_dir, item_id)
+    return _read(p) if p is not None and p.is_file() else None
 
 
 def _set(log_dir: Path, item_id: str, **changes) -> bool:
-    p = folder(log_dir) / f"{item_id}.json"
-    it = _read(p) if p.is_file() else None
+    p = _path(log_dir, item_id)
+    it = _read(p) if p is not None and p.is_file() else None
     if it is None:
         return False
     for k, v in changes.items():

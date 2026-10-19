@@ -178,3 +178,21 @@ def test_long_keys_that_share_a_prefix_stay_separate(tmp_path):
     a = attention.raise_item(tmp_path, "analysis_input", "a", "m", key=base + "/EXP_A")
     b = attention.raise_item(tmp_path, "analysis_input", "b", "m", key=base + "/EXP_B")
     assert a.id != b.id and len(attention.items(tmp_path)) == 2 and "EXP_A" in a.id
+
+
+@pytest.mark.parametrize("item_id", ["../../outside", r"..\..\outside", "../outside", "..", ".", "", "a/b",
+                                     "C:/x/outside", "x\n", "a" * 201])
+def test_an_id_that_is_not_a_file_name_in_the_folder_reads_and_writes_nothing(tmp_path, item_id):
+    """#169: `ionomos attention dismiss ../../outside` rewrote <log_dir>/../outside.json."""
+    log_dir = tmp_path / "logs"
+    real = attention.raise_item(log_dir, "search_failed", "t", "m", key="k")
+    outside = tmp_path / "outside.json"
+    outside.write_bytes(json.dumps({**real.__dict__, "id": "outside"}).encode("utf-8"))
+    before = outside.read_bytes()
+    assert attention.get(log_dir, item_id) is None
+    for act in (attention.dismiss, attention.resolve, attention.snooze):
+        assert act(log_dir, item_id) is False
+    attention.mark_shown(log_dir, item_id)
+    assert outside.read_bytes() == before
+    assert attention.get(log_dir, real.id).is_open  # a real id still works
+    assert attention.dismiss(log_dir, real.id) and not attention.get(log_dir, real.id).is_open

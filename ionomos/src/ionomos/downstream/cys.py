@@ -317,8 +317,12 @@ def load_annotation(path: Path, limit_bytes: int = 512 * 1024**2) -> dict:
 
 
 def find_annotation(name: str, dest: Path | None) -> Path | None:
-    """analysis.site_annotation: an absolute path, or a file in the experiment folder."""
-    if not name:
+    """analysis.site_annotation: an absolute path, or a file in the experiment folder. A network path is never
+    opened (#168): experiment.yaml is written by whoever drops the folder, and opening \\\\server\\share makes
+    Windows sign in to that server."""
+    from ionomos.fragpipe import is_network_path
+
+    if not name or is_network_path(name):
         return None
     p = Path(name)
     if p.is_absolute():

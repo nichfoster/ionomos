@@ -4522,6 +4522,97 @@ unchanged. `test_ledger.py` hammers one Ledger from two threads (both tests
 failed 5 runs out of 5 on the old code). **Not verified**: CI's Linux
 runners, where the original failure was seen.
 
+### D105 — experiment.yaml's `workflow:` and `fasta:` are file names; a network `site_annotation:` is never opened
+**2026-10-18.** Issue #168: `workflow:` and `fasta:` in experiment.yaml
+reached `fragpipe._find_file`, which takes an absolute path as it is. Whoever
+drops a folder writes experiment.yaml (the inbox is often a network share), so
+a drop could make the search use a workflow or FASTA from anywhere the
+watcher's account can read, and a `//server/share` value made Windows sign in
+to that server as the watcher's account. The docs already said "file under
+workflow_dir".
+
+`manifest.parse_overrides` now refuses, at intake, a `workflow:` or `fasta:`
+with `/`, `\`, `:` (a drive, `C:x` included), a bare `..`, or a control
+character, with an OverridesError that says to put the file in
+`workflow_dir` / `fasta_dir` and give its name; the drop stays in the inbox
+with its `.REJECTED.txt`. Names are not sanitised: a file name with spaces or
+dots is kept as written, since it has to match the file. config.yaml's
+`methods:` still take a full path: the lab's own config is trusted, a drop is
+not (SECURITY_NOTES.md).
+
+`analysis.site_annotation:` keeps its full path (WORKFLOWS.md), but
+`cys.find_annotation` never opens a network path; the analysis warns "a
+network path, which Ionomos doesn't open: copy the file into the experiment
+folder". Refusing it at intake was the other option; it was not taken because
+the same key is also set in the app's Analysis tab for a folder searched
+outside Ionomos, where the warning is enough.
+
+### D106 — A dose-response curve needs `dose_min_doses` distinct measured doses for each feature, not only per compound
+**2026-10-18.** Issue #162: `doseresponse.fit_series` fitted a feature when
+it had 4 measured *points*, so a protein measured only at the two highest of
+five doses (3 replicates each, missing below: the usual case for a
+low-abundance protein without imputation) was fitted with the 4-parameter
+curve, called "up", and given a pEC50 with a ±0.4 interval. Through two
+doses and the control the step can sit anywhere between them; the interval
+came from the Jacobian, not from the data. The note already said "features
+measured at fewer than 4 doses were not fitted", which was not the rule the
+code applied.
+
+A feature now needs as many distinct measured doses as its compound does
+(`analysis.dose_min_doses`, default 4), and 4 points; otherwise it is "not
+fitted" and counted in the note, which now names the setting. A lab that
+lowers `dose_min_doses` lowers both: one setting, one rule.
+
+CurveCurator's own per-curve filter is `max_missing`, a count of missing
+values per curve; the golden comparison (tests/golden/dose_response/,
+CurveCurator 0.6.0) switches it off (`max_missing = n`), so it does not pin
+a rule here. A count of missing values doesn't say how many doses are left
+(three missing replicates of one dose vs one of three doses), so distinct
+doses it is. The golden designs' features all keep at least 4 doses and are
+unchanged. **Not verified**: against CurveCurator with its default
+`max_missing`.
+
+### D107 — A search that won't stop holds its job and the queue; a cancel names a survivor
+**2026-10-18.** Issue #175. D69 item 2 stops a search an earlier Ionomos left
+running before the job runs again. When that process did not end (taskkill
+refused, a process stuck in a network drive's I/O), `stop_leftover` said "it
+may still be running", deleted `engine_pid.json`, and the worker started a
+second search beside it. On POSIX the old search went on writing into
+`fragpipe_previous_<time>/`; on Windows the job was usually held as "can't be
+moved aside", right by accident and for the wrong reason.
+
+1. **`fragpipe.stop_leftover` returns a `Leftover(message, running)`.** When
+   the recorded process is ours and still runs after `kill_pid_tree` (and up
+   to 5 s more: taskkill returns before Windows has ended the tree),
+   `running` is true and `engine_pid.json` stays, so every later look tries
+   to stop it again.
+2. **The worker holds the job** before it closes the job's attention items or
+   counts an attempt: "an earlier search of this experiment is still running
+   (process N, started …): end it in Task Manager; the search starts by
+   itself once it has ended" (`help.HOLD_TOPICS` → `search.hold-leftover`).
+   Each poll tries to stop it again; the hold is logged, raised and notified
+   once, as other holds are (the `_held` entry is now cleared only once a
+   search really starts). `worker.recover` logs the same and leaves the job
+   to the worker.
+3. **The rest of the queue waits too.** A held job normally lets the jobs
+   behind it run; this one doesn't (`_search` returns "not run" and the pass
+   ends), because the survivor still takes FragPipe's RAM and threads and the
+   worker runs one search at a time. Letting other folders run beside it is
+   the alternative, noted in ROADMAP.
+4. **A cancel names a survivor** the way a time limit does (`_not_stopped`):
+   `cancelled by user — DIA-NN did not stop when told to (process N): end it
+   in Task Manager before a Retry`, with that hint. The plain "cancelled by
+   user" still raises no pop-up and no notification (the person knows); the
+   longer reason does ("… was cancelled but did not stop"), since the person
+   who cancelled may not know the search lives on. Its Retry waits per item 2.
+
+**Verified**: `tests/test_engine_faults.py` (stop_leftover on Windows and
+POSIX with os / subprocess / signal stubbed; the worker holding a job behind a
+survivor and starting it once it has ended; a real stand-in DIA-NN that
+ignores the cancel, its Retry held, then run once it is stopped) and
+`tests/test_worker.py` (`recover` with a survivor). **Not verified**: a real
+FragPipe on the lab PC that taskkill can't end.
+
 ### D108 — Large-table PCA and knn: faster, the same numbers
 **2026-10-19.** The QC PCA (#163) and knn imputation (#164) were quadratic or cubic in pure Python. Both are
 faster now, and neither changes a result a person could see.
