@@ -8,7 +8,8 @@ status and what to do about it. Shared by the app's Setup tab and `ionomos init`
 
 `action` names something the app can do in one click (create_folders,
 find_fragpipe, save, install_task, start_watcher, open_tab:<tab key>, e.g.
-open_tab:methods; the app also takes the old open_tab:<n>).
+open_tab:methods; the app also takes the old open_tab:<n>; atlas_folder: the
+Folders tab with the cursor in the cysteine atlas's folder, D125).
 """
 from __future__ import annotations
 
@@ -180,6 +181,10 @@ def run(config_path: Path, data: dict | None = None, probe_watcher: bool = True)
         add(Item("analysis", "Analysis settings", "ok",
                  "on: statistics, volcano plots, report after each search" if cfg.analysis.get("enabled", True)
                  else "off: only FragPipe output + the lab's R-script tables", ""))
+        # 8b. the cysteine atlas hand-off (only while it is on: an optional feature, D125)
+        at = atlas_item(d.get("atlas"))
+        if at is not None:
+            add(at)
         # 9. watcher
         if probe_watcher:
             running = health.is_locked(cfg.log_dir)
@@ -290,6 +295,47 @@ def library_item(cfg) -> Item:
                 if not errors else ("Methods tab → Find on this PC… → a ✗ file needs another; Review proposals… "
                                     "picks one."),
                 "open_tab:methods")
+
+
+ATLAS_TITLE = "Cysteine atlas hand-off"
+
+
+def atlas_item(raw) -> Item | None:
+    """The cysteine atlas hand-off's line (atlas.check without its test file: a check writes nothing, D125), from the
+    `atlas:` block as the window or config.yaml has it; None while the hand-off is off (an optional feature most labs
+    don't use). It lists folders and may wait on Dropbox: run it off the Tk thread, as the whole checklist is.
+    `ionomos doctor` shows this line too (checks.everything); `ionomos atlas check` prints the same findings."""
+    from types import SimpleNamespace
+
+    from ionomos import atlas
+
+    try:
+        s = atlas.settings_from(raw or None)
+    except atlas.AtlasError as exc:
+        what = f"atlas: {exc}" if str(exc).startswith("must") else f"atlas.{exc}"
+        return Item("atlas", ATLAS_TITLE, "fail", what,
+                    "Fix the folder on the Folders tab (Cysteine atlas), then Save.", "atlas_folder")
+    if not s["enabled"]:
+        return None
+    try:
+        found = atlas.check(SimpleNamespace(atlas=s), write_probe=False)
+    except Exception as exc:  # noqa: BLE001 - a checklist line must never break the checklist
+        return Item("atlas", ATLAS_TITLE, "warn", f"could not be checked ({exc})",
+                    "Run  ionomos atlas check  in a terminal for the details.", "atlas_folder")
+    detail = "; ".join(f.what for f in found)
+    bad = [f for f in found if not f.ok]
+    if not bad:
+        return Item("atlas", ATLAS_TITLE, "ok", detail)
+    fix = bad[0].fix.strip() or "Run  ionomos atlas check  in a terminal for the details."
+    fix = fix[:1].upper() + fix[1:]
+    folder = not bad[0].what.startswith("atlas site lookup")  # the folder (unset, unreachable), not the lookup
+    if folder and "Folders tab" not in fix:
+        fix += " (the folder is on the Folders tab, under Cysteine atlas)."
+    elif not fix.endswith((".", "?", ")")):
+        fix += "."
+    # no folder yet is a step to take; an unreachable folder or a bad lookup only delays the atlas (it retries)
+    return Item("atlas", ATLAS_TITLE, "todo" if not s["handoff_dir"] else "warn", detail, fix,
+                "atlas_folder" if folder else None)
 
 
 def summary(items: list[Item]) -> str:
