@@ -365,6 +365,8 @@ in QC_TREND.md; `library:` in LIBRARY.md; `assistant:` in ASSISTANT.md;
 | A damaged `ionomos.json` (wrong shape) or job row | skipped by rebuild/adoption with a warning; `worker._read_status` falls back to the ledger's record; a row's record reads `{}` and that job fails |
 | An unexpected error preparing a search | that job fails with the reason; the queue goes on |
 | `repair-ledger` with the ledger open elsewhere | all-or-nothing move aside; `LedgerError` names what to close; exit 1 |
+| `run` with a damaged ledger open elsewhere | the same refusal, nothing changed: the watcher does not start, says what to close, exit 1 (#172) |
+| A read-only `logs/ionomos.lock` (restored from a backup, copied from another PC) | `health.LockFileUnusable`: the file and the `attrib -R` to run; nothing started, exit 2 (#172) |
 | Folder can never be parsed (symbols-only names, a bug) | `intake()` never raises: transient OS errors → RETRY, anything else → `.REJECTED.txt` (no infinite retry loop) |
 | Sanitised names collide | `plan()` rejects duplicate final names (case-insensitive); renames refuse to overwrite |
 | Disk nearly full | a search is held ("waiting: low disk space") until `min_free_gb` + its raws are free |

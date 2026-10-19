@@ -193,7 +193,14 @@ def _open_ledger(cfg: Config) -> Ledger:
     state = ledger_mod.integrity(cfg.database)
     if state not in ("ok", "missing"):
         log.critical("job ledger %s is damaged (%s); rebuilding it from the experiment folders", cfg.database, state)
-        moved, n = ledger_mod.rebuild_from_status_files(cfg.database, cfg.users_root)
+        try:
+            moved, n = ledger_mod.rebuild_from_status_files(cfg.database, cfg.users_root)
+        except ledger_mod.LedgerError as exc:
+            raise ledger_mod.LedgerError(
+                f"the watcher did not start: the job list {cfg.database} is damaged ({state}) and could not be "
+                f"moved aside to rebuild it ({exc.__cause__ or exc}). It is probably open in another program: "
+                "close the Ionomos app and any database viewer (DB Browser), then start the watcher again. "
+                "Nothing was changed.") from exc
         log.critical("ledger rebuilt with %d job(s); the damaged file was kept as %s", n, moved)
     return Ledger(cfg.database)
 
@@ -245,12 +252,24 @@ def cmd_run(args) -> int:
         log.error("%s", exc)
         print(str(exc), file=sys.stderr)
         return 3
+    except health.LockFileUnusable as exc:  # a read-only lock file (#172): a file it needs can't be written
+        log.error("%s", exc)
+        print(str(exc), file=sys.stderr)
+        return 2
     except OSError as exc:  # a log folder this Windows account can't write (or a full disk): nothing started
         print(f"the watcher can't use its log folder (paths.log_dir = {cfg.log_dir}): {exc}. Pick a folder this "
               f"account can write to (app: Folders tab), or give it write access; nothing was started.", file=sys.stderr)
         return 2
     log.info("ionomos %s starting (config %s, pid %d)", __version__, cfg.config_path, os.getpid())
-    ledger = _open_ledger(cfg)
+    from ionomos.ledger import LedgerError
+
+    try:
+        ledger = _open_ledger(cfg)
+    except LedgerError as exc:  # damaged, and open in another program: nothing was changed (#172)
+        log.critical("%s", exc)
+        print(str(exc), file=sys.stderr)
+        lock.release()
+        return 1
     from ionomos.worker import recover
 
     for jid, st in recover(cfg, ledger):

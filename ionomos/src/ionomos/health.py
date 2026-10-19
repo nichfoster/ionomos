@@ -43,6 +43,11 @@ class AlreadyRunning(RuntimeError):
     pass
 
 
+class LockFileUnusable(RuntimeError):
+    """The lock file can't be opened for writing (read-only, restored from a backup or copied from another PC;
+    #172): nothing was started. The message says what to do."""
+
+
 class InstanceLock:
     """An OS-level exclusive lock on <log_dir>/ionomos.lock, held while the watcher runs.
 
@@ -63,7 +68,14 @@ class InstanceLock:
             if _held(self.path.parent / old):
                 raise AlreadyRunning("an old LabWatch watcher is still running for this setup. Stop it first "
                                      "(close LabWatch, or: taskkill /IM LabWatch.exe /F).")
-        fh = open(self.path, "a+b")  # noqa: SIM115 - held open for the process lifetime
+        try:
+            fh = open(self.path, "a+b")  # noqa: SIM115 - held open for the process lifetime
+        except OSError as exc:  # read-only (attrib +R, a restored backup), or this account may not write it
+            fix = (f"attrib -R \"{self.path}\"" if os.name == "nt" else f"chmod u+w '{self.path}'")
+            raise LockFileUnusable(
+                f"the watcher can't open its lock file {self.path} ({exc.strerror or exc}). It is probably "
+                f"read-only (restored from a backup or copied from another PC): remove the read-only flag "
+                f"({fix}) or delete the file, then start the watcher again. Nothing was started.") from exc
         try:
             if os.name == "nt":
                 import msvcrt
