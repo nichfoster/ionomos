@@ -296,9 +296,12 @@ def test_a_tmt_jobs_reason_does_not_carry_the_table_kind_but_analysis_json_does(
 # ------------------------------------------------- a DIA in fractions (#180) --
 
 
+FRACTION_RUNS = [(c, r, f) for c in ("DMSO", "Drug") for r in (1, 2, 3) for f in (1, 2)]
+
+
 def _dia_fractions(tmp_path: Path, layout: bool = True, fractions_in_yaml: bool = False) -> Path:
     dest = tmp_path / "20260917_Isaac_DIA_two-fraction"
-    raws = [(c, r, f) for c in ("DMSO", "Drug") for r in (1, 2, 3) for f in (1, 2)]
+    raws = FRACTION_RUNS
     simulate.dia_pg_matrix(dest / "fragpipe" / "report.pg_matrix.tsv",
                            [(f"{c}_{r}_F{f}_uncalibrated.mzML", c) for c, r, f in raws], seed=5)
     plan = {"folder": {"method": "DIA"},
@@ -335,6 +338,97 @@ def test_a_dias_fractions_are_added_up_per_sample(tmp_path, layout, in_yaml):
 def test_two_runs_of_a_sample_without_fractions_stay_two_and_the_doctor_asks(tmp_path):
     dest = _dia_fractions(tmp_path, layout=False)
     out = downstream.analyze(dest, "DIA", record=postprocess.prepare(dest, None)["record"])
+    assert "DUPLICATE_SAMPLES" in {i.code for i in out.issues} and len(out.summary["samples"]) == 12
+
+
+def _summed(a: list, b: list) -> list:
+    """Two log2 columns added up in linear space (None where both are missing), as quant.sum_fractions does."""
+    return [None if x is None and y is None else math.log2(sum(2 ** v for v in (x, y) if v is not None))
+            for x, y in zip(a, b, strict=True)]
+
+
+def _diann_long_report(dest: Path) -> Path:
+    """DIA-NN's long report for FRACTION_RUNS (Run is the file's stem, as DIA-NN 1.x writes it); a few cells left
+    out so some proteins are measured in one fraction only."""
+    head = ["Run", "Protein.Group", "Genes", "Precursor.Id", "Q.Value", "PG.Q.Value", "PG.MaxLFQ"]
+    rows = [[f"{c}_{r}_F{f}", f"P{i:03d}", f"GENE{i}", f"PEP{i}K2", 0.001, 0.001, 1000.0 * i + 37 * k]
+            for i in range(1, 31) for k, (c, r, f) in enumerate(FRACTION_RUNS) if (i + k) % 7]
+    path = dest / "diann" / "report.tsv"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join("\t".join(str(x) for x in row) for row in [head, *rows]) + "\n", encoding="utf-8")
+    return path
+
+
+@pytest.mark.parametrize("layout", [True, False])
+def test_a_dia_nn_long_reports_fractions_are_added_up_and_other_runs_are_as_read(tmp_path, layout):
+    """D119: the standalone DIA-NN reader names its samples by run and guesses their conditions; a plan with
+    fractions adds each sample's runs up into the manifest's sample, as from DIA's pg_matrix. Without fractions
+    the matrix is the reader's own (a re-acquisition stays two samples, named by their files)."""
+    from ionomos.downstream import engines
+
+    dest = _dia_fractions(tmp_path, layout=layout)
+    path = _diann_long_report(dest)
+    record = postprocess.prepare(dest, None)["record"]
+    m, _files, _notes = downstream.load_quantities("DIA-NN", dest / "diann", dest / "results", record, dest=dest)
+    one = engines.load_diann_long(path)
+    if not layout:
+        assert (m.samples, m.values, m.condition) == (one.samples, one.values, one.condition)
+        assert len(m.samples) == 12 and "fractions" not in m.meta
+        return
+    assert m.samples == [f"{c}_{r}" for c in ("DMSO", "Drug") for r in (1, 2, 3)]
+    assert m.condition == {s: s.split("_")[0] for s in m.samples} and m.replicate["Drug_3"] == 3   # the manifest's
+    assert m.meta["fractions"]["Drug_3"] == ["Drug_3_F1", "Drug_3_F2"]
+    assert m.column("Drug_3") == pytest.approx(_summed(one.column("Drug_3_F1"), one.column("Drug_3_F2")))
+    note = next(n for n in m.notes if "fractions were added" in n)
+    assert downstream.quant.is_info(note) and "6 sample(s) with 2–2 runs" in note
+
+
+def _phosphosites(dest: Path) -> Path:
+    """DIA-NN's phosphosite matrix for FRACTION_RUNS: a column per run file, 0 = missing."""
+    head = ["Protein", "Protein.Names", "Gene.Names", "Residue", "Site", "Sequence",
+            *[f"D:\\data\\{c}_{r}_F{f}.raw" for c, r, f in FRACTION_RUNS]]
+    rows = [[f"Q{i:05d}", f"N{i}_HUMAN", f"GENE{i:03d}", "S", 10 + i, "PEPSIDE",
+             *[0 if (i + k) % 7 == 0 else 1000 * i + 10 * k + (4000 if c == "Drug" and i < 6 else 0)
+               for k, (c, _r, _f) in enumerate(FRACTION_RUNS)]] for i in range(1, 41)]
+    path = dest / "fragpipe" / "diann-output" / "report.phosphosites_90.tsv"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join("\t".join(str(x) for x in row) for row in [head, *rows]) + "\n", encoding="utf-8")
+    return path
+
+
+def test_dia_nn_phosphosites_add_up_a_samples_fractions_before_the_sdrf(tmp_path):
+    """D119: phospho.read_sites adds the fractions up between reading the matrix and applying an SDRF, so the SDRF
+    sets the summed sample's condition and doesn't see its fractions as separate columns."""
+    from ionomos.downstream import phospho
+    from ionomos.downstream.analysis import Settings
+
+    dest = _dia_fractions(tmp_path)
+    path = _phosphosites(dest)
+    head = ["source name", "characteristics[biological replicate]", "comment[data file]",
+            "comment[fraction identifier]", "factor value[compound]"]
+    rows = [[f"{c}_{r}", r, f"{c}_{r}_F{f}.raw", f, "vehicle" if c == "DMSO" else "drug"] for c, r, f in FRACTION_RUNS]
+    (dest / "design.sdrf.tsv").write_text("\n".join("\t".join(str(x) for x in row) for row in [head, *rows]) + "\n",
+                                          encoding="utf-8")
+    record = postprocess.prepare(dest, None)["record"]
+    smap = downstream._sample_map(record)
+    s = Settings(phospho=True)
+    m, notes, problems = phospho.read_sites("DIA", dest / "fragpipe", dest, record, s, smap,
+                                            downstream._fractionated(record))
+    assert problems == [] and m.samples == [f"{c}_{r}" for c in ("DMSO", "Drug") for r in (1, 2, 3)]
+    assert m.condition["DMSO_2"] == "vehicle" and m.condition["Drug_1"] == "drug"   # the SDRF, on the summed sample
+    assert m.meta["sdrf"]["matched"] == 6 and not any("separate columns" in n for n in notes)
+    one = phospho.load(path, "diann", s, dest / "fragpipe", sample_map=smap)   # as read: DMSO_1, DMSO_1.2, ...
+    assert m.column("DMSO_1") == pytest.approx(_summed(one.column("DMSO_1"), one.column("DMSO_1.2")))
+    assert m.level == "site" and m.meta["phospho"]["kind"] == "diann" and m.meta["fractions"]["DMSO_1"]
+
+
+def test_dia_nn_phosphosites_of_a_re_acquired_sample_stay_two_and_the_doctor_asks(tmp_path):
+    dest = _dia_fractions(tmp_path, layout=False)
+    _phosphosites(dest)
+    out = downstream.analyze(dest, "DIA", analysis_cfg={"phospho": True, "enrichment": False},
+                             record=postprocess.prepare(dest, None)["record"])
+    s = json.loads((dest / "results" / "analysis.json").read_text(encoding="utf-8"))
+    assert s["phospho"]["ran"] and s["phospho"]["localisation"]["kind"] == "diann"   # the sites, not the proteins
     assert "DUPLICATE_SAMPLES" in {i.code for i in out.issues} and len(out.summary["samples"]) == 12
 
 

@@ -216,6 +216,8 @@ def test_sdrf_with_maxquant_plexes_gives_conditions_and_the_irs_reference(tmp_pa
     assert s["method"] == "MaxQuant" and s["design"]["sdrf"]["matched"] == 30
     assert s["tmt"]["applied"] and s["tmt"]["reference_from"].startswith("SDRF design.sdrf.tsv")
     assert set(s["samples"].values()) == {"DMSO", "Drug"} and len(s["samples"]) == 24
+    # the SDRF answers MaxQuant's question for the channels' conditions; the pools are references (D118)
+    assert not any("by number only" in n for n in s["notes"])
     with open(out.results_dir / "Drug_vs_DMSO_differential.tsv", encoding="utf-8") as fh:
         sig = {r["id"] for r in csv.DictReader(fh, delimiter="\t") if r["significant"]}
     assert len(sig & hits) >= 0.8 * len(hits)

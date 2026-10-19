@@ -33,6 +33,12 @@ results from any supported engine can be analysed with `ionomos analyze <folder>
 
 Ionomos never runs or ships these engines here; it only reads what they wrote. Nothing is written into the
 engine's folder.
+
+Notes: one that only says what was read or done as planned (the quantity, the q-value filter, the summary, the
+razor and fraction steps, gene names from the FASTA) is a quant.Info, kept out of the job's warnings (D110, D118);
+one asking for the conditions of 'unassigned' channels is a quant.AsksConditions, dropped once the design gives
+them (sdrfdesign.answered); every other note (a repaired or damaged table, a missing run, a setting not used) is a
+plain str, a warning.
 """
 from __future__ import annotations
 
@@ -45,7 +51,7 @@ from pathlib import Path
 
 from ionomos.downstream import anytable
 from ionomos.downstream import rollup as _rollup
-from ionomos.downstream.quant import Feature, QuantMatrix, run_stem
+from ionomos.downstream.quant import AsksConditions, Feature, Info, QuantMatrix, run_stem, sum_fractions
 from ionomos.downstream.tables import num, open_text
 from ionomos.downstream.tables import reader as text_rows  # an engine's own tab file, line by line
 
@@ -209,16 +215,17 @@ def _rolled_up(feats_of: dict[str, dict[str, dict[str, float]]], runs: list[str]
     return cells
 
 
-def _split_note(feats_of: dict[str, dict[str, dict[str, float]]], runs: list[str], method: str) -> str:
-    """MaxLFQ: how many proteins have samples in more than one group that share no feature (each group is
-    scaled on its own, so values across the groups are not ratios)."""
+def _split_note(feats_of: dict[str, dict[str, dict[str, float]]], runs: list[str], method: str) -> list[str]:
+    """MaxLFQ: a note when proteins have samples in more than one group that share no feature (each group is
+    scaled on its own, so values across the groups are not ratios), else []. A warning, so a note of its own after
+    the loader's summary (an Info)."""
     if method != "maxlfq":
-        return ""
+        return []
     split = sum(1 for fmap in feats_of.values()
                 if len({c for c in _rollup.components([[fmap[f].get(r) for r in runs] for f in fmap])
                         if c is not None}) > 1)
-    return (f"; {split:,} protein(s) have samples that share no feature with the others (MaxLFQ scales each such "
-            "group on its own)") if split else ""
+    return [f"{split:,} protein(s) have samples that share no feature with the others (MaxLFQ scales each such "
+            "group on its own)"] if split else []
 
 
 class _QFilter:
@@ -330,14 +337,14 @@ def load_diann_long(path: Path, rollup: str = "auto") -> QuantMatrix:
     meta = {"engine": "DIA-NN", "evidence": "precursors"}
     dropped = f" ({qf.dropped:,} rows above it left out)" if qf.dropped else ""
     if method == "engine":
-        notes = [f"DIA-NN long report {path.name}: protein quantity {qcol}, precursors and protein groups at "
-                 f"q ≤ {LONG_FDR:g}" + dropped]
+        notes = [Info(f"DIA-NN long report {path.name}: protein quantity {qcol}, precursors and protein groups at "
+                      f"q ≤ {LONG_FDR:g}" + dropped)]
     else:
         cells = _rolled_up(prec, runs, method)
         meta.update(quantity=f"{_rollup.LABELS[method]} of {pcol} (Ionomos)", rollup=method)
-        notes = [f"DIA-NN long report {path.name}: precursors ({pcol}) rolled up to protein groups by "
-                 f"{_rollup.describe(method)}, not DIA-NN's own {qcol or 'PG.MaxLFQ'}; precursors and protein groups "
-                 f"at q ≤ {LONG_FDR:g}" + dropped + _split_note(prec, runs, method)]
+        notes = [Info(f"DIA-NN long report {path.name}: precursors ({pcol}) rolled up to protein groups by "
+                      f"{_rollup.describe(method)}, not DIA-NN's own {qcol or 'PG.MaxLFQ'}; precursors and protein "
+                      f"groups at q ≤ {LONG_FDR:g}" + dropped)] + _split_note(prec, runs, method)
     notes += read_notes + qf.notes(path.name)
     if fallback:
         notes.append(fallback)
@@ -358,7 +365,7 @@ def _maxquant_score(path: Path) -> float:
 
 
 def load_maxquant(path: Path) -> QuantMatrix:
-    m = anytable.load(path)
+    m = anytable.load(path, known=True)
     header = _header(path)
     reporter = any(h.startswith("Reporter intensity corrected ") for h in header) and \
         not any(h.startswith("LFQ intensity ") for h in header)
@@ -398,8 +405,8 @@ def _maxquant_plexes(m: QuantMatrix, path: Path) -> QuantMatrix:
     if any(x and x.group(2) for x in hit.values()):
         keep = [j for j, s in enumerate(m.samples) if not (hit[s] and not hit[s].group(2))]
         if len(keep) < len(m.samples):
-            m.notes.append(f"{len(m.samples) - len(keep)} reporter columns summed over experiments were left out "
-                           "(each experiment's own channels are used)")
+            m.notes.append(Info(f"{len(m.samples) - len(keep)} reporter columns summed over experiments were left "
+                                "out (each experiment's own channels are used)"))
             m = keep_samples(m, keep)
     idx = sorted({int(x.group(1)) for s, x in hit.items() if x and s in m.condition})
     if not idx:
@@ -420,8 +427,9 @@ def _maxquant_plexes(m: QuantMatrix, path: Path) -> QuantMatrix:
     for s in channel:
         m.condition[s] = UNASSIGNED
         m.replicate.pop(s, None)
-    m.notes.append(f"MaxQuant names {len(channel)} TMT channels by number only, so their condition is '{UNASSIGNED}': "
-                   "give each its condition on the Analysis tab, with analysis.sample_conditions, or with an SDRF")
+    m.notes.append(AsksConditions(f"MaxQuant names {len(channel)} TMT channels by number only, so their condition is "
+                                  f"'{UNASSIGNED}': give each its condition on the Analysis tab, with "
+                                  "analysis.sample_conditions, or with an SDRF"))
     if plex:
         m.meta["plex"] = plex
         summary = path.parent / "summary.txt"
@@ -517,7 +525,7 @@ def load_spectronaut(path: Path, rollup: str = "auto") -> QuantMatrix:
     h = _header(path)
     method = _rollup.resolve(rollup, "engine")
     if "R.FileName" not in h:  # pivot report: the any-table loader reads <run>.PG.Quantity columns
-        m = anytable.load(path)
+        m = anytable.load(path, known=True)
         m.exp, m.meta["engine"], m.meta["quantity"] = "DIA", "Spectronaut", "PG.Quantity (pivot report)"
         if method != "engine":
             m.notes.append(f"analysis.rollup: {method} was not used: a pivot report holds proteins already")
@@ -578,14 +586,14 @@ def load_spectronaut(path: Path, rollup: str = "auto") -> QuantMatrix:
     meta = {"engine": "Spectronaut", "evidence": "precursors", "quantity": qcol}
     dropped = f"; {qf.dropped:,} rows above q {LONG_FDR:g} left out" if qf.dropped else ""
     if method == "engine":
-        notes = [f"Spectronaut report {path.name}: protein quantity {qcol}; conditions and replicates from "
-                 f"R.Condition / R.Replicate" + dropped]
+        notes = [Info(f"Spectronaut report {path.name}: protein quantity {qcol}; conditions and replicates from "
+                      f"R.Condition / R.Replicate" + dropped)]
     else:
         cells = _rolled_up(prec, runs, method)
         meta.update(quantity=f"{_rollup.LABELS[method]} of FG.Quantity (Ionomos)", rollup=method)
-        notes = [f"Spectronaut report {path.name}: precursors (FG.Quantity) rolled up to protein groups by "
-                 f"{_rollup.describe(method)}, not Spectronaut's {qcol}; conditions and replicates from R.Condition / "
-                 f"R.Replicate" + dropped + _split_note(prec, runs, method)]
+        notes = [Info(f"Spectronaut report {path.name}: precursors (FG.Quantity) rolled up to protein groups by "
+                      f"{_rollup.describe(method)}, not Spectronaut's {qcol}; conditions and replicates from "
+                      f"R.Condition / R.Replicate" + dropped)] + _split_note(prec, runs, method)
     notes += read_notes + qf.notes(path.name)
     if fallback:
         notes.append(fallback)
@@ -604,7 +612,7 @@ def load_alphadia(path: Path) -> QuantMatrix:
     if path.suffix.lower() == ".parquet":
         raise anytable.TableError(f"{path.name}: read AlphaDIA's pg.matrix.tsv instead (the Parquet matrix "
                                   "needs pyarrow and is the same numbers)")
-    m = anytable.load(path)
+    m = anytable.load(path, known=True)
     m.exp, m.meta["engine"], m.meta["quantity"] = "DIA", "AlphaDIA", "pg.matrix (MaxLFQ-style)"
     return m
 
@@ -715,9 +723,10 @@ def load_msstats(path: Path, rollup: str = "auto") -> QuantMatrix:
             if s is not None:
                 cells[(prot, run)] = 2 ** s
     how = "Tukey median polish (MSstats' default)" if method == "median_polish" else _rollup.describe(method)
-    notes = [f"MSstats-format {path.name}: {len(feats):,} proteins summarised from {sum(len(v) for v in by.values()):,} "
-             f"features by {how}" + (f"; {heavy:,} heavy / reference rows left out" if heavy else "")
-             + _split_note(by, runs, method)] + read_notes
+    notes = [Info(f"MSstats-format {path.name}: {len(feats):,} proteins summarised from "
+                  f"{sum(len(v) for v in by.values()):,} features by {how}"
+                  + (f"; {heavy:,} heavy / reference rows left out" if heavy else ""))] \
+        + _split_note(by, runs, method) + read_notes
     samples_cond = {r: cond[r] for r in runs if cond.get(r)}
     return _matrix_from_long(path, feats, cells, runs, samples_cond, rep, "LFQ", notes,
                              {"engine": "MSstats format", "evidence": "peptides",
@@ -818,7 +827,8 @@ def _tmt_summarise(psms: dict, annot: dict, run_info: dict, channels: list[str],
             multi += 1
         feat_run[key] = max(by_psm.values(), key=lambda d: sum(d.values()))
     if multi:
-        notes.append(f"{multi:,} features had several PSMs in a run; the one with the largest total intensity was kept")
+        notes.append(Info(f"{multi:,} features had several PSMs in a run; the one with the largest total intensity was "
+                          "kept"))
     # fractions: runs of one mixture + technical replicate
     by_tech: dict[str, list[str]] = defaultdict(list)
     for run, (mix, tech, _f) in run_info.items():
@@ -847,8 +857,8 @@ def _tmt_summarise(psms: dict, annot: dict, run_info: dict, channels: list[str],
                          for c in {c for d in chosen for c in d}}
     fractionated = sorted(t for t, rs in by_tech.items() if len(rs) > 1)
     if fractionated:
-        notes.append(f"fractions combined within {len(fractionated)} mixture run(s) ({merged:,} features seen in "
-                     "several fractions kept the fraction with the largest mean intensity, as MSstatsConvert)")
+        notes.append(Info(f"fractions combined within {len(fractionated)} mixture run(s) ({merged:,} features seen in "
+                          "several fractions kept the fraction with the largest mean intensity, as MSstatsConvert)"))
     # log2 and global median normalisation between run x channel
     logv = {k: {c: math.log2(v) for c, v in d.items() if v >= 1} for k, d in data.items()}  # < 1: NA in MSstatsTMT
     per: dict[tuple, list[float]] = defaultdict(list)
@@ -961,11 +971,11 @@ def load_msstats_tmt(path: Path) -> QuantMatrix:
         for p, f in feats.items():
             f.peptides = len(peps.get(p, ())) or None
     techreps = s["runs"] > len(mix_order)
-    notes = [f"MSstatsTMT-format {path.name}: {len(feats):,} proteins in {len(mix_order)} mixture(s), summarised "
-             "as MSstatsTMT's proteinSummarization (median polish per run, global median and reference-channel "
-             "normalisation; no model-based imputation)"] + s["notes"] + read_notes
+    notes = [Info(f"MSstatsTMT-format {path.name}: {len(feats):,} proteins in {len(mix_order)} mixture(s), "
+                  "summarised as MSstatsTMT's proteinSummarization (median polish per run, global median and "
+                  "reference-channel normalisation; no model-based imputation)")] + s["notes"] + read_notes
     if techreps:
-        notes.append("technical replicates of a mixture were averaged (log2) into one sample per channel")
+        notes.append(Info("technical replicates of a mixture were averaged (log2) into one sample per channel"))
     samples = [name[k] for k in keys]
     cond = {name[k]: info[k][0] for k in keys if info[k][0]}
     m = _matrix_from_long(path, feats, per_sample(s["abundance"]), samples, cond, {}, "TMT", notes,
@@ -1004,7 +1014,7 @@ def _pd_score(path: Path) -> float:
 def load_pd(path: Path) -> QuantMatrix:
     """Proteome Discoverer Proteins export: Abundances (Normalized) preferred, else Abundance columns.
     'Abundance: F1: 126, Sample, DMSO' -> condition DMSO (the text after the sample type)."""
-    m = anytable.load(path)
+    m = anytable.load(path, known=True)
     header = _header(path)
     fam = [h for h in header if _PD_COL.match(h) and "normalized" in h.lower()] or [h for h in header if _PD_COL.match(h)]
     used = set(m.columns.values())
@@ -1257,31 +1267,32 @@ def load_sage(path: Path, sample_map: dict[str, tuple[str, int]] | None = None, 
         if method == "maxlfq" and len({c for c in _rollup.components(mat) if c is not None}) > 1:
             split += 1
     version = str(settings.get("version") or "")
-    notes = [f"Sage{' ' + version if version else ''} {path.name}: {len(feats):,} protein groups from {len(ions):,} "
-             f"peptide ions at peptide q ≤ {LONG_FDR:g}"
-             + (f" and protein q ≤ {LONG_FDR:g}" if prot_q else " (no results.sage.tsv beside it, so no protein "
-                                                                 "q-value filter)")
-             + "; proteins grouped by razor peptides and summarised by "
-             + ("Tukey median polish" if method == "median_polish" else _rollup.describe(method))]
+    said = Info if prot_q else str  # without the protein q-value filter the summary is a warning
+    notes = [said(f"Sage{' ' + version if version else ''} {path.name}: {len(feats):,} protein groups from "
+                  f"{len(ions):,} peptide ions at peptide q ≤ {LONG_FDR:g}"
+                  + (f" and protein q ≤ {LONG_FDR:g}" if prot_q else " (no results.sage.tsv beside it, so no protein "
+                                                                      "q-value filter)")
+                  + "; proteins grouped by razor peptides and summarised by "
+                  + ("Tukey median polish" if method == "median_polish" else _rollup.describe(method)))]
     if split:
         notes.append(f"{split:,} protein group(s) have samples that share no peptide ion with the others (MaxLFQ "
                      "scales each such group on its own)")
     if above_pep or above_prot:
-        notes.append(f"{above_pep:,} ion(s) above the peptide q-value and {above_prot:,} above the protein q-value "
-                     "were left out")
+        notes.append(Info(f"{above_pep:,} ion(s) above the peptide q-value and {above_prot:,} above the protein "
+                          "q-value were left out"))
     if repeated:
         notes.append(f"{repeated:,} row(s) repeat a peptide ion (same peptide and charge) already read; Sage writes "
                      "one row per ion, so the repeats were left out (was the file joined from two?)")
     notes += read_notes + qf.notes(path.name)
     if shared:
-        notes.append(f"{shared:,} peptide(s) shared between protein groups were given to the group with the most "
-                     "peptides")
+        notes.append(Info(f"{shared:,} peptide(s) shared between protein groups were given to the group with the most "
+                          "peptides"))
     fractions = {s: len(v) for s, v in runs.items() if len(v) > 1}
     if fractions:
-        notes.append(f"the intensities of each sample's fractions were added ({len(fractions)} sample(s) with "
-                     f"{min(fractions.values())}–{max(fractions.values())} files)")
+        notes.append(Info(f"the intensities of each sample's fractions were added ({len(fractions)} sample(s) with "
+                          f"{min(fractions.values())}–{max(fractions.values())} files)"))
     if names:
-        notes.append(f"gene names from {fasta.name}")
+        notes.append(Info(f"gene names from {fasta.name}"))
     for s in unmatched:
         notes.append(f"Run {s} did not match the manifest; inferred condition {cond[s]!r}. Check sample labels.")
     missing = sorted(set(sample_map) - matched)
@@ -1544,17 +1555,18 @@ def load_sage_tmt(path: Path, sample_map: dict[str, tuple[str, int]] | None = No
 
     version = str(settings.get("version") or "")
     shared = sum(1 for pep, prots in pep_prots.items() if any(p not in group[pep] for p in prots))
-    notes = [f"Sage{' ' + version if version else ''} {path.name}: {len(feats):,} protein groups in {len(plexes)} "
-             f"plex(es) from {len(quantified):,} PSMs (targets of rank 1 at spectrum, peptide and protein q ≤ "
-             f"{LONG_FDR:g}); proteins grouped by razor peptides and summarised as MSstatsTMT's MedianPolish "
-             "(global median normalisation, Tukey median polish per plex; no model-based imputation)"]
+    notes = [Info(f"Sage{' ' + version if version else ''} {path.name}: {len(feats):,} protein groups in "
+                  f"{len(plexes)} plex(es) from {len(quantified):,} PSMs (targets of rank 1 at spectrum, peptide and "
+                  f"protein q ≤ {LONG_FDR:g}); proteins grouped by razor peptides and summarised as MSstatsTMT's "
+                  "MedianPolish (global median normalisation, Tukey median polish per plex; no model-based "
+                  "imputation)")]
     left = [f"{dropped[k]:,} {text}" for k, text in (("decoy", "decoy"), ("rank", "of lower rank"),
                                                      ("q", "above a q-value")) if dropped[k]]
     if left:
-        notes.append(f"of {dropped['rows']:,} PSMs in {results.name}, left out: " + ", ".join(left))
+        notes.append(Info(f"of {dropped['rows']:,} PSMs in {results.name}, left out: " + ", ".join(left)))
     if dropped["chimeric"]:
-        notes.append(f"{dropped['chimeric']:,} spectra with more than one passing PSM were left out (their reporter "
-                     "ions belong to several peptides)")
+        notes.append(Info(f"{dropped['chimeric']:,} spectra with more than one passing PSM were left out (their "
+                          "reporter ions belong to several peptides)"))
     blank = len(psm) - len(quantified)
     if blank:
         notes.append(f"{blank:,} passing PSM(s) had no reporter ions in {path.name} and were left out")
@@ -1562,26 +1574,27 @@ def load_sage_tmt(path: Path, sample_map: dict[str, tuple[str, int]] | None = No
         notes.append(f"{short[0]:,} row(s) of {path.name} have fewer cells than its header and were left out: the file "
                      "may be cut off (a search or copy that did not finish)")
     if shared:
-        notes.append(f"{shared:,} peptide(s) shared between protein groups were given to the group with the most "
-                     "peptides")
+        notes.append(Info(f"{shared:,} peptide(s) shared between protein groups were given to the group with the most "
+                          "peptides"))
     notes += s["notes"]
     if labels == header[3:]:
         notes.append(f"the reporter columns ({labels[0]} … {labels[-1]}) are not one of Sage's TMT kits, so the "
                      "channels keep Sage's column names")
     if unused:
-        notes.append(f"{len(unused)} channel(s) called NA / empty in experiment.yaml's tmt: map were left out")
+        notes.append(Info(f"{len(unused)} channel(s) called NA / empty in experiment.yaml's tmt: map were left out"))
     unnamed = [name[k] for k in keys if not given[k]]
     if unnamed:
-        notes.append(f"{len(unnamed)} of {len(keys)} TMT channels have no name in an experiment.yaml tmt: map, so "
-                     f"they are '<plex>_<channel>' with condition '{UNASSIGNED}': give each its condition on the "
-                     "Analysis tab, with a tmt: channels map in experiment.yaml, or with an SDRF")
+        notes.append(AsksConditions(f"{len(unnamed)} of {len(keys)} TMT channels have no name in an experiment.yaml "
+                                    f"tmt: map, so they are '<plex>_<channel>' with condition '{UNASSIGNED}': give "
+                                    "each its condition on the Analysis tab, with a tmt: channels map in "
+                                    "experiment.yaml, or with an SDRF"))
     for x in unmatched:
         notes.append(f"Run {x} did not match the manifest; its plex was read from its name ({_tmt_plex_name(x)}).")
     missing = sorted(set(sample_map) - {k for k in key_of.values() if k})
     if missing:
         notes.append("Expected runs missing from Sage's tmt.tsv: " + ", ".join(missing))
     if names:
-        notes.append(f"gene names from {fasta.name}")
+        notes.append(Info(f"gene names from {fasta.name}"))
     meta = {"engine": "Sage", "evidence": "peptides", "missing_runs": missing, "unmatched_runs": unmatched,
             "quantity": "median polish of tmt.tsv reporter intensities (MSstatsTMT MedianPolish)",
             "fdr": f"spectrum, peptide and protein q ≤ {LONG_FDR:g}",
@@ -1673,11 +1686,14 @@ ROLLUP_LOADERS = ("Sage", "MSstats", "DIA-NN", "Spectronaut")  # the loaders tha
 
 
 def load(method: str, workdir: Path, sample_map: dict[str, tuple[str, int]] | None = None, tmt: dict | None = None,
-         rollup: str = "auto") -> tuple[QuantMatrix | None, list[str]]:
+         rollup: str = "auto", fractionated: set[tuple[str, int]] | None = None) -> tuple[QuantMatrix | None, list[str]]:
     """Load the best table of this engine under workdir (or workdir itself when it is the table). sample_map:
     the watcher's manifest (file stem -> (condition, replicate)), for engines whose table has a column per file.
     tmt: experiment.yaml's tmt: channel map, for Sage's tmt.tsv. rollup: analysis.rollup (rollup.py, D76), for the
-    tables of peptides / precursors (ROLLUP_LOADERS); for a protein table it does not apply, and a note says so."""
+    tables of peptides / precursors (ROLLUP_LOADERS); for a protein table it does not apply, and a note says so.
+    fractionated: the plan's samples in two or more fractions (downstream._fractionated): DIA-NN's long report has
+    a run per file, and a sample's fractions are added up into it as from DIA's pg_matrix (quant.sum_fractions,
+    D111, D119); Sage's lfq.tsv adds them itself, from sample_map."""
     adapter = METHODS[method]
     cands = [d for d in detect_all(workdir) if d.method == method]
     if not cands:
@@ -1688,6 +1704,8 @@ def load(method: str, workdir: Path, sample_map: dict[str, tuple[str, int]] | No
             return load_sage_tmt(path, sample_map, tmt), rollup_unused(rollup, "Sage's tmt.tsv is summarised as "
                                                                                "MSstatsTMT's MedianPolish")
         return load_sage(path, sample_map, rollup), []
+    if method == "DIA-NN":
+        return sum_fractions(load_diann_long(path, rollup), sample_map or {}, fractionated or set()), []
     if method in ROLLUP_LOADERS:
         return adapter[4](path, rollup), []
     return adapter[4](path), rollup_unused(rollup, f"{adapter[0]}'s {path.name} holds proteins already")

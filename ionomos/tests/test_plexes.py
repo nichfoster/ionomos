@@ -408,6 +408,7 @@ def test_maxquant_tmt_without_a_design_is_unassigned_and_asks_once(tmp_path, ple
     out2 = downstream.analyze(tmp_path / "mq", analysis_cfg={**CFG, "sample_conditions": conds, "irs": "none"})
     s2 = json.loads((out2.results_dir / "analysis.json").read_text(encoding="utf-8"))
     assert set(s2["samples"].values()) == {"DMSO", "Drug"} and s2["comparisons"]
+    assert not any("by number only" in n for n in s2["notes"])   # answered: the question goes (D118)
 
 
 def test_proteome_discoverer_files_are_plexes(tmp_path):
