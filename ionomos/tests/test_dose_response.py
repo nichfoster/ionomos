@@ -192,6 +192,44 @@ def test_too_few_points_is_not_fitted():
     assert dr.fit_curve([-8.0, -7.0, -6.0], [1.0, 0.8, 0.3]) is None
 
 
+def _two_dose_matrix():
+    """#162: 5 doses x 3 replicates and DMSO; P0 is measured only at the two highest doses, +2 log2 at 10 µM."""
+    groups = (("DMSO", 0),) + tuple((f"Cmpd_{d}nM", d) for d in (1, 10, 100, 1000, 10000))
+    samples, cond = [], {}
+    for g, _ in groups:
+        for r in (1, 2, 3):
+            samples.append(f"{g}_{r}")
+            cond[f"{g}_{r}"] = g
+    rows = []
+    for i in range(30):
+        vals = []
+        for _g, d in groups:
+            for r in (1, 2, 3):
+                base = 20.0 + i * 0.1 + 0.02 * r
+                if i == 0:
+                    vals.append(None if 0 < d <= 100 else base + (2.0 if d == 10000 else 0.1 if d == 1000 else 0.0))
+                else:
+                    vals.append(base)
+        rows.append(vals)
+    feats = [quant.Feature(f"P{i}", f"G{i}") for i in range(30)]
+    return quant.QuantMatrix("intensity", "protein", feats, samples, rows, cond)
+
+
+def test_a_feature_measured_at_two_doses_is_not_fitted_however_many_replicates():
+    p, _ = fpa.process(_two_dose_matrix(), imputation="none")
+    res, _plan = dr.run(p, Settings(), "DMSO")
+    assert "P0" not in {r["id"] for r in dr.table_rows(res)}
+    assert any("1 features measured at fewer than 4 doses (analysis.dose_min_doses) were not fitted" in n
+               for n in res.notes)
+    assert all(r["doses"] >= 4 for r in dr.table_rows(res))
+
+
+def test_dose_min_doses_is_the_rule_for_each_feature_too():
+    p, _ = fpa.process(_two_dose_matrix(), imputation="none")
+    res, _plan = dr.run(p, Settings(dose_min_doses=2), "DMSO")
+    assert "P0" in {r["id"] for r in dr.table_rows(res)}  # the lab asked for 2: its choice, as for the series
+
+
 def test_flat_quiet_curve_is_not_regulated():
     xs = [math.log10(d * 1e-9) for d in (1, 10, 100, 1000, 10000)]
     fit = dr.fit_curve(xs, [1.01, 0.98, 1.02, 0.99, 1.0])

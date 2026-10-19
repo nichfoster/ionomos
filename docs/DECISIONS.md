@@ -4522,6 +4522,55 @@ unchanged. `test_ledger.py` hammers one Ledger from two threads (both tests
 failed 5 runs out of 5 on the old code). **Not verified**: CI's Linux
 runners, where the original failure was seen.
 
+### D105 — experiment.yaml's `workflow:` and `fasta:` are file names; a network `site_annotation:` is never opened
+**2026-10-18.** Issue #168: `workflow:` and `fasta:` in experiment.yaml
+reached `fragpipe._find_file`, which takes an absolute path as it is. Whoever
+drops a folder writes experiment.yaml (the inbox is often a network share), so
+a drop could make the search use a workflow or FASTA from anywhere the
+watcher's account can read, and a `//server/share` value made Windows sign in
+to that server as the watcher's account. The docs already said "file under
+workflow_dir".
+
+`manifest.parse_overrides` now refuses, at intake, a `workflow:` or `fasta:`
+with `/`, `\`, `:` (a drive, `C:x` included), a bare `..`, or a control
+character, with an OverridesError that says to put the file in
+`workflow_dir` / `fasta_dir` and give its name; the drop stays in the inbox
+with its `.REJECTED.txt`. Names are not sanitised: a file name with spaces or
+dots is kept as written, since it has to match the file. config.yaml's
+`methods:` still take a full path: the lab's own config is trusted, a drop is
+not (SECURITY_NOTES.md).
+
+`analysis.site_annotation:` keeps its full path (WORKFLOWS.md), but
+`cys.find_annotation` never opens a network path; the analysis warns "a
+network path, which Ionomos doesn't open: copy the file into the experiment
+folder". Refusing it at intake was the other option; it was not taken because
+the same key is also set in the app's Analysis tab for a folder searched
+outside Ionomos, where the warning is enough.
+
+### D106 — A dose-response curve needs `dose_min_doses` distinct measured doses for each feature, not only per compound
+**2026-10-18.** Issue #162: `doseresponse.fit_series` fitted a feature when
+it had 4 measured *points*, so a protein measured only at the two highest of
+five doses (3 replicates each, missing below: the usual case for a
+low-abundance protein without imputation) was fitted with the 4-parameter
+curve, called "up", and given a pEC50 with a ±0.4 interval. Through two
+doses and the control the step can sit anywhere between them; the interval
+came from the Jacobian, not from the data. The note already said "features
+measured at fewer than 4 doses were not fitted", which was not the rule the
+code applied.
+
+A feature now needs as many distinct measured doses as its compound does
+(`analysis.dose_min_doses`, default 4), and 4 points; otherwise it is "not
+fitted" and counted in the note, which now names the setting. A lab that
+lowers `dose_min_doses` lowers both: one setting, one rule.
+
+CurveCurator's own per-curve filter is `max_missing`, a count of missing
+values per curve; the golden comparison (tests/golden/dose_response/,
+CurveCurator 0.6.0) switches it off (`max_missing = n`), so it does not pin
+a rule here. A count of missing values doesn't say how many doses are left
+(three missing replicates of one dose vs one of three doses), so distinct
+doses it is. The golden designs' features all keep at least 4 doses and are
+unchanged. **Not verified**: against CurveCurator with its default
+`max_missing`.
 
 ### D107 — A search that won't stop holds its job and the queue; a cancel names a survivor
 **2026-10-18.** Issue #175. D69 item 2 stops a search an earlier Ionomos left

@@ -1129,8 +1129,8 @@ Collected from the other docs; resolve before/during Phase 1.
       exports would settle these. FragPipe's own tables saved again from Excel with thousands separators are still
       read as all missing (FragPipe never writes them). A MaxQuant TMT table without a design gets one condition
       per channel; it should be `unassigned` and ask, as Sage TMT does (#165).
-- [ ] Statistics: a dose-response curve is fitted and called for a protein measured at only two doses (#162; check
-      CurveCurator's per-curve `max_missing` rule first); `qc.pca` takes ~6 min on 500 samples (#163); knn
+- [ ] Statistics: ~~a dose-response curve is fitted and called for a protein measured at only two doses (#162)~~
+      (done, D106); `qc.pca` takes ~6 min on 500 samples (#163); knn
       imputation is quadratic in features (#164).
 - [ ] Intake: what only the watcher can see (a dot-ended folder whose fixed name is taken, a failing loose-file
       grouping) is logged but not raised as an attention item. Since #139 (D94) `cli.cmd_run` gives the watcher
@@ -1152,13 +1152,13 @@ Collected from the other docs; resolve before/during Phase 1.
       points load as a valid config with fewer methods, put right by the next reload); a settle delay would close
       it. 24 options outside `cli.py` have no `--help` text (#166); `bundle 77` and `library show <missing>` exit
       the other way round from the table (#167).
-- [ ] Security (D99, D100, SECURITY_NOTES.md): `experiment.yaml`'s `workflow:` / `fasta:` accept any absolute or
-      UNC path, `site_annotation:` a UNC one (#168); an Authenticode check of the downloaded installer (today:
+- [ ] Security (D99, D100, SECURITY_NOTES.md): ~~`experiment.yaml`'s `workflow:` / `fasta:` accept any absolute or
+      UNC path, `site_annotation:` a UNC one (#168)~~ (done, D105); an Authenticode check of the downloaded installer (today:
       size + SHA-256 from the same GitHub answer); `maxquant.create_template` and `sage.run_job` start programs
       without `batch_problem`; `bundle inspect --key` reads a member with no line break whole; Teams Adaptive
       Cards render a little Markdown from a failure reason; a mapped drive letter (`Z:`) inside a scanned file is
-      not recognised as a network path. An attention item id with `../` reads and rewrites a JSON file outside the
-      attention folder (#169; the assistant checks the id itself now).
+      not recognised as a network path. ~~An attention item id with `../` reads and rewrites a JSON file outside the
+      attention folder (#169)~~ (done: `attention.py` checks every id).
 - [ ] Assistant: should a whole question have a time limit? It can make 6 requests of `timeout_seconds` each (12
       minutes by default, #171). Should a proposal for another job than the one asked about be refused rather than
       shown with a note (D75 4)? Round 4 kept the note and extended it to items without a job and unknown

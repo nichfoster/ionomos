@@ -134,6 +134,20 @@ def _require_path_safe(value: str, what: str) -> str:
         raise OverridesError(f"{what}: {exc}") from exc
 
 
+_FILE_FOLDER = {"workflow": "workflow_dir", "fasta": "fasta_dir"}
+
+
+def _require_file_name(value: str, what: str) -> str:
+    """workflow: / fasta: name a file in the lab's workflow_dir / fasta_dir, as documented (#168). Whoever drops a
+    folder writes experiment.yaml, so a path is refused: it would choose the search's settings or database from
+    anywhere the watcher's account can read, and a network path makes Windows sign in to that server."""
+    if "/" in value or "\\" in value or ":" in value or value.strip() in (".", "..") or not value.isprintable():
+        folder = _FILE_FOLDER[what]
+        raise OverridesError(f"{what} must be the name of a file in the lab's {folder}, not a path: {value!r} — "
+                             f"put the file in {folder} and give its name, e.g. {what}: {_EXAMPLE[what]}")
+    return value
+
+
 def _unknown_keys(unknown: set, known: set, where: str) -> str:
     """'unknown key(s) in <where>: methd (did you mean method?) — the keys it can have: ...': what is wrong and
     what to write instead, for a hand-edited file."""
@@ -192,8 +206,9 @@ def parse_overrides(data: dict | None) -> Overrides:
     ov.method = _name_value(data, "method")
     user = _name_value(data, "user")
     ov.user = _require_path_safe(user, "user") if user else None
-    ov.workflow = _name_value(data, "workflow")
-    ov.fasta = _name_value(data, "fasta")
+    workflow, fasta = _name_value(data, "workflow"), _name_value(data, "fasta")
+    ov.workflow = _require_file_name(workflow, "workflow") if workflow else None
+    ov.fasta = _require_file_name(fasta, "fasta") if fasta else None
     ov.notes = str(data["notes"]) if data.get("notes") else None
     ov.resolved_by = str(data["resolved_by"]) if data.get("resolved_by") else None
     ov.allow_uneven_fractions = _flag(data.get("allow_uneven_fractions", False), "allow_uneven_fractions")
