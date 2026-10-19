@@ -4655,7 +4655,8 @@ into ATLAS.md; the Nomura-Lab side was built at the same time against the same t
    `max_tries` (10), `retry_minutes` (15). `handoff_dir` may have spaces (FragPipe never sees it) but must be a full
    path. Validated by `atlas.settings_from`, unknown keys refused like `library:`.
 2. **Only FragPipe isoDTB methods** may be in `atlas.methods` (their kind, so `naming.methods.<key>.like: isoDTB`
-   counts); anything else stops config.yaml from loading, with the line. The runs CSV says `ProbeClass` isoDTB, as
+   counts); while the hand-off is on, anything else stops config.yaml from loading, with the line. While it is off
+   they are not checked: every Save writes the default `[isoDTB]`, and a lab without isoDTB must load. The runs CSV says `ProbeClass` isoDTB, as
    the contract asks, and the atlas side ingests by that column: a TMT run sent as isoDTB would be counted.
 3. **Ionomos mirrors the script, not its summary.** Where the contract's bullet list and `harvest_fragpipe.ps1`
    differ (the script also takes `*.fasta`, `*.yml`, `*.yaml`, `*.manifest` and `log_*.txt`), the contract's

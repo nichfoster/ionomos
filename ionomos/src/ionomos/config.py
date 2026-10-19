@@ -639,15 +639,17 @@ def _library(raw) -> dict:
 
 
 def _atlas(raw, methods: dict[str, MethodConfig], file_rules: dict[str, FileRule]) -> dict:
-    """atlas: section (the hand-off to the lab's cysteine atlas, D120), validated by the module that uses it. The
-    methods it names must be FragPipe methods that are isoDTB (their kind), since the runs CSV says ProbeClass isoDTB."""
+    """atlas: section (the hand-off to the lab's cysteine atlas, D120), validated by the module that uses it. While it
+    is on, the methods it names must be FragPipe methods that are isoDTB (their kind), since the runs CSV says
+    ProbeClass isoDTB. While it is off they are not checked: every Save writes the default [isoDTB], and a lab without
+    an isoDTB method (or one searched by another engine) must still load."""
     from ionomos.atlas import AtlasError, settings_from
 
     try:
         out = settings_from(raw)
     except AtlasError as exc:
         raise ConfigError(f"atlas.{exc}" if not str(exc).startswith("must") else f"atlas: {exc}") from None
-    for m in out["methods"]:
+    for m in out["methods"] if out["enabled"] else ():
         if m not in methods:
             raise ConfigError(f"atlas.methods: there is no methods.{m} (methods: {', '.join(methods)})",
                               key="atlas.methods")

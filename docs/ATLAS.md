@@ -146,8 +146,9 @@ atlas:   # hand finished isoDTB searches to the lab's cysteine atlas. Off by def
   the first hand-off makes it, as harvest does; when the parent is missing too, the hand-off waits (Dropbox not
   running, not signed in, or the folder not synced to this PC).
 - `methods` may name only methods searched by FragPipe whose kind is isoDTB (`isoDTB`, or a method with
-  `naming.methods.<key>.like: isoDTB`); anything else stops config.yaml from loading with the line named, because
-  the runs CSV says `ProbeClass` isoDTB and the atlas would count it.
+  `naming.methods.<key>.like: isoDTB`); while the hand-off is on, anything else stops config.yaml from loading with
+  the line named, because the runs CSV says `ProbeClass` isoDTB and the atlas would count it. While it is off they
+  are not checked, so a lab without an isoDTB method loads (every Save writes the default `[isoDTB]`).
 - The watcher reads `atlas:` again on every pass, so turning the hand-off on or off in the app counts without a
   restart.
 

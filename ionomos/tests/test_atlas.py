@@ -103,9 +103,22 @@ def test_config_refuses_an_isodtb_method_another_engine_searches(lab):
     d = dict(lab["cfg_dict"])
     d["methods"] = {**d["methods"], "isoSage": {"engine": "sage", "fasta": "h.fas", "data_type": "DDA"}}
     d["naming"] = {"methods": {"isoSage": {"like": "isoDTB"}}}
-    d["atlas"] = {"methods": ["isoSage"]}
+    d["atlas"] = {"enabled": True, "handoff_dir": str(lab["root"] / "dest"), "methods": ["isoSage"]}
     lab["cfg_path"].write_text(yaml.safe_dump(d), encoding="utf-8")
     with pytest.raises(ConfigError, match="searched by sage"):
+        load(lab["cfg_path"])
+
+
+def test_a_lab_without_an_isodtb_method_loads_while_the_hand_off_is_off(lab):
+    """Every Save writes the default methods: [isoDTB]; a lab with no isoDTB method (or a MaxQuant one) must load."""
+    d = dict(lab["cfg_dict"])
+    d["methods"] = {"DIA": d["methods"]["DIA"]}
+    d["atlas"] = {"enabled": False, "methods": ["isoDTB"]}
+    lab["cfg_path"].write_text(yaml.safe_dump(d), encoding="utf-8")
+    assert load(lab["cfg_path"]).atlas["methods"] == ["isoDTB"]
+    d["atlas"]["enabled"] = True  # turned on: now it is named
+    lab["cfg_path"].write_text(yaml.safe_dump(d), encoding="utf-8")
+    with pytest.raises(ConfigError, match="there is no methods.isoDTB"):
         load(lab["cfg_path"])
 
 
