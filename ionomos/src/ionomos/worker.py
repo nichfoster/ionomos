@@ -8,6 +8,7 @@ Worker — takes queued jobs one at a time and runs FragPipe on them.
 For each job, in id order:
 
     prepare  --Hold------>  stays queued; reason shown in ionomos.json/status ("waiting: ...")
+       |     (also while an earlier search of the folder won't stop: stop_leftover, D107)
        |     --JobError-->  failed
        v
     running  (ledger + ionomos.json; attempt counted)
@@ -208,7 +209,6 @@ class Worker:
                 reason = f"Ionomos could not prepare the search: {type(exc).__name__}: {exc}"
                 self._fail(job, reason, hints=fragpipe.explain(reason))
                 return True
-            self._held.pop(job.id, None)
             return self._run(job, spec)
         return False
 
@@ -254,6 +254,14 @@ class Worker:
 
     def _search(self, job: Job, spec: fragpipe.RunSpec) -> bool:
         dest = spec.dest
+        # an earlier Ionomos that was killed mid-search left its FragPipe running: stop it before starting another
+        # on the same folder (D69). When it won't stop, the job waits for it, and so does the queue: one search at
+        # a time (D107). Before anything else, so a wait that repeats every poll is said once.
+        leftover = fragpipe.stop_leftover(spec.run_dir)
+        if leftover.running:
+            self._hold(job, leftover.message)
+            return False
+        self._held.pop(job.id, None)
         _close(self.cfg, job, "search_waiting", "search_failed")
         # clear a stale CANCEL before the ledger flips to 'running' (issue #17): a cancel delivered
         # after this point must survive into run()'s poll — this unlink used to live in
@@ -268,12 +276,9 @@ class Worker:
             self._fail(job, f"job vanished from the ledger: {exc}")
             return True
         self.current = job
-        # an earlier Ionomos that was killed mid-search left its FragPipe running: stop it before starting
-        # another on the same folder (D69)
-        leftover = fragpipe.stop_leftover(spec.run_dir)
-        if leftover:
-            log.warning("job %d: %s", job.id, leftover)
-            spec.notes.append(leftover)
+        if leftover.message:
+            log.warning("job %d: %s", job.id, leftover.message)
+            spec.notes.append(leftover.message)
         try:
             moved = runner.write_inputs(spec)
         except OSError as exc:
@@ -333,7 +338,7 @@ class Worker:
         if res.cancelled:
             (spec.run_dir / fragpipe.CANCEL_FILE).unlink(missing_ok=True)
             _update_status(job, run={"finished_at": finished, "exit_code": res.code})
-            self._fail(job, "cancelled by user", spec)
+            self._fail(job, res.reason, spec, res.hints)  # names an engine that did not stop (D107)
             return True
 
         if res.stopped:
@@ -386,9 +391,11 @@ class Worker:
             log.exception("job %d: could not record 'failed' in the job list", job.id)
         _update_status(job, status="failed", reason=reason)
         engine = spec.engine_name if spec else "The search"
-        if reason != "cancelled by user":
+        if reason != fragpipe.CANCELLED:  # the person who cancelled knows; not when the engine did not stop
             tail = fragpipe.read_tail_text(spec.console_log, 8000) if spec else ""
-            _tell(self.cfg, "search_failed", job, f"{engine} failed on {job.user}/{job.inbox_name}", reason,
+            title = (f"{engine} on {job.user}/{job.inbox_name} was cancelled but did not stop"
+                     if reason.startswith(fragpipe.CANCELLED) else f"{engine} failed on {job.user}/{job.inbox_name}")
+            _tell(self.cfg, "search_failed", job, title, reason,
                   severity="error", causes=list(hints or []) or [
                       f"See the last lines of {engine}'s log below — the first ERROR / Exception line is usually the cause"],
                   fixes=["Fix the cause, then press Retry here (or Jobs tab → Retry)",
@@ -407,7 +414,7 @@ class Worker:
                   f"After fixing the cause: Ionomos app -> Jobs -> select the job -> Retry, "
                   f"or  ionomos retry {job.id}\n")
         log.error("job %d failed: %s", job.id, reason)
-        if reason != "cancelled by user":
+        if reason != fragpipe.CANCELLED:
             _notify(self.cfg, "failed", job, reason)
 
 
@@ -469,8 +476,8 @@ def recover(cfg: Config, ledger: Ledger) -> list[tuple[int, str]]:
             continue
         dest = Path(job.dest_dir)
         leftover = fragpipe.stop_leftover(dest / fragpipe.RUN_DIR)
-        if leftover:
-            log.warning("job %d: %s", jid, leftover)
+        if leftover.message:  # still running: the worker holds the job until it has ended (D107)
+            log.warning("job %d: %s", jid, leftover.message)
         if status == "queued":
             _update_status(job, status="queued", reason=job.reason)
             continue
@@ -495,6 +502,10 @@ def _waiting_causes(reason: str) -> list[str]:
         return ["A replicate number in the job's list of raw files is outside 1-999 (Ionomos 0.5.1 read Xcalibur's "
                 "time stamp as one). FragPipe and DIA-NN would drop that run: set the file's bioreplicate in the "
                 "experiment folder's experiment.yaml; the search then starts by itself"]
+    if "earlier search of this experiment is still running" in r:
+        return ["The search an earlier Ionomos started on this experiment is still running and did not stop when "
+                "Ionomos told it to: end the process named above in Task Manager (Details tab, PID column); the "
+                "search starts by itself once it has ended"]
     if "can't be read yet" in r:
         return ["A raw file is still open in another program — Xcalibur still acquiring, a copy still running, or "
                 "antivirus scanning it; the search starts by itself once it can be read"]

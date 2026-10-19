@@ -324,6 +324,19 @@ a file in it is open in another program (a table open in Excel, Explorer's
 preview pane). Ionomos never writes a new search over it: close the file and
 the search starts by itself.
 
+## An earlier search of the experiment is still running {#search.hold-leftover}
+
+An earlier Ionomos started a search of this experiment and stopped (it was
+ended from Task Manager, or the PC's session ended) while the search went on.
+Ionomos tried to end that search before starting a new one, and it did not
+end: Windows refused, or it is stuck reading a network drive. Two searches of
+one folder at once would write over each other, so the job waits, and so do
+the jobs behind it: one search at a time.
+
+End the process named in the reason in Task Manager (Details tab, PID column;
+**End process tree**). The search starts by itself once it has ended. If it
+can't be ended, restart the PC.
+
 ## A replicate number is out of range {#search.hold-replicate}
 
 The job's list of raw files gives a file a replicate number outside 1–999.

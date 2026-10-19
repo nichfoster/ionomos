@@ -78,6 +78,16 @@ def test_the_editor_replaces_the_analysis_block_and_the_review_merges_into_it(tm
         ({"user": "EJQ\\nX"}, "not a path"),  # control character
         ({"user": ".."}, "no usable characters"),
         ({"files": {"a.raw": {"experiment": "../evil"}}}, "not a path"),
+        # workflow: / fasta: are file names in workflow_dir / fasta_dir: a drop never picks a file elsewhere (#168)
+        ({"workflow": "C:/Users/elsewhere/planted.workflow"}, "name of a file in the lab's workflow_dir, not a path"),
+        ({"workflow": "//server/share/x.workflow"}, "workflow_dir, not a path"),
+        ({"workflow": r"\\server\share\x.workflow"}, "workflow_dir, not a path"),
+        ({"workflow": "../TMT10-MS3.workflow"}, "workflow_dir, not a path"),
+        ({"workflow": ".."}, "workflow_dir, not a path"),
+        ({"workflow": "C:isoDTB.workflow"}, "workflow_dir, not a path"),  # drive-relative
+        ({"fasta": "/home/x/human_reviewed_decoys.fas"}, "fasta_dir, not a path"),
+        ({"fasta": r"\\?\UNC\server\share\db.fas"}, "fasta_dir, not a path"),
+        ({"fasta": "db.fas\n"}, "fasta_dir, not a path"),
     ],
 )
 def test_bad_overrides(data, msg):
@@ -108,6 +118,25 @@ def test_the_naming_window_answer_replaces_the_files_block(tmp_path):
     assert set(back.files) == {"x.raw"} and back.notes == "keep me" and back.user == "Chris"
     save_overrides(tmp_path, Overrides(user="Chris"), replace_files=True)
     assert load_overrides(tmp_path).files == {}
+
+
+@pytest.mark.parametrize("key,name", [
+    ("workflow", "TMT10-MS3-phospho"), ("workflow", "isoDTB.workflow"), ("workflow", "LFQ MBR v2.1.workflow"),
+    ("fasta", "human_reviewed_2025-01_decoys.fas"), ("fasta", "2026-09-15-decoys-reviewed-contam-UP000005640.fas"),
+])
+def test_workflow_and_fasta_file_names_are_kept_as_written(key, name):
+    assert getattr(parse_overrides({key: name}), key) == name
+
+
+def test_a_site_annotation_on_a_network_path_is_never_opened(tmp_path, monkeypatch):
+    from ionomos.downstream import cys
+
+    opened = []
+    monkeypatch.setattr(cys.Path, "is_file", lambda self: opened.append(str(self)) or True)
+    for p in (r"\\server\share\cysdb.csv", "//server/share/cysdb.csv", r"\\?\UNC\server\share\cysdb.csv"):
+        assert cys.find_annotation(p, tmp_path) is None
+    assert opened == []
+    assert cys.find_annotation("cysdb.csv", tmp_path) == tmp_path / "cysdb.csv"
 
 
 def test_absent_file_is_empty(tmp_path):

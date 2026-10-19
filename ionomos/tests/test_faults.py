@@ -294,13 +294,14 @@ def test_a_leftover_fragpipe_is_stopped_only_when_it_is_really_ours(tmp_path):
 
         rec["started"] -= 3600  # the same number, but a process that started an hour later: not ours
         marker.write_text(json.dumps(rec), encoding="utf-8")
-        assert fragpipe.stop_leftover(run_dir) == "" and not marker.exists()
+        assert fragpipe.stop_leftover(run_dir) == fragpipe.Leftover() and not marker.exists()
         assert proc.poll() is None
 
         fragpipe._record_engine(spec, proc.pid)
-        assert "was still running after Ionomos stopped" in fragpipe.stop_leftover(run_dir)
+        found = fragpipe.stop_leftover(run_dir)
+        assert "was still running after Ionomos stopped" in found.message and not found.running
         assert proc.wait(timeout=15) is not None and not marker.exists()
-        assert fragpipe.stop_leftover(run_dir) == ""  # nothing recorded: nothing to do
+        assert fragpipe.stop_leftover(run_dir) == fragpipe.Leftover()  # nothing recorded: nothing to do
     finally:
         if proc.poll() is None:
             proc.kill()

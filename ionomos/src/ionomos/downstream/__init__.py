@@ -987,7 +987,12 @@ def _cysteines(p, settings, results: Path, out: Outcome, dest: Path,
     annotation = None
     if settings.site_annotation:
         path = cys.find_annotation(settings.site_annotation, dest)
-        if path is None:
+        from ionomos.fragpipe import is_network_path
+
+        if path is None and is_network_path(settings.site_annotation):
+            problems.append(("warning", f"site annotation {settings.site_annotation!r} is a network path, which "
+                                        f"Ionomos doesn't open: copy the file into {dest.name}/ and give its name"))
+        elif path is None:
             problems.append(("warning", f"site annotation {settings.site_annotation!r} was not found in "
                                         f"{dest.name}/ (give a file in the experiment folder, or a full path)"))
         else:

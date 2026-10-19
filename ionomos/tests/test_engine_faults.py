@@ -12,6 +12,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 import types
 from dataclasses import dataclass, replace
@@ -242,7 +243,7 @@ def test_an_engine_that_will_not_stop_is_named_and_stopped_later(tmp_path, monke
         assert res.hints[0].startswith("The search program did not stop when Ionomos ended it")
         assert _alive(pid)
         monkeypatch.undo()
-        assert f"process {root}" in fragpipe.stop_leftover(spec.run_dir)
+        assert f"process {root}" in fragpipe.stop_leftover(spec.run_dir).message
         assert _wait(lambda: not _alive(pid) and not _alive(root), 15)
     finally:
         for p in (pid, root):
@@ -416,6 +417,100 @@ def test_a_locked_table_fails_then_holds_the_retry_until_it_is_closed_and_keeps_
     kept = list(dest.glob("diann_previous_*"))
     assert len(kept) == 1 and (kept[0] / "report.pg_matrix.tsv").read_bytes().startswith(b"Protein\tA_1")
 
+
+
+def _leftover_record(dest: Path, pid: int = 4242) -> None:
+    (dest / "ionomos_run").mkdir(exist_ok=True)
+    (dest / "ionomos_run" / names.ENGINE_PID_FILE).write_text(json.dumps(
+        {"pid": pid, "started": 100.0, "group": not WINDOWS, "at": "2026-10-15T09:00:00+02:00"}), encoding="utf-8")
+
+
+def test_a_leftover_search_that_will_not_stop_holds_the_job_until_it_has_ended(bed, caplog):
+    """Issue #175 (D107): the search an earlier Ionomos left running won't stop. The job waits, saying so once, and
+    no second search starts beside it; once it has ended, the search starts by itself."""
+    dest = _queue(bed, "table=report.pg_matrix.tsv")
+    _leftover_record(dest)
+    alive = [True]
+    real = health.process_started
+    bed["mp"].setattr(health, "process_started", lambda pid: 100.5 if pid == 4242 and alive[0] else real(pid))
+    killed = []
+    bed["mp"].setattr(fragpipe, "kill_pid_tree", lambda pid, group=False: killed.append(pid))
+    bed["mp"].setattr(fragpipe, "_wait_gone", lambda pid, s: not alive[0])
+    w = Worker(bed["cfg"], bed["ledger"])
+    with caplog.at_level("WARNING", logger="ionomos.worker"):
+        assert not w.run_once() and not w.run_once()
+    assert killed == [4242, 4242]  # tried again on each pass
+    assert len([r for r in caplog.records if r.name == "ionomos.worker" and "waiting" in r.getMessage()]) == 1
+    job = bed["ledger"].get(1)
+    assert job.status == "queued" and job.attempts == 0, job
+    assert job.reason == ("waiting: an earlier search of this experiment is still running (process 4242, started "
+                          "2026-10-15T09:00:00+02:00): end it in Task Manager; the search starts by itself once it "
+                          "has ended")
+    assert hold_topic(job.reason) == "search.hold-leftover"
+    st = json.loads((dest / names.STATUS_FILE).read_text(encoding="utf-8"))
+    assert st["status"] == "queued" and "process 4242" in st["reason"]
+    item = next(i for i in attention.items(bed["cfg"].log_dir) if i.kind == "search_waiting")
+    assert "process 4242" in item.message and "Task Manager" in item.causes[0]
+    assert not (dest / "diann").exists() and not (dest / "ionomos_run" / "diann_console.log").exists()  # no search
+    assert (dest / "ionomos_run" / names.ENGINE_PID_FILE).exists()
+
+    alive[0] = False  # ended in Task Manager
+    assert w.run_once()
+    job = bed["ledger"].get(1)
+    assert job.status == "done" and job.attempts == 1, job.reason
+    assert not [i for i in attention.items(bed["cfg"].log_dir) if i.kind == "search_waiting"]
+
+
+def test_a_cancelled_engine_that_will_not_stop_is_named_and_its_retry_waits_for_it(bed):
+    """Issue #175: the cancel result names a survivor as the time limit does, its engine_pid.json stays, and a
+    Retry waits for it instead of starting a second search (D107); once it is stopped the retry runs."""
+    dest = _queue(bed, "marker,hang")
+    started = dest / "diann" / "standin.started"
+    kill_tree, kill_pid_tree, wait_gone = fragpipe.kill_tree, fragpipe.kill_pid_tree, fragpipe._wait_gone
+    bed["mp"].setattr(fragpipe, "kill_tree", lambda proc: None)  # taskkill refused
+
+    def cancel():
+        if _wait(started.exists, 60):
+            (dest / "ionomos_run" / fragpipe.CANCEL_FILE).write_text("now", encoding="utf-8")
+
+    threading.Thread(target=cancel, daemon=True).start()
+    w = Worker(bed["cfg"], bed["ledger"])
+    pid_file = dest / "ionomos_run" / names.ENGINE_PID_FILE
+    root = None
+    try:
+        assert w.run_once()
+        root = json.loads(pid_file.read_text(encoding="utf-8"))["pid"]
+        job = bed["ledger"].get(1)
+        assert job.status == "failed" and job.reason.startswith(
+            f"cancelled by user — DIA-NN did not stop when told to (process {root}): end it in Task Manager"), job.reason
+        _plain(job.reason)
+        item = next(i for i in attention.items(bed["cfg"].log_dir) if i.kind == "search_failed")
+        assert "was cancelled but did not stop" in item.title
+        assert item.causes[0].startswith("The search program did not stop when Ionomos ended it")
+        assert f"process {root}" in (dest / "FAILED.txt").read_text(encoding="utf-8")
+        assert _alive(int(started.read_text(encoding="utf-8")))
+
+        bed["mp"].setattr(fragpipe, "kill_pid_tree", lambda pid, group=False: None)  # still refused
+        bed["mp"].setattr(fragpipe, "_wait_gone", lambda pid, s: False)
+        bed["ledger"].requeue(1, "retry requested", reset_attempts=True)
+        assert not w.run_once()
+        job = bed["ledger"].get(1)
+        assert job.status == "queued" and f"still running (process {root}" in job.reason, job.reason
+
+        bed["mp"].setattr(fragpipe, "kill_tree", kill_tree)
+        bed["mp"].setattr(fragpipe, "kill_pid_tree", kill_pid_tree)
+        bed["mp"].setattr(fragpipe, "_wait_gone", wait_gone)
+        bed["mp"].setenv("IONOMOS_STANDIN", "table=report.pg_matrix.tsv")
+        assert _wait(lambda: w.run_once() or bed["ledger"].get(1).status != "queued", 30)
+        job = bed["ledger"].get(1)
+        assert job.status == "done", job.reason
+        st = json.loads((dest / names.STATUS_FILE).read_text(encoding="utf-8"))
+        assert any(f"(process {root}," in n and "it was stopped before this attempt" in n for n in st["run"]["notes"])
+    finally:
+        _end(dest / "diann" / "grandchild.pid")
+        for p in (root, int(started.read_text(encoding="utf-8")) if started.exists() else None):
+            if p and _alive(p):
+                kill_pid_tree(p)
 
 def _try_rename(folder: Path) -> bool:
     try:
@@ -811,34 +906,50 @@ def test_stop_leftover_never_raises_on_a_damaged_record(tmp_path, monkeypatch, c
     killed = []
     monkeypatch.setattr(fragpipe, "kill_pid_tree", lambda pid, group=False: killed.append(pid))
     (tmp_path / names.ENGINE_PID_FILE).write_bytes(content)
-    assert fragpipe.stop_leftover(tmp_path) == ""
+    assert fragpipe.stop_leftover(tmp_path) == fragpipe.Leftover()
     assert killed == [] and not (tmp_path / names.ENGINE_PID_FILE).exists()
 
 
 def test_stop_leftover_with_a_record_it_cannot_read_leaves_it(tmp_path):
     (tmp_path / names.ENGINE_PID_FILE).mkdir()  # not a file
-    assert fragpipe.stop_leftover(tmp_path) == "" and (tmp_path / names.ENGINE_PID_FILE).is_dir()
-    assert fragpipe.stop_leftover(tmp_path / "missing") == ""
+    assert fragpipe.stop_leftover(tmp_path) == fragpipe.Leftover() and (tmp_path / names.ENGINE_PID_FILE).is_dir()
+    assert fragpipe.stop_leftover(tmp_path / "missing") == fragpipe.Leftover()
 
 
 @pytest.mark.parametrize("windows", [True, False])
 def test_stop_leftover_says_when_the_leftover_survives(tmp_path, monkeypatch, windows):
+    """Issue #175: it says the process still runs and keeps engine_pid.json, so the job waits (D107)."""
     monkeypatch.setattr(health, "process_started", lambda pid: 100.5)  # ours, and it never ends
     calls = []
     monkeypatch.setattr(fragpipe.subprocess, "run", lambda cmd, **kw: calls.append(cmd))
+    monkeypatch.setattr(fragpipe, "_wait_gone", lambda pid, s: False)
     if windows:
         monkeypatch.setattr(fragpipe, "os", _Os(os, name="nt"))
     else:
         monkeypatch.setattr(fragpipe, "signal", POSIX_SIGNALS)
-        monkeypatch.setattr(fragpipe, "_wait_gone", lambda pid, s: False)
         monkeypatch.setattr(fragpipe, "os", _Os(os, name="posix", getpgid=lambda pid: pid,
                                                 killpg=lambda pid, sig: calls.append(("killpg", pid, sig))))
     (tmp_path / names.ENGINE_PID_FILE).write_text(json.dumps({"pid": 4242, "started": 100.0, "group": True,
                                                               "at": "2026-10-15T09:00:00+02:00"}), encoding="utf-8")
-    msg = fragpipe.stop_leftover(tmp_path)
-    assert "process 4242, started 2026-10-15T09:00:00+02:00" in msg and "it may still be running" in msg
+    found = fragpipe.stop_leftover(tmp_path)
+    assert found.running, found
+    assert found.message == ("an earlier search of this experiment is still running (process 4242, started "
+                             "2026-10-15T09:00:00+02:00): end it in Task Manager; the search starts by itself once "
+                             "it has ended")
+    assert hold_topic(found.message) == "search.hold-leftover"
     assert calls == ([["taskkill", "/PID", "4242", "/T", "/F"]] if windows else
                      [("killpg", 4242, 15), ("killpg", 4242, 9)])
+    assert (tmp_path / names.ENGINE_PID_FILE).exists()  # the next look tries again
+
+
+def test_stop_leftover_says_when_the_leftover_was_stopped(tmp_path, monkeypatch):
+    alive = [True]
+    monkeypatch.setattr(health, "process_started", lambda pid: 100.5 if alive[0] else None)
+    monkeypatch.setattr(fragpipe, "kill_pid_tree", lambda pid, group=False: alive.__setitem__(0, False))
+    (tmp_path / names.ENGINE_PID_FILE).write_text(json.dumps({"pid": 4242, "started": 100.0, "at": "09:00"}),
+                                                  encoding="utf-8")
+    found = fragpipe.stop_leftover(tmp_path)
+    assert not found.running and "(process 4242, started 09:00) was still running after Ionomos stopped" in found.message
     assert not (tmp_path / names.ENGINE_PID_FILE).exists()
 
 
