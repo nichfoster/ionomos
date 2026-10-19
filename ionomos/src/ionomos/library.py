@@ -2284,7 +2284,7 @@ def _cli_show(args, cfg) -> int:
     p = Path(args.path)
     if not p.is_file():
         print(f"{p} is not a file on this PC", file=sys.stderr)
-        return 1
+        return 2  # a file it was given isn't there (D102, #167)
     ctx = context_from(cfg)
     if p.name.lower().endswith(WORKFLOW_SUFFIX):
         info = describe_workflow(p, ctx)

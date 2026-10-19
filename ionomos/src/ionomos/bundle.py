@@ -2558,6 +2558,12 @@ def add_parser(sub):
 def run_cli(args) -> int:
     import sys
 
+    def not_found_code(problems: list[str]) -> int:
+        """cli.py's table (D102, #167): a folder given that isn't there is 2, a job not in the job list 1."""
+        if not problems:
+            return 0
+        return 1 if all(p.startswith("no job ") for p in problems) else 2
+
     t = list(args.targets)
     try:
         if t[:1] == ["inspect"]:
@@ -2603,7 +2609,7 @@ def run_cli(args) -> int:
         if args.dry_run:
             plan = collect(Path(args.config), t, opts)
             print("\n".join(summary_lines(plan)))
-            return 2 if plan.problems else 0
+            return not_found_code(plan.problems)
         res = create(Path(args.config), t, opts, dest_dir=Path(args.out) if args.out else None,
                      progress=None)
     except BundleError as exc:
@@ -2622,4 +2628,4 @@ def run_cli(args) -> int:
         print(f"  capped: {c['path']}: {c['why']}")
     for prob in res.problems:
         print(f"  not found: {prob}", file=sys.stderr)
-    return 2 if res.problems else 0
+    return not_found_code(res.problems)
