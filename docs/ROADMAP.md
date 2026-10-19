@@ -1137,8 +1137,12 @@ Collected from the other docs; resolve before/during Phase 1.
       its `log_dir`, as the too-long-path item uses: raise these the same way. macOS / Linux: a folder is moved even while a copy still writes
       into it (no open-file lock there; a longer `stable_seconds` is the guard). How intake tells the window's
       `resolved_by: gui` from a hand-written one (#173); `ionomos run`'s two start-up tracebacks (#172).
-- [ ] Engines (D98): stop what an engine leaves running after it exits on Windows (a Job Object or a Toolhelp
-      walk, #174); check on the PC whether MSFragger's `BatmassIoThermoServer.exe` outlives MSFragger. A leftover
+- [ ] Engines (D98, D126): on the lab PC, check whether MSFragger's `BatmassIoThermoServer.exe` outlives
+      MSFragger (Windows now stops it through the engine's job, #174: a finished search's notes and console log
+      would say "a program FragPipe started was still running after FragPipe ended"), and that the installed
+      Ionomos.exe can nest the job (no "could not be put in a Windows job" line in a console log). Should the job
+      also set `JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION`, so a tool that crashes ends at once instead of
+      waiting on a Windows Error Reporting window until the time limit? A leftover
       search that can't be stopped holds the queue until it ends (#175, D107): should jobs of other folders run
       beside it instead? Today "one search at a time" wins. The console log keeps every attempt (up to 2 GB each):
       move aside or truncate an attempt's log past the limit? Does a MaxQuant retry reuse its per-raw working

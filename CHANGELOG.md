@@ -389,6 +389,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Windows: a program a search engine leaves running after it ends is now stopped and noted** (#174, D126), as
+  on POSIX: "a program DIA-NN started was still running after DIA-NN ended; Ionomos stopped it". Every engine
+  Ionomos starts (FragPipe, DIA-NN, MaxQuant, Sage, their helper runs, Philosopher) goes into a Windows Job
+  Object of its own right after it starts (`winjob.py`, stdlib ctypes; nested in a job Ionomos itself runs in).
+  A time limit, a cancel or a stop ends the whole job, so a process whose parent has already ended is stopped
+  too, which `taskkill /T` can't do. The job is closed on every path, and closing ends what is still in it
+  (`KILL_ON_JOB_CLOSE`), so a search also ends with an Ionomos ended from Task Manager instead of running on
+  unseen until the next start. A program that asks to leave the job (`CREATE_BREAKAWAY_FROM_JOB`) may, and is
+  not stopped. The console host that outlives an engine by a few milliseconds is not counted. If Windows won't
+  make the job, that is logged, the console log says so, and the search runs as before.
 - **A search an earlier Ionomos left running that won't stop now holds its job** (#175, D107). `stop_leftover`
   says whether the process is gone and keeps `engine_pid.json` while it runs; the worker then waits ("an earlier
   search of this experiment is still running (process N, …): end it in Task Manager; the search starts by itself

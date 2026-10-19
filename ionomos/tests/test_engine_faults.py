@@ -3,25 +3,28 @@ FragPipe's launcher, DIA-NN, MaxQuant, Sage or the raw converter, and hangs, pri
 odd and negative codes, writes partial or empty tables, locks them, leaves a process behind or floods its log.
 
 Every run ends in a clear state (failed, held, or done with a note) with a reason that says what to do and never a
-traceback; a retry never converts a file twice or writes over an earlier attempt. kill_tree, kill_pid_tree and
-stop_leftover are checked for Windows and POSIX with the module's os / subprocess / signal stubbed (never os.name
-globally). Time limits run on a fake clock (fragpipe._clock); every wait has a limit (D73)."""
+traceback; a retry never converts a file twice or writes over an earlier attempt. kill_tree, kill_pid_tree,
+_stop_stragglers and stop_leftover are checked for Windows and POSIX with the module's os / subprocess / signal
+stubbed (never os.name globally); the Windows job itself in test_winjob.py. Time limits run on a fake clock
+(fragpipe._clock); every wait has a limit (D73)."""
 import io
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
 import threading
 import time
 import types
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
 import pytest
 
-from ionomos import attention, fragpipe, health, maxquant, names, preflight, runner, sage, testbed
+from ionomos import attention, fragpipe, health, maxquant, names, preflight, runner, sage, testbed, winjob
 from ionomos.config import MethodConfig, load
 from ionomos.help import hold_topic
 from ionomos.intake import intake
@@ -230,11 +233,13 @@ def test_an_engine_flooding_its_log_is_stopped_before_it_fills_the_disk(tmp_path
 
 def test_an_engine_that_will_not_stop_is_named_and_stopped_later(tmp_path, monkeypatch):
     """A kill that does not take (taskkill refused, a process that ignores it): the reason says so and how to end
-    it, and its engine_pid.json stays, so the next attempt or start of Ionomos stops it first (stop_leftover)."""
+    it, and its engine_pid.json stays, so the next attempt or start of Ionomos stops it first (stop_leftover).
+    Windows: no job either (a closed job would end it: D126)."""
     spec = _spec(tmp_path, monkeypatch, "marker,hang")
     started = spec.workdir / "standin.started"
     monkeypatch.setattr(fragpipe, "_clock", lambda: time.monotonic() + (1e7 if started.exists() else 0))
     monkeypatch.setattr(fragpipe, "kill_tree", lambda proc: None)
+    monkeypatch.setattr(winjob, "contain", lambda proc, what="": None)
     res = _run(spec)
     pid = int(started.read_text(encoding="utf-8"))  # the stand-in (a venv's python.exe may be a launcher above it)
     root = json.loads((spec.run_dir / names.ENGINE_PID_FILE).read_text(encoding="utf-8"))["pid"]
@@ -251,36 +256,90 @@ def test_an_engine_that_will_not_stop_is_named_and_stopped_later(tmp_path, monke
                 fragpipe.kill_pid_tree(p)
 
 
+STRAGGLER = "a program DIA-NN started was still running after DIA-NN ended; Ionomos stopped it"
+
+
 def test_a_process_left_behind_by_an_engine_that_ended_does_not_hold_the_run(tmp_path, monkeypatch):
     """The engine exits 0 and leaves a process of its own running. Its console log is a file, not a pipe, so the
-    run ends with the engine. POSIX: the leftover (the engine's process group) is stopped and noted. Windows: it
-    can't be told from other programs once its parent is gone (issue #174); it is not waited for."""
+    run ends with the engine. The leftover is stopped and noted: POSIX through the engine's process group, Windows
+    through its job (issue #174, D126)."""
     spec = _spec(tmp_path, monkeypatch, "grandchild=120,table=report.pg_matrix.tsv")
     try:
         res = _run(spec)
         assert res.ok and res.seconds < 60, res.reason
         grandchild = int((spec.workdir / "grandchild.pid").read_text(encoding="utf-8"))
-        if not WINDOWS:
-            assert len(res.warnings) == 1 and res.warnings[0].startswith(
-                "a program DIA-NN started was still running after DIA-NN ended; Ionomos stopped it"), res.warnings
-            assert _wait(lambda: not _alive(grandchild), 15)
-            assert "# a program DIA-NN started" in spec.console_log.read_text(encoding="utf-8")
-        else:
-            assert res.warnings == []
+        assert res.warnings == [STRAGGLER], res.warnings
+        assert _wait(lambda: not _alive(grandchild), 15)
+        assert f"# {STRAGGLER}" in spec.console_log.read_text(encoding="utf-8")
     finally:
         _end(spec.workdir / "grandchild.pid")
 
 
 @only_windows
-def test_a_result_table_locked_by_a_leftover_process_is_named_not_called_cut_off(tmp_path, monkeypatch):
+def test_without_a_job_a_process_left_behind_is_not_stopped_and_the_log_says_why(tmp_path, monkeypatch):
+    """Windows would not make the engine's job (D126): the search runs as before #174, and its console log says
+    what is not done; it never fails the search."""
+    monkeypatch.setattr(winjob, "contain", lambda proc, what="": None)
+    spec = _spec(tmp_path, monkeypatch, "grandchild=120,table=report.pg_matrix.tsv")
+    try:
+        res = _run(spec)
+        assert res.ok and res.warnings == [], (res.reason, res.warnings)
+        assert _alive(int((spec.workdir / "grandchild.pid").read_text(encoding="utf-8")))
+        assert ("# DIA-NN could not be put in a Windows job (see the Ionomos log): a program it leaves running "
+                "after it ends is not stopped") in spec.console_log.read_text(encoding="utf-8")
+    finally:
+        _end(spec.workdir / "grandchild.pid")
+
+
+def test_a_leftover_holding_a_result_table_is_stopped_before_the_table_is_read(tmp_path, monkeypatch):
+    """The process the engine left holding its table (a Windows lock; POSIX: open) is stopped once the engine has
+    ended, and the table is read whole (issue #174, D126)."""
     spec = _spec(tmp_path, monkeypatch, "lockchild=report.pg_matrix.tsv")
     try:
         res = _run(spec)
-        assert not res.ok and "report.pg_matrix.tsv can't be read (Permission denied)" in res.reason, res.reason
-        assert "cut off" not in res.reason and "it is open in another program" in res.reason
-        assert res.hints[0].startswith("A result table of the search is open in another program")
+        assert res.ok and res.warnings == [STRAGGLER], (res.reason, res.warnings)
+        assert not _alive(int((spec.workdir / "grandchild.pid").read_text(encoding="utf-8")))
     finally:
         _end(spec.workdir / "grandchild.pid")
+
+
+OUTSIDE_LOCKER = r"""
+import msvcrt, os, sys, time
+path = sys.argv[1]
+end = time.monotonic() + 60
+while not os.path.exists(path + ".ready") and time.monotonic() < end:
+    time.sleep(0.02)
+fh = open(path, "r+b")
+msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, max(1, os.path.getsize(path)))
+open(path + ".locked", "w").close()
+time.sleep(float(sys.argv[2]))
+"""
+
+
+@contextmanager
+def _locked_by_another_program(path: Path, seconds: float = 60):
+    """A program Ionomos did not start (Excel, an antivirus scan) locks `path` as soon as the stand-in's `handoff`
+    step has written it, and holds it for `seconds` or until the block ends (Windows)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    proc = subprocess.Popen([sys.executable, "-c", OUTSIDE_LOCKER, str(path), str(seconds)],
+                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        yield proc
+    finally:
+        if proc.poll() is None:
+            proc.kill()  # a venv's python.exe launcher: its interpreter ends with it (the launcher's job)
+            proc.wait(timeout=15)
+
+
+@only_windows
+def test_a_result_table_locked_by_another_program_is_named_not_called_cut_off(tmp_path, monkeypatch):
+    spec = _spec(tmp_path, monkeypatch, "handoff=report.pg_matrix.tsv")
+    with _locked_by_another_program(spec.workdir / "report.pg_matrix.tsv"):
+        res = _run(spec)
+    assert not res.ok and "report.pg_matrix.tsv can't be read (Permission denied)" in res.reason, res.reason
+    assert "cut off" not in res.reason and "it is open in another program" in res.reason
+    assert res.hints[0].startswith("A result table of the search is open in another program")
+    assert res.warnings == []  # the lock was not the engine's: nothing of it was left running
 
 
 def test_explanations_stay_fast_on_a_pathological_log():
@@ -397,9 +456,9 @@ def test_a_hung_diann_is_failed_at_the_time_limit(bed):
 
 @only_windows
 def test_a_locked_table_fails_then_holds_the_retry_until_it_is_closed_and_keeps_it(bed):
-    dest = _queue(bed, "lockchild=report.pg_matrix.tsv")
+    dest = _queue(bed, "handoff=report.pg_matrix.tsv")
     w = Worker(bed["cfg"], bed["ledger"])
-    try:
+    with _locked_by_another_program(dest / "diann" / "report.pg_matrix.tsv"):
         w.run_once()
         _ended_clearly(bed, dest, "failed", "can't be read")
         bed["ledger"].requeue(1, "retry requested", reset_attempts=True)
@@ -407,8 +466,6 @@ def test_a_locked_table_fails_then_holds_the_retry_until_it_is_closed_and_keeps_
         job = bed["ledger"].get(1)
         assert job.status == "queued" and "can't be moved aside" in job.reason and job.attempts == 0, job.reason
         assert hold_topic(job.reason) == "search.hold-previous-output"
-    finally:
-        _end(dest / "diann" / "grandchild.pid")
     assert _wait(lambda: _try_rename(dest / "diann"), 15)
     bed["mp"].setenv("IONOMOS_STANDIN", "say=again,exit=4")
     w._held.clear()
@@ -468,6 +525,7 @@ def test_a_cancelled_engine_that_will_not_stop_is_named_and_its_retry_waits_for_
     started = dest / "diann" / "standin.started"
     kill_tree, kill_pid_tree, wait_gone = fragpipe.kill_tree, fragpipe.kill_pid_tree, fragpipe._wait_gone
     bed["mp"].setattr(fragpipe, "kill_tree", lambda proc: None)  # taskkill refused
+    bed["mp"].setattr(winjob, "contain", lambda proc, what="": None)  # and no job to end it with (D126)
 
     def cancel():
         if _wait(started.exists, 60):
@@ -847,6 +905,89 @@ def test_windows_kill_tree_uses_taskkill_on_the_whole_tree(monkeypatch):
     assert seen == [(["taskkill", "/PID", "4242", "/T", "/F"], fragpipe.TASKKILL_SECONDS)] and proc.killed == 0
     fragpipe.kill_tree(proc)  # already ended: nothing more
     assert len(seen) == 1
+
+
+class _FakeJob:
+    """A winjob.Job: what it was asked, and what it answers."""
+
+    def __init__(self, proc=None, terminates=True, rest=(False, True)):
+        self.proc, self.terminates, self.rest, self.asked, self.closed = proc, terminates, rest, [], 0
+
+    def terminate(self):
+        self.asked.append("terminate")
+        if self.terminates and self.proc is not None:
+            self.proc.returncode = winjob.ENDED_CODE
+        return self.terminates
+
+    def stop_rest(self, seconds):
+        self.asked.append(("stop_rest", seconds))
+        return self.rest
+
+    def close(self):
+        self.closed += 1
+
+
+@pytest.mark.parametrize("terminates", [True, False])
+def test_windows_kill_tree_ends_the_engines_job_and_uses_taskkill_only_when_refused(monkeypatch, terminates):
+    seen = []
+    proc = _Proc()
+    proc.win_job = _FakeJob(proc, terminates=terminates)
+
+    def taskkill(cmd, **kw):
+        seen.append(cmd)
+        proc.returncode = 1
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr(fragpipe, "os", _Os(os, name="nt"))
+    monkeypatch.setattr(fragpipe.subprocess, "run", taskkill)
+    fragpipe.kill_tree(proc)
+    assert proc.win_job.asked == ["terminate"] and proc.killed == 0 and proc.poll() == 1
+    assert seen == ([] if terminates else [["taskkill", "/PID", "4242", "/T", "/F"]])
+
+
+@pytest.mark.parametrize(("rest", "said"), [
+    ((False, True), ""),
+    ((True, True), STRAGGLER),
+    ((True, False), STRAGGLER + " (it may still be running: check the process list)"),
+])
+def test_windows_stop_stragglers_asks_the_engines_job(monkeypatch, rest, said):
+    monkeypatch.setattr(fragpipe, "os", _Os(os, name="nt", killpg=lambda *a: 1 / 0))  # never a process group
+    spec = types.SimpleNamespace(engine_name="DIA-NN")
+    proc = _Proc()
+    proc.returncode = 0
+    proc.win_job = _FakeJob(proc, rest=rest)
+    assert fragpipe._stop_stragglers(spec, proc) == said
+    assert proc.win_job.asked == [("stop_rest", fragpipe.STRAGGLER_SECONDS)]
+    proc.win_job = None  # Windows would not make the job: nothing can be told apart, nothing is said (as before #174)
+    assert fragpipe._stop_stragglers(spec, proc) == ""
+
+
+def test_release_closes_the_job_once_and_never_raises():
+    proc, job = _Proc(), _FakeJob()
+    proc.win_job = job
+    fragpipe._release(proc)
+    fragpipe._release(proc)
+    assert job.closed == 1 and proc.win_job is None
+    fragpipe._release(_Proc())  # a process with no job (POSIX, or none was made)
+
+    class Broken(_FakeJob):
+        def close(self):
+            raise OSError(6, "The handle is invalid")
+
+    proc.win_job = Broken()
+    fragpipe._release(proc)
+    assert proc.win_job is None
+
+
+def test_every_engine_start_goes_through_start_and_release():
+    """Every program a search starts is put in its job and lets it go on every path (D126): no Popen of an engine
+    outside fragpipe._start, and every _start is followed by a _release in a finally."""
+    src = Path(fragpipe.__file__).parent
+    for mod in ("fragpipe.py", "diann.py", "maxquant.py", "sage.py", "fastasource.py", "preflight.py"):
+        text = (src / mod).read_text(encoding="utf-8")
+        assert text.count("_popen_kwargs()") == (2 if mod == "fragpipe.py" else 0), mod  # its def, _start's Popen
+        starts = len(re.findall(r"proc = (?:fragpipe\.)?_start\(", text))
+        assert starts == text.count("_release(proc)") and starts == {"fragpipe.py": 2, "fastasource.py": 1}.get(mod, 0), mod
 
 
 def test_posix_kill_tree_terms_then_kills_the_group_and_survives_a_vanished_group(monkeypatch):
