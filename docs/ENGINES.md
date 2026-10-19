@@ -202,6 +202,11 @@ analysis:
 In MaxQuant, the channel totals over experiments
 (`Reporter intensity corrected 1`, without an experiment name) are left out,
 and `combined/txt/summary.txt` tells which raw files each experiment has.
+MaxQuant names the channels by number only, so without an SDRF or
+`sample_conditions` every channel's condition is `unassigned` (as Sage's
+`tmt.tsv` without a channel map, below): the report is QC only, and one note
+asks for the conditions (the Analysis tab, `analysis.sample_conditions`, or an
+SDRF). experiment.yaml's `tmt:` map is not read for MaxQuant.
 
 ## Running DIA-NN directly (instead of FragPipe)
 

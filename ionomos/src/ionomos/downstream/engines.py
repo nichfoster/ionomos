@@ -392,7 +392,7 @@ def _maxquant_plexes(m: QuantMatrix, path: Path) -> QuantMatrix:
     experiments MaxQuant also writes the channel totals over experiments ('... corrected 3'): those are left out.
     Channels are numbered in kit order (from 0 in old versions); combined/txt/summary.txt names each
     experiment's raw files, which the SDRF import matches."""
-    from ionomos.downstream.plex import channel_from_index, keep_samples
+    from ionomos.downstream.plex import UNASSIGNED, channel_from_index, keep_samples
 
     hit = {s: _MQ_REPORTER.match(m.columns.get(s, "")) for s in m.samples}
     if any(x and x.group(2) for x in hit.values()):
@@ -414,6 +414,14 @@ def _maxquant_plexes(m: QuantMatrix, path: Path) -> QuantMatrix:
         if x.group(2):
             plex[s] = x.group(2).strip()
     m.meta["channel"] = channel
+    # A reporter column's number is a channel, not a sample name: nothing in the table says a channel's condition
+    # (#165). As Sage's tmt.tsv without a channel map, each is 'unassigned' (one condition for all, so the analysis
+    # asks instead of testing channels against each other); an SDRF or sample_conditions gives them later.
+    for s in channel:
+        m.condition[s] = UNASSIGNED
+        m.replicate.pop(s, None)
+    m.notes.append(f"MaxQuant names {len(channel)} TMT channels by number only, so their condition is '{UNASSIGNED}': "
+                   "give each its condition on the Analysis tab, with analysis.sample_conditions, or with an SDRF")
     if plex:
         m.meta["plex"] = plex
         summary = path.parent / "summary.txt"
