@@ -306,6 +306,10 @@ def test_a_report_with_the_lookup_shows_the_atlas_columns_and_the_line(tmp_path)
     assert f"<p class='muted' id='cysatlas'>{line}" in text
     assert "looked up in the lab's internal cysteine atlas (built 2026-10-19; 4 human sites)" in text   # Methods
     assert not [x for x in data["notes"] if "atlas" in x]
+    head, *rows = (d / "results" / "cysteine_sites.tsv").read_text(encoding="utf-8").splitlines()
+    assert head.split("\t")[-len(atlasctx.SITE_COLUMNS):] == atlasctx.SITE_COLUMNS
+    mine = next(r.split("\t") for r in rows if r.split("\t")[0] == held)
+    assert mine[-5:] == ["high", "7", "99", "yes", "no"]
 
 
 def test_a_report_without_a_lookup_has_no_atlas_and_a_malformed_one_a_note(tmp_path):
@@ -315,6 +319,7 @@ def test_a_report_without_a_lookup_has_no_atlas_and_a_malformed_one_a_note(tmp_p
     text, data = _page(out)
     assert data["cys"]["ran"] and "atlas" not in data["cys"] and "id='cysatlas'" not in text
     assert not [x for x in data["notes"] if "atlas" in x] and "internal cysteine atlas" not in text
+    assert "new_to_atlas" not in (d / "results" / "cysteine_sites.tsv").read_text(encoding="utf-8")
     _publish(dropbox / names.ATLAS_RETURN_DIR, _row(tier="hgh"))
     out = postprocess.run_for_folder(d, _cfg(dropbox), "isoDTB")
     text, data = _page(out)
