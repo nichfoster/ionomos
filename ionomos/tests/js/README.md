@@ -95,6 +95,11 @@ VirtualConsole; tests assert the list stays empty.
   **?** and its panel (Escape and × give the keyboard back), the export dialog
   keeping the keyboard and returning it, the file pickers reachable by Tab,
   `aria-pressed` on the two-way switches, a name on every chart.
+- `test/tmtexport.test.mjs` — the report's Export of the TMT QC figures says what
+  `sectionfigs.py`'s do (#178): both are checked against `tmt_parity.json` (the
+  Python half is `tests/test_tmt_export_parity.py`): the experiment and the
+  chart's own line in the footer, no hits or statistics, no doubled title, a
+  channel chart named by its plex.
 - `test/exportall.test.mjs` — every export button: SVG and PNG under every
   chart on every QC tab and section, the dialog's buttons and every figure in
   its list, CSV, copy, .gmt, the zips, and safe file names from hostile names.

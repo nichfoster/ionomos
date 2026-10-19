@@ -3043,7 +3043,7 @@
     ["identifications", "Identifications per sample", ""], ["imputation", "Measured and imputed values", ""], ["power", "Power", ""], ["search_quality_", "Search quality per run", ""], ["run_order_", "QC against the order of acquisition", ""],
     ["dose_potency_", "Dose-response: potency against effect", ""], ["dose_curve_", "Dose-response curve", ""], ["time_course_", "Time course", ""], ["time_patterns_", "Time-course patterns", ""],
     ["liganded_rank_", "Liganded sites", ""], ["liganded_selectivity", "Liganded sites across compounds", ""], ["kinase_activity_", "Kinase activity (KSEA)", ""],
-    ["tmt_channels_", "TMT channels: reporter intensity per channel", ""], ["tmt_labelling", "TMT labelling efficiency", ""], ["tmt_purity", "TMT precursor purity", ""]];
+    ["tmt_channels_", "TMT channels", ""], ["tmt_labelling", "TMT labelling efficiency", ""], ["tmt_purity", "TMT precursor purity", ""]];
   const TEST_NAMES = { limma: "limma moderated t-test", welch: "Welch t-test", student: "Student t-test" };
   /** The cut-offs in plain words: shown beside the plot and written into every exported figure. */
   function cutText(c) {
@@ -3066,9 +3066,34 @@
     else if (/^(values_|dose_curve_|time_course_|time_patterns_|cv_|liganded_rank_|dose_potency_)/.test(name)) detail = name.replace(/^(values|dose_curve|time_course|time_patterns|cv|liganded_rank|dose_potency)_/, "");
     else if (/^run_order_/.test(name) && D.qc.run) detail = ((D.qc.run.metrics || []).find((m) => "run_order_" + m.key === name) || {}).label || "";
     else if (/^kinase_activity_/.test(name) && phosComps()[PH.c]) detail = phosComps()[PH.c].name;
-    else if (/^tmt_channels_/.test(name) && tmPlexes()[TM.p]) detail = "plex " + tmPlexes()[TM.p].name;
-    const cuts = cut === "view" ? cutText(c) + (filterText() ? "; " + filterText() : "") : cut === "saved" ? savedCutText() + " (the report's saved cut-offs)" : "";
+    const tq = /^tmt_/.test(name) ? tmtFigText(name) : null;
+    if (tq) return { what: what, cut: "", cuts: clean(tq.cuts), c: null, stats: false, detail: clean(tq.detail), title: clean(tq.title), subtitle: clean(tq.subtitle) };
+    const cuts =cut === "view" ? cutText(c) + (filterText() ? "; " + filterText() : "") : cut === "saved" ? savedCutText() + " (the report's saved cut-offs)" : "";
     return { what: what, cut: cut, cuts: cuts, c: c, detail: clean(detail), title: clean(c ? c.name : what), subtitle: clean((c ? what + " · " : detail ? detail + " · " : "") + D.title) };
+  }
+  /** The words around an exported TMT QC chart, as sectionfigs.figure_tmt_* write them (#178): the statistics did
+   * not make these charts, so the footer has no hits and no analysis settings, only the chart's own line (stats:
+   * false), the title is not "<what>: <what>", and a channel chart is named by its plex ("plexB", not "plex plexB"). */
+  function tmtFigText(name) {
+    const X = D.tmtqc || {}, P = tmPlexes(), exp = D.title || "";
+    const n3 = (v) => String(Math.round(v || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");  // 1,234 as Python writes it, whatever the browser's language
+    if (/^tmt_channels_/.test(name)) {
+      const p = P[TM.p];
+      if (!p) return null;
+      const nm = clean(p.name) || "plex " + (TM.p + 1), plex = /^plex/i.test(nm) ? nm : "plex " + nm;
+      return { detail: plex, title: "TMT channels: " + plex, subtitle: "Reporter intensity per channel, " + n3(p.psms) + " PSMs · " + exp,
+        cuts: "box: 25-75 %, whiskers: 5-95 % of the PSMs with signal" };
+    }
+    if (name === "tmt_labelling") {
+      const lim = (X.limits || {}).min_labelling;
+      return { detail: "", title: "TMT labelling efficiency", subtitle: P.length + " plex" + (P.length !== 1 ? "es" : "") + " · " + exp,
+        cuts: lim != null ? "dashed: the limit " + Math.round(lim * 100) + "%" : "" };
+    }
+    if (name === "tmt_purity") {
+      const med = (X.purity || {}).median;
+      return { detail: "", title: "TMT precursor purity", subtitle: (med != null ? "median " + (+med).toFixed(2) + " · " : "") + exp, cuts: "" };
+    }
+    return null;
   }
   /** The legend of a chart, read from the page beside it: [colour or null, text]. */
   function legendItems(cap, tk) {
@@ -3114,7 +3139,8 @@
     const ttl = st.title ? cut(clean(own.title || info.title), 16) : "", sub = st.subtitle ? cut(clean(own.subtitle || info.subtitle), 12) : "";
     // a low-confidence or fold-change-only comparison says so in the figure, whatever is switched off
     const warn = info.c && info.c.conf ? (info.c.conf === "none" ? "FOLD CHANGE ONLY: no replicates, no p-values" : "LOW CONFIDENCE: a group has one sample; p-values borrowed") : "";
-    const note = st.note ? cut(clean(D.title + (info.cuts ? " · hits: " + info.cuts : "") + " · " + analysisText()), 10) : "";
+    const qc = info.stats === false;  // a QC chart the statistics did not make (the TMT QC's): no hits, no analysis settings
+    const note = st.note ? cut(clean(D.title + (qc ? (info.cuts ? " · " + info.cuts : "") : (info.cuts ? " · hits: " + info.cuts : "") + " · " + analysisText())), 10) : "";
     // legend rows, flowed into the full width
     const rows = [[]];
     let lx = 0;
@@ -3138,9 +3164,9 @@
     out.setAttribute("viewBox", "0 0 " + r2(OW) + " " + r2(OH));
     out.setAttribute("font-family", fontStack(st.font_family));
     const desc = ["Figure: " + info.what + (info.detail ? " (" + info.detail + ")" : ""), "Experiment: " + clean(D.title), info.c ? "Comparison: " + clean(info.c.name) : "",
-      info.cuts ? "Cut-offs: " + info.cuts : "", warn, "Analysis: " + analysisText(), D.sourceName ? "Source table: " + clean(D.sourceName) : "",
+      info.cuts ? (qc ? info.cuts : "Cut-offs: " + info.cuts) : "", warn, qc ? "" : "Analysis: " + analysisText(), D.sourceName ? "Source table: " + clean(D.sourceName) : "",
       "Export style: " + styleText(st), "Made by the Ionomos report, " + stamp()].filter(Boolean).join("\n");
-    svg("title", {}, out).textContent = info.what + (info.c ? ": " + clean(info.c.name) : "");
+    svg("title", {}, out).textContent = info.what + (info.c ? ": " + clean(info.c.name) : qc && info.detail ? ": " + info.detail : "");
     svg("desc", {}, out).textContent = desc;
     if (st.background !== "transparent") svg("rect", { x: 0, y: 0, width: r2(OW), height: r2(OH), fill: tk["--surface"] }, out);
     const put = (x, y, t, attrs) => { const e = svg("text", Object.assign({ x: r2(x), y: r2(y) }, attrs), out); e.textContent = t; return e; };
