@@ -1130,7 +1130,7 @@ def test_cli(pc, capsys):
     assert "no method 'Nope'" in capsys.readouterr().err
     assert cli.main(["--config", cfg, "library", "check"]) in (0, 1)
     assert "isoDTB" in capsys.readouterr().out
-    assert cli.main(["--config", cfg, "library", "show", str(pc["root"] / "nothing.workflow")]) == 1
+    assert cli.main(["--config", cfg, "library", "show", str(pc["root"] / "nothing.workflow")]) == 2
 
 
 def test_adopt_no_config_never_changes_the_live_workflow(pc, capsys):

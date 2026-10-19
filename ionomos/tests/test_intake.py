@@ -657,3 +657,59 @@ def test_the_note_gets_a_short_temp_name_when_its_own_is_near_the_limit(lab, mon
     ionomos.intake._write_note(note, "hello")
     assert note.read_text(encoding="utf-8") == "hello"
     assert [p.name for p in lab["inbox"].iterdir()] == [note.name]  # no temp file left, under either name
+
+
+# ------------------------------------------------- a hand-written resolved_by: gui (#173) --
+
+
+class _Review:
+    """A resolver with a review window that accepts the drop as read (user and method from the draft)."""
+
+    def __init__(self):
+        self.seen = []
+
+    def resolve(self, d):
+        self.seen.append("resolve")
+        return Overrides(user=d.user, method=d.method)
+
+    def review(self, d):
+        self.seen.append("review")
+        return Overrides(user=d.user, method=d.method)
+
+
+def test_a_hand_written_resolved_by_gui_does_not_create_a_user_folder(lab, ledger):
+    """A yaml copied from last month's folder, with a misspelt user, is rejected like any unknown user."""
+    d = make_drop(lab["inbox"], "20260920_Isaac_isoDTB_copied", ["S_1_1.raw"])
+    (d / "experiment.yaml").write_text("user: Isac\nresolved_by: gui\n", encoding="utf-8")
+    with pytest.raises(IntakeError) as e:
+        plan(d, lab["cfg"], ledger)  # a dry run touches nothing either
+    assert e.value.kind == Kind.OVERRIDES and "Isac" in str(e.value) and "resolved_by" in str(e.value)
+    assert not (lab["general"] / "Isac").exists()
+    rv = _Review()
+    assert intake(d, lab["cfg"], ledger, rv) == IntakeResult.REJECTED
+    assert not (lab["general"] / "Isac").exists() and d.is_dir() and rv.seen == []
+    assert "no folder" in (lab["inbox"] / (d.name + ".REJECTED.txt")).read_text(encoding="utf-8")
+
+
+def test_a_copied_files_block_for_other_raws_is_shown_for_review(lab, ledger):
+    d = make_drop(lab["inbox"], "20260920_Isaac_isoDTB_next", ["S_1_1.raw"])
+    save_overrides(d, Overrides(user="Isaac", resolved_by="gui", files={"Old_1_1.raw": FileOverride("Old", 1, -1)}))
+    rv = _Review()
+    assert intake(d, lab["cfg"], ledger, rv) == IntakeResult.QUEUED and rv.seen == ["review"]
+
+
+def test_the_windows_answer_is_not_asked_again_when_the_move_has_to_wait(lab, ledger, monkeypatch):
+    """The answer saved in this process (no files: changed) still counts on the next try after a RETRY."""
+    d = make_drop(lab["inbox"], "20260920_Isaac_isoDTB_wait", ["S_1_1.raw"])
+    real, calls = ionomos.intake._move_tree, []
+
+    def busy_once(src, dest):
+        calls.append(src)
+        if len(calls) == 1:
+            raise PermissionError(13, "in use", str(src))
+        return real(src, dest)
+
+    monkeypatch.setattr(ionomos.intake, "_move_tree", busy_once)
+    rv = _Review()
+    assert intake(d, lab["cfg"], ledger, rv) == IntakeResult.RETRY and rv.seen == ["review"]
+    assert intake(d, lab["cfg"], ledger, rv) == IntakeResult.QUEUED and rv.seen == ["review"]
