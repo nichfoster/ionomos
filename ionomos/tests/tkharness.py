@@ -215,6 +215,35 @@ _MODULES = [(messagebox, n) for n in _MESSAGEBOX] + [(simpledialog, n) for n in 
     [(filedialog, n) for n in _FILEDIALOG] + [(colorchooser, "askcolor")]
 
 
+def _where(frame) -> str:
+    """Where a dialog was asked from (frame: the caller of the recorder): when a Tk callback made the call, the
+    widget whose command / binding / after() it was (tkinter.CallWrapper.widget), whether that widget still exists
+    and which Tcl interpreter it is in (a previous test's app is another one); then the innermost Python frames.
+    Issue #185: a "Find FragPipe" box once came from nothing the smoke test pressed, and the log could not say how."""
+    import traceback
+
+    lines = []
+    f = frame
+    while f is not None:
+        if f.f_code is tk.CallWrapper.__call__.__code__:
+            w = getattr(f.f_locals.get("self"), "widget", None)
+            try:
+                exists = bool(w.winfo_exists())
+                cls = w.winfo_class()
+                text = w.cget("text") if cls in ("TButton", "Button") else ""
+            except (tk.TclError, AttributeError):
+                exists, cls, text = False, "?", ""
+            lines.append(f"    from a Tk callback of {w} ({cls} {text!r}; exists={exists}; "
+                         f"interpreter {id(getattr(w, 'tk', None)):#x})")
+            break
+        f = f.f_back
+    if not lines:
+        lines.append("    called from Python, not from a Tk callback")
+    stack = traceback.extract_stack(frame, limit=10)
+    lines += [f"    {fs.filename.replace(chr(92), '/').rsplit('/', 1)[-1]}:{fs.lineno} in {fs.name}" for fs in stack]
+    return "\n".join(lines)
+
+
 class NoDialogs:
     """Every dialog replaced by a recorder; a context manager, or ``NoDialogs(monkeypatch=mp).start()``.
 
@@ -222,12 +251,14 @@ class NoDialogs:
     returns answer (several queue up). Without one it returns the default (show* None, askyesno / askokcancel /
     askretrycancel False, askyesnocancel None, askquestion "no", simpledialog None, file dialogs "", askcolor
     (None, None)) and counts as unexpected; with ``strict=True`` it raises AssertionError there instead, naming the
-    dialog (inside a Tk callback that goes to report_callback_exception: use TkErrors to see it).
+    dialog (inside a Tk callback that goes to report_callback_exception: use TkErrors to see it). ``.where``: per
+    call, the Tk callback's widget (if one asked) and the stack; ``.report()`` lists the unexpected ones with it.
     """
 
     def __init__(self, strict: bool = False, monkeypatch=None):
         self.strict = strict
         self.calls: list[DialogCall] = []
+        self.where: list[str] = []  # per call: what asked (_where), so a dialog nobody expected says how it came
         self._expected_flags: list[bool] = []
         self._queue: dict[str, collections.deque] = collections.defaultdict(collections.deque)
         self._mp = monkeypatch
@@ -247,15 +278,19 @@ class NoDialogs:
         """Answers queued with expect() that no dialog has taken yet."""
         return {k: list(v) for k, v in self._queue.items() if v}
 
+    def report(self) -> str:
+        """Each dialog nobody expected, with where it was asked from (the Tk callback's widget and the stack)."""
+        return "\n".join(f"  {c.name}: {c.title!r}: {c.detail!r}\n{w}"
+                         for c, w, ok in zip(self.calls, self.where, self._expected_flags, strict=True) if not ok)
+
     def assert_none(self) -> None:
-        """Fail when a dialog was shown that had no answer queued, naming each."""
-        bad = self.unexpected()
-        if bad:
-            raise AssertionError("dialogs nobody expected:\n" + "\n".join(
-                f"  {c.name}: {c.title!r}: {c.detail!r}" for c in bad))
+        """Fail when a dialog was shown that had no answer queued, naming each and where it came from."""
+        if self.unexpected():
+            raise AssertionError("dialogs nobody expected:\n" + self.report())
 
     def _answer(self, name: str, title, detail):
         self.calls.append(DialogCall(name, title, detail))
+        self.where.append(_where(sys._getframe(2)))
         q = self._queue.get(name)
         if q:
             self._expected_flags.append(True)
