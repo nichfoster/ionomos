@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A feature opens from the keyboard in the report** (D116, #176): every table whose rows open something is one
+  Tab stop; arrows, Home, End, Page Up / Down move, Enter or Space opens the row (Shift+Enter pins), and the row
+  rings its point on the chart beside it with its tooltip. Pin and "Behaves like" chips are buttons.
+
 - **The app, slices 2–4 of docs/UI.md (D95): robust for daily driving, and tested with hidden windows.**
   - The tabs are grouped **Today · Inbox · Jobs · Analysis | Setup · Folders · Users · Methods · Advanced ·
     Run & Test · Notifications | Help** and lose their numbers; every help text, checklist line and hint names
@@ -386,9 +390,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     shorter (CmdDiann's plot step is Windows only), so the Linux CI failed on numbers right on Windows.
   - `tests/test_service.py::test_create_desktop_shortcut_encoded_command` asserted the broken PowerShell for
     `O'Brien`; it now asserts the doubled quote (D100).
+- Every option and positional of `library`, `testbed`, `fasta` and `tmt` has a `--help` line;
+  `tests/test_cli_contract.py` now requires one for every option of every parser (#166).
+- Assistant tests read a cited log line's number from the fake FragPipe's console (`scenarios.log_line`), so a
+  change to the fake no longer breaks them; when no line holds the text, the error names the scenario and the
+  console it read (#183).
+- Hidden-window tests: a dialog nobody expected prints the widget whose Tk callback asked for it, its
+  interpreter and the stack, so the next "Find FragPipe" flake names its cause (#185, not yet found).
 
 ### Fixed
 
+- **Round 5 issue sweep (D108–D117):**
+  - **PCA of a large study takes seconds, not minutes** (D108, #163): above 60 samples only the 6 components
+    the report shows, from the smaller Gram matrix; up to 60, Jacobi as before. 500 samples × 300 proteins:
+    6 min → about 3 s. **knn imputation of 10,000 proteins** takes about 25 s instead of 4 min, with the same
+    numbers bit for bit (D108, #164).
+  - A MaxQuant TMT `proteinGroups.txt` without an SDRF or `sample_conditions` no longer gets one condition per
+    channel and 19 fold-change-only comparisons: each channel is `unassigned`, the report is QC only, and one
+    note asks for the conditions (D109, #165).
+  - The FASTA readers of the bundle, the SDRF organism, Sage's gene names and the benchmark's species count the
+    first entry of a FASTA saved with a UTF-8 BOM and read a file without line breaks in bounded chunks, through
+    `fastasource.fasta_headers` (#160).
+  - Notes that only say what was read ("quantity: MaxLFQ Intensity", the TMT table kind, phosphosite filter
+    counts) stay in the report and `analysis.json`, not in a done job's reason, `run.warnings`, DONE.txt or the
+    WARNING log (D110, #182).
+  - An open search (IonQuant, TMT-Integrator and DIA-NN all off) is done with a note pointing at
+    `fragpipe/ptm-shepherd-output/`: no NO_TABLE, no "analysis had a problem", no attention item (#181).
+  - A DIA experiment with fractions has each sample's fractions added up in DIA-NN's protein matrix, with a note,
+    instead of being called re-acquisitions and stopping for input (D111, #180).
+  - A FragPipe refusal Ionomos has no words for is quoted ("FragPipe exited with code 1 (refused: …)") with
+    "fix what it names", not "ended from outside: Retry"; "Database looks to be empty", "Some loaded files don't
+    exist" and "Not all TMT groups have annotation files set" are explained; "badly formatted lines" is a
+    warning on the done job naming the runs FragPipe left out (D112, #179).
+  - A SILAC, PAL, isoTOP or ipIAA search folder is no longer analysed as isoDTB: the Analysis tab says Ionomos
+    doesn't analyse that label (`LABEL_NOT_HANDLED`) (D113, #161).
+  - `ionomos run` with a read-only `logs/ionomos.lock` names the file and exits 2; with a damaged job list open
+    in another program it says what to close and exits 1. Both were tracebacks (#172).
+  - A hand-written or copied `resolved_by: gui` no longer files a drop under a new user folder for a misspelt
+    `user:`, and no longer skips the review window on its own (D114, #173).
+  - `ionomos bundle <missing job>` exits 1 and `ionomos library show <missing file>` exits 2, as the exit-code
+    table says (#167).
+  - Report text reaches WCAG AA 4.5:1 in light and dark: warning words, flagged cells, pills, badges and links
+    take text-only inks; help.html's muted grey and the static volcano's ticks are `#6f6d68`; chart marks keep
+    the palette (D115, #177).
+  - The report's own Export of the TMT QC figures matches `ionomos export --figures tmt`: no statistics or
+    `hits:` in the footer, no doubled title, `TMT channels: plexB` (#178).
+  - A question to the assistant has one time limit, twice `assistant.timeout_seconds` (4 minutes by default);
+    each request and its socket get what is left, and the Ask window says how long it may wait (D117, #171).
 - The Advanced tab's RAM (GB) field refuses a decimal (47.5) as config.yaml's loader does (D102); it used to
   accept it and the next start stopped on `fragpipe.ram_gb must be a whole number`.
 - **TMT-Integrator protein tables are labelled by gene.** In `ratio_protein_*.tsv` / `abundance_protein_*.tsv`,
