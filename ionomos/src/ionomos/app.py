@@ -75,6 +75,8 @@ FIRST-TIME SETUP (the set-up tabs, left to right)
               the users folder, and the working folders. "Create all missing"
               makes them in one click. Point fragpipe_exe at FragPipe's
               headless launcher (only needed once searches are enabled).
+              Cysteine atlas (optional): hand finished isoDTB searches to the
+              lab Dropbox folder the atlas reads (spaces are fine there).
   Users       One subfolder per person under users_root. Add the initials each
               person uses in folder names so "IJD05_isoDTB" -> Isaac.
   Methods     For each method: which .workflow file (exported from the FragPipe
@@ -211,8 +213,11 @@ THE JOBS TAB
   to see details and — for a failed job — the MOST LIKELY CAUSE in plain
   English (out of memory, MSFragger not installed, disk full, file open in
   another program, ...). Buttons: Open report, Open folder, FragPipe log,
-  Re-run analysis, Analysis options…, Retry, Cancel (stops a running search),
-  Copy details, Zip for troubleshooting….
+  Re-run analysis, Analysis options…, Send to atlas, Retry, Cancel (stops a
+  running search), Copy details, Zip for troubleshooting….
+  The atlas column (while the hand-off is on: Folders tab -> Cysteine atlas)
+  says whether each isoDTB search went to the lab's cysteine atlas; Send to
+  atlas sends a finished one now (again, or one from before it was on).
   Pause searches: no new FragPipe runs start (the running one finishes) —
   e.g. while someone needs the PC. Resume to continue.
   Check FragPipe install: finds FragPipe's version, bundled Java, MSFragger,
@@ -565,6 +570,9 @@ class App:
         self.notify_tab.load_vars(d)
         self.v("users.default").set(d["users"].get("default", "") or "")
         self.v("users.learned_aliases_file").set(d["users"].get("learned_aliases_file", "") or "")
+        at = d.get("atlas") if isinstance(d.get("atlas"), dict) else {}
+        self.bv("atlas.enabled").set(at.get("enabled") is True)  # a quoted 'false' is not on (the loader refuses it)
+        self.v("atlas.handoff_dir").set(str(at.get("handoff_dir") or ""))
         self.v("config_path").set(str(self.config_path))
 
     def _collect(self, base: dict | None = None) -> dict:
@@ -600,6 +608,10 @@ class App:
         self.analysis.collect(d)
         self.notify_tab.collect(d)
         d["users"]["learned_aliases_file"] = self.v("users.learned_aliases_file").get().strip()
+        # the atlas hand-off (Folders tab, D125): its other keys (methods, tries) stay as the file has them. The
+        # folder is kept as typed: it is the lab's Dropbox path, spaces and backslashes are fine (FragPipe never sees it)
+        d["atlas"] = {**(d["atlas"] if isinstance(d.get("atlas"), dict) else {}),
+                      "enabled": self.bv("atlas.enabled").get(), "handoff_dir": self.v("atlas.handoff_dir").get().strip()}
         d["methods"] = self.data["methods"]
         return d
 
@@ -961,6 +973,80 @@ class App:
         ttk.Button(b, text="Find FragPipe", command=self.find_fragpipe).pack(side="left", padx=4)
         ttk.Button(b, text="Open inbox", command=lambda: self._open(self.v("paths.inbox").get())).pack(side="left", padx=4)
         ttk.Button(b, text="Open users folder", command=lambda: self._open(self.v("paths.users_root").get())).pack(side="left", padx=4)
+        self._atlas_group(f, r + 1)
+
+    def _atlas_group(self, f, row: int) -> None:
+        """Cysteine atlas (D125, docs/ATLAS.md): the switch and the destination folder of the hand-off. The folder is
+        the lab's Dropbox path, so the no-spaces rule of the paths above does not apply (FragPipe never sees it).
+        The Dropbox folder Ionomos finds is offered with Use, never filled in by itself; it is looked for off the Tk
+        thread when this tab is first shown. Save writes atlas: through the usual Save and its checks."""
+        g = ttk.LabelFrame(f, text="Cysteine atlas", padding=6)
+        g.grid(row=row, column=0, columnspan=5, sticky="ew", **PAD)
+        g.columnconfigure(1, weight=1)
+        ttk.Checkbutton(g, text="Hand finished isoDTB searches to the cysteine atlas",
+                        variable=self.bv("atlas.enabled")).grid(row=0, column=0, columnspan=3, sticky="w", **PAD)
+        ttk.Button(g, text="Help", command=lambda: self.open_help("faq.atlas")).grid(row=0, column=3, sticky="e", **PAD)
+        ttk.Label(g, text="Destination folder").grid(row=1, column=0, sticky="e", **PAD)
+        self.atlas_entry = ttk.Entry(g, textvariable=self.v("atlas.handoff_dir"), width=58)
+        self.atlas_entry.grid(row=1, column=1, columnspan=2, sticky="ew", **PAD)
+        ttk.Button(g, text="Browse…", width=9, command=self.browse_atlas).grid(row=1, column=3, **PAD)
+        ttk.Label(g, text="The lab Dropbox folder …\\Nicholas Foster Data\\fragpipe-runs. FragPipe never sees it, so "
+                          "spaces are fine here.", foreground="#666").grid(row=2, column=1, columnspan=3, sticky="w",
+                                                                            padx=6)
+        self.atlas_found = ttk.Label(g, text="", foreground="#1565c0")  # "Dropbox folder found: …" (+ Use)
+        self.atlas_found.grid(row=3, column=1, sticky="w", padx=6)
+        self.atlas_use = ttk.Button(g, text="Use", width=9, command=self.use_atlas_suggestion)
+        self.atlas_use.grid(row=3, column=2, sticky="w", **PAD)
+        self._atlas_suggestion: str | None = None  # None: not looked for yet; "": none found
+        self._show_atlas_suggestion()
+        self.v("atlas.handoff_dir").trace_add("write", lambda *_: self._show_atlas_suggestion())
+        self.nb.bind("<<NotebookTabChanged>>", lambda e: self.look_for_dropbox() if self._current_tab() == "folders"
+                     else None, add="+")
+
+    def look_for_dropbox(self) -> None:
+        """Find the lab Dropbox folder as harvest_fragpipe.ps1 does (atlas.dropbox_suggestion), once per session: it
+        reads Dropbox's info.json and lists folders two levels down, so it runs off the Tk thread (run_bg)."""
+        from ionomos import atlas
+
+        if self._atlas_suggestion is not None:
+            return
+
+        def done(found, err):
+            self._atlas_suggestion = str(found or "") if err is None else ""
+            self._show_atlas_suggestion()
+
+        self.run_bg("looking for the lab Dropbox folder", lambda: atlas.dropbox_suggestion(), done, key="atlas:dropbox")
+
+    @staticmethod
+    def _same_folder(a: str, b: str) -> bool:
+        return bool(a and b) and os.path.normcase(os.path.normpath(a)) == os.path.normcase(os.path.normpath(b))
+
+    def _show_atlas_suggestion(self) -> None:
+        """The "Dropbox folder found" line, only when a folder was found and the field holds another one."""
+        found = self._atlas_suggestion or ""
+        try:
+            if found and not self._same_folder(found, self.v("atlas.handoff_dir").get().strip()):
+                self.atlas_found.configure(text=f"Dropbox folder found: {found}")
+                self.atlas_found.grid()
+                self.atlas_use.grid()
+            else:
+                self.atlas_found.grid_remove()
+                self.atlas_use.grid_remove()
+        except (AttributeError, tk.TclError):
+            pass  # before the group exists, or while the window closes
+
+    def use_atlas_suggestion(self) -> None:
+        if self._atlas_suggestion:
+            self.v("atlas.handoff_dir").set(self._atlas_suggestion)
+            self.set_status("the Dropbox folder is filled in: tick the hand-off if it is off, then press Save")
+
+    def browse_atlas(self) -> None:
+        cur = self.v("atlas.handoff_dir").get().strip() or self._atlas_suggestion or ""
+        start = cur if cur and Path(cur).exists() else (str(Path(cur).parent) if cur and Path(cur).parent.exists()
+                                                         else str(Path.home()))
+        r = filedialog.askdirectory(initialdir=start, mustexist=False, title="The lab Dropbox folder fragpipe-runs")
+        if r:
+            self.v("atlas.handoff_dir").set(str(Path(r)))  # this PC's own separators, as Dropbox shows the path
 
     def find_fragpipe(self):
         from ionomos.fragpipe import detect_launcher
@@ -2024,7 +2110,8 @@ class App:
             lab_settings=lambda: dict((self.data or {}).get("analysis") or {}),
             popups_enabled=lambda: bool((self.data.get("gui") or {}).get("popups", True)),
             report_problem=lambda note, job_id=None: self.report_problem(note, job_id), open_setup=lambda: self.nb.select(self.tab_setup),
-            on_change=self._attention_badge, database=lambda: self._active_paths().get("database"))
+            on_change=self._attention_badge, database=lambda: self._active_paths().get("database"),
+            send_to_atlas=lambda job_id, report: self.send_to_atlas(job_id=job_id, report=report))
         self.popups = Popups(self.root, host, is_app=True)
         self.popups.start()
 
@@ -2383,6 +2470,10 @@ class App:
         if kind == "open_tab":
             self.select_tab(self._DIGIT_TABS.get(arg, arg))
             return
+        if kind == "atlas_folder":  # the cysteine atlas line (setupcheck.atlas_item): its folder, on the Folders tab
+            self.select_tab("folders")
+            self.atlas_entry.focus_set()
+            return
         if kind == "open_path":
             self._open(arg)
             return
@@ -2543,7 +2634,7 @@ class App:
     # ---------------------------------------------------------- tab: jobs ----
 
     _JCOLS = (("id", 40), ("status", 70), ("user", 80), ("method", 72), ("experiment", 260), ("queued", 110),
-              ("ran", 70), ("now", 330))
+              ("ran", 70), ("atlas", 150), ("now", 330))  # atlas: shown while the hand-off is on or a job has one
 
     def _tab_jobs(self):
         f = ttk.Frame(self.nb, padding=10)
@@ -2573,6 +2664,7 @@ class App:
         for c, w in self._JCOLS:
             self.jtree.heading(c, text=c)
             self.jtree.column(c, width=w, anchor="w", stretch=c in ("experiment", "now"))
+        self.jtree.configure(displaycolumns=[c for c, _ in self._JCOLS if c != "atlas"])  # _show_atlas_column
         for tag, color in (("failed", "#c62828"), ("running", "#1565c0"), ("waiting", "#b26a00"), ("done", "#2e7d32"),
                            ("attention", "#b26a00")):
             self.jtree.tag_configure(tag, foreground=color)
@@ -2583,15 +2675,20 @@ class App:
 
         b = ttk.Frame(f)
         b.grid(row=2, column=0, sticky="w")
+        self.job_btns: dict[str, ttk.Button] = {}
         for text, action in (("Open report", "report"), ("Open folder", "folder"), ("FragPipe log", "log"),
-                             ("Re-run analysis", "analyze"), ("Analysis options…", "studio"), ("Retry", "retry"),
-                             ("Cancel", "cancel"),
+                             ("Re-run analysis", "analyze"), ("Analysis options…", "studio"),
+                             ("Send to atlas", "atlas"), ("Retry", "retry"), ("Cancel", "cancel"),
                              ("Copy details", "copy"), ("Zip for troubleshooting…", "bundle")):
-            ttk.Button(b, text=text, command=lambda a=action: self.job_action(a)).pack(side="left", padx=4)
+            self.job_btns[action] = ttk.Button(b, text=text, command=lambda a=action: self.job_action(a))
+            self.job_btns[action].pack(side="left", padx=4)
         ttk.Label(b, text="double-click = open the report", foreground="#666").pack(side="left", padx=12)
         self.jdetail = OutputPane(f, height=10)
         self.jdetail.grid(row=3, column=0, sticky="nsew", pady=4)
         self._jobs_cache: dict[int, object] = {}
+        # the atlas column (D125): job id -> (ionomos.json's mtime, its `atlas` block), read on a thread
+        self._atlas_seen: dict[int, tuple[int | None, dict]] = {}
+        self._atlas_on, self._atlas_methods, self._atlas_busy = False, (), False
         self._jobs_tick()
 
     def _jobs_tick(self):
@@ -2639,7 +2736,8 @@ class App:
             tag = "waiting" if waiting else "attention" if needs else j.status
             self.jtree.insert("", "end", iid=str(j.id), tags=(tag,), values=(
                 j.id, "waiting" if waiting else j.status, j.user, j.method, j.inbox_name, _local(j.created_at),
-                _duration(j.started_at, j.finished_at if j.status != "running" else None) if j.started_at else "", now))
+                _duration(j.started_at, j.finished_at if j.status != "running" else None) if j.started_at else "",
+                self._atlas_text(j), now))
         if sel and self.jtree.exists(sel[0]):
             self.jtree.selection_set(sel[0])
         summary = ", ".join(f"{n} {k}" for k, n in sorted(counts.items()))
@@ -2647,6 +2745,73 @@ class App:
             summary += f"  ·  {shown} shown"
         self.jobs_state.configure(text=(summary or "No jobs") + ("  ·  searches PAUSED" if is_paused else ""),
                                   foreground="#b26a00" if is_paused else "")
+        self._read_atlas_states(jobs)
+
+    # -- the cysteine atlas hand-off on the Jobs tab (atlas.py, D125)
+
+    def _atlas_text(self, j) -> str:
+        """The atlas column of one job: atlas.describe of its ionomos.json `atlas` block as last read; "not handed
+        off" for a finished search of atlas.methods while the hand-off is on; empty where it doesn't apply."""
+        from ionomos import atlas
+
+        if j.status != "done" or j.method not in self._atlas_methods:
+            return ""
+        block = (self._atlas_seen.get(j.id) or (None, {}))[1]
+        return atlas.describe(block) if block or self._atlas_on else ""
+
+    def _read_atlas_states(self, jobs) -> None:
+        """Read the hand-off settings of the config in use and the `atlas` block of each finished job's ionomos.json
+        on a plain thread (D95: a 3 s tick is not work the busy indicator shows; an unchanged file is not read
+        again), then fill the atlas column on the Tk thread."""
+        from ionomos import atlas
+
+        if self._atlas_busy:
+            return
+        self._atlas_busy = True
+        cfg_path, seen = self._active_cfg(), dict(self._atlas_seen)
+        done = [(j.id, j.method, j.dest_dir) for j in jobs if j.status == "done"]
+
+        def go():
+            s, out = atlas.settings_from(None), {}
+            try:
+                try:
+                    s = atlas.settings_from(configio.read_config(cfg_path).get("atlas") or None) \
+                        if cfg_path and cfg_path.is_file() else s
+                except (ConfigError, OSError, ValueError):
+                    pass  # a config that doesn't load: the defaults (off); the Setup tab says what is wrong
+                for jid, method, dest in done:
+                    if method not in s["methods"]:
+                        continue
+                    try:
+                        mtime = names.status_path(Path(dest)).stat().st_mtime_ns
+                    except OSError:
+                        out[jid] = (None, {})
+                        continue
+                    old = seen.get(jid)
+                    out[jid] = old if old is not None and old[0] == mtime else (mtime, atlas.state(dest))
+            except Exception:  # noqa: BLE001 - never a traceback from a tick; the column keeps what it had
+                log.exception("reading the atlas hand-off states failed")
+            on = bool(s["enabled"] and s["handoff_dir"])
+            self.post(lambda: self._show_atlas_states(on, tuple(s["methods"]), out))
+
+        threading.Thread(target=go, daemon=True, name="app-atlas-states").start()
+
+    def _show_atlas_states(self, on: bool, methods: tuple, states: dict) -> None:
+        self._atlas_busy = False
+        self._atlas_on, self._atlas_methods = on, methods
+        self._atlas_seen.update(states)
+        try:
+            for iid in self.jtree.get_children():
+                j = self._jobs_cache.get(int(iid))
+                if j is not None:
+                    self.jtree.set(iid, "atlas", self._atlas_text(j))
+            # the column is shown while the hand-off is on, or while a job listed has a hand-off to show
+            show = on or any(self.jtree.set(i, "atlas") for i in self.jtree.get_children())
+            cols = [c for c, _ in self._JCOLS if show or c != "atlas"]
+            if list(self.jtree.cget("displaycolumns")) != cols:
+                self.jtree.configure(displaycolumns=cols)
+        except tk.TclError:
+            pass  # the window is closing
 
     def _selected_job(self):
         sel = self.jtree.selection()
@@ -2669,11 +2834,20 @@ class App:
         if j.reason:
             lines.append(f"reason: {j.reason}")
         try:
-            run = json.loads(names.status_path(dest).read_text(encoding="utf-8")).get("run") or {}
+            rec = json.loads(names.status_path(dest).read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            run = {}
+            rec = {}
+        rec = rec if isinstance(rec, dict) else {}
+        run = rec.get("run") if isinstance(rec.get("run"), dict) else {}
         for w in run.get("warnings") or []:
             lines.append(f"note: {w}")
+        block = rec.get("atlas") if isinstance(rec.get("atlas"), dict) else {}
+        if block or self._atlas_text(j):  # the cysteine atlas hand-off, where it applies (D125)
+            from ionomos import atlas
+
+            lines.append(f"atlas hand-off: {atlas.describe(block)}")
+            conflicts = block.get("conflicts") if isinstance(block.get("conflicts"), list) else []
+            lines += [f"  differs: {c}" for c in conflicts[:5]]
         console = names.console_log(dest)
         text = fragpipe.read_tail_text(console, 60_000)
         hints = fragpipe.explain(text) if j.status == "failed" else []
@@ -2719,6 +2893,8 @@ class App:
             self._rerun_analysis(j)
         elif action == "bundle":
             self.report_problem(job_id=j.id)
+        elif action == "atlas":
+            self.send_to_atlas(job=j)
         elif action == "folder":
             self._open(j.dest_dir)
         elif action == "log":
@@ -2781,6 +2957,103 @@ class App:
         if not self.run_bg(f"analysing job {j.id}", lambda: postprocess.run_for_folder(Path(j.dest_dir), cfg, j.method),
                            done, key=f"analyse:{j.id}"):
             self.jdetail.write(f"job {j.id} is being analysed already — wait for it to finish", clear=True)
+
+    def send_to_atlas(self, job=None, job_id: int | None = None,
+                      report: Callable[[str, bool], None] | None = None) -> bool:
+        """Send to atlas (Jobs tab; an atlas_handoff_failed item's window passes job_id and report): hand one finished
+        search to the cysteine atlas now, whatever its hand-off state (atlas.send, trigger "app", D125). The config
+        and the job are read again and the copy (minutes for a big run, into Dropbox) is made off the Tk thread
+        (run_bg: the button is disabled meanwhile, one send per job at a time). The outcome goes to the status line
+        and the details pane; a failure or a conflict to a box that says what to do, with its help. report(text, ok)
+        also tells the window that asked. False when nothing was started."""
+        from ionomos import atlas
+
+        j = job if job is not None else self._jobs_cache.get(job_id) if job_id is not None else self._selected_job()
+        jid = j.id if j is not None else job_id
+        if jid is None:
+            messagebox.showinfo("Send to atlas", "Select a finished search in the list first.")
+            return False
+        if j is not None and j.status != "done":
+            messagebox.showinfo("Send to atlas", f"Job {jid} is {j.status}; only a finished (done) search is handed to "
+                                                 "the cysteine atlas.")
+            return False
+        cfg_path = self._active_cfg()
+        # the window's own switch and folder, to tell "not saved yet" from "off" (only for the config it edits)
+        window = (self.bv("atlas.enabled").get() and bool(self.v("atlas.handoff_dir").get().strip())
+                  and cfg_path == self.config_path)
+        tell = report or (lambda text, ok: None)
+
+        def go():
+            from ionomos.ledger import Ledger
+
+            cfg = load(cfg_path, check_paths=False)
+            found = None
+            if cfg.database.is_file():
+                led = Ledger(cfg.database)
+                try:
+                    found = led.get(jid)  # its state now, not as the list showed it
+                finally:
+                    led.close()
+            return atlas.settings(cfg), atlas.send(cfg, found, trigger="app")  # never raises
+
+        def done(out, err):
+            self._atlas_seen.pop(jid, None)  # its ionomos.json changed: the next tick reads it again
+            if self._current_tab() == "jobs":
+                self.refresh_jobs()
+            if err is not None:
+                tell(f"not sent: {err}", False)
+                messagebox.showerror("Send to atlas", f"Could not read the settings to hand job {jid} to the atlas:\n"
+                                                      f"{err}\n\n→ Fix config.yaml (the Setup tab's Check everything "
+                                                      "names the line), then press Send to atlas again.")
+                return
+            s, res = out
+            tell(res.message, res.ok)
+            if report is None:
+                self.jdetail.write(f"job {jid}: {res.message}" + "".join(f"\n  differs: {c}"
+                                                                         for c in res.conflicts[:10]), clear=True)
+            if res.ok:
+                self.set_status(f"job {jid} {res.message}")
+            elif res.setup and window:
+                messagebox.showinfo("Send to atlas", "The hand-off to the cysteine atlas is set in this window but not "
+                                                     "saved yet.\n\nPress Save, then Send to atlas again.")
+            elif res.setup:
+                what = "has no destination folder" if s["enabled"] else "is off"
+                if messagebox.askyesno("Send to atlas", f"Job {jid} was not sent: the hand-off to the cysteine atlas "
+                                                        f"{what}.\n\nTo turn it on: the Folders tab, under Cysteine "
+                                                        "atlas: tick it, pick the lab Dropbox folder (Browse… or Use), "
+                                                        "Save. Then press Send to atlas again.\n\nGo to the Folders tab "
+                                                        "now?"):
+                    self.select_tab("folders")
+                    self.atlas_entry.focus_set()
+            elif res.state == atlas.CONFLICT:
+                n = len(res.conflicts)
+                first = "\n".join(f"  • {c}" for c in res.conflicts[:5]) + (f"\n  … and {n - 5} more" if n > 5 else "")
+                self.fail("Send to atlas", f"Job {jid} was not handed to the cysteine atlas: {n} file(s) already in the "
+                                           "atlas folder differ from this search's, so nothing was copied or "
+                                           f"overwritten. The first:\n{first}",
+                          "Ask the person who keeps the atlas which copy is right. Once they have moved the old copy "
+                          "aside in Dropbox, press Send to atlas again.", topic="attention.atlas_handoff_failed")
+            elif res.state == atlas.SENDING:
+                messagebox.showinfo("Send to atlas", f"{res.message[:1].upper()}{res.message[1:]}.\n\nWait for it to "
+                                                     "finish: the atlas column of the Jobs tab says when.")
+            elif res.state in (atlas.FAILED, atlas.GAVE_UP):
+                again = " It is also tried again by itself, waiting longer each time." if res.state == atlas.FAILED else ""
+                self.fail("Send to atlas", f"Job {jid} was not handed to the cysteine atlas:\n{res.message}",
+                          "Check that Dropbox is running and signed in on this PC and that the destination folder on "
+                          "the Folders tab (Cysteine atlas) is right, then press Send to atlas again." + again,
+                          topic="attention.atlas_handoff_failed")
+            else:  # nothing was tried: no such job, not finished, not a method of atlas.methods
+                messagebox.showinfo("Send to atlas", f"Job {jid} was not handed to the atlas: {res.message}.")
+
+        button = self.job_btns.get("atlas") if report is None else None
+        if not self.run_bg(f"handing job {jid} to the atlas", go, done, key=f"atlas:{jid}", button=button):
+            tell(f"job {jid} is being handed to the atlas already: wait for it to finish", False)
+            return False
+        text = f"handing job {jid} to the cysteine atlas: its result files are copied into the Dropbox folder…"
+        tell(text, True)
+        if report is None:
+            self.jdetail.write(text, clear=True)
+        return True
 
     def toggle_pause(self):
         from ionomos.worker import pause, paused, resume

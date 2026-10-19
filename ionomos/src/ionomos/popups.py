@@ -19,7 +19,8 @@ Each window says what happened, the most likely causes, what to do, the details
     search_failed                      Retry search, FragPipe log, folder, Report a problem
     search_waiting                     Open Ionomos (setup checklist), folder
     intake_rejected                    Open the inbox, the note
-    every item                         Ask about this (the local assistant, read-only: AskWindow), More help (the
+    atlas_handoff_failed               Send to atlas (the app's, D125); opened from the list only, never by itself
+    every item                        Ask about this (the local assistant, read-only: AskWindow), More help (the
                                        help page at this problem), Remind me in an hour, Dismiss
 
 "Ask about this" is also in the list. The answer is made on a worker thread (assistant/askui.py holds the
@@ -47,7 +48,8 @@ log = logging.getLogger("ionomos.popups")
 
 KIND_TITLE = {"analysis_input": "Your analysis needs a decision", "analysis_failed": "The analysis had a problem",
               "search_failed": "A FragPipe search failed", "search_waiting": "A search is waiting",
-              "intake_rejected": "A dropped folder couldn't be taken in"}
+              "intake_rejected": "A dropped folder couldn't be taken in",
+              "atlas_handoff_failed": "A search wasn't handed to the atlas"}  # in the list only: no pop-up (D121)
 SEV_COLOUR = {"error": "#c62828", "input": "#b26a00", "warning": "#555"}
 
 
@@ -63,6 +65,7 @@ class PopupHost:
     open_setup: Callable[[], None] | None = None           # the app's checklist tab; None = start the app
     on_change: Callable[[list], None] = lambda items: None  # badge updates
     database: Callable[[], Path | None] = lambda: None
+    send_to_atlas: Callable[..., object] | None = None    # the app's Send to atlas (job id, report(text, ok)); D125
     _q: queue.Queue = field(default_factory=queue.Queue)
 
     def post(self, fn) -> None:
@@ -358,6 +361,8 @@ class ItemWindow:
             ttk.Button(b, text="Re-run analysis", command=lambda: self.editor.run(confirm=False)).pack(side="left", padx=3)
         if it.kind == "search_waiting":
             ttk.Button(b, text="Open the setup checklist", command=self.open_setup).pack(side="left", padx=3)
+        if it.kind == "atlas_handoff_failed" and it.job_id is not None and self.host.send_to_atlas is not None:
+            ttk.Button(b, text="Send to atlas", command=self.send_to_atlas).pack(side="left", padx=3)
         if it.kind == "qc_trend" and it.data.get("page"):
             ttk.Button(b, text="Open QC trend", command=lambda: self.host.open_path(it.data["page"])).pack(
                 side="left", padx=3)
@@ -393,6 +398,15 @@ class ItemWindow:
             return
         attention.resolve(self.host.log_dir(), self.item.id)
         self.close()
+
+    def send_to_atlas(self) -> None:
+        """The Jobs tab's Send to atlas for this item's job (the app copies off the Tk thread); the outcome is said
+        here. A hand-off that succeeds closes the item by itself (atlas.send)."""
+        def report(text: str, ok: bool) -> None:
+            if self.alive():
+                self.msg.configure(text=text, foreground="#2e7d32" if ok else "#c62828")
+
+        self.host.send_to_atlas(self.item.job_id, report)
 
     def open_log(self) -> None:
         from ionomos import names
