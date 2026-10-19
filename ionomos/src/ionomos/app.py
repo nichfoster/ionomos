@@ -2808,7 +2808,7 @@ class App:
             # the column is shown while the hand-off is on, or while a job listed has a hand-off to show
             show = on or any(self.jtree.set(i, "atlas") for i in self.jtree.get_children())
             cols = [c for c, _ in self._JCOLS if show or c != "atlas"]
-            if list(self.jtree.cget("displaycolumns")) != cols:
+            if [str(c) for c in self.jtree.cget("displaycolumns")] != cols:
                 self.jtree.configure(displaycolumns=cols)
         except tk.TclError:
             pass  # the window is closing
@@ -2997,7 +2997,8 @@ class App:
             return atlas.settings(cfg), atlas.send(cfg, found, trigger="app")  # never raises
 
         def done(out, err):
-            self._atlas_seen.pop(jid, None)  # its ionomos.json changed: the next tick reads it again
+            if jid in self._atlas_seen:  # its ionomos.json changed: read it again (the column keeps its text meanwhile)
+                self._atlas_seen[jid] = (None, self._atlas_seen[jid][1])
             if self._current_tab() == "jobs":
                 self.refresh_jobs()
             if err is not None:
