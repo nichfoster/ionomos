@@ -212,8 +212,9 @@
   function focusKey(el) {
     if (!el || !el.tagName || el === document.body) return null;
     if (el.id) return { id: el.id };
-    const a = el.hasAttribute("data-k") ? "data-k" : el.hasAttribute("data-m") ? "data-m" : null, host = el.parentElement && el.parentElement.closest("[id]");
-    if (!a || !host || !/^(BUTTON|TH)$/.test(el.tagName)) return null;
+    const a = el.hasAttribute("data-k") ? "data-k" : el.hasAttribute("data-m") ? "data-m" : el.tagName === "TR" && el.hasAttribute("data-i") ? "data-i" : null;
+    const host = el.parentElement && el.parentElement.closest("[id]");
+    if (!a || !host || !/^(BUTTON|TH|TR)$/.test(el.tagName)) return null;  // TR: a table row opened with Enter (rowKeys)
     return { id: host.id, sel: el.tagName.toLowerCase() + "[" + a + "='" + String(el.getAttribute(a)).replace(/['\\]/g, "\\$&") + "']" };
   }
   document.addEventListener("focusin", (e) => { kbd = { el: e.target, key: focusKey(e.target) }; });
@@ -236,6 +237,61 @@
   });
   /** The two-way switches (Volcano / MA, Zoom / Select, Sites / Proteins, before / after) say which half is on. */
   function pressed(root) { $$(".seg button, #dbefore, #dafter", root).forEach((b) => b.setAttribute("aria-pressed", String(b.classList.contains("on")))); }
+  /** A table's clickable rows as one Tab stop (roving tabindex, #176): Tab reaches the row last opened (else the
+   * first), the arrow keys, Home, End, Page Up and Page Down move between the rows, Enter or Space opens the row
+   * as a click does (Shift+Enter as a shift-click: it pins in the results table). While a row has the keyboard,
+   * `preview(tr)` may show where its feature is in a chart (markAt / markDot). Called once a table is drawn. */
+  function rowKeys(host, preview) {
+    const rows = $$("tbody tr", host).filter((tr) => tr.onclick);
+    if (!rows.length) return;
+    const body = rows[0].parentElement, cur = rows.find((tr) => tr.classList.contains("focus")) || rows[0];
+    rows.forEach((tr) => (tr.tabIndex = tr === cur ? 0 : -1));
+    body.addEventListener("keydown", (e) => {
+      const k = rows.indexOf(e.target);
+      if (k < 0 || e.altKey || e.ctrlKey || e.metaKey) return;
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        e.target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, shiftKey: e.shiftKey }));
+        return;
+      }
+      const to = e.key === "ArrowDown" ? k + 1 : e.key === "ArrowUp" ? k - 1 : e.key === "Home" ? 0 : e.key === "End" ? rows.length - 1 :
+        e.key === "PageDown" ? k + 10 : e.key === "PageUp" ? k - 10 : null;
+      if (to == null) return;
+      e.preventDefault();
+      rows[Math.max(0, Math.min(rows.length - 1, to))].focus();
+    });
+    body.addEventListener("focusin", (e) => {
+      if (!rows.includes(e.target)) return;
+      rows.forEach((tr) => (tr.tabIndex = tr === e.target ? 0 : -1));
+      if (preview) preview(e.target);
+    });
+    if (preview) body.addEventListener("focusout", (e) => { if (!rows.includes(e.relatedTarget)) unmarkPoint(); });
+  }
+  // the point of the row that has the keyboard: a ring on its chart, and its tooltip when the chart is in view
+  let KMARK = null, VOLC = null;
+  /** The volcano's point of feature i (renderTable's rows), ringed with its tooltip; nothing when it is off the plot. */
+  function markVolcano(i) {
+    const p = VOLC && VOLC.at.get(i), b = VOLC && VOLC.box;
+    if (!p || p[0] < b[0] || p[0] > b[1] || p[1] < b[2] || p[1] > b[3]) { unmarkPoint(); return; }
+    markAt(VOLC.root, p[0], p[1], (x, y) => showTip({ clientX: x, clientY: y }, featureTip(i)));
+  }
+  function unmarkPoint() { if (KMARK) { KMARK.remove(); KMARK = null; hideTip(); } }
+  /** Ring (x, y) of chart `root` (in its own units) and show `tipFn(clientX, clientY)`'s tooltip there. */
+  function markAt(root, x, y, tipFn) {
+    unmarkPoint();
+    const W = root ? +root.getAttribute("width") : 0, H = root ? +root.getAttribute("height") : 0;
+    if (!root || !root.isConnected || !(x >= 0 && x <= W && y >= 0 && y <= H)) return;
+    KMARK = svg("circle", { cx: x, cy: y, r: 10, fill: "none", stroke: css("--accent"), "stroke-width": 2, "stroke-dasharray": "3 2", "pointer-events": "none", class: "kmark" }, root);
+    const r = root.getBoundingClientRect(), cx = r.left + (x * r.width) / W, cy = r.top + (y * r.height) / H;
+    if (tipFn && cy >= 0 && cy <= window.innerHeight) tipFn(cx, cy);
+  }
+  /** markAt for the point `attr`=`val` of the chart in host `sel`, with the tooltip the mouse would show. */
+  function markDot(sel, attr, val) {
+    const host = $(sel), root = host && host.querySelector(":scope > svg");
+    const dot = root && root.querySelector("circle[" + attr + "='" + String(val).replace(/['\\]/g, "") + "']");
+    if (!dot) { unmarkPoint(); return; }
+    markAt(root, +dot.getAttribute("cx"), +dot.getAttribute("cy"), dot.onmouseenter ? (x, y) => dot.onmouseenter({ clientX: x, clientY: y }) : null);
+  }
 
   // ------------------------------------------------------- feature lookup
   const geneOf = (i) => (D.f.label[i] || "").trim().split(/[;\s]/)[0].replace(/\.\d+$/, "").toUpperCase();
@@ -643,6 +699,7 @@
       if (i != null) { if (e.shiftKey) togglePin(i); setFocus(i); }
     });
     hit.addEventListener("dblclick", () => { ST.zoom = null; renderVolcano(); });
+    if (!EX) VOLC = { root: root, at: at, box: [L, W - R, T, H - B] };  // where each point is, for a table row that has the keyboard
     const tools = svgTools(host, root, "volcano_" + c.slug + (ma ? "_MA" : ""));
     if (ST.zoom) {
       const z = document.createElement("button");
@@ -872,9 +929,21 @@
   function renderPins() {
     const host = $("#pins");
     if (!host) return;
-    host.innerHTML = ST.pinned.length ? ST.pinned.map((i) => '<span class="chip' + (i === ST.focus ? " on" : "") + '" data-i="' + i + '">' +
-      esc(nameOf(i)) + " ✕</span>").join("") + ' <button id="pinprof">Profile of pinned</button> <button id="pinclear">Unpin all</button>' : "";
-    $$(".chip", host).forEach((ch) => (ch.onclick = (e) => { const i = +ch.dataset.i; if (e.target === ch && e.offsetX > ch.offsetWidth - 18) { togglePin(i); renderVolcano(); } else setFocus(i); }));
+    // each pin is a button (#176): a click on its name or Enter opens the feature, a click on ✕ or Delete unpins it
+    host.innerHTML = ST.pinned.length ? ST.pinned.map((i) => '<button type="button" class="chip' + (i === ST.focus ? " on" : "") + '" data-i="' + i + '" aria-label="' +
+      esc(nameOf(i)) + ': open (Delete unpins)">' + esc(nameOf(i)) + " ✕</button>").join("") + ' <button id="pinprof">Profile of pinned</button> <button id="pinclear">Unpin all</button>' : "";
+    const chips = $$(".chip", host);
+    chips.forEach((ch, k) => {
+      // e.detail 0: a click from Enter or Space, not a pointer on the ✕
+      ch.onclick = (e) => { const i = +ch.dataset.i; if (e.detail !== 0 && e.target === ch && e.offsetX > ch.offsetWidth - 18) { togglePin(i); renderVolcano(); } else setFocus(i); };
+      ch.onkeydown = (e) => {
+        if (e.key !== "Delete" && e.key !== "Backspace") return;
+        e.preventDefault();
+        togglePin(+ch.dataset.i); renderVolcano();
+        const next = $$(".chip", host)[Math.min(k, chips.length - 2)] || $("#search");  // the keyboard stays among the pins
+        if (next) next.focus();
+      };
+    });
     const pp = $("#pinprof");
     if (pp) pp.onclick = () => renderProfile();
     const pc = $("#pinclear");
@@ -913,7 +982,7 @@
     });
     h += "</tbody></table>";
     const sim = similar(i, 8);
-    if (sim.length) h += "<div class='sim'><b>Behaves like</b> <span class='muted'>(correlation across samples)</span><div class='chips'>" + sim.map(([j, r]) => "<span class='chip' data-j='" + j + "' title='r = " + fmt(r, 3) + "'>" + esc(nameOf(j)) + " <span class='muted'>" + fmt(r, 2) + "</span></span>").join("") + "</div></div>";
+    if (sim.length) h += "<div class='sim'><b>Behaves like</b> <span class='muted'>(correlation across samples)</span><div class='chips'>" + sim.map(([j, r]) => "<button type='button' class='chip' data-j='" + j + "' title='r = " + fmt(r, 3) + "'>" + esc(nameOf(j)) + " <span class='muted'>" + fmt(r, 2) + "</span></button>").join("") + "</div></div>";
     const g = geneOf(i), acc = (FKEYS && FKEYS[i] || []).find((k) => /^[OPQ][0-9][A-Z0-9]{3}[0-9]$|^[A-NR-Z][0-9]([A-Z][A-Z0-9]{2}[0-9]){1,2}$/.test(k));
     h += '<div class="chips"><button id="pinbtn">' + (ST.pinned.includes(i) ? "Unpin" : "Pin") + '</button><button id="copybtn">Copy values</button>' +
       (sim.length ? "<button id='simbtn'>Mark similar</button>" : "") + "</div>";
@@ -925,7 +994,13 @@
       const rows = ["sample\tcondition\tlog2\timputed"].concat(D.samples.map((s, j) => s + "\t" + D.cond[j] + "\t" + (D.v[i][j] == null ? "" : D.v[i][j]) + "\t" + (isImputed(i, j) ? "yes" : "")));
       copyText(rows.join("\n"));
     };
-    $$(".sim .chip", host).forEach((ch) => (ch.onclick = () => setFocus(+ch.dataset.j)));
+    // a "Behaves like" chip opens that feature; the panel is drawn again, so a keyboard on the chip goes to the new panel's first chip
+    $$(".sim .chip", host).forEach((ch) => (ch.onclick = () => {
+      const kb = document.activeElement === ch;
+      setFocus(+ch.dataset.j);
+      const n = kb && ($(".sim .chip", host) || $("#pinbtn"));
+      if (n) n.focus();
+    }));
     const sb = $("#simbtn");
     if (sb) sb.onclick = () => setHighlight(new Set([i].concat(sim.map((x) => x[0]))), "behaves like " + nameOf(i));
     renderStrip($("#strip"), [i]);
@@ -1021,6 +1096,7 @@
     host.innerHTML = h;
     $$("th", host).forEach((th) => (th.onclick = () => { if (ST.sortKey === th.dataset.k) ST.sortDir *= -1; else { ST.sortKey = th.dataset.k; ST.sortDir = 1; } renderTable(true); }));
     $$("tbody tr[data-i]", host).forEach((tr) => (tr.onclick = (e) => { const i = +tr.dataset.i; if (e.shiftKey) togglePin(i); setFocus(i); }));
+    rowKeys(host, (tr) => markVolcano(+tr.dataset.i));
     $("#pprev").onclick = () => { ST.page = Math.max(0, ST.page - 1); renderTable(false); };
     $("#pnext").onclick = () => { ST.page = Math.min(pages - 1, ST.page + 1); renderTable(false); };
   }
@@ -1049,6 +1125,7 @@
     if (!rows.length) h += "<tr><td colspan='7' class='muted'>No protein has a significant site at these cut-offs.</td></tr>";
     host.innerHTML = h + "</tbody></table></div><div class='pager'>" + fmtInt(rows.length) + " proteins" + (rows.length > 500 ? " (first 500 shown)" : "") + " · click one to mark its sites</div>";
     $$("tbody tr[data-k]", host).forEach((tr) => (tr.onclick = () => { const e = rows[+tr.dataset.k]; setHighlight(new Set(e.idx), e.gene + " sites"); }));
+    rowKeys(host);
   }
   function exportCSV() {
     const c = C();
@@ -1229,6 +1306,7 @@
     const cp = $("#oocopy");
     if (cp) cp.onclick = () => copyText(items.map((x) => nameOf(x[0])).concat(gone.map((x) => x[0] || x[1])).join("\n"));
     $$("tbody tr[data-i]", host).forEach((tr) => (tr.onclick = () => { ST.ci = onoffCi; syncControls(); renderDiff(); setFocus(+tr.dataset.i); goTo("differential"); }));
+    rowKeys(host);
   }
 
   // ------------------------------------------------------------- heatmap
@@ -1370,6 +1448,7 @@
       setHighlight(indicesOfGenes(t.genes), t.term);
       goTo("differential");
     }));
+    rowKeys($("#etable"));
   }
   function renderRank(host) {
     const comps = [...new Set(D.gsea.map((b) => b.comparison))], libs = [...new Set(D.gsea.map((b) => b.library))];
@@ -1411,6 +1490,7 @@
     });
     $("#rtable").innerHTML = tb + "</tbody></table></div><p class='muted'>Click a term for its barcode plot (where its genes sit in the ranking); from there, mark them on the volcano.</p>";
     $$("#rtable tbody tr").forEach((tr) => (tr.onclick = () => { st.sel = terms[+tr.dataset.k].term; renderEnrichment(); }));
+    rowKeys($("#rtable"));
     const sel = terms.find((t) => t.term === st.sel);
     if (sel) renderBarcode($("#rcode"), sel, st.comp);
   }
@@ -2166,6 +2246,7 @@
     host.innerHTML = h + "</tbody></table></div><div class='pager'>" + fmtInt(rows.length) + " curves · page " + (DS.page + 1) + " of " + pages + " <button id='dprev'>‹</button><button id='dnext'>›</button></div>";
     $$("th", host).forEach((th) => (th.onclick = () => { if (DS.sortKey === th.dataset.k) DS.sortDir *= -1; else { DS.sortKey = th.dataset.k; DS.sortDir = th.dataset.k === "name" || th.dataset.k === "cls" || th.dataset.k === "p" || th.dataset.k === "q" ? 1 : -1; } DS.page = 0; renderDoseTable(); }));
     $$("tbody tr[data-k]", host).forEach((tr) => (tr.onclick = () => doseFocus(+tr.dataset.k)));
+    rowKeys(host, (tr) => markDot("#dosescatter", "data-k", tr.dataset.k));
     $("#dprev").onclick = () => { DS.page = Math.max(0, DS.page - 1); renderDoseTable(); };
     $("#dnext").onclick = () => { DS.page = Math.min(pages - 1, DS.page + 1); renderDoseTable(); };
   }
@@ -2374,6 +2455,7 @@
       TS.page = 0; renderTimeTable();
     }));
     $$("tbody tr[data-k]", host).forEach((tr) => (tr.onclick = () => timeFocus(+tr.dataset.k)));
+    rowKeys(host);
     $("#tprev").onclick = () => { TS.page = Math.max(0, TS.page - 1); renderTimeTable(); };
     $("#tnext").onclick = () => { TS.page = Math.min(pages - 1, TS.page + 1); renderTimeTable(); };
   }
@@ -2484,6 +2566,7 @@
     if (!rows.length) h += "<tr><td colspan='" + (Rm ? 7 : 6) + "' class='muted'>None at these cut-offs. Try another choice under Show.</td></tr>";
     host.innerHTML = h + "</tbody></table></div><div class='pager'>" + fmtInt(rows.length) + " " + esc(D.levelWord) + "s · page " + (SP.page + 1) + " of " + pages + " <button id='spprev'>‹</button><button id='spnext'>›</button></div>";
     $$("tbody tr[data-i]", host).forEach((tr) => (tr.onclick = () => { ST.ci = S.e; syncControls(); renderDiff(); setFocus(+tr.dataset.i); }));
+    rowKeys(host, (tr) => markDot("#spplot", "data-i", tr.dataset.i));
     $("#spprev").onclick = () => { SP.page = Math.max(0, SP.page - 1); renderSpecificTable(); };
     $("#spnext").onclick = () => { SP.page = Math.min(pages - 1, SP.page + 1); renderSpecificTable(); };
   }
@@ -2626,6 +2709,7 @@
       CS.page = 0; renderCysTable();
     }));
     $$("tbody tr[data-k]", host).forEach((tr) => (tr.onclick = () => setFocus(X.i[+tr.dataset.k])));
+    rowKeys(host, (tr) => markDot("#cysrank", "data-k", tr.dataset.k));
     $("#cprev").onclick = () => { CS.page = Math.max(0, CS.page - 1); renderCysTable(); };
     $("#cnext").onclick = () => { CS.page = Math.min(pages - 1, CS.page + 1); renderCysTable(); };
   }
@@ -2641,6 +2725,7 @@
     if (!rows.length) h += "<tr><td colspan='" + (3 + X.compounds.length) + "' class='muted'>No protein has a liganded cysteine.</td></tr>";
     host.innerHTML = h + "</tbody></table></div><div class='pager'>" + fmtInt(rows.length) + " proteins" + (rows.length > 500 ? " (first 500 shown)" : "") + " · click one to mark its sites</div>";
     $$("tbody tr[data-k]", host).forEach((tr) => (tr.onclick = () => { const e = rows[+tr.dataset.k]; setHighlight(new Set(e.x), e.g + " sites"); }));
+    rowKeys(host);
   }
 
   // -------------------------------------------- phosphosites, kinases, partners
@@ -2726,6 +2811,7 @@
       "</tbody></table>";
     host.innerHTML = h;
     $$("tr[data-k]", host).forEach((tr) => (tr.onclick = () => { PH.kin = tr.dataset.k; renderKinaseTable(); safe(renderKinases, "#phkin"); }));
+    rowKeys(host);
     const fb = $("#phfind"), box = $("#search");
     if (fb && box && r0) fb.onclick = () => { box.value = Array.from(new Set(r0[7].map((s) => s.split(" ")[0]))).join(" "); box.oninput(); goTo("differential"); };
   }
@@ -3118,7 +3204,7 @@
   function tidyChart(root, st) {
     const grey = st.palette === "grey";
     Array.from(root.querySelectorAll("*")).forEach((e) => {
-      if (e.getAttribute("fill") === "transparent" || e.getAttribute("visibility") === "hidden" || e.tagName.toLowerCase() === "foreignobject") { e.remove(); return; }
+      if (e.getAttribute("fill") === "transparent" || e.getAttribute("visibility") === "hidden" || e.tagName.toLowerCase() === "foreignobject" || e.getAttribute("class") === "kmark") { e.remove(); return; }
       e.removeAttribute("style");
       const sk = e.getAttribute("stroke");
       if (st.line_scale !== 1 && sk && sk !== "none") e.setAttribute("stroke-width", +((parseFloat(e.getAttribute("stroke-width")) || 1) * st.line_scale).toFixed(2));

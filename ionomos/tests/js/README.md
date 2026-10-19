@@ -95,6 +95,12 @@ VirtualConsole; tests assert the list stays empty.
   **?** and its panel (Escape and × give the keyboard back), the export dialog
   keeping the keyboard and returning it, the file pickers reachable by Tab,
   `aria-pressed` on the two-way switches, a name on every chart.
+- `test/rowkeys.test.mjs` — a feature opens from the keyboard (#176): every
+  table with rows that open something is one Tab stop (roving tabindex; arrows,
+  Home, End, Page Up / Down), the row with the keyboard rings its point on the
+  volcano or dose plot with its tooltip (never in an exported file), Enter opens
+  and keeps the keyboard on the row, Shift+Enter pins, the pin and "Behaves
+  like" chips are buttons (Delete unpins), the mouse unchanged.
 - `test/tmtexport.test.mjs` — the report's Export of the TMT QC figures says what
   `sectionfigs.py`'s do (#178): both are checked against `tmt_parity.json` (the
   Python half is `tests/test_tmt_export_parity.py`): the experiment and the
