@@ -209,7 +209,9 @@ class Worker:
                 self._fail(job, reason, hints=fragpipe.explain(reason))
                 return True
             self._held.pop(job.id, None)
-            return self._run(job, spec)
+            ran = self._run(job, spec)
+            _atlas_queue(self.cfg, self.ledger, job.id)
+            return ran
         return False
 
     def _refuse_duplicate(self, job: Job, twin: Job) -> None:
@@ -409,6 +411,25 @@ class Worker:
         log.error("job %d failed: %s", job.id, reason)
         if reason != "cancelled by user":
             _notify(self.cfg, "failed", job, reason)
+
+
+def _atlas_queue(cfg: Config, ledger: Ledger, job_id: int) -> None:
+    """A search that ended done (its analysis too) goes on the cysteine atlas hand-off list (atlas.py, D121): only a
+    mark in its ionomos.json. The copying is the watcher's atlas thread's, so it never holds up the next search,
+    and nothing here can fail or change the job. config.yaml is read again, so turning the hand-off on in the app
+    counts without restarting the watcher."""
+    try:
+        from ionomos import atlas
+        from ionomos.config import ConfigError, load
+
+        try:
+            cfg = load(cfg.config_path, check_paths=False)
+        except (ConfigError, OSError):
+            pass  # a config mid-save: the one the watcher started with
+        if atlas.settings(cfg)["enabled"]:
+            atlas.mark_pending(cfg, ledger.get(job_id))
+    except Exception:  # noqa: BLE001 - never in the job's way
+        log.exception("job %s: could not queue the atlas hand-off", job_id)
 
 
 def _fingerprint(job: Job, spec: fragpipe.RunSpec, res: fragpipe.RunResult, attempt: int, finished: str) -> None:

@@ -74,6 +74,10 @@ Command line.
     ionomos tmt      plan | annotation [--write] | suggest | qc
                                                    TMT channel maps as FragPipe will read them, a tmt: block to paste,
                                                    the TMT QC of a finished search (WORKFLOWS.md, D91)
+    ionomos atlas    send JOB_ID | status [JOB_ID] [--json] | check [--no-write]
+                                                   finished isoDTB searches handed to the lab's cysteine atlas: send
+                                                   one now, where each stands, the folder and the lookup checked
+                                                   (docs/ATLAS.md, D120-D125)
 
 --config defaults to $IONOMOS_CONFIG, then the path last saved by the app (LabWatch-era paths too),
 then ./config.yaml (next to the exe when frozen).
@@ -325,6 +329,11 @@ def cmd_run(args) -> int:
 
 
     live = LiveConfig(cfg)  # users / aliases / naming added in the app count for the next drop, no restart
+    from ionomos.atlas import HandoffLoop
+
+    # finished isoDTB searches to the lab's cysteine atlas (atlas.py, D121): its own thread, idle while atlas: is off
+    atlas_loop = HandoffLoop(live.get, heartbeat=hb)
+    supervised("atlas", atlas_loop.run_forever)
     resolver = None
     root = None
     if cfg.gui_enabled and not args.no_gui:
@@ -357,6 +366,7 @@ def cmd_run(args) -> int:
             log.info("stopping")
         stop.set()
         w.stop()
+        atlas_loop.stop()
         if worker is not None:
             worker.stop()
         if root is not None:
@@ -1603,6 +1613,9 @@ def build_parser() -> argparse.ArgumentParser:
     from ionomos import tmtkit
 
     tmtkit.add_parser(sub)  # `ionomos tmt plan | annotation | suggest | qc` (D91); sets its own fn (tmtkit.main)
+    from ionomos import atlas
+
+    atlas.add_parser(sub)  # `ionomos atlas send | status | check` (D123); sets its own fn (atlas.run_cli)
     return ap
 
 

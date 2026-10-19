@@ -364,7 +364,8 @@ def test_the_slugs_are_githubs():
 # notes (docs/EXAMPLE.md, example.py: `ionomos example`); empty this when DECISIONS.md has it.
 DECISION_PENDING: dict[int, str] = {}
 # a number taken by a decision in a pull request that is not merged into this branch yet
-DECISION_GAPS: dict[int, str] = {105: "PR #186", 106: "PR #186", 107: "PR #187"}
+DECISION_GAPS: dict[int, str] = {105: "PR #186", 106: "PR #186", 107: "PR #187",
+                                  118: "branch fix/round-5-follow-ups", 119: "branch fix/round-5-follow-ups"}
 _DREF = re.compile(r"(?<![\w-])D(\d{1,3})(?![\w])")
 
 
@@ -520,7 +521,7 @@ def _disk_names() -> dict[str, str]:
     out = {}
     for k, v in vars(names).items():
         if k.isupper() and isinstance(v, str) and not k.startswith("LEGACY") and k not in NOT_ON_DISK:
-            out[k] = v.replace("{plex}", "<plex>")
+            out[k] = re.sub(r"\{(\w+)\}", r"<\1>", v)  # tmt_qc_{plex}.tsv is tmt_qc_<plex>.tsv in the layout
     return out
 
 

@@ -197,12 +197,13 @@ class Picked:
     reason: str        # selected | not needed | never-copy pattern | larger than 500 MB
 
 
-def select(run_dir: Path, max_mb: int = MAX_FILE_MB) -> list[Picked]:
+def select(run_dir: Path, max_mb: int | None = None) -> list[Picked]:
     """Every file harvest_fragpipe.ps1 would list in a FragPipe output folder, and whether it takes it: the top
     folder's files by ROOT_ALLOW; each subfolder's (one level, not SKIP_DIR_NAMES, no links) by REPLICATE_ALLOW;
     then NEVER_COPY and the size cap. Raises OSError when a folder can't be listed: an incomplete run is never
     sent (harvest logs it and goes on; a hand-off waits and tries again)."""
     run_dir = Path(run_dir)
+    max_mb = MAX_FILE_MB if max_mb is None else max_mb
     max_bytes = int(max_mb) * 1024 * 1024
     found: list[tuple[os.DirEntry, str, str, bool]] = []
     with os.scandir(_fs(run_dir)) as it:
@@ -581,7 +582,7 @@ def summary(job, run_dir: Path, manifest: dict, wf: dict) -> dict:
         except (OSError, ValueError, AttributeError):
             pass
     return {
-        "job": job.id,
+        "number": job.id,
         "user": job.user,
         "experiment": Path(job.dest_dir).name,
         "inbox_name": job.inbox_name,
@@ -757,7 +758,7 @@ def _send(cfg, job, root: Path) -> Result:
             res.copied += 1
         else:
             res.already += 1
-        files.append({"path": p.rel, "bytes": p.size, "sha256": sha})
+        files.append({"path": p.rel, "size": p.size, "sha256": sha})
 
     # 3. the completion record, then the runs CSV (written last, renamed into place: it means "complete")
     wf_path, mf_path = run_dir / "fragpipe.workflow", run_dir / "fragpipe-files.fp-manifest"
@@ -914,7 +915,7 @@ class HandoffLoop:
                 continue
             self._seen.pop(job.id, None)
             if self.heartbeat is not None:
-                self.heartbeat.beat("atlas", f"handing job {job.id} to the atlas", force=True)
+                self.heartbeat.beat("atlas", f"busy: handing job {job.id} to the atlas", force=True)
             out.append(send(cfg, job, trigger="auto"))
         return out
 
@@ -1038,3 +1039,99 @@ def dropbox_suggestion(env: dict | None = None, roots: list[str] | None = None) 
                 continue
             queue += [(Path(e.path), depth + 1) for e in kids]
     return ""
+
+
+# ------------------------------------------------------------------------------------------ command line --
+
+
+def add_parser(sub):
+    """`ionomos atlas send | status | check` (D123); exit codes as cli.py's table."""
+    import argparse
+
+    p = sub.add_parser("atlas", help="hand finished isoDTB searches to the lab's cysteine atlas (docs/ATLAS.md)",
+                       description=__doc__.split("\n\n")[0], formatter_class=argparse.RawDescriptionHelpFormatter)
+    s = p.add_subparsers(dest="atlas_cmd", required=True)
+    se = s.add_parser("send", help="hand one finished job to the atlas now, whatever its hand-off state (exit 0 "
+                                   "sent; 1 not sent, with why; 2 the hand-off is off or has no folder)")
+    se.add_argument("job_id", type=int, help="the job's number (ionomos status --all lists them)")
+    st = s.add_parser("status", help="the hand-off state of one job, or of every finished job of atlas.methods")
+    st.add_argument("job_id", type=int, nargs="?", help="one job's number (default: every finished atlas job)")
+    st.add_argument("--json", action="store_true", help="print the `atlas` block(s) of ionomos.json as JSON")
+    ck = s.add_parser("check", help="the destination folder set, there and writable; the atlas's site lookup there "
+                                    "and readable (exit 0 all good or off, 1 a problem)")
+    ck.add_argument("--no-write", action="store_true",
+                    help="don't make and remove a small test file in the destination folder")
+    p.set_defaults(fn=run_cli)
+    return p
+
+
+def describe(block: dict) -> str:
+    """One line for a job's `atlas` block, as the Jobs tab and `ionomos atlas status` say it."""
+    st = block.get("state")
+    if not st:
+        return "not handed off"
+    if st == SENT:
+        return f"sent {str(block.get('sent_at') or '')[:16].replace('T', ' ')}"
+    if st == PENDING:
+        return "waiting to be handed off"
+    if st == SENDING:
+        return "being handed off"
+    if st == FAILED:
+        nxt = _when(block.get("next_try"))
+        return (f"failed (try {block.get('tries', 0)}); next try {nxt:%Y-%m-%d %H:%M}" if nxt else "failed") + \
+            (f": {block['message']}" if block.get("message") else "")
+    if st == CONFLICT:
+        return "stopped: the atlas folder holds a different copy (see the attention list)"
+    if st == GAVE_UP:
+        return f"gave up after {block.get('tries', 0)} tries: {block.get('message', '')}"
+    return str(st)
+
+
+def run_cli(args) -> int:
+    import sys
+
+    from ionomos import cli
+    from ionomos.ledger import Ledger
+
+    cfg = cli._load(args, check_paths=False)
+    s = settings(cfg)
+    if args.atlas_cmd == "check":
+        found = check(cfg, write_probe=not args.no_write)
+        for f in found:
+            print(f"{'✓' if f.ok else '✗'} {f.what}" + (f"\n    ↳ {f.fix}" if f.fix and not f.ok else ""))
+        return 0 if all(f.ok for f in found) else 1
+    if not cfg.database.is_file():
+        print("no ledger yet (nothing has been dropped)", file=sys.stderr if args.atlas_cmd == "send" else sys.stdout)
+        return 1 if args.atlas_cmd == "send" or args.job_id is not None else 0
+    led = Ledger(cfg.database)
+    try:
+        if args.job_id is not None:
+            job = led.get(args.job_id)
+            if job is None:
+                print(f"no job {args.job_id}", file=sys.stderr)
+                return 1
+            jobs = [job]
+        else:
+            jobs = [j for j in led.list("done") if j.method in s["methods"]]
+    finally:
+        led.close()
+    if args.atlas_cmd == "send":
+        res = send(cfg, jobs[0], trigger="cli")
+        print(res.message, file=sys.stdout if res.ok else sys.stderr)
+        for c in res.conflicts[:10]:
+            print(f"  differs: {c}", file=sys.stderr)
+        if res.ok and res.record:
+            print(f"record: {res.record}")
+        return 0 if res.ok else (2 if res.setup else 1)
+    blocks = {j.id: state(j.dest_dir) for j in jobs}
+    if args.json:
+        print(json.dumps({str(k): v for k, v in blocks.items()}, indent=2))
+        return 0
+    if not s["enabled"]:
+        print("the atlas hand-off is off (config.yaml atlas.enabled: false)")
+    if not jobs:
+        print(f"no finished {', '.join(s['methods'])} jobs")
+        return 0
+    for j in jobs:
+        print(f"{j.id:>4}  {j.method:<7} {j.user:<10} {Path(j.dest_dir).name:<40} {describe(blocks[j.id])}")
+    return 0

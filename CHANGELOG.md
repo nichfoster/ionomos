@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Finished isoDTB searches go to the lab's cysteine atlas by themselves** (D120–D125, docs/ATLAS.md). With
+  `atlas.enabled` and `atlas.handoff_dir` (the lab Dropbox `…\Nicholas Foster Data\fragpipe-runs`; no default),
+  the worker queues each done isoDTB job and the watcher's new `atlas` thread copies the run's result files into
+  that folder exactly as `harvest_fragpipe.ps1` does (its selection rule and drive-letter layout), each verified by
+  SHA-256 through a `.partial`, then writes `ionomos-handoff.json` and a one-row
+  `_harvest-logs\runs-ionomos-<time>-job<N>.csv` (contract `ionomos-atlas-handoff/1`). Nothing is ever
+  overwritten: a different file at the destination stops the hand-off before anything is copied. Failures (Dropbox
+  offline) are retried with a back-off up to `atlas.max_tries`, raise `atlas_handoff_failed`, and are recorded in
+  the job's `ionomos.json` (`atlas` block); the experiment folder is only read.
+  - `ionomos atlas send <job>`, `ionomos atlas status [job]`, `ionomos atlas check`.
+  - The app: **Send to atlas** and the hand-off state on the Jobs tab, the folder (with **Browse…** and the
+    Dropbox folder found as a suggestion) on the Folders tab, a Setup checklist line with **Fix**; help entries
+    `faq.atlas` and `attention.atlas_handoff_failed`.
+  - The isoDTB report's site table shows each human site's atlas tier, how many atlas experiments saw it and
+    "new to the atlas", from the lookup the atlas publishes back (`_atlas\atlas_sites_lookup.tsv`), with one line
+    saying these are internal lab numbers and whether they may be quoted.
+
 - **A feature opens from the keyboard in the report** (D116, #176): every table whose rows open something is one
   Tab stop; arrows, Home, End, Page Up / Down move, Enter or Space opens the row (Shift+Enter pins), and the row
   rings its point on the chart beside it with its tooltip. Pin and "Behaves like" chips are buttons.
