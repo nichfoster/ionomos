@@ -165,8 +165,11 @@ def _normalise(d: dict) -> dict:
 
 
 def _y(v) -> str:
-    """One YAML scalar/flow value."""
-    return yaml.safe_dump(v, default_flow_style=True, allow_unicode=True).strip().removesuffix("\n...")
+    """One YAML scalar/flow value, on one line: PyYAML's default width of 80 folded a long value with a space past
+    column 80 onto the next line, where the writer's `# comment` after it made config.yaml unreadable (a Dropbox
+    folder in atlas.handoff_dir, D120)."""
+    return yaml.safe_dump(v, default_flow_style=True, allow_unicode=True, width=float("inf")).strip() \
+        .removesuffix("\n...")
 
 
 def dump_config(d: dict) -> str:

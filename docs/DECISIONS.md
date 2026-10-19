@@ -4726,12 +4726,20 @@ rule, and whether the set may be quoted (`quotable`). A malformed lookup is igno
 The lookup reaches the analysis as an argument, like `site_annotation`, not as a new `analysis:` setting.
 
 ### D125 — In the app: Send to atlas on the Jobs tab, the folder on the Folders tab, a line on the Setup checklist
-**2026-10-19.** The Jobs tab shows each job's hand-off state (`atlas.describe`) and has **Send to atlas** for a
-selected done job; the Folders tab has the hand-off switch and the destination with **Browse…**, and offers the
-Dropbox folder Ionomos found (`atlas.dropbox_suggestion`: harvest's own search, `%LOCALAPPDATA%\Dropbox\info.json`
-then `Nicholas Foster Data` up to two levels down) to confirm with **Use**, never filled in by itself. The Setup
-checklist has a line from `atlas.check` with **Fix** (to the Folders tab). Sending, checking and the Dropbox search
-run off the Tk thread (`App.run_bg`, D95). Help: `faq.atlas`, `attention.atlas_handoff_failed`.
+**2026-10-19.** The Jobs tab shows each job's hand-off state (`atlas.describe`) in an atlas column, shown only
+while the hand-off is on or a listed job has one, and has **Send to atlas** for a selected done job; the item's
+window in the attention list has it too. The Folders tab has the hand-off switch and the destination with
+**Browse…**, and offers the Dropbox folder Ionomos found (`atlas.dropbox_suggestion`: harvest's own search,
+`%LOCALAPPDATA%\Dropbox\info.json` then `Nicholas Foster Data` up to two levels down) to confirm with **Use**,
+never filled in by itself; its Save writes `enabled` and `handoff_dir` and keeps the other keys. The Setup checklist
+has a line from `atlas.check` (only while the hand-off is on; to do / warning / problem) with **Fix**, a new action
+`atlas_folder` that puts the cursor in the folder field; `ionomos check` has no atlas row (`ionomos doctor` shows the
+line). Sending and the Dropbox search run on `App.run_bg` (D95), the checklist inside its existing background
+refresh; the atlas column reads `ionomos.json` files on a plain background thread per refresh (a 3 s tick is not
+work the busy indicator should show), again only for a file whose time changed. Help: `faq.atlas`,
+`attention.atlas_handoff_failed`. Found on the way: `configio._y` wrote with PyYAML's width of 80, so a value with
+a space past column 80 (a long Dropbox path) was folded onto the next line and the comment after it made
+config.yaml unreadable; it writes on one line now.
 
 **Not verified (D120-D125)**: on the lab PC: the Dropbox client signed in and syncing `Nicholas Foster Data`,
 the watcher's Windows account writing there, a real isoDTB search handed off and ingested by the atlas side, and

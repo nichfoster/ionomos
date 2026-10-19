@@ -62,10 +62,10 @@ look; an item that would change it is out of scope.
 |---|---|---|
 | **Today** | What needs you, watcher + queue line, the checks' one line ("Checks: N problems"), recent jobs with Open report / Open folder / Re-run analysis / Analysis options… / Show in Jobs | everyone |
 | **Inbox** | What is in the inbox now (the path, "empty" or "N items waiting"; read on a thread while shown); Delete moves an item to the removed-items folder | lab member, PC keeper |
-| **Jobs** | Every job (status, time, what FragPipe is doing), Find, details and the likely cause of a failure, Open report / folder / log, Re-run analysis, Analysis options…, Retry, Cancel, Copy details, Zip; Pause searches, Instrument QC, Check FragPipe install (the full preflight, minutes) | everyone |
+| **Jobs** | Every job (status, time, what FragPipe is doing), Find, details and the likely cause of a failure, Open report / folder / log, Re-run analysis, Analysis options…, Send to atlas, Retry, Cancel, Copy details, Zip; the atlas column (each isoDTB job's hand-off to the cysteine atlas, D125, shown while the hand-off is on or a job has one); Pause searches, Instrument QC, Check FragPipe install (the full preflight, minutes) | everyone |
 | **Analysis** | Sub-tabs: Analyse an experiment (the experiment editor, its buttons on top), Lab defaults, Figure style, Check accuracy | re-analysing |
 | **✓ Setup** | Check everything (`checks.everything`: setup, FragPipe from disk, the library, health, what needs you), Auto-setup, a Fix button per open item; the list scrolls | PC keeper |
-| **Folders** | Paths (inbox, users, workflows, FASTA, logs, ledger, FragPipe), Quick fill, Create all, Find FragPipe | PC keeper, once |
+| **Folders** | Paths (inbox, users, workflows, FASTA, logs, ledger, FragPipe), Quick fill, Create all, Find FragPipe; Cysteine atlas: the hand-off switch, its Dropbox folder (Browse…, Use the one found), Help (D125) | PC keeper, once |
 | **Users** | User folders and their initials, learned aliases, the catch-all user | PC keeper |
 | **Methods** | Methods (keywords, workflow, FASTA, data type, post-processing), Import workflow…, Test names…, and the library panel (Find on this PC…, Download from UniProt…, Add decoys and contaminants…, Check for updates) | PC keeper |
 | **Advanced** | Watcher timings and FragPipe threads/RAM/timeout/disk (checked as you type), the resolver window and pop-ups switch, learned aliases file, config file (open, logs, reset, Undo last save, Restore a previous config…) | PC keeper |

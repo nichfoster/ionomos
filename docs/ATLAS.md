@@ -161,12 +161,24 @@ atlas's site lookup is there and reads; exit 1 when something is wrong. Exit cod
 
 ## In the app
 
-The Jobs tab shows each job's hand-off state and has **Send to atlas**; the copy runs off the window's thread. The
-Folders tab has the destination folder, with **Browse…** and the Dropbox folder Ionomos found (as
-`harvest_fragpipe.ps1` finds it: `%LOCALAPPDATA%\Dropbox\info.json`, then `Nicholas Foster Data` up to two levels
-down) offered as a suggestion to confirm, never filled in by itself. The Setup checklist has a line for the
-hand-off with **Fix**. A failed hand-off is an item in the attention list without a pop-up window
-([help](../ionomos/src/ionomos/help/troubleshooting.md)).
+- **Folders tab → Cysteine atlas**: "Hand finished isoDTB searches to the cysteine atlas" (`atlas.enabled`), the
+  destination folder (spaces allowed) with **Browse…**, and the Dropbox folder Ionomos found (as
+  `harvest_fragpipe.ps1` finds it: `%LOCALAPPDATA%\Dropbox\info.json`, then `Nicholas Foster Data` up to two
+  levels down), offered with **Use**, never filled in by itself. **Help** opens `faq.atlas`. **Save** writes
+  `enabled` and `handoff_dir` and keeps the other `atlas:` keys.
+- **Jobs tab**: an **atlas** column with each isoDTB job's hand-off state (`atlas.describe`), shown while the
+  hand-off is on or a listed job has a hand-off; the detail pane says the same, with the first files that differ
+  after a conflict. **Send to atlas** sends the selected done job now; a job not done, the hand-off off or a folder
+  typed but not saved are explained instead.
+- **Setup checklist**: "Cysteine atlas hand-off", only while the hand-off is on, from `atlas.check` (to do: no
+  folder; warning: the folder can't be reached or the lookup is malformed; problem: the settings don't load), with
+  **Fix** to the folder field.
+- **Attention list**: a failed hand-off is an item without a pop-up window; its window (opened from the list) has
+  **Send to atlas** and **More help** ([help](../ionomos/src/ionomos/help/troubleshooting.md)).
+
+Sending runs off the window's thread (`App.run_bg`), and so does the Dropbox search (once, when the Folders tab is
+first shown). The atlas column reads each done atlas job's `ionomos.json` on a background thread, again only when
+the file changed.
 
 ## In the report
 

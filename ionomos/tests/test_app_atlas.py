@@ -41,11 +41,9 @@ def _dropbox(tmp_path: Path, spaces: bool = True) -> Path:
     return parent / "fragpipe-runs"
 
 
-@pytest.mark.xfail(strict=True, reason="configio._y dumps with PyYAML's width of 80, so a long value with a space past "
-                                       "column 80 is folded over two lines and config.yaml no longer parses (the "
-                                       "app's Save refuses). Fix: width=float('inf') in configio._y, then drop this "
-                                       "mark (strict: it fails once fixed)")
 def test_a_long_dropbox_path_with_spaces_survives_a_save(tmp_path):
+    """configio._y wrote with PyYAML's width of 80: a space past column 80 folded the value onto the next line and
+    the comment after it made config.yaml unreadable (the app's Save refused)."""
     from ionomos import configio
 
     d = configio.defaults()

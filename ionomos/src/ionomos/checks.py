@@ -21,7 +21,8 @@ Sources, in order (SOURCES), each on its own: one that breaks becomes a single â
     attention   open items that need a person, and searches paused
 
 Row.action names what the app can do in one click: create_folders | find_fragpipe | save | install_task |
-start_watcher | open_tab:<uinav key> | open_path:<path> | resume_searches | show_attention | report_problem.
+start_watcher | open_tab:<uinav key> | open_path:<path> | resume_searches | show_attention | report_problem |
+atlas_folder (the Folders tab, the cursor in the cysteine atlas folder, D125).
 Every row that is not ok says what to do (D46), naming tabs by name.
 """
 from __future__ import annotations
