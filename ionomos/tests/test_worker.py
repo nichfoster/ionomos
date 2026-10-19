@@ -495,6 +495,29 @@ def test_hold_reason_is_reported_once_and_again_only_when_it_changes(bed, caplog
     assert len(item) == 1 and any("protein database" in c for c in item[0].causes)
 
 
+def test_a_leftover_that_outlived_ionomos_and_will_not_stop_holds_the_recovered_job(bed, monkeypatch):
+    """Issue #175 (D107): at start-up a job the last Ionomos left running goes back to the queue, but its FragPipe
+    won't stop: the record stays and the worker holds the job instead of starting a second FragPipe beside it."""
+    from ionomos import health, names, worker
+
+    dest = _queue(bed, "iso_good")
+    bed["ledger"].start_attempt(1)
+    run_dir = dest / fragpipe.RUN_DIR
+    run_dir.mkdir(exist_ok=True)
+    marker = run_dir / names.ENGINE_PID_FILE
+    marker.write_text(json.dumps({"pid": 4242, "started": 100.0, "at": "09:00"}), encoding="utf-8")
+    monkeypatch.setattr(health, "process_started", lambda pid: 100.5 if pid == 4242 else None)
+    monkeypatch.setattr(fragpipe, "kill_pid_tree", lambda pid, group=False: None)
+    monkeypatch.setattr(fragpipe, "_wait_gone", lambda pid, s: False)
+    monkeypatch.setattr(fragpipe, "run", lambda *a, **kw: pytest.fail("a second search was started"))
+    assert worker.recover(bed["cfg"], bed["ledger"]) == [(1, "queued")]
+    assert marker.exists()
+    assert not Worker(bed["cfg"], bed["ledger"]).run_once()
+    job = bed["ledger"].get(1)
+    assert job.status == "queued" and "still running (process 4242, started 09:00)" in job.reason, job.reason
+    assert _status(dest)["status"] == "queued"
+
+
 # ------------------------------------------------------------------ unit bits --
 
 
@@ -539,6 +562,11 @@ def test_fasta_falls_back_to_workflow_database(bed):
      "Not enough free disk space for FragPipe's output — free space on the data drive"),
     ("FragPipe launcher not found at C:/nope/fragpipe.bat",
      "FragPipe isn't found — the Folders tab → Find FragPipe"),
+    ("an earlier search of this experiment is still running (process 4242, started 2026-10-15T09:00:00+02:00): end "
+     "it in Task Manager; the search starts by itself once it has ended",
+     "The search an earlier Ionomos started on this experiment is still running and did not stop when Ionomos told "
+     "it to: end the process named above in Task Manager (Details tab, PID column); the search starts by itself "
+     "once it has ended"),
     ("method 'isoDTB' is not in config.yaml any more", None),  # fallback: the raw reason, verbatim
 ])
 def test_waiting_causes_maps_hold_reasons_to_plain_english(reason, expected):

@@ -50,6 +50,7 @@ WORKDIR = "fragpipe"
 MANIFEST_NAME = "fragpipe-files.fp-manifest"
 CONSOLE_LOG = "fragpipe_console.log"
 CANCEL_FILE = "CANCEL"  # created in ionomos_run/ by `ionomos cancel` / the app
+CANCELLED = "cancelled by user"  # a cancelled search's reason; a survivor is named after it (_not_stopped)
 
 # Where FragPipe lives on Windows. Two layouts exist:
 #   zip builds (<= 22):          <root>/fragpipe/bin/fragpipe.bat (+ a GUI fragpipe.exe)
@@ -824,12 +825,21 @@ def _wait_gone(pid: int, seconds: float) -> bool:
     return process_started(pid) is None
 
 
-def stop_leftover(run_dir: Path) -> str:
+@dataclass(frozen=True)
+class Leftover:
+    """What stop_leftover found. `running`: the earlier search is still running after being told to stop, so no
+    other search of the folder may start (D69, D107); its engine_pid.json is kept so the next look tries again."""
+    message: str = ""  # '' when there was nothing to do
+    running: bool = False
+
+
+def stop_leftover(run_dir: Path) -> Leftover:
     """Stop a search an earlier Ionomos started in this run folder and did not see end (Ionomos was ended from
     Task Manager or crashed; FragPipe runs in its own process group and lives on), so a job is never searched
     twice at once (D69). Only a process that is still running
     AND started when the record says is stopped: a number the OS has given to another program since is left
-    alone. Returns what was done, '' when there was nothing to do. Never raises."""
+    alone. Says what was done, and whether the process still runs (taskkill refused, a process stuck in a network
+    drive's I/O): then the record stays, and the caller must not start another search (D107). Never raises."""
     import json
 
     from ionomos.health import process_started
@@ -839,10 +849,10 @@ def stop_leftover(run_dir: Path) -> str:
     try:
         rec = json.loads(marker.read_text(encoding="utf-8"))
     except OSError:  # gone, or can't be read now: nothing to act on
-        return ""
+        return Leftover()
     except ValueError:  # cut off or damaged (a full disk when it was written): it can never name a process again
         rec = {}
-    msg = ""
+    found = Leftover()
     if not isinstance(rec, dict):  # valid JSON but not a record (a hand edit, another program): nothing to stop
         rec = {}
     try:
@@ -850,16 +860,21 @@ def stop_leftover(run_dir: Path) -> str:
         now = process_started(pid) if pid else None
         if now is not None and when is not None and abs(now - float(when)) < 2.0:
             kill_pid_tree(pid, bool(rec.get("group")))
-            msg = (f"an earlier search of this experiment (process {pid}, started {rec.get('at', '?')}) was still "
-                   f"running after Ionomos stopped; it was stopped before this attempt"
-                   + ("" if process_started(pid) is None else " (it may still be running: check Task Manager)"))
+            started = rec.get("at", "?")
+            if _wait_gone(pid, 5):  # taskkill returns before Windows has ended the tree
+                found = Leftover(f"an earlier search of this experiment (process {pid}, started {started}) was "
+                                 f"still running after Ionomos stopped; it was stopped before this attempt")
+            else:
+                return Leftover(f"an earlier search of this experiment is still running (process {pid}, started "
+                                f"{started}): end it in Task Manager; the search starts by itself once it has "
+                                f"ended", running=True)
     except (TypeError, ValueError):
         pass
     try:
         marker.unlink(missing_ok=True)
     except OSError:
         pass
-    return msg
+    return found
 
 
 def run(spec: RunSpec, stop: threading.Event | None = None, on_start=None, poll: float | None = None,
@@ -950,7 +965,8 @@ def _watch(spec: RunSpec, proc: subprocess.Popen, out, stop: threading.Event, po
         if (spec.run_dir / CANCEL_FILE).exists():
             kill_tree(proc)
             _say(out, "\n# cancelled by user\n")
-            return RunResult(proc.returncode, "cancelled by user", cancelled=True)
+            alive = _not_stopped(spec, proc)
+            return RunResult(proc.returncode, CANCELLED + alive, cancelled=True, hints=explain(alive))
         if stop.is_set():
             kill_tree(proc)
             _say(out, "\n# stopped by ionomos\n")

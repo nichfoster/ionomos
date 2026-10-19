@@ -400,6 +400,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A drop's `experiment.yaml` can no longer choose a workflow or FASTA outside the lab's folders (#168, D105).**
+  `workflow:` and `fasta:` are file names in `workflow_dir` / `fasta_dir`, as documented; a path (absolute,
+  `..`, a drive, or a `//server/share` that made Windows sign in to that server as the watcher's account) is
+  refused at intake with what to do. A network `analysis.site_annotation:` is never opened; the analysis warns.
+- `ionomos attention show / dismiss / snooze / resolve` with an id such as `../../outside` read, and rewrote, a
+  JSON file outside the attention folder (#169). `attention.py` now takes only an id it could have made
+  (`[A-Za-z0-9._-]`) for every caller; anything else is "no item".
+- **A search an earlier Ionomos left running that won't stop now holds its job** (#175, D107). `stop_leftover`
+  says whether the process is gone and keeps `engine_pid.json` while it runs; the worker then waits ("an earlier
+  search of this experiment is still running (process N, …): end it in Task Manager; the search starts by itself
+  once it has ended", help `search.hold-leftover`) instead of starting a second search beside it, and tries again
+  on each pass. A cancelled search that did not stop is named in the reason (`cancelled by user — DIA-NN did not
+  stop when told to (process N): …`) as a timed-out one is, and gets a pop-up; its Retry waits for it.
 - **Round 5 issue sweep (D108–D117):**
   - **PCA of a large study takes seconds, not minutes** (D108, #163): above 60 samples only the 6 components
     the report shows, from the smaller Gram matrix; up to 60, Jacobi as before. 500 samples × 300 proteins:
@@ -987,6 +1000,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     messages get their explanation; the `<b>` tags kept them from matching (`fragpipe.EXPLANATIONS`).
   - `ionomos testbed stress`: the TMT drops carry a whole TMT-10 channel map. Since D91 every TMT drop failed
     before the search, so the stress run searched no TMT.
+- **A dose-response curve is no longer fitted for a protein measured at fewer than `dose_min_doses` doses
+  (#162, D106).** Replicates of two doses counted as four points, so a protein missing at the low doses got a
+  4-parameter fit, an "up" call and a tight pEC50 the data could not give. It is now "not fitted" and counted
+  in the stage's note, which names `analysis.dose_min_doses`.
 
 ### Documentation
 

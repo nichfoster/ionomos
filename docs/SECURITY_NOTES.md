@@ -109,10 +109,12 @@ round-4 security audit (2026-10-15); keep it in step with the code.
 
 - **Protected**: intake moves, never deletes; the destination is `users_root / user / safe_name` with
   both parts sanitised; `user:` in experiment.yaml must name an existing user folder and can't be a path.
-- **Not protected (issue #168)**: `workflow:` and `fasta:` in experiment.yaml are passed to
-  `fragpipe._find_file`, which takes an absolute or UNC path as it is: a drop can choose a workflow or
-  FASTA from anywhere the watcher's account can read, and a `//server/share` path makes Windows sign
-  in to that server. `site_annotation:` takes a full path by design and has the same UNC exposure.
+- **Protected (D105, #168)**: `workflow:` and `fasta:` in experiment.yaml are file names in
+  `workflow_dir` / `fasta_dir`: a value with `/`, `\`, `:` or a bare `..` is refused at intake, so a
+  drop can't choose a file elsewhere or make Windows sign in to a `//server/share`. `site_annotation:`
+  takes a full path by design, but a network path is never opened (the analysis warns instead).
+  Tests: `test_a_workflow_or_fasta_outside_the_lab_folders_is_rejected_and_never_used`,
+  `test_a_site_annotation_on_a_network_path_is_never_opened`.
 
 ## The assistant (`assistant/*`, D49, D57, D75)
 
