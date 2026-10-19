@@ -151,6 +151,7 @@ class Config:
     assistant: dict = field(default_factory=dict)  # the local assistant (assistant/, D49 / D57); {} = off
     config_python: str = ""  # FragPipe's --config-python (the Python folder); "" = what FragPipe remembers (D59)
     library: dict = field(default_factory=dict)  # where `ionomos library scan` looks (library.py, D89); {} = defaults
+    atlas: dict = field(default_factory=dict)  # the hand-off to the lab's cysteine atlas (atlas.py, D120); {} = off
 
     @property
     def method_aliases(self) -> dict[str, list[str]]:
@@ -308,7 +309,7 @@ def load(path: str | Path, check_paths: bool = True) -> Config:
 
 # the sections of config.yaml, for finding the key a message is about (_key_in)
 _SECTIONS = ("paths", "watcher", "fragpipe", "gui", "naming", "analysis", "qc_trend", "notify", "library", "assistant",
-             "users", "methods")
+             "atlas", "users", "methods")
 _KEY_RE = re.compile(r"(?<![\w.])(" + "|".join(_SECTIONS) + r")((?:\.[^\s.:'\",()\[\]{}]+)*)")
 
 
@@ -487,6 +488,7 @@ def _load(path: str | Path, check_paths: bool = True) -> Config:
         notify=_notify(raw.get("notify")),
         assistant=_assistant(raw.get("assistant")),
         library=_library(raw.get("library")),
+        atlas=_atlas(raw.get("atlas"), methods, file_rules),
         user_ignore=tuple(str(x) for x in (users.get("ignore") if users.get("ignore") is not None else DEFAULT_USER_IGNORE)),
     )
 
@@ -502,7 +504,7 @@ def _load(path: str | Path, check_paths: bool = True) -> Config:
 
 # keys a section reads beyond those configio.defaults() writes (none today; test_config checks the two agree)
 _SECTION_EXTRA: dict[str, set[str]] = {}
-_CHECKED_SECTIONS = ("paths", "watcher", "fragpipe", "gui", "users", "qc_trend", "library")  # notify checks its own
+_CHECKED_SECTIONS = ("paths", "watcher", "fragpipe", "gui", "users", "qc_trend", "library", "atlas")  # notify checks its own
 
 
 def unknown_settings(raw: dict) -> list[str]:
@@ -634,6 +636,27 @@ def _library(raw) -> dict:
         return settings_from(raw)
     except LibraryError as exc:
         raise ConfigError(f"library.{exc}" if not str(exc).startswith("must") else f"library: {exc}") from None
+
+
+def _atlas(raw, methods: dict[str, MethodConfig], file_rules: dict[str, FileRule]) -> dict:
+    """atlas: section (the hand-off to the lab's cysteine atlas, D120), validated by the module that uses it. The
+    methods it names must be FragPipe methods that are isoDTB (their kind), since the runs CSV says ProbeClass isoDTB."""
+    from ionomos.atlas import AtlasError, settings_from
+
+    try:
+        out = settings_from(raw)
+    except AtlasError as exc:
+        raise ConfigError(f"atlas.{exc}" if not str(exc).startswith("must") else f"atlas: {exc}") from None
+    for m in out["methods"]:
+        if m not in methods:
+            raise ConfigError(f"atlas.methods: there is no methods.{m} (methods: {', '.join(methods)})",
+                              key="atlas.methods")
+        engine = str(methods[m].extra.get("engine") or "fragpipe").lower()
+        kind = method_kind(m, file_rules, engine if engine != "fragpipe" else "")
+        if engine != "fragpipe" or kind != "isoDTB":
+            raise ConfigError(f"atlas.methods: {m} is {'searched by ' + engine if engine != 'fragpipe' else kind}; "
+                              "only FragPipe isoDTB methods go to the cysteine atlas", key="atlas.methods")
+    return out
 
 
 def _read_learned(path: Path, strict: bool = False) -> dict[str, list[str]]:
