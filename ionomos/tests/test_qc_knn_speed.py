@@ -9,7 +9,75 @@ import time
 
 import pytest
 
-from ionomos.downstream import qc
+from ionomos.downstream import fpa, qc
+
+# ------------------------------------------------------------------------ knn --
+
+
+def _table(nf: int, ns: int, seed: int, kind: str = "real", missing: float = 0.2) -> list[list[float | None]]:
+    rng = random.Random(seed)
+    effect = [rng.gauss(0, 0.3) for _ in range(ns)]
+    out = []
+    for _ in range(nf):
+        if kind == "iid":
+            row = [rng.gauss(0, 1) for _ in range(ns)]
+        else:  # proteins: an abundance, sample effects, replicate noise; low abundance missing more often
+            mu = rng.gauss(24, 2.5)
+            row = [mu + effect[j] + rng.gauss(0, 0.4) for j in range(ns)]
+        p = missing * (1.6 if kind == "mnar" and mu < 23 else 1.0) if kind != "iid" else missing
+        out.append([None if rng.random() < p else v for v in row])
+    return out
+
+
+def _variants():
+    yield "real", _table(300, 12, 1)
+    yield "iid", _table(300, 12, 2, "iid")
+    yield "mnar", _table(300, 12, 3, "mnar")
+    t = _table(300, 12, 4)
+    for i in range(0, 300, 7):  # duplicated rows: exact ties, broken by row order
+        t[i] = list(t[(i * 3) % 300])
+    yield "ties", t
+    t = _table(300, 12, 5)
+    rng = random.Random(5)
+    for r in t:  # a nearly empty sample, an empty one, rows with almost nothing
+        if rng.random() < 0.97:
+            r[1] = None
+        r[2] = None
+    t[10] = [None] * 11 + [20.0]
+    t[11] = [None] * 12
+    yield "sparse", t
+    yield "rounded", [[None if v is None else round(v, 1) for v in r] for r in _table(300, 12, 6, missing=0.3)]
+    yield "many samples", _table(220, 30, 7)
+    yield "tiny", _table(25, 4, 8)
+
+
+@pytest.mark.parametrize("name, table", list(_variants()), ids=[n for n, _ in _variants()])
+def test_knn_search_gives_the_reference_numbers_bit_for_bit(monkeypatch, name, table):
+    monkeypatch.setattr(fpa, "KNN_SCAN_ROWS", 0)  # the pruned search even on small tables
+    fast = [list(r) for r in table]
+    ref = [list(r) for r in table]
+    fpa._impute_knn(fast)
+    fpa._impute_knn_reference(ref)
+    assert fast == ref
+
+
+def test_knn_with_non_finite_values_uses_the_reference(monkeypatch):
+    monkeypatch.setattr(fpa, "KNN_SCAN_ROWS", 0)
+    t = _table(60, 6, 9)
+    t[3][0] = math.inf
+    fast, ref = [list(r) for r in t], [list(r) for r in t]
+    fpa._impute_knn(fast)
+    fpa._impute_knn_reference(ref)
+    assert repr(fast) == repr(ref)
+
+
+def test_knn_imputation_of_a_large_table_is_quick():
+    t = _table(3000, 12, 10)
+    t0 = time.perf_counter()
+    fpa._impute_knn(t)  # the all-pairs reference: ~30 s here, quadratic (about 4 min at 10,000 rows)
+    assert time.perf_counter() - t0 < 30
+    assert all(v is not None for r in t for v in r)
+
 
 # ------------------------------------------------------------------------ PCA --
 
