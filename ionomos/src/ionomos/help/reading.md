@@ -125,7 +125,11 @@ is then empty rather than showing every hit. After a search: **Copy names**,
 
 The report works from the keyboard too: Tab reaches every control, the arrow
 keys move between the QC tabs, Enter or Space sorts a table by a column, and
-Escape closes a help panel or the Export dialog.
+Escape closes a help panel or the Export dialog. Each table is one Tab stop:
+the arrow keys (and Home, End, Page Up, Page Down) move between its rows, the
+row's point is ringed on the chart beside it with its tooltip, and Enter
+opens the row (Shift+Enter pins it). The pinned names and the "Behaves like"
+names are buttons: Enter opens one, Delete unpins a pin.
 
 ## Zoom, box select and pins {#report.select}
 
