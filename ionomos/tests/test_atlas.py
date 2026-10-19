@@ -356,6 +356,34 @@ def _snapshot(folder: Path) -> dict:
     return out
 
 
+def _long(p) -> str:
+    """A path the file functions open past Windows' 260 characters, as atlas._fs does: the destination repeats the
+    test's long tmp folder (C/Users/.../pytest-N/.../fragpipe), so its paths pass the limit here, not on the PC."""
+    s = os.path.abspath(str(p))
+    return "\\\\?\\" + s if os.name == "nt" and not s.startswith("\\\\") else s
+
+
+def _files(root: Path) -> dict[str, str]:
+    """Every file under root: relative path with '/' -> a path that opens."""
+    out = {}
+    base = _long(root)
+    for d, _dirs, files in os.walk(base):
+        for f in files:
+            out[os.path.relpath(os.path.join(d, f), base).replace(os.sep, "/")] = os.path.join(d, f)
+    return out
+
+
+def _read(p) -> bytes:
+    with open(_long(p), "rb") as fh:
+        return fh.read()
+
+
+def _write(p, data: bytes) -> None:
+    os.makedirs(_long(Path(p).parent), exist_ok=True)
+    with open(_long(p), "wb") as fh:
+        fh.write(data)
+
+
 def _records(root: Path) -> list[Path]:
     return sorted((root / names.ATLAS_LOG_DIR).glob("runs-ionomos-*.csv"))
 
@@ -368,17 +396,17 @@ def test_a_hand_off_copies_verifies_and_records(handoff):
 
     run_dest = atlas.destination(handoff["run"], handoff["root"])
     assert run_dest == handoff["root"].joinpath(*atlas.layout_parts(atlas.windows_path(handoff["run"])))
-    copied = sorted(p.relative_to(run_dest).as_posix() for p in run_dest.rglob("*") if p.is_file())
+    copied = sorted(_files(run_dest))
     assert copied == sorted(["fragpipe.workflow", "fragpipe.job", "fragpipe-files.fp-manifest",
                              "combined_modified_peptide_label_quant.tsv", "log_2026-10-19_14-02-11.txt",
                              "exp_1/psm.tsv", "exp_2/psm.tsv", names.ATLAS_HANDOFF_FILE])
     for rel in copied:
         if rel != names.ATLAS_HANDOFF_FILE:
-            assert (run_dest / rel).read_bytes() == (handoff["run"] / rel).read_bytes()
-    assert not list(handoff["root"].rglob("*.partial"))
+            assert _read(run_dest / rel) == (handoff["run"] / rel).read_bytes()
+    assert not [r for r in _files(handoff["root"]) if r.endswith(".partial")]
 
     # the completion record
-    data = (run_dest / names.ATLAS_HANDOFF_FILE).read_bytes()
+    data = _read(run_dest / names.ATLAS_HANDOFF_FILE)
     rec = json.loads(data)
     assert rec["contract"] == atlas.CONTRACT and rec["run"] == atlas.windows_path(handoff["run"])
     files = {f["path"]: f for f in rec["files"]}
@@ -423,11 +451,11 @@ def test_a_hand_off_copies_verifies_and_records(handoff):
 def test_sending_again_copies_nothing_and_writes_a_new_record_with_the_same_hash(handoff):
     first = atlas.send(handoff["cfg"], handoff["job"])
     run_dest = Path(first.dest_dir)
-    stamp = {p: p.stat().st_mtime_ns for p in run_dest.rglob("*")}
+    stamp = {r: os.stat(f).st_mtime_ns for r, f in _files(run_dest).items()}
     again = atlas.send(handoff["cfg"], handoff["job"], trigger="app")
     assert again.ok and again.copied == 0 and again.already == 7
     assert again.handoff_sha256 == first.handoff_sha256  # nothing in the record changes: no double count
-    assert {p: p.stat().st_mtime_ns for p in run_dest.rglob("*")} == stamp  # not even the record is rewritten
+    assert {r: os.stat(f).st_mtime_ns for r, f in _files(run_dest).items()} == stamp  # not even the record
     assert len(_records(handoff["root"])) == 2 and again.record != first.record
     hist = atlas.state(handoff["exp"])["history"]
     assert hist == [{"sent_at": hist[0]["sent_at"], "record": first.record, "handoff_sha256": first.handoff_sha256}]
@@ -436,13 +464,12 @@ def test_sending_again_copies_nothing_and_writes_a_new_record_with_the_same_hash
 def test_a_different_file_at_the_destination_is_a_conflict_and_nothing_is_copied(handoff):
     run_dest = atlas.destination(handoff["run"], handoff["root"])
     theirs = run_dest / "exp_1" / "psm.tsv"
-    theirs.parent.mkdir(parents=True)
-    theirs.write_bytes(b"Peptide\n" * 49 + b"Peptidx\n")  # same size, other content
+    _write(theirs, b"Peptide\n" * 49 + b"Peptidx\n")  # same size, other content
     res = atlas.send(handoff["cfg"], handoff["job"])
     assert not res.ok and res.state == atlas.CONFLICT and res.copied == 0
     assert "exp_1" in res.conflicts[0] and "other content" in res.conflicts[0]
-    assert theirs.read_bytes() == b"Peptide\n" * 49 + b"Peptidx\n"
-    assert [p for p in run_dest.rglob("*") if p.is_file()] == [theirs]  # nothing else, no record
+    assert _read(theirs) == b"Peptide\n" * 49 + b"Peptidx\n"
+    assert list(_files(run_dest)) == ["exp_1/psm.tsv"]  # nothing else, no record
     assert not _records(handoff["root"])
     st = atlas.state(handoff["exp"])
     assert st["state"] == "conflict" and not atlas.is_due(st)  # a person decides
@@ -452,8 +479,7 @@ def test_a_different_file_at_the_destination_is_a_conflict_and_nothing_is_copied
 
 def test_a_file_of_another_size_is_a_conflict_without_reading_it(handoff, monkeypatch):
     run_dest = atlas.destination(handoff["run"], handoff["root"])
-    (run_dest / "exp_2").mkdir(parents=True)
-    (run_dest / "exp_2" / "psm.tsv").write_bytes(b"short")
+    _write(run_dest / "exp_2" / "psm.tsv", b"short")
     res = atlas.send(handoff["cfg"], handoff["job"])
     assert res.state == atlas.CONFLICT and "5 bytes" in res.conflicts[0]
 
@@ -497,7 +523,7 @@ def test_a_copy_that_does_not_verify_is_never_renamed(handoff, monkeypatch):
     res = atlas.send(handoff["cfg"], handoff["job"])
     assert res.state == atlas.FAILED and "does not match" in res.message
     run_dest = atlas.destination(handoff["run"], handoff["root"])
-    assert [p.suffix for p in run_dest.rglob("*") if p.is_file()] == [".partial"]
+    assert [os.path.splitext(r)[1] for r in _files(run_dest)] == [".partial"]
     assert not _records(handoff["root"])
     monkeypatch.setattr(atlas, "_sha256", real)
     assert atlas.send(handoff["cfg"], handoff["job"]).ok  # the leftover .partial is our own: written over
@@ -676,8 +702,9 @@ def test_a_search_that_ends_done_is_handed_off_end_to_end(tmp_path, monkeypatch)
     (res,) = atlas.HandoffLoop(lambda: cfg).run_once()
     assert res.ok, res.message
     run_dest = atlas.destination(Path(job.dest_dir) / "fragpipe", Path(d["atlas"]["handoff_dir"]))
-    assert (run_dest / "fragpipe.workflow").is_file() and list(run_dest.glob("*/psm.tsv"))
-    assert json.loads((run_dest / names.ATLAS_HANDOFF_FILE).read_text(encoding="utf-8"))["job"]["method"] == "isoDTB"
+    got = _files(run_dest)
+    assert "fragpipe.workflow" in got and [r for r in got if r.endswith("/psm.tsv")]
+    assert json.loads(_read(run_dest / names.ATLAS_HANDOFF_FILE))["job"]["method"] == "isoDTB"
 
 
 # ---------------------------------------------------------------------------------------- the commands --
@@ -702,7 +729,7 @@ def test_the_commands_on_a_lab_with_a_finished_job(handoff, capsys):
     assert not [p for p in handoff["root"].iterdir() if p.name.startswith(".ionomos-write-test")]
     # a conflict is exit 1 and names the file
     victim = Path(atlas.state(handoff["exp"])["dest"]) / "fragpipe.job"
-    victim.write_bytes(b"edited")
+    _write(victim, b"edited")
     assert main([*cfg, "atlas", "send", "1"]) == 1
     assert "differs:" in capsys.readouterr().err
 

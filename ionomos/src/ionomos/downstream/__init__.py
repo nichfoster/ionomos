@@ -750,7 +750,8 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
                 notes += tnotes
             if cys.applies(pm):
                 say("liganded cysteines")
-                called = stage("cysteines", _cysteines, processed, settings, results, out, dest, protein_hl)
+                called = stage("cysteines", _cysteines, processed, settings, results, out, dest, protein_hl,
+                               (context or {}).get("atlas_lookup"))
                 if called is None:
                     cys_info = {"ran": False, "reason": "the liganded-site step failed (see analysis_error.txt)"}
                 else:
@@ -976,10 +977,11 @@ def _protein_correction(p, diffs, settings, results: Path, out: Outcome, dest: P
 
 
 def _cysteines(p, settings, results: Path, out: Outcome, dest: Path,
-               protein_hl: dict | None = None) -> tuple[dict, dict, list, list[str]]:
+               protein_hl: dict | None = None, atlas_lookup=None) -> tuple[dict, dict, list, list[str]]:
     """results/cysteine_sites.tsv and cysteine_proteins.tsv for site ratio data (cys.py). Returns (analysis.json
     summary, the report's payload, problems for the doctor, notes). protein_hl: the proteome's ratio per site
-    (proteincorr.py), shown beside the calls."""
+    (proteincorr.py), shown beside the calls. atlas_lookup: the lab's cysteine atlas lookup folder, whose columns
+    the sites table gets when it reads (atlasctx.py, D124)."""
     if not settings.liganded:
         off = "liganded-site calls are switched off (analysis.liganded)"
         return cys.summary(None, off), cys.report_payload(None, off), [], []
@@ -996,7 +998,14 @@ def _cysteines(p, settings, results: Path, out: Outcome, dest: Path,
             except cys.AnnotationError as exc:
                 problems.append(("warning", str(exc)))
     res = cys.run(p, settings, annotation, protein_hl)
-    out.files.append(write_tsv(results / "cysteine_sites.tsv", cys.columns(res), cys.table_rows(res)))
+    columns, rows = cys.columns(res), cys.table_rows(res)
+    if atlas_lookup:
+        from ionomos.downstream import atlasctx
+
+        lk, _why = atlasctx.read_lookup(Path(atlas_lookup))  # the report says why when it can't be used
+        if lk is not None:
+            columns, rows = atlasctx.add_tsv_columns(lk, columns, rows)
+    out.files.append(write_tsv(results / "cysteine_sites.tsv", columns, rows))
     prot = None
     if res.proteins:
         out.files.append(write_tsv(results / "cysteine_proteins.tsv", cys.protein_columns(res), cys.protein_rows(res)))
