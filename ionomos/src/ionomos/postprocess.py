@@ -98,6 +98,8 @@ def prepare(dest: Path, cfg, method: str | None = None, extra: dict | None = Non
                     line["experiment"] = correction.experiment
                 if correction.bioreplicate is not None:
                     line["bioreplicate"] = correction.bioreplicate
+                if correction.fraction is not None and correction.fraction >= 1:  # a DIA's fractions are summed
+                    line["fraction"] = correction.fraction                        # (downstream._fractionated, #180)
     except Exception:  # noqa: BLE001 - a broken experiment.yaml must not block the analysis
         pass
     lab = dict(getattr(cfg, "analysis", {}) or {}) if cfg is not None else {}

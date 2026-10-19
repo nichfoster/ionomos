@@ -161,7 +161,7 @@ init --slow-defaults` uses production timings (10 s / 60 s).
 | `tmt_poor_label` | the fake's `tmt-poor-labelling` mode (20 % of N-termini unlabelled) → done, `TMT_LOW_LABELLING` |
 | `lfq_good` | label-free DDA (method LFQ): IonQuant's `combined_protein.tsv` in a real file's layout (blocks per quantity, Java floats, `contam_` rows), `experiment_annotation.tsv` type 0 → Drug vs DMSO |
 | `phospho_lfq` | label-free phospho (method Phospho, `analysis.phospho: true`): `combined_site_STY_79.9663.tsv` → a site-level analysis, EGF vs Ctrl |
-| `dia_fractions` | DIA in two fractions per sample (fractions in `experiment.yaml`): DIA-NN gets 12 `_uncalibrated.mzML` runs for 6 samples; the analysis asks (`DUPLICATE_SAMPLES`, #180) |
+| `dia_fractions` | DIA in two fractions per sample (fractions in `experiment.yaml`): DIA-NN gets 12 `_uncalibrated.mzML` runs for 6 samples; the analysis adds each sample's fractions up: 6 samples, Drug vs DMSO (#180) |
 | `open_search` | an open search (-150 to +500 Da, Crystal-C, PTM-Shepherd): `psm.tsv` with mass shifts, `ptm-shepherd-output/`, no quantification → done, with a note pointing at `ptm-shepherd-output/`, no NO_TABLE and no attention item (#181) |
 | `open_search_no_los` | the same with "Localize mass shift" off (`workflow: Open-noLOS.workflow`): FragPipe's non-fatal ERROR line → still done |
 | `non_ascii_log` | tools printing non-ASCII: `?` on the cp1252 console, the real text in `log_<date>.txt` → done |

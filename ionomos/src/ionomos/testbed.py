@@ -216,7 +216,7 @@ SAMPLES: dict[str, dict] = {
         yaml={"files": {f"{c}_{r}_F{f}.raw": {"experiment": c, "bioreplicate": r, "fraction": f}
                         for c in ("DMSO", "Drug") for r in (1, 2, 3) for f in (1, 2)}},
         shows="DIA in two gas-phase fractions per sample, mapped in experiment.yaml -> DIA-NN reports 12 runs for 6 "
-              "samples",
+              "samples, which the analysis adds up per sample",
     ),
     "open_search": dict(
         folder="20260918_EJQ_opensearch_mass-shifts",

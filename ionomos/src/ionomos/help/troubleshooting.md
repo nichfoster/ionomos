@@ -508,7 +508,9 @@ analysis**.
 Two files look like the same sample (a re-acquisition next to the original),
 and both count as replicates, which inflates the replicate number. Leave out
 the run you don't want, or give it the right condition, then **Run
-analysis**.
+analysis**. Fractions of one sample never show this: give each file its
+`fraction:` in `experiment.yaml` (or an `_F1`, `_F2` in its name) and a DIA's
+fractions are added up into one sample.
 
 ## Every sample is in the same condition {#issue.ONE_CONDITION}
 

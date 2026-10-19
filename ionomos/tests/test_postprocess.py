@@ -8,6 +8,7 @@ pins the glue in postprocess.py and the load_quantities behaviours that surface 
 """
 import copy
 import json
+import math
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -290,6 +291,51 @@ def test_a_tmt_jobs_reason_does_not_carry_the_table_kind_but_analysis_json_does(
     assert summary["method"] == "TMT" and said in summary["notes"]
     assert not any(said in w for w in warnings), warnings
     assert said in json.loads((dest / "results" / "analysis.json").read_text(encoding="utf-8"))["notes"]
+
+
+# ------------------------------------------------- a DIA in fractions (#180) --
+
+
+def _dia_fractions(tmp_path: Path, layout: bool = True, fractions_in_yaml: bool = False) -> Path:
+    dest = tmp_path / "20260917_Isaac_DIA_two-fraction"
+    raws = [(c, r, f) for c in ("DMSO", "Drug") for r in (1, 2, 3) for f in (1, 2)]
+    simulate.dia_pg_matrix(dest / "fragpipe" / "report.pg_matrix.tsv",
+                           [(f"{c}_{r}_F{f}_uncalibrated.mzML", c) for c, r, f in raws], seed=5)
+    plan = {"folder": {"method": "DIA"},
+            "manifest": [{"file": f"{c}_{r}_F{f}.raw", "experiment": c, "bioreplicate": r} for c, r, f in raws]}
+    if layout:
+        plan["layout"] = {c: {str(r): [1, 2] for r in (1, 2, 3)} for c in ("DMSO", "Drug")}
+    (dest / names.STATUS_FILE).write_text(json.dumps({"plan": plan}), encoding="utf-8")
+    if fractions_in_yaml:
+        (dest / "experiment.yaml").write_text(yaml.safe_dump({"files": {
+            f"{c}_{r}_F{f}.raw": {"experiment": c, "bioreplicate": r, "fraction": f} for c, r, f in raws}}),
+            encoding="utf-8")
+    return dest
+
+
+@pytest.mark.parametrize("layout, in_yaml", [(True, False), (False, True)])
+def test_a_dias_fractions_are_added_up_per_sample(tmp_path, layout, in_yaml):
+    dest = _dia_fractions(tmp_path, layout, in_yaml)
+    p = postprocess.prepare(dest, None)
+    m, _files, notes = downstream.load_quantities("DIA", dest / "fragpipe", dest / "results", p["record"])
+    assert m.samples == [f"{c}_{r}" for c in ("DMSO", "Drug") for r in (1, 2, 3)]
+    assert m.replicate == {s: int(s[-1]) for s in m.samples} and m.condition["Drug_2"] == "Drug"
+    assert m.meta["fractions"]["DMSO_1"] == ["DMSO_1_F1", "DMSO_1_F2"]
+    assert m.meta["manifest_run"]["DMSO_1"] == "DMSO_1_F1"
+    one = downstream.quant.from_pg_matrix(dest / "fragpipe" / "report.pg_matrix.tsv",
+                                          downstream._sample_map(p["record"]))
+    a, b = one.column("DMSO_1"), one.column("DMSO_1.2")
+    want = [None if x is None and y is None else math.log2(sum(2 ** v for v in (x, y) if v is not None))
+            for x, y in zip(a, b, strict=True)]
+    assert m.column("DMSO_1") == pytest.approx(want)
+    note = next(n for n in m.notes if "fractions were added" in n)
+    assert downstream.quant.is_info(note) and "6 sample(s) with 2–2 runs" in note
+
+
+def test_two_runs_of_a_sample_without_fractions_stay_two_and_the_doctor_asks(tmp_path):
+    dest = _dia_fractions(tmp_path, layout=False)
+    out = downstream.analyze(dest, "DIA", record=postprocess.prepare(dest, None)["record"])
+    assert "DUPLICATE_SAMPLES" in {i.code for i in out.issues} and len(out.summary["samples"]) == 12
 
 
 # ------------------------------------------------- a search that quantifies nothing (#181) --

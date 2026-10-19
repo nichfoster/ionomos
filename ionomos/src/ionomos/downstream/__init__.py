@@ -126,6 +126,23 @@ def _sample_map(record: dict | None) -> dict[str, tuple[str, int]]:
         out[stem] = (str(line["experiment"]), int(line["bioreplicate"]))
     return out
 
+def _fractionated(record: dict | None) -> set[tuple[str, int]]:
+    """The samples (experiment, bioreplicate) the plan has in two or more fractions: the plan's layout (sample ->
+    replicate -> its fractions, naming.py), or the fraction numbers experiment.yaml gives the manifest's files
+    (postprocess.prepare copies them onto the lines). A sample whose files carry no fraction is not in it."""
+    plan = (record or {}).get("plan") or {}
+    out: set[tuple[str, int]] = set()
+    for sample, reps in (plan.get("layout") or {}).items():
+        for rep, fracs in (reps or {}).items():
+            if str(rep).isdecimal() and len(set(fracs or [])) > 1:
+                out.add((str(sample), int(rep)))
+    seen: dict[tuple[str, int], set[int]] = {}
+    for line in plan.get("manifest") or []:
+        frac = line.get("fraction")
+        if isinstance(frac, int) and frac >= 1:
+            seen.setdefault((str(line["experiment"]), int(line["bioreplicate"])), set()).add(frac)
+    return out | {k for k, v in seen.items() if len(v) > 1}
+
 def _merge_ratio(mats: list[quant.QuantMatrix]) -> quant.QuantMatrix:
     """Several isoDTB samples in one folder -> one site matrix (union of sites)."""
     if len(mats) == 1:
@@ -258,7 +275,8 @@ def _load_quantities(method: str | None, workdir: Path, results: Path, record: d
         pg = _find(workdir, "report.pg_matrix.tsv", "*pg_matrix.tsv")
         if pg is None:
             return None, files, ["no DIA-NN *pg_matrix.tsv found (did the DIA-NN step run?)"]
-        return quant.from_pg_matrix(pg, _sample_map(record)), files, notes
+        smap = _sample_map(record)
+        return quant.sum_fractions(quant.from_pg_matrix(pg, smap), smap, _fractionated(record)), files, notes
     cp = _find(workdir, "combined_protein.tsv")
     if cp is None:
         return None, files, [f"don't know how to analyse method {method!r} (no known result table found)"]

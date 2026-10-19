@@ -132,10 +132,15 @@ def test_a_two_fraction_dia_gives_dia_nn_a_run_per_fraction(bed):
     assert len(head) == 7 + 12 and all(h.endswith("_uncalibrated.mzML") for h in head[7:])
     manifest = _tsv(wd / "fragpipe-files.fp-manifest")
     assert {(r[1], r[2]) for r in manifest} == {(c, str(n)) for c in ("DMSO", "Drug") for n in (1, 2, 3)}
-    # the analysis sees the two fractions of a sample as two runs of it, and asks (issue filed: it calls them
-    # re-acquisitions, ROADMAP); it never treats them as two replicates silently
+    # the analysis adds up each sample's two fractions (experiment.yaml says they are fractions, #180): six samples,
+    # never twelve replicates and never "re-acquisitions"
     a = _analysis(dest)
-    assert a["state"] == "needs_input" and "DUPLICATE_SAMPLES" in {i["code"] for i in a["issues"]}
+    assert "DUPLICATE_SAMPLES" not in {i["code"] for i in a["issues"]}, a["issues"]
+    assert sorted(a["samples"]) == [f"{c}_{n}" for c in ("DMSO", "Drug") for n in (1, 2, 3)]
+    assert any("fractions were added (6 sample(s) with 2–2 runs" in n for n in a["notes"])
+    assert [c["name"] for c in a["comparisons"]] == ["Drug vs DMSO"] and a["comparisons"][0]["samples"] == {
+        "treatment": 3, "control": 3}
+    assert "fractions were added" not in (job.reason or "")  # a note, not a warning (#182)
 
 
 @pytest.mark.parametrize("sample", ["open_search", "open_search_no_los"])
