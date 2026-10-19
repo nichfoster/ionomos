@@ -377,6 +377,10 @@ pop-up. After fixing the cause, press **Retry**; the earlier output is kept.
   restarted during the search. Nothing to do: it runs again from the start.
 - **Raw files missing or empty (0 bytes)**: a file was moved after filing,
   or an acquisition was aborted. Put it back or copy it again.
+- **FragPipe refused: ...**: FragPipe would not start the search and said
+  why; the reason quotes its message (an empty FASTA, a missing TMT
+  annotation, a raw file gone since Ionomos checked). Fix what it names: a
+  Retry without a change fails the same way.
 - **experiment.yaml asks for a workflow or FASTA that isn't there**: fix the
   name in the experiment's `experiment.yaml`, or put the file in the
   workflows / FASTA folder.

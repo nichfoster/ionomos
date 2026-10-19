@@ -59,7 +59,9 @@ bin\fragpipe.bat --headless --workflow <wf> --manifest <mf> --workdir <out>
   don't exist. Please double check.", each path, exit code 1;
   `showSkippedFiles`, 23.1 and 24.0; only the window skips it). Ionomos
   checks the raws itself before every run and bounds replicates to 1–999
-  (D85). Two files with the same name stop the run.
+  (D85); a done job whose log has the "badly formatted lines" line carries
+  a warning naming the runs FragPipe left out (#179). Two files with the
+  same name stop the run.
 - **Experiment names** keep only letters, digits and `_`: FragPipe turns
   every other character into `_` (`EJQ-2-027` → `EJQ_2_027`). Output
   folders are `<experiment>_<bioreplicate>\`, and one flat folder when the

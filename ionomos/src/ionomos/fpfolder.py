@@ -53,7 +53,15 @@ KIND_WORDS = {
     "DIA": "DIA (DIA-NN protein matrix)",
     "DIA-NN": "DIA (DIA-NN precursor report)",
     "LFQ": "label-free DDA (IonQuant)",
+    # MS1 labels other than isoDTB (#161): workflow_kind names them, the analysis does not handle them (no TABLES)
+    "SILAC": "SILAC (IonQuant's K / R labels)",
+    "isoTOP": "isoTOP-ABPP (IonQuant's isoTOP labels)",
+    "ipIAA": "ipIAA (IonQuant's ipIAA labels)",
+    "PAL": "PAL (IonQuant's photo-affinity labels)",
+    "labelled": "an IonQuant MS1 label other than isoDTB",
 }
+UNHANDLED_LABELS = ("SILAC", "isoTOP", "ipIAA", "PAL", "labelled")
+LABEL_TABLES = ("isoDTB", "LFQ")    # what such a search writes: neither is read as its result (#161)
 WHAT_TABLE = {
     "isoDTB": "combined_modified_peptide_label_quant.tsv (IonQuant's labelled peptides)",
     "TMT": "tmt-report/abundance_gene_MD.tsv (TMT-Integrator's table)",
@@ -191,7 +199,10 @@ class Scan:
 
 
 def workflow_kind(props: dict[str, str]) -> str | None:
-    """What a FragPipe workflow quantifies, from its run-* switches (fragpipe.workflow_needs reads the same keys)."""
+    """What a FragPipe workflow quantifies, from its run-* switches (fragpipe.workflow_needs reads the same keys).
+    MS1 labelling (ionquant.use-labeling) is isoDTB only for isoDTB's label masses (ionquant.light / .heavy, or
+    those masses among the variable mods); SILAC / isoTOP / ipIAA / PAL / labelled otherwise, as the library
+    tells them apart (library._label_kind, #161): kinds in UNHANDLED_LABELS, which the analysis does not handle."""
     def on(key: str) -> bool:
         return props.get(key, "").strip().lower() == "true"
 
@@ -200,7 +211,12 @@ def workflow_kind(props: dict[str, str]) -> str | None:
     if on("diann.run-dia-nn"):
         return "DIA"
     if on("quantitation.run-label-free-quant"):
-        return "isoDTB" if on("ionquant.use-labeling") else "LFQ"
+        if not on("ionquant.use-labeling"):
+            return "LFQ"
+        from ionomos import library  # library imports this module: read it when it is needed
+
+        var = [m for m in library.parse_mods(props.get("msfragger.table.var-mods", "")) if m[2]]
+        return library._label_kind(props, var)
     return None
 
 
@@ -418,10 +434,19 @@ def _fill(out: Output) -> None:
 # --------------------------------------------------------------- deciding --
 
 
+def analysable(out: Output) -> list[str]:
+    """The readable tables the analysis may read as their kind: a search with a label other than isoDTB (SILAC,
+    PAL, isoTOP, ipIAA) writes IonQuant's label table and combined_protein.tsv, which are neither isoDTB's
+    cysteine sites nor label-free quantities (#161)."""
+    if out.asked in UNHANDLED_LABELS:
+        return [k for k in out.readable if k not in LABEL_TABLES]
+    return out.readable
+
+
 def decide(out: Output, filed: str | None = None) -> tuple[str | None, bool, str]:
     """(method, confident, why) for one output folder. confident: the evidence is strong enough to overrule what
     the folder was filed as without asking (a table only one kind of search writes, or the workflow agrees)."""
-    readable = out.readable
+    readable = analysable(out)
     asked = out.asked
     if asked and asked in readable:
         return asked, True, f"FragPipe's workflow ran {KIND_WORDS[asked]} and its table is here"
@@ -694,7 +719,8 @@ def _judge(sc: Scan, o: Output, filed: str | None, forced: str | None) -> None:
     """The method to analyse as, and every problem with the tables, the workflow and what it was filed as."""
     rec, sure, why = decide(o, filed)
     sc.recommended, sc.why = rec, why
-    sc.choices = list(o.readable)
+    usable = analysable(o)
+    sc.choices = list(usable)
     asked = o.asked
     log_why, hints = _log_reason(o)
     log_action = [("Open FragPipe's log", f"open:{o.log}")] if o.log is not None else []
@@ -710,7 +736,21 @@ def _judge(sc: Scan, o: Output, filed: str | None, forced: str | None) -> None:
             fix or ("Re-run the last FragPipe steps (or the whole search) and make sure it finishes; check there is "
                     "free disk space."), log_action))
 
-    if asked and asked not in o.readable and not (asked == "DIA" and "DIA-NN" in o.readable):
+    if asked in UNHANDLED_LABELS:  # #161: never isoDTB's cysteine-site analysis on another label
+        labels = " / ".join(v.strip() for k in ("ionquant.light", "ionquant.medium", "ionquant.heavy")
+                            if (v := o.props.get(k, "")).strip())
+        left = [_rel(o.tables[k], o.root) for k in LABEL_TABLES if k in o.tables]
+        sc.findings.append(Finding(
+            "LABEL_NOT_HANDLED", "error" if rec is None else "warning",
+            f"FragPipe's workflow quantified {KIND_WORDS[asked]}: Ionomos does not analyse it",
+            f"The saved workflow ({o.workflow.name if o.workflow else '?'}) switched on IonQuant's MS1 labelling"
+            + (f" with the labels {labels}" if labels else " without isoDTB's labels")
+            + ". Ionomos analyses one MS1 label only, isoDTB (C561.3387 / C567.3462): its site analysis reads "
+              "labelled cysteines, which would be wrong for this experiment."
+            + (f"\nFragPipe's own tables are here: {', '.join(left)}." if left else ""),
+            "Open FragPipe's tables yourself. If this is an isoDTB search, set the isoDTB labels in the workflow "
+            "(FragPipe's Quant (MS1) tab) and re-run FragPipe.", log_action))
+    elif asked and asked not in o.readable and not (asked == "DIA" and "DIA-NN" in o.readable):
         missing = WHAT_TABLE[asked]
         msg = (f"The saved workflow ({o.workflow.name if o.workflow else '?'}) ran {KIND_WORDS[asked]}, but its "
                f"table is not here: expected {missing}.")
@@ -731,7 +771,7 @@ def _judge(sc: Scan, o: Output, filed: str | None, forced: str | None) -> None:
                                    log_why + "." + (f"\nLikely cause: {hints[0]}" if hints else ""),
                                    "Check the log before trusting these results.", log_action))
 
-    if rec is None and not o.broken and not any(f.code == "STEP_MISSING" for f in sc.findings):
+    if rec is None and not o.broken and not any(f.code in ("STEP_MISSING", "LABEL_NOT_HANDLED") for f in sc.findings):
         what = ", ".join(_rel(p, o.root) for p in o.tables.values()) or "none"
         sc.findings.append(Finding(
             "NO_TABLE", "error", "FragPipe ran here, but left no table to analyse",
@@ -760,7 +800,7 @@ def _judge(sc: Scan, o: Output, filed: str | None, forced: str | None) -> None:
             "METHOD_GUESSED", "input", f"Analysed as {KIND_WORDS[rec]}: please check",
             f"There is no saved workflow saying what this search was, and {why}.",
             "If that is wrong, choose the right kind under 'Analyse as'.",
-            [(f"Analyse as {k}", f"method:{k}") for k in o.readable if k != rec][:3]))
+            [(f"Analyse as {k}", f"method:{k}") for k in usable if k != rec][:3]))
 
     if asked == "DIA" and rec == "DIA-NN":
         sc.findings.append(Finding(
@@ -777,7 +817,7 @@ def _judge(sc: Scan, o: Output, filed: str | None, forced: str | None) -> None:
 
     sc.method = rec
     if forced:
-        if forced in o.readable:
+        if forced in usable:
             sc.method = forced
             if rec and forced != rec:
                 sc.findings.append(Finding(
@@ -788,8 +828,11 @@ def _judge(sc: Scan, o: Output, filed: str | None, forced: str | None) -> None:
             sc.method = None
             sc.findings.append(Finding(
                 "METHOD_UNREADABLE", "error", f"Nothing here can be read as {forced}",
-                f"{KIND_WORDS.get(forced, forced)} needs {WHAT_TABLE.get(forced, 'its table')}, which isn't in "
-                f"{_rel(o.root, sc.picked)}.", "Choose one of the kinds offered under 'Analyse as'.",
+                (f"{WHAT_TABLE.get(forced, forced)} is here, but FragPipe's workflow quantified "
+                 f"{KIND_WORDS.get(asked, asked)}, not {KIND_WORDS.get(forced, forced)}."
+                 if forced in o.readable else
+                 f"{KIND_WORDS.get(forced, forced)} needs {WHAT_TABLE.get(forced, 'its table')}, which isn't in "
+                 f"{_rel(o.root, sc.picked)}."), "Choose one of the kinds offered under 'Analyse as'.",
                 [(f"Use {rec} (recommended)", f"method:{rec}")] if rec else []))
 
     if sc.method == "TMT":
