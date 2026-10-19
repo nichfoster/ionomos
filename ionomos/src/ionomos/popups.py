@@ -20,7 +20,7 @@ Each window says what happened, the most likely causes, what to do, the details
     search_waiting                     Open Ionomos (setup checklist), folder
     intake_rejected                    Open the inbox, the note
     atlas_handoff_failed               Send to atlas (the app's, D125); opened from the list only, never by itself
-    every item                        Ask about this (the local assistant, read-only: AskWindow), More help (the
+    every item                         Ask about this (the local assistant, read-only: AskWindow), More help (the
                                        help page at this problem), Remind me in an hour, Dismiss
 
 "Ask about this" is also in the list. The answer is made on a worker thread (assistant/askui.py holds the

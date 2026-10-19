@@ -380,7 +380,8 @@ def test_the_checklist_line_and_its_fix_button(hidden_app, no_dialogs, tk_errors
     app.bv("atlas.enabled").set(True)  # on, no folder (not saved: the checklist shows the window's settings)
     _pump(app, lambda: not app.busy("checks"))
     app.refresh_setup()
-    assert _pump(app, lambda: not app.busy("checks") and any(r.key == "setup:atlas" for r in app.setup_items), 60)
+    assert _pump(app, lambda: not app.busy("checks") and any(r.key == "setup:atlas"
+                                                              for r in getattr(app, "setup_items", [])), 60)
     (row,) = [r for r in app.setup_items if r.key == "setup:atlas"]
     assert row.status == "todo" and row.action == "atlas_folder" and row.title == "Cysteine atlas hand-off"
     assert "Fix" in _buttons(app.setup_list)
