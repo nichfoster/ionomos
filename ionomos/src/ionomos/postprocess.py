@@ -170,6 +170,22 @@ def table_workspace(table: Path) -> Path:
     return ws
 
 
+def atlas_context(cfg) -> dict:
+    """{"atlas_lookup": <atlas.handoff_dir>/_atlas} when the lab's config has the cysteine atlas hand-off on, else {}:
+    where the report reads the atlas' site lookup for the liganded sites (downstream/atlasctx.py, D124). A runtime
+    argument of the analysis, not a setting; reading it is the report's job, and only for isoDTB sites."""
+    if cfg is None:
+        return {}
+    try:
+        from ionomos import atlas
+
+        folder = atlas.lookup_dir(cfg)
+    except Exception:  # noqa: BLE001 - the atlas must never block the analysis
+        log.exception("could not tell where the cysteine atlas publishes its lookup")
+        return {}
+    return {"atlas_lookup": folder} if folder is not None else {}
+
+
 def run_for_folder(dest: Path, cfg, method: str | None = None, extra: dict | None = None, progress=None,
                    table: Path | None = None, strict: bool = False):
     """Analyse one experiment folder (used after a job, by `ionomos analyze` and the Analysis tab).
@@ -178,8 +194,8 @@ def run_for_folder(dest: Path, cfg, method: str | None = None, extra: dict | Non
     from ionomos import downstream
 
     p = prepare(dest, cfg, method, extra, strict)
-    out = downstream.analyze(p["dest"], p["method"], p["lab"], p["overrides"], p["record"], p["context"],
-                             p["mod_mass"], progress=progress, table=table,
+    out = downstream.analyze(p["dest"], p["method"], p["lab"], p["overrides"], p["record"],
+                             {**p["context"], **atlas_context(cfg)}, p["mod_mass"], progress=progress, table=table,
                              workdir=None if table is not None else p["workdir"])
     out.warnings = p["notes"] + out.warnings
     return out

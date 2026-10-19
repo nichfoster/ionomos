@@ -2574,6 +2574,9 @@
   // ------------------------------------------------------- liganded sites
   // D.cys (cys.py report_payload): site ratio data (isoDTB). Per compound, columns over the sites: r = median log2
   // competition ratio, n / over = replicates measured / at or over the threshold, cls = index into D.cys.classes.
+  // D.cys.atlas (atlasctx.py with_atlas, D124; only with the lab's atlas lookup), per site: tier = index into
+  // atlas.tiers, exp / spec = the atlas' experiments and spectra, qc = the atlas flags it, new = a human site the
+  // atlas doesn't have; null / 0 everywhere where the atlas can't say (an isoform, another species).
   // The calls are made in Python; the page only shows them.
   const CS = { c: 0, show: "lig", q: "", sortKey: "r", sortDir: -1, page: 0, rows: "sites" };
   const cysColor = (k) => css(k === 0 ? "--up" : k === 1 ? "--c3" : k === 2 ? "--ns" : "--c6");
@@ -2587,6 +2590,7 @@
       if (CS.show === "any" && !X.nlig[k]) continue;
       if (CS.show === "sel" && X.sel[k] !== 1) continue;
       if (CS.show === "new" && !(X.nlig[k] && X.annotation && X.annotation.status[k] === "new")) continue;
+      if (CS.show === "anew" && !(X.nlig[k] && X.atlas && X.atlas.new[k])) continue;
       if (CS.show === "all" && S.r[k] == null) continue;
       if (q) {
         const i = X.i[k], t = ((D.f.label[i] || "") + " " + (D.f.id[i] || "") + " " + (D.f.desc[i] || "")).toLowerCase();
@@ -2596,7 +2600,8 @@
     }
     const key = CS.sortKey, m = /^c(\d+)$/.exec(key);
     const val = (k) => (m ? X.compounds[+m[1]].r[k] : key === "name" ? nameOf(X.i[k]).toLowerCase() : key === "cls" ? S.cls[k] : key === "over" ? S.over[k] :
-      key === "nlig" ? X.nlig[k] : key === "sel" ? (X.sel[k] || 9) : key === "status" ? X.annotation.status[k] : S.r[k]);
+      key === "nlig" ? X.nlig[k] : key === "sel" ? (X.sel[k] || 9) : key === "status" ? X.annotation.status[k] :
+      key === "atier" ? X.atlas.tier[k] : key === "aexp" ? X.atlas.exp[k] : key === "anew" ? X.atlas.new[k] : S.r[k]);
     out.sort((a, b) => {
       const x = val(a), y = val(b);
       if (x == null || y == null) return x == null ? (y == null ? 0 : 1) : -1;
@@ -2611,8 +2616,8 @@
     if (X.ran) ["#cys", "#navcys"].forEach((s) => { const e = $(s); if (e) e.hidden = false; });
     if (!S) { host.innerHTML = "<div class='empty'>" + esc(X.reason || "No liganded-site calls were made.") + "</div>"; return; }
     CS.c = X.compounds.indexOf(S);
-    const many = X.compounds.length > 1, ann = X.annotation;
-    if ((CS.show === "sel" && !many) || (CS.show === "new" && !ann)) CS.show = "lig";
+    const many = X.compounds.length > 1, ann = X.annotation, at = X.atlas;
+    if ((CS.show === "sel" && !many) || (CS.show === "new" && !ann) || (CS.show === "anew" && !at)) CS.show = "lig";
     const pct = (c) => (c.fraction == null ? "–" : (100 * c.fraction).toFixed(1) + "%");
     let h = "<div class='tiles'>" + X.compounds.map((c) => "<div class='tile'><div class='k'>" + esc(c.name) + "</div><div class='v'>" + fmtInt(c.counts.liganded) +
       "</div><div class='d'>liganded of " + fmtInt(c.assessed) + " assessed (" + pct(c) + ")" + (c.counts.inconsistent ? " · " + fmtInt(c.counts.inconsistent) + " inconsistent" : "") +
@@ -2621,8 +2626,10 @@
       fmtInt(X.selectivity.shared) + " shared · " + fmtInt(X.selectivity.unresolved) + " unresolved</div></div>";
     if (ann) h += "<div class='tile'><div class='k'>New liganded sites</div><div class='v'>" + fmtInt(ann.liganded_new) + "</div><div class='d'>not in " + esc(ann.file) + " · " +
       fmtInt(ann.liganded_known) + " in it</div></div>";
+    if (at) h += "<div class='tile'><div class='k'>New to the atlas</div><div class='v'>" + fmtInt(at.counts.ligNew) + "</div><div class='d'>liganded sites the lab&#39;s atlas doesn&#39;t have · " +
+      fmtInt(at.counts.ligHeld) + " it has</div></div>";
     const opts = [["lig", "liganded by " + S.name], ["inc", "inconsistent in " + S.name]].concat(many ? [["any", "liganded by any compound"], ["sel", "selective"]] : [],
-      ann ? [["new", "liganded and new"]] : [], [["all", "every site measured in " + S.name]]);
+      ann ? [["new", "liganded and new"]] : [], at ? [["anew", "liganded and new to the atlas"]] : [], [["all", "every site measured in " + S.name]]);
     h += "</div><div class='row'>" + (many ? "<label class='ctl'>Compound <select id='ccomp'>" + X.compounds.map((c, k) => "<option value='" + k + "'" + (k === CS.c ? " selected" : "") + ">" + esc(c.name) + "</option>").join("") + "</select></label>" : "") +
       "<label class='ctl'>Show <select id='cshow'>" + opts.map((o) => "<option value='" + o[0] + "'" + (o[0] === CS.show ? " selected" : "") + ">" + esc(o[1]) + "</option>").join("") + "</select></label>" +
       "<input type='search' id='cq' placeholder='Find a site' aria-label='Find a site' value='" + esc(CS.q) + "'>" +
@@ -2674,10 +2681,11 @@
     const X = D.cys, S = cysCompound(), host = $("#cystable");
     if (!S || !host) return;
     if (CS.rows === "proteins") { renderCysProteins(host); return; }
-    const many = X.compounds.length > 1, ann = X.annotation, lim = 2 * Math.log2(X.ratio);
+    const many = X.compounds.length > 1, ann = X.annotation, at = X.atlas, lim = 2 * Math.log2(X.ratio);
     const cols = [{ k: "name", t: "Site" }].concat(X.compounds.map((c, j) => ({ k: "c" + j, t: "R " + c.name, n: 1, comp: j })),
       [{ k: "over", t: "replicates ≥ R", n: 1 }, { k: "cls", t: "call" }], many ? [{ k: "nlig", t: "liganded by", n: 1 }, { k: "sel", t: "selectivity" }] : [],
-      ann ? [{ k: "status", t: "annotation" }] : [], [{ k: "desc", t: "Description" }]);
+      ann ? [{ k: "status", t: "annotation" }] : [],
+      at ? [{ k: "atier", t: "atlas tier" }, { k: "aexp", t: "atlas experiments", n: 1 }, { k: "anew", t: "new to atlas" }] : [], [{ k: "desc", t: "Description" }]);
     const rows = cysRows(), per = 50, pages = Math.max(1, Math.ceil(rows.length / per));
     CS.page = Math.min(CS.page, pages - 1);
     const mark = anyMark();
@@ -2697,6 +2705,10 @@
         if (c.k === "nlig") return "<td class='n'>" + X.nlig[k] + "</td>";
         if (c.k === "sel") return "<td>" + esc(X.selNames[X.sel[k]]) + "</td>";
         if (c.k === "status") return "<td>" + esc(ann.status[k]) + "</td>";
+        if (c.k === "atier") return at.tier[k] == null ? "<td></td>" : "<td title='" + esc("In the lab's atlas: " + at.tiers[at.tier[k]] + ", " + at.exp[k] + " experiments, " + at.spec[k] + " spectra") + "'>" +
+          esc(at.tiers[at.tier[k]]) + (at.qc[k] ? " <span class='badge' title='The atlas flags this site&#39;s evidence as QC suspect'>QC suspect</span>" : "") + "</td>";
+        if (c.k === "aexp") return "<td class='n'>" + (at.exp[k] == null ? "" : fmtInt(at.exp[k])) + "</td>";
+        if (c.k === "anew") return "<td>" + (at.new[k] ? "<span class='badge anew' title='A human site the lab&#39;s atlas does not have'>new</span>" : "") + "</td>";
         return "<td class='desc'>" + esc((D.f.desc[i] || "").slice(0, 120)) + "</td>";
       }).join("") + "</tr>";
     });
@@ -2705,7 +2717,7 @@
     $$("th", host).forEach((th) => (th.onclick = () => {
       const k = th.dataset.k;
       if (k === "desc") return;
-      if (sortKey === k) CS.sortDir *= -1; else { CS.sortKey = k; CS.sortDir = k === "name" || k === "cls" || k === "sel" || k === "status" ? 1 : -1; }
+      if (sortKey === k) CS.sortDir *= -1; else { CS.sortKey = k; CS.sortDir = k === "name" || k === "cls" || k === "sel" || k === "status" || k === "atier" ? 1 : -1; }
       CS.page = 0; renderCysTable();
     }));
     $$("tbody tr[data-k]", host).forEach((tr) => (tr.onclick = () => setFocus(X.i[+tr.dataset.k])));

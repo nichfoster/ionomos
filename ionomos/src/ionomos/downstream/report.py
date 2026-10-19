@@ -21,7 +21,8 @@ The page carries its data as JSON and draws everything in the browser
     Time course    (3+ time points) change over time (limma's F), trend, patterns of the changing features, each
                    feature's profile over its replicates
     Liganded sites (isoDTB) per compound the liganded fraction and a ratio rank plot; a site x compound table of
-                   competition ratios with the call, selectivity and, with a site annotation, known / new
+                   competition ratios with the call, selectivity and, with a site annotation, known / new; with
+                   the lab's cysteine atlas lookup, each site's atlas tier, experiments and new sites (D124)
     TMT plexes     (a FragPipe TMT search, tmtqc.py, D91) per plex the reporter intensity of each channel, the
                    labelling efficiency (N-termini, K, fully labelled) and the precursor purity, against their limits
     QC             sample scorecard, PCA (with what explains each PC), correlation, missing values, missingness
@@ -528,14 +529,36 @@ def _spline_methods(time: dict, names: str, curves: list[dict], vs: list[str]) -
             "profiles scaled to the largest change.")
 
 
+def _cys_atlas(cys: dict | None, ctx: dict, pm: QuantMatrix | None) -> tuple[dict | None, str]:
+    """The liganded sites with the lab's cysteine atlas beside them (atlasctx.py, D124), when the analysis was given
+    the atlas' lookup folder (ctx["atlas_lookup"], postprocess.run_for_folder) and the sites were called. Returns
+    (cys, a note for the report when the lookup is there but can't be used). Never costs a report."""
+    folder = ctx.get("atlas_lookup")
+    if not folder or not (cys and cys.get("ran")) or pm is None:
+        return cys, ""
+    try:
+        from ionomos.downstream import atlasctx
+
+        lk, why = atlasctx.read_lookup(Path(folder))
+        if lk is None:  # not published yet: nothing to say; malformed: one note
+            return cys, "" if why.startswith("not published") else f"cysteine atlas lookup ignored ({why})"
+        return atlasctx.with_atlas(cys, lk, [f.id for f in pm.features]), ""
+    except Exception as exc:  # noqa: BLE001
+        return cys, f"cysteine atlas lookup ignored ({type(exc).__name__}: {exc})"
+
+
 def _cys_methods(cys: dict) -> str:
     ann = cys.get("annotation") or {}
+    at = cys.get("atlas") or {}
     return (f"A cysteine was called liganded by a compound when its competition ratio reached {escape(cys['rule'])} "
             "(never imputed); sites reaching it in fewer replicates "
             "were called inconsistent, and sites measured in fewer replicates than that were not assessed. A site "
             "was called selective when one compound liganded it and every other compound was measured as not "
             "liganding it." + (f" Sites were compared with the lab's site annotation {escape(ann['file'])} "
                                f"({ann['sites_in_file']:,} sites)." if ann else "")
+            + (f" Sites were looked up in the lab's internal cysteine atlas (built {escape(at['built'])}; "
+               f"{at['sites']:,} human sites) by canonical UniProt accession and residue number; isoforms and other "
+               "species were not looked up." if at else "")
             + (" The protein's own ratio from the proteome is listed beside each call in cysteine_sites.tsv; the "
                "call itself uses the site ratio." if cys.get("proteinShown") else ""))
 
@@ -702,10 +725,13 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
     title = ctx.get("experiment") or "Experiment"
     meta = " · ".join(x for x in (ctx.get("user"), ctx.get("method"), ctx.get("date"),
                                   f"generated {datetime.now():%Y-%m-%d %H:%M}", f"Ionomos {ctx.get('version', '')}") if x)
+    pm = p.m if p else m
+    cys, atlas_note = _cys_atlas(cys, ctx, pm)  # the lab's cysteine atlas beside the liganded sites (D124)
+    if atlas_note:
+        notes = [*notes, atlas_note]
     data = json.dumps(payload(ctx, m, p, diffs, notes, files, s, qcd or {}, enrichment, ranked, insight, dose, cys, time,
                               psm, phos),
                       separators=(",", ":"), allow_nan=False).replace("</", "<\\/").replace("<!--", "<\\u0021--")
-    pm = p.m if p else m
     ratio = pm is not None and pm.kind == "ratio"
     dose_shown = bool(dose and (dose.get("ran") or dose.get("found")))
     cys_shown = bool(cys and cys.get("ran"))
@@ -848,7 +874,9 @@ def render(ctx: dict, m: QuantMatrix | None, p: fpa.Processed | None, diffs: lis
              "Which cysteines each compound engages: a site is liganded when its competition ratio R reaches the "
              "threshold in enough replicates. This is the chemoproteomics convention, not a p-value; the volcano "
              "above tests whether a ratio differs from 1. Click a row to see the site's replicates.</p>"
-             "<div id='cysbody'></div></section>")
+             + (f"<p class='muted' id='cysatlas'>{escape(cys['atlas']['line'])}</p>" if cys_shown and cys.get("atlas")
+                else "")
+             + "<div id='cysbody'></div></section>")
     b.append("<section id='phos'" + ("" if phos_shown else " hidden") + "><h2>" + _phos_title(phos) + "</h2>"
              "<p class='sub'>What the phosphosite table kept after the localisation filter, which kinases' known "
              "substrates move together (KSEA: a z-score from the substrates' fold changes, not a measurement of the "

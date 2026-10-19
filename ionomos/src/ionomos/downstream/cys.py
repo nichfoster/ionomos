@@ -14,6 +14,9 @@ threshold in enough replicates; the usual rule is R >= 4 in at least 2 replicate
                                    # low:  R = light / heavy (it carries the heavy tag)
       site_annotation: cysdb.csv   # optional: a site table the lab downloaded (CysDB), for known / new sites
 
+The lab's own cysteine atlas is not a setting: when the atlas hand-off is on, the report puts its tier, experiments
+and new sites beside these calls (atlasctx.py, D124).
+
 Per site and compound:
     liganded        R >= liganded_ratio in >= liganded_min_replicates replicates
     inconsistent    reached in some replicates, but fewer than that
