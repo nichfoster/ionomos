@@ -23,7 +23,7 @@ import zipfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
-from ionomos.downstream.quant import Feature, QuantMatrix, run_stem
+from ionomos.downstream.quant import Feature, Info, QuantMatrix, run_stem
 from ionomos.downstream.tables import NA_STRINGS, decode, num, unquote
 
 TABLE_SUFFIXES = (".tsv", ".csv", ".txt", ".xlsx", ".tab")
@@ -439,9 +439,12 @@ def describe(path: str | Path) -> dict:
 # ------------------------------------------------------------------ loading --
 
 
-def load(path: str | Path) -> QuantMatrix:
+def load(path: str | Path, known: bool = False) -> QuantMatrix:
     """A QuantMatrix from any table. Already-analysed tables come back with no samples and
-    meta["precomputed"] = [{name, fc, p, q}] (lists aligned with the features)."""
+    meta["precomputed"] = [{name, fc, p, q}] (lists aligned with the features). known: an engine's own table
+    (engines.py: MaxQuant, a Spectronaut pivot, AlphaDIA, Proteome Discoverer), whose sample columns and linear
+    intensities are what that engine writes, not a guess: those two notes are then quant.Info (D110, D118)."""
+    said = Info if known else str
     path = Path(path)
     notes: list[str] = []
     header, rows = read_table(path, notes)
@@ -457,8 +460,8 @@ def load(path: str | Path) -> QuantMatrix:
     if flags:
         before = len(rows)
         rows = [r for r in rows if not any(r[ix[f]].strip() == "+" for f in flags)]
-        if before - len(rows):
-            notes.append(f"{before - len(rows)} row(s) flagged {' / '.join(flags)} were left out (MaxQuant '+')")
+        if before - len(rows):  # MaxQuant's own flags, left out as every MaxQuant analysis does: not a warning
+            notes.append(Info(f"{before - len(rows)} row(s) flagged {' / '.join(flags)} were left out (MaxQuant '+')"))
 
     def feature(r) -> Feature:
         fid = r[ix[idc]].strip()
@@ -494,7 +497,7 @@ def load(path: str | Path) -> QuantMatrix:
     if not cols:
         raise TableError(f"{path.name}: no numeric sample columns and no fold-change / p-value columns found")
     raw = [[num(r[ix[c]]) for c in cols] for r in rows]
-    notes += _left_out(header, rows, {idc, labc, descc} - {None}, cols)
+    notes += _left_out(header, rows, {idc, labc, descc, *flags} - {None}, cols)  # flags: read, as a filter
     notes += _cell_notes(rows, [ix[c] for c in cols])
     vals = [v for row in raw for v in row if v is not None]
     if not vals:
@@ -504,7 +507,7 @@ def load(path: str | Path) -> QuantMatrix:
         notes.append(f"values in {path.name} look like log2 already; used as they are")
     else:
         values = [[math.log2(v) if v is not None and v > 0 else None for v in row] for row in raw]
-        notes.append(f"values in {path.name} look like raw intensities; log2-transformed (zeros count as missing)")
+        notes.append(said(f"values in {path.name} look like raw intensities; log2-transformed (zeros count as missing)"))
         negative = sum(1 for v in vals if v < 0)
         if negative:
             notes.append(f"{negative:,} negative intensities in {path.name} count as missing (an intensity can't be "
@@ -522,7 +525,8 @@ def load(path: str | Path) -> QuantMatrix:
         if tail.isdecimal():
             reps[s] = int(tail)
     cond = suggest_conditions(samples)  # 20260101_DMSO_1 / 20260101_Drug_2 -> DMSO / Drug
-    notes.append(f"{len(samples)} sample column(s) found by {how}: " + ", ".join(cols[:8]) + ("…" if len(cols) > 8 else ""))
+    notes.append(said(f"{len(samples)} sample column(s) found by {how}: " + ", ".join(cols[:8])
+                      + ("…" if len(cols) > 8 else "")))
     return QuantMatrix("intensity", "protein", [feature(r) for r in rows], samples, values, cond, str(path), notes=notes,
                        exp="LFQ", replicate=reps, columns=dict(zip(samples, cols, strict=True)),
                        meta={"table": path.name})

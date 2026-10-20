@@ -37,7 +37,7 @@
 | `bundle.py` | The troubleshooting / validation bundle (D63, see "The bundle" below): `collect` (what would go in; sizes only), `learn` + `Anonymiser` (the pseudonyms), `create` (streams the zip, then `verify` searches it for every original; the key file next to it), `inspect` (with `self_check`: every file searched for the real names this computer knows, D74) / `unpack` / `translate` for the reader, `anonymise_text` (the anonymised Copy diagnostics, the same Anonymiser and leak check, D74), the `ionomos bundle` command, and what the window says (`Choice`, `summary_lines`). `unpack` reads a bundle as untrusted: `_safe_member` / `_safe_folder` names, `_bomb_check` (1 GB at 100:1, free space less 1 GB), `_read_small` (64 MB) for BUNDLE.json; the unpacked config loses notify, assistant, library and every `*_exe` ([SECURITY_NOTES.md](SECURITY_NOTES.md)) | — |
 | `bundle_dialog.py` | The **Report a problem** window (Tk only; every decision is in `bundle.py`) | — |
 | `ledger.py` | SQLite job table + status transitions; source of truth for "what's queued". One `Ledger` may be shared across threads: one connection, every use under a lock (D104) | `prior-work/store.py` |
-| `worker.py` | Thread inside `ionomos run`: first runnable `queued` job → FragPipe or DIA-NN (runner.py) → done/failed; holds jobs whose setup files are missing. Sequential. | `prior-work/queue_worker.py` |
+| `worker.py` | Thread inside `ionomos run`: first runnable `queued` job → FragPipe or DIA-NN (runner.py) → done/failed; holds jobs whose setup files are missing. Sequential. A job that ends done is queued for the atlas hand-off (`_atlas_queue`, a mark in `ionomos.json`; the copying is `atlas.py`'s thread's, D121) | `prior-work/queue_worker.py` |
 | `fragpipe.py` | Prepare a job (launcher `fragpipe.bat` with FragPipe's own Java, workflow with `database.db-path` patched to the method's FASTA, manifest, TMT annotation; a FASTA FragPipe would refuse holds the job), run headless with timeout/stop, kill the process tree (Windows: the engine's job, `_start` / `_release`, D126) and stop what the engine left running after it ended (`_stop_stragglers`), read the console (steps, exit codes, `ALL JOBS DONE`), explain failures (`EXPLANATIONS`), the install report. `move_aside` (every runner's `<workdir>_previous_<time>[-n]`), `run_to_file` (bounded helper runs: file output, tree killed at the limit), `code_text` (exit codes as people know them) (D98); `batch_problem(cmd)` (refuses a .bat/.cmd start with cmd.exe metacharacters, used by `_run` and `preflight._start`, D100), `is_network_path(p)` (D99) | `prior-work/fragpipe_runner.py` |
 | `winjob.py` | Windows Job Objects (stdlib ctypes, D126): `contain(proc)` puts an engine started by `fragpipe._start` (searches, helper runs, Philosopher) into a job of its own right after Popen (nested in any job Ionomos runs in); `terminate()` for a time limit, cancel or stop; `stop_rest()` after it ended by itself (console hosts and processes on their way out are not leftovers); `close()` ends what is left (`KILL_ON_JOB_CLOSE`, so a search ends with the Ionomos that held it). `BREAKAWAY_OK`: a program that asks to leave may. A job Windows won't make is logged and the run goes on as before | — |
 | `preflight.py` | `ionomos preflight` / the app's Check FragPipe install: the install report, FragPipe started for `--help` and a `--dry-run` per method, PC checks (spaces, disk, RAM, long paths, permissions), each workflow's tools against the installation (D59) | — |
@@ -62,7 +62,8 @@
 | `folder_check.py` | The check window (D80): what was found, Analyse as (recommended), several outputs, every problem with buttons that fix what can be fixed here, then Review samples / Analyse now into the experiment editor | — |
 | `library.py` | No Tk ([LIBRARY.md](LIBRARY.md), D89): every FragPipe `.workflow` and FASTA on the PC. `scan` (read-only, breadth-first over the pinned folders, FragPipe installations, users_root and `library.roots`; depth- and time-bounded, stoppable, junctions once; FragPipe's `fragpipe-ui.cache` as a hint), `describe_workflow` / `describe_fasta` (kind, key settings, a summary in words, flags with what to do; a FASTA read as bytes once per version), the catalog `<log_dir>/library.json`, `recommend` / `recommend_fastas` (scored, reasons in words), `auto_assign` (proposals for methods whose files are missing or broken; applied by the caller through `configio`), `adopt` / `adopt_fasta` (copies into the pinned folders, `.bak` kept, never over another file), `update_check`; `ionomos library scan / list / show / recommend / adopt / check`. `save_scan` / `merge_scan` (a partial scan keeps the fuller catalog), `adopt_problems`, `live_workflows`; kinds SILAC / isoTOP / ipIAA / PAL / labelled; `CANONICAL_STOCK` breaks stock ties, real ties are not proposed (D101); `folder_answers` / `ROOT_ANSWER_S` (5 s per root on a helper thread, D99) | `fragpipe.import_workflow`, `fpfolder.find_outputs` |
 | `dragdrop.py` | Files and folders dropped from Explorer on the app window (Windows, ctypes `WM_DROPFILES`, no dependency): they open on the Analysis tab, checked first (D80) | — |
-| `attention.py` | Durable "needs a person" queue (`<log_dir>/attention/*.json`): raised by intake, worker, analysis, QC trending (`qc_trend`, a warning: no pop-up unless `qc_trend.popup`); closed when fixed | — |
+| `attention.py` | Durable "needs a person" queue (`<log_dir>/attention/*.json`): raised by intake, worker, analysis, QC trending (`qc_trend`, a warning: no pop-up unless `qc_trend.popup`), the atlas hand-off (`atlas_handoff_failed`, a warning: no pop-up); closed when fixed | — |
+| `atlas.py` | No Tk ([ATLAS.md](ATLAS.md), D120-D123): the hand-off of finished isoDTB searches to the lab's cysteine atlas, contract `ionomos-atlas-handoff/1`. `select` (harvest_fragpipe.ps1's selection rule, its constants copied), `destination` / `layout_parts` (its Get-RelativeDestination), `send` (compare, copy through `.partial`, SHA-256 verify, `ionomos-handoff.json`, the one-row runs CSV renamed into place; never over a file; the `atlas` block of `ionomos.json`; `atlas_handoff_failed`), `mark_pending` (the worker, after a job is done), `HandoffLoop` (the watcher's `atlas` thread: pending and due hand-offs, back-off, `max_tries`), `check`, `dropbox_suggestion` (harvest's Get-DropboxRoots / Find-DataFolder); `ionomos atlas send / status / check` | `Nomura-Lab/Lab Informatics/tools/harvest_fragpipe.ps1` (ported, read-only) |
 | `popups.py` | Pop-up windows + the "needs attention" list, in the app or (app closed) the watcher's own Tk loop; **More help** opens the help page at the item's topic | — |
 | `help/` | The help for users (D46, HELP.md): `*.md` content (getting started, the report, glossary, troubleshooting, never-do, FAQ) parsed and rendered with the stdlib; `report_payload()` for every report, `page()` = `help.html` (`ionomos help`, the app's Help button, pop-ups), `text()` for the terminal, `topic()` / `topic_for_item()` | — |
 | `assistant/` | The local assistant (D49, D57, D75, [ASSISTANT.md](ASSISTANT.md)): `ask()` runs one question through a model on this PC and shows the answer only if its citations check out, else Ionomos's own text (`fallback`). `client.py` (the OpenAI-compatible chat API over urllib, localhost only, no proxy or redirect; `timeout_seconds` is the whole reply, read in 64 KB pieces, 2 MB cap), `tools.py` (seven read-only tools over the ledger, attention items, help, engine logs and analysis.json, with schema-checked arguments and cleaned, capped results), `helpsearch.py` (BM25 over the help: SQLite FTS5 or pure Python), `citations.py` (what the tools returned is what may be cited), `audit.py` (append-only JSONL in app data, one line per record under a thread + OS lock; Windows' O_APPEND is emulated), `fake.py` (the scripted fake model for tests), `proposals.py` (five proposal tools: checked, read-only descriptions of one change), `actions.py` (applies a proposal; called only by the confirm window's Confirm, `popups.ProposalDialog`). Off unless `assistant.enabled` and a model are set; nothing else depends on it | — |
@@ -82,7 +83,7 @@
 | `notify.py` | Messages when a search is done / failed / held (D58): `notify:` settings, the message, the webhook / Teams / Slack / email senders, redaction of secrets. Off by default. `scrub` also hides the pieces of a secret address (`_url_parts`: user part, path, query), `file_secrets` reads config-backups/, `redact_config_text` handles flow style, list items and block values | — |
 | `stress.py` | `ionomos testbed stress`: messy drops + chaos against a real watcher/worker, invariant checks; name fuzzer | — |
 | `runners/` | Left from 0.4 and imported by nothing in the program (`deploy/check_frozen.py` leaves it out of the exe): `isodtb.py` is a thin entry over `downstream/isodtb.py` that only `tests/test_downstream.py` calls; `fragpipe.py`, `tmt.py` and `dia.py` are stubs. The post-processing runs in `postprocess.py` → `downstream/` (`isodtb.py`, `tmt.py`: the R ports) | port of `lab-scripts/isoDTB_…R`, `correct_experimental_annotation…R` |
-| `cli.py` | `ionomos setup / run / stop / check / doctor / preflight / status / attention / dry-run / names test / retry / cancel / pause / resume / repair-ledger / init / testbed / diagnose / bundle / spectronaut-columns / notify-test / update / help / ask / ask-eval / analyze / check-folder / export / demo / example / compare / benchmark / qc-trend / library / fasta / tmt`; no args → app; hidden `fake-fragpipe`, `fake-diann`, `fake-maxquant`, `fake-sage`, `fake-rawparser` for the testbed, `sage-job` for the worker, `probe-gui` for `check`. The list in its docstring is `ionomos --help`; `tests/test_docs_sync.py` keeps it, this row and README in step with the parser. Exit codes: the table in the docstring, the same for every subcommand (D102); `build_parser()` | — |
+| `cli.py` | `ionomos setup / run / stop / check / doctor / preflight / status / attention / dry-run / names test / retry / cancel / pause / resume / repair-ledger / init / testbed / diagnose / bundle / spectronaut-columns / notify-test / update / help / ask / ask-eval / analyze / check-folder / export / demo / example / compare / benchmark / qc-trend / library / fasta / tmt / atlas`; no args → app; hidden `fake-fragpipe`, `fake-diann`, `fake-maxquant`, `fake-sage`, `fake-rawparser` for the testbed, `sage-job` for the worker, `probe-gui` for `check`. The list in its docstring is `ionomos --help`; `tests/test_docs_sync.py` keeps it, this row and README in step with the parser. Exit codes: the table in the docstring, the same for every subcommand (D102); `build_parser()` | — |
 
 ## Data flow for one job
 
@@ -122,6 +123,10 @@
                   ionomos stopped → FragPipe tree killed, job back to queued
 
  5. user        opens their folder, sees ionomos.json / DONE.txt / FAILED.txt
+
+ 6. atlas       (only with atlas.enabled, for atlas.methods: isoDTB) the worker marks the done job
+                "pending" in ionomos.json; the watcher's atlas thread copies the run's result files into
+                atlas.handoff_dir (the lab Dropbox), verified, and writes the completion record (ATLAS.md)
 ```
 
 ## On-disk layout (proteomics PC)
@@ -150,6 +155,7 @@ C:\Fragpipe_Auto\                    ← the app lives here (no spaces!)
     help\help.html                  ← the help page, rewritten each time it is opened (D46)
     preflight\<time>\               ← one FragPipe preflight's files: --help output, each method's dry run (D59)
     ionomos_benchmark\              ← a simulated benchmark run from the app (D67; on the command line: ./ionomos_benchmark)
+    atlas-send-job<job>.lock        ← only while one process hands that job to the atlas (atlas.py, D122)
   ionomos.db                        ← SQLite ledger
 
 C:\Fragpipe_General\<user>\<experiment>\    ← where jobs land
@@ -157,7 +163,8 @@ C:\Fragpipe_General\<user>\<experiment>\    ← where jobs land
   experiment.yaml                    ← if the user wrote one
   experiment-backups\                ← each experiment.yaml the experiment editor or a confirmed proposal replaced (D75)
   ionomos.json                      ← status + provenance, rewritten on every transition; "acquisition": when
-                                       each raw file was acquired, read at intake (acqtime.py, D78)
+                                       each raw file was acquired, read at intake (acqtime.py, D78); "atlas":
+                                       the hand-off to the cysteine atlas (state, tries, record; ATLAS.md)
   ionomos_run\                      ← what ionomos gave FragPipe
     fragpipe-files.fp-manifest
     <method>.workflow                ← pinned workflow, database.db-path set
@@ -187,6 +194,15 @@ C:\Fragpipe_General\<user>\<experiment>\    ← where jobs land
   help\help.html                     ← the help page when there is no lab log folder (a pip install)
   assistant-audit.jsonl              ← every question to the assistant and what it was shown (D57)
   assistant-scorecard-<time>.json    ← `ionomos ask-eval`'s scorecard (+ .txt); C:\ionomos-ask-eval\<time>\ its fixtures (D72)
+
+<atlas.handoff_dir>\                 ← the lab Dropbox ...\Nicholas Foster Data\fragpipe-runs (only with atlas: on; ATLAS.md)
+  C\Fragpipe_General\<user>\<experiment>\fragpipe\   ← the run's result files, as harvest_fragpipe.ps1 lays them out
+    ionomos-handoff.json             ← the completion record: every file's size and SHA-256, the job's summary
+    *.partial                        ← a copy before its SHA-256 is checked (renamed; never left on success)
+  _harvest-logs\                     ← harvest's own logs, and Ionomos' records:
+    runs-ionomos-<stamp>-job<job>.csv   ← one row per hand-off, renamed into place last: "the copy is complete"
+  _atlas\                            ← published by the atlas, read only by Ionomos (the report's atlas context)
+    atlas_sites_lookup.tsv, atlas_sites_lookup.json
 
 Desktop\                             ← the account's Desktop (also when OneDrive moved it)
   Ionomos.lnk                        ← the app's shortcut
@@ -304,7 +320,7 @@ per-method rules) in NAMING_CONVENTION.md, which also shows the `analysis:`
 keys an experiment sets in its `experiment.yaml` (the same keys as here: the
 lab's defaults); the statistics in WORKFLOWS.md; designs, doses, time
 courses, roles and TMT plexes below and in NAMING_CONVENTION.md; `qc_trend:`
-in QC_TREND.md; `library:` in LIBRARY.md; `assistant:` in ASSISTANT.md;
+in QC_TREND.md; `library:` in LIBRARY.md; `assistant:` in ASSISTANT.md; `atlas:` in ATLAS.md;
 `notify:` under "Notifications". The keys explained nowhere else:
 
 | Key | Default | What it does |
@@ -669,7 +685,10 @@ compound (liganded / inconsistent / not liganded / too few) by
 `liganded_ratio` in `liganded_min_replicates` replicates, then derives the
 liganded fraction, selectivity across compounds, a per-protein view and, with
 `site_annotation`, known / new sites. The report's Liganded sites section
-only displays these calls. Rules and settings: WORKFLOWS.md.
+only displays these calls. Rules and settings: WORKFLOWS.md. With the atlas
+hand-off on and the atlas's lookup published (`<atlas.handoff_dir>\_atlas\`),
+`downstream/atlasctx.py` adds each human site's atlas tier, the number of atlas
+experiments and a "new to the atlas" mark (D124, ATLAS.md).
 
 Site ratios can be centred per replicate in `fpa.process` (`centre_ratios`,
 `analysis.ratio_centre`, D70; off by default); the info, with every replicate's

@@ -853,6 +853,21 @@ Risks:
 
 Collected from the other docs; resolve before/during Phase 1.
 
+**The cysteine atlas hand-off (2026-10-19, D120–D125, ATLAS.md): what the lab must confirm**
+- [ ] Is the Dropbox client on the lab PC signed in to the lab Dropbox, and does it sync `Nicholas Foster Data`
+      (not online-only)? `ionomos atlas check` on the PC answers it; the app's Folders tab shows the folder it found.
+- [ ] Which Windows account runs the watcher, and can it write to that folder? (The hand-off runs as the watcher.)
+- [ ] Who decides a conflict (a different copy of a run's file already in Dropbox), and how do they tell Ionomos
+      (today: move the old copy aside, then Send to atlas)?
+- [ ] Turn it on (`atlas.enabled`), then hand off one real isoDTB search and check that the atlas side ingests it
+      (its `runs-ionomos-*.csv`, Run + HandoffSha256) and that a second **Send to atlas** is not counted twice.
+- [ ] Should searches done before the hand-off was turned on be sent (one by one with Send to atlas, or a
+      "send all" for a date range), or does harvest's earlier copy cover them?
+- [ ] The report's atlas context: once the atlas publishes `_atlas\atlas_sites_lookup.tsv`, check one report's
+      tiers and "new to the atlas" marks against the atlas itself, and that the quotable line says what Dan wants.
+- [ ] `atlas.methods` admits only FragPipe isoDTB methods (D120): should isoTOP or other probes go too, once the
+      atlas reads them (the CSV would need their ProbeClass)?
+
 **Lab process**
 - [ ] Confirm the naming convention with users (NAMING_CONVENTION.md); collect initials → user-folder aliases for config.
 - [ ] Trello board has a naming discussion — reconcile with NAMING_CONVENTION.md.
@@ -1129,7 +1144,7 @@ Collected from the other docs; resolve before/during Phase 1.
       exports would settle these. FragPipe's own tables saved again from Excel with thousands separators are still
       read as all missing (FragPipe never writes them). A MaxQuant TMT table without a design is `unassigned`
       since round 5 (D109, #165): should experiment.yaml's `tmt:` map also name MaxQuant channels, as it does
-      Sage's `tmt.tsv`? Its note is still added when an SDRF or `sample_conditions` then gives the conditions.
+      Sage's `tmt.tsv`? (Its note goes once an SDRF or `sample_conditions` gives the conditions, D118.)
 - [ ] Statistics: ~~a dose-response curve is fitted and called for a protein measured at only two doses (#162)~~
       (done, D106). PCA and knn are fast since round 5 (D108, #163, #164):
       port impute.knn's `maxp` clustering for tables over 1,500 rows (needs an R golden for knn first)? The QC
@@ -1183,10 +1198,13 @@ Collected from the other docs; resolve before/during Phase 1.
       has searched it). `_load_quantities` for non-FragPipe engines and `sdrf.py` still read the `tmt:` map
       saved at intake, not `tmtkit.current_block`.
 - [ ] Testbed (D103): does the lab run DIA in fractions, and is adding a sample's fractions what it wants (D111,
-      #180), rather than the max or mean per protein? DIA-NN's phosphosite matrix and the standalone DIA-NN reader
-      are not summed per fraction yet. An open search is done with a note (#181); its report could show
-      PTM-Shepherd's `global.profile.tsv`. Other engines' informational notes in `engines.py` (Sage's summary
-      line, "gene names from …") are still warnings: mark them `quant.Info` (D110, #182). To confirm on the PC: the
+      #180), rather than the max or mean per protein? DIA-NN's long report and phosphosite matrix add them up too
+      (D119); the long report still names its samples by run and guesses their conditions, so a re-acquisition
+      there is two samples, not DUPLICATE_SAMPLES: read the manifest's conditions as the pg_matrix reader does?
+      An open search is done with a note (#181); its report could show PTM-Shepherd's `global.profile.tsv`.
+      Engine notes are Info or warnings by type since D118: Sage TMT's "passing PSM(s) had no reporter ions"
+      warns at any count, and real searches likely have a few; warn only above a share of the PSMs? To confirm
+      on the PC: the
       "badly formatted lines" ERROR line in job 1's console log (REAL_RUNS.md) and that the done-job warning names
       the two runs FragPipe left out (D112, #179); that the console is cp1252 with
       CRLF; that `<raw>_uncalibrated.mzML` sits beside the raws of an Ionomos job; that a dry run writes

@@ -66,6 +66,8 @@ def defaults(root: str | None = None, users_root: str | None = None) -> dict:
                      "popup": False},
         "notify": copy.deepcopy(_notify_defaults()),
         "library": {"roots": [], "exclude": [], "max_depth": 6, "time_limit_s": 120},
+        # no default folder: the lab's Dropbox path has spaces (CLAUDE.md); the app offers the one it finds (D120)
+        "atlas": {"enabled": False, "handoff_dir": "", "methods": ["isoDTB"], "max_tries": 10, "retry_minutes": 15},
         "users": {"aliases": {}, "default": "", "learned_aliases_file": f"{root}/learned_aliases.yaml",
                   "ignore": ["FragPipe*", "Fasta*", "New folder*", "~*"]},
         "methods": {
@@ -163,8 +165,11 @@ def _normalise(d: dict) -> dict:
 
 
 def _y(v) -> str:
-    """One YAML scalar/flow value."""
-    return yaml.safe_dump(v, default_flow_style=True, allow_unicode=True).strip().removesuffix("\n...")
+    """One YAML scalar/flow value, on one line: PyYAML's default width of 80 folded a long value with a space past
+    column 80 onto the next line, where the writer's `# comment` after it made config.yaml unreadable (a Dropbox
+    folder in atlas.handoff_dir, D120)."""
+    return yaml.safe_dump(v, default_flow_style=True, allow_unicode=True, width=float("inf")).strip() \
+        .removesuffix("\n...")
 
 
 def dump_config(d: dict) -> str:
@@ -356,6 +361,21 @@ def dump_config(d: dict) -> str:
         if k not in _notify_defaults():
             a(f"  {_y(str(k))}: {_y(v)}")
     a("")
+    at = d.get("atlas") if isinstance(d.get("atlas"), dict) else {}
+    a("atlas:   # hand finished isoDTB searches to the lab's cysteine atlas (docs/ATLAS.md). Off by default")
+    a(f"  enabled: {_y(at.get('enabled', False))}")
+    a(f"  handoff_dir: {_y(at.get('handoff_dir', '') or '')}   # the lab Dropbox folder "
+      "...\\Nicholas Foster Data\\fragpipe-runs (spaces are fine here: FragPipe never sees it)")
+    a(f"  methods: {_y(list(at.get('methods') or []) if at.get('methods') is not None else ['isoDTB'])}   "
+      "# FragPipe isoDTB methods whose searches are handed off")
+    a(f"  max_tries: {_y(at.get('max_tries', 10))}   # a hand-off that keeps failing (Dropbox offline) stops after this "
+      "many tries")
+    a(f"  retry_minutes: {_y(at.get('retry_minutes', 15))}   # the first wait before trying again; it doubles, up to "
+      "12 hours")
+    for k, v in at.items():  # a typo is written back as it was, so the loader can name it
+        if k not in ("enabled", "handoff_dir", "methods", "max_tries", "retry_minutes"):
+            a(f"  {_y(str(k))}: {_y(v)}")
+    a("")
 
     if isinstance(d.get("assistant"), dict) and d["assistant"]:  # the app doesn't edit these; keep them (D57)
         a("assistant:   # the local assistant, `ionomos ask` (docs/ASSISTANT.md); off unless enabled with a model")
@@ -398,7 +418,7 @@ def dump_config(d: dict) -> str:
 
 _PATHS = ("inbox", "users_root", "fragpipe_exe", "workflow_dir", "fasta_dir", "database", "log_dir")
 _SECTIONS = ("paths", "watcher", "fragpipe", "gui", "naming", "analysis", "qc_trend", "library", "notify", "assistant",
-             "users", "methods")
+             "atlas", "users", "methods")
 # analysis keys the writer always writes; then those written when set (lists, then single values). Anything else
 # a lab has in analysis: is written back as it was (_rest), so a Save never drops a setting the loader takes.
 _AN_WRITTEN = ("enabled", "test", "de_type", "log2fc", "alpha", "use_adjusted", "remove_contaminants",
@@ -512,7 +532,8 @@ def latest_backup(path: str | Path) -> Path | None:
 
 SECTION_WORDS = {"paths": "Folders", "watcher": "Watcher", "fragpipe": "FragPipe", "gui": "Windows",
                  "analysis": "Analysis", "notify": "Notifications", "users": "Users", "methods": "Methods",
-                 "library": "Library", "qc_trend": "Instrument QC", "naming": "Naming", "assistant": "Assistant"}
+                 "library": "Library", "qc_trend": "Instrument QC", "naming": "Naming", "assistant": "Assistant",
+                 "atlas": "Atlas"}
 # blocks whose keys are names a person chose (a method, a user, a condition): shown exactly as written
 _NAMED = {("methods",), ("users", "aliases"), ("naming", "condition_codes"), ("naming", "methods"),
           ("analysis", "roles"), ("analysis", "times"), ("analysis", "doses")}

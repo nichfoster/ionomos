@@ -81,7 +81,27 @@ from DIA-NN (in FragPipe or standalone), `report.phosphosites_90.tsv` (or
 matrices when phosphorylation (UniMod:21) is a variable modification, a FASTA
 is given and matrices are on; its Parquet site report is not read. Other
 engines' site tables can be named with `phospho_table` only when they have one
-of these layouts.
+of these layouts. DIA-NN's matrices have a column per run, so a sample the
+plan has in fractions has its runs added up, before an SDRF sets the design,
+as in DIA-NN's protein matrix (D111, D119).
+
+**Fractions of a DIA sample** (D111, D119). When the plan has a sample in two
+or more fractions (from its file names, or `fraction:` in `experiment.yaml`),
+the runs of DIA-NN's `pg_matrix`, its long report and its phosphosite matrix
+that are that sample's fractions are added up into one sample, named, with
+its condition and replicate, as the manifest names it. Other runs stay as
+read: the long report names its samples by run and guesses their conditions
+from the run names, as before.
+
+**Notes.** Each engine's notes are listed in the report and `analysis.json`.
+Those that only say what was read (the quantity, the q-value filter and how
+many rows it took out, the summary, razor peptides, fractions combined, gene
+names from the FASTA) are information: they are not a done job's warnings
+(D110, D118). A note about a damaged or repaired table, a run the manifest
+doesn't name, a setting not used, or a quantity to be careful with (MaxLFQ
+groups that share no feature, no `Norm` channel, no `results.sage.tsv`) is a
+warning. `tests/test_engine_notes.py` lists every note of each engine and
+which kind it is.
 
 **Conditions and replicates** come from the engine when it records them
 (Spectronaut `R.Condition` / `R.Replicate`, MSstats `Condition` /
@@ -206,7 +226,10 @@ MaxQuant names the channels by number only, so without an SDRF or
 `sample_conditions` every channel's condition is `unassigned` (as Sage's
 `tmt.tsv` without a channel map, below): the report is QC only, and one note
 asks for the conditions (the Analysis tab, `analysis.sample_conditions`, or an
-SDRF). experiment.yaml's `tmt:` map is not read for MaxQuant.
+SDRF). The note goes once they give every channel analysed a condition; a
+pooled reference channel (the SDRF's pooled rows, `tmt_reference`) and a
+channel left out (`exclude_samples`) need none (D118). experiment.yaml's
+`tmt:` map is not read for MaxQuant.
 
 ## Running DIA-NN directly (instead of FragPipe)
 
@@ -441,7 +464,8 @@ tmt:
 - A name used in several plexes gets the plex in front (`plexB_DMSO_1`).
 - Without a map, the channels are `<plex>_<channel>` with the condition
   `unassigned`, and the analysis asks for the conditions. Give them on the
-  Analysis tab, in the `tmt:` map, or with an SDRF (above).
+  Analysis tab, in the `tmt:` map, or with an SDRF (above); the note goes once
+  every channel analysed has one, as for MaxQuant (D118).
 
 **Telemetry.** Sage sends anonymous usage statistics after a search by
 default (its version, index sizes, number of files, run time, OS, memory and

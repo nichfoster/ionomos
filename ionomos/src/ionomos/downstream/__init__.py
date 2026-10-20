@@ -224,7 +224,7 @@ def _load_quantities(method: str | None, workdir: Path, results: Path, record: d
     if method in engines.METHODS:  # results from another engine (engines.py)
         tmt_map = (((record or {}).get("plan") or {}).get("overrides") or {}).get("tmt")  # experiment.yaml tmt:
         m, enotes = engines.load(method, Path(table) if table is not None else workdir, _sample_map(record), tmt_map,
-                                 rollup)
+                                 rollup, _fractionated(record))
         return m, files, notes + enotes
     if (rollup or "auto") != "auto":  # FragPipe's and any other table hold proteins (or sites) already
         notes += engines.rollup_unused(rollup, "this table holds proteins or sites already, not peptides")
@@ -523,7 +523,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
         if settings.phospho and table is None:  # opt-in: the phosphosite table instead of the proteins (D79)
             results.mkdir(parents=True, exist_ok=True)
             pm_, pnotes_, f.phospho_problems = phospho.read_sites(method, workdir, dest, record, settings,
-                                                                  _sample_map(record))
+                                                                  _sample_map(record), _fractionated(record))
             if pm_ is not None:
                 return pm_, [], pnotes_
         try:
@@ -542,7 +542,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
         out.files += files
         notes += tmt.name_note(lnotes, m, settings)   # not when the conditions were given, not guessed (#158)
         if m is not None:
-            notes += m.notes
+            notes += sdrfdesign.answered(m.notes, m, settings)  # a question the SDRF / sample_conditions answer: gone
             notes += stage("input-check", guards.check_input, m) or []  # implausible values, repeated names (D60)
         elif table is None and method != "table":
             f.no_quantification = no_quantification(record, workdir)  # by design: done, not NO_TABLE (#181)
@@ -750,7 +750,8 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
                 notes += tnotes
             if cys.applies(pm):
                 say("liganded cysteines")
-                called = stage("cysteines", _cysteines, processed, settings, results, out, dest, protein_hl)
+                called = stage("cysteines", _cysteines, processed, settings, results, out, dest, protein_hl,
+                               (context or {}).get("atlas_lookup"))
                 if called is None:
                     cys_info = {"ran": False, "reason": "the liganded-site step failed (see analysis_error.txt)"}
                 else:
@@ -976,10 +977,11 @@ def _protein_correction(p, diffs, settings, results: Path, out: Outcome, dest: P
 
 
 def _cysteines(p, settings, results: Path, out: Outcome, dest: Path,
-               protein_hl: dict | None = None) -> tuple[dict, dict, list, list[str]]:
+               protein_hl: dict | None = None, atlas_lookup=None) -> tuple[dict, dict, list, list[str]]:
     """results/cysteine_sites.tsv and cysteine_proteins.tsv for site ratio data (cys.py). Returns (analysis.json
     summary, the report's payload, problems for the doctor, notes). protein_hl: the proteome's ratio per site
-    (proteincorr.py), shown beside the calls."""
+    (proteincorr.py), shown beside the calls. atlas_lookup: the lab's cysteine atlas lookup folder, whose columns
+    the sites table gets when it reads (atlasctx.py, D124)."""
     if not settings.liganded:
         off = "liganded-site calls are switched off (analysis.liganded)"
         return cys.summary(None, off), cys.report_payload(None, off), [], []
@@ -1001,7 +1003,14 @@ def _cysteines(p, settings, results: Path, out: Outcome, dest: Path,
             except cys.AnnotationError as exc:
                 problems.append(("warning", str(exc)))
     res = cys.run(p, settings, annotation, protein_hl)
-    out.files.append(write_tsv(results / "cysteine_sites.tsv", cys.columns(res), cys.table_rows(res)))
+    columns, rows = cys.columns(res), cys.table_rows(res)
+    if atlas_lookup:
+        from ionomos.downstream import atlasctx
+
+        lk, _why = atlasctx.read_lookup(Path(atlas_lookup))  # the report says why when it can't be used
+        if lk is not None:
+            columns, rows = atlasctx.add_tsv_columns(lk, columns, rows)
+    out.files.append(write_tsv(results / "cysteine_sites.tsv", columns, rows))
     prot = None
     if res.proteins:
         out.files.append(write_tsv(results / "cysteine_proteins.tsv", cys.protein_columns(res), cys.protein_rows(res)))

@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Finished isoDTB searches go to the lab's cysteine atlas by themselves** (D120–D125, docs/ATLAS.md). With
+  `atlas.enabled` and `atlas.handoff_dir` (the lab Dropbox `…\Nicholas Foster Data\fragpipe-runs`; no default),
+  the worker queues each done isoDTB job and the watcher's new `atlas` thread copies the run's result files into
+  that folder exactly as `harvest_fragpipe.ps1` does (its selection rule and drive-letter layout), each verified by
+  SHA-256 through a `.partial`, then writes `ionomos-handoff.json` and a one-row
+  `_harvest-logs\runs-ionomos-<time>-job<N>.csv` (contract `ionomos-atlas-handoff/1`). Nothing is ever
+  overwritten: a different file at the destination stops the hand-off before anything is copied. Failures (Dropbox
+  offline) are retried with a back-off up to `atlas.max_tries`, raise `atlas_handoff_failed`, and are recorded in
+  the job's `ionomos.json` (`atlas` block); the experiment folder is only read.
+  - `ionomos atlas send <job>`, `ionomos atlas status [job]`, `ionomos atlas check`.
+  - The app: **Send to atlas** and the hand-off state on the Jobs tab, the folder (with **Browse…** and the
+    Dropbox folder found as a suggestion) on the Folders tab, a Setup checklist line with **Fix**; help entries
+    `faq.atlas` and `attention.atlas_handoff_failed`.
+  - The isoDTB report's site table shows each human site's atlas tier, how many atlas experiments saw it and
+    "new to the atlas", from the lookup the atlas publishes back (`_atlas\atlas_sites_lookup.tsv`), with one line
+    saying these are internal lab numbers and whether they may be quoted.
+
 - **A feature opens from the keyboard in the report** (D116, #176): every table whose rows open something is one
   Tab stop; arrows, Home, End, Page Up / Down move, Enter or Space opens the row (Shift+Enter pins), and the row
   rings its point on the chart beside it with its tooltip. Pin and "Behaves like" chips are buttons.
@@ -400,6 +417,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A long value no longer breaks config.yaml on Save** (D125): the writer folded a value with a space past column
+  80 (a long Dropbox folder in `atlas.handoff_dir`, any long path) onto the next line, and the comment after it
+  made the file unreadable; every value is written on one line now.
 - **Windows: a program a search engine leaves running after it ends is now stopped and noted** (#174, D126), as
   on POSIX: "a program DIA-NN started was still running after DIA-NN ended; Ionomos stopped it". Every engine
   Ionomos starts (FragPipe, DIA-NN, MaxQuant, Sage, their helper runs, Philosopher) goes into a Windows Job
@@ -460,6 +480,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `hits:` in the footer, no doubled title, `TMT channels: plexB` (#178).
   - A question to the assistant has one time limit, twice `assistant.timeout_seconds` (4 minutes by default);
     each request and its socket get what is left, and the Ask window says how long it may wait (D117, #171).
+- **Round 5 follow-ups (D118–D119):**
+  - The other engines' notes that only say what was read (the summaries of DIA-NN, Spectronaut, MSstats,
+    MSstatsTMT and Sage, q-value and PSM filter counts, razor peptides, fractions combined, gene names from the
+    FASTA; MaxQuant's, Spectronaut's, AlphaDIA's and Proteome Discoverer's sample columns and log2 step) no longer
+    become a done job's warnings. Real problems still warn. MaxQuant's Reverse / contaminant columns are no
+    longer listed as "columns with no values" (D118).
+  - The note asking for the conditions of `unassigned` TMT channels (MaxQuant, Sage without a `tmt:` map) is
+    left out once an SDRF or `sample_conditions` gives every channel analysed one; pooled reference channels and
+    channels left out need none (D118).
+  - A sample's DIA fractions are also added up in DIA-NN's long report and its phosphosite matrix, before an
+    SDRF is applied; runs without fractions are read as before (D119).
+  - `fastasource.fasta_headers`' docstring names all seven of its callers.
 - The Advanced tab's RAM (GB) field refuses a decimal (47.5) as config.yaml's loader does (D102); it used to
   accept it and the next start stopped on `fragpipe.ram_gb must be a whole number`.
 - **TMT-Integrator protein tables are labelled by gene.** In `ratio_protein_*.tsv` / `abundance_protein_*.tsv`,

@@ -47,6 +47,7 @@ QUESTIONS = {
     "analysis_input": "What does the analysis need me to decide here?",
     "analysis_failed": "What went wrong with the analysis, and what should I do?",
     "qc_trend": "What does this QC warning mean?",
+    "atlas_handoff_failed": "Why wasn't this search handed to the cysteine atlas, and what should I do?",
 }
 DEFAULT_QUESTION = "What does this mean, and what should I do?"
 
