@@ -471,6 +471,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `hits:` in the footer, no doubled title, `TMT channels: plexB` (#178).
   - A question to the assistant has one time limit, twice `assistant.timeout_seconds` (4 minutes by default);
     each request and its socket get what is left, and the Ask window says how long it may wait (D117, #171).
+- **Round 5 follow-ups (D118–D119):**
+  - The other engines' notes that only say what was read (the summaries of DIA-NN, Spectronaut, MSstats,
+    MSstatsTMT and Sage, q-value and PSM filter counts, razor peptides, fractions combined, gene names from the
+    FASTA; MaxQuant's, Spectronaut's, AlphaDIA's and Proteome Discoverer's sample columns and log2 step) no longer
+    become a done job's warnings. Real problems still warn. MaxQuant's Reverse / contaminant columns are no
+    longer listed as "columns with no values" (D118).
+  - The note asking for the conditions of `unassigned` TMT channels (MaxQuant, Sage without a `tmt:` map) is
+    left out once an SDRF or `sample_conditions` gives every channel analysed one; pooled reference channels and
+    channels left out need none (D118).
+  - A sample's DIA fractions are also added up in DIA-NN's long report and its phosphosite matrix, before an
+    SDRF is applied; runs without fractions are read as before (D119).
+  - `fastasource.fasta_headers`' docstring names all seven of its callers.
 - The Advanced tab's RAM (GB) field refuses a decimal (47.5) as config.yaml's loader does (D102); it used to
   accept it and the next start stopped on `fragpipe.ram_gb must be a whole number`.
 - **TMT-Integrator protein tables are labelled by gene.** In `ratio_protein_*.tsv` / `abundance_protein_*.tsv`,

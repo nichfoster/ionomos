@@ -4736,6 +4736,39 @@ run a 330 s script at once. Not taken: a new `question_seconds` setting (more co
 the value) and a lower MAX_ROUNDS (it would cap fast models that need a tool round and a repair). Twice is a
 guess; revisit when a real model is measured (ROADMAP 6.0).
 
+### D118 — Engine notes that say what was read are Info; a question for the conditions goes once it is answered
+**2026-10-19.** Follows D110 and D109. Every note in `engines.py` that only says what was read or done as planned is
+now a `quant.Info`: the summaries of the DIA-NN and Spectronaut long reports, MSstats, MSstatsTMT and Sage (with
+the q-value filter and how many rows it took out), Sage's peptide and protein q-value counts, razor peptides,
+fractions added or combined, PSM filters, NA / empty channels and gene names from the FASTA, MaxQuant's channel
+totals left out, and MSstatsTMT's technical replicates and best-PSM step. `anytable.load(path, known=True)`, used
+by the MaxQuant, Spectronaut pivot, AlphaDIA and Proteome Discoverer loaders, makes its "sample columns found by"
+and "raw intensities; log2-transformed" notes Info: for an engine's own table they are what the engine writes,
+while for any other table (D33) they stay guesses and warn. MaxQuant's `+` rows left out are Info everywhere, and
+its flag columns no longer count as "columns with no values". Still warnings: a repaired or damaged table, blank
+q-values, a run the manifest doesn't name or a run missing, a setting not used (`analysis.rollup`), MaxLFQ groups
+that share no feature (now a note of its own after the summary), no `Norm` channel, PSMs without reporter ions,
+reporter columns of no kit, and Sage's summary when `results.sage.tsv` is missing (no protein q-value filter).
+`tests/test_engine_notes.py` lists every note of 16 small tables with its kind, so a new note is a decision.
+
+The question for the conditions of `unassigned` channels (MaxQuant TMT, Sage TMT channels no `tmt:` map names) is a
+`quant.AsksConditions`. `sdrfdesign.answered`, called where `analyze` collects the loader's notes, drops it when no
+sample analysed is still `unassigned` after the SDRF and `sample_conditions`: a channel left out
+(`exclude_samples`) or a reference channel (an SDRF's pooled rows, `tmt_reference`) needs no condition. While one
+still is, the note stays as made, with the loader's count: the sample table says which. Matching the note's text
+was the alternative; a type follows D110.
+
+### D119 — DIA-NN's long report and phosphosite matrix add up a sample's fractions too
+**2026-10-19.** Follows D111. `engines.load` passes the plan's fractionated samples (`downstream._fractionated`) to
+DIA-NN's long report, and `phospho.read_sites` to DIA-NN's phosphosite matrix, both through
+`quant.sum_fractions`. In `read_sites` the sum comes between reading the matrix and the SDRF (`load_into`), as in
+`load_quantities`, so an SDRF describes the summed sample and doesn't call its fractions separate columns.
+FragPipe's own site tables have a column per sample already. A summed sample now takes its condition from the
+manifest, as its name and replicate did: the long report guesses conditions from run names, and `DMSO_1_F1`'s guess
+is `DMSO_1_F1`. Runs that are not fractions are as read: without fractions both matrices are unchanged, a
+re-acquisition in the phosphosite matrix still raises DUPLICATE_SAMPLES, and in the long report, which names its
+samples by run and doesn't read the manifest's conditions, it stays two samples named by file, as before (ROADMAP).
+
 ### D120 — Ionomos hands finished isoDTB searches to the lab's cysteine atlas, by one contract, off by default
 **2026-10-19.** The lab's cysteine atlas (Nomura-Lab repository, `Lab Informatics\tools`) took FragPipe isoDTB runs
 as its third source on 2026-10-19, through `harvest_fragpipe.ps1`, which a person ran by hand. Ionomos runs those
