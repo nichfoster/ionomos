@@ -351,7 +351,8 @@ the search starts by itself.
 ## An earlier search of the experiment is still running {#search.hold-leftover}
 
 An earlier Ionomos started a search of this experiment and stopped (it was
-ended from Task Manager, or the PC's session ended) while the search went on.
+ended from Task Manager, or the PC's session ended) while the search went on
+without it.
 Ionomos tried to end that search before starting a new one, and it did not
 end: Windows refused, or it is stuck reading a network drive. Two searches of
 one folder at once would write over each other, so the job waits, and so do
@@ -460,9 +461,20 @@ pop-up. After fixing the cause, press **Retry**; the earlier output is kept.
   itself could not carry on (often a full disk). Fix the cause, then Retry.
 
 When Ionomos itself is ended in the middle of a search (Task Manager, a
-crash), FragPipe can keep running on its own. The next time Ionomos starts
-it stops that FragPipe first and runs the search again from the start, so
-one experiment is never searched twice at once.
+crash), Windows ends the search with it: Ionomos keeps each search and
+everything it starts together. On a Mac or Linux FragPipe can keep running
+on its own. Either way, the next time Ionomos starts it stops anything of
+that search still running and runs the search again from the start, so one
+experiment is never searched twice at once.
+
+A finished search can carry the note **a program FragPipe started was still
+running after FragPipe ended; Ionomos stopped it** (or DIA-NN, MaxQuant,
+Sage). A tool the search program started, such as MSFragger's Thermo raw
+file reader, did not end with it. Ionomos ended it before reading the
+results, so it could not go on writing into them or keep a file locked for
+the next search. The results are fine to use. If the note adds "it may still
+be running", end that program in Task Manager (Details tab) before the next
+search of the experiment.
 
 ## Analysis issues {#trouble.issues}
 

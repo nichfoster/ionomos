@@ -905,23 +905,26 @@ def _run_tool(cmd: list[str], cwd: Path, log: Path, timeout_s: float, stop: thre
     from ionomos import fragpipe
 
     with open(log, "ab") as out:
-        proc = subprocess.Popen(cmd, cwd=str(cwd), stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                                **fragpipe._popen_kwargs())
-        end = time.monotonic() + timeout_s
-        while True:
-            try:
-                return proc.wait(timeout=0.25)
-            except subprocess.TimeoutExpired:
-                pass
-            if (stop is not None and stop.is_set()) or time.monotonic() > end:
-                fragpipe.kill_tree(proc)
+        proc = fragpipe._start(cmd, "Philosopher", cwd=str(cwd), stdout=out, stderr=subprocess.STDOUT,
+                               stdin=subprocess.DEVNULL)
+        try:
+            end = time.monotonic() + timeout_s
+            while True:
                 try:
-                    proc.wait(timeout=10)
+                    return proc.wait(timeout=0.25)
                 except subprocess.TimeoutExpired:
                     pass
-                if stop is not None and stop.is_set():
-                    raise Stopped()
-                raise TimeoutError(f"Philosopher took longer than {timeout_s:.0f} s")
+                if (stop is not None and stop.is_set()) or time.monotonic() > end:
+                    fragpipe.kill_tree(proc)
+                    try:
+                        proc.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        pass
+                    if stop is not None and stop.is_set():
+                        raise Stopped()
+                    raise TimeoutError(f"Philosopher took longer than {timeout_s:.0f} s")
+        finally:
+            fragpipe._release(proc)  # Windows: what it left running ends with its job (D126)
 
 
 # a line of a Go crash report: "goroutine 1 [running]:", "main.main()", "github.com/x/y.(*T).F(...)", "…/f.go:23 +0x85"

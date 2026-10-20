@@ -420,7 +420,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A long value no longer breaks config.yaml on Save** (D125): the writer folded a value with a space past column
   80 (a long Dropbox folder in `atlas.handoff_dir`, any long path) onto the next line, and the comment after it
   made the file unreadable; every value is written on one line now.
-
+- **Windows: a program a search engine leaves running after it ends is now stopped and noted** (#174, D126), as
+  on POSIX: "a program DIA-NN started was still running after DIA-NN ended; Ionomos stopped it". Every engine
+  Ionomos starts (FragPipe, DIA-NN, MaxQuant, Sage, their helper runs, Philosopher) goes into a Windows Job
+  Object of its own right after it starts (`winjob.py`, stdlib ctypes; nested in a job Ionomos itself runs in).
+  A time limit, a cancel or a stop ends the whole job, so a process whose parent has already ended is stopped
+  too, which `taskkill /T` can't do. The job is closed on every path, and closing ends what is still in it
+  (`KILL_ON_JOB_CLOSE`), so a search also ends with an Ionomos ended from Task Manager instead of running on
+  unseen until the next start. A program that asks to leave the job (`CREATE_BREAKAWAY_FROM_JOB`) may, and is
+  not stopped. The console host that outlives an engine by a few milliseconds is not counted. If Windows won't
+  make the job, that is logged, the console log says so, and the search runs as before.
 - **A drop's `experiment.yaml` can no longer choose a workflow or FASTA outside the lab's folders (#168, D105).**
   `workflow:` and `fasta:` are file names in `workflow_dir` / `fasta_dir`, as documented; a path (absolute,
   `..`, a drive, or a `//server/share` that made Windows sign in to that server as the watcher's account) is

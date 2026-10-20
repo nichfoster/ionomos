@@ -4869,3 +4869,91 @@ config.yaml unreadable; it writes on one line now.
 **Not verified (D120-D125)**: on the lab PC: the Dropbox client signed in and syncing `Nicholas Foster Data`,
 the watcher's Windows account writing there, a real isoDTB search handed off and ingested by the atlas side, and
 the app's new controls on the PC's screen.
+
+### D126 — On Windows an engine runs in a Job Object: what it leaves running is stopped, and it ends with Ionomos
+**2026-10-19.** Issue #174. On POSIX, a process an engine started and left
+running after the engine exited is stopped through the engine's process group
+and noted (D98). On Windows nothing was stopped or said: `taskkill /PID
+<engine> /T` follows parent links, which end with the engine, and once the
+engine is gone its leftover can't be told from any other program. It could go
+on writing into the output folder the analysis is about to read, hold a
+result table open, or keep the raw files locked for the next search. This
+amends D69 item 2 and D98.
+
+1. **Every engine goes into a Job Object of its own right after it starts**
+   (`winjob.contain`, stdlib ctypes; `fragpipe._start`). That covers the run
+   loop (FragPipe, DIA-NN, MaxQuant, and Sage with its converter, which run
+   inside the `sage-job` process), the helper runs (`run_to_file`:
+   `MaxQuantCmd --create`, the preflight's `--help` and dry runs) and
+   Philosopher (`fastasource`). A job holds every process started inside it,
+   whatever became of its parent. A Toolhelp walk for processes whose parent
+   is the dead engine was the alternative: Windows does not update an orphan's
+   parent id and reuses it, a grandchild of an already-ended child is missed,
+   and it does nothing for time limits.
+2. **A time limit, a cancel or a stop ends the whole job** (`kill_tree`:
+   `TerminateJobObject`, exit code 1 as `taskkill /F` leaves, so the exit
+   reasons read the same). That reaches a process whose parent has already
+   ended, which `taskkill /T` can't. `taskkill /T` stays for a process without
+   a job, when Windows refuses, and for `stop_leftover` (an earlier Ionomos's
+   search: no handle on its job).
+3. **After the engine ends by itself, what it left in the job is stopped**
+   (`Job.stop_rest`, 5 s) with the same note as on POSIX: "a program DIA-NN
+   started was still running after DIA-NN ended; Ionomos stopped it". Each
+   leftover is waited for by its handle, so its files are closed (a lock on a
+   result table released) before the tables are read. Not leftovers: the
+   engine's console host (conhost.exe outlived the engine by a few
+   milliseconds in 15 runs of 20 on Windows 11), and a process that ends by
+   itself within 1 s (`GRACE_SECONDS`; one caught while it exits has no name
+   to read yet). Both gave a false note before they were left out.
+4. **`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`: the job is closed on every path
+   (`fragpipe._release` in a `finally`), and closing it ends what is still in
+   it.** So a search ends with the Ionomos that held its job, however it
+   ended (Task Manager, a crash), instead of running on unseen until the next
+   start stops it (D69 item 2). On Windows, `stop_leftover` now matters only
+   for a search without a job, a kill that did not take, and a search an
+   older Ionomos started. A helper run's leftovers end silently when its job
+   is closed. Leaving the limit off kept D69's behaviour, but a search would
+   still run on unseen after Ionomos ended. No path closes the job while a
+   search should go on: Ionomos stops its searches whenever it stops.
+5. **`JOB_OBJECT_LIMIT_BREAKAWAY_OK`, never `SILENT_BREAKAWAY_OK`.** A program
+   that asks to leave (`CREATE_BREAKAWAY_FROM_JOB`) may, and is then not
+   stopped, as before. Without the limit Windows refuses to start that
+   program, which could fail a search. With the silent limit every child
+   would leave.
+6. **Nested jobs.** Ionomos itself usually runs inside a job (a venv's
+   python.exe launcher, Task Scheduler, a terminal; the tests run in one), and
+   Windows 8 and later nest the engine's job inside it. A parent job's own
+   limits still apply (one that ends its processes ends the search too, as
+   before).
+7. **A job Windows won't make never fails a search.** If `CreateJobObjectW`,
+   `SetInformationJobObject` or `AssignProcessToJobObject` fails (Windows 7
+   with Ionomos already in a job, a parent job with UI limits, no kernel32),
+   that is logged (`ionomos.winjob`), the console log says the engine "could
+   not be put in a Windows job", and the run goes on as before #174. An engine
+   that ended before it could be put in a job is not a warning.
+8. **The few milliseconds between CreateProcess and AssignProcessToJobObject
+   are not covered**: subprocess can't start a process suspended. Every
+   engine's first child comes long after that (cmd.exe reads fragpipe.bat,
+   Java starts).
+
+Tests changed with it: the stand-in's `lockchild` (a leftover holding a
+table) is now stopped and the table read, on both systems. A lock by a
+program outside the engine (Excel, an antivirus) is the stand-in's new
+`handoff` step, with the lock taken by the test. The two "won't stop" tests
+fake a refused kill without a job, because closing the job would end the
+process. `test_faults`' killed-Ionomos test expects the fake FragPipe to end
+with Ionomos on Windows.
+
+**Verified**: `tests/test_winjob.py` (kernel32 stubbed through the module's
+`ctypes` and `os`: the limits, every failure and its handle closed, the
+console host, a reused pid, a list too long for the first buffer, an
+unreadable list, a leftover that won't end; and with the real kernel32 on
+Windows 11, nested in this test run's job: a leftover stopped after its
+parent ended, kill-on-close, a breakaway child left alone, ten engines that
+leave nothing never noted) and `tests/test_engine_faults.py` (`-k
+left_behind`: the leftover stopped and the note present on Windows; the time
+limit, cancel and won't-stop paths; kill_tree and `_stop_stragglers` with a
+stubbed job). **Not verified**: on the lab PC with the real engines; whether
+MSFragger's `BatmassIoThermoServer.exe` (the Thermo reader) outlives MSFragger;
+that the installed Ionomos.exe can nest the job (a console log would say it
+could not).
