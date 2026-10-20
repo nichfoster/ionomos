@@ -5,6 +5,7 @@ fraction and label each run of the quant table is.
     path, notes = find(dest, workdir, table)      # a *.sdrf.tsv / sdrf.tsv the user put there, never results/
     design = read(path, factor=["compound"])       # its rows (PSI SDRF-Proteomics, github.com/bigbio/proteomics-sample-metadata)
     m, info = apply(m, design)                     # conditions / replicates / plexes set on the QuantMatrix
+    notes = answered(m.notes, m, settings)         # a loader's question for the conditions, once they are given
 
 Matching a run of the quant table to an SDRF row (`comment[data file]`, compared by file stem):
     label-free   the run's column (DIA-NN, Spectronaut, MSstats: the raw file) or its name, with the same rules as
@@ -35,8 +36,8 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path, PureWindowsPath
 
-from ionomos.downstream.plex import channel_key, same_channel
-from ionomos.downstream.quant import QuantMatrix, match_run_stem, run_stem
+from ionomos.downstream.plex import UNASSIGNED, channel_key, find_references, same_channel
+from ionomos.downstream.quant import AsksConditions, QuantMatrix, match_run_stem, run_stem
 from ionomos.downstream.tables import open_text, unquote
 
 SKIP_DIRS = {"results", "ionomos_run", "fragpipe-analyst", "__MACOSX"}
@@ -357,6 +358,26 @@ def apply(m: QuantMatrix, d: Design) -> tuple[QuantMatrix, dict]:
     m.meta["sdrf"] = info
     m.meta["conditions_from"] = f"SDRF {rel}" if d.factors else m.meta.get("conditions_from", "")
     return m, info
+
+
+def answered(notes: list[str], m: QuantMatrix | None, settings=None) -> list[str]:
+    """notes without the quant.AsksConditions ones (MaxQuant's numbered TMT channels, Sage's channels no tmt: map
+    names) once the design has answered them (D118): no sample left in (analysis.exclude_samples) is 'unassigned'
+    after this SDRF (apply, already on m) and analysis.sample_conditions (applied later by fpa.choose_samples, read
+    here the same way). A reference channel needs no condition (the SDRF's pooled rows, analysis.tmt_reference:
+    plex.find_references), so an SDRF that gives the pools 'not applicable' answers it too. While a sample is still
+    unassigned, the note stays as the loader made it."""
+    if m is None or not any(isinstance(n, AsksConditions) for n in notes):
+        return list(notes)
+    given = getattr(settings, "sample_conditions", None) or {}
+    left_out = set(getattr(settings, "exclude_samples", None) or []) | set(m.meta.get("reference_samples") or [])
+    wanted = list(getattr(settings, "tmt_reference", None) or [])
+    if wanted:
+        left_out |= set(find_references(m, wanted)[0])
+    if any((str(given.get(s) or "").strip() or m.condition.get(s)) == UNASSIGNED
+           for s in m.samples if s not in left_out):
+        return list(notes)
+    return [n for n in notes if not isinstance(n, AsksConditions)]
 
 
 def load_into(m: QuantMatrix | None, dest: Path, workdir: Path, table: Path | None = None,

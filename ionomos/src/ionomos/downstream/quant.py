@@ -38,6 +38,14 @@ def is_info(note) -> bool:
     return isinstance(note, Info)
 
 
+class AsksConditions(str):
+    """A note asking for the conditions of samples a loader could only call 'unassigned' (MaxQuant's numbered TMT
+    channels, the channels of Sage's tmt.tsv no tmt: map names). A warning while it is true; dropped once an SDRF or
+    analysis.sample_conditions gives each such sample its condition (sdrfdesign.answered, D118). Kept like Info."""
+
+    __slots__ = ()
+
+
 @dataclass
 class Feature:
     id: str
@@ -226,7 +234,9 @@ def sum_fractions(m: QuantMatrix, sample_map: dict[str, tuple[str, int]],
     """The runs of a matrix that are fractions of one sample (its experiment + bioreplicate is in fractionated,
     from the manifest's plan) -> one column, their intensities added, as Sage's lfq.tsv (engines.load_sage) and
     isoDTB / TMT fractions are (#180). A run the manifest doesn't name, or one of a sample without fractions, is
-    left as it is (two runs of such a sample stay two, and the doctor asks). m itself when nothing is summed."""
+    left as it is (two runs of such a sample stay two, and the doctor asks). m itself when nothing is summed.
+    A summed sample is the manifest's: its name, condition and replicate come from there, so a reader that named
+    its runs by file (DIA-NN's long report, engines.load) gets the same samples as from_pg_matrix (D119)."""
     if m.kind != "intensity" or not fractionated or not sample_map:
         return m
     groups: dict[str, list[int]] = {}
@@ -258,6 +268,7 @@ def sum_fractions(m: QuantMatrix, sample_map: dict[str, tuple[str, int]],
     replicate = {name: m.replicate[first[name]] for name in samples if first[name] in m.replicate}
     for name in summed:
         key = keys[name][0]
+        condition[name] = str(sample_map[key][0])
         replicate[name] = int(sample_map[key][1])
     columns = {name: m.columns[first[name]] for name in samples if first[name] in m.columns}
     meta = dict(m.meta)

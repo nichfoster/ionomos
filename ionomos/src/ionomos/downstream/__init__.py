@@ -224,7 +224,7 @@ def _load_quantities(method: str | None, workdir: Path, results: Path, record: d
     if method in engines.METHODS:  # results from another engine (engines.py)
         tmt_map = (((record or {}).get("plan") or {}).get("overrides") or {}).get("tmt")  # experiment.yaml tmt:
         m, enotes = engines.load(method, Path(table) if table is not None else workdir, _sample_map(record), tmt_map,
-                                 rollup)
+                                 rollup, _fractionated(record))
         return m, files, notes + enotes
     if (rollup or "auto") != "auto":  # FragPipe's and any other table hold proteins (or sites) already
         notes += engines.rollup_unused(rollup, "this table holds proteins or sites already, not peptides")
@@ -523,7 +523,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
         if settings.phospho and table is None:  # opt-in: the phosphosite table instead of the proteins (D79)
             results.mkdir(parents=True, exist_ok=True)
             pm_, pnotes_, f.phospho_problems = phospho.read_sites(method, workdir, dest, record, settings,
-                                                                  _sample_map(record))
+                                                                  _sample_map(record), _fractionated(record))
             if pm_ is not None:
                 return pm_, [], pnotes_
         try:
@@ -542,7 +542,7 @@ def analyze(dest: Path, method: str | None = None, analysis_cfg: dict | None = N
         out.files += files
         notes += tmt.name_note(lnotes, m, settings)   # not when the conditions were given, not guessed (#158)
         if m is not None:
-            notes += m.notes
+            notes += sdrfdesign.answered(m.notes, m, settings)  # a question the SDRF / sample_conditions answer: gone
             notes += stage("input-check", guards.check_input, m) or []  # implausible values, repeated names (D60)
         elif table is None and method != "table":
             f.no_quantification = no_quantification(record, workdir)  # by design: done, not NO_TABLE (#181)
