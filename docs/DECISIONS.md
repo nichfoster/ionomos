@@ -4571,3 +4571,44 @@ a rule here. A count of missing values doesn't say how many doses are left
 doses it is. The golden designs' features all keep at least 4 doses and are
 unchanged. **Not verified**: against CurveCurator with its default
 `max_missing`.
+
+### D107 — A search that won't stop holds its job and the queue; a cancel names a survivor
+**2026-10-18.** Issue #175. D69 item 2 stops a search an earlier Ionomos left
+running before the job runs again. When that process did not end (taskkill
+refused, a process stuck in a network drive's I/O), `stop_leftover` said "it
+may still be running", deleted `engine_pid.json`, and the worker started a
+second search beside it. On POSIX the old search went on writing into
+`fragpipe_previous_<time>/`; on Windows the job was usually held as "can't be
+moved aside", right by accident and for the wrong reason.
+
+1. **`fragpipe.stop_leftover` returns a `Leftover(message, running)`.** When
+   the recorded process is ours and still runs after `kill_pid_tree` (and up
+   to 5 s more: taskkill returns before Windows has ended the tree),
+   `running` is true and `engine_pid.json` stays, so every later look tries
+   to stop it again.
+2. **The worker holds the job** before it closes the job's attention items or
+   counts an attempt: "an earlier search of this experiment is still running
+   (process N, started …): end it in Task Manager; the search starts by
+   itself once it has ended" (`help.HOLD_TOPICS` → `search.hold-leftover`).
+   Each poll tries to stop it again; the hold is logged, raised and notified
+   once, as other holds are (the `_held` entry is now cleared only once a
+   search really starts). `worker.recover` logs the same and leaves the job
+   to the worker.
+3. **The rest of the queue waits too.** A held job normally lets the jobs
+   behind it run; this one doesn't (`_search` returns "not run" and the pass
+   ends), because the survivor still takes FragPipe's RAM and threads and the
+   worker runs one search at a time. Letting other folders run beside it is
+   the alternative, noted in ROADMAP.
+4. **A cancel names a survivor** the way a time limit does (`_not_stopped`):
+   `cancelled by user — DIA-NN did not stop when told to (process N): end it
+   in Task Manager before a Retry`, with that hint. The plain "cancelled by
+   user" still raises no pop-up and no notification (the person knows); the
+   longer reason does ("… was cancelled but did not stop"), since the person
+   who cancelled may not know the search lives on. Its Retry waits per item 2.
+
+**Verified**: `tests/test_engine_faults.py` (stop_leftover on Windows and
+POSIX with os / subprocess / signal stubbed; the worker holding a job behind a
+survivor and starting it once it has ended; a real stand-in DIA-NN that
+ignores the cancel, its Retry held, then run once it is stopped) and
+`tests/test_worker.py` (`recover` with a survivor). **Not verified**: a real
+FragPipe on the lab PC that taskkill can't end.

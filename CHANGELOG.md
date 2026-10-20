@@ -396,6 +396,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ionomos attention show / dismiss / snooze / resolve` with an id such as `../../outside` read, and rewrote, a
   JSON file outside the attention folder (#169). `attention.py` now takes only an id it could have made
   (`[A-Za-z0-9._-]`) for every caller; anything else is "no item".
+- **A search an earlier Ionomos left running that won't stop now holds its job** (#175, D107). `stop_leftover`
+  says whether the process is gone and keeps `engine_pid.json` while it runs; the worker then waits ("an earlier
+  search of this experiment is still running (process N, …): end it in Task Manager; the search starts by itself
+  once it has ended", help `search.hold-leftover`) instead of starting a second search beside it, and tries again
+  on each pass. A cancelled search that did not stop is named in the reason (`cancelled by user — DIA-NN did not
+  stop when told to (process N): …`) as a timed-out one is, and gets a pop-up; its Retry waits for it.
 - The Advanced tab's RAM (GB) field refuses a decimal (47.5) as config.yaml's loader does (D102); it used to
   accept it and the next start stopped on `fragpipe.ram_gb must be a whole number`.
 - **TMT-Integrator protein tables are labelled by gene.** In `ratio_protein_*.tsv` / `abundance_protein_*.tsv`,
