@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-19
+
 ### Added
 
 - **Finished isoDTB searches go to the lab's cysteine atlas by themselves** (D120–D125, docs/ATLAS.md). With
