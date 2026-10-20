@@ -62,8 +62,9 @@ analysis of the same data?
   installer and one-button updates (D14, D22, D58, D67).
 - Instrument QC trending of the lab's QC standard (D45, D55).
 - A support bundle that is anonymised, saved and never sent (D63, D74).
-- A local assistant that explains and proposes; it has not yet run with a
-  real model (D49, D57, D75; [ASSISTANT.md](ASSISTANT.md)).
+- A local assistant that explains and proposes; two small models were scored
+  on the dev PC's GPU (8 % and 23 %), none on the lab PC (D49, D57, D75;
+  [ASSISTANT.md](ASSISTANT.md)).
 
 **The analysis** (any computer, `pip install ionomos`):
 - Tables from FragPipe, DIA-NN, MaxQuant, Sage, Spectronaut, AlphaDIA,

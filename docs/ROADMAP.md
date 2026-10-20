@@ -797,6 +797,18 @@ that scorecard, not leaderboards.
 - [ ] **6.0 Spike (≈1 week).** Check memory channels; run `llama-bench` on the PC idle
   and with FragPipe running. *Exit:* measured tok/s, a RAM budget, and the default
   model(s) recorded in DECISIONS.
+  - **Measured on the dev PC, not the lab PC (2026-10-19, #170;
+    [ASSISTANT.md](ASSISTANT.md#measured-on-the-dev-pc-rtx-5070-ti-2026-10-19)).** An RTX 5070 Ti and
+    Ollama 0.40.6 ran qwen3:8b and qwen3.5:9b (5.5–5.6 GB, all on the GPU; gpt-oss:20b skipped at the
+    user's request).
+    - About 110 tok/s generation for qwen3:8b, 18–26 s for the first request with the load, and a median
+      2–4 s per request.
+    - Both models reason before every reply: 450–1,200 characters at the median, once 43,000 until the
+      2 MB cap.
+    - Ollama's default context, 4,096 tokens, was too small: prompts reached 4,091 tokens, and replies were
+      cut in 12 scenarios.
+    - Still for the lab PC: tok/s on the CPU, a context of 8,192 or more and what it costs in RAM, and
+      whether reasoning off keeps the scores.
 - [ ] **6.1 Read-only "Explain" (2–3 weeks).** Client, the read-only tools, citation
   validator, audit log, not-installed state, "Ask about this" on attention items,
   `ionomos ask`, 30+ scenarios. *Exit:* ≥ 90% pass on must / must-not, 0 injection
@@ -814,14 +826,25 @@ that scorecard, not leaderboards.
     token idle and while searching); `assistant.keep_alive` and
     `assistant.while_searching` (another model or address, a shorter keep-alive, or a
     pause while the worker runs a search). The corpus now ships with Ionomos.
-  - **Remains (the box stays open):** nothing has run against a real model or runtime,
-    so none of the exit criteria is measured. Needs 6.0 first (a model to try), then
-    `ionomos ask-eval` on the PC, idle and during a search, and the settings it suggests.
+  - **Remains (the box stays open):** nothing has run on the lab PC, so none of the exit
+    criteria is measured there (two models on the dev PC's GPU are below, far from them). Needs 6.0 first (a
+    model to try), then `ionomos ask-eval` on the PC, idle and during a search, and the settings it suggests.
   - **Round 4 (2026-10-15):** 19 scenarios (85, 53 scored) and `tests/test_assistant_robustness.py`
     (the audit log under concurrent writers, a trickling model, a 10 MB reply, every tool's bad arguments, an
     injected help entry, whitelist smuggling); still nothing against a real model. #170 lists what a real model
     must be scored on (ambiguous questions, the new injections, near-miss tool names, the passive-claim net,
     whether 120 s for a whole reply fits).
+  - **First real models, on the dev PC's GPU (2026-10-19, #170;
+    [ASSISTANT.md](ASSISTANT.md#measured-on-the-dev-pc-rtx-5070-ti-2026-10-19)).**
+    - Scores: qwen3:8b passed 4 of 53 (8 %), qwen3.5:9b 12 of 53 (23 %). Each failed all 5 injection
+      scenarios, but neither obeyed an injection. Median time to first token 0.2 s on the GPU.
+    - Most failures were invented citations (`[log:2:252]`, `[log:JOB#LINE]`, `[analysis:3]`), and replies
+      cut by Ollama's 4,096-token context.
+    - Ambiguous questions were asked back, never guessed, but withheld: the paragraph with the question had
+      no source.
+    - No near-miss tool names. No claims of having acted.
+    - Both models proposed `alpha` for "change the FDR".
+    - Not measured: the lab PC, while searching, and gpt-oss:20b.
 - [ ] **6.2 Confirmed actions (2–3 weeks).** The proposal tools and the native
   diff-and-confirm dialog. *Exit:* no path runs an action without a click (tested), and
   3 lab members finish the tasks unaided.
@@ -1179,9 +1202,29 @@ Collected from the other docs; resolve before/during Phase 1.
       Cards render a little Markdown from a failure reason; a mapped drive letter (`Z:`) inside a scanned file is
       not recognised as a network path. ~~An attention item id with `../` reads and rewrites a JSON file outside the
       attention folder (#169)~~ (done: `attention.py` checks every id).
-- [ ] Assistant: is 2 × `timeout_seconds` the right limit for a whole question (D117, #171)? Measure on the PC
-      with `ionomos ask-eval`: how many requests a real answer takes and how long each takes, idle and while
-      searching (6.0); should it be a setting? Should a proposal for another job than the one asked about be refused rather than
+- [ ] Assistant: is 2 × `timeout_seconds` the right limit for a whole question (D117, #171)?
+      - **Measured on the dev PC's GPU, 2026-10-19 (#170):** 106 questions over two models.
+        - Requests sent: 1 to 6 per question, median 2; 41 took 3 or more.
+        - Seconds per request: median 2–4, at most 25.8 (a model load), or 77.5 (a reasoning run-away
+          stopped by the 2 MB cap).
+        - A question took 1.7 times its own longest request at the median, more than twice it in 24, at most
+          3.5 times.
+      - Proposed, not applied: keep 2, and set `timeout_seconds` on the lab PC to about twice its slowest
+        request, which covers every question measured. With `timeout_seconds` at the slowest request itself,
+        2 stops about one question in four, and the factor would have to be 4.
+      - Still to measure on the lab PC, idle and while searching (6.0). Should it be a setting?
+- [ ] Assistant, from the first real scorecards (#170, [ASSISTANT.md](ASSISTANT.md#measured-on-the-dev-pc-rtx-5070-ti-2026-10-19)):
+      - Should a question back ("Which job do you mean?") be shown without a source? Today it is withheld.
+      - Should `[log:2:252]` be read as `[log:2#252]`, the commonest invented shape?
+      - Should Ionomos say when a reply was cut because the runtime's context was full?
+      - Should `propose_setting`'s description say that `alpha` is not the search's FDR? Both models
+        proposed it for "change the FDR".
+      - Rubric fixes:
+        - `hit_counts` expects 26 / 19, but the state built has 24 / 28;
+        - must-nots are matched against Ionomos's own fallback text;
+        - `is (now )?(done|fixed)` fails a true "Job 3 is done";
+        - injection failures could separate obeying an injection from not answering.
+- [ ] Assistant: should a proposal for another job than the one asked about be refused rather than
       shown with a note (D75 4)? Round 4 kept the note and extended it to items without a job and unknown
       experiments; an injected line can still aim a proposal at another job, which a person then has to read.
 - [ ] Report: keyboard access (D116, #176), text contrast (D115, #177) and the TMT export's footer (#178) are
