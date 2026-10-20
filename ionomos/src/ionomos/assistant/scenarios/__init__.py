@@ -91,33 +91,62 @@ def load(folder: Path | str | None = None) -> list[dict]:
 LOG_ANCHOR = re.compile(r"log:(\d+)#\{([^{}]+)\}")
 
 
-def resolve(s: dict, cfg) -> dict:
-    """The scenario with every `log:<job>#{text}` replaced by `log:<job>#<n>`, n being the number of the last line
-    of that job's engine log (in the built state `cfg`) that holds the text. Raises ValueError when no line does."""
-    if not LOG_ANCHOR.search(json.dumps(s, ensure_ascii=False)):
-        return s
-    from ionomos.assistant import tools
-    from ionomos.ledger import Ledger
+# who wrote each engine's console in a fixture state: named when a cited line is not found, so the failure points
+# at the fake whose output changed, not at the scenario (#183)
+FAKE_CONSOLES = {"fragpipe_console.log": "the testbed's fake FragPipe (ionomos/fake_fragpipe.py)",
+                 "diann_console.log": "the testbed's fake DIA-NN (testbed.write_fake_diann)",
+                 "maxquant_console.log": "the testbed's fake MaxQuant (testbed.write_fake_maxquant)",
+                 "sage_console.log": "the testbed's fake Sage (testbed.write_fake_sage)"}
 
-    logs: dict[int, list[tuple[int, str]]] = {}
 
-    def lines(job_id: int) -> list[tuple[int, str]]:
-        if job_id not in logs:
-            led = Ledger(cfg.database)
+class _Logs:
+    """Each job's numbered engine log in a built state, read once."""
+
+    def __init__(self, cfg):
+        self.cfg, self.cache = cfg, {}
+
+    def get(self, job_id: int) -> tuple[Path | None, list[tuple[int, str]]]:
+        if job_id not in self.cache:
+            from ionomos.assistant import tools
+            from ionomos.ledger import Ledger
+
+            led = Ledger(self.cfg.database)
             try:
                 job = led.get(job_id)
             finally:
                 led.close()
             path = tools._console_log(job, tools._record(job)) if job is not None else None
-            logs[job_id] = tools._numbered_tail(path)[0] if path is not None else []
-        return logs[job_id]
+            self.cache[job_id] = (path, tools._numbered_tail(path)[0] if path is not None else [])
+        return self.cache[job_id]
+
+    def cite(self, job_id: int, text: str, who: str = "") -> str:
+        path, lines = self.get(job_id)
+        found = [n for n, line in lines if text in line]
+        if found:
+            return f"log:{job_id}#{found[-1]}"
+        where = (f"{path}, printed by {FAKE_CONSOLES.get(path.name, 'its engine')}" if path is not None
+                 else "the job has no engine log")
+        raise ValueError(f"{who}no line of job {job_id}'s log holds {text!r} ({where}). If that console changed, "
+                         "cite a line it still prints")
+
+
+def log_line(cfg, job_id: int, text: str) -> str:
+    """`log:<job>#<n>`: the citation of the last line of that job's engine log (in the built state `cfg`) that holds
+    the text. Tests that cite a line of a fake engine's console read its number from here, so a change to what the
+    fake prints does not break them (#183). Raises ValueError naming the console when no line holds the text."""
+    return _Logs(cfg).cite(job_id, text)
+
+
+def resolve(s: dict, cfg) -> dict:
+    """The scenario with every `log:<job>#{text}` replaced by `log:<job>#<n>`, n being the number of the last line
+    of that job's engine log (in the built state `cfg`) that holds the text. Raises ValueError when no line does,
+    naming the scenario and the fake engine's console it looked in."""
+    if not LOG_ANCHOR.search(json.dumps(s, ensure_ascii=False)):
+        return s
+    logs = _Logs(cfg)
 
     def number(m: re.Match) -> str:
-        job_id, text = int(m.group(1)), m.group(2)
-        found = [n for n, line in lines(job_id) if text in line]
-        if not found:
-            raise ValueError(f"{s['id']}: no line of job {job_id}'s log holds {text!r}")
-        return f"log:{job_id}#{found[-1]}"
+        return logs.cite(int(m.group(1)), m.group(2), f"{s['id']}: ")
 
     def walk(x):
         if isinstance(x, str):

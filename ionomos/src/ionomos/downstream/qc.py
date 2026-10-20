@@ -14,11 +14,17 @@ Everything is plain Python; the heavy steps are bounded (pca: n_top features, cl
 """
 from __future__ import annotations
 
+import functools
 import math
+import sys
+from itertools import repeat
+from operator import add, mul, sub
 
 from ionomos.downstream import stats
 
 Matrix = list[list[float | None]]
+
+JACOBI_SAMPLES = 60  # pca: up to this many samples, Jacobi on all components (the results before #163, bit for bit)
 
 
 # ----------------------------------------------------------------------- PCA --
@@ -53,10 +59,165 @@ def _jacobi_eigen(a: list[list[float]], sweeps: int = 100) -> tuple[list[float],
     return [a[i][i] for i in range(n)], v
 
 
+def _gram(vectors: list[list[float]]) -> list[list[float]]:
+    """All dot products, each summed in the vectors' order (the upper triangle mirrored: a * b == b * a)."""
+    m = len(vectors)
+    g = [[0.0] * m for _ in range(m)]
+    for a in range(m):
+        va = vectors[a]
+        for b in range(a, m):
+            g[a][b] = g[b][a] = sum(map(mul, va, vectors[b]))
+    return g
+
+
+def _tridiagonal(a: list[list[float]]) -> tuple[list[float], list[float], list[tuple[list[float], float]]]:
+    """Householder reduction of a symmetric matrix: a = Q T Q', T = (diagonal d, off-diagonal e). Q is kept as
+    its reflectors (v, beta): H = I - beta v v' acting on the entries after the reflector's position."""
+    m = len(a)
+    b = [list(r) for r in a]
+    d, e, refl = [], [], []
+    for _ in range(m - 2):
+        row = b[0]
+        d.append(row[0])
+        x = row[1:]
+        rest = [r[1:] for r in b[1:]]
+        norm = math.sqrt(sum(map(mul, x, x)))
+        if norm == 0.0:
+            e.append(0.0)
+            refl.append(([], 0.0))
+            b = rest
+            continue
+        alpha = -math.copysign(norm, x[0])
+        v = list(x)
+        v[0] -= alpha
+        beta = 2.0 / sum(map(mul, v, v))
+        p = [beta * sum(map(mul, r, v)) for r in rest]
+        kk = beta / 2 * sum(map(mul, p, v))
+        w = list(map(sub, p, map(mul, repeat(kk), v)))
+        b = [list(map(sub, map(sub, r, map(mul, repeat(vi), w)), map(mul, repeat(wi), v)))
+             for r, vi, wi in zip(rest, v, w, strict=True)]
+        e.append(alpha)
+        refl.append((v, beta))
+    if m >= 2:
+        d += [b[0][0], b[1][1]]
+        e.append(b[1][0])
+    elif m == 1:
+        d.append(b[0][0])
+    return d, e, refl
+
+
+def _tridiagonal_eigenvalue(d: list[float], e: list[float], index: int) -> float:
+    """The index-th smallest eigenvalue (0-based) of the tridiagonal (d, e), by bisection on Sturm counts."""
+    m = len(d)
+    e2 = [x * x for x in e]
+    norm = max(abs(d[i]) + (abs(e[i - 1]) if i else 0.0) + (abs(e[i]) if i < m - 1 else 0.0) for i in range(m))
+    pivmin = sys.float_info.min * max(1.0, max(e2, default=0.0))
+    lo, hi = -norm - 1e-300, norm + 1e-300
+
+    def below(x):  # how many eigenvalues are < x
+        c, piv = 0, 1.0
+        for i in range(m):
+            piv = d[i] - x - (e2[i - 1] / piv if i else 0.0)
+            if abs(piv) < pivmin:
+                piv = -pivmin
+            if piv < 0:
+                c += 1
+        return c
+
+    for _ in range(200):
+        mid = (lo + hi) / 2
+        if mid in (lo, hi) or hi - lo <= 4 * sys.float_info.epsilon * max(abs(lo), abs(hi)) + pivmin:
+            break
+        if below(mid) <= index:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2
+
+
+def _tridiagonal_solve(d: list[float], e: list[float], lam: float, y: list[float], tiny: float) -> list[float]:
+    """(T - lam I) x = y, Gaussian elimination with partial pivoting (LAPACK dgtsv); zero pivots become tiny."""
+    m = len(d)
+    dg = [x - lam for x in d]
+    du = list(e)
+    dl = list(e)
+    du2 = [0.0] * m
+    b = list(y)
+    for i in range(m - 1):
+        if abs(dg[i]) >= abs(dl[i]):
+            if dg[i] == 0.0:
+                dg[i] = tiny
+            f = dl[i] / dg[i]
+            dg[i + 1] -= f * du[i]
+            b[i + 1] -= f * b[i]
+        else:
+            f = dg[i] / dl[i]
+            dg[i] = dl[i]
+            tmp = dg[i + 1]
+            dg[i + 1] = du[i] - f * tmp
+            if i < m - 2:
+                du2[i] = du[i + 1]
+                du[i + 1] = -f * du2[i]
+            du[i] = tmp
+            b[i], b[i + 1] = b[i + 1], b[i] - f * b[i + 1]
+    if dg[m - 1] == 0.0:
+        dg[m - 1] = tiny
+    x = [0.0] * m
+    for i in range(m - 1, -1, -1):
+        s = b[i]
+        if i + 1 < m:
+            s -= du[i] * x[i + 1]
+        if i + 2 < m:
+            s -= du2[i] * x[i + 2]
+        x[i] = s / dg[i]
+    return x
+
+
+def _top_eigen(a: list[list[float]], k: int) -> tuple[list[float], list[list[float]]]:
+    """The k largest eigenvalues of a symmetric matrix (descending) and unit eigenvectors: Householder
+    tridiagonalisation, bisection, inverse iteration (orthogonalised against the earlier vectors), back-transform.
+    O(m^3 / 3) multiply-adds for the reduction, run in C by map; Jacobi's sweeps are minutes at m = 500 (#163)."""
+    m = len(a)
+    d, e, refl = _tridiagonal(a)
+    norm = max(abs(x) for x in d + e) or 1.0
+    tiny = sys.float_info.epsilon * norm
+    lams, vecs = [], []
+    seed = 12345
+    for idx in range(m - 1, m - 1 - k, -1):
+        lam = _tridiagonal_eigenvalue(d, e, idx)
+        y = []
+        for _ in range(m):  # a fixed pseudo-random start (an LCG), never orthogonal to the answer in practice
+            seed = (seed * 1103515245 + 12345) % 2 ** 31
+            y.append(seed / 2 ** 31 - 0.5)
+        for _ in range(6):
+            y = _tridiagonal_solve(d, e, lam, y, tiny)
+            for u in vecs:
+                c = sum(map(mul, u, y))
+                y = list(map(sub, y, map(mul, repeat(c), u)))
+            nrm = math.sqrt(sum(map(mul, y, y))) or 1.0
+            y = [x / nrm for x in y]
+        lams.append(lam)
+        vecs.append(y)
+    out = []
+    for y in vecs:
+        z = list(y)
+        for pos in range(len(refl) - 1, -1, -1):
+            v, beta = refl[pos]
+            if not v:
+                continue
+            seg = z[pos + 1:]
+            c = beta * sum(map(mul, v, seg))
+            z[pos + 1:] = map(sub, seg, map(mul, repeat(c), v))
+        out.append(z)
+    return lams, out
+
+
 def pca(values: Matrix, n_top: int = 500, scale: bool = False) -> dict:
     """{"scores": [[PC1, PC2, ...] per sample], "percent": [% variance per PC], "n": features used}.
 
-    Complete rows only, the n_top with the largest standard deviation (plot_pca's n = 500)."""
+    Complete rows only, the n_top with the largest standard deviation (plot_pca's n = 500). Up to JACOBI_SAMPLES
+    samples, cyclic Jacobi on the samples x samples Gram matrix; above that only the top components, from the smaller
+    of the two Gram matrices (_top_eigen, #163)."""
     rows = [r for r in values if r and all(v is not None for v in r)]
     ns = len(values[0]) if values else 0
     if len(rows) < 2 or ns < 2:
@@ -72,13 +233,28 @@ def pca(values: Matrix, n_top: int = 500, scale: bool = False) -> dict:
             s = sd[i] or 1.0
             d = [v / s for v in d]
         x.append(d)
-    g = [[sum(f[a] * f[b] for f in x) for b in range(ns)] for a in range(ns)]  # samples x samples
-    lam, vec = _jacobi_eigen(g)
-    idx = sorted(range(ns), key=lambda k: -lam[k])
-    lam = [max(lam[k], 0.0) for k in idx]
-    total = sum(lam) or 1.0
     npc = min(ns, 6)
-    scores = [[vec[s][idx[k]] * math.sqrt(lam[k]) for k in range(npc)] for s in range(ns)]
+    if ns <= JACOBI_SAMPLES:
+        g = _gram([[f[a] for f in x] for a in range(ns)])  # samples x samples
+        lam, vec = _jacobi_eigen(g)
+        idx = sorted(range(ns), key=lambda k: -lam[k])
+        lam = [max(lam[k], 0.0) for k in idx]
+        total = sum(lam) or 1.0
+        scores = [[vec[s][idx[k]] * math.sqrt(lam[k]) for k in range(npc)] for s in range(ns)]
+    elif len(x) < ns:  # fewer features than samples: the features x features matrix has the same eigenvalues
+        g = _gram(x)
+        total = sum(g[f][f] for f in range(len(x))) or 1.0
+        top, vecs = _top_eigen(g, min(npc, len(x)))
+        lam = [max(v, 0.0) for v in top] + [0.0] * (npc - len(top))
+        cols = [[f[s] for f in x] for s in range(ns)]
+        # the scores are x' u: sqrt(lambda) times the samples' eigenvector
+        scores = [[sum(map(mul, cols[s], u)) for u in vecs] + [0.0] * (npc - len(vecs)) for s in range(ns)]
+    else:
+        g = _gram([[f[a] for f in x] for a in range(ns)])
+        total = sum(g[s][s] for s in range(ns)) or 1.0  # the trace: the sum of all eigenvalues
+        top, vecs = _top_eigen(g, npc)
+        lam = [max(v, 0.0) for v in top]
+        scores = [[vecs[k][s] * math.sqrt(lam[k]) for k in range(npc)] for s in range(ns)]
     for k in range(npc):  # a stable sign: the sample with the largest |score| is positive
         big = max(range(ns), key=lambda s: abs(scores[s][k]))
         if scores[big][k] < 0:
@@ -93,10 +269,16 @@ def pca(values: Matrix, n_top: int = 500, scale: bool = False) -> dict:
 def _dist_matrix(rows: list[list[float | None]]) -> list[list[float]]:
     n = len(rows)
     d = [[0.0] * n for _ in range(n)]
+    complete = [all(v is not None for v in r) for r in rows]
     for i in range(n):
         ri = rows[i]
         for j in range(i + 1, n):
             rj = rows[j]
+            if complete[i] and complete[j] and len(ri) == len(rj) and ri:
+                # the loop below, run in C: the same squares added left to right from 0.0
+                acc = functools.reduce(add, map(pow, map(sub, ri, rj), repeat(2)), 0.0)
+                d[i][j] = d[j][i] = math.sqrt(acc * len(ri) / len(ri))
+                continue
             acc, k = 0.0, 0
             for a, b in zip(ri, rj, strict=False):
                 if a is not None and b is not None:
@@ -232,7 +414,7 @@ def correlation(values: Matrix) -> dict:
         for i in range(ns):
             for j in range(i + 1, ns):
                 if norms[i] > 0 and norms[j] > 0:
-                    mat[i][j] = mat[j][i] = sum(a * b for a, b in zip(centred[i], centred[j], strict=True)) / (norms[i] * norms[j])
+                    mat[i][j] = mat[j][i] = sum(map(mul, centred[i], centred[j])) / (norms[i] * norms[j])
     order = cluster_order([[v if v is not None else 0.0 for v in r] for r in mat]) if ns > 1 else list(range(ns))
     return {"matrix": mat, "order": order, "complete_rows": len(rows)}
 

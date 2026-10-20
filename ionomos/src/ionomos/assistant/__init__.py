@@ -51,6 +51,7 @@ DEFAULTS = {
     "while_searching": {},                      # model / base_url / keep_alive / timeout_seconds / pause while a
 }                                               # search runs (runtime.py)
 MAX_ROUNDS = 6            # requests to the model per question
+QUESTION_TIMEOUTS = 2     # a whole question may take this many timeout_seconds (#171); see question_limit()
 MAX_CALLS_PER_ROUND = 4
 MAX_CALLS = 12
 REPAIRS = 1               # chances to correct an answer whose citations failed
@@ -141,6 +142,14 @@ def state(settings: dict) -> tuple[str, str]:
     if not settings.get("model"):
         return "not_set_up", "No model is set for the assistant (assistant.model in config.yaml)."
     return "ready", f"model {settings['model']} at {settings['base_url']}"
+
+
+def question_limit(settings: dict) -> float:
+    """Seconds one question may take in all, every request to the model included: QUESTION_TIMEOUTS times
+    timeout_seconds (the setting in force: while a search runs, while_searching's). Each request gets what is
+    left, at most timeout_seconds; when nothing is left the loop stops and Ionomos's own text is shown (#171).
+    Which limit is right waits on a real model measured on the PC (ROADMAP 6.0)."""
+    return QUESTION_TIMEOUTS * float(settings.get("timeout_seconds", DEFAULTS["timeout_seconds"]))
 
 
 def prompt_digest() -> str:
@@ -273,10 +282,11 @@ def fallback(ctx: tools.Context, question: str, job_id: int | None, item, lead: 
 
 
 def ask(cfg, question: str, *, experiment=None, item_id: str | None = None, transport=None,
-        audit_path=None, searching: bool | None = None) -> Answer:
+        audit_path=None, searching: bool | None = None, clock=None) -> Answer:
     """One question, one answer. Never raises for a missing, broken or misbehaving model.
     searching: whether a search is running (None: read it from the worker's heartbeat in cfg.log_dir); while
-    one is, assistant.while_searching applies (runtime.py)."""
+    one is, assistant.while_searching applies (runtime.py). clock: seconds now, for the question's time limit
+    (question_limit; tests pass fake.Clock so a slow script costs no time)."""
     from ionomos import attention
 
     started = time.monotonic()
@@ -292,7 +302,7 @@ def ask(cfg, question: str, *, experiment=None, item_id: str | None = None, tran
         job_id, note = find_job(ledger, experiment if experiment not in (None, "") else (item.job_id if item else None))
         if item_id and item is None:
             note = f"there is no attention item {tools.clean(item_id, 80)} (ionomos attention lists them)"
-        ans = _answer(ctx, s, question, job_id, item, transport)
+        ans = _answer(ctx, s, question, job_id, item, transport, clock)
         if note:
             ans.text = f"Note: {note}.\n\n{ans.text}"
         ans.job_id = job_id
@@ -324,7 +334,9 @@ def ask(cfg, question: str, *, experiment=None, item_id: str | None = None, tran
             ledger.close()
 
 
-def _answer(ctx: tools.Context, s: dict, question: str, job_id, item, transport) -> Answer:
+def _answer(ctx: tools.Context, s: dict, question: str, job_id, item, transport, clock=None) -> Answer:
+    now = clock or time.perf_counter
+    deadline = now() + question_limit(s)
     who = s.get("maintainer", "")
     if not question:
         return Answer(fallback(ctx, "", job_id, item, "No question was asked.", who), "fallback", "empty question")
@@ -352,9 +364,21 @@ def _answer(ctx: tools.Context, s: dict, question: str, job_id, item, transport)
 
     ans = Answer("", "fallback", tool_calls=calls)
     repairs = REPAIRS
+    per, total = float(s["timeout_seconds"]), question_limit(s)
+    out_of_time = ""
     try:
         for _round in range(MAX_ROUNDS):
-            reply = client.chat(s, messages, schemas(), transport)
+            left = deadline - now()
+            if left <= 0:
+                out_of_time = (f"the question took longer than {total:g} s in all ({QUESTION_TIMEOUTS} x "
+                               f"assistant.timeout_seconds), so it was stopped after {ans.rounds} request(s) "
+                               "to the model")
+                ans.outcome, ans.reason = "unavailable", out_of_time
+                break
+            # each request gets the time left of the question, at most its own limit (and the socket the same)
+            reply = client.chat(s, messages, schemas(), transport, limit=min(per, left), clock=now,
+                                why="assistant.timeout_seconds" if left >= per else
+                                f"the time left of the {total:g} s a question may take")
             ans.rounds += 1
             ans.model = reply.model or s.get("model", "")
             ans.ttft = reply.ttft if ans.ttft is None else ans.ttft
@@ -398,9 +422,13 @@ def _answer(ctx: tools.Context, s: dict, question: str, job_id, item, transport)
         ans.outcome, ans.reason = "refused", str(exc)
     except ChatError as exc:
         ans.outcome, ans.reason = "unavailable", str(exc)
+        if now() >= deadline:  # the request was cut short by the question's limit
+            out_of_time = ans.reason
     lead = {"refused": f"{ans.reason}.",
             "unavailable": f"The assistant's model is not answering ({tools.clean(ans.reason, 200)})."}.get(
         ans.outcome, "The assistant has no answer it can back with what Ionomos knows.")
+    if out_of_time:
+        lead = f"The assistant ran out of time for this question: {tools.clean(out_of_time, 300)}."
     ans.citations = []
     if ctx.proposal is not None:
         ans.withheld = "the answer that came with it could not be shown, so the proposal is not offered either"

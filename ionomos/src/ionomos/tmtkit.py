@@ -1190,12 +1190,12 @@ def add_parser(sub):
     pl = s.add_parser("plan", help="what Ionomos will write for a TMT folder, and every check (read only)")
     method_help = ("the lab's method key, e.g. TMT (default: what the folder was filed as, or what its name says); "
                    "a job that is not TMT is refused")
-    pl.add_argument("folder")
+    pl.add_argument("folder", help="the TMT experiment folder (an inbox drop or a filed experiment)")
     pl.add_argument("--method", default=None, help=method_help)
-    pl.add_argument("--json", action="store_true")
+    pl.add_argument("--json", action="store_true", help="print the result as JSON")
     an = s.add_parser("annotation", help="print the annotation file(s) from experiment.yaml (write with --write, "
                                          "never over an existing file)")
-    an.add_argument("folder")
+    an.add_argument("folder", help="the TMT experiment folder (an inbox drop or a filed experiment)")
     an.add_argument("--method", default=None, help=method_help)
     an.add_argument("--write", action="store_true", help="write each annotation.txt that is not there yet")
     sg = s.add_parser("suggest", help="a tmt: block for experiment.yaml from a few answers")
@@ -1206,9 +1206,9 @@ def add_parser(sub):
     sg.add_argument("--reference", default="", help="the bridge / pool channel(s), e.g. 126")
     sg.add_argument("--plexes", default="", help="several plexes: their names, comma-separated (plexA,plexB)")
     qc = s.add_parser("qc", help="the TMT QC of a finished search: channels, labelling, purity (read only)")
-    qc.add_argument("folder")
+    qc.add_argument("folder", help="the TMT experiment folder (an inbox drop or a filed experiment)")
     qc.add_argument("--method", default=None, help=method_help)
-    qc.add_argument("--json", action="store_true")
+    qc.add_argument("--json", action="store_true", help="print the result as JSON")
     p.set_defaults(fn=main)
     return p
 

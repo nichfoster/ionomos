@@ -1127,16 +1127,21 @@ Collected from the other docs; resolve before/during Phase 1.
 - [ ] Loaders (D97), not verified on real files: Excel's UTF-16 save of each engine's table, a Spectronaut report
       from a German Windows, a Proteome Discoverer `.xlsx` export, DIA-NN 2.x `--out` names. A lab member's real
       exports would settle these. FragPipe's own tables saved again from Excel with thousands separators are still
-      read as all missing (FragPipe never writes them). A MaxQuant TMT table without a design gets one condition
-      per channel; it should be `unassigned` and ask, as Sage TMT does (#165).
+      read as all missing (FragPipe never writes them). A MaxQuant TMT table without a design is `unassigned`
+      since round 5 (D109, #165): should experiment.yaml's `tmt:` map also name MaxQuant channels, as it does
+      Sage's `tmt.tsv`? Its note is still added when an SDRF or `sample_conditions` then gives the conditions.
 - [ ] Statistics: ~~a dose-response curve is fitted and called for a protein measured at only two doses (#162)~~
-      (done, D106); `qc.pca` takes ~6 min on 500 samples (#163); knn
-      imputation is quadratic in features (#164).
+      (done, D106). PCA and knn are fast since round 5 (D108, #163, #164):
+      port impute.knn's `maxp` clustering for tables over 1,500 rows (needs an R golden for knn first)? The QC
+      correlation heatmap is now the slowest QC step at 500 samples (10–17 s): accept a non-bit-identical faster
+      distance, or cap the clustered heatmap?
 - [ ] Intake: what only the watcher can see (a dot-ended folder whose fixed name is taken, a failing loose-file
       grouping) is logged but not raised as an attention item. Since #139 (D94) `cli.cmd_run` gives the watcher
       its `log_dir`, as the too-long-path item uses: raise these the same way. macOS / Linux: a folder is moved even while a copy still writes
-      into it (no open-file lock there; a longer `stable_seconds` is the guard). How intake tells the window's
-      `resolved_by: gui` from a hand-written one (#173); `ionomos run`'s two start-up tracebacks (#172).
+      into it (no open-file lock there; a longer `stable_seconds` is the guard). Since round 5 only the window's
+      answer in this intake names a new user (D114, #173): should that answer survive a watcher restart (a
+      one-time marker file), so an unchanged answer is not shown once more? `ionomos run`'s two start-up
+      tracebacks are messages (#172).
 - [ ] Engines (D98, D126): on the lab PC, check whether MSFragger's `BatmassIoThermoServer.exe` outlives
       MSFragger (Windows now stops it through the engine's job, #174: a finished search's notes and console log
       would say "a program FragPipe started was still running after FragPipe ended"), and that the installed
@@ -1150,8 +1155,8 @@ Collected from the other docs; resolve before/during Phase 1.
       check a path with µ or ü on the PC, or hold a job whose paths are not ASCII.
 - [ ] Config and CLI (D102): `LiveConfig` can read a config.yaml another editor is writing in place (6 of 138 cut
       points load as a valid config with fewer methods, put right by the next reload); a settle delay would close
-      it. 24 options outside `cli.py` have no `--help` text (#166); `bundle 77` and `library show <missing>` exit
-      the other way round from the table (#167).
+      it. (Every option has `--help` text, #166, and `bundle` / `library show` follow the exit-code table, #167,
+      since round 5.)
 - [ ] Security (D99, D100, SECURITY_NOTES.md): ~~`experiment.yaml`'s `workflow:` / `fasta:` accept any absolute or
       UNC path, `site_annotation:` a UNC one (#168)~~ (done, D105); an Authenticode check of the downloaded installer (today:
       size + SHA-256 from the same GitHub answer); `maxquant.create_template` and `sage.run_job` start programs
@@ -1159,29 +1164,31 @@ Collected from the other docs; resolve before/during Phase 1.
       Cards render a little Markdown from a failure reason; a mapped drive letter (`Z:`) inside a scanned file is
       not recognised as a network path. ~~An attention item id with `../` reads and rewrites a JSON file outside the
       attention folder (#169)~~ (done: `attention.py` checks every id).
-- [ ] Assistant: should a whole question have a time limit? It can make 6 requests of `timeout_seconds` each (12
-      minutes by default, #171). Should a proposal for another job than the one asked about be refused rather than
+- [ ] Assistant: is 2 × `timeout_seconds` the right limit for a whole question (D117, #171)? Measure on the PC
+      with `ionomos ask-eval`: how many requests a real answer takes and how long each takes, idle and while
+      searching (6.0); should it be a setting? Should a proposal for another job than the one asked about be refused rather than
       shown with a note (D75 4)? Round 4 kept the note and extended it to items without a job and unknown
       experiments; an injected line can still aim a proposal at another job, which a person then has to read.
-- [ ] Report: rows, chart points and chips cannot be opened from the keyboard (#176); text in palette colours and
-      help.html / charts.py's `#898781` are below 4.5:1 (#177); `composeFigure` still puts the statistics footer
-      on exported TMT QC figures (#178); a user's own `/regex/` with catastrophic backtracking can still freeze the
+- [ ] Report: keyboard access (D116, #176), text contrast (D115, #177) and the TMT export's footer (#178) are
+      fixed since round 5. Open: a keyboard path through a chart's own points (today a point is reached through
+      its table row)? The report's TMT export still reads its legend from the page while `sectionfigs.py` builds
+      its own: align them? Dose / time badges coloured by class still use the palette as text. A user's own `/regex/` with catastrophic backtracking can still freeze the
       page (JS has no regex time-out). Not verified: a real screen reader, Safari / Firefox, a 100k-feature report
       in a real browser.
-- [ ] Library (D101): `fpfolder.workflow_kind` still calls SILAC / PAL / isoTOP / ipIAA search folders isoDTB for
-      the analysis (#161). On the PC: the merged catalog after a `--time`-limited scan of `D:\`, the app's "Use it
+- [ ] Library (D101): SILAC / PAL / isoTOP / ipIAA search folders are named and refused, not read as isoDTB, since
+      round 5 (D113, #161): should Ionomos analyse other MS1 labels as a generic light/heavy ratio? On the PC: the merged catalog after a `--time`-limited scan of `D:\`, the app's "Use it
       anyway?" question and the Review proposals status line.
-- [ ] FASTA: four more readers (`bundle.fasta_facts`, `sdrf.fasta_organism`, `engines._fasta_names`,
-      `benchmark.read_fasta_species`) still miss the first entry of a BOM file and read a line-free file as one
-      line (#160).
+- [x] FASTA: the four other readers skip a BOM and read in bounded chunks (#160, round 5).
 - [ ] TMT: if the lab has iTRAQ data, try FragPipe's stock iTRAQ4 workflow on the first real TMT run (only the fake
       has searched it). `_load_quantities` for non-FragPipe engines and `sdrf.py` still read the `tmt:` map
       saved at intake, not `tmtkit.current_block`.
-- [ ] Testbed (D103): does the lab run DIA in fractions? If so, sum the fractions per sample before the statistics
-      (#180). An open search's report could show PTM-Shepherd's `global.profile.tsv` instead of failing on
-      NO_TABLE (#181). A FragPipe refusal with no explanation entry reads "ended from outside, nothing failed:
-      Retry" (#179); plain analysis notes are shown as warnings on a done job (#182). To confirm on the PC: the
-      "badly formatted lines" ERROR line in job 1's console log (REAL_RUNS.md); that the console is cp1252 with
+- [ ] Testbed (D103): does the lab run DIA in fractions, and is adding a sample's fractions what it wants (D111,
+      #180), rather than the max or mean per protein? DIA-NN's phosphosite matrix and the standalone DIA-NN reader
+      are not summed per fraction yet. An open search is done with a note (#181); its report could show
+      PTM-Shepherd's `global.profile.tsv`. Other engines' informational notes in `engines.py` (Sage's summary
+      line, "gene names from …") are still warnings: mark them `quant.Info` (D110, #182). To confirm on the PC: the
+      "badly formatted lines" ERROR line in job 1's console log (REAL_RUNS.md) and that the done-job warning names
+      the two runs FragPipe left out (D112, #179); that the console is cp1252 with
       CRLF; that `<raw>_uncalibrated.mzML` sits beside the raws of an Ionomos job; that a dry run writes
       `fragpipe.job` into the preflight folder.
 - [x] Docs: should `test_docs_sync.py`'s config check also require every key `analysis.Settings` accepts to be

@@ -36,9 +36,11 @@ SEQ = ["#cde2fb", "#b7d3f6", "#9ec5f4", "#86b6ef", "#6da7ec", "#5598e7", "#3987e
        "#1c5cab", "#184f95", "#104281", "#0d366b"]
 
 _TOKENS_LIGHT = """--vz-surface:#fcfcfb;--vz-text:#0b0b0b;--vz-text2:#52514e;--vz-muted:#898781;
---vz-grid:#e1e0d9;--vz-axis:#c3c2b7;--vz-up:#e34948;--vz-down:#2a78d6;--vz-ns:#c3c2b7;--vz-warn:#a15c07;"""
+--vz-grid:#e1e0d9;--vz-axis:#c3c2b7;--vz-up:#e34948;--vz-down:#2a78d6;--vz-ns:#c3c2b7;--vz-warn:#a15c07;
+--vz-tick:#6f6d68;"""
 _TOKENS_DARK = """--vz-surface:#1a1a19;--vz-text:#ffffff;--vz-text2:#c3c2b7;--vz-muted:#898781;
---vz-grid:#2c2c2a;--vz-axis:#383835;--vz-up:#e66767;--vz-down:#3987e5;--vz-ns:#52514e;--vz-warn:#f2b64a;"""
+--vz-grid:#2c2c2a;--vz-axis:#383835;--vz-up:#e66767;--vz-down:#3987e5;--vz-ns:#52514e;--vz-warn:#f2b64a;
+--vz-tick:#898781;"""
 
 
 def _cat_tokens(dark: bool) -> str:
@@ -53,7 +55,7 @@ STYLE = f"""
 .vz .grid{{stroke:var(--vz-grid);stroke-width:1}}
 .vz .axis{{stroke:var(--vz-axis);stroke-width:1}}
 .vz .thr{{stroke:var(--vz-muted);stroke-width:1}}
-.vz .tick{{fill:var(--vz-muted);font-size:12px;font-variant-numeric:tabular-nums}}
+.vz .tick{{fill:var(--vz-tick);font-size:12px;font-variant-numeric:tabular-nums}}
 .vz .atitle{{fill:var(--vz-text2);font-size:13px}}
 .vz .lbl{{fill:var(--vz-text2);font-size:12px}}
 .vz .lgd{{fill:var(--vz-text2);font-size:13px}}

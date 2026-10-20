@@ -368,6 +368,48 @@ def test_maxquant_multiplex_end_to_end_with_reference_setting(tmp_path):
     assert not s2["tmt"]["applied"] and "TMT_PLEXES_NOT_NORMALISED" in {i["code"] for i in s2["issues"]}
 
 
+def _maxquant_one_experiment(folder: Path, prots, sim) -> Path:
+    """One experiment: MaxQuant names the reporter columns by number only ('Reporter intensity corrected 3')."""
+    txt = folder / "combined" / "txt"
+    txt.mkdir(parents=True, exist_ok=True)
+    chans = sim["Exp1"]
+    head = ["Protein IDs", "Majority protein IDs", "Gene names", "Peptides", "Reverse", "Potential contaminant"]
+    head += [f"Reporter intensity corrected {k}" for k in range(1, 11)]
+    rows = [[p, p, f"G{p[1:]}", 5, "", "", *[chans[c][p] for c in TMT10]] for p in prots]
+    (txt / "proteinGroups.txt").write_text("\t".join(head) + "\n" + "\n".join("\t".join(str(x) for x in r)
+                                                                              for r in rows) + "\n", encoding="utf-8")
+    return txt / "proteinGroups.txt"
+
+
+@pytest.mark.parametrize("plexes, layout, samples", [
+    (2, "experiments", 20),        # the issue's case: two TMT10 plexes, the totals over experiments left out
+    (3, "no totals", 30),          # several experiments, no totals written
+    (1, "one experiment", 10),     # 'Reporter intensity corrected 1' ... 10, without an experiment name
+])
+def test_maxquant_tmt_without_a_design_is_unassigned_and_asks_once(tmp_path, plexes, layout, samples):
+    """#165: a channel number is no condition. Without an SDRF or sample_conditions every channel is 'unassigned',
+    as Sage's tmt.tsv without a channel map: QC only, one note asking, no comparison of channel against channel."""
+    prots, sim, _ = _sim(n=60, plexes=plexes)
+    if layout == "one experiment":
+        _maxquant_one_experiment(tmp_path / "mq", prots, sim)
+    else:
+        _maxquant(tmp_path / "mq", prots, sim, totals=layout == "experiments")
+    m = engines.load_maxquant(tmp_path / "mq" / "combined" / "txt" / "proteinGroups.txt")
+    assert len(m.samples) == samples and set(m.condition.values()) == {plex.UNASSIGNED} and m.replicate == {}
+    assert sum("by number only" in n for n in m.notes) == 1
+    out = downstream.analyze(tmp_path / "mq", analysis_cfg=CFG)
+    s = json.loads((out.results_dir / "analysis.json").read_text(encoding="utf-8"))
+    codes = [i["code"] for i in s["issues"]]
+    assert "ONE_CONDITION" in codes and "FOLD_CHANGE_ONLY" not in codes and "NO_CONTROL" not in codes
+    assert not s["comparisons"] and set(s["samples"].values()) == {plex.UNASSIGNED}
+    assert sum("by number only" in n for n in s["notes"]) == 1
+    # sample_conditions still win, by the sample names MaxQuant's columns give
+    conds = {x: ("DMSO" if k % 2 else "Drug") for k, x in enumerate(m.samples)}
+    out2 = downstream.analyze(tmp_path / "mq", analysis_cfg={**CFG, "sample_conditions": conds, "irs": "none"})
+    s2 = json.loads((out2.results_dir / "analysis.json").read_text(encoding="utf-8"))
+    assert set(s2["samples"].values()) == {"DMSO", "Drug"} and s2["comparisons"]
+
+
 def test_proteome_discoverer_files_are_plexes(tmp_path):
     prots, sim, _ = _sim(n=40, plexes=2)
     head = ["Accession", "Description"] + [f"Abundance: F{x}: {c}, Sample, {_cond(c)}" for x in (1, 2) for c in TMT10]

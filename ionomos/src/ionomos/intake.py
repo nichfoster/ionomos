@@ -284,15 +284,21 @@ def _resolve_method(name: str, cfg: Config, raw_names: list[str], ov: Overrides)
         raise IntakeError(str(exc), Kind.METHOD) from exc
 
 
-def _resolve_user(name: str, cfg: Config, ov: Overrides) -> str:
+def _resolve_user(name: str, cfg: Config, ov: Overrides, new_user: str | None = None) -> str:
     if ov.user:
         udir = cfg.users_root / ov.user
         if not udir.is_dir():
-            if ov.resolved_by == "gui":
+            # Only the window's answer in this intake names a new user (passed in memory, never read from the
+            # file): a `resolved_by: gui` typed by hand or copied from another experiment.yaml with a misspelt
+            # user is rejected like any unknown user, not filed under a new folder nobody looks in (#173).
+            if new_user is not None and ov.user == new_user:
                 log.info("creating new user folder %s (named in the resolver window)", udir)
                 udir.mkdir(parents=True)
             else:
-                raise IntakeError(f"experiment.yaml user {ov.user!r}: no folder {udir}", Kind.OVERRIDES)
+                hint = (" (`resolved_by: gui` does not create a user folder: only a new user named in the naming "
+                        "window does)" if ov.resolved_by == "gui" else "")
+                raise IntakeError(f"experiment.yaml user {ov.user!r}: no folder {udir}{hint}. Fix the user: line, "
+                                  "or add the user in the app (Users tab) if it is a new one", Kind.OVERRIDES)
         return ov.user
     try:
         return find_user(name, _users(cfg), cfg.method_aliases)
@@ -312,10 +318,13 @@ def _lenient(filename: str, method: str, codes: dict[str, str] | None = None, ru
         return RawName(filename=filename, safe_filename=stem + RAW_SUFFIX, sample=stem, rep=1, fraction=None)
 
 
-def plan(folder: Path, cfg: Config, ledger: Ledger | None = None) -> Plan:
-    """Read-only interpretation of a folder. Raises IntakeError (never a bare NamingError)."""
+def plan(folder: Path, cfg: Config, ledger: Ledger | None = None, new_user: str | None = None) -> Plan:
+    """Read-only interpretation of a folder. Raises IntakeError (never a bare NamingError).
+
+    new_user: a user the naming window named in this intake (its answer, in memory); only that one gets a new
+    folder under users_root when it has none (#173). Nothing else plan does writes."""
     try:
-        return _plan(folder, cfg, ledger)
+        return _plan(folder, cfg, ledger, new_user)
     except NamingError as exc:  # e.g. a name made only of symbols/emoji survives until sanitize()
         msg = str(exc)
         if "no usable characters" in msg:
@@ -330,7 +339,7 @@ def _safe(name: str, fallback: str = "unnamed") -> str:
         return fallback
 
 
-def _plan(folder: Path, cfg: Config, ledger: Ledger | None = None) -> Plan:
+def _plan(folder: Path, cfg: Config, ledger: Ledger | None = None, new_user: str | None = None) -> Plan:
     folder = Path(folder)
     if not folder.is_dir():
         raise IntakeError(f"not a folder: {folder}")
@@ -348,7 +357,7 @@ def _plan(folder: Path, cfg: Config, ledger: Ledger | None = None) -> Plan:
                           Kind.NO_RAWS)
 
     method = _resolve_method(folder.name, cfg, raw_names, ov)
-    user = _resolve_user(folder.name, cfg, ov)
+    user = _resolve_user(folder.name, cfg, ov, new_user)
     d = ov.date or find_date(folder.name, formats=cfg.date_formats)
     fn = FolderName(
         original=folder.name, safe=sanitize(folder.name), method=method, user=user, date=d,
@@ -936,9 +945,10 @@ def _ask(folder: Path, cfg: Config, ledger: Ledger, resolver: Resolver, exc: Int
                      "see the window again")
         return IntakeResult.REJECTED
     ov.resolved_by = ov.resolved_by or "gui"
-    save_overrides(folder, ov, replace_files=True)  # the window showed every raw: its answer is the files: block
+    saved = save_overrides(folder, ov, replace_files=True)  # the window showed every raw: its answer is the files:
+    _remember_answer(folder, saved)
     try:
-        p = plan(folder, cfg, ledger)
+        p = plan(folder, cfg, ledger, new_user=ov.user or None)  # the window's answer, in memory (#173)
     except IntakeError as exc2:
         _reject(folder, f"after manual fix: {exc2}")
         return IntakeResult.REJECTED
@@ -950,6 +960,43 @@ def _ask(folder: Path, cfg: Config, ledger: Ledger, resolver: Resolver, exc: Int
     except OSError:
         log.exception("Could not save naming history")
     return p
+
+
+# experiment.yaml files the naming/review window wrote in this process: folder -> a hash of the text it saved (#173)
+_ANSWERED: dict[str, str] = {}
+
+
+def _yaml_hash(path: Path) -> str | None:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def _remember_answer(folder: Path, saved: Path) -> None:
+    h = _yaml_hash(saved)
+    if h is not None:
+        _ANSWERED[os.path.normcase(os.path.abspath(folder))] = h
+
+
+def _answered_already(folder: Path, p: Plan) -> bool:
+    """True when the review window need not show this drop again (D34, #173): its experiment.yaml says
+    `resolved_by: gui` and either the window wrote that file in this process (a move that has to wait, then a
+    second try), or its files: block names only raws of this drop. A file copied from another experiment, or one
+    whose raws have changed since, is shown again: the line alone, which anyone can type, is not an answer."""
+    if (p.overrides or {}).get("resolved_by") != "gui":
+        return False
+    y = Path(folder) / EXPERIMENT_YAML
+    h = _ANSWERED.get(os.path.normcase(os.path.abspath(folder)))
+    if h is not None and h == _yaml_hash(y):
+        return True
+    try:
+        files = load_overrides(folder).files
+        raws = _raw_places(folder)[1]
+    except (IntakeError, OverridesError, NumberOutOfRange, OSError):
+        return False
+    names = set(raws) | {_safe(r[: -len(RAW_SUFFIX)]) + RAW_SUFFIX for r in raws}
+    return bool(files) and all(k in names for k in files)
 
 
 def _intake(folder: Path, cfg: Config, ledger: Ledger, resolver: Resolver | None = None) -> IntakeResult:
@@ -966,9 +1013,9 @@ def _intake(folder: Path, cfg: Config, ledger: Ledger, resolver: Resolver | None
             return IntakeResult.REJECTED
     else:
         # A clean reading can still be the wrong one (X_D1 read as its own condition, KC not known yet):
-        # a person sees it first, unless one already answered for this folder (experiment.yaml resolved_by gui).
+        # a person sees it first, unless one already answered for this drop (_answered_already, #173).
         if (resolver is not None and getattr(resolver, "review", None) is not None and cfg.review_drops
-                and (p.overrides or {}).get("resolved_by") != "gui"):
+                and not _answered_already(folder, p)):
             got = _ask(folder, cfg, ledger, resolver, None)
             if isinstance(got, IntakeResult):
                 return got

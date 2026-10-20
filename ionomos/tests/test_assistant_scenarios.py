@@ -112,8 +112,12 @@ def test_a_log_citation_follows_its_line_not_its_number(sid, states, tmp_path, m
     answer, _model, _records = _run(moved, states, tmp_path)
     assert answer.outcome == s["harness"]["outcome"], (answer.outcome, answer.reason)
     assert corpus.score(moved["rubric"], answer) == [], answer.text
-    with pytest.raises(ValueError, match="no line of job 2"):
+    # a line the fake no longer prints: the failure names the scenario and the fake whose console it read
+    with pytest.raises(ValueError, match=rf"{sid}: no line of job 2's log holds 'a line no log has' \(.*"
+                                         r"fragpipe_console\.log, printed by the testbed's fake FragPipe"):
         corpus.resolve({**s, "rubric": {"must_cite": ["log:2#{a line no log has}"]}}, states(s["state"]))
+    with pytest.raises(ValueError, match=r"job 99's log .*\(the job has no engine log\)"):
+        corpus.log_line(states(s["state"]), 99, "anything")
 
 
 @pytest.mark.parametrize("s", SCENARIOS, ids=[s["id"] for s in SCENARIOS])

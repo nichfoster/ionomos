@@ -69,6 +69,7 @@ class Findings:
     model: object = None                # analysis.Model: the design used, or why an asked-for one wasn't
     roles: object = None                # roles.Plan: the conditions' roles and the comparisons they gave
     guards: list = field(default_factory=list)            # guards.statistics: p-values that may not mean what they say
+    no_quantification: str = ""         # the search's workflow quantifies nothing (an open search): no table by design
 
 # the tables each method needs, and why they might be missing
 EXPECTED = {
@@ -373,7 +374,7 @@ def check(f: Findings) -> list[Issue]:
                   f"{f.read_problem}, so there are no statistics or volcano plot.", causes, fixes, {"method": method}))
         return out
     if m is None:
-        if "read" not in f.stage_errors:
+        if "read" not in f.stage_errors and not f.no_quantification:  # an open search: nothing missing (#181)
             want, causes = EXPECTED.get(method, ("a FragPipe result table",
                                                  ["The method isn't known, so Ionomos doesn't know which table to read",
                                                   "FragPipe's quantification didn't run"]))

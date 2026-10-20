@@ -392,7 +392,7 @@ def _maxquant_plexes(m: QuantMatrix, path: Path) -> QuantMatrix:
     experiments MaxQuant also writes the channel totals over experiments ('... corrected 3'): those are left out.
     Channels are numbered in kit order (from 0 in old versions); combined/txt/summary.txt names each
     experiment's raw files, which the SDRF import matches."""
-    from ionomos.downstream.plex import channel_from_index, keep_samples
+    from ionomos.downstream.plex import UNASSIGNED, channel_from_index, keep_samples
 
     hit = {s: _MQ_REPORTER.match(m.columns.get(s, "")) for s in m.samples}
     if any(x and x.group(2) for x in hit.values()):
@@ -414,6 +414,14 @@ def _maxquant_plexes(m: QuantMatrix, path: Path) -> QuantMatrix:
         if x.group(2):
             plex[s] = x.group(2).strip()
     m.meta["channel"] = channel
+    # A reporter column's number is a channel, not a sample name: nothing in the table says a channel's condition
+    # (#165). As Sage's tmt.tsv without a channel map, each is 'unassigned' (one condition for all, so the analysis
+    # asks instead of testing channels against each other); an SDRF or sample_conditions gives them later.
+    for s in channel:
+        m.condition[s] = UNASSIGNED
+        m.replicate.pop(s, None)
+    m.notes.append(f"MaxQuant names {len(channel)} TMT channels by number only, so their condition is '{UNASSIGNED}': "
+                   "give each its condition on the Analysis tab, with analysis.sample_conditions, or with an SDRF")
     if plex:
         m.meta["plex"] = plex
         summary = path.parent / "summary.txt"
@@ -1083,16 +1091,17 @@ def _sage_protein_q(path: Path) -> dict[str, float]:
 
 
 def _fasta_names(path: Path, limit_bytes: int = 1024**3) -> dict[str, tuple[str, str]]:
-    """UniProt accession -> (gene name, description) from a FASTA's header lines; {} when it can't be read."""
+    """UniProt accession -> (gene name, description) from a FASTA's header lines; {} when it can't be read. Headers
+    are read by fastasource.fasta_headers: a leading UTF-8 byte-order mark skipped, bounded memory on any file."""
+    from ionomos.fastasource import fasta_headers
+
     out: dict[str, tuple[str, str]] = {}
     try:
         if not path.is_file() or path.stat().st_size > limit_bytes:
             return out
-        with open(path, encoding="utf-8", errors="replace") as fh:
-            for line in fh:
-                if not line.startswith(">"):
-                    continue
-                m = re.match(r"^>(?:sp|tr)\|([^|]+)\|\S+\s*(.*)$", line.rstrip())
+        with open(path, "rb") as fh:
+            for raw in fasta_headers(fh):
+                m = re.match(r"^(?:sp|tr)\|([^|]+)\|\S+\s*(.*)$", raw.decode("utf-8", "replace").rstrip())
                 if not m:
                     continue
                 rest = m.group(2)

@@ -281,13 +281,14 @@ def fasta_organism(path: str | Path | None, decoy: str = "rev_") -> tuple[str | 
     key = (str(p), st.st_mtime, st.st_size)
     if key in _FASTA_CACHE:
         return _FASTA_CACHE[key]
+    from ionomos.fastasource import fasta_headers  # BOM skipped, bounded memory on a file without line breaks
+
     counts: Counter = Counter()
     rx = re.compile(rb" OS=(.+?)(?: [A-Z]{2}=|$)")
     try:
         with open(p, "rb") as fh:
-            for line in fh:
-                if not line.startswith(b">") or line.startswith(b">" + decoy.encode()) or \
-                        line[1:].lower().startswith((b"contam_", b"cont_")):
+            for line in fasta_headers(fh):
+                if line.startswith(decoy.encode()) or line.lower().startswith((b"contam_", b"cont_")):
                     continue
                 m = rx.search(line.rstrip())
                 counts[m.group(1).decode("utf-8", "replace").strip() if m else ""] += 1

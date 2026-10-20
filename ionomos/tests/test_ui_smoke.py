@@ -168,7 +168,8 @@ def test_every_window_opens_hidden_and_fits_a_laptop_screen(hidden_app, no_dialo
     too_big = {n: sizes[n] for n, ok in seen.items() if not ok}
     assert not too_big, f"wider or taller than 1366x768 (at {_scale():.2f}x): {too_big}"
     assert "resolver demo" in seen and len(seen) >= 14, sorted(seen)
-    assert not no_dialogs.unexpected(), no_dialogs.unexpected()
+    # each one with the widget whose Tk callback asked and that widget's interpreter (this app's: below) (#185)
+    assert not no_dialogs.unexpected(), f"this app's interpreter {id(app.root.tk):#x}\n{no_dialogs.report()}"
 
 
 def test_main_buttons_are_on_screen_at_1366x768(hidden_app, no_dialogs, tmp_path):

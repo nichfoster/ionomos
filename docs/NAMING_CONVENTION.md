@@ -371,8 +371,14 @@ caught before FragPipe runs. This is on by default; turn it off with
 so they stick. **Not now** leaves it in the inbox with a note. If
 `gui.timeout_minutes` is set and nobody answers, a reviewed drop is filed as
 read. The window isn't shown again for a folder someone already answered for
-(`experiment.yaml` → `resolved_by: gui`). On a PC with no display, drops are
-filed as read.
+(`experiment.yaml` → `resolved_by: gui`): when the window wrote that file while
+this watcher runs (a move that has to wait, then a second try), or when its
+`files:` block names only raws of this drop. A `resolved_by: gui` line alone
+(typed by hand, or copied from another experiment's `experiment.yaml`) is not an
+answer: the drop is shown again. A new user gets a folder under `users_root`
+only when named in the window: a `user:` in `experiment.yaml` with no folder is
+refused like any unknown user, `resolved_by: gui` or not. On a PC with no
+display, drops are filed as read.
 
 Users and aliases added in the app while the window is open appear in it
 within two seconds. A blank user is filled in as soon as an alias matches
