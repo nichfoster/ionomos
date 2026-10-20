@@ -731,13 +731,16 @@ def load_expected(path: str | Path) -> dict:
 
 
 def read_fasta_species(path: str | Path) -> dict[str, set[str]]:
-    """accession (upper case) -> the species its FASTA header names (entry-name suffix and OS=), canonical."""
+    """accession (upper case) -> the species its FASTA header names (entry-name suffix and OS=), canonical. Headers
+    are read by fastasource.fasta_headers: a leading UTF-8 byte-order mark skipped, bounded memory on any file."""
+    from ionomos.fastasource import fasta_headers
+
     out: dict[str, set[str]] = {}
-    with open(path, encoding="utf-8", errors="replace") as fh:
-        for line in fh:
-            if not line.startswith(">"):
+    with open(path, "rb") as fh:
+        for raw in fasta_headers(fh):
+            head = raw.decode("utf-8", "replace").strip()
+            if not head:
                 continue
-            head = line[1:].strip()
             first = head.split(None, 1)[0]
             if first.lower().startswith(("rev_", "decoy_", "reverse_")):
                 continue

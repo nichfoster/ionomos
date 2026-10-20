@@ -16,9 +16,11 @@ token, because nothing is shown before the answer's citations are checked. `tran
 call: tests and the scenario corpus pass assistant.fake.ScriptedModel, so no test opens a socket.
 
 Limits on a reply, whatever the runtime does:
-  - time: `timeout_seconds` is the whole request, from sending it to the end of the reply. The socket's own
-    timeout (the same value) only bounds each wait for data, so a model that trickles a token every few
-    seconds was never stopped; now a reply still coming after timeout_seconds is dropped (ChatError).
+  - time: `timeout_seconds` is the whole request, from sending it to the end of the reply; a reply still
+    coming after it is dropped (ChatError). The socket's timeout is the time left of the request, set again
+    before each read, so a reply that stalls just before the limit is stopped at the limit, not one socket
+    timeout later (#171). ask() hands each request less than timeout_seconds when less is left of the time
+    the whole question may take (`limit=`, assistant.question_limit).
   - size: MAX_REPLY_BYTES. The reply is read in pieces of at most READ_BYTES, so a reply without line
     breaks (10 MB of JSON on one line) is stopped at the limit instead of being read whole first.
 """
@@ -84,12 +86,24 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def _socket_of(resp):
+    """The socket under an http.client response (resp.fp is a buffered reader over a SocketIO), or None."""
+    return getattr(getattr(getattr(resp, "fp", None), "raw", None), "_sock", None)
+
+
 def _http(url: str, data: bytes, headers: dict, timeout: float) -> Iterator[bytes]:
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
     req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+    deadline = time.perf_counter() + timeout
     try:
         with opener.open(req, timeout=timeout) as resp:
-            while line := resp.readline(READ_BYTES):  # never a whole 10 MB line at once
+            sock = _socket_of(resp)
+            while True:
+                if sock is not None:  # each wait for data gets only what is left of the request's time
+                    sock.settimeout(max(0.01, deadline - time.perf_counter()))
+                line = resp.readline(READ_BYTES)  # never a whole 10 MB line at once
+                if not line:
+                    break
                 yield line
     except urllib.error.HTTPError as exc:
         body = ""
@@ -112,31 +126,40 @@ def request_body(settings: dict, messages: list[dict], tools: list[dict]) -> byt
     return json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 
 
-def chat(settings: dict, messages: list[dict], tools: list[dict], transport: Transport | None = None) -> Reply:
+def chat(settings: dict, messages: list[dict], tools: list[dict], transport: Transport | None = None, *,
+         limit: float | None = None, why: str = "assistant.timeout_seconds",
+         clock: Callable[[], float] | None = None) -> Reply:
+    """One request. limit: its time in seconds (None: assistant.timeout_seconds), also the transport's timeout;
+    why: what set it, for the message when it runs out; clock: seconds now (tests pass a fake one)."""
     problem = local_problem(settings.get("base_url", ""))
     if problem:
         raise NotLocal(problem)
     url = str(settings["base_url"]).rstrip("/") + "/chat/completions"
     headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
-    started = time.perf_counter()  # not monotonic(): on Windows before 3.13 that ticks every ~16 ms
+    now = clock or time.perf_counter  # not monotonic(): on Windows before 3.13 that ticks every ~16 ms
+    started = now()
     lines, size = [], 0
     reply = Reply()
-    limit = float(settings.get("timeout_seconds", 120))
+    limit = float(settings.get("timeout_seconds", 120)) if limit is None else float(limit)
+    too_slow = f"the model took longer than {limit:g} s to reply ({why}); the reply was dropped"
     try:
         for raw in (transport or _http)(url, request_body(settings, messages, tools), headers, limit):
             size += len(raw)
             if size > MAX_REPLY_BYTES:
                 raise ChatError(f"the model's reply is larger than {MAX_REPLY_BYTES // 1_000_000} MB; none of it "
                                 "is used")
-            if time.perf_counter() - started > limit:
-                raise ChatError(f"the model took longer than {limit:g} s to reply (assistant.timeout_seconds); "
-                                "the reply was dropped")
+            if now() - started > limit:
+                raise ChatError(too_slow)
             lines.append(raw)
             if reply.ttft is None and _first_token(raw):
-                reply.ttft = round(time.perf_counter() - started, 3)
-    except ChatError:
+                reply.ttft = round(now() - started, 3)
+    except ChatError as exc:
+        if str(exc) != too_slow and not isinstance(exc, NotLocal) and now() - started >= limit:
+            raise ChatError(too_slow) from None  # the socket timed out at the limit: say so, not "timed out"
         raise
     except (OSError, ValueError) as exc:
+        if now() - started >= limit:
+            raise ChatError(too_slow) from None
         raise ChatError(f"no answer from the model runtime: {exc}") from None
     text = b"".join(lines).decode("utf-8", errors="replace")
     try:

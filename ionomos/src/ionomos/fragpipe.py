@@ -1047,6 +1047,11 @@ def exit_code_reason(code: int | None, text: str) -> str:
     if not facts["error_lines"] and not facts["finished"] and not facts["started"] and not facts["commands"]:
         return ""  # it stopped before running anything: the last lines say why
     if not _FAILED_STEP.search(text) and not _CANCELLED_TASKS.search(text) and not explain(text):
+        if facts["error_lines"] and not facts["started"] and not facts["finished"]:
+            # an ERROR line before any step is FragPipe refusing the run and saying why (#179): quote it
+            said = re.sub(r"</?\w{1,10}>", "", facts["error_lines"][0]).strip()[:300]
+            more = len(facts["error_lines"]) - 1
+            return f"refused: {said}" + (f" (and {more} more ERROR line(s))" if more else "")
         if facts["error_lines"] or _TRACEBACK.search(text):  # an error is there, just not one Ionomos knows (#138)
             return "stopped after an error that Ionomos does not recognise"
         return "stopped in the middle of a step without saying why"
@@ -1173,6 +1178,12 @@ def judge(spec: RunSpec, code: int | None, offset: int = 0) -> RunResult:
         why = ("FragPipe exited 0 without its 'ALL JOBS DONE' line and without any of its result tables: the run "
                "did not finish")
         return RunResult(1, f"{why}; last lines: {tail(spec.console_log, 4)}", hints=explain(why) + hints)
+    if is_fragpipe and _BAD_MANIFEST.search(text):  # #179: FragPipe searched without some of the runs
+        left_out = dropped_manifest_lines(text)
+        warnings.append("FragPipe left " + (f"{len(left_out)} run(s) out of the search ({', '.join(left_out)})"
+                                            if left_out else "lines of the file list out of the search")
+                        + ": their bioreplicate in the file list is not a number it can read (\"badly formatted "
+                          "lines\" in its log), so the results lack those runs")
     if not finished:
         # FragPipe's source prints this line at the end of every complete run. A warning, not a failure, until
         # a real headless run on the PC has shown the line in the console Ionomos captures (docs/ROADMAP.md)
@@ -1270,6 +1281,22 @@ _ALL_DONE = re.compile(r"ALL JOBS DONE IN ([\d.,]+) MINUTES")
 _DRY_RUN = re.compile(r"It's a dry-run, not running the commands")
 
 _RAW_ERR = r"\b(error|exception|fail(ed|ure|s)?|unable|cannot|could not|corrupt(ed)?)\b"
+_BAD_MANIFEST = re.compile(r"Manifest file contained some badly formatted lines(.*)")
+
+
+def dropped_manifest_lines(console_text: str) -> list[str]:
+    """The raw files of the manifest lines FragPipe left out ("badly formatted lines": a bioreplicate
+    Integer.parseInt refuses). Headless FragPipe logs them on one ERROR line, line breaks turned into spaces and
+    each line's tabs kept, so a file is a path (or a raw file name) before a tab."""
+    names: list[str] = []
+    for m in _BAD_MANIFEST.finditer(console_text):
+        for path in re.findall(r"(?:^|\s)(\S+?)\t", m.group(1)):
+            name = re.split(r"[\\/]", path)[-1]
+            if not re.search(r"[\\/]", path) and not re.search(r"(?i)\.(?:raw|mzml|mzxml|mgf|d|wiff|mzbin)$", name):
+                continue  # the line's experiment or bioreplicate field, not its file
+            if name and name not in names:
+                names.append(name)
+    return names
 
 # (regex on FragPipe's console output, plain-English explanation + what to do). First match first.
 # A regex must not match what a healthy run prints: FragPipe echoes every workflow key (the "fragpipe.config"
@@ -1296,6 +1323,10 @@ EXPLANATIONS: list[tuple[str, str]] = [
      "Windows could not start a program of the search: a DLL it needs is missing, or is for another Windows "
      "(32/64-bit). Usually that is the Microsoft Visual C++ Redistributable (x64) — DIA-NN has VC_redist.x64.exe "
      "in its folder — or a .NET runtime: install it, then Retry"),
+    (r"FragPipe refused: ",
+     "FragPipe refused to start the search and said why (the reason quotes its message): fix what it names, then "
+     "Retry. Retrying without a change fails the same way; if the message is unclear, send Report a problem so "
+     "the next version can explain it"),
     (r"(?:FragPipe|DIA-NN|MaxQuant|Sage) stopped after an error that Ionomos does not recognise",
      "The search stopped on an error that Ionomos does not recognise: the last lines of its console log say what "
      "(Open log). Send Report a problem so the next version can explain it"),
@@ -1324,6 +1355,10 @@ EXPLANATIONS: list[tuple[str, str]] = [
      "instrument PC (or remove it from the experiment folder), then Retry"),
     (r"raw file\(s\) missing from",
      "Raw files were moved or deleted from the experiment folder after it was filed — put them back, then Retry"),
+    # TabWorkflow.showSkippedFiles (23.1, 24.0): headless, one ERROR line per path, then System.exit(1)
+    (r"Some loaded files don't exist\. Please double check",
+     "A raw file of the file list was moved, renamed or deleted after Ionomos checked the experiment folder (the "
+     "ERROR lines after FragPipe's message name it): put it back in the experiment folder, then Retry"),
     (r"JAVA_HOME is not set and no 'java' command could be found|JAVA_HOME is set to an invalid directory",
      "FragPipe's launcher found no Java. Ionomos points it at FragPipe's own (the jre folder beside bin): that "
      "folder is missing, so reinstall FragPipe (or install a 64-bit Java 17), then Retry"),
@@ -1333,6 +1368,10 @@ EXPLANATIONS: list[tuple[str, str]] = [
     (r"FASTA file path is empty|No FASTA file|Could not find fasta file at",
      "No protein database: set this method's FASTA in the app (Methods tab), or re-export the workflow after "
      "setting it"),
+    # FragpipeRun.checkDbConfig (24.0)
+    (r"Database looks to be empty",
+     "The FASTA has no protein entries (an empty file, or not a FASTA): put a real FASTA with decoys in the FASTA "
+     "folder and pick it for the method on the Methods tab, then Retry"),
     (r"No decoys found in the FASTA file|All FASTA entries seem to be decoys|FASTA file contains [\d.,]+% decoys|"
      r"Decoy protein prefix(?:</b>)? is empty",
      "The FASTA's decoys are not what FragPipe needs (about half the entries, each starting with the decoy "
@@ -1406,10 +1445,19 @@ EXPLANATIONS: list[tuple[str, str]] = [
      "The TMT annotation (channel -> sample) doesn't fit the workflow: list every channel of the label type "
      "once, one sample name without spaces per channel (NA for unused), names unique across plexes, and the "
      "reference channel named as the workflow expects — fix tmt: in experiment.yaml, then Retry"),
-    (r"Some input LCMS files have the same name|multiple experimental groups, but one of them has empty name|"
-     r"Manifest file contained some badly formatted lines",
+    # FragpipeRun's TMT check (24.0): a plex (experiment) has no annotation file
+    (r"Not all TMT groups have annotation files set",
+     "FragPipe found no TMT annotation (channel -> sample) for one of the plexes: every plex needs its channels "
+     "in tmt: in experiment.yaml (or on the Analysis tab) — add the missing plex, then Retry"),
+    (r"Some input LCMS files have the same name|multiple experimental groups, but one of them has empty name",
      "FragPipe refused the file list: two raw files have the same name, or a name FragPipe can't use — rename "
      "the files so every one is unique, then Retry"),
+    # TabWorkflow.manifestLoad: a line whose bioreplicate Integer.parseInt refuses is left out and the run goes on
+    # (exit 0) without it; on a done job judge() turns the line into a warning (dropped_manifest_lines)
+    (_BAD_MANIFEST.pattern,
+     "FragPipe left lines of the file list out because their bioreplicate is not a whole number it can read "
+     "(Java's int: at most 2147483647, no spaces), and searched without those runs: fix the replicate numbers in "
+     "the raw file names or experiment.yaml (1-999), then Retry"),
     (r"(Percolator|PeptideProphet) was enabled but MSFragger's output formats|"
      r"Both FreeQuant and TMT-Integrator were enabled|cannot be run in the same workflow",
      "The workflow's settings contradict each other (FragPipe's message says which): fix them in the FragPipe "

@@ -9,7 +9,7 @@ import pytest
 import yaml
 
 from ionomos import assistant, configio, health, testbed
-from ionomos.assistant import audit, client, fake, runtime
+from ionomos.assistant import audit, client, fake, runtime, scenarios
 from ionomos.config import ConfigError, load
 from ionomos.intake import intake
 from ionomos.ledger import Ledger
@@ -27,14 +27,13 @@ def bed(tmp_path, monkeypatch):
     assert intake(testbed.drop(tmp_path / "bed", "iso_good"), cfg, led).value == "queued"
     Worker(cfg, led).run_once()
     led.close()
-    return {"cfg": cfg, "cfg_path": cfg_path, "audit": tmp_path / "audit.jsonl"}
+    return {"cfg": cfg, "cfg_path": cfg_path, "audit": tmp_path / "audit.jsonl",
+            # the out-of-memory line, its number read from the fake FragPipe's console (#183)
+            "answer": [{"content": f"FragPipe ran out of memory [{scenarios.log_line(cfg, 1, 'OutOfMemoryError')}]."}]}
 
 
 def _with(cfg, **block):
     return replace(cfg, assistant=assistant.settings_from({"enabled": True, "model": "big", "stream": False, **block}))
-
-
-ANSWER = [{"content": "FragPipe ran out of memory [log:1#242]."}]
 
 
 # ----------------------------------------------------------------- settings --
@@ -143,11 +142,11 @@ def test_keep_alive_goes_into_the_request_only_when_set_and_threads_never_do():
 
 def test_idle_and_searching_questions_use_their_own_model_and_keep_alive(bed):
     cfg = _with(bed["cfg"], keep_alive="5m", while_searching={"model": "small", "keep_alive": "30s"})
-    model = fake.ScriptedModel(ANSWER)
+    model = fake.ScriptedModel(bed["answer"])
     ans = assistant.ask(cfg, "why?", experiment="1", transport=model, audit_path=bed["audit"], searching=False)
     assert ans.grounded and ans.mode == "idle"
     assert (model.requests[0]["model"], model.requests[0]["keep_alive"]) == ("big", "5m")
-    model = fake.ScriptedModel(ANSWER)
+    model = fake.ScriptedModel(bed["answer"])
     ans = assistant.ask(cfg, "why?", experiment="1", transport=model, audit_path=bed["audit"], searching=True)
     assert ans.grounded and ans.mode == "searching"
     assert (model.requests[0]["model"], model.requests[0]["keep_alive"]) == ("small", "30s")
@@ -158,32 +157,34 @@ def test_idle_and_searching_questions_use_their_own_model_and_keep_alive(bed):
 def test_ask_reads_the_workers_state_itself(bed):
     cfg = _with(bed["cfg"], while_searching={"model": "small"})
     health.Heartbeat(cfg.log_dir).beat("worker", "running job 7: IonQuant", force=True)
-    model = fake.ScriptedModel(ANSWER)
+    model = fake.ScriptedModel(bed["answer"])
     ans = assistant.ask(cfg, "why?", experiment="1", transport=model, audit_path=bed["audit"])
     assert ans.mode == "searching" and model.requests[0]["model"] == "small"
     health.Heartbeat(cfg.log_dir).beat("worker", "idle", force=True)
-    model = fake.ScriptedModel(ANSWER)
+    model = fake.ScriptedModel(bed["answer"])
     assert assistant.ask(cfg, "why?", experiment="1", transport=model, audit_path=bed["audit"]).mode == "idle"
     assert model.requests[0]["model"] == "big"
 
 
 def test_paused_while_searching_is_ionomos_own_text_and_asks_nothing(bed):
     cfg = _with(bed["cfg"], while_searching={"pause": True})
-    model = fake.ScriptedModel(ANSWER)
+    model = fake.ScriptedModel(bed["answer"])
     ans = assistant.ask(cfg, "why?", experiment="1", transport=model, audit_path=bed["audit"], searching=True)
     assert ans.outcome == "unavailable" and model.requests == [] and "paused while a search runs" in ans.text
     assert "likely: FragPipe ran out of memory" in ans.text and not ans.sources
     # idle, the same settings ask as usual
-    assert assistant.ask(cfg, "why?", experiment="1", transport=fake.ScriptedModel(ANSWER), audit_path=bed["audit"],
+    again = fake.ScriptedModel(bed["answer"])
+    assert assistant.ask(cfg, "why?", experiment="1", transport=again, audit_path=bed["audit"],
                          searching=False).grounded
 
 
 def test_a_search_address_off_this_pc_is_refused_like_any_other(bed):
     cfg = _with(bed["cfg"], while_searching={"base_url": "http://192.168.1.20:8080/v1"})
-    model = fake.ScriptedModel(ANSWER)
+    model = fake.ScriptedModel(bed["answer"])
     ans = assistant.ask(cfg, "why?", experiment="1", transport=model, audit_path=bed["audit"], searching=True)
     assert ans.outcome == "refused" and model.requests == [] and "192.168.1.20" in ans.text
-    assert assistant.ask(cfg, "why?", experiment="1", transport=fake.ScriptedModel(ANSWER), audit_path=bed["audit"],
+    again = fake.ScriptedModel(bed["answer"])
+    assert assistant.ask(cfg, "why?", experiment="1", transport=again, audit_path=bed["audit"],
                          searching=False).grounded
 
 

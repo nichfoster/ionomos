@@ -2107,22 +2107,23 @@ def add_parser(sub):
                     "in fewer folders than the last one (default: what it did not look at is kept)")
     sc.add_argument("--depth", type=int, default=None, help="folders deep (default: library.max_depth, 6)")
     sc.add_argument("--time", type=float, default=None, help="seconds at most (default: library.time_limit_s, 120)")
-    sc.add_argument("--json", action="store_true")
+    sc.add_argument("--json", action="store_true", help="print the result as JSON")
     li = ls.add_parser("list", help="what the last scan found")
-    li.add_argument("what", nargs="?", choices=("workflows", "fastas"), default=None)
+    li.add_argument("what", nargs="?", choices=("workflows", "fastas"), default=None,
+                    help="only the workflows or only the FASTAs (default: both)")
     li.add_argument("--kind", default=None, help=f"only workflows of this kind ({', '.join(KINDS)})")
     li.add_argument("--flags", action="store_true", help="also list each one's flags")
-    li.add_argument("--json", action="store_true")
+    li.add_argument("--json", action="store_true", help="print the result as JSON")
     sh = ls.add_parser("show", help="one workflow or FASTA in plain words")
-    sh.add_argument("path")
-    sh.add_argument("--json", action="store_true")
+    sh.add_argument("path", help="a .workflow or FASTA file on this PC")
+    sh.add_argument("--json", action="store_true", help="print the result as JSON")
     rc = ls.add_parser("recommend", help="the best workflow and FASTA per method")
     rc.add_argument("--apply", action="store_true", help="adopt the proposals for methods whose files are missing "
                     "or broken, and save them in config.yaml (a backup is kept)")
-    rc.add_argument("--json", action="store_true")
+    rc.add_argument("--json", action="store_true", help="print the result as JSON")
     ad = ls.add_parser("adopt", help="copy a workflow (and its FASTA) into the pinned folders for a method")
-    ad.add_argument("path")
-    ad.add_argument("--method", required=True)
+    ad.add_argument("path", help="the .workflow or FASTA file to copy in")
+    ad.add_argument("--method", required=True, help="the method key in config.yaml it is for, e.g. DIA")
     ad.add_argument("--with-fasta", action="store_true", help="also switch the method to the workflow's own FASTA "
                     "(default: only when the method's FASTA is missing)")
     ad.add_argument("--no-config", action="store_true", help="copy only, under a name no method uses; leave "
@@ -2130,7 +2131,7 @@ def add_parser(sub):
     ad.add_argument("--force", action="store_true", help="adopt even a workflow of another kind than the method's, "
                     "or a file with an error mark (a FASTA without decoys ...)")
     ck = ls.add_parser("check", help="newer stock workflows, old or superseded FASTAs (changes nothing)")
-    ck.add_argument("--json", action="store_true")
+    ck.add_argument("--json", action="store_true", help="print the result as JSON")
     return p
 
 
@@ -2284,7 +2285,7 @@ def _cli_show(args, cfg) -> int:
     p = Path(args.path)
     if not p.is_file():
         print(f"{p} is not a file on this PC", file=sys.stderr)
-        return 1
+        return 2  # a file it was given isn't there (D102, #167)
     ctx = context_from(cfg)
     if p.name.lower().endswith(WORKFLOW_SUFFIX):
         info = describe_workflow(p, ctx)

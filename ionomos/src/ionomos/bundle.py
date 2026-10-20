@@ -1665,18 +1665,30 @@ def _put(z: zipfile.ZipFile, arc: str, lines, scrub: _Scrub) -> tuple[int, str]:
 
 
 def fasta_facts(path: Path) -> dict | None:
-    """Name, size, entry count, decoy count and SHA-256 of a FASTA file: what a bundle says instead of holding it."""
+    """Name, size, entry count, decoy count and SHA-256 of a FASTA file: what a bundle says instead of holding it.
+    Headers are read by fastasource.fasta_headers (a leading UTF-8 byte-order mark skipped, bounded memory on a file
+    without line breaks); the size and SHA-256 are of every byte, the mark included."""
+    from ionomos.fastasource import fasta_headers
+
+    class _Hashed:  # every byte fasta_headers reads goes through the digest too: one pass over the file
+        def __init__(self, fh):
+            self.fh, self.digest, self.size = fh, hashlib.sha256(), 0
+
+        def read(self, n: int = -1) -> bytes:
+            block = self.fh.read(n)
+            self.digest.update(block)
+            self.size += len(block)
+            return block
+
     try:
-        digest, entries, decoys, size = hashlib.sha256(), 0, 0, 0
+        entries = decoys = 0
         with open(_long(path), "rb") as f:
-            for line in f:
-                digest.update(line)
-                size += len(line)
-                if line.startswith(b">"):
-                    entries += 1
-                    decoys += line[1:6].lower().startswith((b"rev_", b"decoy"))
-        return {"name": Path(path).name, "bytes": size, "entries": entries, "decoys": decoys,
-                "sha256": digest.hexdigest()}
+            h = _Hashed(f)
+            for head in fasta_headers(h):
+                entries += 1
+                decoys += head[:5].lower().startswith((b"rev_", b"decoy"))
+        return {"name": Path(path).name, "bytes": h.size, "entries": entries, "decoys": decoys,
+                "sha256": h.digest.hexdigest()}
     except OSError:
         return None
 
@@ -2558,6 +2570,12 @@ def add_parser(sub):
 def run_cli(args) -> int:
     import sys
 
+    def not_found_code(problems: list[str]) -> int:
+        """cli.py's table (D102, #167): a folder given that isn't there is 2, a job not in the job list 1."""
+        if not problems:
+            return 0
+        return 1 if all(p.startswith("no job ") for p in problems) else 2
+
     t = list(args.targets)
     try:
         if t[:1] == ["inspect"]:
@@ -2603,7 +2621,7 @@ def run_cli(args) -> int:
         if args.dry_run:
             plan = collect(Path(args.config), t, opts)
             print("\n".join(summary_lines(plan)))
-            return 2 if plan.problems else 0
+            return not_found_code(plan.problems)
         res = create(Path(args.config), t, opts, dest_dir=Path(args.out) if args.out else None,
                      progress=None)
     except BundleError as exc:
@@ -2622,4 +2640,4 @@ def run_cli(args) -> int:
         print(f"  capped: {c['path']}: {c['why']}")
     for prob in res.problems:
         print(f"  not found: {prob}", file=sys.stderr)
-    return 2 if res.problems else 0
+    return not_found_code(res.problems)

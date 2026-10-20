@@ -380,10 +380,10 @@ def _generated(entry_id: str) -> str:
 
 
 PAGE_CSS = """
-:root{color-scheme:light;--page:#f9f9f7;--surface:#fcfcfb;--sunk:#f1f0ec;--text:#0b0b0b;--text2:#52514e;--muted:#898781;
---line:#e1e0d9;--accent:#2a78d6}
+:root{color-scheme:light;--page:#f9f9f7;--surface:#fcfcfb;--sunk:#f1f0ec;--text:#0b0b0b;--text2:#52514e;--muted:#6f6d68;
+--line:#e1e0d9;--accent:#2a78d6;--link:#1f66c2}
 @media (prefers-color-scheme: dark){:root{color-scheme:dark;--page:#0d0d0d;--surface:#1a1a19;--sunk:#141413;--text:#fff;
---text2:#c3c2b7;--muted:#898781;--line:#2c2c2a;--accent:#3987e5}}
+--text2:#c3c2b7;--muted:#898781;--line:#2c2c2a;--accent:#3987e5;--link:#3987e5}}
 *{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:70px}
 body{margin:0;background:var(--page);color:var(--text);font:15px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}
 header{position:sticky;top:0;background:var(--page);border-bottom:1px solid var(--line);padding:10px 20px;z-index:2;
@@ -394,12 +394,12 @@ padding:5px 10px;min-width:240px}
 .wrap{display:grid;grid-template-columns:250px minmax(0,1fr);gap:28px;max-width:1180px;margin:0 auto;padding:10px 20px 80px}
 nav{position:sticky;top:64px;align-self:start;max-height:calc(100vh - 80px);overflow:auto;font-size:13.5px}
 nav b{display:block;margin:12px 0 2px}nav a{display:block;color:var(--text2);text-decoration:none;padding:1px 0}
-nav a:hover{color:var(--accent)}
+nav a:hover{color:var(--link)}
 main{max-width:80ch}
 h2{font-size:21px;margin:36px 0 6px;font-weight:640;border-bottom:1px solid var(--line);padding-bottom:4px}
 article{margin:18px 0 22px}article:target{outline:2px solid var(--accent);outline-offset:6px;border-radius:4px}
 h3{font-size:16px;margin:0 0 4px;font-weight:620}h3 a.self{color:var(--muted);text-decoration:none;font-weight:400;margin-left:6px}
-p{margin:6px 0}ul,ol{margin:6px 0;padding-left:22px}li{margin:3px 0}a{color:var(--accent)}
+p{margin:6px 0}ul,ol{margin:6px 0;padding-left:22px}li{margin:3px 0}a{color:var(--link)}
 code{font:13px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--sunk);border:1px solid var(--line);
 border-radius:4px;padding:0 4px}
 .meta{color:var(--muted);font-size:13px}.hidden{display:none}

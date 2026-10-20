@@ -38,18 +38,6 @@ def _options(p):
     return [a for a in p._actions if not isinstance(a, (argparse._HelpAction, argparse._SubParsersAction))]
 
 
-# options defined outside cli.py (bundle.py, library.py, testbed.py, fastasource.py, tmtkit.py) with no help text
-# yet (#166): this list may only shrink (a new option without help fails the test)
-NO_HELP_YET = {
-    "library scan --json", "library list what", "library list --json", "library show path", "library show --json",
-    "library recommend --json", "library adopt path", "library adopt --method", "library check --json",
-    "testbed init dir", "testbed list dir", "testbed drop name", "testbed drop dir", "testbed reset dir",
-    "testbed stress --seed", "testbed stress --no-chaos", "fasta search --limit", "fasta prepare fasta",
-    "fasta prepare --no-philosopher", "tmt plan folder", "tmt plan --json", "tmt annotation folder",
-    "tmt qc folder", "tmt qc --json",
-}
-
-
 def _name(path, a) -> str:
     return " ".join([*path, a.option_strings[-1] if a.option_strings else a.dest])
 
@@ -70,9 +58,9 @@ def test_every_option_of_every_subcommand_is_explained_in_its_help():
             shown = a.option_strings or [p._get_formatter()._format_args(a, a.dest).strip("[]. ")]
             for s in shown:
                 assert s in text, f"`ionomos {' '.join(path)} --help` does not mention {s}"
-            if not a.help:
+            if not (a.help or "").strip():  # every option and positional, in cli.py or a module's add_parser (#166)
                 lacking.add(_name(path, a))
-    assert lacking <= NO_HELP_YET, f"options without a help text: {sorted(lacking - NO_HELP_YET)}"
+    assert not lacking, f"options without a help text: {sorted(lacking)}"
 
 
 def test_the_docstring_has_the_exit_code_table():
@@ -264,3 +252,79 @@ def test_run_with_a_log_folder_it_cannot_write_is_exit_2(lab, monkeypatch, capsy
                 root.addHandler(h)
     err = capsys.readouterr().err
     assert "Access is denied" in err and "log_dir" in err
+
+
+def _app_traceback(err: str) -> bool:
+    """A traceback from Ionomos itself; logging's own "--- Logging error ---" report of a handler an earlier
+    test left on a closed stream (seen in the full suite only) is not one."""
+    import re
+
+    return "Traceback" in re.sub(r"--- Logging error ---.*?\nArguments: [^\n]*\n", "", err, flags=re.S)
+
+
+def _run_keeping_log_handlers(argv):
+    root, before = logging.getLogger(), list(logging.getLogger().handlers)
+    try:
+        return main(argv)
+    finally:  # run set up its own log handlers: put the test's back
+        for h in list(root.handlers):
+            if h not in before:
+                root.removeHandler(h)
+                h.close()
+        for h in before:
+            if h not in root.handlers:
+                root.addHandler(h)
+
+
+def test_run_with_a_read_only_lock_file_is_exit_2_with_the_fix(lab, capsys):
+    """#172: a lock file restored from a backup (attrib +R) is a message and exit 2, not a traceback."""
+    import os
+    import stat
+
+    from ionomos import health
+
+    lock = lab["cfg"].log_dir / health.LOCK_NAME
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    lock.write_bytes(b"")
+    os.chmod(lock, stat.S_IREAD)
+    try:
+        try:
+            open(lock, "a+b").close()  # noqa: SIM115
+            pytest.skip("this account writes read-only files (root)")
+        except PermissionError:
+            pass
+        assert _run_keeping_log_handlers(["--config", str(lab["cfg_path"]), "run", "--no-gui"]) == 2
+    finally:
+        os.chmod(lock, stat.S_IREAD | stat.S_IWRITE)
+    err = capsys.readouterr().err
+    assert str(lock) in err and "read-only" in err and "Nothing was started" in err
+    assert not _app_traceback(err), err
+    assert lock.read_bytes() == b""
+
+
+def test_run_with_a_damaged_ledger_open_elsewhere_is_exit_1_and_changes_nothing(lab, monkeypatch, capsys):
+    """#172: a damaged ledger that can't be moved aside (open in DB Browser, the app) stops the watcher with a
+    message and exit 1; the file is left as it was, and the lock is let go."""
+    from pathlib import Path
+
+    from ionomos import health
+
+    db = lab["cfg"].database
+    db.parent.mkdir(parents=True, exist_ok=True)
+    db.write_bytes(b"this is not a database" * 100)
+    real = Path.replace
+
+    def held(self, target):
+        if Path(self) == db:
+            raise PermissionError(13, "The process cannot access the file", str(self))
+        return real(self, target)
+
+    monkeypatch.setattr(Path, "replace", held)
+    assert _run_keeping_log_handlers(["--config", str(lab["cfg_path"]), "run", "--no-gui"]) == 1
+    err = capsys.readouterr().err
+    assert str(db) in err and "open in another program" in err and "Nothing was changed" in err
+    assert not _app_traceback(err), err
+    assert db.read_bytes() == b"this is not a database" * 100
+    assert [p.name for p in db.parent.iterdir() if p.name.startswith(db.name + ".")] == []
+    with health.InstanceLock(lab["cfg"].log_dir):  # released: the next start is not "already running"
+        pass

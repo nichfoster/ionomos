@@ -132,10 +132,15 @@ def test_a_two_fraction_dia_gives_dia_nn_a_run_per_fraction(bed):
     assert len(head) == 7 + 12 and all(h.endswith("_uncalibrated.mzML") for h in head[7:])
     manifest = _tsv(wd / "fragpipe-files.fp-manifest")
     assert {(r[1], r[2]) for r in manifest} == {(c, str(n)) for c in ("DMSO", "Drug") for n in (1, 2, 3)}
-    # the analysis sees the two fractions of a sample as two runs of it, and asks (issue filed: it calls them
-    # re-acquisitions, ROADMAP); it never treats them as two replicates silently
+    # the analysis adds up each sample's two fractions (experiment.yaml says they are fractions, #180): six samples,
+    # never twelve replicates and never "re-acquisitions"
     a = _analysis(dest)
-    assert a["state"] == "needs_input" and "DUPLICATE_SAMPLES" in {i["code"] for i in a["issues"]}
+    assert "DUPLICATE_SAMPLES" not in {i["code"] for i in a["issues"]}, a["issues"]
+    assert sorted(a["samples"]) == [f"{c}_{n}" for c in ("DMSO", "Drug") for n in (1, 2, 3)]
+    assert any("fractions were added (6 sample(s) with 2–2 runs" in n for n in a["notes"])
+    assert [c["name"] for c in a["comparisons"]] == ["Drug vs DMSO"] and a["comparisons"][0]["samples"] == {
+        "treatment": 3, "control": 3}
+    assert "fractions were added" not in (job.reason or "")  # a note, not a warning (#182)
 
 
 @pytest.mark.parametrize("sample", ["open_search", "open_search_no_los"])
@@ -153,6 +158,15 @@ def test_an_open_search_is_done_and_leaves_its_mass_shifts(bed, sample):
     los = "ERROR - Mass-offset or open search with 'Localize mass shift (LOS)` was disabled."
     assert (los in console) == (sample == "open_search_no_los")
     assert "ALL JOBS DONE IN" in console
+    # nothing is quantified by design (#181): done, no "analysis had a problem", no attention item
+    a = _analysis(dest)
+    assert a["state"] == "ok" and "NO_TABLE" not in {i["code"] for i in a["issues"]}
+    said = "this search quantifies nothing (an open search): no statistics; PTM-Shepherd's mass shifts are in " \
+           "fragpipe/ptm-shepherd-output/"
+    assert said in a["notes"] and a["quantification"] == {"ran": False, "reason": said}
+    assert "analysis had a problem" not in (job.reason or "") and said in (job.reason or "")
+    from ionomos import attention
+    assert not [it for it in attention.items(bed["cfg"].log_dir) if it.kind == "analysis_failed"]
 
 
 def test_tools_printing_non_ascii_text_reach_the_console_in_the_code_page_and_the_log_in_utf8(bed):

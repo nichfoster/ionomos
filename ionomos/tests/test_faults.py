@@ -213,6 +213,10 @@ def test_tables_that_were_not_written_to_the_end(tmp_path):
     (1, "MSFragger [Work dir: C:\\x]\n2026-10-01 14:03:11,532 ERROR - something new\n",
      "stopped after an error that Ionomos does not recognise"),
     (1, "2026-10-01 14:03:11,532 ERROR - No decoys found in the FASTA file.\n", ""),
+    # #179: an ERROR line before any step is FragPipe refusing and saying why, not "ended from outside: Retry"
+    (1, "2026-10-01 14:03:11,532 ERROR - Something <b>new</b> is wrong\n"
+        "2026-10-01 14:03:11,533 ERROR - C:\\x\\a.raw\n", "refused: Something new is wrong (and 1 more ERROR line(s))"),
+    (1, "2026-10-01 14:03:11,532 ERROR - Database looks to be empty\n", ""),
     (1, "", ""),
 ])
 def test_what_an_exit_code_alone_says(code, text, want):

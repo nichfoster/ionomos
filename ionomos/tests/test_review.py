@@ -186,11 +186,21 @@ def test_accepting_the_automatic_control_pins_nothing(lab):
 
 
 def test_answered_folders_and_old_resolvers_are_not_asked_again(lab, ledger):
-    # a folder a person already answered for (experiment.yaml resolved_by: gui) is filed without asking twice
+    # a folder a person already answered for (experiment.yaml resolved_by: gui, a files: block naming this drop's
+    # raws) is filed without asking twice
+    from ionomos.manifest import FileOverride
+
     folder = make_drop(lab["inbox"], "20260927_EJQ_DIA_w", ["DMSO_1.raw", "DMSO_2.raw", "Drug_1.raw", "Drug_2.raw"])
-    save_overrides(folder, load_overrides(folder).__class__(resolved_by="gui"))
+    save_overrides(folder, load_overrides(folder).__class__(
+        resolved_by="gui", files={"DMSO_1.raw": FileOverride("DMSO", 1, -1)}))
     rv = Reviewer(_accept_as_read)
     assert intake(folder, lab["cfg"], ledger, rv) == IntakeResult.QUEUED and rv.seen == []
+
+    # the line alone (typed, or copied with no files: block) is not an answer: the window is shown (#173)
+    folder = make_drop(lab["inbox"], "20260927_EJQ_DIA_u", ["DMSO_1.raw", "DMSO_2.raw", "Drug_1.raw", "Drug_2.raw"])
+    save_overrides(folder, load_overrides(folder).__class__(resolved_by="gui"))
+    rv = Reviewer(_accept_as_read)
+    assert intake(folder, lab["cfg"], ledger, rv) == IntakeResult.QUEUED and [k for k, _ in rv.seen] == ["review"]
 
     class ProblemsOnly:  # a resolver without review(): unchanged behaviour
         def resolve(self, d):

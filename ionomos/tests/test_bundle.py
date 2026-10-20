@@ -602,8 +602,11 @@ def test_cli_usage_and_dry_run(bed, capsys):
     assert "Level: validate" in out and "DIA-NN protein matrix" in out and "Estimated size" in out
     assert "Never included: raw / mzML" in out and not bed["out"].exists()
     assert cli.main(["bundle", "inspect"]) == 2 and cli.main(["bundle", "unpack", "x.zip"]) == 2
-    assert cli.main(["--config", str(bed["cfg_path"]), "bundle", "77", "--out", str(bed["out"])]) == 2
+    assert cli.main(["--config", str(bed["cfg_path"]), "bundle", "77", "--out", str(bed["out"])]) == 1
     assert "no job 77" in capsys.readouterr().err
+    gone = str(bed["tmp"] / "no-such-folder")  # a folder given that isn't there: 2, as everywhere (#167)
+    assert cli.main(["--config", str(bed["cfg_path"]), "bundle", gone, "--out", str(bed["out"])]) == 2
+    assert "not a job number or a folder" in capsys.readouterr().err
     with pytest.raises(bundle.BundleError):
         Options(level="everything")
 

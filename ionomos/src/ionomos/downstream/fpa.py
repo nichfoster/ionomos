@@ -33,9 +33,13 @@ remembered so the report can show which points were measured.
 """
 from __future__ import annotations
 
+import bisect
 import functools
+import heapq
 import math
 from dataclasses import dataclass, field
+from itertools import compress, repeat
+from operator import add, and_, ge, itemgetter, le, mul, sub, truediv
 from pathlib import Path
 
 from ionomos.downstream import stats
@@ -608,15 +612,143 @@ def impute(m: QuantMatrix, method: str, shift: float = 1.8, scale: float = 0.3,
     return _copy(m, feats, vals), mask, dropped, notes
 
 
-def _impute_knn(vals: Matrix, k: int = 10, rowmax: float = 0.5) -> None:
-    """Troyanskaya et al. (2001) as in impute::impute.knn: a missing value becomes the mean of that sample's
-    value in the k most similar rows (mean squared difference over shared samples); rows missing more than
-    rowmax get the sample mean."""
-    ns = len(vals[0]) if vals else 0
+KNN_SCAN_ROWS = 200  # knn: tables up to this many rows compare every pair directly (_impute_knn_reference)
+
+
+def _knn_col_means(vals: Matrix, ns: int) -> list[float]:
     col_mean = []
     for j in range(ns):
         obs = [r[j] for r in vals if r[j] is not None]
         col_mean.append(sum(obs) / len(obs) if obs else 0.0)
+    return col_mean
+
+
+def _impute_knn(vals: Matrix, k: int = 10, rowmax: float = 0.5) -> None:
+    """Troyanskaya et al. (2001) as in impute::impute.knn: a missing value becomes the mean of that sample's
+    value in the k most similar rows (mean squared difference over shared samples); rows missing more than
+    rowmax get the sample mean.
+
+    The same numbers as _impute_knn_reference (every row against every other), found faster (#164): one C-level
+    pass per row (math.dist on vectors built so that it carries the row's distance minus a bound) keeps only the
+    rows that can be among the k nearest, and those get the reference's own distance, sum and tie order."""
+    ns = len(vals[0]) if vals else 0
+    n = len(vals)
+    present = [v for r in vals for v in r if v is not None]
+    if n <= KNN_SCAN_ROWS or not present or not all(math.isfinite(v) for v in present):
+        _impute_knn_reference(vals, k, rowmax)
+        return
+    col_mean = _knn_col_means(vals, ns)
+    snap = [list(r) for r in vals]
+    rows = range(n)
+    bits = [sum(1 << j for j, v in enumerate(r) if v is not None) for r in snap]
+    # Scaled values (|x| <= 1) for the pass. For a target row x (present columns o) and a row v (present m, values
+    # w, 0 where missing): sum over shared j of (x_j - v_j)^2 - t * shared = p . q + sum_j w_j^2 with
+    # p = ((x_j^2 - t) o_j, -2 x_j o_j, o_j - 1) and q = (m_j, w_j, w_j^2); p . q = (|p|^2 + |q|^2 - |p - q|^2) / 2.
+    # A last coordinate sqrt(hmax - h) in q turns the per-row terms into one constant, so "distance <= t" is
+    # math.dist(p, q) >= a threshold.
+    centre = sum(present) / len(present)
+    s = 1.0 / (max(abs(v - centre) for v in present) or 1.0)
+    q, hs = [], []
+    for r in snap:
+        w = [0.0 if v is None else (v - centre) * s for v in r]
+        t = [0.0 if v is None else 1.0 for v in r] + w + [a * a for a in w]
+        hs.append(2 * sum(a * a for a in w) + sum(a * a for a in t))
+        q.append(t)
+    hmax = max(hs)
+    q = [tuple(t + [math.sqrt(hmax - h)]) for t, h in zip(q, hs, strict=True)]
+    slack = 1e-9 * ns  # far above the rounding of the pass (~1e-13 ns); only costs a few extra exact distances
+    means = [sum(v for v in r if v is not None) / max(1, b.bit_count()) for r, b in zip(snap, bits, strict=True)]
+    by_mean = sorted(rows, key=means.__getitem__)
+    sorted_means = [means[i2] for i2 in by_mean]
+    colp = [[r[j] is not None for r in snap] for j in range(ns)]
+    sparse = {j: list(compress(rows, colp[j])) for j in range(ns) if sum(colp[j]) <= 8 * k}
+
+    for i, r in enumerate(snap):
+        miss = [j for j, v in enumerate(r) if v is None]
+        if not miss:
+            continue
+        if len(miss) / ns > rowmax:
+            for j in miss:
+                vals[i][j] = col_mean[j]
+            continue
+        own = [j for j in range(ns) if r[j] is not None]
+        ownbits = bits[i]
+        exact: dict[int, float] = {}
+
+        def dist(i2: int, r=r, own=own, exact=exact) -> float:  # the reference's distance, bit for bit
+            v = exact.get(i2)
+            if v is None:
+                r2 = snap[i2]
+                shared = [j for j in own if r2[j] is not None]
+                v = exact[i2] = sum((r[j] - r2[j]) ** 2 for j in shared) / len(shared)
+            return v
+
+        # few rows have this sample: all of them are candidates
+        cand = {i2 for j in miss if j in sparse for i2 in sparse[j] if i2 != i and bits[i2] & ownbits}
+        dense = [j for j in miss if j not in sparse]
+        if dense:
+            # t: the k-th distance per dense sample among the rows nearest in mean, an upper bound on the true one
+            need = dict.fromkeys(dense, k)
+            lo = bisect.bisect_left(sorted_means, means[i]) - 1
+            hi = lo + 1
+            window = []
+            while need and (lo >= 0 or hi < n):
+                if hi >= n or (lo >= 0 and means[i] - sorted_means[lo] <= sorted_means[hi] - means[i]):
+                    i2, lo = by_mean[lo], lo - 1
+                else:
+                    i2, hi = by_mean[hi], hi + 1
+                if i2 == i or not bits[i2] & ownbits:
+                    continue
+                window.append(i2)
+                for j in [j for j in need if colp[j][i2]]:
+                    need[j] -= 1
+                    if not need[j]:
+                        del need[j]
+            if need:  # fewer than k usable rows for some sample: every row is a candidate
+                cand.update(i2 for i2 in rows if i2 != i and bits[i2] & ownbits)
+            else:
+                cand.update(_knn_candidates(r, i, ownbits, dense, window, dist, k, bits, colp, q, hmax, centre, s,
+                                            slack))
+        ranked = sorted((dist(i2), i2) for i2 in cand)
+        for j in miss:
+            near = [snap[i2][j] for _, i2 in ranked if snap[i2][j] is not None][:k]
+            vals[i][j] = sum(near) / len(near) if near else col_mean[j]
+
+
+def _knn_candidates(r, i, ownbits, dense, window, dist, k, bits, colp, q, hmax, centre, s, slack) -> set[int]:
+    """Rows that can be among row i's k nearest with a value in each dense sample: one pass over every row."""
+    t = max(sorted(dist(i2) for i2 in window if colp[j][i2])[k - 1] for j in dense)
+    t = t * s * s * (1 + 1e-9)  # scaled, and a hair wider for the rounding of the scaling
+    o = [0.0 if v is None else 1.0 for v in r]
+    w = [0.0 if v is None else (v - centre) * s for v in r]
+    p = tuple([(a * a - t) * b for a, b in zip(w, o, strict=True)] + [-2.0 * a for a in w]
+              + [b - 1.0 for b in o] + [0.0])
+    c0 = hmax + sum(a * a for a in p)
+    dd = list(map(math.dist, repeat(p), q))
+    # distance <= t (+ slack) <=> dd >= sqrt(c0 - 2 slack)
+    surv = list(compress(range(len(q)), map(ge, dd, repeat(math.sqrt(max(0.0, c0 - 2 * slack))))))
+    pick = itemgetter(*surv) if len(surv) > 1 else (lambda xs: [xs[i2] for i2 in surv])
+    ds = pick(dd)
+    shared = list(map(int.bit_count, map(and_, pick(bits), repeat(ownbits))))
+    # approximate scaled distances of the survivors: t + (c0 - dd^2) / (2 shared), within slack of the exact
+    approx = list(map(add, repeat(t), map(truediv, map(sub, repeat(c0), map(mul, ds, ds)),
+                                          map(mul, map(max, shared, repeat(1)), repeat(2)))))
+    for x, i2 in enumerate(surv):
+        if not shared[x] or i2 == i:
+            approx[x] = math.inf
+    out: set[int] = set()
+    for j in dense:
+        flags = pick(colp[j])
+        kth = heapq.nsmallest(k, compress(approx, flags))
+        lim = kth[-1] + 2 * slack * (1 + t) if len(kth) == k else math.inf
+        out.update(compress(surv, map(and_, flags, map(le, approx, repeat(lim)))))
+    return {i2 for i2 in out if i2 != i and bits[i2] & ownbits}
+
+
+def _impute_knn_reference(vals: Matrix, k: int = 10, rowmax: float = 0.5) -> None:
+    """_impute_knn by the definition: every row against every other (quadratic; small tables, and the check)."""
+    ns = len(vals[0]) if vals else 0
+    col_mean = _knn_col_means(vals, ns)
     snapshot = [list(r) for r in vals]
     for i, r in enumerate(snapshot):
         miss = [j for j, v in enumerate(r) if v is None]

@@ -319,6 +319,17 @@ REAL_FAILURES = [
     (_refused("No decoys found in the FASTA file."), "FASTA's decoys"),
     (_refused("FASTA file contains 33.3% decoys."), "FASTA's decoys"),
     (_refused("All FASTA entries seem to be decoys."), "FASTA's decoys"),
+    # #179, FragPipe 24.0 refusals: FragpipeRun.checkDbConfig; TabWorkflow.showSkippedFiles (headless: each path,
+    # then System.exit(1)); FragpipeRun's TMT check (a dialog: the <b> tags stay)
+    (_refused("Database looks to be empty"), "no protein entries"),
+    (_refused("Some loaded files don't exist. Please double check.")
+     + "2026-10-01 14:03:11,533 ERROR - C:\\Fragpipe_Auto\\users\\EJQ\\x\\DMSO_1_1.raw\n",
+     "moved, renamed or deleted after Ionomos checked"),
+    (_refused("Not all TMT groups have annotation files set. Check <b>Quant (Isobaric)</b> tab, \"Assign files to "
+              "TMT channels\"."), "no TMT annotation"),
+    # TabWorkflow.manifestLoad: the line is left out and the run goes on (REAL_RUNS.md job 1)
+    (_refused("Manifest file contained some badly formatted lines  C:\\Fragpipe_Auto\\users\\EJQ\\x\\A_2.raw\tA\t"
+              "20260508180610\tDDA"), "left lines of the file list out"),
     # FragpipeRun.validateWd; TabConfig's tool checks
     (_refused("Output directory path contains whitespace characters. Some programs in the pipeline might not work "
               "properly in this case. Please change output directory to one without spaces."), "space in it"),
@@ -429,6 +440,7 @@ def test_every_explanation_is_exercised_by_a_test():
         "FragPipe wrote more than 2000 MB to its console log; stopped so it can't fill the disk",
         "FragPipe ended by SIGKILL", "FragPipe crashed with an access violation (0xC0000005)",
         "FragPipe stopped after an error that Ionomos does not recognise",
+        "FragPipe refused: Something FragPipe 25 says",
         "FragPipe's result table combined_modified_peptide_label_quant.tsv ends in the middle of a row (it was cut off)",
         "FragPipe exited 0 without its 'ALL JOBS DONE' line and without any of its result tables: the run did not "
         "finish", "Ionomos hit an unexpected error while running the search: OSError: x",
@@ -940,6 +952,8 @@ def test_fake_stops_on_manifest_files_that_do_not_exist_like_fragpipe(bed):
     code, text = _fake(bed, *spec.command()[1:])
     assert code == 1 and "ERROR - Some loaded files don't exist. Please double check." in text
     assert f"ERROR - {gone.resolve()}" in text and "commands to execute" not in text
+    assert "after Ionomos checked the experiment folder" in fragpipe.explain(text)[0]  # #179: not "Retry, nothing failed"
+    assert fragpipe.exit_code_reason(code, text) == ""
     assert [p.stat().st_size for p in spec.workdir.glob("log_*.txt")] == [0]  # the shutdown hook's empty log
     with pytest.raises(fragpipe.JobError, match="raw file\\(s\\) missing"):
         fragpipe.prepare(bed["ledger"].get(1), bed["cfg"])
@@ -980,6 +994,14 @@ def test_fake_reads_the_manifest_as_fragpipe_does(bed, tmp_path):
     assert len([ln for ln in text.splitlines() if "ERROR - Manifest file" in ln]) == 1
     listed = text.split("LCMS files:")[1].split("commands to execute")[0]
     assert Path(first[0]).name not in listed and len(lines) - 1 == listed.count(".raw\t")
+    # #179: the done job says which runs FragPipe left out (the run itself went on, exit 0)
+    assert fragpipe.dropped_manifest_lines(text) == [Path(first[0]).name]
+    spec.console_log.parent.mkdir(parents=True, exist_ok=True)
+    spec.console_log.write_text(text, encoding="utf-8")
+    result = fragpipe.judge(spec, 0)
+    assert result.code == 0 and any(f"left 1 run(s) out of the search ({Path(first[0]).name})" in w
+                                    for w in result.warnings), result.warnings
+    assert "left lines of the file list out" in fragpipe.explain(text)[0]
 
 
 def test_fragpipes_own_sdrf_is_not_taken_for_the_users_design(bed):

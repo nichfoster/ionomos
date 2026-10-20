@@ -1,0 +1,57 @@
+{
+  "about": "#178: one TMT QC payload and the words its exported figures carry. tests/js/test/tmtexport.test.mjs checks the report's own Export (report.js composeFigure) against `expect`, tests/test_tmt_export_parity.py checks sectionfigs.py (ionomos export --figures tmt) against the same, so the two can't drift apart. The rest of the payload is the fixture's (fixture.html), with title set to `title`.",
+  "title": "TMT parity",
+  "tmtqc": {
+    "workflow": {"label": "TMT-16", "quant": "MS2"},
+    "limits": {"min_labelling": 0.95, "min_purity": 0.7},
+    "labelling": {"nterm": 0.97, "k": 0.98, "full": 0.96, "k_fixed": false},
+    "purity": {"median": 0.834, "min_purity": 0.5, "below_min": 0.04, "n": 1500, "bins": [1, 2, 4, 8, 20, 40, 120, 300, 600, 405]},
+    "plexes": [
+      {"name": "plexB", "folder": "plexB", "psms": 1234, "columns": 3,
+       "labelling": {"nterm": 0.97, "k": 0.98, "full": 0.96, "k_fixed": false}, "purity": {},
+       "ch": [
+         {"c": "126", "n": "DMSO_1", "cond": "DMSO", "na": false, "ref": true, "sig": 0.99, "q": [14.1, 15.2, 16.0, 16.8, 17.9], "rel": 0.1, "flags": []},
+         {"c": "127N", "n": "Drug_1", "cond": "Drug", "na": false, "ref": false, "sig": 0.98, "q": [14.0, 15.1, 15.9, 16.7, 17.8], "rel": 0.0, "flags": []},
+         {"c": "127C", "n": "NA", "cond": "", "na": true, "ref": false, "sig": 0.1, "q": [9.0, 10.0, 10.5, 11.0, 12.0], "rel": -5.4, "flags": ["low signal"]}
+       ]},
+      {"name": "KL6166", "folder": "KL6166", "psms": 987, "columns": 2,
+       "labelling": {"nterm": 0.93, "k": 0.97, "full": 0.92, "k_fixed": false}, "purity": {},
+       "ch": [
+         {"c": "126", "n": "DMSO_2", "cond": "DMSO", "na": false, "ref": false, "sig": 0.99, "q": [14.2, 15.3, 16.1, 16.9, 18.0], "rel": 0.1, "flags": []},
+         {"c": "127N", "n": "Drug_2", "cond": "Drug", "na": false, "ref": false, "sig": 0.97, "q": [14.1, 15.2, 16.0, 16.8, 17.9], "rel": 0.0, "flags": []}
+       ]}
+    ],
+    "tables": [], "notes": [], "problems": []
+  },
+  "expect": {
+    "tmt_channels_plexB": {
+      "svg_title": "TMT channels: plexB",
+      "title": "TMT channels: plexB",
+      "subtitle": "Reporter intensity per channel, 1,234 PSMs · TMT parity",
+      "note": "TMT parity · box: 25-75 %, whiskers: 5-95 % of the PSMs with signal",
+      "desc": ["Figure: TMT channels (plexB)", "Experiment: TMT parity", "box: 25-75 %, whiskers: 5-95 % of the PSMs with signal"]
+    },
+    "tmt_channels_KL6166": {
+      "svg_title": "TMT channels: plex KL6166",
+      "title": "TMT channels: plex KL6166",
+      "subtitle": "Reporter intensity per channel, 987 PSMs · TMT parity",
+      "note": "TMT parity · box: 25-75 %, whiskers: 5-95 % of the PSMs with signal",
+      "desc": ["Figure: TMT channels (plex KL6166)", "Experiment: TMT parity", "box: 25-75 %, whiskers: 5-95 % of the PSMs with signal"]
+    },
+    "tmt_labelling": {
+      "svg_title": "TMT labelling efficiency",
+      "title": "TMT labelling efficiency",
+      "subtitle": "2 plexes · TMT parity",
+      "note": "TMT parity · dashed: the limit 95%",
+      "desc": ["Figure: TMT labelling efficiency", "Experiment: TMT parity", "dashed: the limit 95%"]
+    },
+    "tmt_purity": {
+      "svg_title": "TMT precursor purity",
+      "title": "TMT precursor purity",
+      "subtitle": "median 0.83 · TMT parity",
+      "note": "TMT parity",
+      "desc": ["Figure: TMT precursor purity", "Experiment: TMT parity"]
+    }
+  },
+  "never": ["hits:", "Analysis:", "Cut-offs:", "limma", "normalisation", "imputation:", "plex plexB"]
+}

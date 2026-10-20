@@ -4612,3 +4612,126 @@ survivor and starting it once it has ended; a real stand-in DIA-NN that
 ignores the cancel, its Retry held, then run once it is stopped) and
 `tests/test_worker.py` (`recover` with a survivor). **Not verified**: a real
 FragPipe on the lab PC that taskkill can't end.
+
+### D108 — Large-table PCA and knn: faster, the same numbers
+**2026-10-19.** The QC PCA (#163) and knn imputation (#164) were quadratic or cubic in pure Python. Both are
+faster now, and neither changes a result a person could see.
+- **PCA.** Up to 60 samples (`qc.JACOBI_SAMPLES`), cyclic Jacobi on the samples × samples Gram matrix, unchanged
+  bit for bit. Above that, only the `min(samples, 6)` components the report shows, from the smaller Gram matrix
+  (features × features when there are fewer features): Householder tridiagonalisation, bisection on Sturm
+  counts, inverse iteration orthogonalised against earlier vectors. It is robust to repeated and zero
+  eigenvalues, which Lanczos would not be. The variance share divides by the trace (about 1e-14 from before);
+  scores match Jacobi to about 1e-10; components with no variance score 0 instead of 1e-7 noise. The 60-sample
+  cut-off keeps every study the lab has run on the old path. 500 samples × 300 proteins: 6 min → about 3 s.
+- **knn.** Same rule (impute.knn's k = 10, rowmax = 0.5, without its `maxp` clustering), same numbers bit for
+  bit. The all-pairs scan stays as `_impute_knn_reference` for tables up to 200 rows (`fpa.KNN_SCAN_ROWS`), for
+  non-finite values and for the tests. Above that a pruned search bounds each gap's k-th distance from the rows
+  nearest in mean, keeps the rows within it in one `math.dist` pass, and gives the survivors the reference's own
+  distance, sort and tie order. 10,000 rows: about 4 min → about 25 s.
+
+Porting `maxp` would change the numbers and needs an R golden for knn, which does not exist (ROADMAP).
+**Not verified**: bit-identity on Python 3.11 / 3.12 (CI runs the equality tests).
+
+### D109 — A MaxQuant TMT channel without a design is `unassigned`
+**2026-10-19.** MaxQuant's `Reporter intensity corrected <n> [<experiment>]` columns number the channels; nothing
+in the table says what a channel holds. Conditions taken from the column names (`1_Exp1` …) gave one condition
+per channel and a fold-change-only comparison per channel against an arbitrary control (#165).
+`_maxquant_plexes` now gives every reporter channel the condition `unassigned` (`plex.UNASSIGNED`) and clears
+its replicate number, as `load_sage_tmt` does for a channel no `tmt:` map names: one condition, so the analysis
+raises `ONE_CONDITION` and runs QC only, and `irs: auto` does not fall back to plex means. One note asks for the
+conditions. Sample names are unchanged (`1 Exp1`), so `sample_conditions` keys and an SDRF match as before and
+still win. experiment.yaml's `tmt:` map is read only for Sage's `tmt.tsv`, so the note does not offer it.
+
+### D110 — Informational notes are a type, not a warning
+**2026-10-19.** An analysis note that only says what was read (`downstream.quant.Info`, a `str` subclass) goes
+to the report and `analysis.json` `notes` like every other note, but `postprocess.job_warnings` leaves it out of
+the job's reason, `run.warnings`, DONE.txt and the WARNING log (it is logged at INFO) (#182). Severity is carried
+by the type where the note is made, not by matching its text, so a reworded note doesn't move between the lists.
+A plain `str` stays a warning, so a new note warns until someone marks it. Marked so far: the LFQ quantity, the
+TMT-Integrator table kind, the three phosphosite filter counts, and DIA fractions added up (D111). The
+open-search note (#181) is deliberately plain, so the job's reason says where an open search's results are.
+Other engines' notes in `engines.py` (Sage's summary line, "gene names from …") are still plain (ROADMAP).
+
+### D111 — A fractionated DIA's runs are added up per sample
+**2026-10-19.** When the plan has a sample in two or more fractions (its layout from the file names, or
+`fraction:` for its files in `experiment.yaml`), the DIA-NN `pg_matrix` columns of that experiment +
+bioreplicate are added up (linear intensities; a fraction with no value adds nothing; none at all stays missing)
+into one sample before the statistics (`downstream.quant.sum_fractions`), with a note (#180). This is what Sage's
+`lfq.tsv` reader does and how FragPipe treats isoDTB / TMT fractions; a sample's fractions are parts of one
+sample, not replicates. Adding gas-phase fractions gives every sample a larger total, so log2 fold changes are
+not biased. Taking the maximum or mean per protein was the alternative; the sum was chosen because the rest of
+Ionomos already does it. Two runs of a sample whose files carry no fraction (a real re-acquisition) still raise
+DUPLICATE_SAMPLES. `report.pr_matrix.tsv` is not read by the FragPipe DIA analysis; DIA-NN's phosphosite matrix
+and the standalone DIA-NN engine reader are not summed yet. **The lab should confirm** that it runs fractionated
+DIA and that adding fractions is what it wants (ROADMAP).
+
+### D112 — An ERROR line before any step is FragPipe refusing, quoted
+**2026-10-19.** FragPipe 24 refuses some runs with only a logback `ERROR -` line and exit 1 (#179). When no
+explanation matches and no step has started, `fragpipe.exit_code_reason` returns `refused: <first ERROR line>`
+(HTML tags dropped, at most 300 characters, "(and N more ERROR line(s))"), and `EXPLANATIONS` maps
+"FragPipe refused: " to "fix what it names, then Retry; a Retry without a change fails the same way". An
+unrecognised ERROR line after a step started stays "does not recognise" (#138). The reason is the quoted line
+rather than "" so that it and the hint reach FAILED.txt and preflight through the existing
+`explain(f"FragPipe {how}")` path. "Database looks to be empty", "Some loaded files don't exist" and "Not all TMT
+groups have annotation files set" get their own entries.
+
+"Manifest file contained some badly formatted lines" is not a refusal: `TabWorkflow.manifestLoad` leaves the
+lines out and the run goes on. It has its own explanation (a bioreplicate that is not a Java int), and on a done
+job `judge` adds a warning naming the raw files of those lines (`fragpipe.dropped_manifest_lines`). D85's 1–999
+bound means a manifest Ionomos writes can't hit it today.
+
+### D113 — Only isoDTB's label is isoDTB
+**2026-10-19.** `fpfolder.workflow_kind` returns `library._label_kind`'s answer for an MS1-labelled workflow
+(#161): `isoDTB` only for isoDTB's masses in `ionquant.light / .medium / .heavy` (or, with no labels set, among
+the variable mods); `SILAC` / `isoTOP` / `ipIAA` / `PAL` / `labelled` otherwise (`fpfolder.UNHANDLED_LABELS`,
+with words in `KIND_WORDS` but no `TABLES` entry). Labelling switched on with no label is `labelled`. For such a
+workflow `fpfolder.analysable` leaves out the IonQuant tables: `decide` and `choices` offer neither isoDTB nor
+label-free, and `--method isoDTB` is refused with METHOD_UNREADABLE. The scan adds `LABEL_NOT_HANDLED` (an error
+when nothing else is readable, a warning otherwise) naming the labels and FragPipe's tables. No generic
+light/heavy ratio analysis: that is a feature, not a fix (ROADMAP).
+
+### D114 — Only the naming window's answer in this intake names a new user; `resolved_by: gui` alone is not an answer
+**2026-10-19.** Amends D34 ("a folder is never asked about twice"). `resolved_by: gui` in `experiment.yaml` was
+trusted twice: a `user:` with no folder under `users_root` was created, and the review window was skipped. People
+copy `experiment.yaml` between folders, so a typo filed an experiment under a new folder nobody looks in (#173).
+1. **A new user folder comes only from the window's answer, passed in memory.** `intake._ask` hands the user the
+   window returned to `plan(..., new_user=...)`; only that name gets a folder. A `user:` without a folder is
+   otherwise refused (`Kind.OVERRIDES`, as without `resolved_by`), and the message says that `resolved_by: gui`
+   doesn't create one. `plan()` without `new_user` (dry-run, tmt plan) creates nothing.
+2. **The review is skipped only for an answer Ionomos can recognise**: the window wrote this `experiment.yaml`
+   while this watcher runs (a hash of what it saved, in memory, so a move that has to wait does not ask twice),
+   or the `files:` block is non-empty and names only raws of this drop. Judgement call (conservative): a window
+   answer from before a restart that changed no file is shown once more; one more look is cheaper than a wrong
+   filing.
+
+**Not verified**: on the lab PC with the real window.
+
+### D115 — Text in the report takes its own inks; the chart marks keep the palette
+**2026-10-19.** The report's warning words, flagged cells, status pills and some badges used palette colours
+(`--up #e34948` on `#fcfcfb` is 3.85:1, the ok pill's green on its tint 2.35:1), and help.html and the static
+volcano kept `#898781` (3.6:1) (#177). The palette stays, so words got text-only tokens: `--upink`, `--okink`,
+`--c3ink`, `--link` in report.css and `--vz-tick` in charts.py, each 4.5:1 or better on every background it sits
+on, in both themes. Points, bars, lines, borders and the pills' tints keep the palette; charts.py's threshold
+lines and whiskers keep `#898781`. Links go from `#2a78d6` to `#1f66c2` in light mode only.
+`tests/test_report_contrast.py` parses the CSS and fails when a word drops below 4.5:1 or a mark token changes.
+
+### D116 — A report table is one Tab stop; its row's point is shown, not reached
+**2026-10-19.** Rows, chips and chart points took only the mouse (#176). Each table whose rows open something is
+a roving-tabindex group (`rowKeys`): one Tab stop (the row last opened, else the first), arrows / Home / End /
+Page Up / Page Down to move, Enter or Space dispatching the row's own click (Shift+Enter pins), and the focus
+keeper putting the keyboard back on the row after a redraw. Chart points are not Tab stops (thousands of points,
+no order a keyboard user can follow); the row with the keyboard rings its point on the chart beside it and shows
+the mouse's tooltip. Pin and "Behaves like" chips are `<button>`s; Delete unpins. The mouse is unchanged.
+**Not verified**: in a real browser or screen reader (jsdom only).
+
+### D117 — A question to the assistant may take twice timeout_seconds, and each request gets what is left
+**2026-10-19.** One question could make `MAX_ROUNDS = 6` requests of `assistant.timeout_seconds` each, so "Ask
+about this" could wait 12 minutes, and a reply stalling just before its limit about twice the setting (#171).
+The whole question now has `assistant.question_limit()` = `QUESTION_TIMEOUTS` (2) × `timeout_seconds`
+(`while_searching.timeout_seconds` while a search runs). Each request gets `min(timeout_seconds, time left)` as
+its limit and its transport's timeout; with nothing left the loop stops, outcome `unavailable`, led by "The
+assistant ran out of time for this question". `client._http` sets the socket's timeout before each read to what
+is left of the request. The Ask window names the limit (`askui.asking`). `fake.Clock` is injectable, so tests
+run a 330 s script at once. Not taken: a new `question_seconds` setting (more config surface before anyone knows
+the value) and a lower MAX_ROUNDS (it would cap fast models that need a tool round and a repair). Twice is a
+guess; revisit when a real model is measured (ROADMAP 6.0).
