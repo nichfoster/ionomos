@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from ionomos import winjob
 from ionomos.config import Config
 from ionomos.ledger import Job
 from ionomos.manifest import (
@@ -618,6 +619,29 @@ def _popen_kwargs() -> dict:
     return {"start_new_session": True}
 
 
+def _start(cmd: list[str], what: str, **kw) -> subprocess.Popen:
+    """Start an engine (or a helper run of one) in a process group / session of its own and, on Windows, in a Job
+    Object of its own that holds everything it starts (winjob, D126). `proc.win_job` is that job: None off Windows
+    and when Windows would not make one (logged; then a program the engine leaves running is not stopped). The
+    caller hands the process to `_release` on every path."""
+    proc = subprocess.Popen(cmd, **kw, **_popen_kwargs())
+    proc.win_job = winjob.contain(proc, what)
+    return proc
+
+
+def _release(proc: subprocess.Popen) -> None:
+    """Close the job of a process `_start` started (Windows): what still runs in it ends now (KILL_ON_JOB_CLOSE).
+    Safe to call twice; never raises."""
+    job = getattr(proc, "win_job", None)
+    if job is None:
+        return
+    proc.win_job = None
+    try:
+        job.close()
+    except (AttributeError, OSError):
+        pass
+
+
 # Windows starts a .bat / .cmd (fragpipe.bat) through cmd.exe, which reads these in the command line Python builds
 # even inside a path: `C:/R&D/users/x.workflow` runs `D/users/x.workflow` as a second command, `%PATH%` is
 # replaced by its value, `|` and `<`/`>` pipe and redirect. Python quotes an argument only when it has a space.
@@ -652,11 +676,15 @@ def _taskkill(pid: int) -> None:
 
 
 def kill_tree(proc: subprocess.Popen) -> None:
-    """FragPipe starts Java, which starts MSFragger/IonQuant/DIA-NN: stop the whole tree."""
+    """FragPipe starts Java, which starts MSFragger/IonQuant/DIA-NN: stop the whole tree. Windows: its job ends
+    everything in it, a process whose parent has already ended too (D126); taskkill /T when it has no job or
+    Windows refused."""
     if proc.poll() is not None:
         return
     if os.name == "nt":
-        _taskkill(proc.pid)
+        job = getattr(proc, "win_job", None)
+        if job is None or not job.terminate():
+            _taskkill(proc.pid)
     else:
         try:
             os.killpg(proc.pid, signal.SIGTERM)
@@ -692,13 +720,15 @@ def run_to_file(cmd: list[str], out_file: Path, cwd: Path, timeout: float,
         return None, unsafe, False
     try:
         with open(out_file, "wb") as out:
-            proc = subprocess.Popen(cmd, stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, cwd=str(cwd),
-                                    env={**os.environ, **env} if env else None, **_popen_kwargs())
+            proc = _start(cmd, Path(str(cmd[0])).name if cmd else "the program", stdout=out, stderr=subprocess.STDOUT,
+                          stdin=subprocess.DEVNULL, cwd=str(cwd), env={**os.environ, **env} if env else None)
             try:
                 code = proc.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
                 timed_out = True
                 kill_tree(proc)
+            finally:
+                _release(proc)  # Windows: what the helper run left running ends with its job
     except (OSError, ValueError) as exc:  # ValueError: a NUL in a path from the settings
         return None, f"could not start: {exc}", False
     return code, read_tail_text(out_file, 2_000_000), timed_out
@@ -712,35 +742,45 @@ def _not_stopped(spec: RunSpec, proc: subprocess.Popen) -> str:
     return f" — {spec.engine_name} did not stop when told to (process {proc.pid}): end it in Task Manager before a Retry"
 
 
+STRAGGLER_SECONDS = 5  # how long what an engine left running is given to end once it is told to
+
+
 def _stop_stragglers(spec: RunSpec, proc: subprocess.Popen) -> str:
-    """POSIX: processes the engine started that still run after it ended by itself (its process group outlives
-    it). They could go on writing into the output folder the analysis is about to read, or hold its files: they
-    are stopped, and that is said. '' when there were none. On Windows they can't be told apart from other
-    programs once the engine is gone (no process group to ask): issue #174."""
+    """Processes the engine started that still run after it ended by itself. They could go on writing into the
+    output folder the analysis is about to read, or hold its files: they are stopped, and that is said. '' when
+    there were none. POSIX: the engine's process group outlives it. Windows: its job (D126); without one (Windows
+    would not make it) they can't be told from other programs once the engine is gone, and nothing is done."""
     if os.name == "nt":
-        return ""
+        job = getattr(proc, "win_job", None)
+        if job is None:
+            return ""
+        found, gone = job.stop_rest(STRAGGLER_SECONDS)
+        if not found:
+            return ""
+        still = not gone
+    else:
+        def alive() -> bool:
+            try:
+                os.killpg(proc.pid, 0)
+                return True
+            except OSError:
+                return False
 
-    def alive() -> bool:
-        try:
-            os.killpg(proc.pid, 0)
-            return True
-        except OSError:
-            return False
-
-    if not alive():
-        return ""
-    for sig in (signal.SIGTERM, signal.SIGKILL):
-        try:
-            os.killpg(proc.pid, sig)
-        except OSError:
-            break
-        end = time.monotonic() + 5
-        while alive() and time.monotonic() < end:
-            time.sleep(0.05)
         if not alive():
-            break
+            return ""
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            try:
+                os.killpg(proc.pid, sig)
+            except OSError:
+                break
+            end = time.monotonic() + STRAGGLER_SECONDS
+            while alive() and time.monotonic() < end:
+                time.sleep(0.05)
+            if not alive():
+                break
+        still = alive()
     return (f"a program {spec.engine_name} started was still running after {spec.engine_name} ended; Ionomos "
-            f"stopped it" + (" (it may still be running: check the process list)" if alive() else ""))
+            f"stopped it" + (" (it may still be running: check the process list)" if still else ""))
 
 
 POLL_SECONDS = 1.0  # how often a running search is checked (cancel, stop, time limit, console size)
@@ -919,29 +959,34 @@ def _run(spec: RunSpec, stop: threading.Event, on_start, poll: float, on_poll, s
         _say(out, f"# ionomos job {spec.job_id}  {datetime.now():%Y-%m-%d %H:%M:%S}\n# {' '.join(cmd)}\n"
                   + "".join(f"# {k}={v}\n" for k, v in env.items()) + "\n")
         try:
-            proc = subprocess.Popen(cmd, stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                                    cwd=str(spec.run_dir), env={**os.environ, **env} if env else None,
-                                    **_popen_kwargs())
+            proc = _start(cmd, spec.engine_name, stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                          cwd=str(spec.run_dir), env={**os.environ, **env} if env else None)
         except OSError as exc:
             return RunResult(None, f"could not start {spec.engine_name} ({spec.exe}): {exc}", hints=explain(str(exc)))
-        _record_engine(spec, proc.pid)
         try:
-            if on_start:
-                on_start(proc.pid, cmd)
-            ended = _watch(spec, proc, out, stop, poll, on_poll, deadline, offset)
-        except BaseException:
-            kill_tree(proc)  # Ionomos itself failed while watching: never leave a search running unseen
-            raise
+            if os.name == "nt" and proc.win_job is None:
+                _say(out, f"# {spec.engine_name} could not be put in a Windows job (see the Ionomos log): a program "
+                          f"it leaves running after it ends is not stopped\n")
+            _record_engine(spec, proc.pid)
+            try:
+                if on_start:
+                    on_start(proc.pid, cmd)
+                ended = _watch(spec, proc, out, stop, poll, on_poll, deadline, offset)
+            except BaseException:
+                kill_tree(proc)  # Ionomos itself failed while watching: never leave a search running unseen
+                raise
+            finally:
+                if proc.poll() is not None:
+                    _forget_engine(spec)
+            if ended is not None:
+                return ended
+            code = proc.returncode
+            _say(out, f"\n# exit code {code} after {(_clock() - started) / 60:.1f} min\n")
+            straggler = _stop_stragglers(spec, proc)
+            if straggler:
+                _say(out, f"# {straggler}\n")
         finally:
-            if proc.poll() is not None:
-                _forget_engine(spec)
-        if ended is not None:
-            return ended
-        code = proc.returncode
-        _say(out, f"\n# exit code {code} after {(_clock() - started) / 60:.1f} min\n")
-        straggler = _stop_stragglers(spec, proc)
-        if straggler:
-            _say(out, f"# {straggler}\n")
+            _release(proc)  # Windows: whatever still runs in the engine's job ends with it (D126)
     res = judge(spec, code, offset)
     if straggler:
         res.warnings.append(straggler)

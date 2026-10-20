@@ -781,10 +781,14 @@ def report_payload(local: dict | None, ksea: dict | None, net: dict | None, corr
 # ---------------------------------------------------------------- analyze() stages --
 
 
-def read_sites(method: str | None, workdir: Path, dest: Path, record, settings, sample_map: dict | None
+def read_sites(method: str | None, workdir: Path, dest: Path, record, settings, sample_map: dict | None,
+               fractionated: set[tuple[str, int]] | None = None
                ) -> tuple[QuantMatrix | None, list[str], list[tuple[str, str, str]]]:
     """analysis.phospho: the site table as the experiment's quantities, or None (then the proteins are analysed
-    as before, and a problem says why). Returns (matrix, notes, [(issue code, severity, message)])."""
+    as before, and a problem says why). Returns (matrix, notes, [(issue code, severity, message)]).
+    fractionated: the plan's samples in two or more fractions (downstream._fractionated). DIA-NN's phosphosite
+    matrix has a run per file, so a sample's fractions are added up (quant.sum_fractions, D119) before an SDRF sets
+    the design, as load_quantities does for the proteins; FragPipe's site tables have a column per sample already."""
     from ionomos.downstream import sdrfdesign
 
     path, kind = find_table(Path(workdir), dest, method, settings)
@@ -797,6 +801,8 @@ def read_sites(method: str | None, workdir: Path, dest: Path, record, settings, 
         m = load(path, kind, settings, Path(workdir), record, sample_map)
     except SiteTableError as exc:
         return None, [], [("PHOSPHO_TABLE", "input", f"{exc}; the proteins were analysed instead")]
+    if m.meta["phospho"]["kind"] == "diann":
+        m = quant.sum_fractions(m, sample_map or {}, fractionated or set())
     m, dnotes = sdrfdesign.load_into(m, Path(dest), Path(workdir), None, settings.sdrf_factor)
     problems = []
     info = m.meta.get("phospho") or {}

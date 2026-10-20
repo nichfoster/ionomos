@@ -604,7 +604,9 @@ def fasta_headers(fh, stop: threading.Event | None = None, deadline: float | Non
     `chunk` bytes: never split into lines or decoded, a leading UTF-8 byte-order mark skipped, linear time and
     bounded memory on any file (one with no line break at all, a header of a gigabyte: at most `HEADER_MAX` bytes of
     a header are kept). Raises TimeoutError when `stop` is set or `deadline` (time.monotonic()) has passed.
-    The one header reader of `_scan`, `library.describe_fasta` and `fragpipe.fasta_info`."""
+    The one header reader of `_scan`, `library.describe_fasta` (through `library._headers`), `fragpipe.fasta_info`,
+    and since #160 `bundle.fasta_facts`, `downstream.benchmark.read_fasta_species`, `downstream.engines._fasta_names`
+    and `downstream.sdrf.fasta_organism`."""
     head: bytearray | None = None  # a header that runs on into the next chunk
     at_start = True                # the next byte read begins a line
     first = True
@@ -903,23 +905,26 @@ def _run_tool(cmd: list[str], cwd: Path, log: Path, timeout_s: float, stop: thre
     from ionomos import fragpipe
 
     with open(log, "ab") as out:
-        proc = subprocess.Popen(cmd, cwd=str(cwd), stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                                **fragpipe._popen_kwargs())
-        end = time.monotonic() + timeout_s
-        while True:
-            try:
-                return proc.wait(timeout=0.25)
-            except subprocess.TimeoutExpired:
-                pass
-            if (stop is not None and stop.is_set()) or time.monotonic() > end:
-                fragpipe.kill_tree(proc)
+        proc = fragpipe._start(cmd, "Philosopher", cwd=str(cwd), stdout=out, stderr=subprocess.STDOUT,
+                               stdin=subprocess.DEVNULL)
+        try:
+            end = time.monotonic() + timeout_s
+            while True:
                 try:
-                    proc.wait(timeout=10)
+                    return proc.wait(timeout=0.25)
                 except subprocess.TimeoutExpired:
                     pass
-                if stop is not None and stop.is_set():
-                    raise Stopped()
-                raise TimeoutError(f"Philosopher took longer than {timeout_s:.0f} s")
+                if (stop is not None and stop.is_set()) or time.monotonic() > end:
+                    fragpipe.kill_tree(proc)
+                    try:
+                        proc.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        pass
+                    if stop is not None and stop.is_set():
+                        raise Stopped()
+                    raise TimeoutError(f"Philosopher took longer than {timeout_s:.0f} s")
+        finally:
+            fragpipe._release(proc)  # Windows: what it left running ends with its job (D126)
 
 
 # a line of a Go crash report: "goroutine 1 [running]:", "main.main()", "github.com/x/y.(*T).F(...)", "…/f.go:23 +0x85"

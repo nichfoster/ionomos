@@ -370,6 +370,29 @@ watcher (**Run & Test** → **Stop watcher**, **Start watcher**) so it uses the 
 settings. Everything on the tab is also `notify:` in `config.yaml`. A message that can't be sent never fails or slows a
 search ([A notification did not arrive](#trouble.notify)).
 
+## Does my isoDTB search go to the lab's cysteine atlas? {#faq.atlas}
+
+Yes, once the person who looks after Ionomos turns the hand-off on (it is off
+by default). Then every isoDTB search that finishes is copied, by itself, into
+the lab Dropbox folder `Nicholas Foster Data\fragpipe-runs`, the same way the
+lab's harvest script copies older runs: the result tables (`psm.tsv` per
+replicate, the workflow, the file list, the combined tables, the logs), never
+the raw files. Each copy is checked, and nothing already in Dropbox is ever
+overwritten. The atlas picks the run up from there.
+
+To turn it on: the **Folders** tab → **Cysteine atlas**, tick it, pick the
+Dropbox folder (**Browse…**, or **Use** the one Ionomos found), **Save**. The
+**Jobs** tab then shows, for each isoDTB search, whether it was handed off,
+and **Send to atlas** sends a selected finished search now: also one from
+before the hand-off was turned on, or one to send again (it is never counted
+twice). On the command line: `ionomos atlas send <job>`,
+`ionomos atlas status`, `ionomos atlas check`.
+
+When the atlas publishes its site list back into that folder, an isoDTB
+report shows, for each human cysteine site, its atlas tier, how many atlas
+experiments saw it, and whether it is new to the atlas. These are the lab's
+own numbers; the line under the table says whether they may be quoted.
+
 ## Can I ask Ionomos a question in plain words? {#faq.assistant}
 
 Yes, if your lab has set up the assistant. In a window that says something

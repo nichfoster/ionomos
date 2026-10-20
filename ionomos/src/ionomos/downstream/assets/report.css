@@ -133,6 +133,7 @@ border:1px solid var(--line);margin-left:3px;vertical-align:1px;white-space:nowr
 .badge.pep{color:var(--upink);border-color:var(--up)}
 .badge.oo{color:var(--c3ink);border-color:var(--c3)}
 .badge.term{color:var(--link);border-color:var(--accent)}
+.badge.anew{color:var(--okink);border-color:var(--c2)}
 .pill{display:inline-block;font-size:11px;padding:0 8px;border-radius:999px;text-transform:uppercase;letter-spacing:.03em;font-weight:600}
 .pill.ok{background:rgba(27,175,122,.16);color:var(--okink)}.pill.warn{background:var(--warnbg);color:var(--warnink)}
 .pill.fail{background:rgba(227,73,72,.15);color:var(--upink)}

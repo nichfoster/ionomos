@@ -4735,3 +4735,225 @@ is left of the request. The Ask window names the limit (`askui.asking`). `fake.C
 run a 330 s script at once. Not taken: a new `question_seconds` setting (more config surface before anyone knows
 the value) and a lower MAX_ROUNDS (it would cap fast models that need a tool round and a repair). Twice is a
 guess; revisit when a real model is measured (ROADMAP 6.0).
+
+### D118 — Engine notes that say what was read are Info; a question for the conditions goes once it is answered
+**2026-10-19.** Follows D110 and D109. Every note in `engines.py` that only says what was read or done as planned is
+now a `quant.Info`: the summaries of the DIA-NN and Spectronaut long reports, MSstats, MSstatsTMT and Sage (with
+the q-value filter and how many rows it took out), Sage's peptide and protein q-value counts, razor peptides,
+fractions added or combined, PSM filters, NA / empty channels and gene names from the FASTA, MaxQuant's channel
+totals left out, and MSstatsTMT's technical replicates and best-PSM step. `anytable.load(path, known=True)`, used
+by the MaxQuant, Spectronaut pivot, AlphaDIA and Proteome Discoverer loaders, makes its "sample columns found by"
+and "raw intensities; log2-transformed" notes Info: for an engine's own table they are what the engine writes,
+while for any other table (D33) they stay guesses and warn. MaxQuant's `+` rows left out are Info everywhere, and
+its flag columns no longer count as "columns with no values". Still warnings: a repaired or damaged table, blank
+q-values, a run the manifest doesn't name or a run missing, a setting not used (`analysis.rollup`), MaxLFQ groups
+that share no feature (now a note of its own after the summary), no `Norm` channel, PSMs without reporter ions,
+reporter columns of no kit, and Sage's summary when `results.sage.tsv` is missing (no protein q-value filter).
+`tests/test_engine_notes.py` lists every note of 16 small tables with its kind, so a new note is a decision.
+
+The question for the conditions of `unassigned` channels (MaxQuant TMT, Sage TMT channels no `tmt:` map names) is a
+`quant.AsksConditions`. `sdrfdesign.answered`, called where `analyze` collects the loader's notes, drops it when no
+sample analysed is still `unassigned` after the SDRF and `sample_conditions`: a channel left out
+(`exclude_samples`) or a reference channel (an SDRF's pooled rows, `tmt_reference`) needs no condition. While one
+still is, the note stays as made, with the loader's count: the sample table says which. Matching the note's text
+was the alternative; a type follows D110.
+
+### D119 — DIA-NN's long report and phosphosite matrix add up a sample's fractions too
+**2026-10-19.** Follows D111. `engines.load` passes the plan's fractionated samples (`downstream._fractionated`) to
+DIA-NN's long report, and `phospho.read_sites` to DIA-NN's phosphosite matrix, both through
+`quant.sum_fractions`. In `read_sites` the sum comes between reading the matrix and the SDRF (`load_into`), as in
+`load_quantities`, so an SDRF describes the summed sample and doesn't call its fractions separate columns.
+FragPipe's own site tables have a column per sample already. A summed sample now takes its condition from the
+manifest, as its name and replicate did: the long report guesses conditions from run names, and `DMSO_1_F1`'s guess
+is `DMSO_1_F1`. Runs that are not fractions are as read: without fractions both matrices are unchanged, a
+re-acquisition in the phosphosite matrix still raises DUPLICATE_SAMPLES, and in the long report, which names its
+samples by run and doesn't read the manifest's conditions, it stays two samples named by file, as before (ROADMAP).
+
+### D120 — Ionomos hands finished isoDTB searches to the lab's cysteine atlas, by one contract, off by default
+**2026-10-19.** The lab's cysteine atlas (Nomura-Lab repository, `Lab Informatics\tools`) took FragPipe isoDTB runs
+as its third source on 2026-10-19, through `harvest_fragpipe.ps1`, which a person ran by hand. Ionomos runs those
+searches, so it sends them. Both sides implement one contract, `ionomos-atlas-handoff/1`, copied word for word
+into ATLAS.md; the Nomura-Lab side was built at the same time against the same text.
+1. **`atlas:` in config.yaml**: `enabled` (false), `handoff_dir` (no default: the lab's Dropbox path has spaces,
+   and CLAUDE.md forbids a default path with one; the app offers the folder it finds, D125), `methods` (`[isoDTB]`),
+   `max_tries` (10), `retry_minutes` (15). `handoff_dir` may have spaces (FragPipe never sees it) but must be a full
+   path. Validated by `atlas.settings_from`, unknown keys refused like `library:`.
+2. **Only FragPipe isoDTB methods** may be in `atlas.methods` (their kind, so `naming.methods.<key>.like: isoDTB`
+   counts); while the hand-off is on, anything else stops config.yaml from loading, with the line. While it is off
+   they are not checked: every Save writes the default `[isoDTB]`, and a lab without isoDTB must load. The runs CSV says `ProbeClass` isoDTB, as
+   the contract asks, and the atlas side ingests by that column: a TMT run sent as isoDTB would be counted.
+3. **Ionomos mirrors the script, not its summary.** Where the contract's bullet list and `harvest_fragpipe.ps1`
+   differ (the script also takes `*.fasta`, `*.yml`, `*.yaml`, `*.manifest` and `log_*.txt`), the contract's
+   "the SAME selection rule as harvest_fragpipe.ps1" decides: its constants are copied into `atlas.py` in its
+   order, and `tests/test_atlas.py` holds them table-driven.
+4. **What the contract leaves open is fixed in ATLAS.md** and was agreed with the receiver: the record's field
+   names are the receiver's (`files[].path / size / sha256`, `job.number`, …), SHA-256 is lowercase hex,
+   `files[].path` is relative with `/`, the record holds no send time (so a re-send of the same run gives the same
+   HandoffSha256), and the CSV is written byte for byte as PowerShell 5.1's `Export-Csv` writes.
+
+### D121 — The worker queues a hand-off; a thread of its own does the copying, and retries with a back-off
+**2026-10-19.** A hand-off must never delay, fail or change a job (CLAUDE.md, the task).
+1. **The worker only marks.** `Worker.run_once`, after `_run` returns, calls `_atlas_queue`: when the job ended
+   done (its analysis finished: `done` is set after it) and the hand-off is on for its method, the job's
+   `ionomos.json` gets `"atlas": {"state": "pending", …}`. `_search` is not touched (PR #187 edits it). config.yaml is
+   read again there, so turning the hand-off on in the app counts without a restart. Any error is logged.
+2. **The copying is `atlas.HandoffLoop`'s**, a supervised thread `atlas` in `ionomos run`, every 30 s, on
+   `LiveConfig`: each done job of `atlas.methods` whose hand-off is pending, or failed and due. A slow Dropbox
+   never holds up a search. Its heartbeat says `busy:` while it copies, so a big run is not "not responding".
+3. **State lives in `ionomos.json`** (`atlas`: state, tries, last_try, next_try, message, record,
+   handoff_sha256, history of earlier sends), not in the ledger: no schema change, and the person sees it next to
+   the data. States: pending, sending, sent, failed, conflict, gave_up (ATLAS.md).
+4. **Failures retry by themselves**: after `retry_minutes`, doubling, at most 12 hours apart, until `max_tries`
+   (`gave_up`); a conflict is not retried. Each failure raises `atlas_handoff_failed` (one item per job, a warning,
+   no pop-up window: the search is fine), closed when the job is sent.
+5. **Searches done before the hand-off was turned on are not sent by themselves**: the atlas has what harvest
+   copied, and sending a year of runs at once is a person's decision. **Send to atlas** and `ionomos atlas send`
+   send any done job.
+
+### D122 — A hand-off copies through `.partial`, verifies every file, and stops before copying anything on a conflict
+**2026-10-19.** The destination is shared lab data in Dropbox; the experiment folder is the lab's data.
+1. **The experiment folder is only read.** Nothing in it is moved, renamed or deleted; the one write is the `atlas`
+   block of `ionomos.json` (read just before, written atomically). Junctions and links are never followed.
+2. **Compare first.** Every selected file is compared with what is at the destination before anything is copied:
+   the same size and SHA-256 is skipped; another size, or the same size with other content, is a conflict. Any
+   conflict stops the hand-off with nothing copied, so the destination never holds half of one run and half of
+   another. The attention item lists every file that differs.
+3. **Copy through `<name>.partial`**, hashed while copying, read back and compared, then renamed to its name with a
+   rename that never replaces (Windows' rename; a hard link elsewhere). The source's size and time are checked
+   before and after, so a file that changed mid-copy is copied again on the next try. The source's modified time
+   is kept, as harvest keeps it. A leftover `.partial` is Ionomos' own and is written over.
+4. **Completion in order**: `ionomos-handoff.json` only after every file is verified; then the runs CSV, written as
+   `.partial` and renamed last, so its presence means complete. `ionomos-handoff.json` is the one file at the
+   destination Ionomos ever replaces, and only when the job's summary changed; an older CSV whose HandoffSha256 no
+   longer matches it was superseded.
+5. **One process per job**: `<log_dir>/atlas-send-job<N>.lock`, made exclusively (the watcher's thread, the app and
+   the command line can all send); one older than 6 hours was left by a process that died and is taken over.
+6. **The destination folder is made only when its parent is there**, as harvest does: no `Nicholas Foster Data`
+   means Dropbox is not running or not synced, and the hand-off waits instead of making a local folder that never
+   syncs. Paths past 260 characters use the `\\?\` form.
+
+### D123 — `ionomos atlas send | status | check`
+**2026-10-19.** `send JOB_ID` hands one done job over now whatever its state (exit 0 sent; 1 not sent: no such job,
+not done, not an atlas method, a conflict or a failure, with every file that differs; 2 the hand-off is off or has
+no folder: nothing was tried). `status [JOB_ID] [--json]` shows where each finished atlas job stands (0; 1 for a job
+that isn't there). `check [--no-write]` checks the setting, the folder (there, writable: one small test file made
+and removed) and the atlas's site lookup (0 all good or off; 1 a problem). The exit codes are D102's table;
+`tests/test_cli_contract.py` holds the subcommand.
+
+### D124 — The isoDTB report shows the atlas's tier, experiments and "new to the atlas"; read only, only if present
+**2026-10-19.** The atlas publishes `<handoff_dir>\_atlas\atlas_sites_lookup.tsv` + `.json` (contract
+`ionomos-atlas-lookup/1`). `downstream/atlasctx.py` reads it read-only when the hand-off is on and the files are
+there, and joins it to the cysteine site table: tier, the number of atlas experiments, and "new to the atlas" for a
+human site the atlas has never seen. Positions are 1-based in the canonical UniProt sequence, as the contract's; an
+isoform, a non-UniProt protein or a non-human protein gets no context and is never called new (the lookup is human
+only). One line in the section says these are the lab's internal numbers, when the atlas was built and by which
+rule, and whether the set may be quoted (`quotable`). A malformed lookup is ignored with a note; none changes nothing.
+The lookup reaches the analysis as an argument, like `site_annotation`, not as a new `analysis:` setting.
+
+### D125 — In the app: Send to atlas on the Jobs tab, the folder on the Folders tab, a line on the Setup checklist
+**2026-10-19.** The Jobs tab shows each job's hand-off state (`atlas.describe`) in an atlas column, shown only
+while the hand-off is on or a listed job has one, and has **Send to atlas** for a selected done job; the item's
+window in the attention list has it too. The Folders tab has the hand-off switch and the destination with
+**Browse…**, and offers the Dropbox folder Ionomos found (`atlas.dropbox_suggestion`: harvest's own search,
+`%LOCALAPPDATA%\Dropbox\info.json` then `Nicholas Foster Data` up to two levels down) to confirm with **Use**,
+never filled in by itself; its Save writes `enabled` and `handoff_dir` and keeps the other keys. The Setup checklist
+has a line from `atlas.check` (only while the hand-off is on; to do / warning / problem) with **Fix**, a new action
+`atlas_folder` that puts the cursor in the folder field; `ionomos check` has no atlas row (`ionomos doctor` shows the
+line). Sending and the Dropbox search run on `App.run_bg` (D95), the checklist inside its existing background
+refresh; the atlas column reads `ionomos.json` files on a plain background thread per refresh (a 3 s tick is not
+work the busy indicator should show), again only for a file whose time changed. Help: `faq.atlas`,
+`attention.atlas_handoff_failed`. Found on the way: `configio._y` wrote with PyYAML's width of 80, so a value with
+a space past column 80 (a long Dropbox path) was folded onto the next line and the comment after it made
+config.yaml unreadable; it writes on one line now.
+
+**Not verified (D120-D125)**: on the lab PC: the Dropbox client signed in and syncing `Nicholas Foster Data`,
+the watcher's Windows account writing there, a real isoDTB search handed off and ingested by the atlas side, and
+the app's new controls on the PC's screen.
+
+### D126 — On Windows an engine runs in a Job Object: what it leaves running is stopped, and it ends with Ionomos
+**2026-10-19.** Issue #174. On POSIX, a process an engine started and left
+running after the engine exited is stopped through the engine's process group
+and noted (D98). On Windows nothing was stopped or said: `taskkill /PID
+<engine> /T` follows parent links, which end with the engine, and once the
+engine is gone its leftover can't be told from any other program. It could go
+on writing into the output folder the analysis is about to read, hold a
+result table open, or keep the raw files locked for the next search. This
+amends D69 item 2 and D98.
+
+1. **Every engine goes into a Job Object of its own right after it starts**
+   (`winjob.contain`, stdlib ctypes; `fragpipe._start`). That covers the run
+   loop (FragPipe, DIA-NN, MaxQuant, and Sage with its converter, which run
+   inside the `sage-job` process), the helper runs (`run_to_file`:
+   `MaxQuantCmd --create`, the preflight's `--help` and dry runs) and
+   Philosopher (`fastasource`). A job holds every process started inside it,
+   whatever became of its parent. A Toolhelp walk for processes whose parent
+   is the dead engine was the alternative: Windows does not update an orphan's
+   parent id and reuses it, a grandchild of an already-ended child is missed,
+   and it does nothing for time limits.
+2. **A time limit, a cancel or a stop ends the whole job** (`kill_tree`:
+   `TerminateJobObject`, exit code 1 as `taskkill /F` leaves, so the exit
+   reasons read the same). That reaches a process whose parent has already
+   ended, which `taskkill /T` can't. `taskkill /T` stays for a process without
+   a job, when Windows refuses, and for `stop_leftover` (an earlier Ionomos's
+   search: no handle on its job).
+3. **After the engine ends by itself, what it left in the job is stopped**
+   (`Job.stop_rest`, 5 s) with the same note as on POSIX: "a program DIA-NN
+   started was still running after DIA-NN ended; Ionomos stopped it". Each
+   leftover is waited for by its handle, so its files are closed (a lock on a
+   result table released) before the tables are read. Not leftovers: the
+   engine's console host (conhost.exe outlived the engine by a few
+   milliseconds in 15 runs of 20 on Windows 11), and a process that ends by
+   itself within 1 s (`GRACE_SECONDS`; one caught while it exits has no name
+   to read yet). Both gave a false note before they were left out.
+4. **`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`: the job is closed on every path
+   (`fragpipe._release` in a `finally`), and closing it ends what is still in
+   it.** So a search ends with the Ionomos that held its job, however it
+   ended (Task Manager, a crash), instead of running on unseen until the next
+   start stops it (D69 item 2). On Windows, `stop_leftover` now matters only
+   for a search without a job, a kill that did not take, and a search an
+   older Ionomos started. A helper run's leftovers end silently when its job
+   is closed. Leaving the limit off kept D69's behaviour, but a search would
+   still run on unseen after Ionomos ended. No path closes the job while a
+   search should go on: Ionomos stops its searches whenever it stops.
+5. **`JOB_OBJECT_LIMIT_BREAKAWAY_OK`, never `SILENT_BREAKAWAY_OK`.** A program
+   that asks to leave (`CREATE_BREAKAWAY_FROM_JOB`) may, and is then not
+   stopped, as before. Without the limit Windows refuses to start that
+   program, which could fail a search. With the silent limit every child
+   would leave.
+6. **Nested jobs.** Ionomos itself usually runs inside a job (a venv's
+   python.exe launcher, Task Scheduler, a terminal; the tests run in one), and
+   Windows 8 and later nest the engine's job inside it. A parent job's own
+   limits still apply (one that ends its processes ends the search too, as
+   before).
+7. **A job Windows won't make never fails a search.** If `CreateJobObjectW`,
+   `SetInformationJobObject` or `AssignProcessToJobObject` fails (Windows 7
+   with Ionomos already in a job, a parent job with UI limits, no kernel32),
+   that is logged (`ionomos.winjob`), the console log says the engine "could
+   not be put in a Windows job", and the run goes on as before #174. An engine
+   that ended before it could be put in a job is not a warning.
+8. **The few milliseconds between CreateProcess and AssignProcessToJobObject
+   are not covered**: subprocess can't start a process suspended. Every
+   engine's first child comes long after that (cmd.exe reads fragpipe.bat,
+   Java starts).
+
+Tests changed with it: the stand-in's `lockchild` (a leftover holding a
+table) is now stopped and the table read, on both systems. A lock by a
+program outside the engine (Excel, an antivirus) is the stand-in's new
+`handoff` step, with the lock taken by the test. The two "won't stop" tests
+fake a refused kill without a job, because closing the job would end the
+process. `test_faults`' killed-Ionomos test expects the fake FragPipe to end
+with Ionomos on Windows.
+
+**Verified**: `tests/test_winjob.py` (kernel32 stubbed through the module's
+`ctypes` and `os`: the limits, every failure and its handle closed, the
+console host, a reused pid, a list too long for the first buffer, an
+unreadable list, a leftover that won't end; and with the real kernel32 on
+Windows 11, nested in this test run's job: a leftover stopped after its
+parent ended, kill-on-close, a breakaway child left alone, ten engines that
+leave nothing never noted) and `tests/test_engine_faults.py` (`-k
+left_behind`: the leftover stopped and the note present on Windows; the time
+limit, cancel and won't-stop paths; kill_tree and `_stop_stragglers` with a
+stubbed job). **Not verified**: on the lab PC with the real engines; whether
+MSFragger's `BatmassIoThermoServer.exe` (the Thermo reader) outlives MSFragger;
+that the installed Ionomos.exe can nest the job (a console log would say it
+could not).

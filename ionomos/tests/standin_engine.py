@@ -15,6 +15,8 @@ stands in for FragPipe's launcher, DIA-NN, MaxQuant or Sage whatever arguments t
                               <out>/grandchild.pid
         lockchild=<rel>       a grandchild that opens <out>/<rel> and holds a Windows lock on it (POSIX: holds
                               it open) for 60 s; its pid goes to <out>/grandchild.pid
+        handoff=<rel>         write a whole table at <out>/<rel>, then <rel>.ready, and wait (up to 30 s) for
+                              <rel>.locked: a program outside the engine (the test's) locks the table between
         flood=<bytes>         print that many bytes as fast as it can (0 = for ever)
         marker                create <out>/standin.started (the tests' sign that it is running)
         hang                  sleep for ever
@@ -101,6 +103,12 @@ def main() -> int:
             if not p.exists():
                 _write(arg, b"Protein\tA_1\tB_1\nP1\t1.0\t2.0\n")
             _spawn(LOCKER, str(p), "60")
+            end = time.monotonic() + 30
+            while not Path(str(p) + ".locked").exists() and time.monotonic() < end:
+                time.sleep(0.02)
+        elif name == "handoff":
+            p = _write(arg, b"Protein\tA_1\tB_1\nP1\t1.0\t2.0\nP2\t3.0\t4.0\n")
+            Path(str(p) + ".ready").write_bytes(b"")
             end = time.monotonic() + 30
             while not Path(str(p) + ".locked").exists() and time.monotonic() < end:
                 time.sleep(0.02)

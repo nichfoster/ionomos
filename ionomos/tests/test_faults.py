@@ -352,9 +352,10 @@ def _run_proc(cfg_path: Path, env_extra: dict) -> subprocess.Popen:
 
 
 def test_ionomos_killed_mid_search_restarts_without_a_second_fragpipe_or_a_lost_job(bed):
-    """Ionomos ended from Task Manager while FragPipe runs: FragPipe lives on (its own process group). The next
-    Ionomos stops it, then searches the job again from the start: one attempt more, never two FragPipes on one
-    folder, and the job ends done."""
+    """Ionomos ended from Task Manager while FragPipe runs. POSIX: FragPipe lives on (its own process group), and
+    the next Ionomos stops it. Windows: FragPipe ends with Ionomos, whose handle was the last on the search's job
+    (KILL_ON_JOB_CLOSE, D126). Either way the next Ionomos searches the job again from the start: one attempt
+    more, never two FragPipes on one folder, and the job ends done."""
     cfg = bed["cfg"]
     dest = _queue(bed)
     bed["ledger"].close()
@@ -372,7 +373,10 @@ def test_ionomos_killed_mid_search_restarts_without_a_second_fragpipe_or_a_lost_
     finally:
         if p1.poll() is None:
             p1.kill()
-    assert _alive(orphan), "the FragPipe of a killed Ionomos keeps running (the hazard this test is about)"
+    if os.name == "nt":
+        assert _wait(lambda: not _alive(orphan), 15), "the FragPipe of a killed Ionomos ends with its job"
+    else:
+        assert _alive(orphan), "the FragPipe of a killed Ionomos keeps running (the hazard this test is about)"
     assert Ledger(cfg.database).get(1).status == "running"
 
     p2 = _run_proc(bed["cfg_path"], {"IONOMOS_FAKE_FP_SECONDS": "0"})
@@ -386,7 +390,7 @@ def test_ionomos_killed_mid_search_restarts_without_a_second_fragpipe_or_a_lost_
     console = _console(dest)
     assert console.count("# ionomos job 1 ") == 2 and console.count("ALL JOBS DONE IN") == 1
     log_text = names.log_file(cfg.log_dir).read_text(encoding="utf-8", errors="replace")
-    assert "was still running after Ionomos stopped" in log_text
+    assert ("was still running after Ionomos stopped" in log_text) == (os.name != "nt")  # Windows: nothing left
     assert list(dest.glob("fragpipe_previous_*"))  # the killed attempt's output is kept
 
 
