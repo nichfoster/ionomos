@@ -108,6 +108,30 @@ folder, a share it can only read): give the account it runs as the right to
 create, rename and delete files there. Ionomos keeps trying by itself, and the
 message closes when the folder is filed.
 
+## A search wasn't handed to the cysteine atlas {#attention.atlas_handoff_failed}
+
+When the lab has turned on the atlas hand-off, every finished isoDTB search is
+copied into the lab Dropbox folder the cysteine atlas reads
+(`Nicholas Foster Data\fragpipe-runs`). This item says one copy did not
+finish. Your search and its report are fine and nothing in your experiment
+folder was changed: the hand-off only reads it.
+
+- **"can't be reached … is Dropbox running"**, or another error: the copy
+  is tried again by itself, waiting longer each time; the item says when.
+  Nothing to do if Dropbox was only offline. If it keeps failing, check that
+  Dropbox is running and signed in on this PC and that the folder on the
+  **Folders** tab is right, then **Send to atlas** on the **Jobs** tab.
+- **"gave up after … tries"**: it stopped trying. Fix the cause, then
+  **Send to atlas**.
+- **"differ from this run's; nothing was copied"**: the Dropbox folder
+  already holds a different copy of a file of this run (the item lists each
+  one). Ionomos never overwrites it. Ask the person who keeps the atlas which
+  copy is right; once they have moved the old one aside, press
+  **Send to atlas**.
+
+`ionomos atlas check` checks the folder; `ionomos atlas status` lists where
+each search stands. More: [the hand-off](#faq.atlas).
+
 ## The instrument QC standard looks off {#attention.qc_trend}
 
 Your lab's recurring QC standard (a HeLa or K562 run, for example) came

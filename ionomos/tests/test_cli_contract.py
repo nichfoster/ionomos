@@ -129,6 +129,7 @@ CASES = {
     "testbed": ("free", ["list", "{tmp}/nobed"]),
     "fasta": ("own", "network (UniProt): test_fastasource.py; every fasta command works without a config"),
     "tmt": ("free", ["suggest", "--tag", "TMT-10", "--conditions", "A,B", "--replicates", "2"]),
+    "atlas": ("config", ["status"]),
 }
 
 
@@ -195,6 +196,9 @@ def test_a_command_that_needs_no_config_does_not_care_if_it_is_broken(cmd, broke
     (["resume"], 0),
     (["repair-ledger"], 0),
     (["spectronaut-columns"], 0),
+    (["atlas", "status"], 0),
+    (["atlas", "check"], 0),  # off: nothing is wrong
+    (["atlas", "send", "1"], 1),  # no ledger yet: no job 1
 ])
 def test_exit_codes_on_a_working_lab(lab, argv, code, capsys, monkeypatch):
     monkeypatch.setenv("APPDATA", str(lab["root"] / "appdata"))
@@ -209,6 +213,7 @@ def _with_ledger(lab):
 
 @pytest.mark.parametrize(("argv", "code"), [
     (["retry", "77"], 1), (["cancel", "77"], 1), (["analyze", "77"], 1), (["export", "77"], 1),
+    (["atlas", "send", "77"], 1), (["atlas", "status", "77"], 1),
 ])
 def test_a_job_that_is_not_in_the_ledger_is_exit_1(lab, argv, code, capsys):
     _with_ledger(lab)

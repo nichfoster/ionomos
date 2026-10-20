@@ -103,6 +103,7 @@ lab: [docs/ROADMAP.md](docs/ROADMAP.md).
 | [LIBRARY.md](docs/LIBRARY.md) | The workflow and FASTA library (`ionomos library`): where it looks on the PC, what it says about each workflow and FASTA, how it ranks them per method and pins the chosen ones |
 | [UI.md](docs/UI.md) | The app's UI: its rules, every tab and window and who uses it, what was seen on screen, and the plan for daily driving (#109–#132) |
 | [FASTA.md](docs/FASTA.md) | Getting, preparing and refreshing FASTAs (`ionomos fasta`): UniProt downloads, decoys and contaminants, how old a FASTA is |
+| [ATLAS.md](docs/ATLAS.md) | The hand-off of finished isoDTB searches to the lab's cysteine atlas (`ionomos atlas`): the contract both sides implement, word for word, what is copied and how, the states a hand-off goes through, and the atlas's site lookup in the report |
 | [SECURITY_NOTES.md](docs/SECURITY_NOTES.md) | The threat model, per component: what each part that faces an inbox, a drop, an engine's output, a bundle, a webhook or the network protects against, what it does not, and the test that attacks it (reporting a problem: SECURITY.md) |
 
 ## Try the analysis on any computer
@@ -127,7 +128,7 @@ Windows, macOS or Linux; no lab setup, no Tk. See [docs/QUICKSTART.md](docs/QUIC
 - **The lab PC**: `setup` (the app; also what a bare `ionomos` opens), `init`, `check`, `doctor`, `preflight`, `run`,
   `stop`, `status`, `attention`, `dry-run`, `names test`, `retry`, `cancel`, `pause`, `resume`,
   `repair-ledger`, `qc-trend`, `library`, `fasta`, `tmt`, `notify-test`, `diagnose`, `bundle`, `ask`,
-  `ask-eval`, `update`.
+  `ask-eval`, `update`, `atlas`.
 - **Testing**: `testbed` (a fake lab with a fake FragPipe; docs/TESTING.md).
 
 ## Quick start (dev, on this Mac)

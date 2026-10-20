@@ -520,7 +520,7 @@ def _disk_names() -> dict[str, str]:
     out = {}
     for k, v in vars(names).items():
         if k.isupper() and isinstance(v, str) and not k.startswith("LEGACY") and k not in NOT_ON_DISK:
-            out[k] = v.replace("{plex}", "<plex>")
+            out[k] = re.sub(r"\{(\w+)\}", r"<\1>", v)  # tmt_qc_{plex}.tsv is tmt_qc_<plex>.tsv in the layout
     return out
 
 

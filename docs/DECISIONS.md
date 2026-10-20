@@ -4768,3 +4768,104 @@ manifest, as its name and replicate did: the long report guesses conditions from
 is `DMSO_1_F1`. Runs that are not fractions are as read: without fractions both matrices are unchanged, a
 re-acquisition in the phosphosite matrix still raises DUPLICATE_SAMPLES, and in the long report, which names its
 samples by run and doesn't read the manifest's conditions, it stays two samples named by file, as before (ROADMAP).
+
+### D120 — Ionomos hands finished isoDTB searches to the lab's cysteine atlas, by one contract, off by default
+**2026-10-19.** The lab's cysteine atlas (Nomura-Lab repository, `Lab Informatics\tools`) took FragPipe isoDTB runs
+as its third source on 2026-10-19, through `harvest_fragpipe.ps1`, which a person ran by hand. Ionomos runs those
+searches, so it sends them. Both sides implement one contract, `ionomos-atlas-handoff/1`, copied word for word
+into ATLAS.md; the Nomura-Lab side was built at the same time against the same text.
+1. **`atlas:` in config.yaml**: `enabled` (false), `handoff_dir` (no default: the lab's Dropbox path has spaces,
+   and CLAUDE.md forbids a default path with one; the app offers the folder it finds, D125), `methods` (`[isoDTB]`),
+   `max_tries` (10), `retry_minutes` (15). `handoff_dir` may have spaces (FragPipe never sees it) but must be a full
+   path. Validated by `atlas.settings_from`, unknown keys refused like `library:`.
+2. **Only FragPipe isoDTB methods** may be in `atlas.methods` (their kind, so `naming.methods.<key>.like: isoDTB`
+   counts); while the hand-off is on, anything else stops config.yaml from loading, with the line. While it is off
+   they are not checked: every Save writes the default `[isoDTB]`, and a lab without isoDTB must load. The runs CSV says `ProbeClass` isoDTB, as
+   the contract asks, and the atlas side ingests by that column: a TMT run sent as isoDTB would be counted.
+3. **Ionomos mirrors the script, not its summary.** Where the contract's bullet list and `harvest_fragpipe.ps1`
+   differ (the script also takes `*.fasta`, `*.yml`, `*.yaml`, `*.manifest` and `log_*.txt`), the contract's
+   "the SAME selection rule as harvest_fragpipe.ps1" decides: its constants are copied into `atlas.py` in its
+   order, and `tests/test_atlas.py` holds them table-driven.
+4. **What the contract leaves open is fixed in ATLAS.md** and was agreed with the receiver: the record's field
+   names are the receiver's (`files[].path / size / sha256`, `job.number`, …), SHA-256 is lowercase hex,
+   `files[].path` is relative with `/`, the record holds no send time (so a re-send of the same run gives the same
+   HandoffSha256), and the CSV is written byte for byte as PowerShell 5.1's `Export-Csv` writes.
+
+### D121 — The worker queues a hand-off; a thread of its own does the copying, and retries with a back-off
+**2026-10-19.** A hand-off must never delay, fail or change a job (CLAUDE.md, the task).
+1. **The worker only marks.** `Worker.run_once`, after `_run` returns, calls `_atlas_queue`: when the job ended
+   done (its analysis finished: `done` is set after it) and the hand-off is on for its method, the job's
+   `ionomos.json` gets `"atlas": {"state": "pending", …}`. `_search` is not touched (PR #187 edits it). config.yaml is
+   read again there, so turning the hand-off on in the app counts without a restart. Any error is logged.
+2. **The copying is `atlas.HandoffLoop`'s**, a supervised thread `atlas` in `ionomos run`, every 30 s, on
+   `LiveConfig`: each done job of `atlas.methods` whose hand-off is pending, or failed and due. A slow Dropbox
+   never holds up a search. Its heartbeat says `busy:` while it copies, so a big run is not "not responding".
+3. **State lives in `ionomos.json`** (`atlas`: state, tries, last_try, next_try, message, record,
+   handoff_sha256, history of earlier sends), not in the ledger: no schema change, and the person sees it next to
+   the data. States: pending, sending, sent, failed, conflict, gave_up (ATLAS.md).
+4. **Failures retry by themselves**: after `retry_minutes`, doubling, at most 12 hours apart, until `max_tries`
+   (`gave_up`); a conflict is not retried. Each failure raises `atlas_handoff_failed` (one item per job, a warning,
+   no pop-up window: the search is fine), closed when the job is sent.
+5. **Searches done before the hand-off was turned on are not sent by themselves**: the atlas has what harvest
+   copied, and sending a year of runs at once is a person's decision. **Send to atlas** and `ionomos atlas send`
+   send any done job.
+
+### D122 — A hand-off copies through `.partial`, verifies every file, and stops before copying anything on a conflict
+**2026-10-19.** The destination is shared lab data in Dropbox; the experiment folder is the lab's data.
+1. **The experiment folder is only read.** Nothing in it is moved, renamed or deleted; the one write is the `atlas`
+   block of `ionomos.json` (read just before, written atomically). Junctions and links are never followed.
+2. **Compare first.** Every selected file is compared with what is at the destination before anything is copied:
+   the same size and SHA-256 is skipped; another size, or the same size with other content, is a conflict. Any
+   conflict stops the hand-off with nothing copied, so the destination never holds half of one run and half of
+   another. The attention item lists every file that differs.
+3. **Copy through `<name>.partial`**, hashed while copying, read back and compared, then renamed to its name with a
+   rename that never replaces (Windows' rename; a hard link elsewhere). The source's size and time are checked
+   before and after, so a file that changed mid-copy is copied again on the next try. The source's modified time
+   is kept, as harvest keeps it. A leftover `.partial` is Ionomos' own and is written over.
+4. **Completion in order**: `ionomos-handoff.json` only after every file is verified; then the runs CSV, written as
+   `.partial` and renamed last, so its presence means complete. `ionomos-handoff.json` is the one file at the
+   destination Ionomos ever replaces, and only when the job's summary changed; an older CSV whose HandoffSha256 no
+   longer matches it was superseded.
+5. **One process per job**: `<log_dir>/atlas-send-job<N>.lock`, made exclusively (the watcher's thread, the app and
+   the command line can all send); one older than 6 hours was left by a process that died and is taken over.
+6. **The destination folder is made only when its parent is there**, as harvest does: no `Nicholas Foster Data`
+   means Dropbox is not running or not synced, and the hand-off waits instead of making a local folder that never
+   syncs. Paths past 260 characters use the `\\?\` form.
+
+### D123 — `ionomos atlas send | status | check`
+**2026-10-19.** `send JOB_ID` hands one done job over now whatever its state (exit 0 sent; 1 not sent: no such job,
+not done, not an atlas method, a conflict or a failure, with every file that differs; 2 the hand-off is off or has
+no folder: nothing was tried). `status [JOB_ID] [--json]` shows where each finished atlas job stands (0; 1 for a job
+that isn't there). `check [--no-write]` checks the setting, the folder (there, writable: one small test file made
+and removed) and the atlas's site lookup (0 all good or off; 1 a problem). The exit codes are D102's table;
+`tests/test_cli_contract.py` holds the subcommand.
+
+### D124 — The isoDTB report shows the atlas's tier, experiments and "new to the atlas"; read only, only if present
+**2026-10-19.** The atlas publishes `<handoff_dir>\_atlas\atlas_sites_lookup.tsv` + `.json` (contract
+`ionomos-atlas-lookup/1`). `downstream/atlasctx.py` reads it read-only when the hand-off is on and the files are
+there, and joins it to the cysteine site table: tier, the number of atlas experiments, and "new to the atlas" for a
+human site the atlas has never seen. Positions are 1-based in the canonical UniProt sequence, as the contract's; an
+isoform, a non-UniProt protein or a non-human protein gets no context and is never called new (the lookup is human
+only). One line in the section says these are the lab's internal numbers, when the atlas was built and by which
+rule, and whether the set may be quoted (`quotable`). A malformed lookup is ignored with a note; none changes nothing.
+The lookup reaches the analysis as an argument, like `site_annotation`, not as a new `analysis:` setting.
+
+### D125 — In the app: Send to atlas on the Jobs tab, the folder on the Folders tab, a line on the Setup checklist
+**2026-10-19.** The Jobs tab shows each job's hand-off state (`atlas.describe`) in an atlas column, shown only
+while the hand-off is on or a listed job has one, and has **Send to atlas** for a selected done job; the item's
+window in the attention list has it too. The Folders tab has the hand-off switch and the destination with
+**Browse…**, and offers the Dropbox folder Ionomos found (`atlas.dropbox_suggestion`: harvest's own search,
+`%LOCALAPPDATA%\Dropbox\info.json` then `Nicholas Foster Data` up to two levels down) to confirm with **Use**,
+never filled in by itself; its Save writes `enabled` and `handoff_dir` and keeps the other keys. The Setup checklist
+has a line from `atlas.check` (only while the hand-off is on; to do / warning / problem) with **Fix**, a new action
+`atlas_folder` that puts the cursor in the folder field; `ionomos check` has no atlas row (`ionomos doctor` shows the
+line). Sending and the Dropbox search run on `App.run_bg` (D95), the checklist inside its existing background
+refresh; the atlas column reads `ionomos.json` files on a plain background thread per refresh (a 3 s tick is not
+work the busy indicator should show), again only for a file whose time changed. Help: `faq.atlas`,
+`attention.atlas_handoff_failed`. Found on the way: `configio._y` wrote with PyYAML's width of 80, so a value with
+a space past column 80 (a long Dropbox path) was folded onto the next line and the comment after it made
+config.yaml unreadable; it writes on one line now.
+
+**Not verified (D120-D125)**: on the lab PC: the Dropbox client signed in and syncing `Nicholas Foster Data`,
+the watcher's Windows account writing there, a real isoDTB search handed off and ingested by the atlas side, and
+the app's new controls on the PC's screen.
