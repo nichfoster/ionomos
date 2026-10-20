@@ -386,6 +386,8 @@ fallbacks, audit log). It does not measure any model's answer quality.
 Phase 6.1's exit criteria (≥ 90% on the rubrics with real models, no
 injection failure, time to first token on the PC) are still open: `ionomos
 ask-eval` measures them on the PC ([ASSISTANT.md](ASSISTANT.md#scoring-a-real-model)).
+Two models scored on the dev PC's GPU (2026-10-19) passed 8 % and 23 %
+([ASSISTANT.md](ASSISTANT.md#measured-on-the-dev-pc-rtx-5070-ti-2026-10-19)).
 `tests/test_assistant_eval.py` runs that runner over real HTTP against
 `assistant.fake.ScriptedServer` (127.0.0.1, a port the OS picks): every
 scenario a real model is scored on passes with its well-behaved script, a

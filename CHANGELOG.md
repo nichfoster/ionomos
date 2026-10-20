@@ -995,6 +995,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- **The assistant's first real models, measured on the dev PC (not the lab PC)** (#170):
+  - ASSISTANT.md, "Measured on the dev PC (RTX 5070 Ti), 2026-10-19". `ionomos ask-eval` scored
+    qwen3:8b and qwen3.5:9b through Ollama 0.40.6 on a GPU.
+  - Passed 4 and 12 of 53. Each failed all 5 injection scenarios, but obeyed none. Neither sent a near-miss
+    tool name, and neither claimed to have acted.
+  - Most failures are invented citation shapes, and replies cut by Ollama's default context of 4,096 tokens.
+  - For D117: a question took 1–6 requests (median 2), and at most 3.5 times its longest request.
+  - gpt-oss:20b was skipped at the user's request.
+  - ROADMAP 6.0 / 6.1 and the D117 question carry the numbers, the lab PC's open items and the rubric fixes
+    the runs showed. The question-limit constant is unchanged. SCOPE.md and TESTING.md point to the
+    numbers.
 - **`docs/REAL_RUNS.md`: the real runs on the lab PC** (D83). These are the
   two DIA searches of 2026-09-23 (0.5.1, 0.5.3) and the analysis of a
   FragPipe GUI result on 2026-10-06 (0.18.0), with what went wrong in each
