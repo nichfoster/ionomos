@@ -75,8 +75,9 @@ FIRST-TIME SETUP (the set-up tabs, left to right)
               the users folder, and the working folders. "Create all missing"
               makes them in one click. Point fragpipe_exe at FragPipe's
               headless launcher (only needed once searches are enabled).
-              Cysteine atlas (optional): hand finished isoDTB searches to the
-              lab Dropbox folder the atlas reads (spaces are fine there).
+              Cysteine atlas (optional): hand finished isoDTB searches (and,
+              with "Also TMT searches", TMT ones) to the lab Dropbox folder
+              the atlas reads (spaces are fine there).
   Users       One subfolder per person under users_root. Add the initials each
               person uses in folder names so "IJD05_isoDTB" -> Isaac.
   Methods     For each method: which .workflow file (exported from the FragPipe
@@ -216,8 +217,9 @@ THE JOBS TAB
   Re-run analysis, Analysis options…, Send to atlas, Retry, Cancel (stops a
   running search), Copy details, Zip for troubleshooting….
   The atlas column (while the hand-off is on: Folders tab -> Cysteine atlas)
-  says whether each isoDTB search went to the lab's cysteine atlas; Send to
-  atlas sends a finished one now (again, or one from before it was on).
+  says whether each isoDTB (or TMT) search went to the lab's cysteine
+  atlas; Send to atlas sends a finished one now (again, or one from before
+  it was on).
   Pause searches: no new FragPipe runs start (the running one finishes) —
   e.g. while someone needs the PC. Resume to continue.
   Check FragPipe install: finds FragPipe's version, bundled Java, MSFragger,
@@ -557,6 +559,8 @@ class App:
         return self.vars[key]
 
     def _load_vars(self):
+        from ionomos import atlas
+
         d = self.data
         for k, val in d["paths"].items():
             self.v(f"paths.{k}").set(val)
@@ -573,6 +577,7 @@ class App:
         at = d.get("atlas") if isinstance(d.get("atlas"), dict) else {}
         self.bv("atlas.enabled").set(at.get("enabled") is True)  # a quoted 'false' is not on (the loader refuses it)
         self.v("atlas.handoff_dir").set(str(at.get("handoff_dir") or ""))
+        self.bv("atlas.tmt").set(atlas.sends_kind(d, "TMT"))
         self.v("config_path").set(str(self.config_path))
 
     def _collect(self, base: dict | None = None) -> dict:
@@ -613,6 +618,12 @@ class App:
         d["atlas"] = {**(d["atlas"] if isinstance(d.get("atlas"), dict) else {}),
                       "enabled": self.bv("atlas.enabled").get(), "handoff_dir": self.v("atlas.handoff_dir").get().strip()}
         d["methods"] = self.data["methods"]
+        # the TMT switch (D127): the lab's FragPipe TMT methods in atlas.methods or out, the others as the file has them
+        from ionomos import atlas
+
+        methods = atlas.methods_with(d, "TMT", self.bv("atlas.tmt").get())
+        if methods != atlas.methods_listed(d):
+            d["atlas"]["methods"] = methods
         return d
 
     def set_status(self, msg: str, ok: bool = True):
@@ -986,6 +997,9 @@ class App:
         ttk.Checkbutton(g, text="Hand finished isoDTB searches to the cysteine atlas",
                         variable=self.bv("atlas.enabled")).grid(row=0, column=0, columnspan=3, sticky="w", **PAD)
         ttk.Button(g, text="Help", command=lambda: self.open_help("faq.atlas")).grid(row=0, column=3, sticky="e", **PAD)
+        self.atlas_tmt = ttk.Checkbutton(g, text="Also TMT searches (competition runs: stored with their sample design, "
+                                                 "not counted)", variable=self.bv("atlas.tmt"))
+        self.atlas_tmt.grid(row=4, column=1, columnspan=3, sticky="w", **PAD)
         ttk.Label(g, text="Destination folder").grid(row=1, column=0, sticky="e", **PAD)
         self.atlas_entry = ttk.Entry(g, textvariable=self.v("atlas.handoff_dir"), width=58)
         self.atlas_entry.grid(row=1, column=1, columnspan=2, sticky="ew", **PAD)

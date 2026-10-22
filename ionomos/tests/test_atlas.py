@@ -1,4 +1,5 @@
-"""The hand-off to the lab's cysteine atlas (atlas.py, docs/ATLAS.md, D120-D125), contract "ionomos-atlas-handoff/1".
+"""The hand-off to the lab's cysteine atlas (atlas.py, docs/ATLAS.md, D120-D125, D127), contract
+"ionomos-atlas-handoff/2".
 
 The selection rule is harvest_fragpipe.ps1's (Nomura-Lab, Lab Informatics/tools), so its cases are table-driven
 from the script's constants; the layout is its Get-RelativeDestination, checked against the atlas side's reader
@@ -8,6 +9,7 @@ nomura-data, C:/Fragpipe_Auto or C:/Fragpipe_General.
 from __future__ import annotations
 
 import csv
+import gzip
 import hashlib
 import io
 import json
@@ -33,7 +35,7 @@ CONTRACT_COLUMNS = ["Run", "Owner", "RunName", "LastModified", "FragPipeVersion"
 
 
 def test_the_contract_names_and_columns():
-    assert atlas.CONTRACT == "ionomos-atlas-handoff/1"
+    assert atlas.CONTRACT == "ionomos-atlas-handoff/2"
     assert atlas.LOOKUP_CONTRACT == "ionomos-atlas-lookup/1"
     assert list(atlas.CSV_COLUMNS) == CONTRACT_COLUMNS
     assert names.ATLAS_HANDOFF_FILE == "ionomos-handoff.json"
@@ -42,6 +44,9 @@ def test_the_contract_names_and_columns():
     assert (names.ATLAS_RETURN_DIR, names.ATLAS_LOOKUP_TSV, names.ATLAS_LOOKUP_JSON) == \
         ("_atlas", "atlas_sites_lookup.tsv", "atlas_sites_lookup.json")
     assert atlas.MAX_FILE_MB == 500
+    assert atlas.MAX_PIN_MB == 100 and names.ATLAS_GZIP_SUFFIX == ".gz"
+    assert atlas.KINDS == ("isoDTB", "TMT")
+    assert atlas.DESIGN_FILES == ("experiment.yaml", "results/fragpipe-analyst/experiment_annotation.tsv")
 
 
 # ------------------------------------------------------------------------------------------- settings --
@@ -56,6 +61,9 @@ def test_the_contract_names_and_columns():
     ({"handoff_dir": r"\\server\share\fragpipe-runs"}, {**atlas.DEFAULTS, "handoff_dir": r"\\server\share\fragpipe-runs"}),
     ({"methods": "isoDTB"}, atlas.DEFAULTS),
     ({"max_tries": 3, "retry_minutes": 2.5}, {**atlas.DEFAULTS, "max_tries": 3, "retry_minutes": 2.5}),
+    ({"pin_max_mb": 0}, {**atlas.DEFAULTS, "pin_max_mb": 0}),
+    ({"methods": ["isoDTB", "TMT"], "pin_max_mb": 250}, {**atlas.DEFAULTS, "methods": ["isoDTB", "TMT"],
+                                                        "pin_max_mb": 250}),
 ])
 def test_settings_read(raw, want):
     assert atlas.settings_from(raw) == want
@@ -71,6 +79,8 @@ def test_settings_read(raw, want):
     ({"max_tries": 0}, "max_tries must be"),
     ({"max_tries": 2.5}, "max_tries must be"),
     ({"retry_minutes": True}, "retry_minutes must be"),
+    ({"pin_max_mb": -1}, "pin_max_mb must be a whole number from 0 to 4096"),
+    ({"pin_max_mb": 2.5}, "pin_max_mb must be"),
 ])
 def test_settings_refuse(raw, words):
     with pytest.raises(atlas.AtlasError, match=re.escape(words)):
@@ -90,10 +100,10 @@ def test_config_has_the_section_off_by_default(lab):
 
 
 @pytest.mark.parametrize(("methods", "words"), [
-    (["TMT"], "TMT is TMT; only FragPipe isoDTB methods"),
+    (["DIA"], "DIA is DIA; only FragPipe isoDTB and TMT methods"),
     (["Nope"], "there is no methods.Nope"),
 ])
-def test_config_lets_only_fragpipe_isodtb_methods_in(lab, methods, words):
+def test_config_lets_only_fragpipe_isodtb_and_tmt_methods_in(lab, methods, words):
     with pytest.raises(ConfigError, match=re.escape(words)) as exc:
         _write_cfg(lab, enabled=True, handoff_dir=str(lab["root"] / "dest"), methods=methods)
     assert "line" in str(exc.value)  # the file and the line of the key (D102)
@@ -120,6 +130,11 @@ def test_a_lab_without_an_isodtb_method_loads_while_the_hand_off_is_off(lab):
     lab["cfg_path"].write_text(yaml.safe_dump(d), encoding="utf-8")
     with pytest.raises(ConfigError, match="there is no methods.isoDTB"):
         load(lab["cfg_path"])
+
+
+def test_tmt_may_go_while_the_hand_off_is_on(lab):
+    cfg = _write_cfg(lab, enabled=True, handoff_dir=str(lab["root"] / "dest"), methods=["isoDTB", "TMT"])
+    assert cfg.atlas["methods"] == ["isoDTB", "TMT"] and atlas.kind_of(cfg, "TMT") == "TMT"
 
 
 def test_a_method_like_isodtb_may_go(lab):
@@ -172,7 +187,8 @@ SELECTION = [
     ("interact.prot.xml", False, "never-copy pattern"),  # *.xml, but *.prot.xml is never copied
     ("x.pep.xml", False, "never-copy pattern"),
     ("a.pepXML", False, "not needed"),
-    ("a.pin", False, "not needed"),
+    ("a.pin", True, "selected (gzip)"),              # the decoys (D127): its own rule, before $NeverCopy
+    ("b.pin.gz", False, "not needed"),
     ("a.raw", False, "not needed"),
     ("a.mzML", False, "not needed"),
     ("lib.speclib", False, "not needed"),
@@ -189,6 +205,10 @@ SELECTION = [
     ("exp_2/other.txt", False, "not needed"),
     ("exp_2/interact-a.pep.xml", False, "not needed"),
     ("exp_2/a_calibrated.mgf", False, "not needed"),
+    ("exp_2/S_2.PIN", True, "selected (gzip)"),
+    ("exp_2/S_3.pin", False, "its _edited.pin is taken"),  # MSBooster's twin holds all of it
+    ("exp_2/S_3_edited.pin", True, "selected (gzip)"),
+    ("exp_2/S_4_edited.pin", True, "selected (gzip)"),
 ]
 NOT_LISTED = ["exp_1/deeper/psm.tsv", "MSBooster/psm.tsv", "msbooster/x.log", "tmp/psm.tsv", "TEMP/x.log",
               "__pycache__/x.log", ".git/x.log"]
@@ -218,6 +238,16 @@ def test_the_size_cap_is_harvests(tmp_path, monkeypatch):
     assert got == {"big.tsv": "larger than 1 MB", "edge.tsv": "selected", "exp_1/psm.tsv": "larger than 1 MB"}
     monkeypatch.setattr(atlas, "MAX_FILE_MB", 1)  # the default is read at call time
     assert {p.rel for p in atlas.select(run) if p.take} == {"edge.tsv"}
+
+
+def test_the_pin_cap(tmp_path):
+    run = _run_folder(tmp_path / "fragpipe", {"exp_1/a.pin": MB + 1, "exp_1/b.pin": MB, "big.tsv": MB + 1})
+    got = {p.rel: (p.take, p.reason, p.gzip, p.dest_rel) for p in atlas.select(run, max_mb=1, pin_max_mb=1)}
+    assert got == {"exp_1/a.pin": (False, "pin larger than 1 MB", False, "exp_1/a.pin"),
+                   "exp_1/b.pin": (True, "selected (gzip)", True, "exp_1/b.pin.gz"),
+                   "big.tsv": (False, "larger than 1 MB", False, "big.tsv")}
+    assert {p.reason for p in atlas.select(run, pin_max_mb=0) if p.rel.endswith(".pin")} == {"pins off"}
+    assert {p.rel for p in atlas.select(run, max_mb=0) if p.take} == {"exp_1/a.pin", "exp_1/b.pin"}  # their own cap
 
 
 def test_a_linked_folder_is_not_followed(tmp_path):
@@ -611,6 +641,214 @@ def test_rename_never_replaces(tmp_path):
     with pytest.raises(FileExistsError):
         atlas._rename_new(tmp_path / "a.partial", tmp_path / "a")
     assert (tmp_path / "a").read_bytes() == b"old"
+
+
+# --------------------------------------------------------------- the decoys and the sample design (D127) --
+
+PIN_HEAD = b"SpecId\tLabel\tScanNr\thyperscore\tPeptide\tProteins\n"
+
+
+def _pin(n: int, extra: str = "") -> bytes:
+    rows = [f"S_{i}.{i}.{i}.2\t{1 if i % 3 else -1}\t{i}\t{20 + i % 7}{extra}\tK.PEPC{i}K.R\tsp|P{i}|X_HUMAN\n"
+            for i in range(n)]
+    return PIN_HEAD + "".join(rows).encode()
+
+
+@pytest.fixture
+def design(handoff):
+    """The handoff job, with its .pin files and its sample design: experiment.yaml and the analysis' annotation in the
+    experiment folder, a TMT annotation beside the raw files."""
+    run, exp = handoff["run"], handoff["exp"]
+    pins = {"exp_1/S_1.pin": _pin(400), "exp_1/S_1_edited.pin": _pin(400, "\t0.5"), "exp_2/S_2.pin": _pin(300)}
+    _run_folder(run, pins)
+    _run_folder(exp, {"experiment.yaml": b"analysis:\n  control: DMSO\ntmt:\n  126: DMSO_1\n",
+                      "raw/annotation.txt": b"126 DMSO_1\n127N KB02_1\n",
+                      "raw/other.txt": b"not design",
+                      "results/fragpipe-analyst/experiment_annotation.tsv": b"file\tsample\tcondition\n"})
+    return {**handoff, "pins": pins}
+
+
+def test_the_pins_and_the_sample_design_go_too(design):
+    before = _snapshot(design["exp"])
+    res = atlas.send(design["cfg"], design["job"])
+    assert res.ok, res.message
+    assert (res.copied, res.pins, res.design) == (12, 2, 3) and ".pin gzip-compressed" in res.message
+    run_dest = Path(res.dest_dir)
+    got = _files(run_dest)
+    assert {r for r in got if ".pin" in r} == {"exp_1/S_1_edited.pin.gz", "exp_2/S_2.pin.gz"}  # S_1.pin: its twin
+    for rel in ("exp_1/S_1_edited.pin", "exp_2/S_2.pin"):
+        with gzip.open(_long(run_dest / (rel + ".gz"))) as fh:
+            assert fh.read() == design["pins"][rel]
+    rec = json.loads(_read(run_dest / names.ATLAS_HANDOFF_FILE))
+    assert rec["contract"] == "ionomos-atlas-handoff/2" and rec["probe_class"] == "isoDTB"
+    files = {f["path"]: f for f in rec["files"]}
+    gz = files["exp_2/S_2.pin.gz"]
+    assert gz["sha256"] == hashlib.sha256(_read(run_dest / "exp_2" / "S_2.pin.gz")).hexdigest()
+    assert gz["gzip_of"] == {"path": "exp_2/S_2.pin", "size": len(design["pins"]["exp_2/S_2.pin"]),
+                             "sha256": hashlib.sha256(design["pins"]["exp_2/S_2.pin"]).hexdigest()}
+    assert gz["size"] < len(design["pins"]["exp_2/S_2.pin"]) / 2
+    assert rec["left"] == [{"path": "exp_1/S_1.pin", "size": len(design["pins"]["exp_1/S_1.pin"]),
+                            "reason": "its _edited.pin is taken"}]
+    # the design: each at its own path under the destination (harvest's layout), relative to it in the record
+    kinds = {d["kind"]: d for d in rec["design"]}
+    assert set(kinds) == {"experiment.yaml", "experiment_annotation.tsv", "annotation.txt"}
+    for d in rec["design"]:
+        src = Path(d["source"])
+        assert d["path"] == "/".join(atlas.layout_parts(atlas.windows_path(src)))
+        assert _read(design["root"].joinpath(*d["path"].split("/"))) == src.read_bytes()
+        assert d["sha256"] == hashlib.sha256(src.read_bytes()).hexdigest() and d["size"] == src.stat().st_size
+    assert kinds["annotation.txt"]["source"] == atlas.windows_path(design["exp"] / "raw" / "annotation.txt")
+    (row,) = list(csv.DictReader(io.StringIO(_records(design["root"])[0].read_bytes()[3:].decode("utf-8"))))
+    assert (row["FilesSelected"], row["PsmFiles"], row["ProbeClass"]) == ("12", "2", "isoDTB")
+    assert row["HandoffSha256"] == res.handoff_sha256
+    assert _snapshot(design["exp"]) == before  # read only
+    # sent again: nothing copied, the same record
+    again = atlas.send(design["cfg"], design["job"])
+    assert again.ok and again.copied == 0 and again.already == 12 and again.handoff_sha256 == res.handoff_sha256
+
+
+def test_a_pin_gz_another_writer_compressed_counts_as_there(design):
+    """harvest_fragpipe.ps1 compresses with .NET's GZipStream: other bytes, the same content. Compared by content."""
+    run_dest = atlas.destination(design["run"], design["root"])
+    theirs = gzip.compress(design["pins"]["exp_2/S_2.pin"], compresslevel=1, mtime=1_700_000_000)
+    _write(run_dest / "exp_2" / "S_2.pin.gz", theirs)
+    res = atlas.send(design["cfg"], design["job"])
+    assert res.ok and res.already == 1 and res.copied == 11
+    assert _read(run_dest / "exp_2" / "S_2.pin.gz") == theirs  # left as it was
+    rec = json.loads(_read(run_dest / names.ATLAS_HANDOFF_FILE))
+    gz = {f["path"]: f for f in rec["files"]}["exp_2/S_2.pin.gz"]
+    assert gz["sha256"] == hashlib.sha256(theirs).hexdigest() and gz["size"] == len(theirs)
+
+
+@pytest.mark.parametrize(("there", "words"), [
+    (gzip.compress(b"another run's pin"), "holds other content"),
+    (b"not gzip at all", "not a whole gzip file"),
+    (gzip.compress(b"x" * 5000)[:-9], "not a whole gzip file"),  # cut short
+])
+def test_a_pin_gz_with_other_content_is_a_conflict(design, there, words):
+    run_dest = atlas.destination(design["run"], design["root"])
+    _write(run_dest / "exp_2" / "S_2.pin.gz", there)
+    res = atlas.send(design["cfg"], design["job"])
+    assert res.state == atlas.CONFLICT and res.copied == 0 and words in res.conflicts[0]
+    assert _read(run_dest / "exp_2" / "S_2.pin.gz") == there
+
+
+def test_compression_is_the_same_every_time_and_verified(tmp_path, monkeypatch):
+    src = tmp_path / "a.pin"
+    src.write_bytes(_pin(2000))
+    a = atlas._gzip_verified(src, tmp_path / "a1.pin.gz")
+    b = atlas._gzip_verified(src, tmp_path / "a2.pin.gz")
+    assert a == b and (tmp_path / "a1.pin.gz").read_bytes() == (tmp_path / "a2.pin.gz").read_bytes()
+    assert a[2] == hashlib.sha256(src.read_bytes()).hexdigest() and a[1] == (tmp_path / "a1.pin.gz").stat().st_size
+    assert os.stat(tmp_path / "a1.pin.gz").st_mtime_ns == src.stat().st_mtime_ns
+    monkeypatch.setattr(atlas, "gunzip_sha256", lambda p: ("0" * 64, 0))
+    with pytest.raises(OSError, match="compressed copy"):
+        atlas._gzip_verified(src, tmp_path / "a3.pin.gz")
+    assert not (tmp_path / "a3.pin.gz").exists() and (tmp_path / "a3.pin.gz.partial").exists()
+
+
+def test_no_pins_when_the_cap_is_zero(design):
+    cfg = _write_cfg(design["lab"], enabled=True, handoff_dir=str(design["root"]), pin_max_mb=0)
+    res = atlas.send(cfg, design["job"])
+    assert res.ok and res.pins == 0
+    assert not [r for r in _files(Path(res.dest_dir)) if ".pin" in r]
+    rec = json.loads(_read(Path(res.dest_dir) / names.ATLAS_HANDOFF_FILE))
+    assert {(x["path"], x["reason"]) for x in rec["left"]} == {("exp_1/S_1.pin", "its _edited.pin is taken"),
+                                                               ("exp_1/S_1_edited.pin", "pins off"),
+                                                               ("exp_2/S_2.pin", "pins off")}
+
+
+def test_a_changed_design_file_goes_beside_the_earlier_copy(design):
+    first = atlas.send(design["cfg"], design["job"])
+    yml = design["exp"] / "experiment.yaml"
+    yml.write_bytes(b"analysis:\n  control: Vehicle\n")  # the analysis' choices edited, then sent again
+    second = atlas.send(design["cfg"], design["job"])
+    assert second.ok and second.copied == 1 and second.handoff_sha256 != first.handoff_sha256
+    dest = atlas.destination(yml, design["root"])
+    sha = hashlib.sha256(yml.read_bytes()).hexdigest()
+    assert _read(dest) == b"analysis:\n  control: DMSO\ntmt:\n  126: DMSO_1\n"  # the earlier copy stays
+    assert _read(dest.with_name(f"experiment.{sha[:12]}.yaml")) == yml.read_bytes()
+    rec = json.loads(_read(Path(second.dest_dir) / names.ATLAS_HANDOFF_FILE))
+    (d,) = [x for x in rec["design"] if x["kind"] == "experiment.yaml"]
+    assert d["path"].endswith(f"/experiment.{sha[:12]}.yaml") and d["sha256"] == sha
+    third = atlas.send(design["cfg"], design["job"])
+    assert third.ok and third.copied == 0 and third.handoff_sha256 == second.handoff_sha256
+
+
+def test_a_tmt_search_goes_as_tmt_with_each_plexs_annotation(design):
+    from dataclasses import replace
+
+    exp = design["exp"]
+    plexes = [exp / "plex1" / "P1.raw", exp / "plex2" / "P2.raw"]
+    for i, r in enumerate(plexes, 1):
+        _run_folder(r.parent, {r.name: b"raw", f"plex{i}_annotation.txt": f"126 DMSO_{i}\n".encode()})
+    (design["run"] / "fragpipe-files.fp-manifest").write_text(
+        "".join(f"{r}\tplex{i}\t\tDDA\n" for i, r in enumerate(plexes, 1)), encoding="utf-8")
+    (design["run"] / "fragpipe.workflow").write_text("msfragger.table.var-mods=229.1629,K,true,1\n", encoding="utf-8")
+    cfg = _write_cfg(design["lab"], enabled=True, handoff_dir=str(design["root"]), methods=["isoDTB", "TMT"])
+    res = atlas.send(cfg, replace(design["job"], method="TMT"))
+    assert res.ok, res.message
+    rec = json.loads(_read(Path(res.dest_dir) / names.ATLAS_HANDOFF_FILE))
+    assert rec["probe_class"] == "TMT" and rec["job"]["method"] == "TMT"
+    anns = sorted(Path(d["source"]).name for d in rec["design"] if d["kind"] == "annotation.txt")
+    assert anns == ["plex1_annotation.txt", "plex2_annotation.txt"]  # raw/annotation.txt: no raw file of this run
+    (row,) = list(csv.DictReader(io.StringIO(_records(design["root"])[0].read_bytes()[3:].decode("utf-8"))))
+    assert (row["ProbeClass"], row["IonomosMethod"]) == ("TMT", "TMT")
+
+
+def test_only_isodtb_and_tmt_go_even_by_hand(design):
+    from dataclasses import replace
+
+    res = atlas.send(design["cfg"], replace(design["job"], method="DIA"), force=True)
+    assert not res.ok and "only isoDTB and TMT searches" in res.message and not design["root"].exists()
+
+
+def test_the_experiment_folder_harvest_finds(tmp_path):
+    run = _run_folder(tmp_path / "exp" / "fragpipe", {"fragpipe.workflow": b"x"})
+    assert atlas.experiment_folder(run) is None  # a FragPipe run of someone's own: nothing of Ionomos above it
+    for marker in ("experiment.yaml", "ionomos.json", "labwatch.json"):
+        (tmp_path / "exp" / marker).write_text("{}\n", encoding="utf-8")
+        assert atlas.experiment_folder(run) == tmp_path / "exp"
+        (tmp_path / "exp" / marker).unlink()
+    assert atlas.EXPERIMENT_MARKERS == ("experiment.yaml", names.STATUS_FILE, *names.LEGACY_STATUS_FILES)
+
+
+def test_design_files_skip_what_is_not_there(tmp_path):
+    rows = [{"raw": str(tmp_path / "gone" / "a.raw")}, {"raw": ""}]
+    assert atlas.design_files(tmp_path / "no-exp", rows) == []
+    _run_folder(tmp_path / "raw", {"a.raw": b"r", "b.raw": b"r", "Annotation.TXT": b"126 x\n", "big_annotation.txt": 3})
+    rows = [{"raw": str(tmp_path / "raw" / "a.raw")}, {"raw": str(tmp_path / "raw" / "b.raw")}]
+    got = [(p.rel, p.take, p.reason) for p in atlas.design_files(None, rows, max_mb=0)]
+    assert got == [("Annotation.TXT", False, "larger than 0 MB"), ("big_annotation.txt", False, "larger than 0 MB")]
+    assert [p.rel for p in atlas.design_files(None, rows) if p.take] == ["Annotation.TXT", "big_annotation.txt"]
+
+
+@pytest.mark.parametrize(("extra", "want"), [
+    ({}, ["TMT"]),
+    ({"naming": {"methods": {"TMT16": {"like": "TMT"}, "TMTsage": {"like": "TMT"}}}}, ["TMT", "TMT16"]),
+    ({"naming": {"methods": {"TMT16": "{sample}_{rep}"}}}, ["TMT"]),  # a template only: its own kind
+])
+def test_the_labs_tmt_methods(extra, want):
+    from ionomos import configio
+
+    d = configio.defaults()
+    d["methods"]["TMT16"] = {"workflow": "TMT16.workflow", "fasta": "h.fas", "data_type": "DDA"}
+    d["methods"]["TMTsage"] = {"engine": "sage", "fasta": "h.fas", "data_type": "DDA"}  # another engine: never
+    d.update(extra)
+    assert atlas.methods_of_kind(d, "TMT") == want
+    assert atlas.methods_of_kind(d, "isoDTB") == ["isoDTB"]
+
+
+def test_the_tmt_switch_puts_the_labs_tmt_methods_in_and_takes_them_out():
+    from ionomos import configio
+
+    d = configio.defaults()
+    assert atlas.methods_listed(d) == ["isoDTB"] and not atlas.sends_kind(d, "TMT")
+    assert atlas.methods_with(d, "TMT", True) == ["isoDTB", "TMT"]
+    d["atlas"]["methods"] = ["TMT", "isoDTB2"]
+    assert atlas.sends_kind(d, "TMT") and atlas.methods_with(d, "TMT", False) == ["isoDTB2"]
+    del d["atlas"]["methods"]
+    assert atlas.methods_listed(d) == ["isoDTB"]
 
 
 # --------------------------------------------------------------------------------- pending and the loop --

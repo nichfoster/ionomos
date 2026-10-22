@@ -169,6 +169,7 @@ def test_the_labels_the_help_names_are_the_apps():
     for tab in ("folders", "jobs"):
         assert f"**{uinav.tab_name(tab)}**" in text, tab
     assert 'text="Hand finished isoDTB searches to the cysteine atlas"' in src
+    assert "**Also TMT searches**" in text and 'text="Also TMT searches (competition runs' in src
 
 
 # ---------------------------------------------------------------------------------- the windows, hidden --
@@ -257,6 +258,22 @@ def test_the_folders_tab_saves_the_switch_and_the_folder(hidden_app, no_dialogs,
     assert not no_dialogs.unexpected(), no_dialogs.report()
     app.reload(ask=False)  # read back into the window
     assert app.bv("atlas.enabled").get() and app.v("atlas.handoff_dir").get() == str(dest)
+
+
+def test_the_tmt_switch_puts_the_labs_tmt_methods_in_and_out(hidden_app, no_dialogs, tk_errors, tmp_path):
+    """D127: one switch on the Folders tab; atlas.methods' other names stay as the file has them."""
+    app = hidden_app
+    _lab(app, tmp_path)
+    assert not app.bv("atlas.tmt").get() and not app.dirty()
+    app.bv("atlas.tmt").set(True)
+    assert app.dirty() and app.save()
+    assert load(tmp_path / "Auto" / "config.yaml").atlas["methods"] == ["isoDTB", "TMT"]
+    app.reload(ask=False)
+    assert app.bv("atlas.tmt").get() and not app.dirty()
+    app.bv("atlas.tmt").set(False)
+    assert app.save()
+    assert load(tmp_path / "Auto" / "config.yaml").atlas["methods"] == ["isoDTB"]
+    assert not no_dialogs.unexpected(), no_dialogs.report()
 
 
 def test_a_folder_the_loader_refuses_is_not_saved(hidden_app, no_dialogs, tk_errors, tmp_path):

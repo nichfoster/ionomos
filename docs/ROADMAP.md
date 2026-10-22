@@ -888,8 +888,13 @@ Collected from the other docs; resolve before/during Phase 1.
       "send all" for a date range), or does harvest's earlier copy cover them?
 - [ ] The report's atlas context: once the atlas publishes `_atlas\atlas_sites_lookup.tsv`, check one report's
       tiers and "new to the atlas" marks against the atlas itself, and that the quotable line says what Dan wants.
-- [ ] `atlas.methods` admits only FragPipe isoDTB methods (D120): should isoTOP or other probes go too, once the
-      atlas reads them (the CSV would need their ProbeClass)?
+- [ ] `atlas.methods` admits FragPipe isoDTB and TMT methods (D120, D127): should isoTOP or other probes go too,
+      once the atlas reads them (the CSV would need their ProbeClass)?
+- [ ] TMT, the sample design and the decoys (D127): with **Also TMT searches** on, hand off one real TMT
+      competition search and check that the atlas side stores it with its `experiment.yaml` and each plex's
+      `annotation.txt`, and counts nothing from it; check one `.pin.gz` against its `.pin`.
+- [ ] Is 100 MB the right `atlas.pin_max_mb`? Every `.pin` on the PC so far is under 60 MB; a long DIA or
+      high-load run may not be.
 
 **Lab process**
 - [ ] Confirm the naming convention with users (NAMING_CONVENTION.md); collect initials → user-folder aliases for config.
