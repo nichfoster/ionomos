@@ -4957,3 +4957,46 @@ stubbed job). **Not verified**: on the lab PC with the real engines; whether
 MSFragger's `BatmassIoThermoServer.exe` (the Thermo reader) outlives MSFragger;
 that the installed Ionomos.exe can nest the job (a console log would say it
 could not).
+
+### D127 — The atlas hand-off carries TMT runs, the sample design and the decoys: contract `/2`
+**2026-10-21.** Dan approved training a model of cysteine engagement on the lab's competition runs (the Nomura-Lab
+PROJECT-LOG, 2026-10-21). It needs the TMT competition runs and how each was designed (conditions, doses, times,
+the channel map); and FragPipe's numbers in the atlas can't be quoted until a decoy check exists, which needs the
+decoys that `harvest_fragpipe.ps1` has left behind so far (MSFragger's `.pin`). The hand-off and the harvest change
+together, so the lab PC's two senders keep one selection rule (`harvest_fragpipe.ps1` and HARVEST-README in the
+Nomura-Lab repository, same day).
+1. **TMT is one switch.** `atlas.methods` may name FragPipe methods whose kind is isoDTB or TMT (`atlas.KINDS`);
+   `[isoDTB]` stays the default. The Folders tab's **Also TMT searches** puts the lab's FragPipe TMT methods in
+   (`atlas.methods_of_kind`: a method's `like:`, else its key; another engine never) or takes them out, and leaves
+   the other names as the file has them. The runs CSV's `ProbeClass` and the record's `probe_class` are the
+   method's kind, so the atlas side tells them apart: it counts isoDTB runs and stores TMT runs. A forced send
+   (`send(force=True)`) of any other kind is refused, where before it would have gone as isoDTB.
+2. **The decoys go gzip-compressed**: every `*.pin` of the top folder and of each replicate folder, as
+   `<name>.pin.gz`, up to `atlas.pin_max_mb` (default 100, before compression; 0 = none). Measured first, on the
+   lab PC's harvest inventory of 2026-10-12 (4,642 `.pin`, median 8 MiB, largest 57 MiB, 42.5 GiB) and on a lab
+   run's files in Dropbox (gzip level 6: 0.336 of the size; 9: the same, twice as slow; 1: 0.51). MSBooster's
+   `<x>_edited.pin` holds every row and column of `<x>.pin` with the same values plus seven features (six pairs
+   checked), and Percolator scored it, so `<x>.pin` stays behind when it is there: 2,449 files, about 8 GiB
+   compressed for every run on the PC. The cap is on the size before compression, so harvest can decide it
+   before compressing.
+3. **A `.pin.gz` is compared by what it holds.** .NET's GZipStream (harvest) and Python's zlib give different bytes
+   for the same file, so "already there" means the decompressed content has the `.pin`'s SHA-256; a copy is
+   verified by decompressing it. Ionomos writes no name or time in the gzip header, so it gives the same bytes
+   every time, and a re-send gives the same record.
+4. **The sample design, from beside the run folder**: the experiment folder's `experiment.yaml` and
+   `results/fragpipe-analyst/experiment_annotation.tsv`, and every file ending in `annotation.txt` in each folder
+   holding the manifest's raw files (where FragPipe reads a TMT annotation). Each lands at its own path under
+   `<dest>` by harvest's layout. These files change (an analysis choice edited, an analysis re-run), so a
+   different file already there is not a conflict: the new one goes beside it as `<name>.<sha12>.<ext>` and the
+   record names it. Harvest finds the experiment folder as the run folder's parent holding `experiment.yaml` or
+   Ionomos' status file (`ionomos.json`, `labwatch.json`; `experiment.yaml` is there only once an analysis choice
+   was saved); Ionomos uses the job's folder (the same folder for every Ionomos run).
+5. **The contract is `ionomos-atlas-handoff/2`** because the receiver must change: it skipped every row whose
+   ProbeClass isn't isoDTB, and refused a file path outside the run folder. The record gains `probe_class`,
+   `files[].gzip_of`, `design` and `left`; the CSV's columns are the same. The Nomura-Lab `atlas_intake.py` takes
+   `/1` and `/2`, stores TMT runs and the new files, and changes no counting rule.
+
+**Verified**: `tests/test_atlas.py` (the selection table with `.pin` and `_edited.pin`, the pin cap, a TMT search
+with two plexes' annotations, a `.pin.gz` compressed by another writer, conflicts by content, a changed design
+file beside the earlier copy, the same bytes on every compression, the TMT switch's lists) and
+`tests/test_app_atlas.py` (the switch saved and read back). **Not verified**: on the lab PC with a real TMT search.

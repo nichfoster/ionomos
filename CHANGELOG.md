@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The cysteine atlas hand-off carries TMT searches, the sample design and the decoys** (D127, docs/ATLAS.md,
+  contract `ionomos-atlas-handoff/2`), for the lab's engagement model trained on competition runs and for a decoy
+  check of FragPipe's results. `harvest_fragpipe.ps1` (Nomura-Lab) takes the same files by the same rule.
+  - **Also TMT searches** on the Folders tab puts the lab's FragPipe TMT methods in `atlas.methods` (isoDTB stays
+    the default). The runs CSV's `ProbeClass` is the method's kind; the atlas stores TMT runs and counts nothing
+    from them.
+  - Each replicate's `.pin` (MSFragger's targets and decoys) goes gzip-compressed as `.pin.gz`, up to the new
+    `atlas.pin_max_mb` (100 MB before compression; 0 = none); MSBooster's `_edited.pin`, which holds all of the
+    `.pin`, instead of it when both are there. A `.pin.gz` already there is compared by what it holds.
+  - The experiment's `experiment.yaml`, the analysis' `experiment_annotation.tsv` and the TMT `annotation.txt`
+    beside the raw files go too, each at its own path; one changed since an earlier send goes beside it as
+    `<name>.<sha12>.<ext>`, never over it.
+  - `ionomos-handoff.json` gains `probe_class`, `files[].gzip_of`, `design` and `left`.
+
 ## [0.19.0] - 2026-10-19
 
 ### Added

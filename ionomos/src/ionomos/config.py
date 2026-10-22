@@ -639,11 +639,12 @@ def _library(raw) -> dict:
 
 
 def _atlas(raw, methods: dict[str, MethodConfig], file_rules: dict[str, FileRule]) -> dict:
-    """atlas: section (the hand-off to the lab's cysteine atlas, D120), validated by the module that uses it. While it
-    is on, the methods it names must be FragPipe methods that are isoDTB (their kind), since the runs CSV says
-    ProbeClass isoDTB. While it is off they are not checked: every Save writes the default [isoDTB], and a lab without
-    an isoDTB method (or one searched by another engine) must still load."""
-    from ionomos.atlas import AtlasError, settings_from
+    """atlas: section (the hand-off to the lab's cysteine atlas, D120, D127), validated by the module that uses it.
+    While it is on, the methods it names must be FragPipe methods that are isoDTB or TMT (their kind), since the runs
+    CSV's ProbeClass is that kind and the atlas counts isoDTB runs. While it is off they are not checked: every Save
+    writes the default [isoDTB], and a lab without an isoDTB method (or one searched by another engine) must still
+    load."""
+    from ionomos.atlas import KINDS, AtlasError, settings_from
 
     try:
         out = settings_from(raw)
@@ -655,9 +656,10 @@ def _atlas(raw, methods: dict[str, MethodConfig], file_rules: dict[str, FileRule
                               key="atlas.methods")
         engine = str(methods[m].extra.get("engine") or "fragpipe").lower()
         kind = method_kind(m, file_rules, engine if engine != "fragpipe" else "")
-        if engine != "fragpipe" or kind != "isoDTB":
+        if engine != "fragpipe" or kind not in KINDS:
             raise ConfigError(f"atlas.methods: {m} is {'searched by ' + engine if engine != 'fragpipe' else kind}; "
-                              "only FragPipe isoDTB methods go to the cysteine atlas", key="atlas.methods")
+                              f"only FragPipe {' and '.join(KINDS)} methods go to the cysteine atlas",
+                              key="atlas.methods")
     return out
 
 
