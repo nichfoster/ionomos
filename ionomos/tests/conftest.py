@@ -163,6 +163,15 @@ def tk_errors(hidden_app):
 
 
 @pytest.fixture(autouse=True)
+def _atlas_free_space_unknown(monkeypatch):
+    """The atlas hand-off's free-space probe says "not known" (no floor) in every test: a CI runner's C: has about
+    30 GB free, under the sweep's and FragPipe's floors. The tests of the floor give their own number."""
+    from ionomos import atlas
+
+    monkeypatch.setattr(atlas, "_free_bytes", lambda path: None)
+
+
+@pytest.fixture(autouse=True)
 def _collect_garbage_on_the_main_thread():
     """Tk objects a test leaves behind are collected here, on the main thread, not later on a
     worker thread of another test (where Tcl would abort the process — see ionomos/tkutil.py)."""

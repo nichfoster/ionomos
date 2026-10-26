@@ -9,7 +9,8 @@
         {
           "name": "search_help",
           "arguments": {
-            "query": "search failed"
+            "query": "search failed",
+            "limit": 5
           }
         }
       ]

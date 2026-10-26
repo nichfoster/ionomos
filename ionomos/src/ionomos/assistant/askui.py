@@ -48,6 +48,7 @@ QUESTIONS = {
     "analysis_failed": "What went wrong with the analysis, and what should I do?",
     "qc_trend": "What does this QC warning mean?",
     "atlas_handoff_failed": "Why wasn't this search handed to the cysteine atlas, and what should I do?",
+    "atlas_sweep_problem": "Why weren't these FragPipe runs found on this PC handed to the cysteine atlas?",
 }
 DEFAULT_QUESTION = "What does this mean, and what should I do?"
 
