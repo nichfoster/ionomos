@@ -383,11 +383,13 @@ def experiment_folder(run_dir: Path) -> Path | None:
     return parent if any(os.path.isfile(_fs(parent / m)) for m in EXPERIMENT_MARKERS) else None
 
 
-def design_files(exp_dir: Path | None, manifest_rows: list[dict], max_mb: int | None = None) -> list[Picked]:
+def design_files(exp_dir: Path | None, manifest_rows: list[dict], max_mb: int | None = None,
+                 run_dir: Path | None = None) -> list[Picked]:
     """The run's sample design, from beside its folder (DESIGN_FILES in the experiment folder; the files whose name
     ends in annotation.txt in each folder holding the manifest's raw files, which is where FragPipe looks for a TMT
     annotation), each once, up to the size cap. A folder that isn't there or can't be listed adds nothing: the raw
-    files may have moved (harvest's RawMissing)."""
+    files may have moved (harvest's RawMissing). A file inside run_dir is the run's own (select takes it, and the
+    record lists it in files[]), never design too: raw files kept in the output folder would plan it twice."""
     max_mb = MAX_FILE_MB if max_mb is None else max_mb
     max_bytes = int(max_mb) * 1024 * 1024
     cands: list[tuple[Path, str]] = []
@@ -408,9 +410,10 @@ def design_files(exp_dir: Path | None, manifest_rows: list[dict], max_mb: int | 
             continue
         cands += [(Path(e.path), ANNOTATION_SUFFIX) for e in anns]
     out, seen = [], set()
+    inside = os.path.normcase(os.path.abspath(str(run_dir))).rstrip("\\/") + os.sep if run_dir is not None else None
     for p, kind in cands:
         key = os.path.normcase(os.path.abspath(str(p)))
-        if key in seen:
+        if key in seen or (inside is not None and key.startswith(inside)):
             continue
         seen.add(key)
         try:
@@ -1050,7 +1053,7 @@ def transfer(run_dir: Path, exp_dir: Path | None, root: Path, kind: str = KINDS[
                                                                   "ProbeClass": "unknown", "Enzyme": ""}
     mf = read_manifest_info(mf_path) if mf_path.is_file() else read_manifest_info(Path(os.devnull))
     picks = select(run_dir, pin_max_mb=pin_max_mb)
-    design = [p for p in design_files(exp_dir, mf["rows"])
+    design = [p for p in design_files(exp_dir, mf["rows"], run_dir=run_dir)
               if not os.path.normcase(windows_path(p.path)).startswith(dst_n.rstrip("\\/") + os.sep)]
     take = [p for p in picks if p.take]
     dtake = [p for p in design if p.take]

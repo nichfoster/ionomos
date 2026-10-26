@@ -796,6 +796,25 @@ def test_a_tmt_search_goes_as_tmt_with_each_plexs_annotation(design):
     assert (row["ProbeClass"], row["IonomosMethod"]) == ("TMT", "TMT")
 
 
+def test_an_annotation_in_the_run_folder_goes_once_as_the_runs_file(tmp_path):
+    """Raw files kept in FragPipe's output folder: its annotation.txt is the run's own file (select's *.txt), not a
+    design file too, so it is planned once and the first send goes through (the receiver accepts a design path
+    inside the run folder only when files[] lists it)."""
+    run = tmp_path / "Fragpipe_General" / "Tess" / "TMT_y" / "fragpipe"
+    raw = run / "TMT_y_1.raw"
+    _run_folder(run, {"TMT_y_1.raw": b"raw", "annotation.txt": b"126 DMSO_1\n", "p1/psm.tsv": b"Peptide\n",
+                      "fragpipe.workflow": b"# FragPipe (24.0)\nmsfragger.table.fix-mods=229.16293,K,true,-1\n",
+                      "fragpipe-files.fp-manifest": f"{raw}\tp1\t\tDDA\n".encode()})
+    assert atlas.design_files(None, [{"raw": str(raw)}], run_dir=run) == []
+    assert [p.rel for p in atlas.design_files(None, [{"raw": str(raw)}])] == ["annotation.txt"]  # beside the raw
+    dest = tmp_path / "Dropbox" / "fragpipe-runs"
+    dest.parent.mkdir()
+    res = atlas.transfer(run, None, dest, "TMT", owner="Tess")
+    assert res.ok, res.message
+    rec = json.loads(_read(Path(res.dest_dir) / names.ATLAS_HANDOFF_FILE))
+    assert rec["design"] == [] and "annotation.txt" in {f["path"] for f in rec["files"]}
+
+
 def test_only_isodtb_and_tmt_go_even_by_hand(design):
     from dataclasses import replace
 

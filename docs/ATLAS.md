@@ -93,7 +93,8 @@ Both sides implement exactly this.
 - **The sample design's kinds** are `experiment.yaml`, `experiment_annotation.tsv` (Ionomos's analysis wrote it
   for FragPipe-Analyst) and `annotation.txt` (any file whose name ends so, beside a raw file of the run). A folder
   of raw files that is gone or can't be listed adds nothing (harvest's RawMissing counts those raw files). A file
-  inside `<dest>` is never taken. The 500 MB cap applies.
+  inside `<dest>` is never taken. A file inside the run folder (raw files kept in FragPipe's output folder, with
+  their `annotation.txt`) is the run's own: it goes once, in `files[]`, and not in `design`. The 500 MB cap applies.
 - **Run** is `os.path.abspath` of the job's FragPipe output folder (`ionomos.json` `run.workdir`, else
   `<experiment>\fragpipe`), with backslashes and no `\\?\`. A UNC path lands under `<dest>\<server>_<share>\`,
   as harvest's does.

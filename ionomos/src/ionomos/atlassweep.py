@@ -381,7 +381,7 @@ def consider(cfg, run: str, jobs: dict, prev: dict | None, retry: bool, dry_run:
     mf_path = run_dir / "fragpipe-files.fp-manifest"
     mf = atlas.read_manifest_info(mf_path) if os.path.isfile(atlas._fs(mf_path)) else {"rows": []}
     exp_dir = atlas.experiment_folder(run_dir)
-    every = picks + atlas.design_files(exp_dir, mf["rows"])
+    every = picks + atlas.design_files(exp_dir, mf["rows"], run_dir=run_dir)
     rr.fingerprint = fingerprint(kind, s["pin_max_mb"], every)
     taken = [p for p in every if p.take]
     rr.files, rr.bytes = len(taken), sum(p.size for p in taken)
