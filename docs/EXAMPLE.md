@@ -251,6 +251,10 @@ first (above), or the verdict measures the settings, not the code.
   `tests/test_example.py` zips it, stubs the download and runs the whole
   path offline, including the biology above (CCND1 and CDK4 up; CA9 up and
   NDUFV2 down in DIA and TMT).
+- The documentation site shows the three reports (D132): on each `v*` tag
+  the `docs-site` workflow runs `ionomos example`, and `website/hooks.py`
+  puts each `results/` folder, README.txt and experiment.yaml on its Example
+  reports page with the attribution above (not the zip, not the tables).
 - If Zenodo changes the record, the size and checksums in `ARCHIVE` stop
   matching. The example then refuses the download with a sentence instead of
   analysing something else.

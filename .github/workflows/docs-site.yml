@@ -1,0 +1,138 @@
+# The documentation site (D132; website/): https://nichfoster.github.io/ionomos/
+#
+#   a pull request that changes a page's file:   build only, strict (a broken link or anchor fails it), no example
+#   a pushed v* tag, or Actions -> docs-site -> Run workflow:   `ionomos example` (FragPipe-Analyst's data from
+#       Zenodo, CC BY 4.0) runs and its reports go into the site, then the site is deployed to GitHub Pages
+#
+# If the example can't be made (Zenodo down, a failed analysis) the build still succeeds and the site's "Example
+# reports" page says they were not built this time; it never links to a report that isn't there.
+#
+# GITHUB PAGES MUST BE SWITCHED ON ONCE BY THE MAINTAINER (docs/DEV_LOOP.md, "Releasing"):
+#   Settings -> Pages -> Build and deployment -> Source: GitHub Actions; then Settings -> Environments ->
+#   github-pages -> Deployment branches and tags: add the tag rule v* (Pages allows only master at first).
+# Until then the deploy job fails with a message that says so. It is its own workflow, so build-exe and
+# publish-pypi on the same tag are not affected.
+name: docs-site
+on:
+  pull_request:
+    paths:
+      - "docs/**"
+      - "CHANGELOG.md"
+      - "ionomos/src/ionomos/help/**"
+      - "ionomos/src/ionomos/example.py"   # the reports page's datasets and attribution
+      - "website/**"
+      - "scripts/build_site.sh"
+      - ".github/workflows/docs-site.yml"
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: "Deploy to GitHub Pages after the build (needs Pages switched on: docs/DEV_LOOP.md)"
+        type: boolean
+        default: true
+permissions:
+  contents: read
+concurrency:  # a pull request's newer push cancels its older build; deploys wait for each other
+  group: docs-site-${{ github.event_name == 'pull_request' && github.head_ref || 'deploy' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FULL: ${{ github.event_name != 'pull_request' }}   # with the example, and an artifact for Pages
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: MkDocs at website/requirements.txt's pins, and Ionomos from this checkout
+        run: python -m pip install -r website/requirements.txt -e ./ionomos "pytest>=9"
+      - name: The site's own checks (tests/test_site.py, here with Python-Markdown)
+        run: python -m pytest ionomos/tests/test_site.py -q -rs
+        env:
+          IONOMOS_OFFLINE: "1"
+      # the example's one download, kept between runs: the key is the Zenodo record and the zip's SHA-256 (example.py)
+      - if: env.FULL == 'true'
+        id: zip-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/ionomos-example
+          key: zenodo-13147961-1a9d962e4e29b124a6ca26ce08d086183b975aca72479a55ece9fe0979eafa7d
+      - name: The example's reports (ionomos example)
+        if: env.FULL == 'true'
+        id: example
+        continue-on-error: true
+        run: |
+          echo "IONOMOS_SITE_EXAMPLE=$RUNNER_TEMP/ionomos_example" >> "$GITHUB_ENV"
+          cache="$HOME/.cache/ionomos-example"
+          zip="$cache/FragPipe_Analyst_Manuscript_Datasets.zip"
+          mkdir -p "$cache"
+          cd "$RUNNER_TEMP"
+          args=()
+          if [ -f "$zip" ]; then args=(--zip "$zip"); fi
+          if ionomos example ionomos_example --quiet "${args[@]}"; then
+            echo "::notice title=Example reports::built: $(ls ionomos_example/*/results/report.html | tr '\n' ' ')"
+          else
+            echo "::warning title=Example reports::ionomos example failed (exit $?); the site says which reports were not built this time"
+          fi
+          if [ ! -f "$zip" ] && [ -f ionomos_example/download/FragPipe_Analyst_Manuscript_Datasets.zip ]; then
+            cp ionomos_example/download/FragPipe_Analyst_Manuscript_Datasets.zip "$zip"
+          fi
+          if [ -f "$zip" ]; then echo "zip=yes" >> "$GITHUB_OUTPUT"; fi
+      - if: env.FULL == 'true' && steps.zip-cache.outputs.cache-hit != 'true' && steps.example.outputs.zip == 'yes'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/ionomos-example
+          key: zenodo-13147961-1a9d962e4e29b124a6ca26ce08d086183b975aca72479a55ece9fe0979eafa7d
+      - name: Build the site (strict)
+        env:
+          IONOMOS_SITE_REF: ${{ github.ref_type == 'tag' && github.ref_name || 'master' }}
+        run: python -m mkdocs build --strict -f website/mkdocs.yml --site-dir "$RUNNER_TEMP/site"
+      - name: What was built
+        run: |
+          cd "$RUNNER_TEMP/site"
+          find . -name '*.html' -not -path './reports/*/results/*' | sort
+          ls reports/*/results/report.html 2>/dev/null || echo "no example reports in this build"
+          du -sh .
+      - if: env.FULL == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ runner.temp }}/site
+      - if: env.FULL != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: site-preview
+          path: ${{ runner.temp }}/site
+          retention-days: 7
+  deploy:
+    needs: build
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.deploy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: GitHub Pages is switched on, with GitHub Actions as its source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          how="The maintainer does this once: Settings -> Pages -> Build and deployment -> Source: GitHub Actions (docs/DEV_LOOP.md, Releasing), then re-runs this job."
+          if out=$(gh api "repos/$GITHUB_REPOSITORY/pages" --jq .build_type 2>&1); then
+            if [ "$out" != "workflow" ]; then
+              echo "::error title=GitHub Pages builds from a branch::its source is '$out', not GitHub Actions. $how"
+              exit 1
+            fi
+          elif echo "$out" | grep -q "404"; then
+            echo "::error title=GitHub Pages is not switched on::the site was built (see the build job's artifact) but can't be published. $how"
+            exit 1
+          else
+            echo "::warning title=Pages settings not readable::$out; trying the deploy anyway"
+          fi
+      - id: deployment
+        uses: actions/deploy-pages@v4

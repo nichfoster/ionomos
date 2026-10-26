@@ -161,7 +161,12 @@ In order. ROADMAP 5D has each step with an owner.
 6. **A documentation site.** Today the docs are Markdown on GitHub. A site
    (GitHub Pages) should hold QUICKSTART, ENGINES, VALIDATION, the help
    pages that `ionomos help` already renders, and the real-data example's
-   report, so a reader can see a report before installing.
+   report, so a reader can see a report before installing. Where it stands
+   (2026-10-26, D132): built, in `website/`, with VISION, SCOPE, the
+   changelog and the example's three reports too. The `docs-site` workflow
+   deploys it to <https://nichfoster.github.io/ionomos/> on each `v*` tag,
+   once the maintainer has switched GitHub Pages on
+   ([DEV_LOOP.md](DEV_LOOP.md#one-time-setup-for-the-documentation-site-github-pages)).
 7. **Name and logo.** Keep "Ionomos" unless a clash is found (the PyPI name
    was free on 2026-09-30); check for trademark and tool-name clashes before
    the paper. There is no logo; the app and the report use none. The GitHub
