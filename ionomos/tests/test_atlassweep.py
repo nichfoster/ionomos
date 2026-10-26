@@ -56,6 +56,8 @@ def drives(lab, monkeypatch):
     sweep, into a Dropbox folder whose path has spaces."""
     monkeypatch.delenv("LOCALAPPDATA", raising=False)
     monkeypatch.delenv("APPDATA", raising=False)
+    # _age sets modified times only; a test can't set a file's creation time, which Windows reports (atlas._born)
+    monkeypatch.setattr(atlas, "_born", lambda st: 0.0)
     dropbox = lab["root"] / "TNRG Dropbox" / "Nicholas Foster Data"
     dropbox.mkdir(parents=True)
     dest = dropbox / "fragpipe-runs"
@@ -168,7 +170,10 @@ def test_the_walk_skips_harvests_names_links_and_the_excluded(tmp_path):
     for rel in ("AppData/Local/x/fragpipe.workflow", "Windows/y/psm.tsv", "Users/me/MSBooster/psm.tsv",
                 "Backups/old/fragpipe.workflow", "keep/run/fragpipe.workflow", "keep/run/exp_1/sub/psm.tsv"):
         _run_folder(root, {rel: b"x"})
-    (root / "link").symlink_to(root / "keep", target_is_directory=True)
+    try:
+        (root / "link").symlink_to(root / "keep", target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pass  # this account can't make a folder link (Windows without the privilege): the rest still holds
     w = atlassweep.walk([str(root)], exclude=[str(root / "backups")])  # case is ignored, as harvest's -ieq
     assert [Path(r).relative_to(root).as_posix() for r in w.runs] == ["keep/run"]  # exp_1/sub: two levels down
     assert w.skipped >= 4
@@ -225,6 +230,22 @@ def test_exclusions_hold_the_atlas_and_dropbox_folders(tmp_path):
                              "sweep_exclude": [str(tmp_path / "Backups")]})
     assert atlassweep.exclusions(s, env={"LOCALAPPDATA": str(tmp_path / "local")}) == \
         [s["handoff_dir"], str(tmp_path / "TNRG Dropbox"), str(tmp_path / "Backups")]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows' drives")
+def test_the_fixed_drives_hold_c():
+    assert "C:\\" in atlassweep.fixed_drives()
+
+
+def test_a_files_birth_is_its_creation_time_on_windows_only(monkeypatch):
+    from types import SimpleNamespace
+
+    st = SimpleNamespace(st_birthtime=5.0, st_ctime=3.0)
+    monkeypatch.setattr(atlas, "os", SimpleNamespace(name="posix"))  # the module's os, never os.name itself
+    assert atlas._born(st) == 0.0  # st_ctime is the inode's change time there
+    monkeypatch.setattr(atlas, "os", SimpleNamespace(name="nt"))
+    assert atlas._born(st) == 5.0
+    assert atlas._born(SimpleNamespace(st_ctime=3.0)) == 3.0  # before 3.12: st_ctime is the creation time
 
 
 def test_off_windows_there_are_no_fixed_drives(monkeypatch):
