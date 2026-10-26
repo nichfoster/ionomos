@@ -5068,3 +5068,76 @@ copied in just now, a dead process's lock, the saved pass, soft and hard stops).
 `search.failed` and `attention.analysis_failed` (FTS5 gives `search`, in most entries, almost no weight); any new
 help entry could flip it, as this one did, so the script asks for 5. **Not verified**: on the lab PC (its drives,
 the walk's time, Dropbox's upload of about 8 GiB), and the atlas side reading item 7.
+
+### D130 — An update brought on a USB stick: found, checked against its `.sha256`, copied into Downloads, installed as online
+**2026-10-26.** The lab PC can't reach the internet at the moment, so it can't update itself (D22). Offline the app
+found a Setup file in Downloads but refused it, as there was nothing to check it against, and the person ran it by
+hand: nothing checked the file, and a stick pulled out mid-install would break the program. (A hand-run installer
+does stop the watcher itself, `stop --wait 60 --remember`, and the startup task and the app it opens at the end start
+it again, unless the person unticks "Open Ionomos"; what the app's route adds is the check, a copy that can't be
+pulled out, and one button.) Now the USB stick is a way in like GitHub (`updates.py`,
+DEPLOY_WINDOWS.md "Updating a PC with no internet").
+1. **The release publishes `Ionomos-Setup-<version>.exe.sha256`** beside the installer, in sha256sum's format
+   (`<64 hex>  <name>`, lower case, ASCII, LF, no BOM), written by `build-exe.yml` with `Get-FileHash` and checked
+   there by the frozen CLI (`ionomos update --from <Setup> --check`, offline). On a computer with internet the
+   person copies both files onto a stick. Releases up to 0.20.0 have no such file; for them a person can make one
+   from the SHA-256 GitHub shows for the asset.
+2. **Where it looks**: Downloads (as before), the root of each removable drive, and an `Ionomos` folder at that root;
+   when the app opens, every 6 hours, and on **Check for updates**. Removable means Windows' `GetDriveTypeW` says
+   `DRIVE_REMOVABLE` (2) for a drive in `GetLogicalDrives`; A: and B: are not asked (a floppy drive is slow). That
+   reads Windows' drive table, not the media; the listing runs with `SetThreadErrorMode(SEM_FAILCRITICALERRORS |
+   SEM_NOOPENFILEERRORBOX)`, so a card reader with no card is an `OSError` that is skipped, never a "There is no
+   disk in the drive" box waiting for a click. Nothing but the folder listings is read until a person presses
+   Update. On the lab PC (inventory of 2026-09-15) D:, the WD Elements USB disk, reports 3 (fixed) and is not
+   looked at; E:, the 30 GB "Proteome Discoverer 2.5" stick, reports 2 and only its root is listed; a new stick
+   comes in as F:. A stick or USB disk that reports fixed is reached with **Update from a file…**. The newest
+   version newer than this one wins; of one version, the one with a `.sha256` beside it, then the one in Downloads,
+   then the newest file.
+3. **What makes it installable**: its SHA-256 (and size) matches GitHub's digest for its version, when GitHub
+   answers (as before, and that digest wins over a `.sha256` that disagrees); or, without one, a `.sha256` file
+   beside it gives its SHA-256. The `.sha256` is read tolerantly: a `*` before the name, upper-case hex, a UTF-8 BOM
+   or UTF-16 (PowerShell 5's `Out-File`), CRLF, a bare hash on its own line (certutil's output), BSD's
+   `SHA256 (name) = hex`, the name with a folder or Windows' ` (1)`; a line for another file or version is left
+   out. The file may also be called `… (1).sha256` or `.sha256.txt`. With neither, the refusal stays, and says to
+   copy `Ionomos-Setup-<version>.exe.sha256` from the release's page next time.
+   **What the `.sha256` proves**: that the copy is whole and is the file it names: a bad stick, a copy cut short, a
+   browser's half download, two files from different releases. It does not prove where the installer came from:
+   whoever can change the installer on the stick can change its `.sha256` too. The person who copied both from the
+   release page is the trust, as when they ran it by hand; the installer is not signed (SECURITY_NOTES.md). The app
+   says "checked against its .sha256 file", never "verified" or "safe".
+4. **Copied into Downloads before it runs.** Inno Setup reads its compressed payload from the exe while it installs
+   (a minute or more, with the app closed and the watcher stopped); a stick pulled out then, or Windows' "Eject",
+   leaves a half-replaced program. From C: nothing can be pulled. The copy goes through a new `.part` (opened
+   exclusive, so a browser's own `.part` stays), is read back from the disk and must match the digest that passed,
+   then is renamed: what runs is the bytes that were checked, even if the stick's file changes meanwhile. Never over
+   a file: a different file of that name in Downloads stays, and the copy is `Ionomos-Setup-<v>(1).exe` (the
+   name pattern already allows that); a file of that name with the same content is used as it is; a failed copy
+   removes only its own `.part`. The copy gets its own `.sha256`, so it can be checked again with the stick gone. A
+   file already in Downloads runs where it is. The cost is the installer's size on C: (about 99 GB free there).
+5. **In the app** the same **Update to x.y.z** button and status line ("Ready on the USB stick E:\:
+   Ionomos-Setup-0.21.0.exe"; one without its `.sha256` says so). **Update from a file…** beside Check for
+   updates opens a file picker at the first stick (else Downloads); the file's version must be newer than this
+   one (reinstalling or going back is the installer run by hand). The check and the copy run on a worker thread
+   (S2.2; a 100 MB read from a USB 2 stick takes seconds). Every route ends in `_finish_update` (the old `finish`):
+   `request_stop`, `RESTART_WATCHER`, the silent installer, the app closes, and reopens to start the watcher. When
+   GitHub can't be reached, the Updates box says the USB way in one line.
+6. **`ionomos update --from FILE [--check]`** does the same from the command line (the `update` command was git
+   only): GitHub's digest if it answers, else the `.sha256`; the copy into Downloads; the watcher of `--config`
+   stopped; the installer started. `--check` only checks (0 passes, 1 refused).
+7. **The first time** the PC still runs a version without this, so the first offline update is the installer run
+   by hand (the check is then the person's).
+
+**Verified**: `tests/test_usb_update.py` (the `.sha256` read in 23 forms; its file names; a match passes; a short,
+changed or empty copy is refused; no `.sha256`, or one that gives nothing, is refused saying what to copy; GitHub's
+digest alone passes and a different one wins over the `.sha256`, a release of another version does not count; the
+copy in Downloads with its `.sha256`, the stick only read, a second copy not made, a file already in Downloads run in
+place, a different file of the same name and a browser's `.part` left alone; a stick pulled out mid-copy and a copy
+that reads back wrong leave Downloads as it was; the newest version across Downloads and two sticks, the `Ionomos`
+folder, the tie-breaks, an unreadable place skipped; the drives from a stand-in kernel32 with the lab PC's drive types,
+never raising, the error mode set and put back; `ionomos update --from` checking, refusing, installing from Downloads
+and stopping the watcher first; `build-exe.yml` writes the file before the release and attaches it; the app's
+`_update_from_file` without Tk, through to `_finish_update`, and its status line), and the app in a real window in
+`tests/test_app.py` (Update from a file… through `_finish_update` with `updates.install` stubbed, the
+refusals, the stick's status line and button, the USB line when GitHub can't be reached; these open Tk, so CI only).
+**Not verified**: on Windows (`GetDriveTypeW` on a real stick and an empty card reader, the error mode, the file
+picker) and on the lab PC (a real update from a stick); the release step's PowerShell until the next tag.

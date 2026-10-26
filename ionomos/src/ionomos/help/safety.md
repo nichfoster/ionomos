@@ -156,4 +156,6 @@ shown instead), also when names are not replaced. See
 
 Installing an update replaces only the program. Uninstalling removes the
 program and keeps `C:\Fragpipe_Auto` (settings, job list, logs) and every
-experiment in `C:\Fragpipe_General`.
+experiment in `C:\Fragpipe_General`. An installer brought on a USB stick is
+only read there; its copy in Downloads never replaces another file ([getting
+a new version](#faq.update)).

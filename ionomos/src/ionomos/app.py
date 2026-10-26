@@ -39,6 +39,8 @@ log = logging.getLogger("ionomos.app")
 
 PAD = {"padx": 6, "pady": 3}
 IS_WIN = os.name == "nt"
+# the Updates box's line when GitHub can't be reached (D130)
+USB_UPDATE_HINT = "No internet? Bring the installer and its .sha256 file on a USB stick, or use Update from a file…"
 
 HELP_TEXT = """\
 IONOMOS — what it does
@@ -119,6 +121,12 @@ UPDATES
   Ionomos checks GitHub when it opens and every 6 hours. A new version shows
   as "Update to x.y.z" in the bottom bar: one click downloads it (checksum
   checked), stops the watcher cleanly, installs, reopens, restarts the watcher.
+  No internet on this PC: on a computer that has it, copy the installer
+  (Ionomos-Setup-x.y.z.exe) AND its .sha256 file from the release page onto a
+  USB stick. Plug it in here, then Run & Test -> Check for updates finds it
+  (at the stick's top level or in an Ionomos folder on it), or use
+  "Update from a file…". It is checked against the .sha256 file and copied to
+  Downloads before it runs, then the update goes as above.
 
 UPDATING A DEVELOPMENT INSTALL (git checkout)
   If this app was installed with deploy\\dev_install.ps1 it runs straight from
@@ -2078,16 +2086,20 @@ class App:
         from ionomos import names
         from ionomos.buildinfo import one_line
 
-        ttk.Label(u, text=f"This is {one_line()}.").grid(row=0, column=0, columnspan=3, sticky="w", **PAD)
+        ttk.Label(u, text=f"This is {one_line()}.").grid(row=0, column=0, columnspan=4, sticky="w", **PAD)
         ttk.Button(u, text="Check for updates", command=lambda: self.check_downloaded_update(auto=False)).grid(row=1, column=0, **PAD)
-        ttk.Button(u, text="Update now", command=self.install_update).grid(row=1, column=1, **PAD)
-        ttk.Button(u, text="Release notes (GitHub)", command=lambda: self._open(names.RELEASES_URL)).grid(row=1, column=2, **PAD)
+        self.upd_file_btn = ttk.Button(u, text="Update from a file…", command=self.install_update_from_file)
+        self.upd_file_btn.grid(row=1, column=1, **PAD)
+        ttk.Button(u, text="Update now", command=self.install_update).grid(row=1, column=2, **PAD)
+        ttk.Button(u, text="Release notes (GitHub)", command=lambda: self._open(names.RELEASES_URL)).grid(row=1, column=3, **PAD)
         self.upd_lbl = ttk.Label(u, text="", foreground="#666")
-        self.upd_lbl.grid(row=2, column=0, columnspan=3, sticky="w", padx=6)
+        self.upd_lbl.grid(row=2, column=0, columnspan=4, sticky="w", padx=6)
         ttk.Label(u, text="Ionomos checks GitHub when it opens and every 6 hours; a new version shows as "
                           "'Update to …' in the bottom bar. One click downloads it (checksum-verified), stops the "
-                          "watcher cleanly, installs, reopens and restarts the watcher. Settings and data are kept.",
-                  foreground="#666", wraplength=820).grid(row=3, column=0, columnspan=3, sticky="w", padx=6)
+                          "watcher cleanly, installs, reopens and restarts the watcher. Settings and data are kept. "
+                          "No internet here: bring the installer and its .sha256 file from the release page on a USB "
+                          "stick, then Check for updates (or Update from a file…).",
+                  foreground="#666", wraplength=820).grid(row=3, column=0, columnspan=4, sticky="w", padx=6)
 
     # -- dev install: update from GitHub / diagnostics
 
@@ -2216,13 +2228,14 @@ class App:
         self.report_win, self.report_text, self.report_debug, self.report_create = d.win, d.text, d.debug, d.save  # tests
 
     def check_downloaded_update(self, auto: bool = True):
-        """Ask GitHub for a newer release (and look in Downloads). auto=False: also say "you're up to date"."""
+        """Ask GitHub for a newer release, and look for a Setup file in Downloads and on USB sticks (D130).
+        auto=False: also say "you're up to date"."""
         from ionomos import updates
 
         def go():
             rel, why = updates.check_latest()
             online = rel if updates.is_newer(rel) else None
-            local = updates.find_downloaded_installer()
+            local = updates.find_installer()
             self.post(lambda: self._show_update(online, local, why, auto, rel))
 
         threading.Thread(target=go, daemon=True).start()
@@ -2241,19 +2254,31 @@ class App:
             if online:
                 text = f"Ionomos {online.version} is available — press Update to {online.version}."
             elif local:
-                text = f"Downloaded and ready: {local[0].name}"
+                text = self._found_update_text(local)
             elif latest is not None:
                 text = f"Up to date (latest release: {latest.version})."
             else:
-                text = f"Couldn't check GitHub just now ({why})." if why else ""
+                text = f"Couldn't check GitHub just now ({why}).\n{USB_UPDATE_HINT}" if why else ""
             self.upd_lbl.configure(text=text)
         if not auto and not version:
             messagebox.showinfo("Updates", f"You have the latest version ({__version__})." if latest is not None
-                                else f"Couldn't check for updates:\n{why}")
+                                else f"Couldn't check for updates:\n{why}\n\n{USB_UPDATE_HINT}")
+
+    @staticmethod
+    def _found_update_text(local) -> str:
+        """The Updates box's line for a Setup file found in Downloads or on a USB stick (updates.Found; a bare
+        (path, version) pair is one in Downloads)."""
+        path, version = Path(local[0]), local[1]
+        place = getattr(local, "place", "Downloads")
+        text = f"Downloaded and ready: {path.name}" if place == "Downloads" else f"Ready on {place}: {path.name}"
+        if not getattr(local, "has_sidecar", True):
+            text += (f" (no Ionomos-Setup-{version}.exe.sha256 beside it to check it with: copy that from the release "
+                     "page too)")
+        return text
 
     def install_update(self):
         """Download (if needed, verified) and install the newer version; the watcher restarts afterwards."""
-        from ionomos import health, updates
+        from ionomos import updates
 
         online = getattr(self, "_release", None)
         local = getattr(self, "_update_found", None)
@@ -2261,57 +2286,21 @@ class App:
             self.check_downloaded_update(auto=False)
             return
         version = online.version if online else local[1]
+        if local and (not online or parse_v(local[1]) >= parse_v(online.version)):
+            self._update_from_file(Path(local[0]), online if online and parse_v(local[1]) == parse_v(online.version)
+                                   else None)
+            return
         if not updates.can_self_update():
             messagebox.showinfo("Update", f"Ionomos {version} is available: {updates.RELEASES_PAGE}\n"
                                           "(this copy isn't an installed Windows build, so it can't update itself)")
             return
-        running = health.is_locked(self._active_log_dir())
-        if not messagebox.askyesno("Update", f"Update to Ionomos {version} now?\n\n"
-                                   + ("The watcher will be stopped (a running search re-runs afterwards) and "
-                                      "started again when the new version opens.\n" if running else "")
-                                   + "Your settings and data are not touched."):
-            return
-
-        def finish(installer: Path):
-            """Stop the watcher (up to 15 s, on a worker thread: S2.2), then install and close."""
-            log.info("installing update %s from %s", version, installer)
-            log_dir = self._active_log_dir()
-            proc = self.proc if self.proc and self.proc.poll() is None else None
-            if running:
-                self.set_status("stopping the watcher for the update…")
-
-            def stop_then_install():
-                if running:
-                    service.request_stop(log_dir, proc=proc)
-                updates.install(installer, log_dir, running)
-
-            def done(_res, err):
-                if err is not None:
-                    messagebox.showerror("Update", f"The update could not be started: {err}\n\n→ Try again; if it repeats, "
-                                                   f"run {installer.name} yourself from\n{updates.RELEASES_PAGE}")
-                    return
-                self.root.destroy()
-
-            self.run_bg(f"installing Ionomos {version}", stop_then_install, done, key="install_update")
-
-        if local and (not online or parse_v(local[1]) >= parse_v(online.version)):
-            release = online if online and parse_v(local[1]) == parse_v(online.version) else None
-            if release is None or not release.sha256:
-                messagebox.showerror("Update", f"Ionomos {version} has no published SHA-256 to verify {local[0].name} "
-                                               f"against, so it won't be installed automatically.\n\n"
-                                               f"→ Download it from\n{updates.RELEASES_PAGE}\nand run it yourself.")
-                return
-            if not updates._verified(local[0], release):
-                messagebox.showerror("Update", f"{local[0].name} failed its checksum.\n\n→ Delete it and download it "
-                                               f"again from\n{updates.RELEASES_PAGE}")
-                return
-            finish(local[0])
-            return
-
         if not online.sha256:
             messagebox.showerror("Update", f"Ionomos {online.version} has no published SHA-256, so its installer can't be "
                                            f"verified before installing.\n\n→ Download it from\n{updates.RELEASES_PAGE}"
                                            "\nand run it yourself.")
+            return
+        running = self._ask_to_update(version)
+        if running is None:
             return
 
         def progress(got, total):
@@ -2322,11 +2311,108 @@ class App:
             if err is not None:
                 messagebox.showerror("Update", f"{err}\n\n→ Try again, or download it from\n{online.page}")
                 return
-            finish(path)
+            self._finish_update(path, version, running)
 
         self.set_status(f"downloading Ionomos {version}…")
         self.run_bg(f"downloading Ionomos {version}", lambda: updates.download(online, progress=progress), downloaded,
                     key="download_update")
+
+    def install_update_from_file(self):
+        """Update from a file…: pick an Ionomos-Setup-<version>.exe (from a USB stick, say), then the same path as a
+        Setup file the app found: checked against its .sha256 file (or GitHub's digest), copied to Downloads,
+        installed with the watcher stopped and started again (D130)."""
+        from ionomos import updates
+
+        drives = updates.removable_drives()
+        chosen = filedialog.askopenfilename(
+            parent=self.root, title="The Ionomos installer (Ionomos-Setup-<version>.exe, with its .sha256 beside it)",
+            initialdir=str(drives[0] if drives else updates.downloads_dir()),
+            filetypes=[("Ionomos installer", "*.exe"), ("All files", "*")])
+        if not chosen:
+            return
+        path = Path(chosen)
+        version = updates.installer_version(path.name)
+        if version is None:
+            messagebox.showerror("Update", f"{path.name} is not an Ionomos installer.\n\n→ Choose an "
+                                           f"Ionomos-Setup-<version>.exe from\n{updates.RELEASES_PAGE}")
+            return
+        if parse_v(version) <= parse_v(__version__):
+            messagebox.showinfo("Update", f"{path.name} is Ionomos {version}; this is {__version__} already.\n\n"
+                                          "Choose a newer one. To reinstall or go back to an older version, run the "
+                                          "installer yourself.")
+            return
+        online = getattr(self, "_release", None)
+        self._update_from_file(path, online if online and parse_v(online.version) == parse_v(version) else None)
+
+    def _update_from_file(self, installer: Path, release=None):
+        """Install a Setup file found on this PC or chosen by hand. It runs only after it matches GitHub's digest
+        for its version (release) or the .sha256 file beside it, and from a checked copy in Downloads, never from
+        a USB stick (updates.prepare_installer, on a worker thread: S2.2). No check possible: refused, saying what
+        to copy next time."""
+        from ionomos import updates
+
+        version = updates.installer_version(installer.name) or "?"
+        if not updates.can_self_update():
+            messagebox.showinfo("Update", f"Ionomos {version} is in {installer.parent}, but this copy isn't an "
+                                          "installed Windows build, so it can't update itself. Run the installer "
+                                          f"yourself, or get it from {updates.RELEASES_PAGE}")
+            return
+        checks = updates.checks_for(installer, release)
+        if not checks:
+            err = updates.nothing_to_check_with(installer, checks)
+            messagebox.showerror("Update", f"{err}\n\n→ {err.fix}")
+            return
+        running = self._ask_to_update(version)
+        if running is None:
+            return
+
+        def checked(path, err):
+            if err is not None:
+                fix = getattr(err, "fix", "") or f"Try again, or run {installer.name} yourself."
+                messagebox.showerror("Update", f"{err}\n\n→ {fix}")
+                return
+            self._finish_update(Path(path), version, running)
+
+        self.set_status(f"checking {installer.name}…")
+        self.run_bg(f"checking {installer.name}", lambda: updates.prepare_installer(installer, release), checked,
+                    key="check_update_file", button=getattr(self, "upd_file_btn", None))
+
+    def _ask_to_update(self, version: str) -> bool | None:
+        """Ask before updating. None: not now; else whether the watcher runs (it is stopped, then started again)."""
+        from ionomos import health
+
+        running = health.is_locked(self._active_log_dir())
+        if not messagebox.askyesno("Update", f"Update to Ionomos {version} now?\n\n"
+                                   + ("The watcher will be stopped (a running search re-runs afterwards) and "
+                                      "started again when the new version opens.\n" if running else "")
+                                   + "Your settings and data are not touched."):
+            return None
+        return running
+
+    def _finish_update(self, installer: Path, version: str, running: bool):
+        """Stop the watcher (up to 15 s, on a worker thread: S2.2), then install and close. Every update ends here:
+        a download, a Setup file found in Downloads or on a USB stick, Update from a file…"""
+        from ionomos import updates
+
+        log.info("installing update %s from %s", version, installer)
+        log_dir = self._active_log_dir()
+        proc = self.proc if self.proc and self.proc.poll() is None else None
+        if running:
+            self.set_status("stopping the watcher for the update…")
+
+        def stop_then_install():
+            if running:
+                service.request_stop(log_dir, proc=proc)
+            updates.install(installer, log_dir, running)
+
+        def done(_res, err):
+            if err is not None:
+                messagebox.showerror("Update", f"The update could not be started: {err}\n\n→ Try again; if it repeats, "
+                                               f"run {installer.name} yourself from\n{installer.parent}")
+                return
+            self.root.destroy()
+
+        self.run_bg(f"installing Ionomos {version}", stop_then_install, done, key="install_update")
 
     def _after_update_restart(self):
         """After an update that stopped the watcher: start it again (via the startup task if there is one)."""

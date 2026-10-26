@@ -162,9 +162,19 @@ round-4 security audit (2026-10-15); keep it in step with the code.
 - **Protected**: only an installer whose size and SHA-256 match the digest GitHub publishes runs:
   `download()` refuses a release without a digest, a non-`https://` address (urllib would also open
   `file:` and `ftp:`) and a name other than `Ionomos-Setup-<version>.exe`; the download is a `.part`
-  file, renamed after the check and deleted on failure. A Setup file found in Downloads runs only when
-  it matches the online release's digest. `check_latest` never raises on an odd answer.
+  file, renamed after the check and deleted on failure. A Setup file found in Downloads or on a USB
+  stick, or picked with Update from a file…, runs only when it matches the online release's digest for
+  its version or, without one, the `Ionomos-Setup-<version>.exe.sha256` beside it (D130); a digest from
+  GitHub that differs wins over the `.sha256`. It runs from a copy in Downloads, made through a new
+  `.part`, read back and compared with the digest that passed, and never written over another file, so
+  the bytes that run are the ones checked and a pulled stick can't break an install. Listing a
+  removable drive turns Windows' "no disk" box off; nothing on a stick is opened until a person presses
+  Update. `check_latest` never raises on an odd answer.
 - **Not protected**: the installer is not checked for an Authenticode signature; the digest comes from
   the same HTTPS answer as the address (trust = GitHub's TLS and the repository's owner). Someone who
-  can write to the user's Downloads can plant a file, but it runs only if its digest matches.
-  Tests: `test_loose_and_updates.py`, `test_an_installer_is_never_fetched_*`, `test_an_odd_answer_*`.
+  can write to the user's Downloads can plant a file, but it runs only if its digest matches. **A
+  `.sha256` on the same stick is not a signature**: it catches a bad or cut-short copy, not a forged
+  one (whoever can change the installer there can change its `.sha256`). Offline, the trust is the
+  person who copied both files from the release page, as when they ran the installer by hand.
+  Tests: `test_loose_and_updates.py`, `test_an_installer_is_never_fetched_*`, `test_an_odd_answer_*`,
+  `test_usb_update.py`.

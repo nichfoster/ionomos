@@ -69,7 +69,7 @@ look; an item that would change it is out of scope.
 | **Users** | User folders and their initials, learned aliases, the catch-all user | PC keeper |
 | **Methods** | Methods (keywords, workflow, FASTA, data type, post-processing), Import workflow…, Test names…, and the library panel (Find on this PC…, Download from UniProt…, Add decoys and contaminants…, Check for updates) | PC keeper |
 | **Advanced** | Watcher timings and FragPipe threads/RAM/timeout/disk (checked as you type), the resolver window and pop-ups switch, learned aliases file, config file (open, logs, reset, Undo last save, Restore a previous config…) | PC keeper |
-| **Run & Test** | Watcher page: start/stop and status, diagnostics, startup task, updates; Testing page: the testbed, the development-install box; an output pane under both | PC keeper |
+| **Run & Test** | Watcher page: start/stop and status, diagnostics, startup task, updates (Check for updates, Update from a file… for an installer on a USB stick, D130); Testing page: the testbed, the development-install box; an output pane under both | PC keeper |
 | **Notifications** | Teams / Slack / webhook / email when a search ends | PC keeper |
 | **Help** | Keyboard shortcuts, the full help page button, the set-up text | PC keeper |
 

@@ -206,7 +206,8 @@ install can coexist; they share the same `config.yaml`.
    deploy\build_exe.ps1 -NoInstaller`. `deploy/check_frozen.py` fails the
    build if a module or data file of the package is missing from the exe.
 3. `git tag vX.Y.Z && git push --tags`. Two workflows run: `build-exe`
-   (installer + zip, tested, attached to the GitHub Release) and
+   (installer, its `.sha256` file for updates from a USB stick (D130) and the
+   zip, tested, attached to the GitHub Release) and
    `publish-pypi` (checks the tag is the pyproject version, builds, `twine
    check`, installs the wheel on Windows / macOS / Linux, then uploads only
    when step 4 is done).
