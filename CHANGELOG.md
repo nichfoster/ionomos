@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now the root's and do nothing once their window is closed (`tkutil.after`). The hidden-window tests fail on any
   window destroyed with a timer of its own still pending (`tests/tkharness.Timers`), and a source scan on any
   `widget.after` that isn't the root's.
+- Windows CI on 0.20.0: a drive-sweep test with no `atlas.sweep_roots` walked the runner's own `C:` (every fixed
+  drive is the default there); it stubs the drives now. The experiment editor's roles preview ran on a variable
+  that outlived its closed window and raised a Tk error; it returns when its window is gone.
+- docs/ATLAS.md's first-run steps write the dry run's JSON with `cmd /c` (PowerShell 5.1's `>` writes UTF-16).
 
 ## [0.20.0] - 2026-10-26
 

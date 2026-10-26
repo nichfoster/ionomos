@@ -284,8 +284,9 @@ deletes, moves or overwrites anything; each step can be stopped and done again.
 3. **Dry run** (10-30 minutes: it lists every folder of C: and D:; it copies and writes nothing):
    ```powershell
    C:\Ionomos\ionomos-cli.exe atlas sweep --dry-run
-   C:\Ionomos\ionomos-cli.exe atlas sweep --dry-run --json > C:\Fragpipe_Auto\logs\atlas-sweep-dry-run.json
+   cmd /c "C:\Ionomos\ionomos-cli.exe atlas sweep --dry-run --json > C:\Fragpipe_Auto\logs\atlas-sweep-dry-run.json"
    ```
+   (`cmd /c`: Windows PowerShell 5.1's own `>` writes UTF-16, which the atlas side's reader takes for broken JSON.)
    The first prints the runs that would go by probe class and owner, and why the others are left; the second has
    every run with its path, owner, probe class, FragPipe version, modification tables (which TMT, which probe on
    C), `.pin` and annotation counts, and the MB not in Dropbox yet. Copy the JSON into `Nicholas Foster Data\`
