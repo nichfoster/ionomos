@@ -75,9 +75,11 @@ Command line.
                                                    TMT channel maps as FragPipe will read them, a tmt: block to paste,
                                                    the TMT QC of a finished search (WORKFLOWS.md, D91)
     ionomos atlas    send JOB_ID | status [JOB_ID] [--json] | check [--no-write]
+                     | sweep [--dry-run] [--root DIR] [--json]
                                                    finished isoDTB searches handed to the lab's cysteine atlas: send
-                                                   one now, where each stands, the folder and the lookup checked
-                                                   (docs/ATLAS.md, D120-D125)
+                                                   one now, where each stands, the folder and the lookup checked;
+                                                   sweep: the runs on this PC's drives Ionomos did not search, with
+                                                   their decoys and sample design (docs/ATLAS.md, D120-D128)
 
 --config defaults to $IONOMOS_CONFIG, then the path last saved by the app (LabWatch-era paths too),
 then ./config.yaml (next to the exe when frozen).
@@ -334,6 +336,12 @@ def cmd_run(args) -> int:
     # finished isoDTB searches to the lab's cysteine atlas (atlas.py, D121): its own thread, idle while atlas: is off
     atlas_loop = HandoffLoop(live.get, heartbeat=hb)
     supervised("atlas", atlas_loop.run_forever)
+    from ionomos.atlassweep import SweepLoop
+
+    # the runs on the PC's drives Ionomos did not search (atlassweep.py, D128): idle unless atlas.sweep is on; a pass
+    # every atlas.sweep_hours, never while a search runs
+    sweep_loop = SweepLoop(live.get, heartbeat=hb)
+    supervised("atlas-sweep", sweep_loop.run_forever)
     resolver = None
     root = None
     if cfg.gui_enabled and not args.no_gui:
@@ -367,6 +375,7 @@ def cmd_run(args) -> int:
         stop.set()
         w.stop()
         atlas_loop.stop()
+        sweep_loop.stop()
         if worker is not None:
             worker.stop()
         if root is not None:

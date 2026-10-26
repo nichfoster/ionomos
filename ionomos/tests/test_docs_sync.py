@@ -364,8 +364,7 @@ def test_the_slugs_are_githubs():
 # notes (docs/EXAMPLE.md, example.py: `ionomos example`); empty this when DECISIONS.md has it.
 DECISION_PENDING: dict[int, str] = {}
 # a number taken by a decision in a pull request that is not merged into this branch yet
-DECISION_GAPS: dict[int, str] = {127: "the atlas hand-off /2, PR #193 (and #194)",
-                                 128: "the atlas drive sweep, PR #194"}
+DECISION_GAPS: dict[int, str] = {}
 _DREF = re.compile(r"(?<![\w-])D(\d{1,3})(?![\w])")
 
 

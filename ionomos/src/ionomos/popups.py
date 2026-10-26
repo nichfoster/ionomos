@@ -20,6 +20,7 @@ Each window says what happened, the most likely causes, what to do, the details
     search_waiting                     Open Ionomos (setup checklist), folder
     intake_rejected                    Open the inbox, the note
     atlas_handoff_failed               Send to atlas (the app's, D125); opened from the list only, never by itself
+    atlas_sweep_problem                the runs the drive sweep couldn't send and why (D128); from the list only
     every item                         Ask about this (the local assistant, read-only: AskWindow), More help (the
                                        help page at this problem), Remind me in an hour, Dismiss
 
@@ -49,7 +50,8 @@ log = logging.getLogger("ionomos.popups")
 KIND_TITLE = {"analysis_input": "Your analysis needs a decision", "analysis_failed": "The analysis had a problem",
               "search_failed": "A FragPipe search failed", "search_waiting": "A search is waiting",
               "intake_rejected": "A dropped folder couldn't be taken in",
-              "atlas_handoff_failed": "A search wasn't handed to the atlas"}  # in the list only: no pop-up (D121)
+              "atlas_handoff_failed": "A search wasn't handed to the atlas",  # in the list only: no pop-up (D121)
+              "atlas_sweep_problem": "Runs found on this PC weren't handed to the atlas"}  # the list only (D128)
 SEV_COLOUR = {"error": "#c62828", "input": "#b26a00", "warning": "#555"}
 
 

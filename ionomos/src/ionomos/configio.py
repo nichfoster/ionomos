@@ -67,7 +67,9 @@ def defaults(root: str | None = None, users_root: str | None = None) -> dict:
         "notify": copy.deepcopy(_notify_defaults()),
         "library": {"roots": [], "exclude": [], "max_depth": 6, "time_limit_s": 120},
         # no default folder: the lab's Dropbox path has spaces (CLAUDE.md); the app offers the one it finds (D120)
-        "atlas": {"enabled": False, "handoff_dir": "", "methods": ["isoDTB"], "max_tries": 10, "retry_minutes": 15},
+        "atlas": {"enabled": False, "handoff_dir": "", "methods": ["isoDTB"], "pin_max_mb": 100, "max_tries": 10,
+                  "retry_minutes": 15, "sweep": False, "sweep_roots": [], "sweep_exclude": [], "sweep_hours": 24,
+                  "sweep_min_free_gb": 40},
         "users": {"aliases": {}, "default": "", "learned_aliases_file": f"{root}/learned_aliases.yaml",
                   "ignore": ["FragPipe*", "Fasta*", "New folder*", "~*"]},
         "methods": {
@@ -362,18 +364,29 @@ def dump_config(d: dict) -> str:
             a(f"  {_y(str(k))}: {_y(v)}")
     a("")
     at = d.get("atlas") if isinstance(d.get("atlas"), dict) else {}
-    a("atlas:   # hand finished isoDTB searches to the lab's cysteine atlas (docs/ATLAS.md). Off by default")
+    a("atlas:   # hand finished isoDTB (and TMT) searches to the lab's cysteine atlas (docs/ATLAS.md). Off by default")
     a(f"  enabled: {_y(at.get('enabled', False))}")
     a(f"  handoff_dir: {_y(at.get('handoff_dir', '') or '')}   # the lab Dropbox folder "
       "...\\Nicholas Foster Data\\fragpipe-runs (spaces are fine here: FragPipe never sees it)")
     a(f"  methods: {_y(list(at.get('methods') or []) if at.get('methods') is not None else ['isoDTB'])}   "
-      "# FragPipe isoDTB methods whose searches are handed off")
+      "# FragPipe isoDTB or TMT methods whose searches are handed off (the atlas counts isoDTB only)")
+    a(f"  pin_max_mb: {_y(at.get('pin_max_mb', 100))}   # each .pin (the decoys) goes gzip-compressed if no larger than "
+      "this many MB before compression; 0 = none")
     a(f"  max_tries: {_y(at.get('max_tries', 10))}   # a hand-off that keeps failing (Dropbox offline) stops after this "
       "many tries")
     a(f"  retry_minutes: {_y(at.get('retry_minutes', 15))}   # the first wait before trying again; it doubles, up to "
       "12 hours")
+    a(f"  sweep: {_y(at.get('sweep', False))}   # also search this PC's drives for FragPipe runs Ionomos did not search "
+      "(harvest's rule) and hand off the isoDTB (and TMT) ones, with their decoys and sample design")
+    a(f"  sweep_roots: {_y(list(at.get('sweep_roots') or []))}   # the folders searched; [] = every fixed drive")
+    a(f"  sweep_exclude: {_y(list(at.get('sweep_exclude') or []))}   # folders never searched (the atlas and Dropbox "
+      "folders never are)")
+    a(f"  sweep_hours: {_y(at.get('sweep_hours', 24))}   # a search every this many hours, never while a search runs")
+    a(f"  sweep_min_free_gb: {_y(at.get('sweep_min_free_gb', 40))}   # the sweep's copying stops before the atlas "
+      "folder's drive has less free than this (a job's hand-off keeps fragpipe.min_free_gb)")
     for k, v in at.items():  # a typo is written back as it was, so the loader can name it
-        if k not in ("enabled", "handoff_dir", "methods", "max_tries", "retry_minutes"):
+        if k not in ("enabled", "handoff_dir", "methods", "pin_max_mb", "max_tries", "retry_minutes", "sweep",
+                     "sweep_roots", "sweep_exclude", "sweep_hours", "sweep_min_free_gb"):
             a(f"  {_y(str(k))}: {_y(v)}")
     a("")
 
