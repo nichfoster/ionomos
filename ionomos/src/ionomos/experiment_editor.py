@@ -24,7 +24,7 @@ import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from tkinter import filedialog, messagebox, scrolledtext, simpledialog, ttk
+from tkinter import TclError, filedialog, messagebox, scrolledtext, simpledialog, ttk
 
 from ionomos import tkutil
 
@@ -375,6 +375,11 @@ class ExperimentEditor:
         return view
 
     def refresh_roles(self) -> None:
+        try:
+            if not self.roles_tree.winfo_exists():
+                return  # a trace on a variable that outlived its window (closed): nothing to show
+        except TclError:
+            return
         try:
             view = self.role_view()
         except Exception:  # noqa: BLE001 - the preview must never break the editor

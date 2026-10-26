@@ -574,7 +574,8 @@ def test_nothing_is_tried_without_the_setup(drives, block, words):
     assert p.setup and words in p.message and not p.runs
 
 
-def test_no_roots_off_windows_is_the_setup(drives):
+def test_no_roots_off_windows_is_the_setup(drives, monkeypatch):
+    monkeypatch.setattr(atlassweep, "fixed_drives", lambda: [])  # on Windows: never the runner's own C:
     cfg = _write_cfg(drives["lab"], enabled=True, handoff_dir=str(drives["dest"]), sweep=True)
     p = atlassweep.sweep(cfg)
     assert p.setup and "no folders to search" in p.message
