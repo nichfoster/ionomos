@@ -159,6 +159,46 @@ the sweep only reads them.
 copying anything; `ionomos atlas status` says how the last one went. More:
 [the hand-off](#faq.atlas).
 
+## Notifications are waiting for a connection {#attention.notify_unsent}
+
+Messages about searches (done, failed, waiting) could not be sent because
+the PC could not reach Teams, Slack, the webhook or the mail server: there
+is no internet, or a firewall or proxy is in the way. Your searches,
+reports and the atlas hand-off are not affected.
+
+Nothing to do: Ionomos keeps the messages and sends them by itself when the
+connection is back, marked "Sent late" with the time they happened. It
+tries again every few minutes, then every half hour; a message is kept for
+7 days, at most 50 of them, and only the newest about each search. The item
+closes by itself once they are sent. To check the connection now, press
+**Send test** on the **Notifications** tab, or run `ionomos notify-test`.
+More: [No internet on the PC](#trouble.offline).
+
+## No internet on the PC {#trouble.offline}
+
+Ionomos does its work on the PC, so it runs a whole day without internet:
+it takes in drops, runs the searches, writes the reports, hands finished
+searches to the atlas and sweeps the drives.
+
+- **Waits, and goes out by itself later**: notifications
+  ([Notifications are waiting](#attention.notify_unsent)), and Dropbox's
+  upload of the atlas hand-off (Ionomos writes into the Dropbox folder on
+  the PC; Dropbox sends it when it is online).
+- **Does not work until the internet is back**: **Download from UniProt…**
+  (use a FASTA that is already on the PC, or one copied over on a USB
+  stick, then **Add decoys and contaminants…**, which works offline),
+  UniProt's release in the Methods tab's **Check for updates** (it says
+  "unknown"; the rest of the check works), `ionomos example`, and the
+  gene-set libraries of an enrichment the PC has never downloaded (the
+  report says "Enrichment was incomplete"; **Re-run analysis** once
+  online).
+- **Updates**: the app says it couldn't check GitHub. A PC without
+  internet is updated with the installer on a USB stick (the maintainer's
+  `docs/DEPLOY_WINDOWS.md`, "Updating a PC with no internet").
+
+Each says once what didn't happen and what to do; nothing hangs and
+nothing is changed.
+
 ## The instrument QC standard looks off {#attention.qc_trend}
 
 Your lab's recurring QC standard (a HeLa or K562 run, for example) came
@@ -402,10 +442,14 @@ there if the file already has one). The search then starts by itself.
 
 ## A notification did not arrive {#trouble.notify}
 
-A message that can't be sent is given up on after a few seconds and noted
-once in the log ("could not notify by ..."). The search itself is not
-affected: its status, `DONE.txt` / `FAILED.txt` and the report are written
-before the message is sent.
+A message that can't be sent is noted once in the log ("could not notify
+by ..."). The search itself is not affected: its status, `DONE.txt` /
+`FAILED.txt` and the report are written before the message is sent. When
+the message never reached the service (no internet, the service can't be
+reached, or it said "try later"), it is kept and sent by itself when the
+connection is back: [Notifications are waiting](#attention.notify_unsent).
+When the service answered no (a wrong address, a wrong password), it is
+not sent again.
 
 Press **Send test** on the app's **Notifications** tab, or run
 `ionomos notify-test`. It sends a test message to every channel and says

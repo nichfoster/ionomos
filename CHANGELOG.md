@@ -7,8 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **No internet on the PC** (D131, docs/PROTEOMICS_PC.md "No internet on the PC", help "No internet on the PC"):
+  what works offline (everything but the items below), what waits, what doesn't work until the connection is back,
+  and how each shows up in the app. Every network touchpoint was tried with the socket failing as the OS fails it
+  (no name lookup, no route, refused, a connect timeout, a TLS handshake cut off) and with a reply cut off mid-way;
+  each has a test.
+
 ### Fixed
 
+- **Notifications sent while the PC had no internet were lost** (D131; D58 sent once and forgot). A message that
+  never reached Teams, Slack, the webhook or the mail server (no connection, or "try later": HTTP 429 / 5xx, SMTP
+  4xx) is kept in `notify_state.json` and sent when the connection is back, marked "Sent late": tried again after
+  5, 10, 20, then every 30 minutes, at the watcher's start, and at once when another message gets through. The
+  newest message about each search only, at most 50, for 7 days. One item, **Notifications are waiting for a
+  connection** (a warning, no pop-up), closes itself when they have gone. A message the service refused (a wrong
+  address or password) is still not sent again, nor one a webhook took without answering.
+- **Enrichment without internet** tried each missing gene-set library in turn on every analysis (30 s each when
+  packets are dropped): the first failure now stops the rest, and one note names the missing libraries and says
+  to re-run the analysis once online.
+- **A download the network cut off part way** (UniProt, GitHub, Zenodo) ended in a traceback, and left the app's
+  UniProt search window waiting: it is an error in words now ("the connection to … broke off before the end"),
+  and nothing is left behind.
 - Windows CI on 0.20.0: a drive-sweep test with no `atlas.sweep_roots` walked the runner's own `C:` (every fixed
   drive is the default there); it stubs the drives now. The experiment editor's roles preview ran on a variable
   that outlived its closed window and raised a Tk error; it returns when its window is gone.

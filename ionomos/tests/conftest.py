@@ -68,6 +68,32 @@ def lab(tmp_path: Path):
             "cfg_path": cfg_path, "cfg_dict": cfg, "cfg": load(cfg_path)}
 
 
+def _no_internet():
+    """How the socket fails on a PC with no internet (D131): the name lookup, no route, refused, a connect timeout,
+    a TLS handshake cut off. Each is the OSError the OS gives; urllib wraps it in URLError, smtplib does not."""
+    import errno
+    import socket
+    import ssl
+
+    return [
+        pytest.param(lambda: socket.gaierror(11001, "getaddrinfo failed"), id="dns"),
+        pytest.param(lambda: OSError(errno.ENETUNREACH, "Network is unreachable"), id="no-route"),
+        pytest.param(lambda: ConnectionRefusedError(errno.ECONNREFUSED, "Connection refused"), id="refused"),
+        pytest.param(lambda: TimeoutError("timed out"), id="connect-timeout"),
+        pytest.param(lambda: ssl.SSLEOFError(8, "EOF occurred in violation of protocol"), id="tls"),
+    ]
+
+
+NO_INTERNET = _no_internet()
+
+
+def urllib_offline(make):
+    """The error urlopen raises for one of NO_INTERNET's socket errors (a URLError around it)."""
+    import urllib.error
+
+    return urllib.error.URLError(make())
+
+
 def make_drop(inbox: Path, name: str, raws: list[str], others: list[str] = (), raw_sub: bool = False):
     d = inbox / name
     d.mkdir()

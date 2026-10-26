@@ -368,7 +368,8 @@ Press **Send test**: it sends a test message to each one and says which
 arrived (same as `ionomos notify-test`). Then **Save**, and restart the
 watcher (**Run & Test** → **Stop watcher**, **Start watcher**) so it uses the new
 settings. Everything on the tab is also `notify:` in `config.yaml`. A message that can't be sent never fails or slows a
-search ([A notification did not arrive](#trouble.notify)).
+search ([A notification did not arrive](#trouble.notify)); one that couldn't get through for want of a connection is
+sent when the connection is back ([Notifications are waiting](#attention.notify_unsent)).
 
 ## Does my isoDTB search go to the lab's cysteine atlas? {#faq.atlas}
 

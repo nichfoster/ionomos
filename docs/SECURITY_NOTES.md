@@ -58,13 +58,16 @@ round-4 security audit (2026-10-15); keep it in step with the code.
   server standing for 169.254.169.254); `http://` only to loopback. What is sent is `Message.fields`
   only: names (sanitised at intake to `[A-Za-z0-9._-]`), counts, the report's local path, the PC name;
   `include_names: false` sends the job number and status alone. Slack text escapes `& < >`, so no
-  name or reason can `@channel` or make a link.
+  name or reason can `@channel` or make a link. A message kept for want of a connection (D131) is written to
+  `<log_dir>/notify_state.json` as those fields only: the address and the password are read from the config
+  when it is sent, never kept with it; at most 50 messages, 7 days.
 - **Not protected**: an `https://` hook to a private address the config owner chose (they own the
   PC); the system proxy (`HTTPS_PROXY`) is used for hooks; Teams renders a little Markdown in a reason;
   e-mail goes over STARTTLS/SSL as configured (`security: none` refuses a password).
   `config.yaml` and its backups hold the values in plain text (D58).
   Tests: `test_a_webhook_address_with_a_password_*`, `test_a_hook_that_redirects_*`, `test_slack_*`,
-  `test_a_config_that_does_not_parse_is_still_redacted`, `test_a_hook_address_replaced_last_week_*`.
+  `test_a_config_that_does_not_parse_is_still_redacted`, `test_a_hook_address_replaced_last_week_*`,
+  `test_without_internet_every_channel_fails_at_once_in_words_*` (no secret in any detail).
 
 ## Diagnostics, fingerprints, catalog, logs (`service.diagnostics`, `fingerprint.py`, `library.py`)
 

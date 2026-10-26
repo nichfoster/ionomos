@@ -3,11 +3,19 @@
 No test here talks to the network: webhooks go to an HTTP server in this process on 127.0.0.1, email
 to a small fake SMTP server on 127.0.0.1 (or to a stub of smtplib.SMTP for STARTTLS + login).
 """
+import errno
 import json
 import logging
+import os
+import smtplib
+import socket
 import socketserver
+import ssl
+import subprocess
+import sys
 import threading
 import time
+import urllib.error
 import zipfile
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -16,11 +24,12 @@ from pathlib import Path
 import pytest
 import yaml
 
-from ionomos import cli, configio, fragpipe, health, names, notify, service, testbed
+from ionomos import attention, cli, configio, fragpipe, health, names, notify, service, testbed
 from ionomos.config import ConfigError, load
 from ionomos.intake import intake
 from ionomos.ledger import Job, Ledger
 from ionomos.worker import Worker
+from tests.conftest import NO_INTERNET
 
 # ------------------------------------------------------------ fake servers --
 
@@ -494,7 +503,8 @@ def test_a_dead_webhook_does_not_change_or_delay_the_job(bed, hook, caplog):
         assert time.monotonic() - t0 < 0.5
         assert notify.flush(20)
     warned = [r.getMessage() for r in caplog.records if r.name == "ionomos.notify" and r.levelno == logging.WARNING]
-    # logged once per channel, although two messages failed; one try per channel and message, no retries
+    # logged once per channel, although two messages failed; one try per channel and message: the server took the
+    # request and never answered, so it may have arrived and is not sent again (D131 keeps only what never got out)
     assert len(warned) == 2 and all("no answer in time" in m and "job 1 done" in m for m in warned)
     assert len(hook.got) == 4
     assert hook.url not in caplog.text
@@ -522,6 +532,241 @@ def test_announce_never_raises(lab, monkeypatch):
     monkeypatch.setattr(notify, "_post", boom)  # an unexpected error while sending: reported, address hidden
     (r,) = notify.send_test(cfg.notify)
     assert not r.ok and r.detail == "RuntimeError: ***"
+
+
+# ------------------------------------------------------- no internet (D131) --
+
+
+@pytest.fixture
+def offline(monkeypatch):
+    """No internet: every new connection fails the way the OS fails it, at socket.create_connection (which urllib
+    and smtplib both use). Returns a switch: offline(make) sets the error, offline(None) brings the network back."""
+    real = socket.create_connection
+    state = {"make": lambda: socket.gaierror(11001, "getaddrinfo failed")}
+
+    def connect(address, *a, **k):
+        if state["make"] is None:
+            return real(address, *a, **k)
+        raise state["make"]()
+
+    monkeypatch.setattr(socket, "create_connection", connect)
+
+    def switch(make):
+        state["make"] = make
+
+    return switch
+
+
+def _cfg(lab, **kw):
+    return replace(lab["cfg"], notify=_settings(**kw))
+
+
+def _warnings(caplog) -> list[str]:
+    return [r.getMessage() for r in caplog.records if r.name == "ionomos.notify" and r.levelno == logging.WARNING]
+
+
+def _item(log_dir):
+    return next((i for i in attention.items(log_dir, open_only=False) if i.key == notify.ATTENTION_KIND), None)
+
+
+@pytest.mark.parametrize("exc, retry", [
+    (urllib.error.URLError(socket.gaierror(11001, "getaddrinfo failed")), True),       # no name lookup
+    (urllib.error.URLError(OSError(errno.ENETUNREACH, "Network is unreachable")), True),
+    (urllib.error.URLError(ConnectionRefusedError(61, "Connection refused")), True),
+    (urllib.error.URLError(TimeoutError("timed out")), True),                             # could not connect in time
+    (urllib.error.URLError(ssl.SSLEOFError(8, "EOF occurred in violation of protocol")), True),
+    (urllib.error.URLError(ssl.SSLCertVerificationError(1, "certificate verify failed")), False),  # an answer
+    (notify._Refused(503, "the server answered HTTP 503"), True),                         # "later"
+    (notify._Refused(429, "the server answered HTTP 429"), True),
+    (notify._Refused(404, "the server answered HTTP 404"), False),                        # the hook is gone
+    (notify._Refused(401, "the server answered HTTP 401"), False),
+    (notify._NoAnswer("no answer in time (timed out)"), False),                          # it may have arrived
+    (notify.NotifyError("environment variable X (slack.url_env) is not set"), False),
+    (socket.gaierror(11001, "getaddrinfo failed"), True),                                # the mail server's name
+    (ConnectionRefusedError(10061, "refused"), True),
+    (TimeoutError("timed out"), True),
+    (smtplib.SMTPServerDisconnected("Connection unexpectedly closed"), True),
+    (smtplib.SMTPSenderRefused(451, b"try again later", "pc@example.org"), True),
+    (smtplib.SMTPDataError(452, b"insufficient storage"), True),
+    (smtplib.SMTPAuthenticationError(535, b"bad credentials"), False),
+    (smtplib.SMTPSenderRefused(550, b"not allowed", "pc@example.org"), False),
+    (smtplib.SMTPRecipientsRefused({"a@example.org": (550, b"no such user")}), False),
+    (smtplib.SMTPNotSupportedError("STARTTLS extension not supported by server."), False),
+    (RuntimeError("a bug"), False),
+])
+def test_what_is_worth_sending_again(exc, retry):
+    assert notify.worth_retrying(exc) is retry
+
+
+@pytest.mark.parametrize("make", NO_INTERNET)
+def test_without_internet_every_channel_fails_at_once_in_words_and_may_be_sent_later(offline, make):
+    offline(make)
+    s = notify.settings_from({"enabled": True, "timeout_seconds": 10,
+                              "slack": {"url": SLACK}, "teams": {"url": TEAMS}, "webhook": {"url": GENERIC},
+                              "email": {"host": "smtp.example.org", "username": "lab", "password": "pw-SECRET",
+                                        "from": "pc@example.org", "to": ["a@example.org"]}})
+    t0 = time.monotonic()
+    results = notify.deliver(s, notify.build("done", _job(), s))
+    assert time.monotonic() - t0 < 2, "no wait for a timeout: the OS said no"
+    assert [r.channel for r in results] == ["webhook", "teams", "slack", "email"]
+    assert all(not r.ok and r.retry for r in results), results
+    assert all(r.detail.startswith("could not connect: ") for r in results[:3])
+    for r in results:
+        assert "SECRET" not in r.detail and "hooks.slack.com" not in r.detail and "lab.example.org" not in r.detail
+
+
+@pytest.mark.parametrize("mode, kept", [(503, True), (429, True), (404, False), (401, False), ("redirect", False),
+                                        ("hang", False)])
+def test_only_a_message_that_never_got_through_is_kept(lab, hook, mode, kept):
+    hook.mode = mode
+    cfg = _cfg(lab, timeout_seconds=1, webhook={"url": hook.url + "/hook"})
+    notify.announce(cfg, "done", _job())
+    assert notify.flush(20)
+    assert len(hook.got) == 1, "one try"
+    assert [e["channel"] for e in notify.unsent(cfg.log_dir)] == (["webhook"] if kept else [])
+    assert (_item(cfg.log_dir) is not None) is kept
+
+
+def test_kept_through_a_long_outage_and_a_restart_then_sent_once(bed, hook, offline, caplog):
+    dest = _queue(bed)
+    cfg = replace(bed["cfg"], notify=_settings(webhook={"url": hook.url + "/hook/secret-key"}))
+    with caplog.at_level(logging.INFO):
+        assert Worker(cfg, bed["ledger"]).run_once()
+        assert notify.flush(20)
+    job = bed["ledger"].get(1)
+    assert job.status == "done" and (dest / "DONE.txt").is_file(), "the job never waits for a message"
+    (kept,) = notify.unsent(cfg.log_dir)
+    assert (kept["channel"], kept["job_id"], kept["fields"]["event"]) == ("webhook", 1, "done")
+    item = _item(cfg.log_dir)
+    assert item.is_open and item.severity == "warning" and item.kind not in attention.POPUP_KINDS
+    assert "1 message about searches could not be sent by webhook: could not connect" in item.message
+    (warned,) = _warnings(caplog)
+    assert "Kept: it is sent when the webhook can be reached again" in warned and "secret-key" not in caplog.text
+
+    # a day without internet: the maintenance thread tries every minute; nothing more is said, nothing piles up
+    caplog.clear()
+    start = time.time()
+    tried = 0
+    with caplog.at_level(logging.INFO):
+        for minute in range(1, 24 * 60, 7):
+            if notify.retry_unsent(cfg, now=start + minute * 60) is not None:
+                tried += 1
+            assert notify.flush(20)
+    assert 35 <= tried <= 50, f"backed off to every {notify.UNSENT_MAX_S // 60} minutes: {tried} tries in a day"
+    assert hook.got == [] and len(notify.unsent(cfg.log_dir)) == 1
+    assert _warnings(caplog) == [] and "needs attention" not in caplog.text
+
+    notify._failing.clear()  # the watcher restarts: what it remembered is gone, the file in the log folder is not
+    notify._mem_held.clear()
+    offline(None)  # the connection is back
+    with caplog.at_level(logging.INFO):
+        assert notify.retry_unsent(cfg, force=True) is not None and notify.flush(20)
+    (got,) = hook.got
+    f = got["json"]
+    assert (f["event"], f["job_id"], f["user"], f["experiment"]) == ("done", 1, job.user, job.inbox_name)
+    assert "Sent late: this happened " in f["text"] and "could not reach the webhook then" in f["text"]
+    assert not [k for k in f if k not in ("app", "version", "event", "job_id", "time", "experiment", "user", "method",
+                                          "reason", "hits", "report", "pc", "text")]
+    assert "notified by webhook: job 1 done (sent late; it happened " in caplog.text
+    assert notify.unsent(cfg.log_dir) == [] and _item(cfg.log_dir).state == "resolved"
+    assert notify.retry_unsent(cfg, force=True) is None and notify.flush(5) and len(hook.got) == 1, "sent once"
+
+
+def test_a_newer_message_about_a_job_replaces_the_kept_one_and_a_working_channel_sends_the_rest(lab, hook, offline):
+    cfg = _cfg(lab, webhook={"url": hook.url + "/hook"})
+    notify.announce(cfg, "held", _job(id=7), "low disk space: 12 GB free")
+    notify.announce(cfg, "done", _job(id=7), summary=SUMMARY)  # the job ran after all: "waiting" is stale
+    assert notify.flush(20)  # whichever thread ends first, the newer message is the one kept
+    assert [(e["job_id"], e["fields"]["event"]) for e in notify.unsent(cfg.log_dir)] == [(7, "done")]
+    notify.announce(cfg, "failed", _job(id=8), "FragPipe ran out of memory")
+    assert notify.flush(20)
+    assert [(e["job_id"], e["fields"]["event"]) for e in notify.unsent(cfg.log_dir)] == [(7, "done"), (8, "failed")]
+    assert _item(cfg.log_dir).data == {"waiting": 2, "channels": ["webhook"]}
+
+    offline(None)
+    notify.announce(cfg, "done", _job(id=9))  # the next message gets through: what was kept follows at once
+    assert notify.flush(20)
+    assert [(g["json"]["job_id"], g["json"]["event"], "Sent late" in g["json"]["text"]) for g in hook.got] == [
+        (9, "done", False), (7, "done", True), (8, "failed", True)]
+    assert notify.unsent(cfg.log_dir) == [] and _item(cfg.log_dir).state == "resolved"
+
+
+def test_kept_messages_are_bounded_in_number_and_age(lab, hook, offline, monkeypatch, caplog):
+    monkeypatch.setattr(notify, "UNSENT_MAX", 3)
+    cfg = _cfg(lab, webhook={"url": hook.url + "/hook"})
+    with caplog.at_level(logging.WARNING):
+        for job_id in range(1, 6):
+            notify.announce(cfg, "done", _job(id=job_id))
+            assert notify.flush(20)
+    assert [e["job_id"] for e in notify.unsent(cfg.log_dir)] == [3, 4, 5], "the newest are kept"
+    assert "kept notification(s) dropped: older than 7 days, or more than 3 waiting" in caplog.text
+    a_week_on = time.time() + (notify.UNSENT_DAYS + 1) * 86400
+    assert notify.retry_unsent(cfg, now=a_week_on) is not None and notify.flush(20)
+    assert notify.unsent(cfg.log_dir) == [] and _item(cfg.log_dir).state == "resolved" and hook.got == []
+
+
+def test_a_dismissed_item_stays_dismissed_until_the_messages_have_gone(lab, hook, offline):
+    cfg = _cfg(lab, webhook={"url": hook.url + "/hook"})
+    notify.announce(cfg, "done", _job(id=1))
+    assert notify.flush(20) and _item(cfg.log_dir).is_open
+    attention.dismiss(cfg.log_dir, _item(cfg.log_dir).id)
+    notify.announce(cfg, "done", _job(id=2))  # a second message waits; the person was told already
+    assert notify.flush(20) and _item(cfg.log_dir).state == "dismissed" and len(notify.unsent(cfg.log_dir)) == 2
+    offline(None)
+    assert notify.retry_unsent(cfg, force=True) is not None and notify.flush(20)
+    assert len(hook.got) == 2 and _item(cfg.log_dir).state == "resolved"
+    offline(lambda: OSError(errno.ENETUNREACH, "Network is unreachable"))  # another outage: told again
+    notify.announce(cfg, "done", _job(id=3))
+    assert notify.flush(20) and _item(cfg.log_dir).is_open and "Network is unreachable" in _item(cfg.log_dir).message
+
+
+def test_retry_unsent_returns_at_once_and_is_quiet_when_there_is_nothing(lab, hook, offline, monkeypatch):
+    cfg = _cfg(lab, webhook={"url": hook.url + "/hook"})
+    assert notify.retry_unsent(cfg, force=True) is None  # nothing kept
+    notify.announce(cfg, "done", _job())
+    assert notify.flush(20) and len(notify.unsent(cfg.log_dir)) == 1
+    assert notify.retry_unsent(cfg) is None, "not due yet"
+    assert notify.retry_unsent(replace(cfg, notify=_settings(enabled=False, webhook={"url": hook.url}))) is None
+
+    def slow(*a, **k):  # a network that takes its time to say no
+        time.sleep(1.5)
+        raise TimeoutError("timed out")
+
+    monkeypatch.setattr(socket, "create_connection", slow)
+    t0 = time.monotonic()
+    t = notify.retry_unsent(cfg, force=True)
+    assert t is not None and time.monotonic() - t0 < 0.5, "the caller (the maintenance thread) never waits"
+    assert notify.retry_unsent(cfg, force=True) is None, "one sender at a time"
+    assert notify.flush(20) and len(notify.unsent(cfg.log_dir)) == 1
+
+    (cfg.log_dir / names.NOTIFY_STATE).write_text("{not json", encoding="utf-8")  # damaged: read as empty
+    assert notify.retry_unsent(cfg, force=True) is None and notify.unsent(cfg.log_dir) == []
+
+
+def test_the_watcher_sends_what_was_kept_soon_after_it_starts(bed, hook, offline):
+    argv = _with_notify(bed, {"enabled": True, "webhook": {"url": hook.url + "/hook"}})
+    cfg = load(bed["cfg_path"])
+    notify.announce(cfg, "failed", _job(id=4), "FragPipe ran out of memory")  # yesterday, without internet
+    assert notify.flush(20) and len(notify.unsent(cfg.log_dir)) == 1
+    offline(None)
+    env = {**os.environ, "IONOMOS_FAKE_FP_SECONDS": "0"}
+    with open(bed["root"] / "run_output.txt", "ab") as sink:
+        p = subprocess.Popen([sys.executable, "-m", "ionomos", *argv[:2], "run", "--no-gui"], stdout=sink,
+                             stderr=subprocess.STDOUT, env=env)
+    try:
+        end = time.monotonic() + 40
+        while not hook.got and time.monotonic() < end and p.poll() is None:
+            time.sleep(0.2)
+        assert hook.got, (bed["root"] / "run_output.txt").read_text(encoding="utf-8", errors="replace")[-2000:]
+        assert hook.got[0]["json"]["job_id"] == 4 and "Sent late" in hook.got[0]["json"]["text"]
+        end = time.monotonic() + 10
+        while notify.unsent(cfg.log_dir) and time.monotonic() < end:
+            time.sleep(0.2)
+        assert notify.unsent(cfg.log_dir) == []
+    finally:
+        service.request_stop(cfg.log_dir, proc=p, timeout=30)
+        if p.poll() is None:
+            p.kill()
 
 
 # --------------------------------------------------------------- redaction --
@@ -623,6 +868,8 @@ def test_cli_notify_test(bed, hook, smtp, capsys):
     out = capsys.readouterr().out
     assert "✗ slack    NOT sent: the server answered HTTP 500" in out and "✗ webhook  NOT sent: " in out
     assert "2 of 2 could not be sent; jobs are not affected" in out and "secret-key" not in out
+    assert "waits and is sent when the connection is back" in out  # HTTP 500 is "later"; port 9 refuses
+    assert notify.unsent(bed["cfg"].log_dir) == [], "a test message is never kept"
 
     assert cli.main(["--config", str(bed["cfg_path"]), "check"]) in (0, 1)
     out = capsys.readouterr().out

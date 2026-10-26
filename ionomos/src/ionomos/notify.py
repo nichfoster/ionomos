@@ -5,6 +5,7 @@ Notifications: a message when a search is done, failed or held (D58). Off unless
     announce(cfg, "done", job, summary=summary)  # the worker: builds the message, sends it in a thread
     results = deliver(s, message)                # synchronous: one Result per configured channel
     send_test(s)                                 # `ionomos notify-test`
+    retry_unsent(cfg)                            # the watcher, every minute: the messages kept for later (D131)
 
 Channels: a generic JSON webhook, a Microsoft Teams webhook (an Adaptive Card), a Slack incoming
 webhook ({"text": ...}) and SMTP email. Standard library only (urllib, smtplib).
@@ -14,12 +15,19 @@ What leaves the PC is exactly `Message.fields`: the event, the job id, the time 
 the local path of the report and the PC's name. Never a file, never a quantity.
 
 Nothing here may fail or delay a job: `announce` never raises, sending happens in a daemon thread
-with a timeout, there are no retries, and a channel's error is logged once until it works again.
-Webhook URLs and the SMTP password are secrets: they are never logged (`scrub`), and the
-diagnostics report and bundle are passed through `redact_config_text` / `scrub` (service.py).
+with a timeout, and a channel's error is logged once until it works again. One try per message and
+channel, except (D131) a message that never reached the service (no connection, no name lookup, refused;
+or the service said "later": HTTP 429 / 5xx, SMTP 4xx): it is kept in <log_dir>/notify_state.json, with
+one attention item (`notify_unsent`, a warning), and sent again later (every UNSENT_FIRST_S, doubling, at
+most UNSENT_MAX_S apart; at once when the channel works again), the newest about a job only, at most
+UNSENT_MAX messages for UNSENT_DAYS days. A request that reached the service and got no answer is not
+sent again (it may have arrived). Webhook URLs and the SMTP password are secrets: they are never logged
+(`scrub`), never kept with a message, and the diagnostics report and bundle are passed through
+`redact_config_text` / `scrub` (service.py).
 """
 from __future__ import annotations
 
+import http.client
 import json
 import logging
 import os
@@ -28,9 +36,11 @@ import smtplib
 import socket
 import ssl
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from email.message import EmailMessage
@@ -47,6 +57,13 @@ CHANNELS = (*HOOKS, "email")
 SECURITY = ("starttls", "ssl", "none")
 HIDDEN = "***"
 MAX_REASON = 600  # characters of a failure / hold reason that are sent
+# messages that never reached the service (D131): tried again after UNSENT_FIRST_S, doubling, at most UNSENT_MAX_S
+# apart; kept UNSENT_DAYS days, at most UNSENT_MAX of them (the oldest go first)
+UNSENT_FIRST_S = 300
+UNSENT_MAX_S = 1800
+UNSENT_DAYS = 7
+UNSENT_MAX = 50
+ATTENTION_KIND = "notify_unsent"
 
 _HOOK_DEFAULTS = {"url": "", "url_env": ""}
 _EMAIL_DEFAULTS = {"host": "", "port": 587, "security": "starttls", "username": "", "password": "",
@@ -447,6 +464,19 @@ class Result:
     channel: str
     ok: bool
     detail: str  # "HTTP 200", "accepted by smtp.example.org", or why not (never a secret)
+    retry: bool = False  # not sent, but it may get through later: it never reached the service (D131)
+
+
+class _Refused(NotifyError):
+    """The webhook's server answered with an HTTP error."""
+
+    def __init__(self, code: int, text: str):
+        super().__init__(text)
+        self.code = code
+
+
+class _NoAnswer(NotifyError):
+    """The request went out and no answer came (a timeout, the connection closed): it may have arrived."""
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -459,11 +489,19 @@ def _post(url: str, payload: dict, timeout: float) -> str:
                                  headers={"Content-Type": "application/json",
                                           "User-Agent": f"{names.SLUG}/{__version__}"})
     try:
-        with urllib.request.build_opener(_NoRedirect).open(req, timeout=timeout) as r:
-            r.read(2000)
-            return f"HTTP {r.status}"
+        r = urllib.request.build_opener(_NoRedirect).open(req, timeout=timeout)
     except urllib.error.HTTPError as exc:
-        raise NotifyError(f"the server answered HTTP {exc.code} {exc.reason}") from None
+        raise _Refused(exc.code, f"the server answered HTTP {exc.code} {exc.reason}") from None
+    except urllib.error.URLError:
+        raise  # urllib's own: the request was not sent (no connection, no name lookup, refused, TLS)
+    except OSError as exc:  # sent; then no answer in time, or the connection closed before one
+        raise _NoAnswer(_why(exc)) from None
+    with r:
+        try:
+            r.read(2000)
+        except (OSError, http.client.HTTPException):
+            pass  # the status line was the answer
+        return f"HTTP {r.status}"
 
 
 def _send_email(s: dict, msg: Message, timeout: float, env=None) -> str:
@@ -491,18 +529,42 @@ def _send_email(s: dict, msg: Message, timeout: float, env=None) -> str:
 def _why(exc: BaseException) -> str:
     if isinstance(exc, NotifyError):
         return str(exc)
-    if isinstance(exc, (TimeoutError, socket.timeout)) or "timed out" in str(exc):
-        return "no answer in time (timed out)"
     if isinstance(exc, urllib.error.URLError):
         return f"could not connect: {exc.reason}"
+    if isinstance(exc, (TimeoutError, socket.timeout)) or "timed out" in str(exc):
+        return "no answer in time (timed out)"
     return f"{type(exc).__name__}: {exc}"
 
 
-def deliver(s: dict, msg: Message, env=None) -> list[Result]:
-    """Send `msg` on every configured channel, one try each. Never raises; a Result's detail holds no secret."""
+def worth_retrying(exc: BaseException) -> bool:
+    """Whether a message that failed this way may still arrive when it is sent again later (D131): it never reached
+    the service (no connection, no name lookup, refused, a TLS handshake that failed), or the service said "later"
+    (HTTP 429 or 5xx, an SMTP 4xx; a mail server has accepted nothing until it says 250). Not when the service said
+    no (another HTTP error, a wrong password, refused addresses), a setting is wrong, or a webhook took the request
+    and gave no answer (it may have arrived)."""
+    if isinstance(exc, _Refused):
+        return exc.code == 429 or exc.code >= 500
+    if isinstance(exc, NotifyError):
+        return False
+    if isinstance(exc, smtplib.SMTPResponseException):  # login, sender, data, connect, HELO: the code says
+        return 400 <= exc.smtp_code < 500
+    if isinstance(exc, smtplib.SMTPServerDisconnected):
+        return True
+    if isinstance(exc, smtplib.SMTPException):  # refused recipients, no STARTTLS: an answer, and it is no
+        return False
+    if isinstance(getattr(exc, "reason", exc), ssl.SSLCertVerificationError):
+        return False  # something answered, with a certificate that isn't the service's: a setting, or a proxy
+    return isinstance(exc, OSError)  # urllib's URLError, or the mail server could not be reached
+
+
+def deliver(s: dict, msg: Message, env=None, only: tuple[str, ...] | None = None) -> list[Result]:
+    """Send `msg` on every configured channel (or those in `only`), one try each. Never raises; a Result's detail
+    holds no secret, and its `retry` says whether the message never reached the service (`worth_retrying`)."""
     out = []
     hide = secrets(s, env)
     for name in channels(s):
+        if only is not None and name not in only:
+            continue
         try:
             if name == "email":
                 if s["email"]["password_env"] and not _password(s, env):
@@ -516,7 +578,7 @@ def deliver(s: dict, msg: Message, env=None) -> list[Result]:
                 detail = _post(url, _PAYLOADS[name](msg), s["timeout_seconds"])
             out.append(Result(name, True, detail))
         except Exception as exc:  # noqa: BLE001 - a message must never break anything
-            out.append(Result(name, False, scrub(_why(exc), hide)))
+            out.append(Result(name, False, scrub(_why(exc), hide), worth_retrying(exc)))
     return out
 
 
@@ -542,7 +604,9 @@ def run_test(s: dict, say=print, env=None) -> int:
         say(f" {'✓' if r.ok else '✗'} {r.channel:<8} {'sent' if r.ok else 'NOT sent'}: {r.detail}")
     bad = [r for r in results if not r.ok]
     say("\nall sent; check that the message arrived" if not bad
-        else f"\n{len(bad)} of {len(results)} could not be sent; jobs are not affected by this")
+        else f"\n{len(bad)} of {len(results)} could not be sent; jobs are not affected by this"
+        + (". A search's message that can't get through for want of a connection waits and is sent when the "
+           "connection is back" if any(r.retry for r in bad) else ""))
     return 1 if bad else 0
 
 
@@ -551,12 +615,12 @@ def run_test(s: dict, say=print, env=None) -> int:
 _lock = threading.Lock()
 _failing: dict[str, str] = {}  # channel -> the error already logged (log once until it changes or works)
 _sending: list[threading.Thread] = []
+_unsent_lock = threading.Lock()  # one thread at a time sends the kept messages (D131)
+_SERVICE = {"webhook": "the webhook", "teams": "Teams", "slack": "Slack", "email": "the mail server"}
 
 
 def flush(timeout: float = 10.0) -> bool:
     """Wait for messages still being sent (tests). True if none is left."""
-    import time
-
     end = time.monotonic() + timeout
     with _lock:
         threads = list(_sending)
@@ -567,44 +631,86 @@ def flush(timeout: float = 10.0) -> bool:
         return not _sending
 
 
-def _send_logged(s: dict, msg: Message, what: str) -> None:
-    for r in deliver(s, msg):
-        with _lock:
-            before = _failing.get(r.channel)
-            if r.ok:
-                _failing.pop(r.channel, None)
-            else:
-                _failing[r.channel] = r.detail
+def _start(target, args: tuple, kwargs: dict, name: str) -> threading.Thread:
+    t = threading.Thread(target=target, args=args, kwargs=kwargs, name=name, daemon=True)
+    with _lock:
+        _sending[:] = [x for x in _sending if x.is_alive()] + [t]
+    t.start()
+    return t
+
+
+def _note(r: Result, what: str, kept: bool = False, late: str = "") -> None:
+    """Log one channel's outcome; a failure once, until its error changes or the channel works again."""
+    with _lock:
+        before = _failing.get(r.channel)
         if r.ok:
-            log.info("notified by %s: %s%s", r.channel, what, " (it works again)" if before else "")
-        elif before != r.detail:
-            log.warning("could not notify by %s: %s (%s). Not tried again for this message; "
-                        "check with: ionomos notify-test", r.channel, r.detail, what)
+            _failing.pop(r.channel, None)
+        else:
+            _failing[r.channel] = r.detail
+    if r.ok:
+        log.info("notified by %s: %s%s%s", r.channel, what, late, " (it works again)" if before else "")
+    elif before == r.detail:
+        return
+    elif kept:
+        log.warning("could not notify by %s: %s (%s). Kept: it is sent when %s can be reached again (tried every "
+                    "few minutes, then every %d minutes, for %d days); check with: ionomos notify-test", r.channel,
+                    r.detail, what, _SERVICE.get(r.channel, r.channel), UNSENT_MAX_S // 60, UNSENT_DAYS)
+    else:
+        log.warning("could not notify by %s: %s (%s). Not tried again for this message; "
+                    "check with: ionomos notify-test", r.channel, r.detail, what)
+
+
+def _send_logged(s: dict, msg: Message, what: str, log_dir: Path | None = None, job_id=None, order: int = 0) -> None:
+    """The sending thread of one message. order: when it was announced (ns), so a slow thread never keeps an older
+    message over a newer one about the same job."""
+    worked = []
+    for r in deliver(s, msg):
+        kept = bool(not r.ok and r.retry and log_dir is not None and _keep(log_dir, r, msg, what, job_id, order))
+        _note(r, what, kept)
+        if r.ok:
+            worked.append(r.channel)
+    if log_dir is not None and worked:
+        _send_unsent(s, log_dir, only=tuple(worked), force=True)  # it works: what was kept for it goes now
 
 
 def _state_path(log_dir: Path) -> Path:
     return Path(log_dir) / names.NOTIFY_STATE
 
 
+def _unsent_entry(e) -> bool:
+    return (isinstance(e, dict) and isinstance(e.get("id"), str) and isinstance(e.get("channel"), str)
+            and isinstance(e.get("title"), str) and isinstance(e.get("fields"), dict)
+            and isinstance(e.get("kept"), (int, float)))
+
+
 def _read_state(log_dir: Path) -> dict:
+    """{"held": {job id: [reasons sent]}, "unsent": [kept messages, oldest first], "retry": {channel: {"tries",
+    "next"}}}; a part that is missing or damaged reads as empty."""
     try:
         d = json.loads(_state_path(log_dir).read_text(encoding="utf-8"))
-        return d if isinstance(d, dict) and isinstance(d.get("held"), dict) else {"held": {}}
     except (OSError, ValueError):
-        return {"held": {}}
+        d = {}
+    d = d if isinstance(d, dict) else {}
+    held = d.get("held") if isinstance(d.get("held"), dict) else {}
+    unsent = [e for e in d.get("unsent") or [] if _unsent_entry(e)] if isinstance(d.get("unsent"), list) else []
+    retry = {k: v for k, v in (d.get("retry") or {}).items() if isinstance(v, dict)} \
+        if isinstance(d.get("retry"), dict) else {}
+    return {"held": held, "unsent": unsent, "retry": retry}
 
 
-def _write_state(log_dir: Path, state: dict) -> None:
+def _write_state(log_dir: Path, state: dict) -> bool:
     p = _state_path(log_dir)
     tmp = p.with_suffix(f".{os.getpid()}.tmp")
     try:
         tmp.write_text(json.dumps(state), encoding="utf-8")
         os.replace(tmp, p)
-    except OSError:
+        return True
+    except (OSError, TypeError, ValueError):
         try:
             tmp.unlink(missing_ok=True)
         except OSError:
             pass
+        return False
 
 
 def _hold_key(reason: str) -> str:
@@ -637,16 +743,255 @@ def _forget_held(log_dir: Path, job_id) -> None:
             _write_state(log_dir, state)
 
 
+# ------------------------------------------------- kept for later (D131) --
+
+
+def _delay(tries: int) -> float:
+    """Seconds to the next try of a channel after its `tries`-th failure: UNSENT_FIRST_S, doubling, UNSENT_MAX_S."""
+    return float(min(UNSENT_FIRST_S * 2 ** max(tries - 1, 0), UNSENT_MAX_S))
+
+
+def _trim(entries: list[dict], now: float) -> tuple[list[dict], int]:
+    """The kept messages younger than UNSENT_DAYS, the newest UNSENT_MAX of them; and how many were dropped."""
+    young = [e for e in entries if now - e["kept"] <= UNSENT_DAYS * 86400]
+    keep = young[-UNSENT_MAX:]
+    return keep, len(entries) - len(keep)
+
+
+def _tidy(state: dict) -> None:
+    """A channel's retry schedule goes with its last kept message."""
+    left = {e["channel"] for e in state["unsent"]}
+    state["retry"] = {k: v for k, v in state["retry"].items() if k in left}
+
+
+def _same_job(e: dict, job_id) -> bool:
+    return job_id is not None and e.get("job_id") == job_id
+
+
+def _keep(log_dir: Path, r: Result, msg: Message, what: str, job_id, order: int = 0) -> bool:
+    """Keep a message that never reached `r.channel`, to send it later. The newest about a job only: an older one
+    about the same job and channel is replaced, and one older than what is kept already is not kept (it was
+    announced first, its thread only finished later). False when it can't be kept (the state file can't be
+    written)."""
+    now = time.time()
+    entry = {"id": uuid.uuid4().hex[:12], "channel": r.channel, "job_id": job_id, "what": what, "order": order,
+             "title": msg.title, "facts": [list(f) for f in msg.facts], "fields": msg.fields,
+             "error": r.detail, "kept": now}
+    with _lock:
+        state = _read_state(log_dir)
+        if any(_same_job(e, job_id) and int(e.get("order") or 0) > order for e in state["unsent"]):
+            return True  # a newer message about this job waits already: this one is stale
+        old = [e for e in state["unsent"] if not (e["channel"] == r.channel and _same_job(e, job_id))]
+        state["unsent"], dropped = _trim([*old, entry], now)
+        sched = state["retry"].setdefault(r.channel, {"tries": 1, "next": now + _delay(1)})
+        sched["error"] = r.detail
+        _tidy(state)
+        ok = _write_state(log_dir, state)
+        waiting = list(state["unsent"])
+    if not ok:
+        return False
+    if dropped:
+        log.warning("%d kept notification(s) dropped: older than %d days, or more than %d waiting", dropped,
+                    UNSENT_DAYS, UNSENT_MAX)
+    _tell_unsent(log_dir, waiting, new=True)
+    return True
+
+
+def _drop_unsent(log_dir: Path, job_id, order: int) -> None:
+    """A newer message about `job_id` (announced at `order`) replaces whatever was kept about it."""
+    with _lock:
+        state = _read_state(log_dir)
+        left = [e for e in state["unsent"] if not (_same_job(e, job_id) and int(e.get("order") or 0) < order)]
+        if len(left) == len(state["unsent"]):
+            return
+        state["unsent"] = left
+        _tidy(state)
+        _write_state(log_dir, state)
+    _tell_unsent(log_dir, left)
+
+
+def _when(iso) -> str:
+    try:
+        return datetime.fromisoformat(str(iso)).strftime("%Y-%m-%d %H:%M")
+    except ValueError:
+        return "earlier"
+
+
+def late_message(entry: dict) -> Message:
+    """A kept message as it is sent later: the same title, facts and fields, and a line saying when it happened."""
+    facts = tuple((str(f[0]), str(f[1])) for f in entry.get("facts") or []
+                  if isinstance(f, (list, tuple)) and len(f) == 2)
+    when = _when(entry["fields"].get("time"))
+    facts += (("Sent late", f"this happened {when}; the PC could not reach "
+                            f"{_SERVICE.get(entry['channel'], entry['channel'])} then"),)
+    text = Message(entry["title"], facts).text
+    return Message(entry["title"], facts, {**entry["fields"], "text": text})
+
+
+def _send_unsent(s: dict, log_dir: Path, only: tuple[str, ...] | None = None, force: bool = False,
+                 now: float | None = None, locked: bool = False) -> int:
+    """Send the kept messages of each channel that is due (all of them with `force`), oldest first. A channel that
+    still can't be reached waits longer (`_delay`); one that now says no drops that message. Returns how many were
+    sent. One thread at a time: a second call while one runs returns 0. locked: the caller took _unsent_lock for
+    this call (retry_unsent, before starting the thread); it is released here."""
+    if not locked and not _unsent_lock.acquire(blocking=False):
+        return 0
+    try:
+        now = time.time() if now is None else now
+        live = set(channels(s))
+        with _lock:
+            state = _read_state(log_dir)
+            before = len(state["unsent"])
+            state["unsent"], dropped = _trim(state["unsent"], now)
+            gone = [e for e in state["unsent"] if e["channel"] not in live]
+            state["unsent"] = [e for e in state["unsent"] if e["channel"] in live]
+            _tidy(state)
+            if len(state["unsent"]) != before:
+                _write_state(log_dir, state)
+            due: dict[str, list[dict]] = {}
+            for e in state["unsent"]:
+                sched = state["retry"].get(e["channel"]) or {}
+                if (only is None or e["channel"] in only) and (force or float(sched.get("next") or 0) <= now):
+                    due.setdefault(e["channel"], []).append(e)
+        if dropped:
+            log.warning("%d kept notification(s) dropped: older than %d days", dropped, UNSENT_DAYS)
+        if gone:
+            log.warning("%d kept notification(s) dropped: %s no longer set up in config.yaml", len(gone),
+                        ", ".join(sorted({e["channel"] for e in gone})))
+        sent = 0
+        for ch, entries in due.items():
+            for e in entries:
+                try:
+                    msg = late_message(e)
+                except Exception:  # noqa: BLE001 - a damaged entry is dropped, not retried for a week
+                    _forget_unsent(log_dir, e["id"])
+                    continue
+                (r,) = deliver(s, msg, only=(ch,)) or [Result(ch, False, "not set up", False)]
+                if r.ok:
+                    _forget_unsent(log_dir, e["id"])
+                    sent += 1
+                    _note(r, str(e.get("what") or "a message"),
+                          late=f" (sent late; it happened {_when(e['fields'].get('time'))})")
+                    continue
+                if r.retry:  # still out of reach: the channel waits longer, its other messages too
+                    _postpone(log_dir, ch, r.detail, now)
+                    _note(r, str(e.get("what") or "a message"), kept=True)
+                    break
+                _forget_unsent(log_dir, e["id"])  # the service answered no: as for a new message, not tried again
+                _note(r, str(e.get("what") or "a message"))
+        with _lock:
+            left = _read_state(log_dir)["unsent"]
+        if sent or due or dropped or gone:
+            _tell_unsent(log_dir, left)
+        return sent
+    finally:
+        _unsent_lock.release()
+
+
+def _forget_unsent(log_dir: Path, entry_id: str) -> None:
+    with _lock:
+        state = _read_state(log_dir)
+        state["unsent"] = [e for e in state["unsent"] if e["id"] != entry_id]
+        _tidy(state)
+        _write_state(log_dir, state)
+
+
+def _postpone(log_dir: Path, channel: str, detail: str, now: float) -> None:
+    with _lock:
+        state = _read_state(log_dir)
+        sched = state["retry"].setdefault(channel, {"tries": 0})
+        sched["tries"] = int(sched.get("tries") or 0) + 1
+        sched["next"] = now + _delay(sched["tries"])
+        sched["error"] = detail
+        _tidy(state)
+        _write_state(log_dir, state)
+
+
+def unsent(log_dir: Path | None) -> list[dict]:
+    """The messages kept for later, oldest first (for `ionomos status` and the tests)."""
+    if log_dir is None:
+        return []
+    with _lock:
+        return _read_state(log_dir)["unsent"]
+
+
+def _tell_unsent(log_dir: Path, waiting: list[dict], new: bool = False) -> None:
+    """One attention item while messages wait (a warning: no pop-up), closed when none is left. A person who
+    dismissed it is not asked again until every message has gone."""
+    try:
+        from ionomos import attention
+
+        item = next((i for i in attention.items(log_dir, open_only=False) if i.key == ATTENTION_KIND), None)
+        if not waiting:
+            if item is not None and item.state != "resolved":
+                attention.resolve(log_dir, item.id)
+            return
+        if item is not None and not item.is_open and (not new or item.state == "dismissed"):
+            return
+        if item is None and not new:
+            return
+        chans = list(dict.fromkeys(e["channel"] for e in waiting))
+        n = len(waiting)
+        message = (f"{n} message{'s' if n != 1 else ''} about searches could not be sent by {', '.join(chans)}: "
+                   f"{waiting[-1].get('error') or 'no connection'}")
+        if item is not None and item.is_open and item.message == message:
+            return
+        attention.raise_item(
+            log_dir, ATTENTION_KIND, "Notifications are waiting to be sent", message, key=ATTENTION_KIND,
+            severity="warning",
+            causes=["This PC has no internet connection right now, or it can't reach the service (a firewall, a "
+                    "proxy, the service is down)"],
+            fixes=[f"Nothing to do: they are sent by themselves when the connection is back (tried every few "
+                   f"minutes, then every {UNSENT_MAX_S // 60} minutes, for {UNSENT_DAYS} days). Searches, reports "
+                   "and the atlas hand-off are not affected",
+                   "To check the connection now: Notifications tab → Send test, or run  ionomos notify-test"],
+            data={"waiting": n, "channels": chans})
+    except Exception:  # noqa: BLE001 - telling a person must not break a message
+        log.exception("could not record %s", ATTENTION_KIND)
+
+
+def retry_unsent(cfg, now: float | None = None, force: bool = False) -> threading.Thread | None:
+    """The watcher's maintenance thread calls this every minute (and once at start with force=True, whatever the
+    schedule says): the kept messages of each channel that is due are sent by a daemon thread, which is returned
+    (None: nothing is due, notifications are off, or one is already sending). Returns at once; never raises."""
+    try:
+        s = getattr(cfg, "notify", None) or {}
+        log_dir = getattr(cfg, "log_dir", None)
+        if log_dir is None or not s.get("enabled") or not channels(s) or _unsent_lock.locked():
+            return None
+        now = time.time() if now is None else now
+        with _lock:
+            state = _read_state(log_dir)
+        if not state["unsent"]:
+            return None
+        if not force and not any(float((state["retry"].get(e["channel"]) or {}).get("next") or 0) <= now
+                                 for e in state["unsent"]):
+            return None
+        if not _unsent_lock.acquire(blocking=False):
+            return None
+    except Exception as exc:  # noqa: BLE001 - the maintenance loop must go on
+        log.warning("could not send the kept notifications: %s", type(exc).__name__)
+        return None
+    try:  # the thread releases the lock when it is done
+        return _start(_send_unsent, (s, log_dir), {"force": force, "now": now, "locked": True}, "notify-unsent")
+    except Exception as exc:  # noqa: BLE001 - e.g. no thread can be started
+        _unsent_lock.release()
+        log.warning("could not send the kept notifications: %s", type(exc).__name__)
+        return None
+
+
 def announce(cfg, event: str, job, reason: str = "", summary: dict | None = None) -> threading.Thread | None:
     """Tell the configured channels that `job` is done / failed / held. Returns at once: the sending is
     done by the returned daemon thread (None if nothing is sent). Never raises.
 
     "held" is sent once per job and reason (remembered in <log_dir>/notify_state.json, so a restart
-    doesn't repeat it); the job running to done or failed clears that."""
+    doesn't repeat it); the job running to done or failed clears that. A message that never reached a
+    channel is kept and sent later (D131); a newer message about the same job replaces it."""
     try:
         s = getattr(cfg, "notify", None) or {}
         if not s.get("enabled") or not channels(s):
             return None
+        order = time.time_ns()
         log_dir = getattr(cfg, "log_dir", None)
         if log_dir is not None:
             if event == "held":
@@ -654,15 +999,12 @@ def announce(cfg, event: str, job, reason: str = "", summary: dict | None = None
                     return None
             else:
                 _forget_held(log_dir, job.id)
+            _drop_unsent(log_dir, job.id, order)
         if event not in s["on"]:
             return None
         msg = build(event, job, s, reason, summary)
-        t = threading.Thread(target=_send_logged, args=(s, msg, f"job {job.id} {_WORDS[event]}"),
-                             name=f"notify-job{job.id}", daemon=True)
-        with _lock:
-            _sending[:] = [x for x in _sending if x.is_alive()] + [t]
-        t.start()
-        return t
+        return _start(_send_logged, (s, msg, f"job {job.id} {_WORDS[event]}"),
+                      {"log_dir": log_dir, "job_id": job.id, "order": order}, f"notify-job{job.id}")
     except Exception as exc:  # noqa: BLE001 - never let a message stop a search
         log.warning("could not prepare a notification for job %s: %s", getattr(job, "id", "?"), type(exc).__name__)
         return None

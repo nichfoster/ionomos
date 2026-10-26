@@ -7,11 +7,13 @@ Philosopher is a small Python stand-in run as a real subprocess."""
 from __future__ import annotations
 
 import gzip
+import http.client
 import io
 import json
 import os
 import sys
 import threading
+import time
 import urllib.error
 import zipfile
 from datetime import date
@@ -20,6 +22,7 @@ from pathlib import Path
 import pytest
 
 from ionomos import cli, fastasource, fragpipe
+from tests.conftest import NO_INTERNET, urllib_offline
 
 UNIPROT_HEADERS = {"X-UniProt-Release": "2026_03", "X-UniProt-Release-Date": "02-September-2026"}
 
@@ -64,6 +67,8 @@ class FakeNet:
             if key in url:
                 if isinstance(answer, BaseException):
                     raise answer
+                if isinstance(answer, Resp):
+                    return answer
                 if isinstance(answer, int):
                     raise urllib.error.HTTPError(url, answer, "error", {}, io.BytesIO(b"nope"))
                 body, headers = answer
@@ -178,6 +183,74 @@ def test_download_refuses_a_bad_id_and_offline_without_any_request(tmp_path, mon
     assert fastasource.stock_workflows("24.0").error
     assert fastasource.fetch_stock_workflow("24.0", "TMT10", tmp_path).error
     assert fake.calls == []
+
+
+# ------------------------------------------------------- no internet (D131) --
+
+
+class Cut(Resp):
+    """A reply the network drops part way: `good` bytes, then `exc` (IncompleteRead for a chunked reply, a reset,
+    a read that timed out)."""
+
+    def __init__(self, good: bytes, headers: dict, exc: BaseException):
+        super().__init__(good, headers)
+        self.exc = exc
+
+    def read(self, n: int = -1) -> bytes:
+        data = super().read(n)
+        if data and n != -1:
+            return data
+        raise self.exc
+
+
+def _contaminant_notes(_d):
+    notes: list[str] = []
+    assert fastasource.fetch_contaminants(notes=notes) == ([], "")
+    return " ".join(notes)
+
+
+def _release_notes(_d):
+    notes: list[str] = []
+    assert fastasource.uniprot_release(notes=notes) is None
+    return " ".join(notes)
+
+
+NET_CALLS = {  # every function here that goes out to the network -> the words it gives back
+    "search": lambda d: fastasource.search_proteomes("human").error,
+    "release": _release_notes,
+    "download": lambda d: fastasource.download_proteome("UP000005640", d).error,
+    "contaminants": _contaminant_notes,
+    "stock-list": lambda d: fastasource.stock_workflows("24.0").error,
+    "stock-fetch": lambda d: fastasource.fetch_stock_workflow("24.0", "TMT10-MS3", d).error,
+}
+HOSTS = ("rest.uniprot.org", "raw.githubusercontent.com", "ftp.thegpm.org", "api.github.com")
+
+
+@pytest.mark.parametrize("call", sorted(NET_CALLS))
+@pytest.mark.parametrize("make", NO_INTERNET)
+def test_without_internet_every_request_says_why_at_once_and_leaves_nothing(tmp_path, net, make, call):
+    fake = net(("", urllib_offline(make)))
+    t0 = time.monotonic()
+    words = NET_CALLS[call](tmp_path)
+    assert time.monotonic() - t0 < 2
+    assert words and "internet connection" in words and any(h in words for h in HOSTS), words
+    assert fake.calls and all(t for _u, t in fake.calls), "every request has a timeout"
+    assert _files(tmp_path) == []
+
+
+@pytest.mark.parametrize("exc, words", [
+    (http.client.IncompleteRead(b"", 4096), "broke off before the end (IncompleteRead)"),
+    (ConnectionResetError(54, "Connection reset by peer"), "broke off before the end (ConnectionResetError)"),
+    (TimeoutError("timed out"), "did not answer in time"),
+])
+def test_a_connection_lost_mid_reply_is_an_error_in_words_and_leaves_nothing(tmp_path, net, exc, words):
+    count = (b"", {**UNIPROT_HEADERS, "X-Total-Results": "3"})
+    net(("uniprotkb/search", count), ("uniprotkb/stream", Cut(gzip.compress(HUMAN)[:40], UNIPROT_HEADERS, exc)))
+    res = fastasource.download_proteome("UP000005640", tmp_path)
+    assert not res.ok and words in res.error and "internet connection" in res.error
+    assert _files(tmp_path) == [], "no .part file is left behind"
+    net(("proteomes/search", Cut(b"", {}, exc)))  # the search window waits on this one: it must come back
+    assert words in fastasource.search_proteomes("human").error
 
 
 # ------------------------------------------------------------------ search --

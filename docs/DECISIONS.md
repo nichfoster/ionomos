@@ -5068,3 +5068,67 @@ copied in just now, a dead process's lock, the saved pass, soft and hard stops).
 `search.failed` and `attention.analysis_failed` (FTS5 gives `search`, in most entries, almost no weight); any new
 help entry could flip it, as this one did, so the script asks for 5. **Not verified**: on the lab PC (its drives,
 the walk's time, Dropbox's upload of about 8 GiB), and the atlas side reading item 7.
+
+### D131 — No internet on the PC: every request is bounded and says why once; notifications wait and go later
+**2026-10-26.** The lab PC has no internet connection, possibly for weeks. Ionomos must run whole days like that:
+watch, search, report, hand off to the atlas, sweep the drives, without a hang, a slower watcher, a frozen app or
+the same message again and again. Every network touchpoint in `ionomos/src/ionomos` was listed and tried with the
+socket failing as an OS fails it (no name lookup, no route, refused, a connect timeout, a TLS handshake cut off:
+`tests/conftest.py` `NO_INTERNET`) and with a reply cut off mid-way. `updates.py` and the app's update flow are
+another PR's and were left out. What was found and done (PROTEOMICS_PC.md "No internet on the PC" for the lab):
+1. **Notifications were lost** (D58.6: "a message lost while the network was down is lost"; and a "held" message
+   was marked as told before it was sent, so a restart never sent it either). Now a message that never reached the
+   service is kept and sent later. `notify.worth_retrying` decides: urllib's URLError (the request was not sent:
+   DNS, no route, refused, TLS), an SMTP connection that failed or a 4xx, HTTP 429 or 5xx are kept; a service
+   that said no (HTTP 4xx, a wrong password, refused addresses, a certificate that isn't the service's), a setting,
+   and a webhook that took the request and gave no answer (it may have arrived: `_NoAnswer`) are not, as before.
+   Kept in `<log_dir>/notify_state.json` (`unsent`, `retry` beside D58's `held`): the fields that would be sent,
+   never an address or password; only the newest message about a job (a newer announce replaces it, by the time it
+   was announced, so a slow thread can't keep a stale one); at most `UNSENT_MAX` (50), `UNSENT_DAYS` (7 days).
+   Sent again by `notify.retry_unsent`, which the watcher's maintenance thread calls every minute (its own daemon
+   thread; returns at once; one sender at a time), per channel after 5, 10, 20, then every 30 minutes; at the
+   watcher's start whatever the schedule; and at once when another message gets through on that channel. A late
+   message is the same message plus "Sent late: this happened <time>; the PC could not reach <service> then" (in
+   `text`; the webhook's keys are D58.3's). Logged once per channel and error ("Kept: it is sent when … can be
+   reached again"). One attention item `notify_unsent` (a warning, no pop-up, KINDS, help
+   `attention.notify_unsent`) while any waits, its text changed only when the count or error does; it closes when
+   the last is sent; dismissed, it is not raised again until then. `ionomos notify-test` adds that a search's
+   message would wait. Test messages are never kept. Not taken: a digest of many late messages (more surface; 50
+   and 7 days bound the burst), an endless queue (weeks-old "done" messages are noise), retrying "no answer"
+   (a duplicate in the channel is worse than D58's one try).
+2. **Enrichment tried each missing gene-set library in turn** (30 s each with packets dropped; three by default)
+   on every analysis in the worker, with a raw exception in the note. Now the first failure for want of a
+   connection stops the rest (`enrich._unreachable`: a server that answered, an HTTP 404, is not that), and one
+   note names them all: "… not on this PC yet and could not be downloaded from maayanlab.cloud (…); they are
+   downloaded by the first analysis run while the PC is online (Re-run analysis then)". Cached libraries work
+   offline, as before (the report's **Enrichment was incomplete**, a warning: no pop-up).
+3. **A reply cut off mid-way escaped as an exception**: `fastasource` and `example` caught URLError and OSError
+   but not http.client's `IncompleteRead` / `BadStatusLine` (a chunked UniProt stream the network drops), so the
+   app's UniProt search window could wait for ever and `ionomos fasta` / `example` ended in a traceback.
+   `fastasource._NET_ERRORS` and example's except clause include `http.client.HTTPException`, and both say "the
+   connection to <host> broke off before the end (…)"; the `.part` files go, as before. (`updates.py` already
+   caught it.)
+4. **Already right, now with a test each**: UniProt search, release, download, contaminants and GitHub's stock
+   workflows (`test_without_internet_every_request_says_why_at_once_and_leaves_nothing`, every call × every
+   failure; `test_check_for_updates_without_internet_says_why_and_does_the_rest`); `ionomos example`
+   (`test_a_network_failure_is_a_sentence_and_leaves_no_part_file`); the assistant, which only talks to
+   `localhost` (`test_no_model_runtime_is_said_at_once_with_ionomos_own_text`: no runtime, or a socket that fails,
+   is the fallback at once); the dev install's git fetch / pull
+   (`test_git_without_internet_says_so_within_its_time_and_installs_nothing`: 60 s / 180 s, nothing installed);
+   the atlas hand-off, `atlas check` and the Setup checklist line, which look only at the Dropbox folder on this PC
+   (`test_without_internet_the_hand_off_its_check_and_the_checklist_line_all_work`): Dropbox being offline is not
+   an error for them. Every network call already ran off the Tk thread and outside the inbox loop (the app's
+   UniProt, update and Send test windows on worker threads; the worker's analysis and notifications in the worker
+   and daemon threads). `report.html` and the help page load nothing from the internet. `bundle.py` and
+   `notify._pc` ask only `socket.gethostname()`. FragPipe's preflight starts FragPipe on the PC with its time
+   limits (90 s, 300 s); Ionomos never asks FragPipe to download anything.
+
+**Verified**: `tests/test_notify.py` (what is worth sending again, table; every channel without internet × every
+failure, in words, no secret; which HTTP answers are kept; a job's message kept through a day of tries and a
+restart, then sent once, late; a newer message replacing the kept one and a working channel sending the rest at
+once; the bounds; a dismissed item; `retry_unsent` returning at once, one sender, a damaged file; the real
+`ionomos run` sending what was kept within seconds of its start), `test_fpa.py`, `test_fastasource.py`,
+`test_example.py`, `test_library_tab.py`, `test_assistant_robustness.py`, `test_service.py`, `test_atlas.py`.
+**Not verified**: on the lab PC; what FragPipe 24.0 does without internet; how Dropbox's online-only files behave
+offline (a hand-off that can't read one fails and retries as `atlas_handoff_failed`, up to `atlas.max_tries`);
+Windows' DNS client on a network with no DNS server (its own time, not urllib's timeout, bounds a lookup).
