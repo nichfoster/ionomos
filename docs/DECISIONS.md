@@ -4962,9 +4962,11 @@ could not).
 **2026-10-21.** Dan approved training a model of cysteine engagement on the lab's competition runs (the Nomura-Lab
 PROJECT-LOG, 2026-10-21). It needs the TMT competition runs and how each was designed (conditions, doses, times,
 the channel map); and FragPipe's numbers in the atlas can't be quoted until a decoy check exists, which needs the
-decoys that `harvest_fragpipe.ps1` has left behind so far (MSFragger's `.pin`). The hand-off and the harvest change
-together, so the lab PC's two senders keep one selection rule (`harvest_fragpipe.ps1` and HARVEST-README in the
-Nomura-Lab repository, same day).
+decoys that `harvest_fragpipe.ps1` has left behind so far (MSFragger's `.pin`). The hand-off and the harvest were
+to change together, so the lab PC's two senders keep one selection rule (`harvest_fragpipe.ps1` and HARVEST-README
+in the Nomura-Lab repository). **Correction 2026-10-26**: neither change reached Nomura-Lab (main at 25d2b99 and
+the desktop copy of 2026-10-23: `atlas_intake.py` reads only `/1`, harvest takes no `.pin`); the receiver is being
+written there, and the drive sweep (D128) does harvest's part from Ionomos.
 1. **TMT is one switch.** `atlas.methods` may name FragPipe methods whose kind is isoDTB or TMT (`atlas.KINDS`);
    `[isoDTB]` stays the default. The Folders tab's **Also TMT searches** puts the lab's FragPipe TMT methods in
    (`atlas.methods_of_kind`: a method's `like:`, else its key; another engine never) or takes them out, and leaves
@@ -4993,10 +4995,75 @@ Nomura-Lab repository, same day).
    was saved); Ionomos uses the job's folder (the same folder for every Ionomos run).
 5. **The contract is `ionomos-atlas-handoff/2`** because the receiver must change: it skipped every row whose
    ProbeClass isn't isoDTB, and refused a file path outside the run folder. The record gains `probe_class`,
-   `files[].gzip_of`, `design` and `left`; the CSV's columns are the same. The Nomura-Lab `atlas_intake.py` takes
-   `/1` and `/2`, stores TMT runs and the new files, and changes no counting rule.
+   `files[].gzip_of`, `design` and `left`; the CSV's columns are the same. The Nomura-Lab `atlas_intake.py` is to take
+   `/1` and `/2`, store TMT runs and the new files, and change no counting rule (not done yet: see the correction
+   above).
 
 **Verified**: `tests/test_atlas.py` (the selection table with `.pin` and `_edited.pin`, the pin cap, a TMT search
 with two plexes' annotations, a `.pin.gz` compressed by another writer, conflicts by content, a changed design
 file beside the earlier copy, the same bytes on every compression, the TMT switch's lists) and
 `tests/test_app_atlas.py` (the switch saved and read back). **Not verified**: on the lab PC with a real TMT search.
+
+### D128 — The drive sweep: Ionomos hands the PC's other FragPipe runs to the atlas, as harvest did by hand
+**2026-10-26.** The atlas needs the decoys and sample design of the lab's earlier runs (D127: the engagement model,
+the decoy check), and the TMT competition runs, not only of the searches Ionomos runs from now on. Those runs are on
+the PC's drives (the harvest inventory of 2026-10-12: about 380 runs, 4,642 `.pin` files); `harvest_fragpipe.ps1`
+took their result files, not their decoys or design, and only when a person ran it. Ionomos is on the PC all day,
+so it sweeps the drives itself (`atlassweep.py`, ATLAS.md "The drive sweep").
+1. **Harvest's walk, Ionomos' copying.** The walk is the script's pass 1 (every fixed drive, or `atlas.sweep_roots`;
+   its skipped names; no reparse points; the atlas folder, the Dropbox folders and `atlas.sweep_exclude` left out;
+   a run folder by its markers, or psm.tsv with no run folder one or two above). Each run goes through
+   `atlas.transfer`, the job hand-off's copying, factored out of `send` unchanged: the same selection, `.pin.gz`,
+   design files, compare-before-copy, `.partial` and SHA-256, never over a file. So a run harvest copied before
+   only gains its decoys, design and a verified record.
+2. **A record of its own, not a fake job.** `ionomos-handoff.json` carries `found` (owner by harvest's
+   Get-OwnerGuess, experiment, workflow, raw files, ...) in place of `job`, and the CSV is
+   `runs-ionomos-<time>-found-<run id>.csv` (12 hex of the SHA-256 of Run: unique per run, no clock drift over
+   thousands of sends) with IonomosJob and IonomosMethod empty. Keyed by Run + HandoffSha256 like a job's. The
+   contract stays `/2` (unreleased, its receiver change pending, D127) and gains item 7; a receiver that doesn't know
+   it ignores the records by their name, so nothing is ever counted from a record it can't read.
+3. **What goes: the masses decide**, as harvest's ProbeClass, but only of the modifications turned on (a
+   FragPipe table row is mass,sites,enabled,max; a label-free workflow copied from isoDTB with its probe row off is
+   no isoDTB search, though harvest reads it so): exactly `isoDTB`, or exactly `TMT` while `atlas.methods` names a
+   TMT method (the TMT switch). isoTOP, other, unknown (no workflow) and mixed classes are left, and counted in the
+   pass's summary. A run with no `psm.tsv` never goes (the atlas can't use it, and FragPipe's dry runs have
+   none). Ionomos' own log folder (the setup check's FragPipe preflights are dry runs of the lab's real workflows)
+   and inbox are not searched, and the test bed's fake runs (`# FAKE` fragger.params) never go.
+4. **In an Ionomos experiment folder only its latest search goes**: a ledger job's own run folder is queued as
+   its hand-off (`mark_pending`, which writes the job's `atlas` block as the worker does) and sent with its job
+   record; every other run there (`fragpipe_previous_<time>`: a cancelled, failed or superseded attempt) is left.
+   A folder of no job in this ledger (another PC's, LabWatch's) sends its `run.workdir` (else `fragpipe`) only
+   when its status is done. Turning the sweep on is the person's decision D121.5 asked for: the first pass queues
+   every done atlas-method job that has no hand-off yet.
+5. **Never in the way of a search or of the data.** No pass while the ledger has a running job; a pass checks
+   between runs and stops, keeping what it did, and goes on 10 minutes after (reusing its walk; the walk itself
+   is not stopped by a search, as it only lists folders and must finish to be of use). A pass that stopped for a
+   cause (Dropbox gone, the drive full, a bug) is tried again after an hour, with the attention item; a soft stop
+   (a search, a restart) raises none. Windows background priority for the thread. A run with a file made or
+   changed in the last hour waits (on Windows the creation time counts: a copy keeps the modified time, so a run
+   being copied onto D: looks old by that alone). Nothing of a run is copied when it would leave the Dropbox drive
+   (`C:`, FragPipe's) below `atlas.min_free_gb` (40; FragPipe holds searches at 20): one floor for a job's
+   hand-off and the sweep, since the sweep's first pass also queues the old jobs. A lock names its process and is
+   taken over at once when that process is gone. Everything searched is only read.
+6. **Incremental**: `atlas-sweep.json` keeps each run's fingerprint (its taken files' names, sizes and times, the
+   kind, the pin cap); a sent run with the same fingerprint is not read again. A conflict waits for a person: the
+   daily pass leaves it, a pass a person asks for (Search now, `ionomos atlas sweep`) tries it again. Failures are
+   tried on the next pass. One attention item, `atlas_sweep_problem` (a warning, no pop-up), lists what was left
+   to a person; a clean pass closes it.
+7. **Off by default** (`atlas.sweep: false`); needs `enabled` and `handoff_dir`. **Search now** (a request file the
+   watcher's thread takes within a minute) and `ionomos atlas sweep` work while it is off. `ionomos atlas sweep
+   --dry-run` reads only (no content: names and sizes against Dropbox) and writes nothing anywhere, so the lab can
+   see what would go before turning anything on.
+
+**Verified**: `tests/test_atlassweep.py` (the walk against harvest's rule: markers, psm-only folders, skipped
+names, links, exclusions, unreadable folders; the owner guess; a found isoDTB run sent with its decoys and record,
+the drives unchanged; TMT only with the switch; isoTOP, unknown and fake runs left; unchanged runs not read again;
+a changed run sent again; a run being written waits; a conflict waits and a manual pass retries it; an Ionomos
+job's run queued as the job; a dry run writes nothing; the free-space stop; Dropbox missing; a pass stopped and
+resumed; the loop's schedule and Search now; the command's exit codes; and, from a review of the first version,
+Ionomos' preflights and inbox not searched, no psm.tsv left, earlier attempts left, a probe row turned off, a run
+copied in just now, a dead process's lock, the saved pass, soft and hard stops). Found on the way: the assistant scenario
+`failed_search_generic_help` (its scripted model's `search_help`, 3 hits) held on a BM25 margin of 0.003 between
+`search.failed` and `attention.analysis_failed` (FTS5 gives `search`, in most entries, almost no weight); any new
+help entry could flip it, as this one did, so the script asks for 5. **Not verified**: on the lab PC (its drives,
+the walk's time, Dropbox's upload of about 8 GiB), and the atlas side reading item 7.

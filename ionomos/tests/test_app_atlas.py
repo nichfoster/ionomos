@@ -1,6 +1,6 @@
-"""The cysteine atlas hand-off in the app (D125, docs/ATLAS.md "In the app"): the Folders tab's Cysteine atlas group,
-Send to atlas and the atlas column on the Jobs tab, the Setup checklist's line, the attention item's title and
-button, and the help they open.
+"""The cysteine atlas hand-off in the app (D125, docs/ATLAS.md "In the app"): the Folders tab's Cysteine atlas group
+(with the drive sweep's switch, Search now and its line, D128), Send to atlas and the atlas column on the Jobs tab, the
+Setup checklist's line, the attention items' titles and button, and the help they open.
 
 The checklist line (setupcheck.atlas_item) is tested without Tk; the windows run hidden (tests/tkharness.py, D95)
 where tests/conftest.gui_tests() allows (CI; never IONOMOS_GUI_TESTS on a desk). Every path is under tmp_path, and
@@ -17,7 +17,7 @@ from tkinter import ttk
 import pytest
 import yaml
 
-from ionomos import atlas, attention, names, setupcheck, uinav
+from ionomos import atlas, atlassweep, attention, names, setupcheck, uinav
 from ionomos.config import load
 from ionomos.ledger import Job, Ledger
 
@@ -172,6 +172,33 @@ def test_the_labels_the_help_names_are_the_apps():
     assert "**Also TMT searches**" in text and 'text="Also TMT searches (competition runs' in src
 
 
+def test_the_sweeps_attention_kind_has_a_title_and_help_and_no_pop_up():
+    """D128: runs the drive sweep couldn't send are one warning in the needs-attention list, never a window by
+    itself, with its own help entry."""
+    from ionomos import help as helpdoc
+    from ionomos import popups
+
+    kind = atlassweep.ATTENTION_KIND
+    assert kind == "atlas_sweep_problem"
+    assert kind in attention.KINDS and kind not in attention.POPUP_KINDS
+    assert popups.KIND_TITLE[kind] == "Runs found on this PC weren't handed to the atlas"
+    assert "attention.atlas_sweep_problem" in helpdoc.entries()
+    assert helpdoc.topic_for_item({"kind": kind}) == "attention.atlas_sweep_problem"
+
+
+def test_the_sweeps_help_names_the_apps_switch_and_button():
+    """faq.atlas and the sweep's attention entry tell people which switch and button to press: the app has them."""
+    from ionomos import app
+    from ionomos import help as helpdoc
+
+    src = Path(app.__file__).read_text(encoding="utf-8")
+    ents = helpdoc.entries()
+    for hid in ("faq.atlas", "attention.atlas_sweep_problem"):
+        assert "**Also search this PC's drives**" in ents[hid].body and "**Search now**" in ents[hid].body, hid
+    assert 'text="Also search this PC\'s drives every day' in src and 'text="Search now"' in src
+    assert f"**{uinav.tab_name('folders')}**" in ents["attention.atlas_sweep_problem"].body
+
+
 # ---------------------------------------------------------------------------------- the windows, hidden --
 
 WORKFLOW = "# FragPipe (24.0) runtime properties\nmsfragger.table.var-mods=561.3387,C,true,1\n"
@@ -273,6 +300,109 @@ def test_the_tmt_switch_puts_the_labs_tmt_methods_in_and_out(hidden_app, no_dial
     app.bv("atlas.tmt").set(False)
     assert app.save()
     assert load(tmp_path / "Auto" / "config.yaml").atlas["methods"] == ["isoDTB"]
+    assert not no_dialogs.unexpected(), no_dialogs.report()
+
+
+def test_the_sweep_switch_is_read_and_saved_and_the_sweeps_other_settings_stay(hidden_app, no_dialogs, tk_errors,
+                                                                                tmp_path):
+    """D128: one switch on the Folders tab; atlas.sweep_roots, sweep_exclude and sweep_hours (no field for them) stay
+    as the file has them."""
+    from ionomos import configio
+
+    app = hidden_app
+    _lab(app, tmp_path)
+    cfg_path = tmp_path / "Auto" / "config.yaml"
+    assert not app.bv("atlas.sweep").get() and load(cfg_path).atlas["sweep"] is False
+    archive = tmp_path / "Archive"
+    (archive / "old").mkdir(parents=True)
+    d = configio.read_config(cfg_path)
+    d["atlas"].update(sweep=True, sweep_roots=[str(archive)], sweep_exclude=[str(archive / "old")], sweep_hours=12)
+    configio.write_config(cfg_path, d)  # as a person edits config.yaml
+    app.reload(ask=False)
+    assert app.bv("atlas.sweep").get() and not app.dirty()
+    app.bv("atlas.sweep").set(False)
+    assert app.dirty() and any(c.startswith("Atlas") for c in app.changes()), app.changes()
+    assert app.save()
+    at = load(cfg_path).atlas  # the watcher's loader takes what the app wrote
+    assert at["sweep"] is False and at["enabled"] is True
+    assert (at["sweep_roots"], at["sweep_exclude"], at["sweep_hours"]) == ([str(archive)], [str(archive / "old")], 12)
+    app.reload(ask=False)
+    assert not app.bv("atlas.sweep").get() and not app.dirty()
+    app.bv("atlas.sweep").set(True)
+    assert app.save()
+    at = load(cfg_path).atlas
+    assert at["sweep"] is True and at["sweep_roots"] == [str(archive)] and at["sweep_hours"] == 12
+    assert "\n  sweep: true" in cfg_path.read_text(encoding="utf-8")  # unquoted: the loader refuses 'true'
+    assert not no_dialogs.unexpected(), no_dialogs.report()
+
+
+def test_search_now_needs_the_hand_off_on_and_saved(hidden_app, no_dialogs, tk_errors, tmp_path):
+    """Search now asks the watcher, which reads config.yaml: off, without a folder or with unsaved changes it says
+    what to do, and asks nothing."""
+    app = hidden_app
+    _lab(app, tmp_path, on=False)
+    req = load(tmp_path / "Auto" / "config.yaml").log_dir / names.ATLAS_SWEEP_NOW
+    no_dialogs.expect("showinfo", None)
+    app.atlas_sweep_btn.invoke()  # off
+    call = no_dialogs.calls[-1]
+    assert call.name == "showinfo" and call.title == "Search now" and "hand-off to the cysteine atlas on" in \
+        call.detail and "press Save" in call.detail
+    app.bv("atlas.enabled").set(True)  # on in the window, no folder
+    no_dialogs.expect("showinfo", None)
+    app.sweep_now()
+    assert len(no_dialogs.calls) == 2 and "pick the lab Dropbox folder" in no_dialogs.calls[-1].detail
+    app.v("atlas.handoff_dir").set(str(_dropbox(tmp_path, spaces=False)))  # and a folder, not saved
+    assert app.dirty()
+    no_dialogs.expect("showinfo", None)
+    app.sweep_now()
+    assert len(no_dialogs.calls) == 3 and no_dialogs.calls[-1].detail.startswith("Press Save first")
+    assert app.save()
+    app.bv("atlas.sweep").set(True)  # saved on; another change not saved
+    assert app.dirty()
+    no_dialogs.expect("showinfo", None)
+    app.atlas_sweep_btn.invoke()
+    assert len(no_dialogs.calls) == 4 and no_dialogs.calls[-1].detail.startswith("Press Save first")
+    assert not req.exists() and not os.path.exists(req.parent / names.ATLAS_SWEEP_STATE)
+    assert "asked for a search" not in app.status_lbl.cget("text")
+    assert not no_dialogs.unexpected() and not no_dialogs.pending(), no_dialogs.report()
+
+
+def test_search_now_asks_the_watchers_sweep_thread_for_a_pass(hidden_app, no_dialogs, tk_errors, tmp_path):
+    """With the saved settings on (the daily sweep may be off): the request file in the configured log_dir, which the
+    watcher's sweep thread takes as a pass asked for; the app itself searches nothing."""
+    app = hidden_app
+    _lab(app, tmp_path)
+    cfg = load(tmp_path / "Auto" / "config.yaml")
+    assert cfg.atlas["sweep"] is False and not app.dirty()
+    req = cfg.log_dir / names.ATLAS_SWEEP_NOW
+    assert not req.exists() and atlassweep.SweepLoop(lambda: cfg).due(cfg) == ""
+    app.atlas_sweep_btn.invoke()
+    assert req.is_file() and atlas._when(req.read_text(encoding="utf-8").strip()) is not None
+    assert atlassweep.SweepLoop(lambda: cfg).due(cfg) == "asked"  # what the watcher's thread does with it
+    assert "asked for a search of the drives" in app.status_lbl.cget("text")
+    assert not (cfg.log_dir / names.ATLAS_SWEEP_STATE).exists() and not (cfg.log_dir / names.ATLAS_SWEEP_LOCK).exists()
+    assert not no_dialogs.calls, no_dialogs.report()  # asked: the status line says so, no box
+
+
+def test_the_line_under_the_sweep_switch_says_how_the_last_search_went(hidden_app, no_dialogs, tk_errors, tmp_path):
+    """Read off the Tk thread from the log folder's atlas-sweep.json, each time the Folders tab is shown."""
+    from types import SimpleNamespace
+
+    app = hidden_app
+    _lab(app, tmp_path)
+    log_dir = load(tmp_path / "Auto" / "config.yaml").log_dir
+    app.show_sweep_info()
+    assert _pump(app, lambda: not app.busy("atlas:sweep-info"))
+    assert str(app.atlas_sweep_info.cget("text")) == "the drives haven't been searched yet"
+    summary = {"trigger": "auto", "started": "2026-10-20T02:00:00-07:00", "finished": "2026-10-20T03:10:00-07:00",
+               "runs": 5, atlassweep.SENT: 2, atlassweep.UNCHANGED: 1, atlassweep.LEFT: 2, atlassweep.CONFLICT: 0}
+    atlassweep.save_state(SimpleNamespace(log_dir=log_dir), {"contract": atlassweep.CONTRACT, "passes": [summary],
+                                                             "walk": {}, "runs": {}})
+    app.select_tab("jobs")
+    app.root.update()
+    app.select_tab("folders")  # shown again: read again
+    want = "last search 2026-10-20 03:10: 5 FragPipe runs, 2 sent, 1 unchanged, 2 not for the atlas"
+    assert _pump(app, lambda: str(app.atlas_sweep_info.cget("text")) == want), app.atlas_sweep_info.cget("text")
     assert not no_dialogs.unexpected(), no_dialogs.report()
 
 

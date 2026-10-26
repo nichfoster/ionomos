@@ -7,11 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The drive sweep: the FragPipe runs on the PC's drives go to the cysteine atlas too** (D128, docs/ATLAS.md "The
+  drive sweep", contract item 7). With `atlas.sweep` (the Folders tab's **Also search this PC's drives every day**)
+  the watcher's new `atlas-sweep` thread searches every fixed drive once a day, as `harvest_fragpipe.ps1` does, for
+  the FragPipe runs Ionomos did not search, and hands each isoDTB run (and TMT run, with **Also TMT searches**) to
+  the atlas the way a job's search goes: result files, decoys (`.pin.gz`), sample design, `ionomos-handoff.json`
+  with a `found` block in place of `job`, and `_harvest-logs\runs-ionomos-<time>-found-<run id>.csv`.
+  - The drives are only read. The probe class is the workflow's modification masses (harvest's); an Ionomos job's
+    run is queued as the job's own hand-off; the test bed's fake runs never go; a run changed in the last hour
+    waits; a run sent before is read again only when its files change.
+  - Never while Ionomos is searching (a pass stops between two runs and goes on later), at background priority on
+    Windows, and never below the new `atlas.min_free_gb` (40) free on the Dropbox drive (a job's hand-off keeps
+    it too). `atlas.sweep_roots`, `atlas.sweep_exclude`, `atlas.sweep_hours` (24). Ionomos' own log folder and
+    inbox are not searched; a run with no `psm.tsv`, an earlier attempt in an Ionomos experiment folder and a
+    workflow whose probe row is turned off are left.
+  - `ionomos atlas sweep [--dry-run] [--root DIR] [--json]`; **Search now** on the Folders tab; `ionomos atlas
+    status` says how the last pass went; runs left to a person raise one `atlas_sweep_problem` item.
+  - The atlas side (Nomura-Lab `atlas_intake.py`) must learn item 7's record name and `found` block; until then it
+    ignores the records and nothing is counted wrongly.
+
 ### Changed
 
 - **The cysteine atlas hand-off carries TMT searches, the sample design and the decoys** (D127, docs/ATLAS.md,
   contract `ionomos-atlas-handoff/2`), for the lab's engagement model trained on competition runs and for a decoy
-  check of FragPipe's results. `harvest_fragpipe.ps1` (Nomura-Lab) takes the same files by the same rule.
+  check of FragPipe's results. The atlas side's reader of `/2` (Nomura-Lab `atlas_intake.py`) is still to be written;
+  until then `/2` records wait in Dropbox, uncounted.
   - **Also TMT searches** on the Folders tab puts the lab's FragPipe TMT methods in `atlas.methods` (isoDTB stays
     the default). The runs CSV's `ProbeClass` is the method's kind; the atlas stores TMT runs and counts nothing
     from them.

@@ -396,6 +396,15 @@ before the hand-off was turned on, or one to send again (it is never counted
 twice). On the command line: `ionomos atlas send <job>`,
 `ionomos atlas status`, `ionomos atlas check`.
 
+Searches Ionomos did not run go too, with **Also search this PC's drives**:
+once a day, while no search is running, Ionomos looks through every fixed
+drive of the PC for FragPipe results (as the harvest script does) and hands
+each isoDTB run (and TMT run, with **Also TMT searches**) to the atlas the same
+way, with its decoys and sample design, by its owner's folder name. A run is
+sent once; it is sent again only when its files change. **Search now** starts
+a pass over the drives at once; `ionomos atlas sweep --dry-run` shows what it
+would send without copying anything.
+
 When the atlas publishes its site list back into that folder, an isoDTB
 report shows, for each human cysteine site, its atlas tier, how many atlas
 experiments saw it, and whether it is new to the atlas. These are the lab's

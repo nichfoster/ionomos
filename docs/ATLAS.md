@@ -14,11 +14,20 @@ below, word for word; the Nomura-Lab side is built in that repository.
 Since 2026-10-21 (D127, contract `/2`) the hand-off also carries what a model of cysteine engagement trained on the
 lab's competition runs needs, and what a decoy check of FragPipe's results needs: TMT searches (one switch; the atlas
 stores them and counts nothing from them), each run's sample design (`experiment.yaml`, the annotation files) and
-its decoys (each replicate's `.pin`, gzip-compressed). `harvest_fragpipe.ps1` takes the same files by the same rule.
+its decoys (each replicate's `.pin`, gzip-compressed). **Not on the atlas side yet** (checked 2026-10-26 on Nomura-Lab
+main): `atlas_intake.py` still reads only `/1` and `harvest_fragpipe.ps1` still takes no `.pin` or design file; the
+receiver for `/2` (and item 7) is being written in that repository. Until it is, `/2` records wait in Dropbox,
+uncounted.
+
+Since 2026-10-26 (D128) Ionomos also does what a person did with `harvest_fragpipe.ps1`: the **drive sweep** searches
+the PC's drives once a day for the FragPipe runs Ionomos did not search (the years of runs on `D:\<user>\` and in
+`C:\Fragpipe_General`) and hands each isoDTB run, and each TMT run with the TMT switch on, to the atlas the same way,
+decoys and sample design included ([The drive sweep](#the-drive-sweep), contract item 7).
 
 Decisions: D120 (the contract and the settings), D121 (when a job is handed off), D122 (how files are copied),
 D123 (the command line), D124 (atlas context in the report), D125 (the app), D127 (TMT, the sample design and the
-decoys: contract `/2`). Code: `ionomos/src/ionomos/atlas.py`, `ionomos/src/ionomos/downstream/atlasctx.py`.
+decoys: contract `/2`), D128 (the drive sweep). Code: `ionomos/src/ionomos/atlas.py`,
+`ionomos/src/ionomos/atlassweep.py`, `ionomos/src/ionomos/downstream/atlasctx.py`.
 
 ## The contract: "ionomos-atlas-handoff/2"
 
@@ -48,11 +57,18 @@ Both sides implement exactly this.
    - Then: IonomosJob, IonomosUser, IonomosExperiment, IonomosMethod, IonomosVersion, HandoffSha256 (the SHA-256 of `ionomos-handoff.json`).
    - Run = the FragPipe output folder's absolute Windows path on the PC. Owner = the Ionomos user folder name. ProbeClass = the method's kind, `isoDTB` or `TMT`. FilesSelected and MBSelected count the `.pin` files (at their size before compression) and the sample design; FilesTooLarge counts what either cap left.
    - The atlas counts sites from `isoDTB` runs only. A `TMT` run is verified and stored with its design and decoys; no counting rule reads it.
-5. **Re-sending.** Re-sending a job (Retry or re-run) writes a new record. The atlas side keys a run by Run + HandoffSha256 and never double-counts. The atlas side accepts `/1` records as before.
+5. **Re-sending.** Re-sending a job (Retry or re-run) writes a new record. The atlas side keys a run by Run + HandoffSha256 and never double-counts. The atlas side is to accept `/1` records as before.
 6. **Return path.** The atlas side publishes `<dest>\_atlas\atlas_sites_lookup.tsv` and `atlas_sites_lookup.json`.
    - TSV columns: accession, site (1-based position of the C in the canonical UniProt sequence), tier (high/medium/low by Dan's spectra rule of 2026-10-14), experiments, spectra, qc_suspect (0/1). Human only, sorted by accession then site.
    - JSON: contract `ionomos-atlas-lookup/1`, atlas_sha256, built, rule, sources, set, rows, quotable (bool).
    - Ionomos reads it read-only and only if it is present. A malformed file is ignored with a note.
+7. **A run Ionomos found on the drives** (D128: not an Ionomos job; the drive sweep). Items 1-5 hold, with these differences.
+   - It goes when harvest's reading of its workflow's modification masses is exactly `isoDTB`, or exactly `TMT` while `atlas.methods` names a TMT method. ProbeClass and `probe_class` are that reading.
+   - Its experiment folder (for `experiment.yaml` and `experiment_annotation.tsv`) is harvest's: the run folder's parent when it holds `experiment.yaml` or an Ionomos status file.
+   - `ionomos-handoff.json` has `found` in place of `job`: owner, experiment, experiment_folder, FragPipe version, workflow, FASTA, raw files, replicate plan, last_modified, probe_class_by_masses, Ionomos version. It holds no send time either.
+   - The CSV is `<dest>\_harvest-logs\runs-ionomos-<YYYYMMDD-HHMMSS>-found-<run id>.csv`; `<run id>` is the first 12 hex of the SHA-256 of Run in lower case. Same columns. Owner and IonomosUser = harvest's Get-OwnerGuess of Run; IonomosExperiment = `found.experiment`; IonomosJob and IonomosMethod are empty.
+   - The atlas side keys it by Run + HandoffSha256, as an Ionomos job's. A run harvest copied earlier has the same Run: its files are there already (skipped, by item 3), and the atlas side's same-inputs rule keeps it from being counted twice.
+   - A receiver that doesn't know item 7 yet ignores the record (its name matches neither `runs-<time>.csv` nor `runs-ionomos-<time>-job<N>.csv`). The files wait in Dropbox; nothing is counted wrongly.
 
 ### What the contract leaves open, as Ionomos does it
 
@@ -103,6 +119,20 @@ Both sides implement exactly this.
             "probe_class_by_masses": "isoDTB", "ionomos_version": "0.18.1"}
   }
   ```
+
+  A run the drive sweep found has, in place of `job` (item 7):
+
+  ```json
+    "found": {"owner": "EJQ", "experiment": "2025-03-04_isoDTB_EJQ-1-100",
+              "experiment_folder": "D:\\EJQ\\2025-03-04_isoDTB_EJQ-1-100", "fragpipe_version": "22.0",
+              "workflow": "D:\\EJQ\\2025-03-04_isoDTB_EJQ-1-100\\fragpipe\\fragpipe.workflow", "fasta": "…",
+              "raw_files": ["…\\S_1.raw"], "replicate_plan": [{"raw": "…", "experiment": "exp_1", "bioreplicate": "",
+              "data_type": "DDA"}], "last_modified": "2025-03-05T09:12:44", "probe_class_by_masses": "isoDTB",
+              "ionomos_version": "0.19.0"}
+  ```
+
+  `experiment` is the experiment folder's name, else the run folder's; `experiment_folder` is "" when harvest's
+  rule finds none.
 
   `files[].path` is relative to the run folder, with `/`, sorted; the record is not in its own list.
   `replicate_plan` is the rows of the run's `fragpipe-files.fp-manifest`. `probe_class_by_masses` is harvest's
@@ -158,7 +188,9 @@ send              lock <log_dir>\atlas-send-job<N>.lock (one process per job at 
 | `conflict` | a different file is already at the destination | waits for a person (below) |
 
 Older searches are not sent when the hand-off is turned on: the atlas side already has what `harvest_fragpipe.ps1`
-copied, and sending a year of runs at once is a decision for a person. **Send to atlas** sends any done job.
+copied, and sending a year of runs at once is a decision for a person. **Send to atlas** sends any done job. Turning
+the drive sweep on is that decision (D128): its first pass queues every done Ionomos job of `atlas.methods` that has
+no hand-off yet, and hands off every other run on the drives.
 
 **A conflict** means the Dropbox folder already holds a different copy of one of the run's files: a copy someone
 edited, or an earlier search harvested from the same folder. Ionomos never overwrites it. The attention item names
@@ -173,6 +205,105 @@ copy (`experiment.<sha12>.yaml`); the record names the one this send used.
 `ionomos.json`. Nothing at the destination is deleted, and nothing outside `<dest>` is written except that
 `ionomos.json` block and the lock file in Ionomos' log folder.
 
+## The drive sweep
+
+The runs the lab searched before Ionomos, or searched by hand in FragPipe, are on the PC's drives: about 380 runs
+with 4,642 `.pin` files in the harvest inventory of 2026-10-12. `harvest_fragpipe.ps1` copied their result files,
+but not their decoys or sample design, and only when a person ran it. With `atlas.sweep` on, Ionomos does it by
+itself (`atlassweep.py`, D128):
+
+```
+atlas-sweep thread   SweepLoop, in the watcher (cli.cmd_run), every minute: is a pass due? (atlas.enabled and a
+  │                  folder; atlas.sweep on and the last pass atlas.sweep_hours old, or stopped 10 minutes ago;
+  │                  or Search now in the app). Never while Ionomos is searching. Windows: background priority
+  ▼
+walk                 harvest's pass 1, read only: every fixed drive (or atlas.sweep_roots), harvest's skipped names
+  │                  (Windows, AppData, MSBooster, tmp, ...), no junctions or links; the atlas folder, the Dropbox
+  │                  folders (and any folder holding Dropbox's .dropbox marker), Ionomos' log folder (its FragPipe
+  │                  preflights are dry runs of real workflows) and inbox, and atlas.sweep_exclude left out. A run folder holds a run marker (fragpipe.workflow,
+  │                  the manifest, fragpipe.job, a combined_*.tsv), or psm.tsv with no run folder one or two above
+  ▼
+each run             in an Ionomos experiment folder only its latest search: a ledger job's → the job's hand-off
+  │                  (queued if it has none); an earlier attempt (fragpipe_previous_<time>) → left
+  │                  probe class by the workflow's masses, of the modifications turned on, not isoDTB (or TMT with
+  │                  the switch) → left, with why; no psm.tsv (a dry run) or the test bed's fake FragPipe → left
+  │                  a file made or changed in the last hour (Windows: its creation time too, which a copy sets)
+  │                  → waits for the next pass
+  │                  sent before, same files (names, sizes, times) → unchanged: not read again
+  │                  the atlas folder's drive would fall below atlas.min_free_gb → nothing copied, the pass stops
+  ▼
+atlas.transfer       as a job's hand-off: compare, copy through .partial, verify, ionomos-handoff.json with `found`,
+                     runs-ionomos-<time>-found-<run id>.csv renamed into place last
+                     <log_dir>\atlas-sweep.json: what each run came to; attention item atlas_sweep_problem when a
+                     run couldn't go or the pass stopped, closed by a pass with nothing left to a person
+```
+
+| What a run came to | Why | What happens next |
+|---|---|---|
+| `sent` | every file verified, record and CSV written | nothing, until its files change: then it is sent again (a new record; only the new files are copied) |
+| `unchanged` | sent before, the same files since | nothing |
+| `job` | the run of an Ionomos job | the job's hand-off (atlas.py) sends it, with its job record |
+| `left` | not for the atlas: probe class isoTOP, other or unknown (no workflow), TMT with the switch off, a probe row turned off, no `psm.tsv`, another method's job, an earlier attempt in an Ionomos experiment folder, the test bed's fake run | nothing |
+| `waiting` | a file made or changed in the last hour, or its Ionomos experiment folder is still being searched | the next pass |
+| `failed` | it couldn't be listed or copied (Dropbox offline) | the next pass tries again |
+| `conflict` | a different copy of one of its files is already in Dropbox (usually harvest's copy of a folder that changed since) | waits for a person: move the old copy aside, then **Search now** or `ionomos atlas sweep` (a pass a person asks for tries conflicts again; the daily pass doesn't) |
+
+- **The first pass is long**: the walk lists every folder of every fixed drive (harvest took 10-30 minutes), and
+  every run's files are compared with what harvest copied (read and hashed both sides), the `.pin` files
+  compressed: about 8 GiB more in Dropbox (D127). It runs at background priority and stops between two runs
+  when a search starts (the walk itself goes on: it only lists folders); the next pass, 10 minutes after Ionomos
+  is idle again, reuses the walk and skips what was sent. A pass that stopped for a cause (Dropbox gone, the
+  drive full, a bug) is tried again after an hour and raises the attention item; one that stopped for a search
+  or a restart does neither. Later passes read only what changed.
+- **Free space**: the Dropbox folder is on `C:`, where FragPipe writes. Nothing of a run is copied when its copy
+  would leave less than `atlas.min_free_gb` (40 GB; FragPipe holds a search below `fragpipe.min_free_gb`, 20) on
+  that drive: the pass stops and says so in the attention list, and a job's hand-off fails and is tried again
+  later, as when Dropbox is offline.
+- **Only reads**: nothing on the drives is written, moved or renamed. Outside `<dest>` the sweep writes Ionomos'
+  own `atlas-sweep.json` (and its lock) in the log folder, and, when it queues a done Ionomos job, that job's
+  `atlas` block in its `ionomos.json`, as the worker does. Deleting `atlas-sweep.json` is safe: the next pass
+  compares every run with the destination again and copies nothing twice.
+- **Locks**: a pass's lock (`atlas-sweep.lock`, and a job's `atlas-send-job<N>.lock`) names its process; one left
+  by a process that is gone (Ionomos restarted mid-copy) is taken over at once, not after 6 hours.
+- `ionomos atlas sweep --dry-run` (also while the hand-off is off) lists what a pass would send, by probe class
+  and owner, and how many files and MB are not in Dropbox yet (by name and size: it reads no content); it writes
+  nothing anywhere.
+
+### The first run on the lab PC
+
+What to do at the PC, in order (`ionomos-cli.exe` is `C:\Ionomos\ionomos-cli.exe`, in PowerShell). Nothing here
+deletes, moves or overwrites anything; each step can be stopped and done again.
+
+1. **Install 0.20.0 or later** (the installer from the GitHub release, or the app's update check), then restart
+   the app and the watcher.
+2. **Set the folder and the switches, not the sweep yet.** Folders tab → Cysteine atlas: **Use** the Dropbox
+   folder Ionomos found (`…\Nicholas Foster Data\fragpipe-runs`), tick **Also TMT searches**, leave **Also search
+   this PC's drives** off, **Save**. Then `ionomos-cli.exe atlas check`: every line ✓ (the folder there and
+   writable; the site lookup may be missing). Ticking the hand-off itself is not needed for the dry run.
+3. **Dry run** (10-30 minutes: it lists every folder of C: and D:; it copies and writes nothing):
+   ```powershell
+   C:\Ionomos\ionomos-cli.exe atlas sweep --dry-run
+   C:\Ionomos\ionomos-cli.exe atlas sweep --dry-run --json > C:\Fragpipe_Auto\logs\atlas-sweep-dry-run.json
+   ```
+   The first prints the runs that would go by probe class and owner, and why the others are left; the second has
+   every run with its path, owner, probe class, FragPipe version, modification tables (which TMT, which probe on
+   C), `.pin` and annotation counts, and the MB not in Dropbox yet. Copy the JSON into `Nicholas Foster Data\`
+   in Dropbox (not into `fragpipe-runs`) for the atlas side. Check: about 380 runs in all (harvest's inventory of
+   2026-10-12), isoDTB and TMT ones under the owners you expect, and `C:`'s free space above 40 GB plus about
+   8 GB (the `.pin.gz`).
+4. **One folder first, by hand**, an owner with TMT competition runs (the hand-off on: tick it, **Save**):
+   ```powershell
+   C:\Ionomos\ionomos-cli.exe atlas sweep --root "D:\<owner>"
+   ```
+   It prints each run it sends. In Dropbox, under `fragpipe-runs\D\<owner>\…\`, a sent TMT run has its
+   `psm.tsv` files, its `*.pin.gz`, `ionomos-handoff.json` (`probe_class` TMT, `found`, `design` naming each
+   plex's `annotation.txt`), and `_harvest-logs\runs-ionomos-<time>-found-<id>.csv`. A conflict means harvest's
+   copy of that run differs: leave it for the person who keeps the atlas.
+5. **Then the rest, in the background**: tick **Also search this PC's drives every day**, **Save**, **Search
+   now**. The watcher does the first pass at background priority and pauses for each search; the Folders tab's
+   line, `ionomos-cli.exe atlas status` and the attention list say how far it got and what was left. Runs found
+   but not counted yet: the atlas side reads them once it knows contract item 7.
+
 ## Settings
 
 ```yaml
@@ -183,6 +314,11 @@ atlas:   # hand finished isoDTB (and TMT) searches to the lab's cysteine atlas. 
   pin_max_mb: 100      # each .pin (the decoys) goes gzip-compressed if no larger than this many MB; 0 = none
   max_tries: 10        # a hand-off that keeps failing (Dropbox offline) stops after this many tries
   retry_minutes: 15    # the first wait before trying again; it doubles, up to 12 hours
+  sweep: false         # also search this PC's drives for FragPipe runs Ionomos did not search (D128)
+  sweep_roots: []      # the folders searched; [] = every fixed drive
+  sweep_exclude: []    # folders never searched (the atlas and Dropbox folders never are)
+  sweep_hours: 24      # a search every this many hours, never while a search runs
+  min_free_gb: 40      # copying to the atlas folder (a job's hand-off, the sweep) stops before its drive has less free
 ```
 
 - `handoff_dir` may have spaces: FragPipe never sees it. It must be a full path (`C:\…` or `\\server\share\…`).
@@ -196,6 +332,11 @@ atlas:   # hand finished isoDTB (and TMT) searches to the lab's cysteine atlas. 
   `[isoDTB]`).
 - `pin_max_mb` is a whole number from 0 to 4096, in MiB before compression, like harvest's `-MaxPinMB`; 0 sends no
   `.pin` at all.
+- `sweep_roots` and `sweep_exclude` are lists of full folder paths (spaces are fine: they are only read). With no
+  `sweep_roots`, every fixed drive (Windows' DRIVE_FIXED, as harvest's Win32_LogicalDisk DriveType 3): the lab
+  PC's `C:` and its USB archive disk `D:`, not its flash drive. `sweep_hours` is a number from 1 to 720,
+  `min_free_gb` from 0 (0 = no floor), for a job's hand-off as for the sweep. The sweep needs `enabled` and `handoff_dir`; **Search now** and `ionomos atlas
+  sweep` work while `sweep` is off.
 - The watcher reads `atlas:` again on every pass, so turning the hand-off on or off in the app counts without a
   restart.
 
@@ -205,7 +346,11 @@ atlas:   # hand finished isoDTB (and TMT) searches to the lab's cysteine atlas. 
 and every file that differs; 2 the hand-off is off or has no folder). `ionomos atlas status [JOB_ID] [--json]`
 lists each finished atlas job and where its hand-off stands. `ionomos atlas check [--no-write]` checks that the
 hand-off is on, the folder is set, there and writable (it makes and removes one small test file), and that the
-atlas's site lookup is there and reads; exit 1 when something is wrong. Exit codes follow D102.
+atlas's site lookup is there and reads; exit 1 when something is wrong. `ionomos atlas sweep [--dry-run] [--root
+DIR]... [--json]` runs a pass of the drive sweep now, in the terminal (conflicts are tried again; `--root` searches
+those folders instead; exit 0 went through; 1 a run not sent, or the pass stopped; 2 the hand-off is off or has no
+folder, or there is nothing to search). `ionomos atlas status` ends with a line for the last pass. Exit codes
+follow D102.
 
 ## In the app
 
@@ -216,6 +361,9 @@ atlas's site lookup is there and reads; exit 1 when something is wrong. Exit cod
   (D127) is on while `atlas.methods` names one of the lab's FragPipe TMT methods; ticking it adds every such method
   (`atlas.methods_of_kind`), clearing it takes them out. **Save** writes `enabled`, `handoff_dir` and that change
   of `methods`, and keeps the other `atlas:` keys (and the other names in `methods`) as the file has them.
+  **Also search this PC's drives every day** is `atlas.sweep` (D128); **Search now** asks the watcher for a pass at
+  once (`atlas-sweep-now` in the log folder; the saved settings only), and the line under it says how the last one
+  went (read off the window's thread when the tab is shown).
 - **Jobs tab**: an **atlas** column with each isoDTB (or TMT) job's hand-off state (`atlas.describe`), shown while the
   hand-off is on or a listed job has a hand-off; the detail pane says the same, with the first files that differ
   after a conflict. **Send to atlas** sends the selected done job now; a job not done, the hand-off off or a folder
@@ -224,7 +372,8 @@ atlas's site lookup is there and reads; exit 1 when something is wrong. Exit cod
   folder; warning: the folder can't be reached or the lookup is malformed; problem: the settings don't load), with
   **Fix** to the folder field.
 - **Attention list**: a failed hand-off is an item without a pop-up window; its window (opened from the list) has
-  **Send to atlas** and **More help** ([help](../ionomos/src/ionomos/help/troubleshooting.md)).
+  **Send to atlas** and **More help** ([help](../ionomos/src/ionomos/help/troubleshooting.md)). A pass of the drive
+  sweep that left runs to a person, or stopped, is one item `atlas_sweep_problem` (no pop-up), with each run and why.
 
 Sending runs off the window's thread (`App.run_bg`), and so does the Dropbox search (once, when the Folders tab is
 first shown). The atlas column reads each done atlas job's `ionomos.json` on a background thread, again only when
@@ -243,4 +392,4 @@ in the report changes; a malformed lookup is ignored and the report says so in i
 
 See [ROADMAP.md](ROADMAP.md) ("The cysteine atlas hand-off"): whether the lab PC's Dropbox client is signed in to
 the lab Dropbox and syncs `Nicholas Foster Data`, whether the Windows account the watcher runs as can write there,
-and who decides a conflict.
+and who decides a conflict; for the drive sweep, that the atlas side reads item 7's records.

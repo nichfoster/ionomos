@@ -206,6 +206,9 @@ UI_STATE_FILE = "ionomos-ui.json"
 ATLAS_HANDOFF_FILE = "ionomos-handoff.json"
 ATLAS_LOG_DIR = "_harvest-logs"
 ATLAS_RUNS_CSV = "runs-ionomos-{stamp}-job{job}.csv"
+# a run the drive sweep found on the PC's disks, not an Ionomos job (atlassweep.py, D128); run: 12 hex of the
+# SHA-256 of its folder's path
+ATLAS_FOUND_CSV = "runs-ionomos-{stamp}-found-{run}.csv"
 ATLAS_RETURN_DIR = "_atlas"
 ATLAS_LOOKUP_TSV = "atlas_sites_lookup.tsv"
 ATLAS_LOOKUP_JSON = "atlas_sites_lookup.json"
@@ -214,3 +217,9 @@ ATLAS_GZIP_SUFFIX = ".gz"
 # In log_dir while one process hands a job to the atlas (the watcher's thread, the app, `ionomos atlas send`), so two
 # never copy the same run at once; removed when it ends (one older than 6 hours is taken over).
 ATLAS_SEND_LOCK = "atlas-send-job{job}.lock"
+# The drive sweep (atlassweep.py, D128), in log_dir: what it found and sent (one JSON file, written atomically; delete
+# it and the next pass compares every run with the destination again, copying nothing twice), its lock (one pass at a
+# time), and the request the app writes for a pass now (the watcher's thread takes it).
+ATLAS_SWEEP_STATE = "atlas-sweep.json"
+ATLAS_SWEEP_LOCK = "atlas-sweep.lock"
+ATLAS_SWEEP_NOW = "atlas-sweep-now"

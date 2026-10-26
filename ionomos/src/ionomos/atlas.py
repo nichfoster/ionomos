@@ -5,6 +5,7 @@ The hand-off to the lab's cysteine atlas (docs/ATLAS.md, D120-D125, D127), contr
     design = design_files(exp_dir, rows)      # ... and from beside it: experiment.yaml, the annotation files
     destination(src, root)                    # where harvest's Get-RelativeDestination puts a file or folder
     res = send(cfg, job)                      # copy + verify + completion record; returns a Result, never raises
+    transfer(run_dir, exp_dir, root, kind)    # the same for any run folder (a job's, or one the drive sweep found)
     mark_pending(cfg, job)                    # a finished search goes on the list (the worker, after a job)
     state(dest)                               # the `atlas` block of an experiment's ionomos.json ({} = never)
     HandoffLoop(get_cfg).run_forever()        # the watcher's thread: hands off what is due, with a back-off
@@ -24,7 +25,8 @@ The rules, from CLAUDE.md and the contract:
     renamed last: its presence means the copy is complete
 
 Nothing here needs Tk or the network. The destination is a folder the Dropbox client syncs; when it is offline or
-missing the hand-off waits and is tried again (HandoffLoop), up to atlas.max_tries times.
+missing the hand-off waits and is tried again (HandoffLoop), up to atlas.max_tries times. The runs on the PC's
+drives that Ionomos did not search reach the atlas by the drive sweep (atlassweep.py, D128), through `transfer`.
 """
 from __future__ import annotations
 
@@ -58,7 +60,12 @@ KINDS = ("isoDTB", "TMT")
 MAX_PIN_MB = 100  # a .pin larger than this many MiB (before compression) stays behind; the PC's largest is 57
 
 DEFAULTS = {"enabled": False, "handoff_dir": "", "methods": ["isoDTB"], "pin_max_mb": MAX_PIN_MB, "max_tries": 10,
-            "retry_minutes": 15}
+            "retry_minutes": 15,
+            # the drive sweep (atlassweep.py, D128): the PC's FragPipe runs that Ionomos did not search. Off by
+            # default; sweep_roots [] = every fixed drive, as harvest_fragpipe.ps1 searches
+            "sweep": False, "sweep_roots": [], "sweep_exclude": [], "sweep_hours": 24,
+            # copying to the atlas folder stops before its drive (the lab PC's C:, FragPipe's) has less free than this
+            "min_free_gb": 40}
 MAX_RETRY_HOURS = 12  # the back-off doubles from retry_minutes up to this
 
 # ------------------------------------------------------------ the selection rule (harvest_fragpipe.ps1) --
@@ -112,7 +119,7 @@ class AtlasError(ValueError):
 def settings_from(raw) -> dict:
     """The `atlas:` block of config.yaml, checked; {} / None = the defaults (off). handoff_dir may hold spaces (it
     is the lab's Dropbox folder and FragPipe never sees it) but has no default, so no default path has one."""
-    out = dict(DEFAULTS, methods=list(DEFAULTS["methods"]))
+    out = dict(DEFAULTS, methods=list(DEFAULTS["methods"]), sweep_roots=[], sweep_exclude=[])
     if raw is None:
         return out
     if not isinstance(raw, dict):
@@ -141,8 +148,26 @@ def settings_from(raw) -> dict:
         if not isinstance(v, (list, tuple)) or not all(isinstance(x, str) and x.strip() for x in v):
             raise AtlasError("methods must be a list of method names, e.g. [isoDTB]")
         out["methods"] = [x.strip() for x in v]
+    v = raw.get("sweep")
+    if v is not None:
+        if not isinstance(v, bool):
+            raise AtlasError("sweep must be true or false (without quotes)")
+        out["sweep"] = v
+    for k in ("sweep_roots", "sweep_exclude"):  # only read, never written: spaces are fine
+        v = raw.get(k)
+        if v is None:
+            continue
+        if isinstance(v, str):
+            v = [v]
+        if not isinstance(v, (list, tuple)) or not all(isinstance(x, str) and x.strip() for x in v):
+            raise AtlasError(f"{k} must be a list of folders, e.g. ['D:\\'] (in quotes)")
+        bad_p = [x for x in v if not _absolute(x.strip())]
+        if bad_p:
+            raise AtlasError(f"{k} must hold full folder paths (C:\\... or \\\\server\\share\\...), not {bad_p[0]!r}")
+        out[k] = [x.strip() for x in v]
     for k, lo, hi, kind in (("pin_max_mb", 0, 4096, int), ("max_tries", 1, 100, int),
-                            ("retry_minutes", 1, 24 * 60, float)):
+                            ("retry_minutes", 1, 24 * 60, float), ("sweep_hours", 1, 24 * 30, float),
+                            ("min_free_gb", 0, 100000, float)):
         v = raw.get(k)
         if v is None:
             continue
@@ -273,6 +298,7 @@ class Picked:
     reason: str        # selected | selected (gzip) | not needed | never-copy pattern | larger than 500 MB | ...
     gzip: bool = False  # copied gzip-compressed, as <rel>.gz (a .pin)
     kind: str = ""     # design: experiment.yaml | experiment_annotation.tsv | annotation.txt
+    born: float = 0.0  # Windows: when the file was made here (a copy keeps the modified time, not this); 0 elsewhere
 
     @property
     def dest_rel(self) -> str:
@@ -281,6 +307,14 @@ class Picked:
 
 def _is_pin(name: str) -> bool:
     return _like(name, PIN_ALLOW)
+
+
+def _born(st) -> float:
+    """A file's creation time on Windows (st_birthtime from 3.12, st_ctime before); 0 elsewhere (st_ctime is the
+    inode's change time there)."""
+    if os.name != "nt":
+        return 0.0
+    return float(getattr(st, "st_birthtime", None) or st.st_ctime)
 
 
 def select(run_dir: Path, max_mb: int | None = None, pin_max_mb: int | None = None) -> list[Picked]:
@@ -334,7 +368,7 @@ def select(run_dir: Path, max_mb: int | None = None, pin_max_mb: int | None = No
             if take:
                 reason = "selected"
         out.append(Picked(run_dir / Path(*rel.split("/")), rel, level, st.st_size, st.st_mtime, take,
-                          reason or "not needed", gzip=gz and take))
+                          reason or "not needed", gzip=gz and take, born=_born(st)))
     return out
 
 
@@ -346,7 +380,7 @@ def experiment_folder(run_dir: Path) -> Path | None:
     status file (Ionomos puts FragPipe's output in <experiment>/fragpipe; experiment.yaml is there only once someone
     saved an analysis choice). A hand-off knows its job's folder and uses that."""
     parent = Path(run_dir).parent
-    return parent if any((parent / m).is_file() for m in EXPERIMENT_MARKERS) else None
+    return parent if any(os.path.isfile(_fs(parent / m)) for m in EXPERIMENT_MARKERS) else None
 
 
 def design_files(exp_dir: Path | None, manifest_rows: list[dict], max_mb: int | None = None) -> list[Picked]:
@@ -394,7 +428,8 @@ def design_files(exp_dir: Path | None, manifest_rows: list[dict], max_mb: int | 
 def is_run_folder(run_dir: Path) -> bool:
     """harvest's test: the folder holds one of RUN_MARKERS (or a psm.tsv)."""
     try:
-        have = {p.name for p in Path(run_dir).iterdir() if p.is_file()}
+        with os.scandir(_fs(run_dir)) as it:
+            have = {e.name for e in it if e.is_file()}
     except OSError:
         return False
     return bool(have & set(RUN_MARKERS)) or "psm.tsv" in {h.lower() for h in have}
@@ -468,11 +503,17 @@ def read_workflow_info(path: Path) -> dict:
                 info[key] = m.group(1) if key == "Version" else m.group(1).strip()
                 break
     info["Database"] = re.sub(r"\\([:\\])", r"\1", info["Database"])
-    mods = info["VarMods"] + " " + info["FixMods"]
-    classes = [c for c, pat in (("isoDTB", r"561\.33|567\.34"), ("isoTOP", r"464\.28|470\.29"),
-                                ("TMT", r"229\.16|304\.20|304\.21")) if re.search(pat, mods)]
-    info["ProbeClass"] = "+".join(classes or ["other"])
+    info["ProbeClass"] = probe_class(info["VarMods"] + " " + info["FixMods"])
     return info
+
+
+# harvest's $ProbeMasses: the modification masses that say which probe (or label) a search looked for
+PROBE_MASSES = (("isoDTB", r"561\.33|567\.34"), ("isoTOP", r"464\.28|470\.29"), ("TMT", r"229\.16|304\.20|304\.21"))
+
+
+def probe_class(mods: str) -> str:
+    """harvest's probe class of a workflow's modification tables: isoDTB, isoTOP, TMT (several joined by +), other."""
+    return "+".join([c for c, pat in PROBE_MASSES if re.search(pat, mods)] or ["other"])
 
 
 def read_manifest_info(path: Path) -> dict:
@@ -641,6 +682,7 @@ class Result:
     too_large: list[str] = field(default_factory=list)
     pins: int = 0                            # .pin files at the destination, gzip-compressed
     design: int = 0                          # sample-design files at the destination
+    low_space: bool = False                  # not copied: the destination's drive is below atlas.min_free_gb
 
 
 def _sha256(path: str | Path) -> str:
@@ -690,6 +732,15 @@ def _copy_verified(src: Path, dst: Path) -> str:
     os.utime(_fs(part), ns=(after.st_atime_ns, after.st_mtime_ns))
     _rename_new(part, dst)
     return sha
+
+
+def _free_bytes(path: Path) -> int | None:
+    try:
+        import shutil
+
+        return shutil.disk_usage(_fs(path)).free
+    except OSError:
+        return None
 
 
 def gunzip_sha256(path: str | Path) -> tuple[str, int]:
@@ -804,13 +855,50 @@ def summary(job, run_dir: Path, manifest: dict, wf: dict) -> dict:
     }
 
 
-def _stamp_name(log_dir: Path, job_id) -> Path:
-    """runs-ionomos-<YYYYMMDD-HHMMSS>-job<N>.csv that isn't there yet (a second send in the same second takes the
-    next second's name)."""
+def found_summary(run_dir: Path, exp_dir: Path | None, owner: str, manifest: dict, wf: dict,
+                  last_modified: str) -> dict:
+    """The `found` part of ionomos-handoff.json for a run the drive sweep found (D128): where it is and how it was
+    searched, as harvest reads it. Like `job`, no send time: the same files give the same record."""
+    run_dir = Path(run_dir)
+    wf_path = run_dir / "fragpipe.workflow"
+    return {
+        "owner": owner,
+        "experiment": Path(exp_dir).name if exp_dir is not None else run_dir.name,
+        "experiment_folder": windows_path(exp_dir) if exp_dir is not None else "",
+        "fragpipe_version": wf.get("Version") or "",
+        "workflow": windows_path(wf_path) if wf_path.is_file() else "",
+        "fasta": wf.get("Database") or "",
+        "raw_files": [r["raw"] for r in manifest["rows"] if r["raw"]],
+        "replicate_plan": manifest["rows"],
+        "last_modified": last_modified,
+        "probe_class_by_masses": wf.get("ProbeClass") or "",
+        "ionomos_version": __version__,
+    }
+
+
+def run_id(run: str) -> str:
+    """12 hex of the SHA-256 of a run folder's path (without case): the found record's name part (D128)."""
+    return hashlib.sha256(os.path.normcase(_plain(str(run))).lower().encode("utf-8")).hexdigest()[:12]
+
+
+def owner_guess(path: str | Path) -> str:
+    """harvest's Get-OwnerGuess: the folder under Fragpipe_General, else under Users, else the top folder."""
+    parts = [p for p in re.split(r"[\\/]+", _plain(str(path)))]
+    for marker in ("fragpipe_general", "users"):
+        for i in range(len(parts) - 1):
+            if parts[i].lower() == marker:
+                return parts[i + 1]
+    return parts[1] if len(parts) >= 2 else ""
+
+
+def _stamp_name(log_dir: Path, job_id, run: str = "") -> Path:
+    """runs-ionomos-<YYYYMMDD-HHMMSS>-job<N>.csv (no job: -found-<run id>.csv) that isn't there yet (a second send
+    in the same second takes the next second's name)."""
     t = datetime.now()
     for i in range(3600):
-        p = log_dir / names.ATLAS_RUNS_CSV.format(stamp=(t + timedelta(seconds=i)).strftime("%Y%m%d-%H%M%S"),
-                                                  job=job_id)
+        stamp = (t + timedelta(seconds=i)).strftime("%Y%m%d-%H%M%S")
+        p = log_dir / (names.ATLAS_RUNS_CSV.format(stamp=stamp, job=job_id) if job_id is not None
+                       else names.ATLAS_FOUND_CSV.format(stamp=stamp, run=run_id(run)))
         if not os.path.lexists(_fs(p)) and not os.path.lexists(_fs(str(p) + names.ATLAS_PARTIAL_SUFFIX)):
             return p
     raise OSError(f"no free record name in {log_dir}")
@@ -830,8 +918,8 @@ class _Lock:
     """One hand-off of a job at a time across processes (the watcher's thread, the app, `ionomos atlas send`):
     <log_dir>/atlas-send-job<N>.lock, made exclusively; one older than LOCK_STALE_S is taken over."""
 
-    def __init__(self, log_dir: Path | None, job_id):
-        self.path = Path(log_dir) / names.ATLAS_SEND_LOCK.format(job=job_id) if log_dir else None
+    def __init__(self, log_dir: Path | None, job_id, name: str = ""):
+        self.path = Path(log_dir) / (name or names.ATLAS_SEND_LOCK.format(job=job_id)) if log_dir else None
         self.held = False
 
     def __enter__(self):
@@ -844,7 +932,7 @@ class _Lock:
                 fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             except FileExistsError:
                 try:
-                    if time.time() - self.path.stat().st_mtime > LOCK_STALE_S:
+                    if time.time() - self.path.stat().st_mtime > LOCK_STALE_S or self._dead():
                         self.path.unlink(missing_ok=True)
                         continue
                 except OSError:
@@ -855,6 +943,23 @@ class _Lock:
             self.held = True
             return self
         return self
+
+    def _dead(self) -> bool:
+        """The lock names a process (pid and time) that isn't running, or a later process with its number: Ionomos
+        stopped mid-copy (a restart, a crash), so the lock is taken over without waiting LOCK_STALE_S. A lock that
+        names no readable pid and time is left to the age rule."""
+        from ionomos import health
+
+        try:
+            pid, at = self.path.read_text(encoding="utf-8").split()[:2]
+            when = datetime.fromisoformat(at).timestamp()
+            pid = int(pid)
+        except (OSError, ValueError):
+            return False
+        if pid == os.getpid():
+            return False
+        started = health.process_started(pid)
+        return started is None or started > when + 5
 
     def __exit__(self, *exc):
         if self.held and self.path is not None:
@@ -896,7 +1001,7 @@ def send(cfg, job, trigger: str = "auto", force: bool = False) -> Result:
                 "trigger": trigger}
         _set_state(job.dest_dir, {**base, "state": SENDING, "tries": tries, "last_try": _iso()})
         try:
-            res = _send(cfg, job, Path(s["handoff_dir"]), kind, s["pin_max_mb"])
+            res = _send(cfg, job, Path(s["handoff_dir"]), kind, s["pin_max_mb"], s["min_free_gb"])
         except Exception as exc:  # noqa: BLE001 - a full disk, Dropbox offline, a bug: the job is not touched
             log.exception("job %s: atlas hand-off failed", jid)
             res = Result(jid, FAILED, f"{type(exc).__name__}: {exc}" if not isinstance(exc, OSError) else str(exc))
@@ -904,11 +1009,24 @@ def send(cfg, job, trigger: str = "auto", force: bool = False) -> Result:
     return res
 
 
-def _send(cfg, job, root: Path, kind: str = KINDS[0], pin_max_mb: int = MAX_PIN_MB) -> Result:
-    jid = job.id
-    run_dir = run_folder(job)
+def _send(cfg, job, root: Path, kind: str = KINDS[0], pin_max_mb: int = MAX_PIN_MB,
+          min_free_gb: float = 0) -> Result:
+    return transfer(run_folder(job), Path(job.dest_dir), root, kind, pin_max_mb, job=job, min_free_gb=min_free_gb)
+
+
+def transfer(run_dir: Path, exp_dir: Path | None, root: Path, kind: str = KINDS[0], pin_max_mb: int = MAX_PIN_MB,
+             job=None, owner: str = "", min_free_gb: float = 0) -> Result:
+    """Copy one FragPipe output folder to the atlas destination by harvest's rule, with its sample design (from
+    exp_dir and beside its raw files), every file verified; then its completion record and its one-row runs CSV.
+    job: the Ionomos job it is the search of (the record's `job`, runs-ionomos-<time>-job<N>.csv). None: a run the
+    drive sweep found (atlassweep.py, D128): the record's `found`, runs-ionomos-<time>-found-<run id>.csv, Owner as
+    harvest guesses it (`owner`). Nothing is copied when it would leave the destination's drive with less than
+    min_free_gb free (Result.low_space). Raises OSError when the destination can't be written; the caller records
+    it."""
+    jid = job.id if job is not None else None
+    run_dir = Path(run_dir)
     res = Result(jid, FAILED, "", run_dir=windows_path(run_dir))
-    if not run_dir.is_dir():
+    if not os.path.isdir(_fs(run_dir)):
         res.message = f"the FragPipe output folder {run_dir} is not there"
         return res
     if not is_run_folder(run_dir):
@@ -932,7 +1050,7 @@ def _send(cfg, job, root: Path, kind: str = KINDS[0], pin_max_mb: int = MAX_PIN_
                                                                   "ProbeClass": "unknown", "Enzyme": ""}
     mf = read_manifest_info(mf_path) if mf_path.is_file() else read_manifest_info(Path(os.devnull))
     picks = select(run_dir, pin_max_mb=pin_max_mb)
-    design = [p for p in design_files(Path(job.dest_dir), mf["rows"])
+    design = [p for p in design_files(exp_dir, mf["rows"])
               if not os.path.normcase(windows_path(p.path)).startswith(dst_n.rstrip("\\/") + os.sep)]
     take = [p for p in picks if p.take]
     dtake = [p for p in design if p.take]
@@ -992,6 +1110,14 @@ def _send(cfg, job, root: Path, kind: str = KINDS[0], pin_max_mb: int = MAX_PIN_
         res.message = (f"{len(res.conflicts)} file(s) at the atlas folder differ from this run's; nothing was copied "
                        f"or overwritten. First: {res.conflicts[0]}")
         return res
+    need = sum(p.size * (0.4 if p.gzip else 1) for p, _dst, there in plan if not there)  # a .pin.gz: ~0.34
+    free = _free_bytes(root)
+    if min_free_gb and free is not None and free - need < min_free_gb * 1024 ** 3:
+        res.low_space = True
+        res.message = (f"the atlas folder's drive has {free / 1024 ** 3:,.0f} GB free and this run needs about "
+                       f"{need / 1024 ** 3:,.1f} GB; copying stops above {min_free_gb:g} GB free (atlas.min_free_gb), "
+                       "so FragPipe keeps its room. Nothing was copied")
+        return res
 
     # 2. copy what isn't there, each verified
     files, design_out = [], []
@@ -1019,31 +1145,37 @@ def _send(cfg, job, root: Path, kind: str = KINDS[0], pin_max_mb: int = MAX_PIN_
     res.design = len(design_out)
 
     # 3. the completion record, then the runs CSV (written last, renamed into place: it means "complete")
+    last_modified = _ps_time(max((p.mtime for p in picks), default=None))
     record = {"contract": CONTRACT, "run": res.run_dir, "probe_class": kind,
               "files": sorted(files, key=lambda f: f["path"].lower()),
               "design": sorted(design_out, key=lambda f: f["path"].lower()),
               "left": [{"path": p.rel if p.level != "design" else windows_path(p.path), "size": p.size,
-                        "reason": p.reason} for p in left],
-              "job": summary(job, run_dir, mf, wf)}
+                        "reason": p.reason} for p in left]}
+    if job is not None:
+        record["job"] = about = summary(job, run_dir, mf, wf)
+        who = {"IonomosJob": job.id, "IonomosUser": job.user, "IonomosExperiment": about["experiment"],
+               "IonomosMethod": job.method}
+        owner = job.user
+    else:
+        record["found"] = about = found_summary(run_dir, exp_dir, owner, mf, wf, last_modified)
+        who = {"IonomosJob": "", "IonomosUser": owner, "IonomosExperiment": about["experiment"], "IonomosMethod": ""}
     data = (json.dumps(record, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
     _write_new_or_same(run_dest / names.ATLAS_HANDOFF_FILE, data)
     res.handoff_sha256 = hashlib.sha256(data).hexdigest()
     row = {
-        "Run": res.run_dir, "Owner": job.user, "RunName": Path(res.run_dir).name,
-        "LastModified": _ps_time(max((p.mtime for p in picks), default=None)),
-        "FragPipeVersion": wf.get("Version") or record["job"]["fragpipe_version"], "ProbeClass": kind,
+        "Run": res.run_dir, "Owner": owner, "RunName": Path(res.run_dir).name, "LastModified": last_modified,
+        "FragPipeVersion": wf.get("Version") or about["fragpipe_version"], "ProbeClass": kind,
         "Database": wf.get("Database", ""), "Enzyme": wf.get("Enzyme", ""), "VarMods": wf.get("VarMods", ""),
         "HasWorkflow": str(wf_path.is_file()), "HasManifest": str(mf_path.is_file()),
         "PsmFiles": sum(1 for p in take if Path(p.rel).name.lower() == "psm.tsv"),
         "RawFiles": mf["RawCount"], "RawMissing": mf["RawMissing"], "Experiments": mf["Experiments"],
         "RawPaths": mf["RawPaths"], "FilesSelected": res.files, "MBSelected": _ps_number(res.bytes / 1024 / 1024),
         "FilesTooLarge": len(res.too_large), "Destination": str(run_dest),
-        "IonomosJob": job.id, "IonomosUser": job.user, "IonomosExperiment": record["job"]["experiment"],
-        "IonomosMethod": job.method, "IonomosVersion": __version__, "HandoffSha256": res.handoff_sha256,
+        **who, "IonomosVersion": __version__, "HandoffSha256": res.handoff_sha256,
     }
     logs = root / names.ATLAS_LOG_DIR
     os.makedirs(_fs(logs), exist_ok=True)
-    final = _stamp_name(logs, job.id)
+    final = _stamp_name(logs, jid, run=res.run_dir)
     part = final.with_name(final.name + names.ATLAS_PARTIAL_SUFFIX)
     blob = runs_csv_bytes(row)
     with open(_fs(part), "wb") as fh:
@@ -1321,6 +1453,16 @@ def add_parser(sub):
                                     "and readable (exit 0 all good or off, 1 a problem)")
     ck.add_argument("--no-write", action="store_true",
                     help="don't make and remove a small test file in the destination folder")
+    sw = s.add_parser("sweep", help="search this PC's drives for FragPipe runs Ionomos did not search and hand each "
+                                    "isoDTB (and TMT) run to the atlas, with its decoys and sample design (D128; exit "
+                                    "0 done; 1 runs not sent or the search stopped; 2 the hand-off is off or has no "
+                                    "folder)")
+    sw.add_argument("--dry-run", action="store_true",
+                    help="only say what would be sent: reads the drives, writes nothing anywhere (works while the "
+                         "hand-off is off)")
+    sw.add_argument("--root", action="append", metavar="DIR",
+                    help="search this folder instead of atlas.sweep_roots or every fixed drive (repeat for more)")
+    sw.add_argument("--json", action="store_true", help="print the pass and every run it found as JSON")
     p.set_defaults(fn=run_cli)
     return p
 
@@ -1360,8 +1502,14 @@ def run_cli(args) -> int:
         for f in found:
             print(f"{'✓' if f.ok else '✗'} {f.what}" + (f"\n    ↳ {f.fix}" if f.fix and not f.ok else ""))
         return 0 if all(f.ok for f in found) else 1
+    if args.atlas_cmd == "sweep":
+        from ionomos import atlassweep
+
+        return atlassweep.run_cli(args, cfg)
     if not cfg.database.is_file():
         print("no ledger yet (nothing has been dropped)", file=sys.stderr if args.atlas_cmd == "send" else sys.stdout)
+        if args.atlas_cmd == "status" and args.job_id is None:
+            _print_sweep(cfg, s)
         return 1 if args.atlas_cmd == "send" or args.job_id is not None else 0
     led = Ledger(cfg.database)
     try:
@@ -1391,7 +1539,17 @@ def run_cli(args) -> int:
         print("the atlas hand-off is off (config.yaml atlas.enabled: false)")
     if not jobs:
         print(f"no finished {', '.join(s['methods'])} jobs")
-        return 0
     for j in jobs:
         print(f"{j.id:>4}  {j.method:<7} {j.user:<10} {Path(j.dest_dir).name:<40} {describe(blocks[j.id])}")
+    if args.job_id is None:
+        _print_sweep(cfg, s)
     return 0
+
+
+def _print_sweep(cfg, s: dict) -> None:
+    """`ionomos atlas status`'s line for the drive sweep (D128), when it is on or has run."""
+    from ionomos import atlassweep
+
+    last = atlassweep.last_pass(cfg)
+    if s["sweep"] or last:
+        print(f"drive sweep {'on' if s['sweep'] else 'off'}: {atlassweep.describe_last(last)}")

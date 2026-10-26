@@ -132,6 +132,33 @@ folder was changed: the hand-off only reads it.
 `ionomos atlas check` checks the folder; `ionomos atlas status` lists where
 each search stands. More: [the hand-off](#faq.atlas).
 
+## Runs found on this PC weren't handed to the cysteine atlas {#attention.atlas_sweep_problem}
+
+When the lab has turned on **Also search this PC's drives**, Ionomos looks
+through the PC's disks every day for FragPipe results it did not search
+itself and copies the isoDTB ones (and TMT ones, with **Also TMT searches**)
+into the lab Dropbox folder the atlas reads. This item says some of them did
+not go, or a pass over the drives stopped. Nothing on the drives was changed:
+the sweep only reads them.
+
+- **"a different copy … Ionomos never overwrites it"**: the Dropbox folder
+  already holds a different copy of one of the run's files, usually because
+  the harvest script copied it earlier and the run's folder changed since.
+  The item lists each run. Ask the person who keeps the atlas which copy is
+  right; once they have moved the old one aside, press **Search now** on the
+  **Folders** tab (Cysteine atlas), or run `ionomos atlas sweep`.
+- **"could not be copied"**: Dropbox was offline or a file could not be
+  read. The next pass tries again by itself.
+- **"copying stops above … GB free"**: the drive with the Dropbox folder
+  is nearly full, so the copying stopped before it filled the disk FragPipe
+  needs. Free some space (or let Dropbox upload and make the folder
+  online-only), then **Search now**.
+- **"can't be reached"**: Dropbox isn't running or signed in on this PC.
+
+`ionomos atlas sweep --dry-run` lists what a pass would send, without
+copying anything; `ionomos atlas status` says how the last one went. More:
+[the hand-off](#faq.atlas).
+
 ## The instrument QC standard looks off {#attention.qc_trend}
 
 Your lab's recurring QC standard (a HeLa or K562 run, for example) came

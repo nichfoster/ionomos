@@ -578,6 +578,7 @@ class App:
         self.bv("atlas.enabled").set(at.get("enabled") is True)  # a quoted 'false' is not on (the loader refuses it)
         self.v("atlas.handoff_dir").set(str(at.get("handoff_dir") or ""))
         self.bv("atlas.tmt").set(atlas.sends_kind(d, "TMT"))
+        self.bv("atlas.sweep").set(at.get("sweep") is True)
         self.v("config_path").set(str(self.config_path))
 
     def _collect(self, base: dict | None = None) -> dict:
@@ -616,7 +617,8 @@ class App:
         # the atlas hand-off (Folders tab, D125): its other keys (methods, tries) stay as the file has them. The
         # folder is kept as typed: it is the lab's Dropbox path, spaces and backslashes are fine (FragPipe never sees it)
         d["atlas"] = {**(d["atlas"] if isinstance(d.get("atlas"), dict) else {}),
-                      "enabled": self.bv("atlas.enabled").get(), "handoff_dir": self.v("atlas.handoff_dir").get().strip()}
+                      "enabled": self.bv("atlas.enabled").get(), "handoff_dir": self.v("atlas.handoff_dir").get().strip(),
+                      "sweep": self.bv("atlas.sweep").get()}
         d["methods"] = self.data["methods"]
         # the TMT switch (D127): the lab's FragPipe TMT methods in atlas.methods or out, the others as the file has them
         from ionomos import atlas
@@ -1000,6 +1002,14 @@ class App:
         self.atlas_tmt = ttk.Checkbutton(g, text="Also TMT searches (competition runs: stored with their sample design, "
                                                  "not counted)", variable=self.bv("atlas.tmt"))
         self.atlas_tmt.grid(row=4, column=1, columnspan=3, sticky="w", **PAD)
+        # the drive sweep (D128): the runs on this PC's disks that Ionomos did not search, once a day
+        ttk.Checkbutton(g, text="Also search this PC's drives every day for FragPipe runs Ionomos did not search "
+                                "(with their decoys and sample design)",
+                        variable=self.bv("atlas.sweep")).grid(row=5, column=1, columnspan=2, sticky="w", **PAD)
+        self.atlas_sweep_btn = ttk.Button(g, text="Search now", width=11, command=self.sweep_now)
+        self.atlas_sweep_btn.grid(row=5, column=3, sticky="e", **PAD)
+        self.atlas_sweep_info = ttk.Label(g, text="", foreground="#666", wraplength=620, justify="left")
+        self.atlas_sweep_info.grid(row=6, column=1, columnspan=3, sticky="w", padx=6)
         ttk.Label(g, text="Destination folder").grid(row=1, column=0, sticky="e", **PAD)
         self.atlas_entry = ttk.Entry(g, textvariable=self.v("atlas.handoff_dir"), width=58)
         self.atlas_entry.grid(row=1, column=1, columnspan=2, sticky="ew", **PAD)
@@ -1014,8 +1024,52 @@ class App:
         self._atlas_suggestion: str | None = None  # None: not looked for yet; "": none found
         self._show_atlas_suggestion()
         self.v("atlas.handoff_dir").trace_add("write", lambda *_: self._show_atlas_suggestion())
-        self.nb.bind("<<NotebookTabChanged>>", lambda e: self.look_for_dropbox() if self._current_tab() == "folders"
-                     else None, add="+")
+        self.nb.bind("<<NotebookTabChanged>>", lambda e: (self.look_for_dropbox(), self.show_sweep_info())
+                     if self._current_tab() == "folders" else None, add="+")
+
+    def show_sweep_info(self) -> None:
+        """The line under the sweep's switch: how the last search of the drives went (atlassweep.describe_last), read
+        from the log folder's atlas-sweep.json off the Tk thread each time the Folders tab is shown."""
+        from types import SimpleNamespace
+
+        from ionomos import atlassweep
+
+        if self.busy("atlas:sweep-info"):  # two quick tab switches: one read is enough
+            return
+        log_dir = self._log_dir()
+
+        def done(text, err):
+            try:
+                self.atlas_sweep_info.configure(text="" if err is not None else text)
+            except (AttributeError, tk.TclError):
+                pass
+
+        self.run_bg("reading the last search of the drives",
+                    lambda: atlassweep.describe_last(atlassweep.last_pass(SimpleNamespace(log_dir=log_dir))), done,
+                    key="atlas:sweep-info")
+
+    def sweep_now(self) -> None:
+        """Search now (Folders tab, D128): ask the watcher's sweep thread for a search of the drives now
+        (atlassweep.request_now; it takes the request within a minute and searches while no FragPipe search runs).
+        With the saved settings only: the watcher reads config.yaml, not this window."""
+        from ionomos import atlassweep
+
+        if not (self.bv("atlas.enabled").get() and self.v("atlas.handoff_dir").get().strip()):
+            messagebox.showinfo("Search now", "Turn the hand-off to the cysteine atlas on and pick the lab Dropbox "
+                                              "folder first (above), then press Save.")
+            return
+        if self.dirty():
+            messagebox.showinfo("Search now", "Press Save first: the watcher searches the drives with the saved "
+                                              "settings.")
+            return
+        try:
+            atlassweep.request_now(self._log_dir())
+        except OSError as exc:
+            messagebox.showerror("Search now", f"Could not ask the watcher for a search of the drives:\n{exc}\n\n"
+                                               "→ Or run  ionomos atlas sweep  in a terminal.")
+            return
+        self.set_status("asked for a search of the drives: the watcher starts it within a minute, once no search "
+                        "is running (the needs-attention list says if a run couldn't go)")
 
     def look_for_dropbox(self) -> None:
         """Find the lab Dropbox folder as harvest_fragpipe.ps1 does (atlas.dropbox_suggestion), once per session: it

@@ -895,6 +895,13 @@ Collected from the other docs; resolve before/during Phase 1.
       `annotation.txt`, and counts nothing from it; check one `.pin.gz` against its `.pin`.
 - [ ] Is 100 MB the right `atlas.pin_max_mb`? Every `.pin` on the PC so far is under 60 MB; a long DIA or
       high-load run may not be.
+- [ ] The drive sweep (D128): on the PC, run `ionomos atlas sweep --dry-run` and check its counts against harvest's
+      last inventory (runs, probe classes, owners); then turn **Also search this PC's drives** on and watch the
+      first pass (its time, the free space on `C:`, Dropbox's upload of about 8 GiB of `.pin.gz`).
+- [ ] The atlas side reads contract item 7 (`runs-ionomos-<time>-found-<run id>.csv`, `found` in place of `job`):
+      Nomura-Lab `atlas_intake.py`. Until it does, found runs wait in Dropbox, uncounted.
+- [ ] Should the sweep also send isoTOP runs (left today, as the atlas doesn't read them), and should it leave
+      some owners' folders out by default?
 
 **Lab process**
 - [ ] Confirm the naming convention with users (NAMING_CONVENTION.md); collect initials → user-folder aliases for config.
