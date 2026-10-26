@@ -340,7 +340,7 @@ def test_search_now_needs_the_hand_off_on_and_saved(hidden_app, no_dialogs, tk_e
     """Search now asks the watcher, which reads config.yaml: off, without a folder or with unsaved changes it says
     what to do, and asks nothing."""
     app = hidden_app
-    _lab(app, tmp_path, on=False)
+    dest = _lab(app, tmp_path, on=False)
     req = load(tmp_path / "Auto" / "config.yaml").log_dir / names.ATLAS_SWEEP_NOW
     no_dialogs.expect("showinfo", None)
     app.atlas_sweep_btn.invoke()  # off
@@ -351,7 +351,7 @@ def test_search_now_needs_the_hand_off_on_and_saved(hidden_app, no_dialogs, tk_e
     no_dialogs.expect("showinfo", None)
     app.sweep_now()
     assert len(no_dialogs.calls) == 2 and "pick the lab Dropbox folder" in no_dialogs.calls[-1].detail
-    app.v("atlas.handoff_dir").set(str(_dropbox(tmp_path, spaces=False)))  # and a folder, not saved
+    app.v("atlas.handoff_dir").set(str(dest))  # and a folder (the one _lab made), not saved
     assert app.dirty()
     no_dialogs.expect("showinfo", None)
     app.sweep_now()

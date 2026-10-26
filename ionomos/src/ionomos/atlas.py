@@ -64,8 +64,9 @@ DEFAULTS = {"enabled": False, "handoff_dir": "", "methods": ["isoDTB"], "pin_max
             # the drive sweep (atlassweep.py, D128): the PC's FragPipe runs that Ionomos did not search. Off by
             # default; sweep_roots [] = every fixed drive, as harvest_fragpipe.ps1 searches
             "sweep": False, "sweep_roots": [], "sweep_exclude": [], "sweep_hours": 24,
-            # copying to the atlas folder stops before its drive (the lab PC's C:, FragPipe's) has less free than this
-            "min_free_gb": 40}
+            # the sweep's copying stops before the atlas folder's drive (the lab PC's C:, FragPipe's) has less free
+            # than this; a job's small hand-off keeps FragPipe's own floor, fragpipe.min_free_gb
+            "sweep_min_free_gb": 40}
 MAX_RETRY_HOURS = 12  # the back-off doubles from retry_minutes up to this
 
 # ------------------------------------------------------------ the selection rule (harvest_fragpipe.ps1) --
@@ -167,7 +168,7 @@ def settings_from(raw) -> dict:
         out[k] = [x.strip() for x in v]
     for k, lo, hi, kind in (("pin_max_mb", 0, 4096, int), ("max_tries", 1, 100, int),
                             ("retry_minutes", 1, 24 * 60, float), ("sweep_hours", 1, 24 * 30, float),
-                            ("min_free_gb", 0, 100000, float)):
+                            ("sweep_min_free_gb", 0, 100000, float)):
         v = raw.get(k)
         if v is None:
             continue
@@ -685,7 +686,7 @@ class Result:
     too_large: list[str] = field(default_factory=list)
     pins: int = 0                            # .pin files at the destination, gzip-compressed
     design: int = 0                          # sample-design files at the destination
-    low_space: bool = False                  # not copied: the destination's drive is below atlas.min_free_gb
+    low_space: bool = False                  # not copied: the destination's drive would fall below the floor
 
 
 def _sha256(path: str | Path) -> str:
@@ -1004,7 +1005,8 @@ def send(cfg, job, trigger: str = "auto", force: bool = False) -> Result:
                 "trigger": trigger}
         _set_state(job.dest_dir, {**base, "state": SENDING, "tries": tries, "last_try": _iso()})
         try:
-            res = _send(cfg, job, Path(s["handoff_dir"]), kind, s["pin_max_mb"], s["min_free_gb"])
+            res = _send(cfg, job, Path(s["handoff_dir"]), kind, s["pin_max_mb"],
+                        float(getattr(cfg, "min_free_gb", 0) or 0))  # FragPipe's floor (fragpipe.min_free_gb)
         except Exception as exc:  # noqa: BLE001 - a full disk, Dropbox offline, a bug: the job is not touched
             log.exception("job %s: atlas hand-off failed", jid)
             res = Result(jid, FAILED, f"{type(exc).__name__}: {exc}" if not isinstance(exc, OSError) else str(exc))
@@ -1014,17 +1016,18 @@ def send(cfg, job, trigger: str = "auto", force: bool = False) -> Result:
 
 def _send(cfg, job, root: Path, kind: str = KINDS[0], pin_max_mb: int = MAX_PIN_MB,
           min_free_gb: float = 0) -> Result:
-    return transfer(run_folder(job), Path(job.dest_dir), root, kind, pin_max_mb, job=job, min_free_gb=min_free_gb)
+    return transfer(run_folder(job), Path(job.dest_dir), root, kind, pin_max_mb, job=job, min_free_gb=min_free_gb,
+                    floor="fragpipe.min_free_gb")
 
 
 def transfer(run_dir: Path, exp_dir: Path | None, root: Path, kind: str = KINDS[0], pin_max_mb: int = MAX_PIN_MB,
-             job=None, owner: str = "", min_free_gb: float = 0) -> Result:
+             job=None, owner: str = "", min_free_gb: float = 0, floor: str = "atlas.sweep_min_free_gb") -> Result:
     """Copy one FragPipe output folder to the atlas destination by harvest's rule, with its sample design (from
     exp_dir and beside its raw files), every file verified; then its completion record and its one-row runs CSV.
     job: the Ionomos job it is the search of (the record's `job`, runs-ionomos-<time>-job<N>.csv). None: a run the
     drive sweep found (atlassweep.py, D128): the record's `found`, runs-ionomos-<time>-found-<run id>.csv, Owner as
     harvest guesses it (`owner`). Nothing is copied when it would leave the destination's drive with less than
-    min_free_gb free (Result.low_space). Raises OSError when the destination can't be written; the caller records
+    min_free_gb free (Result.low_space; `floor` names the setting). Raises OSError when the destination can't be written; the caller records
     it."""
     jid = job.id if job is not None else None
     run_dir = Path(run_dir)
@@ -1118,7 +1121,7 @@ def transfer(run_dir: Path, exp_dir: Path | None, root: Path, kind: str = KINDS[
     if min_free_gb and free is not None and free - need < min_free_gb * 1024 ** 3:
         res.low_space = True
         res.message = (f"the atlas folder's drive has {free / 1024 ** 3:,.0f} GB free and this run needs about "
-                       f"{need / 1024 ** 3:,.1f} GB; copying stops above {min_free_gb:g} GB free (atlas.min_free_gb), "
+                       f"{need / 1024 ** 3:,.1f} GB; copying stops above {min_free_gb:g} GB free ({floor}), "
                        "so FragPipe keeps its room. Nothing was copied")
         return res
 

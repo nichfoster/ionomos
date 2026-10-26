@@ -18,8 +18,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
+import yaml
 
 from ionomos import atlas, atlassweep, attention, configio, names
+from ionomos.atlas import _free_bytes as real_free_bytes  # before conftest's fixture replaces it
+from ionomos.config import load
 from ionomos.ledger import Job, Ledger
 from tests.test_atlas import WORKFLOW, _files, _long, _pin, _read, _records, _run_folder, _snapshot, _write, _write_cfg
 
@@ -110,7 +113,7 @@ def _outcome(p, folder: Path) -> atlassweep.RunResult:
     ({"sweep_roots": ["C:\\Fragpipe_General", "D:\\Old Runs"]}, {"sweep_roots": ["C:\\Fragpipe_General",
                                                                                  "D:\\Old Runs"]}),
     ({"sweep_exclude": ["D:\\Backups"]}, {"sweep_exclude": ["D:\\Backups"]}),
-    ({"sweep_hours": 6, "min_free_gb": 25.5}, {"sweep_hours": 6.0, "min_free_gb": 25.5}),
+    ({"sweep_hours": 6, "sweep_min_free_gb": 25.5}, {"sweep_hours": 6.0, "sweep_min_free_gb": 25.5}),
 ])
 def test_sweep_settings_read(raw, want):
     assert atlas.settings_from(raw) == {**atlas.DEFAULTS, **want}
@@ -118,7 +121,7 @@ def test_sweep_settings_read(raw, want):
 
 def test_the_sweep_is_off_by_default_and_searches_every_fixed_drive():
     s = atlas.settings_from(None)
-    assert (s["sweep"], s["sweep_roots"], s["sweep_exclude"], s["sweep_hours"], s["min_free_gb"]) == \
+    assert (s["sweep"], s["sweep_roots"], s["sweep_exclude"], s["sweep_hours"], s["sweep_min_free_gb"]) == \
         (False, [], [], 24, 40)
     s["sweep_roots"].append("X:\\")
     assert atlas.DEFAULTS["sweep_roots"] == []  # each read gets its own list
@@ -130,7 +133,7 @@ def test_the_sweep_is_off_by_default_and_searches_every_fixed_drive():
     ({"sweep_roots": ["Fragpipe_General"]}, "sweep_roots must hold full folder paths"),
     ({"sweep_exclude": ["backups"]}, "sweep_exclude must hold full folder paths"),
     ({"sweep_hours": 0}, "sweep_hours must be a number from 1 to 720"),
-    ({"min_free_gb": -1}, "min_free_gb must be a number"),
+    ({"sweep_min_free_gb": -1}, "sweep_min_free_gb must be a number"),
 ])
 def test_sweep_settings_refuse(raw, words):
     with pytest.raises(atlas.AtlasError, match=re.escape(words)):
@@ -468,6 +471,10 @@ def test_a_run_copied_in_just_now_waits_though_its_files_are_old(drives, monkeyp
     assert r.outcome == atlassweep.WAITING and "made or changed 1 min ago" in r.why
 
 
+def test_the_free_space_probe_reads_the_drive(tmp_path):
+    assert real_free_bytes(tmp_path) > 0  # the tests' fixture turns it off (conftest); the real one reads the disk
+
+
 def test_a_lock_left_by_a_process_that_is_gone_is_taken_over(drives, monkeypatch):
     from ionomos import health
 
@@ -515,9 +522,9 @@ def test_a_dry_run_writes_nothing_anywhere(drives):
 
 
 def test_the_copying_stops_before_the_drive_runs_low(drives, monkeypatch):
-    monkeypatch.setattr("shutil.disk_usage", lambda p: type("u", (), {"free": 30 * 1024 ** 3})())
+    monkeypatch.setattr(atlas, "_free_bytes", lambda path: 30 * 1024 ** 3)
     p = atlassweep.sweep(drives["cfg"])
-    assert not p.ok and not p.soft and "copying stops above 40 GB free (atlas.min_free_gb)" in p.stopped
+    assert not p.ok and not p.soft and "copying stops above 40 GB free (atlas.sweep_min_free_gb)" in p.stopped
     assert not _records(drives["dest"]) and set(_files(drives["dest"])) <= set()  # nothing copied at all
     (item,) = _sweep_items(drives["cfg"])
     assert "stops above 40 GB free" in " ".join(item.causes)
@@ -527,19 +534,27 @@ def test_the_copying_stops_before_the_drive_runs_low(drives, monkeypatch):
     assert loop.due(drives["cfg"], now + timedelta(seconds=atlassweep.HARD_RETRY_S + 1)) == "retry"
 
 
-def test_a_jobs_hand_off_waits_while_the_drive_is_low_too(drives, monkeypatch):
+def test_a_jobs_hand_off_keeps_fragpipes_own_floor(drives, monkeypatch):
+    """A job's hand-off is small: it keeps fragpipe.min_free_gb (20), not the sweep's 40."""
+    d = dict(drives["lab"]["cfg_dict"])
+    d["fragpipe"] = {**d["fragpipe"], "min_free_gb": 20}
+    d["atlas"] = {"enabled": True, "handoff_dir": str(drives["dest"])}
+    drives["lab"]["cfg_path"].write_text(yaml.safe_dump(d), encoding="utf-8")
+    cfg = load(drives["lab"]["cfg_path"])
     exp = drives["general"] / "EJQ" / "20261019_isoDTB_EJQ-2-027"
     run = _run_folder(exp / "fragpipe", {"fragpipe.workflow": WORKFLOW.encode(), "exp_1/psm.tsv": b"P\n"})
-    led = Ledger(drives["cfg"].database)
+    led = Ledger(cfg.database)
     jid = led.insert(Job(inbox_name=exp.name, user="EJQ", method="isoDTB", dest_dir=str(exp)))
     led.set_status(jid, "done")
     (exp / names.STATUS_FILE).write_text(json.dumps({"status": "done", "run": {"workdir": str(run)}}),
                                          encoding="utf-8")
-    monkeypatch.setattr("shutil.disk_usage", lambda p: type("u", (), {"free": 30 * 1024 ** 3})())
-    res = atlas.send(drives["cfg"], led.get(jid))
-    assert not res.ok and res.low_space and res.state == atlas.FAILED and "atlas.min_free_gb" in res.message
+    monkeypatch.setattr(atlas, "_free_bytes", lambda path: 15 * 1024 ** 3)
+    res = atlas.send(cfg, led.get(jid))
+    assert not res.ok and res.low_space and res.state == atlas.FAILED and "(fragpipe.min_free_gb)" in res.message
     assert not _files(drives["dest"])  # nothing copied
     assert atlas.state(exp)["state"] == atlas.FAILED and atlas.state(exp)["next_try"]  # tried again later
+    monkeypatch.setattr(atlas, "_free_bytes", lambda path: 30 * 1024 ** 3)
+    assert atlas.send(cfg, led.get(jid)).ok  # above FragPipe's floor, though under the sweep's 40
 
 
 def test_no_dropbox_stops_the_pass(drives):

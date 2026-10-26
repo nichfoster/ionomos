@@ -24,7 +24,7 @@ The rules, as the hand-off's (atlas.py) and harvest's:
   - no pass while Ionomos is searching; a pass stops between two runs when a search starts, and goes on later
   - a run sent before and unchanged since (its files' names, sizes and times) is not read again
   - a conflict (another copy of a run's file already in Dropbox) waits for a person, as a job's does
-  - the copying stops before the free space of the atlas folder's drive falls below atlas.min_free_gb
+  - the copying stops before the free space of the atlas folder's drive falls below atlas.sweep_min_free_gb
 
 Nothing here needs Tk. What a pass found and sent is in <log_dir>/atlas-sweep.json.
 """
@@ -248,7 +248,7 @@ class RunResult:
     record: str = ""
     handoff_sha256: str = ""
     fingerprint: str = ""
-    low_space: bool = False          # not copied: the atlas folder's drive is below atlas.min_free_gb
+    low_space: bool = False          # not copied: the atlas folder's drive is below atlas.sweep_min_free_gb
     conflicts: list[str] = field(default_factory=list)
     # how it was searched, as its workflow says (for a person reading a dry run: which TMT, which probe on C)
     fragpipe_version: str = ""
@@ -624,7 +624,7 @@ def _send(cfg, root: Path, rr: RunResult, plan: dict) -> None:
     s = atlas.settings(cfg)
     try:
         res = atlas.transfer(plan["run_dir"], plan["exp_dir"], root, plan["kind"], s["pin_max_mb"], owner=rr.owner,
-                             min_free_gb=s["min_free_gb"])
+                             min_free_gb=s["sweep_min_free_gb"])
     except Exception as exc:  # noqa: BLE001 - Dropbox offline, a full disk: tried again on the next pass
         log.warning("atlas sweep: %s not handed off: %s", rr.run, exc)
         rr.outcome, rr.why = FAILED, str(exc) if isinstance(exc, OSError) else f"{type(exc).__name__}: {exc}"

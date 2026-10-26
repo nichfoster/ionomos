@@ -69,7 +69,7 @@ def defaults(root: str | None = None, users_root: str | None = None) -> dict:
         # no default folder: the lab's Dropbox path has spaces (CLAUDE.md); the app offers the one it finds (D120)
         "atlas": {"enabled": False, "handoff_dir": "", "methods": ["isoDTB"], "pin_max_mb": 100, "max_tries": 10,
                   "retry_minutes": 15, "sweep": False, "sweep_roots": [], "sweep_exclude": [], "sweep_hours": 24,
-                  "min_free_gb": 40},
+                  "sweep_min_free_gb": 40},
         "users": {"aliases": {}, "default": "", "learned_aliases_file": f"{root}/learned_aliases.yaml",
                   "ignore": ["FragPipe*", "Fasta*", "New folder*", "~*"]},
         "methods": {
@@ -382,11 +382,11 @@ def dump_config(d: dict) -> str:
     a(f"  sweep_exclude: {_y(list(at.get('sweep_exclude') or []))}   # folders never searched (the atlas and Dropbox "
       "folders never are)")
     a(f"  sweep_hours: {_y(at.get('sweep_hours', 24))}   # a search every this many hours, never while a search runs")
-    a(f"  min_free_gb: {_y(at.get('min_free_gb', 40))}   # copying to the atlas folder (a job's hand-off, the sweep) "
-      "stops before its drive has less free than this")
+    a(f"  sweep_min_free_gb: {_y(at.get('sweep_min_free_gb', 40))}   # the sweep's copying stops before the atlas "
+      "folder's drive has less free than this (a job's hand-off keeps fragpipe.min_free_gb)")
     for k, v in at.items():  # a typo is written back as it was, so the loader can name it
         if k not in ("enabled", "handoff_dir", "methods", "pin_max_mb", "max_tries", "retry_minutes", "sweep",
-                     "sweep_roots", "sweep_exclude", "sweep_hours", "min_free_gb"):
+                     "sweep_roots", "sweep_exclude", "sweep_hours", "sweep_min_free_gb"):
             a(f"  {_y(str(k))}: {_y(v)}")
     a("")
 

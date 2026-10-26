@@ -231,7 +231,7 @@ each run             in an Ionomos experiment folder only its latest search: a l
   │                  a file made or changed in the last hour (Windows: its creation time too, which a copy sets)
   │                  → waits for the next pass
   │                  sent before, same files (names, sizes, times) → unchanged: not read again
-  │                  the atlas folder's drive would fall below atlas.min_free_gb → nothing copied, the pass stops
+  │                  the atlas folder's drive would fall below atlas.sweep_min_free_gb → nothing copied, the pass stops
   ▼
 atlas.transfer       as a job's hand-off: compare, copy through .partial, verify, ionomos-handoff.json with `found`,
                      runs-ionomos-<time>-found-<run id>.csv renamed into place last
@@ -256,10 +256,10 @@ atlas.transfer       as a job's hand-off: compare, copy through .partial, verify
   is idle again, reuses the walk and skips what was sent. A pass that stopped for a cause (Dropbox gone, the
   drive full, a bug) is tried again after an hour and raises the attention item; one that stopped for a search
   or a restart does neither. Later passes read only what changed.
-- **Free space**: the Dropbox folder is on `C:`, where FragPipe writes. Nothing of a run is copied when its copy
-  would leave less than `atlas.min_free_gb` (40 GB; FragPipe holds a search below `fragpipe.min_free_gb`, 20) on
-  that drive: the pass stops and says so in the attention list, and a job's hand-off fails and is tried again
-  later, as when Dropbox is offline.
+- **Free space**: the Dropbox folder is on `C:`, where FragPipe writes. The sweep copies nothing of a run that would
+  leave less than `atlas.sweep_min_free_gb` (40 GB) on that drive: the pass stops and says so in the attention list.
+  A job's hand-off is small and keeps FragPipe's own floor, `fragpipe.min_free_gb` (20, where FragPipe holds its
+  searches): below it the hand-off fails and is tried again later, as when Dropbox is offline.
 - **Only reads**: nothing on the drives is written, moved or renamed. Outside `<dest>` the sweep writes Ionomos'
   own `atlas-sweep.json` (and its lock) in the log folder, and, when it queues a done Ionomos job, that job's
   `atlas` block in its `ionomos.json`, as the worker does. Deleting `atlas-sweep.json` is safe: the next pass
@@ -319,7 +319,7 @@ atlas:   # hand finished isoDTB (and TMT) searches to the lab's cysteine atlas. 
   sweep_roots: []      # the folders searched; [] = every fixed drive
   sweep_exclude: []    # folders never searched (the atlas and Dropbox folders never are)
   sweep_hours: 24      # a search every this many hours, never while a search runs
-  min_free_gb: 40      # copying to the atlas folder (a job's hand-off, the sweep) stops before its drive has less free
+  sweep_min_free_gb: 40   # the sweep's copying stops before the atlas folder's drive has less free than this
 ```
 
 - `handoff_dir` may have spaces: FragPipe never sees it. It must be a full path (`C:\…` or `\\server\share\…`).
@@ -336,7 +336,7 @@ atlas:   # hand finished isoDTB (and TMT) searches to the lab's cysteine atlas. 
 - `sweep_roots` and `sweep_exclude` are lists of full folder paths (spaces are fine: they are only read). With no
   `sweep_roots`, every fixed drive (Windows' DRIVE_FIXED, as harvest's Win32_LogicalDisk DriveType 3): the lab
   PC's `C:` and its USB archive disk `D:`, not its flash drive. `sweep_hours` is a number from 1 to 720,
-  `min_free_gb` from 0 (0 = no floor), for a job's hand-off as for the sweep. The sweep needs `enabled` and `handoff_dir`; **Search now** and `ionomos atlas
+  `sweep_min_free_gb` from 0 (0 = no floor; a job's hand-off keeps `fragpipe.min_free_gb` instead). The sweep needs `enabled` and `handoff_dir`; **Search now** and `ionomos atlas
   sweep` work while `sweep` is off.
 - The watcher reads `atlas:` again on every pass, so turning the hand-off on or off in the app counts without a
   restart.

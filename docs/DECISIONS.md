@@ -5042,8 +5042,9 @@ so it sweeps the drives itself (`atlassweep.py`, ATLAS.md "The drive sweep").
    (a search, a restart) raises none. Windows background priority for the thread. A run with a file made or
    changed in the last hour waits (on Windows the creation time counts: a copy keeps the modified time, so a run
    being copied onto D: looks old by that alone). Nothing of a run is copied when it would leave the Dropbox drive
-   (`C:`, FragPipe's) below `atlas.min_free_gb` (40; FragPipe holds searches at 20): one floor for a job's
-   hand-off and the sweep, since the sweep's first pass also queues the old jobs. A lock names its process and is
+   (`C:`, FragPipe's) below `atlas.sweep_min_free_gb` (40; FragPipe holds searches at 20). A job's hand-off (the
+   sweep's first pass also queues the old jobs) keeps `fragpipe.min_free_gb`: it is small, and a 40 GB floor would
+   fail it over and over on a PC that sits at 35 GB (a CI runner's 31 GB showed it). A lock names its process and is
    taken over at once when that process is gone. Everything searched is only read.
 6. **Incremental**: `atlas-sweep.json` keeps each run's fingerprint (its taken files' names, sizes and times, the
    kind, the pin cap); a sent run with the same fingerprint is not read again. A conflict waits for a person: the

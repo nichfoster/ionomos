@@ -21,8 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     run is queued as the job's own hand-off; the test bed's fake runs never go; a run changed in the last hour
     waits; a run sent before is read again only when its files change.
   - Never while Ionomos is searching (a pass stops between two runs and goes on later), at background priority on
-    Windows, and never below the new `atlas.min_free_gb` (40) free on the Dropbox drive (a job's hand-off keeps
-    it too). `atlas.sweep_roots`, `atlas.sweep_exclude`, `atlas.sweep_hours` (24). Ionomos' own log folder and
+    Windows, and never below `atlas.sweep_min_free_gb` (40) free on the Dropbox drive (a job's hand-off keeps
+    FragPipe's own floor, `fragpipe.min_free_gb`). `atlas.sweep_roots`, `atlas.sweep_exclude`, `atlas.sweep_hours` (24). Ionomos' own log folder and
     inbox are not searched; a run with no `psm.tsv`, an earlier attempt in an Ionomos experiment folder and a
     workflow whose probe row is turned off are left.
   - `ionomos atlas sweep [--dry-run] [--root DIR] [--json]`; **Search now** on the Folders tab; `ionomos atlas
