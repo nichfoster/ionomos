@@ -672,13 +672,21 @@ need nothing from the lab.
     says that coding agents wrote most of the code, and how it was checked:
     reference tests against R and Python tools, pull requests merged by a
     person (D31), the decision log.
-11. [ ] **Versioning and support promises** — *an agent* writes them into
+11. [x] **Versioning and support promises** — *an agent* writes them into
     README.md from VISION.md ("Versioning and support, from 1.0") once the
     maintainer agrees to them: semantic versioning of the command line, the
     YAML keys, `results/` and `analysis.json`; deprecations warn for one
     minor release; best-effort support through GitHub issues.
+    2026-10-26 (D133): README.md "Versioning and support" (merging it is the
+    maintainer's agreement); `retired.py` is how a retired key warns
+    (`ionomos check`, the checklist, the analysis' notes, the log), with an
+    empty table today.
 12. [ ] **v1.0** — *the maintainer* tags it when VISION.md's "done for v1.0"
-    holds.
+    holds. Done of that list (2026-10-26, D133): the promises in the README,
+    and every open "Not verified" line of VALIDATION.md stated in the report
+    where it applies or marked as no report caveat. Open: PyPI, the real-data
+    example on the site, a real mixed-species benchmark, real compares,
+    real TMT and isoDTB searches, a second lab.
 13. [ ] **Dead code**: `ionomos/src/ionomos/runners/` is imported by nothing
     in the program, only by `tests/test_downstream.py`, and the exe build's
     `deploy/check_frozen.py` lists it as an exception; remove it or wire it

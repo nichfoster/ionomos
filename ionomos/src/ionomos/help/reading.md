@@ -39,16 +39,25 @@ A short summary per comparison at the current cut-offs:
 
 A short list under the key findings. Each line repeats one check of this
 analysis and gives its number: samples per group, how well replicates agree,
-how much is missing or [imputed](#glossary.imputation), what was tested and
+how much is missing or [imputed](#glossary.imputation), how TMT plexes were
+put on one scale, how isoDTB site ratios were used, what was tested and
 found per comparison, the shape of the p-values, and the smallest change this
 design can find reliably ([power](#qc.power)).
 
 - There is no score. A line marked **check** crossed the limit of its own
   check (a group under 3 samples, a sample the scorecard fails, hits resting
-  on imputed values, an unusual p-value histogram). Read it and decide.
+  on imputed values, an unusual p-value histogram, a replicate whose site
+  ratios sit off 0). Read it and decide.
+- The line under the list says what Ionomos' methods were checked on: the R
+  tools they port, and simulated data, not yet real lab data. Where this
+  analysis used a method whose check left something out (TMT, peptides
+  rolled up to proteins, isoDTB site ratios and their centring), a line in
+  the list says what.
 - If this experiment was compared with a reference (`ionomos compare`) or
   with known ratios (`ionomos benchmark`), the verdict is shown here with a
   link. **other settings** means it was made before the settings changed.
+  A sentence beside it says when that kind of comparison has not been tried
+  on real data yet.
 - The same list is in `analysis.json` under `trust`.
 
 ## Issue boxes {#report.issues}

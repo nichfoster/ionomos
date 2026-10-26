@@ -5068,3 +5068,66 @@ copied in just now, a dead process's lock, the saved pass, soft and hard stops).
 `search.failed` and `attention.analysis_failed` (FTS5 gives `search`, in most entries, almost no weight); any new
 help entry could flip it, as this one did, so the script asks for 5. **Not verified**: on the lab PC (its drives,
 the walk's time, Dropbox's upload of about 8 GiB), and the atlas side reading item 7.
+
+### D133 — VALIDATION.md's open lines are said in the report where they apply; retired keys warn before they go
+**2026-10-26.** Two of VISION.md's v1.0 items are agent work: every open "Not verified" line of VALIDATION.md
+either verified or stated in the report's "How far to trust this", and the versioning and support promises in the
+README. The first is about what the report says, not what it computes: no default and no number changes.
+1. **Said only where it applies.** A report that pasted every caveat would be read by nobody (D60: a list of
+   checks with their numbers, not a disclaimer). So each open line of VALIDATION.md is said only when the analysis
+   used what it is about, and VALIDATION.md gives each line a status: *stated in the report* with the trust.py key
+   that says it, or *not a report caveat* with why.
+2. **The line that applies to every analysis goes under the list** (`trust.VALIDATED`, in `basis`): the
+   statistics are checked against the R tools they port and the settings on simulated data, not yet on real lab
+   data (no real benchmark sample, no real FragPipe-Analyst, MSstats or Perseus result compared). Not for a
+   results table Ionomos only read: it ran none of those methods. That covers the page's opening line, the
+   re-run by hand of 2026-10-06, the example (whose report does not know it is the example) and the simulated DIA
+   benchmark's "does not show how the lab's samples behave".
+3. **One method, one sentence**, in a statement `simulated` ("Checked on simulated data", never marked **check**:
+   it says what the evidence is), from the table `trust.SIMULATED`: `tmt` for every TMT analysis (the simulated
+   plexes have no ratio compression; on MS2-level TMT co-isolation makes real fold changes smaller), `rollup` /
+   `maxlfq` when Ionomos rolled peptides or precursors up itself (`meta["rollup"]`; no shared or modified peptides
+   in the simulation; MaxLFQ found a few more small changes and a few more false ones). With none of them, no
+   statement.
+4. **isoDTB site ratios get a statement of their own**, `ratios`, because its caveat has a number: how the ratios
+   were used (`fpa.centre_label`), the largest replicate offset from 0 on the stable sites (the doctor's
+   measurement), marked **check** on the doctor's `RATIO_OFFSET` threshold, and that a mixing error's effect and
+   the centring are known from simulated sites only. Two replicates were already marked (`replicates`).
+5. **Beside a result from the results folder** (`trust.EXTERNAL_CAVEATS`): a compare result whose reference is a
+   results table says that no real export of FragPipe-Analyst, limma, MSstats or Perseus has been tried (check how
+   many features matched); one against another Ionomos analysis says nothing, it needs no column layout. A
+   known-ratio benchmark says its code was tested on simulated mixed-species tables only. The simulated
+   benchmark's own title already says what it is.
+6. **Not report caveats**: the timing of 50,000 features (speed, not the result), the fuzz's simulated damage and
+   the engine formats checked on simulated tables (the report already names its engine and every repair it made;
+   which engines' real exports have been read is ENGINES.md's, with round 4's open loader items in ROADMAP).
+7. **Retired keys: the mechanism the promise needed.** Before this, config.yaml's checked sections warned about an
+   unknown key (D94 item 4), but said nothing of a key that had been renamed, and `analysis:`, `naming:`,
+   `methods:` and experiment.yaml refuse an unknown key outright, so a retired key there would have stopped the
+   file from loading with no release of warning. `retired.py` holds the table `RETIRED` (old key, new key or None,
+   the version that retired it, a message, the files it is read from; `*` for every name of a mapping, a rename
+   stays within its section). While an entry is there: config.yaml (`config.load`) renames it before anything
+   reads the file, so its value counts under the new name, or leaves a removed key out, and says so in
+   `Config.warnings` and `Config.retired_keys`: `ionomos check` prints a `!` line, the app's checklist marks
+   Settings saved, the watcher logs it at start. When both names are set, the new one wins and the old one is
+   said. The app's Save (`configio.read_config`) and experiment.yaml's (`manifest.overrides_text`) write a renamed
+   key under its new name with its value and keep a removed one where it is (a Save never drops a value, D67).
+   experiment.yaml (`parse_overrides`) does the same and keeps the words in `Overrides.warnings`, which the
+   analysis adds to its notes, and in the log once per process (it is read for every analysis).
+   `settings_from` applies the `analysis.` entries to settings from anywhere (a job record written before the
+   rename, the command line), logged once. The table is empty today. An entry stays until at least the next minor
+   release after its `since` has shipped. Values accepted in an older spelling (`imputation: man`) are not keys;
+   the LabWatch-era names are not keys either and stay in names.py for good (D21).
+8. **The README** gets a "Versioning and support" section that states VISION.md's promises in a few lines and
+   links to the full text; the promises themselves are VISION.md's (D92 item 2), unchanged.
+
+**Verified**: `tests/test_trust.py` (a table of analysis set-ups, DIA with and without imputation, isoDTB as
+measured with and without a mixing error and centred, TMT plexes, peptides by median polish and by MaxLFQ, each
+with the statements and caveat ids it must and must not show, the line under the list, and the ratios mark
+against the doctor's `RATIO_OFFSET`; a results table without the line; a table of compare / benchmark files and
+the sentence beside each), `tests/test_retired.py` (the real table and an example one checked: a released version,
+an old key no loader reads, a new key one does; renamed, both set, removed, an analysis key in either file, a key
+under every name of a mapping; config.yaml through `load`, `ionomos check`, the checklist and the app's Save;
+experiment.yaml through `load_overrides`, its Save and the analysis' notes, logged once; `settings_from` on a job
+record's old key). The default DIA report's statements are unchanged (the JS fixture's list). **Not verified**:
+how the new lines read to a lab member; the JS tests were not run here (no `node_modules`), CI runs them.

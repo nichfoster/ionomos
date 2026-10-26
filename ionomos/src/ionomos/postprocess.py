@@ -62,6 +62,7 @@ def prepare(dest: Path, cfg, method: str | None = None, extra: dict | None = Non
     method = method or filed
     overrides = ((record.get("plan") or {}).get("overrides") or {}).get("analysis") or {}
     yaml_problem = ""
+    retired_said: list[str] = []
     try:  # an experiment.yaml edited after intake (e.g. new comparisons) wins
         from ionomos.manifest import OverridesError, load_overrides
 
@@ -71,6 +72,7 @@ def prepare(dest: Path, cfg, method: str | None = None, extra: dict | None = Non
             yaml_problem = str(exc)
             raise
         overrides = current.analysis or overrides
+        retired_said = current.warnings  # a key of experiment.yaml renamed or taken away (retired.py, D133)
         tmt = current.tmt or ((record.get("plan") or {}).get("overrides") or {}).get("tmt") or {}
         if isinstance(tmt, dict) and tmt.get("reference_channel") not in (None, "") and \
                 "tmt_reference" not in overrides:  # experiment.yaml tmt.reference_channel = analysis.tmt_reference
@@ -113,7 +115,7 @@ def prepare(dest: Path, cfg, method: str | None = None, extra: dict | None = Non
     mod_mass = "561.3387"
     if method in methods:
         mod_mass = str(methods[method].extra.get("isodtb_mod_mass", mod_mass))
-    notes: list[str] = []
+    notes: list[str] = list(retired_said)
     if yaml_problem:
         notes.append(f"experiment.yaml was not used ({yaml_problem}); the analysis used the settings saved when the "
                      f"experiment was filed")

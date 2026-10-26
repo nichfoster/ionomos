@@ -139,8 +139,10 @@ def run(config_path: Path, data: dict | None = None, probe_watcher: bool = True)
     else:
         try:
             cfg = load(config_path, check_paths=True)
-            if cfg.unknown_keys:  # an unknown key (a typo) is ignored, so the lab PC runs with the default (#137)
-                add(Item("config", "Settings saved", "warn", "; ".join(cfg.unknown_keys),
+            # an unknown key (a typo) is ignored, so the lab PC runs with the default (#137); a retired one is
+            # renamed or ignored, and goes away in a later release (retired.py, D133)
+            if cfg.unknown_keys or cfg.retired_keys:
+                add(Item("config", "Settings saved", "warn", "; ".join(cfg.retired_keys + cfg.unknown_keys),
                          "Fix the key in config.yaml (a text editor), then Reload."))
             else:
                 add(Item("config", "Settings saved", "ok", str(config_path)))

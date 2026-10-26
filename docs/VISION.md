@@ -167,6 +167,7 @@ In order. ROADMAP 5D has each step with an owner.
    the paper. There is no logo; the app and the report use none. The GitHub
    description still says the tool is for one lab's PC.
 8. **Versioning and support promises** (below), written down before 1.0.
+   In the README since 2026-10-26 (D133).
 
 ## Versioning and support, from 1.0
 
@@ -203,7 +204,11 @@ In order. ROADMAP 5D has each step with an owner.
   engines, and its problems fixed.
 - The promises above written into the README, and every open "Not verified"
   line in VALIDATION.md either verified or stated in the report's "How far to
-  trust this".
+  trust this". Done 2026-10-26 (D133): the README's "Versioning and
+  support", with `retired.py` for the warning before a key goes; each open
+  line of VALIDATION.md carries its status (stated in the report, with the
+  key that says it, or why it is not a report caveat). A new open line needs
+  its status too.
 - CONTRIBUTING, a code of conduct, issue templates and CITATION.cff in the
   repository (added 2026-10-15).
 

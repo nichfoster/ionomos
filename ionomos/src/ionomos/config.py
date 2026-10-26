@@ -18,6 +18,7 @@ from pathlib import Path
 
 import yaml
 
+from ionomos import retired
 from ionomos.naming import (
     DEFAULT_CONDITION_CODES,
     DEFAULT_DATE_FORMATS,
@@ -141,6 +142,7 @@ class Config:
     user_ignore: tuple[str, ...] = DEFAULT_USER_IGNORE  # users_root subfolders that aren't people (glob patterns)
     warnings: tuple[str, ...] = ()
     unknown_keys: tuple[str, ...] = ()  # keys config.yaml holds that nothing reads (#137); also in warnings  # non-fatal path problems (FragPipe bits missing, etc.)
+    retired_keys: tuple[str, ...] = ()  # keys renamed or taken away (retired.py, D133), each said; also in warnings
     gui_popups: bool = True  # pop-up windows for analysis decisions / failed searches (attention.py)
     review_drops: bool = True  # show every drop in the review window before it is filed (when a display exists)
     condition_codes: dict = field(default_factory=lambda: dict(DEFAULT_CONDITION_CODES))  # DIA X_D1 -> DMSO rep 1
@@ -371,6 +373,7 @@ def _load(path: str | Path, check_paths: bool = True) -> Config:
         raise ConfigError(parse_error(p, exc)) from exc
     if not isinstance(raw, dict):
         raise ConfigError(f"{p} must be a YAML mapping")
+    raw, retired_said = retired.apply(raw, retired.CONFIG)  # a renamed key counts under its new name (D133)
 
     _SPACE_WARNINGS.clear()
     paths = {k: _path("paths", k, _get(raw, "paths", k, required=True)) for k in _REQUIRED_PATHS}
@@ -493,13 +496,14 @@ def _load(path: str | Path, check_paths: bool = True) -> Config:
     )
 
     unknown = unknown_settings(raw)
-    warnings = space_warnings + unknown
+    warnings = space_warnings + retired_said + unknown
     if check_paths:
         errors, more = _check_paths(cfg)
         if errors:
             raise ConfigError("config problems:\n  - " + "\n  - ".join(errors))
         warnings += more
-    return replace(cfg, warnings=tuple(warnings), unknown_keys=tuple(unknown)) if warnings else cfg
+    return replace(cfg, warnings=tuple(warnings), unknown_keys=tuple(unknown),
+                   retired_keys=tuple(retired_said)) if warnings else cfg
 
 
 # keys a section reads beyond those configio.defaults() writes (none today; test_config checks the two agree)
@@ -510,7 +514,8 @@ _CHECKED_SECTIONS = ("paths", "watcher", "fragpipe", "gui", "users", "qc_trend",
 def unknown_settings(raw: dict) -> list[str]:
     """Keys in config.yaml that nothing reads (#137), each with the nearest known key. A typo such as
     watcher.poll_secnds silently left the default in force while every check said all good. Warnings, not
-    errors, so an older config with a retired key still loads. analysis:, naming: and methods: check their own."""
+    errors, so an older config with a retired key still loads. analysis:, naming: and methods: check their own.
+    A key in retired.RETIRED is said by retired.apply before this runs, with its version and new name (D133)."""
     import difflib
 
     from ionomos import configio

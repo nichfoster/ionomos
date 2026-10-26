@@ -141,6 +141,30 @@ ionomos/.venv/bin/ionomos setup   # the app, pointed at any config you like
 On the PC: [docs/DEV_LOOP.md](docs/DEV_LOOP.md) while prototyping,
 [docs/DEPLOY_WINDOWS.md](docs/DEPLOY_WINDOWS.md) for the finished tool.
 
+## Versioning and support
+
+What Ionomos promises from 1.0 (the full text:
+[docs/VISION.md](docs/VISION.md#versioning-and-support-from-10)):
+
+- **Semantic versioning of what you touch:** the command line (commands and
+  options), the `config.yaml` and `experiment.yaml` keys, the files in
+  `results/` and the fields of `analysis.json`. Python module internals are
+  not an API. A key or option that goes away warns for at least one minor
+  release first (`ionomos check` and the analysis' notes say so already). The
+  LabWatch-era names keep working.
+- **Python versions:** those CI runs (today 3.11 to 3.14) on Windows and
+  Linux; the package is also tried on macOS on each tag.
+- **Results don't change silently:** a change in a default or a numerical
+  method that changes results is a minor version at least, with a CHANGELOG
+  entry under "Changed" and a decision, and `ionomos compare` can show the
+  difference against the previous version's result.
+- **Support:** GitHub issues, answered by one maintainer as time allows, with
+  no guaranteed response time. A report with the diagnostics text or a bundle
+  ([docs/DEV_LOOP.md](docs/DEV_LOOP.md)) can be reproduced; one without
+  usually cannot.
+- **The watcher is Windows-only and FragPipe-first.** The analysis is
+  supported on Windows, macOS and Linux.
+
 ## Cite
 
 [CITATION.cff](CITATION.cff) (GitHub's "Cite this repository" reads it).
