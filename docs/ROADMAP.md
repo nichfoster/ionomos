@@ -1137,6 +1137,11 @@ Collected from the other docs; resolve before/during Phase 1.
 - [ ] App settings (D67): open the Figure style, Check accuracy and Notifications pages on the PC (display scaling,
       the colour picker, the masked fields) and have a lab member set a figure style and send a test message without
       help. Should "Show addresses and password" exist at all, or should a stored secret only ever be replaced?
+- [ ] App (D129, #185): a scrolled list binds the mouse wheel for the whole app while the pointer is over it
+      (`tkutil.ScrolledFrame`, `bind_all`) and unbinds it on `<Leave>`. If its window closes under the pointer (the
+      analysis pop-up after Run analysis), the binding may keep naming the list's deleted command, as a closed
+      window's timer did. Does Tk then show its "invalid command name" box at the next wheel turn? Needs a real
+      pointer: on the PC, or unbind on `<Destroy>` regardless.
 - [ ] Phase 5: which pilot labs can we reach? Does this lab run titrations or phospho? (Orders 5C.)
 - [ ] D79 (2026-10-04): if the lab runs phospho, send one search's site table (FragPipe, TMT-Integrator or
       DIA-NN) to check the columns the readers expect, and say which kinase-substrate table it uses

@@ -651,7 +651,7 @@ class TkResolver:
                 return
             if value == "control":
                 ctl_v.set(cond)
-            win.after_idle(update_summary)
+            tkutil.after_idle(win, update_summary)
 
         def confirm(cond: str) -> None:
             from ionomos.downstream import roles
@@ -659,7 +659,7 @@ class TkResolver:
             row = next((r for r in (last_view[0].rows if last_view[0] else []) if r.condition == cond), None)
             if row is not None and row.confirmable:
                 chosen[0] = roles.set_role(chosen[0], cond, row.role)
-                win.after_idle(update_summary)
+                tkutil.after_idle(win, update_summary)
 
         def fill_roles(view) -> None:
             from ionomos.downstream import roles
@@ -829,9 +829,9 @@ class TkResolver:
                         # Same shape as accept: show the rejection, keep the dialog up.
                         err_v.set(str(exc))
                     if win.winfo_exists():
-                        win.after(500, poll)
+                        tkutil.after(win, 500, poll)
 
-            win.after(500, poll)
+            tkutil.after(win, 500, poll)
 
         def live():
             """Users / aliases added in the app while this window is open: offer them, fill a blank user."""
@@ -846,10 +846,10 @@ class TkResolver:
             except Exception:  # noqa: BLE001 - a failed refresh just leaves the window as it was
                 log.debug("resolver refresh failed", exc_info=True)
             if win.winfo_exists():
-                win.after(2000, live)
+                tkutil.after(win, 2000, live)
 
         if self.refresh is not None:
-            win.after(2000, live)
+            tkutil.after(win, 2000, live)
 
         ttk.Button(btns, text="Not now (leave in inbox)" if d.review else "Skip (leave in inbox)",
                    command=skip).pack(side="left", padx=4)
@@ -866,7 +866,7 @@ class TkResolver:
                 skip()
 
         if self.timeout:
-            win.after(int(self.timeout * 1000), timed_out)
+            tkutil.after(win, int(self.timeout * 1000), timed_out)
 
         win.update_idletasks()
         w, h = win.winfo_reqwidth(), win.winfo_reqheight()

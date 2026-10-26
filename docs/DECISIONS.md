@@ -4957,3 +4957,39 @@ stubbed job). **Not verified**: on the lab PC with the real engines; whether
 MSFragger's `BatmassIoThermoServer.exe` (the Thermo reader) outlives MSFragger;
 that the installed Ionomos.exe can nest the job (a console log would say it
 could not).
+
+### D129 — A window's timer is the root's, and does nothing once the window is closed
+**2026-10-26.** Issue #185. The hidden-window smoke test once saw a "Find FragPipe" box on Windows CI that nothing in
+it pressed. The cause is tkinter's: `widget.after(ms, f)` makes `f` a Tcl command of the widget named
+`id(tkinter's wrapper) + f.__name__` ("2155…<lambda>", "2155…close") and sets a Tcl timer that calls that name.
+`widget.destroy()` deletes the command but not the timer. Python soon reuses the freed wrapper's address, so the
+next callback registered under the same `__name__` gets the same name, and the old timer calls it. Each pop-up
+set `win.after(1500, lambda: …)` (no longer on top after 1.5 s); the smoke test closes its five pop-ups after
+0.3 s, and the Setup checklist's Fix buttons are `command=lambda a=…: …`. When the checks finished while a pop-up's
+timer was pending, the timer pressed Find FragPipe, which on a runner without FragPipe asks with a box. In a loop
+with nothing in between, the next lambda took the name 200 times in 200. This was the app's bug, not the test's:
+on the lab PC a pop-up closed within 1.5 s (or an analysis pop-up closed by hand within 2.5 s of "All set") could
+press whatever was registered next, and a closed naming window's time-out could close the next one.
+
+1. **`tkutil.after(widget, ms, func, *args)` / `tkutil.after_idle`**: the timer is the root's, which lives as long
+   as the app, and `func` runs only if `widget` still exists. Every timer of a window that can close uses it: the
+   pop-up's 1.5 s and its 2.5 s close (`popups`), the naming window's file poll, live refresh, time-out and summary
+   refresh (`resolve`). `root.after` stays for the app's own loops; the drag-and-drop timer is the root's.
+   Cancelling the timers on `<Destroy>` was the alternative: a Toplevel's `<Destroy>` binding fires for each of
+   its children too, and a poll that re-arms itself has a new id each time.
+2. **A source scan** (`tests/test_tk_timers.py`, AST, as for the Tk variables) fails on `.after(` /
+   `.after_idle(` on anything but a root or `tkutil`.
+3. **The harness looks at the cause, not at its chance outcome.** `tests/tkharness.Timers` records each widget
+   destroyed while a timer of its own is still pending (it wraps `tkinter.Misc.destroy`, which every destroy ends
+   in, and reads `after info`). `make_app` installs it; `hidden_app` fails at teardown on any, so every hidden-app
+   test checks it on every run. Whether a later callback takes the name is chance (once in many CI runs); the
+   pending timer is not: the smoke test's pop-ups left five.
+4. **The smoke test is unchanged** (no skip, no expected dialog): with no window timers left nothing can press a
+   button in it. `NoDialogs`' record of where a dialog came from (round 5) stays.
+
+**Verified**: `tests/test_tk_timers.py` in a Tcl interpreter without Tk (no window: a window's own timer stays
+pending with its command gone and `Timers` names it; `tkutil.after` runs while the window is open and does nothing
+once it is closed; the scan, which named the nine old call sites before the fix). In CI only (real Tk): the
+smoke test, a pop-up closed at once with a button made right after, and a naming window closed at once with its
+poll, refresh and time-out pending. **Not verified**: that the flake is gone (it showed once); `ScrolledFrame`'s
+mouse-wheel `bind_all`, a Tcl script that can also name a closed window's command (ROADMAP).

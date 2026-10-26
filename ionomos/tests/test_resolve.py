@@ -346,6 +346,41 @@ def test_tk_dialog_accept_and_skip(lab):
     root.destroy()
 
 
+@pytest.mark.skipif(not _ok, reason=f"no GUI: {_why}")
+def test_a_closed_naming_window_leaves_no_timer_of_its_own(lab):
+    """#185: the window's file poll (500 ms), live refresh (2 s) and time-out are the root's timers and do nothing
+    once it is closed (tkutil.after). Its own timers outlived it and could call a callback registered later under
+    the same Tcl name: a closed pop-up's timer pressed the Setup checklist's Find FragPipe button that way."""
+    import time
+
+    from ionomos.resolve import TkResolver
+    from tests.tkharness import Timers
+
+    d = make_drop(lab["inbox"], "XYZ98_isoDTB_run", iso_raws([1, 2], [1, 2]))
+    with pytest.raises(IntakeError) as e:
+        plan(d, lab["cfg"])
+    dr = draft(d, lab["cfg"], e.value)
+    root = make_tk_root()
+    root.withdraw()
+    refreshed, at_close = [], []
+    res = TkResolver(root, timeout_seconds=60, refresh=lambda dd: refreshed.append(dd) or dd)
+
+    def close(win):  # as soon as it is shown: its timers are still pending
+        at_close.append(len(refreshed))
+        win.event_generate("<Escape>")
+
+    with Timers() as timers:
+        assert not _drive_dialog(root, close)
+        assert res.resolve(dr) is None
+        end = time.monotonic() + 2.5  # past the live refresh's 2 s
+        while time.monotonic() < end:
+            root.update()
+            time.sleep(0.05)
+    root.destroy()
+    assert not timers.dangling, timers.report()
+    assert at_close and len(refreshed) == at_close[0]  # nothing ran for the closed window
+
+
 def _all(w):
     yield w
     for c in w.winfo_children():

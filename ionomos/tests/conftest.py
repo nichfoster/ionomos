@@ -135,7 +135,8 @@ def no_dialogs(monkeypatch):
 @pytest.fixture
 def hidden_app(tmp_path, monkeypatch, no_dialogs):
     """The app on a withdrawn root, every window it opens withdrawn, its dialogs recorded (no_dialogs: a native
-    message box cannot be hidden and would wait for a click). Skips where gui_tests() says no (CI runs it)."""
+    message box cannot be hidden and would wait for a click). Skips where gui_tests() says no (CI runs it). The test
+    fails at teardown if a window was destroyed with a timer of its own still pending (tkharness.Timers, #185)."""
     ok, why = gui_tests()
     if not ok:
         pytest.skip(f"no GUI: {why}")
@@ -144,6 +145,7 @@ def hidden_app(tmp_path, monkeypatch, no_dialogs):
     app = make_app(tmp_path, monkeypatch)
     try:
         yield app
+        app._tkharness_timers.assert_none()
     finally:
         destroy_app(app)
 
