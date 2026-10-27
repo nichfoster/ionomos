@@ -929,6 +929,17 @@ Collected from the other docs; resolve before/during Phase 1.
       Nomura-Lab `atlas_intake.py`. Until it does, found runs wait in Dropbox, uncounted.
 - [ ] Should the sweep also send isoTOP runs (left today, as the atlas doesn't read them), and should it leave
       some owners' folders out by default?
+- [ ] The selection of D134 on the PC (with harvest's matching version): the first sweep after the update sends the
+      runs whose takes changed once more; check in Dropbox that a TMT run's `tmt-report\*.tsv` arrived, that Kosuke's
+      `A549_nucleus_TMT-check` runs went as TMT, and that Isaac's `20260629-isoDTB` record lists the earlier
+      search's `.pin` files in `left[]`, the copies sent before still there.
+- [ ] Replicate folders that are no group of the current manifest (D134: Isaac's `isoDTB_IJ510312_4` to `_7`, left
+      by an earlier search that grouped by fraction) still have their `psm.tsv`, `peptide.tsv` and `protein.tsv`
+      taken by the replicate rule; only their `.pin` files stay behind. Should those tables stay behind too (on both
+      sides, harvest's and Ionomos'), or does the atlas side tell them apart by the manifest?
+- [ ] A run that moved drives (Sheena's, from `C:` to `D:`) arrives as a new run key (Run is its path). A
+      `same_inputs_as` field in the record would let the atlas side link the two, but deciding it needs the hashes of
+      the Dropbox copies, and harvest's copies CSV has no SHA-256; not now (D134).
 
 **Lab process**
 - [ ] Confirm the naming convention with users (NAMING_CONVENTION.md); collect initials → user-folder aliases for config.

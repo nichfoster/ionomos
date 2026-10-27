@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The atlas hand-off takes TMT-Integrator's tables** (D134, docs/ATLAS.md): every `*.tsv` of the run folder's
+  `tmt-report` subfolder (`abundance_*.tsv`, `ratio_*.tsv`; the folder's name in any case), for a job's hand-off and
+  the drive sweep alike, whatever the run's probe class. One level only; the 500 MB cap and `left[]` as for any
+  file. The lab's Dropbox export of 2026-10-27 had 46 runs with TMT-Integrator on and none of these tables.
+  `harvest_fragpipe.ps1` takes the same in the same release.
+
+### Changed
+
+- **Every TMT reagent counts as TMT** (D134): the probe class by the masses (harvest's `$ProbeMasses`) also knows
+  TMT2 (duplex, 225.1558), TMT0 (224.1525) and TMTpro zero (295.1896). Runs searched with them (the five of
+  `D:\Kosuke\A549_nucleus_TMT-check`, TMT2) were classed `other` and left by the drive sweep; with **Also TMT
+  searches** on they go on the next pass.
+- **A run the drive sweep sent before goes again once** when this release changes what is taken from it (a TMT run
+  with `tmt-report` tables, a run with an earlier search's `.pin` files): only the missing files are copied, the
+  rest compared; nothing in Dropbox is removed or overwritten but the run's `ionomos-handoff.json`, and a `.pin.gz`
+  copied earlier that is now left stays there, named in the new record's `left[]`. An Ionomos job already handed
+  off is not sent again by itself: **Send to atlas** or `ionomos atlas send JOB` sends it with the new selection.
+
+### Fixed
+
+- **An earlier search's `.pin` files no longer go to the atlas as the run's** (D134). Each `.pin` is checked against
+  the run's `fragpipe-files.fp-manifest` (no header: its first line is a row): one whose raw file the manifest
+  doesn't name stays behind (`its raw file is not in this run's manifest`), and one in a replicate folder that
+  isn't its raw file's, while that replicate's folder is there, too (`its raw file is another replicate's
+  (<folder>)`); both in the record's `left[]`. When that can't be told for sure (no experiment, no such folder, no
+  manifest) the `.pin` is taken as before. Isaac's `20260629-isoDTB` run, whose folders hold an earlier search's
+  `.pin` files grouped by fraction, was inflated by about 25% at the atlas. `harvest_fragpipe.ps1` gets the same
+  rule.
+
 ## [0.21.0] - 2026-10-26
 
 ### Added

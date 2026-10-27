@@ -9,6 +9,7 @@ nomura-data, C:/Fragpipe_Auto or C:/Fragpipe_General.
 from __future__ import annotations
 
 import csv
+import dataclasses
 import gzip
 import hashlib
 import io
@@ -210,9 +211,21 @@ SELECTION = [
     ("exp_2/S_3.pin", False, "its _edited.pin is taken"),  # MSBooster's twin holds all of it
     ("exp_2/S_3_edited.pin", True, "selected (gzip)"),
     ("exp_2/S_4_edited.pin", True, "selected (gzip)"),
+    ("exp_2/Old_search_F1_edited.pin", False, "its raw file is not in this run's manifest"),  # D134: a leftover
+    # TMT-Integrator's tables (D134): the tmt-report subfolder takes every .tsv; another subfolder only the psm,
+    # peptide and protein tables
+    ("tmt-report/abundance_gene_MD.tsv", True, "selected"),
+    ("tmt-report/ratio_protein_None.tsv", True, "selected"),
+    ("tmt-report/abundance_multi-site_MD.tsv", True, "selected"),
+    ("tmt-report/notes.txt", False, "not needed"),
+    ("tmt-report/x.pep.xml", False, "not needed"),
+    ("exp_1/abundance_gene_MD.tsv", False, "not needed"),
 ]
 NOT_LISTED = ["exp_1/deeper/psm.tsv", "MSBooster/psm.tsv", "msbooster/x.log", "tmp/psm.tsv", "TEMP/x.log",
-              "__pycache__/x.log", ".git/x.log"]
+              "__pycache__/x.log", ".git/x.log", "tmt-report/deeper/abundance_gene_MD.tsv"]
+# The selection's manifest (headerless: raw, experiment, bioreplicate, data type): a.raw with no experiment (its
+# .pin in the top folder), S_2..S_4 the replicate exp_2's
+SELECTION_MANIFEST = ("C:\\raw\\a.raw\t\t\tDDA\n" + "".join(f"C:\\raw\\S_{i}.raw\texp\t2\tDDA\n" for i in (2, 3, 4)))
 
 
 def _run_folder(base: Path, files: dict[str, bytes | int]) -> Path:
@@ -226,11 +239,13 @@ def _run_folder(base: Path, files: dict[str, bytes | int]) -> Path:
 def test_the_selection_is_harvests(tmp_path):
     run = _run_folder(tmp_path / "fragpipe", {rel: rel.encode() for rel, _t, _r in SELECTION + [
         (n, None, None) for n in NOT_LISTED]})
+    (run / "fragpipe-files.fp-manifest").write_text(SELECTION_MANIFEST, encoding="utf-8")
     got = {p.rel: (p.take, p.reason) for p in atlas.select(run)}
     want = {rel: (take, reason) for rel, take, reason in SELECTION}
     assert {k: v for k, v in got.items() if k in want} == want
     assert not set(got) & set(NOT_LISTED), "a skipped or second-level folder was listed"
-    assert all(p.level == ("replicate" if "/" in p.rel else "root") for p in atlas.select(run))
+    assert all(p.level == ("root" if "/" not in p.rel else "tmt-report" if p.rel.startswith("tmt-report/")
+                           else "replicate") for p in atlas.select(run))  # harvest's inventory's Level
 
 
 def test_the_size_cap_is_harvests(tmp_path, monkeypatch):
@@ -264,6 +279,200 @@ def test_a_linked_folder_is_not_followed(tmp_path):
 def test_an_unreadable_run_folder_raises(tmp_path):
     with pytest.raises(OSError):
         atlas.select(tmp_path / "not-there")
+
+
+def test_the_tmt_report_folder_by_any_case_and_under_the_cap(tmp_path, monkeypatch):
+    """FragPipe writes TMT-Integrator's tables into tmt-report (D134); case is ignored, as harvest's -like; one
+    level only; the size cap and left[] as for any file. harvest's tests have the same cases (its parity test
+    compares the two)."""
+    run = _run_folder(tmp_path / "fragpipe", {
+        "TMT-Report/abundance_protein_MD.tsv": b"Index\n", "TMT-Report/ratio_protein_MD.TSV": b"Index\tr\n",
+        "TMT-Report/notes.txt": b"not a table", "TMT-Report/deeper/abundance_gene_MD.tsv": b"Index\n",
+        "TMT-Report/psm.tsv": b"P\n", "TMT-Report/ratio_gene_MD.tsv": MB + 1})
+    got = {p.rel: (p.take, p.reason, p.level) for p in atlas.select(run, max_mb=1)}
+    assert got == {"TMT-Report/abundance_protein_MD.tsv": (True, "selected", "tmt-report"),
+                   "TMT-Report/ratio_protein_MD.TSV": (True, "selected", "tmt-report"),
+                   "TMT-Report/notes.txt": (False, "not needed", "tmt-report"),
+                   "TMT-Report/psm.tsv": (True, "selected", "tmt-report"),
+                   "TMT-Report/ratio_gene_MD.tsv": (False, "larger than 1 MB", "tmt-report")}  # deeper/: not listed
+    (run / "fragpipe.workflow").write_bytes(b"msfragger.table.fix-mods=229.16293,K,true,-1\n")
+    dest = tmp_path / "Dropbox" / "fragpipe-runs"
+    dest.parent.mkdir()
+    monkeypatch.setattr(atlas, "MAX_FILE_MB", 1)
+    res = atlas.transfer(run, None, dest, "TMT", owner="Kosuke")
+    assert res.ok, res.message
+    run_dest = Path(res.dest_dir)
+    assert _read(run_dest / "TMT-Report" / "abundance_protein_MD.tsv") == b"Index\n"  # <run dest>/tmt-report/<name>
+    assert sorted(_files(run_dest)) == sorted(["fragpipe.workflow", names.ATLAS_HANDOFF_FILE, "TMT-Report/psm.tsv",
+                                               "TMT-Report/abundance_protein_MD.tsv",
+                                               "TMT-Report/ratio_protein_MD.TSV"])
+    rec = json.loads(_read(run_dest / names.ATLAS_HANDOFF_FILE))
+    assert {"TMT-Report/abundance_protein_MD.tsv", "TMT-Report/ratio_protein_MD.TSV"} <= {f["path"]
+                                                                                          for f in rec["files"]}
+    assert rec["left"] == [{"path": "TMT-Report/ratio_gene_MD.tsv", "size": MB + 1, "reason": "larger than 1 MB"}]
+    assert res.too_large == ["TMT-Report/ratio_gene_MD.tsv"]
+    from ionomos import atlassweep  # the sweep's fingerprint takes a tmt-report file as any subfolder's
+
+    picks = atlas.select(run)
+    assert atlassweep.fingerprint("TMT", 100, picks) == atlassweep.fingerprint(
+        "TMT", 100, [dataclasses.replace(p, level="replicate") if p.level == "tmt-report" else p for p in picks])
+
+
+# ---------------------------------------------------------------- a run's .pin files and its manifest (D134) --
+
+ISAAC_EXP = "isoDTB_IJ510312"
+
+
+def _isaac_raw(rep: int, frac: int) -> str:
+    return f"IJ_isoDTB_IJ510312_25mM_22Rv1_4h_{rep}_{frac}"
+
+
+# D:\Isaac\20260629-isoDTB\output, from the lab's Dropbox export of 2026-10-27: 21 manifest rows (3 replicates x 7
+# fractions, bioreplicate = the replicate), but 7 replicate folders from an earlier search that grouped the raw files
+# by fraction. (The raw files' folder is the test's.)
+ISAAC_MANIFEST = "".join(f"D:\\Isaac\\20260629-isoDTB\\{_isaac_raw(rep, frac)}.raw\t{ISAAC_EXP}\t{rep}\tDDA\n"
+                         for rep in (1, 2, 3) for frac in range(1, 8))
+ISAAC_FOLDERS = {
+    f"{ISAAC_EXP}_1": [(1, f) for f in range(1, 8)] + [(2, 1), (3, 1)],
+    f"{ISAAC_EXP}_2": [(1, 2)] + [(2, f) for f in range(1, 8)] + [(3, 2)],
+    f"{ISAAC_EXP}_3": [(1, 3), (2, 3)] + [(3, f) for f in range(1, 8)],
+    **{f"{ISAAC_EXP}_{k}": [(1, k), (2, k), (3, k)] for k in range(4, 8)},
+}
+
+
+def _isaac_want() -> dict[str, str]:
+    """What the brief says: in _1, _2 and _3 only that replicate's 7 pins are taken; every other pin there, and
+    every pin in _4 .. _7, is left as another replicate's, naming that replicate's folder."""
+    out = {}
+    for folder, pins in ISAAC_FOLDERS.items():
+        k = int(folder.rsplit("_", 1)[1])
+        for rep, frac in pins:
+            rel = f"{folder}/{_isaac_raw(rep, frac)}_edited.pin"
+            out[rel] = "selected (gzip)" if rep == k else f"its raw file is another replicate's ({ISAAC_EXP}_{rep})"
+    return out
+
+
+ELK_EXP = "isoDTB_ELK052"
+# D:\Carolyn\isoDTB_ELK\output: the manifest's FIRST row is a cytochrome C run of Qian's (a data row: there is no
+# header), then the ELK fractions of the same replicate
+ELK_MANIFEST = ("D:\\Qian\\QS_shotugun_cytochromeC_TosteLab\\QS_shotugun_cytochromeC_9N2_TosteLab.raw\t"
+                f"{ELK_EXP}\t1\tDDA\n"
+                + "".join(f"C:\\Proteomics_File_Sharing\\CG_isoDTB_22rv1_ELK_1_F{f}.raw\t{ELK_EXP}\t1\tDDA\n"
+                          for f in range(1, 8)))
+ELK_PINS = ["QS_shotugun_cytochromeC_9N2_TosteLab_edited.pin"] + [f"CG_isoDTB_22rv1_ELK_1_F{f}_edited.pin"
+                                                                   for f in range(1, 8)]
+NOT_IN = "its raw file is not in this run's manifest"
+TAKEN = "selected (gzip)"
+
+# (case, the manifest's text or None for no manifest, {.pin path in the run folder: its reason})
+PIN_CASES = [
+    ("isaac-earlier-grouping", ISAAC_MANIFEST, _isaac_want()),
+    ("carolyn-first-row-is-data", ELK_MANIFEST, {f"{ELK_EXP}_1/{n}": TAKEN for n in ELK_PINS}),
+    ("a-leftover-of-another-search", ELK_MANIFEST, {
+        f"{ELK_EXP}_1/CG_isoDTB_22rv1_ELK_1_F1_edited.pin": TAKEN,
+        f"{ELK_EXP}_1/Old_search_F1_edited.pin": NOT_IN,
+        "Old_search_F2.pin": NOT_IN,                            # the top folder gets the manifest check too
+        "CG_isoDTB_22rv1_ELK_1_F2.pin": TAKEN,                  # ... and only that one: no replicate check there
+    }),
+    ("no-manifest", None, {f"{ELK_EXP}_1/Old_search_F1_edited.pin": TAKEN, "Old_search_F2.pin": TAKEN}),
+    ("an-empty-manifest", "\n\n", {f"{ELK_EXP}_1/Old_search_F1_edited.pin": TAKEN}),
+    ("rows-without-a-raw", "\tEXP\t1\tDDA\n", {f"{ELK_EXP}_1/Old_search_F1_edited.pin": TAKEN}),
+    ("case-is-ignored", ELK_MANIFEST.upper(), {f"{ELK_EXP}_1/cg_isodtb_22rv1_elk_1_f3_EDITED.PIN": TAKEN}),
+    # no experiment in the manifest: FragPipe's .pin files are in the top folder and no group is known
+    ("no-experiment", "C:\\raw\\S_1.raw\t\t\tDDA\nC:\\raw\\S_2.raw\t\t\tDDA\n",
+     {"S_1.pin": TAKEN, "old/S_2.pin": TAKEN, "old/S_9.pin": NOT_IN}),
+    # its row's group has no folder here: it can't be told for sure, so it is taken
+    ("the-group-has-no-folder", "C:\\raw\\S_1.raw\tplex1\t\tDDA\nC:\\raw\\S_2.raw\tplex2\t\tDDA\n",
+     {"plex1/S_1.pin": TAKEN, "plex1/S_2.pin": TAKEN, "elsewhere/S_1.pin": "its raw file is another replicate's "
+                                                                            "(plex1)"}),
+    # POSIX separators and other raw formats: a .pin is named after the raw file's stem
+    ("mzml-and-d", "/data/x/S_1.mzML\tE\t1\tDDA\nD:\\bruker\\S_2.d\tE\t2\tDIA\n",
+     {"E_1/S_1.pin": TAKEN, "E_2/S_2.pin": TAKEN, "E_2/S_1.pin": "its raw file is another replicate's (E_1)",
+      "tmt-report/S_2.pin": "its raw file is another replicate's (E_2)"}),  # a subfolder as any other
+]
+
+
+@pytest.mark.parametrize(("manifest", "want"), [c[1:] for c in PIN_CASES], ids=[c[0] for c in PIN_CASES])
+def test_a_runs_pins_are_checked_against_its_manifest(tmp_path, manifest, want):
+    run = _run_folder(tmp_path / "output", {rel: _pin(3) for rel in want})
+    if manifest is not None:
+        (run / "fragpipe-files.fp-manifest").write_text(manifest, encoding="utf-8")
+    got = {p.rel: p.reason for p in atlas.select(run) if p.rel.lower().endswith(".pin")}
+    assert got == want
+    assert {p.rel for p in atlas.select(run) if p.take and p.gzip} == {r for r, why in want.items() if why == TAKEN}
+
+
+def test_an_unreadable_manifest_leaves_the_pins_as_before(tmp_path):
+    run = _run_folder(tmp_path / "output", {f"{ELK_EXP}_1/Old_search_F1_edited.pin": _pin(3)})
+    (run / "fragpipe-files.fp-manifest").mkdir()  # can't be read as a file (as a locked one can't)
+    assert [p.reason for p in atlas.select(run)] == [TAKEN]
+
+
+def test_the_edited_twin_rule_goes_first_and_the_cap_last(tmp_path):
+    """Order (D134): the _edited twin, then the manifest, then pins off and the size cap."""
+    stale = f"{ISAAC_EXP}_1/{_isaac_raw(2, 1)}"
+    run = _run_folder(tmp_path / "output", {f"{stale}.pin": _pin(3), f"{stale}_edited.pin": _pin(3),
+                                            f"{ISAAC_EXP}_1/{_isaac_raw(1, 1)}_edited.pin": MB + 1,
+                                            f"{ISAAC_EXP}_2/{_isaac_raw(2, 1)}_edited.pin": _pin(3)})
+    (run / "fragpipe-files.fp-manifest").write_text(ISAAC_MANIFEST, encoding="utf-8")
+    other = f"its raw file is another replicate's ({ISAAC_EXP}_2)"
+    got = {p.rel: p.reason for p in atlas.select(run, pin_max_mb=1) if p.rel.endswith(".pin")}
+    assert got == {f"{stale}.pin": "its _edited.pin is taken", f"{stale}_edited.pin": other,
+                   f"{ISAAC_EXP}_1/{_isaac_raw(1, 1)}_edited.pin": "pin larger than 1 MB",
+                   f"{ISAAC_EXP}_2/{_isaac_raw(2, 1)}_edited.pin": TAKEN}
+    got = {p.rel: p.reason for p in atlas.select(run, pin_max_mb=0)}
+    assert got[f"{stale}_edited.pin"] == other and got[f"{ISAAC_EXP}_2/{_isaac_raw(2, 1)}_edited.pin"] == "pins off"
+
+
+@pytest.mark.parametrize(("raw", "stem"), [
+    ("C:\\Proteomics_File_Sharing\\CG_isoDTB_22rv1_ELK_1_F1.raw", "CG_isoDTB_22rv1_ELK_1_F1"),
+    ("D:\\Qian\\QS_shotugun_cytochromeC_TosteLab\\QS_shotugun_cytochromeC_9N2_TosteLab.raw",
+     "QS_shotugun_cytochromeC_9N2_TosteLab"),
+    ("/data/S_1.mzML", "S_1"), ("x.mzXML", "x"), ("D:\\bruker\\S_2.d", "S_2"), ("D:\\bruker\\S_2.d\\", "S_2"),
+    ("C:/mixed\\S_3.mgf", "S_3"), ("D:\\a\\sample.1.raw", "sample.1"), ("  C:\\a\\S_4.RAW ", "S_4"),
+])
+def test_a_manifest_raws_stem(raw, stem):
+    assert atlas.raw_stem(raw) == stem
+
+
+@pytest.mark.parametrize(("name", "stem"), [
+    ("CG_isoDTB_22rv1_ELK_1_F1_edited.pin", "CG_isoDTB_22rv1_ELK_1_F1"), ("S_1.pin", "S_1"),
+    ("S_1_EDITED.PIN", "S_1"), ("x_edited_edited.pin", "x_edited"), ("edited.pin", "edited"),
+])
+def test_a_pins_stem(name, stem):
+    assert atlas.pin_stem(name) == stem
+
+
+@pytest.mark.parametrize(("row", "group"), [
+    ({"experiment": "isoDTB_ELK052", "bioreplicate": "1"}, "isoDTB_ELK052_1"),
+    ({"experiment": "plex1", "bioreplicate": ""}, "plex1"),
+    ({"experiment": "", "bioreplicate": "1"}, ""),
+    ({"experiment": " EXP ", "bioreplicate": " 2 "}, "EXP_2"),
+])
+def test_a_manifest_rows_replicate_folder(row, group):
+    assert atlas.replicate_group(row) == group
+
+
+def test_the_pins_left_by_the_manifest_are_in_the_record(tmp_path):
+    """Isaac's run handed off: the record's files[] has each replicate's own 21 .pin.gz; left[] the other 18, each
+    with its reason, as the other reasons of a .pin left behind."""
+    run = _run_folder(tmp_path / "Isaac" / "20260629-isoDTB" / "output",
+                      {rel: _pin(5) for rel in _isaac_want()} | {f"{ISAAC_EXP}_{r}/psm.tsv": b"Peptide\n"
+                                                                  for r in (1, 2, 3)})
+    (run / "fragpipe-files.fp-manifest").write_text(ISAAC_MANIFEST, encoding="utf-8")
+    dest = tmp_path / "Dropbox" / "fragpipe-runs"
+    dest.parent.mkdir()
+    res = atlas.transfer(run, None, dest, "isoDTB", owner="Isaac")
+    assert res.ok, res.message
+    assert res.pins == 21 and not res.too_large
+    rec = json.loads(_read(Path(res.dest_dir) / names.ATLAS_HANDOFF_FILE))
+    want = _isaac_want()
+    assert {f["gzip_of"]["path"] for f in rec["files"] if "gzip_of" in f} == {r for r, w in want.items() if w == TAKEN}
+    assert rec["left"] == [{"path": r, "size": len(_pin(5)), "reason": w} for r, w in sorted(
+        want.items(), key=lambda x: x[0].lower()) if w != TAKEN]
+    assert not [r for r in _files(Path(res.dest_dir)) if r in {f"{x}.gz" for x, w in want.items() if w != TAKEN}]
+    (row,) = list(csv.DictReader(io.StringIO(_records(dest)[0].read_bytes()[3:].decode("utf-8"))))
+    assert (row["FilesSelected"], row["FilesTooLarge"]) == (str(1 + 3 + 21), "0")  # manifest, 3 psm.tsv, 21 pins
 
 
 # ----------------------------------------------------------------------------------------------- layout --
@@ -318,11 +527,27 @@ def test_workflow_info_reads_like_harvest(tmp_path):
 @pytest.mark.parametrize(("mods", "cls"), [
     ("567.34,C,true,1", "isoDTB"), ("464.28,C,true,1", "isoTOP"), ("229.1629,K,true,1", "TMT"),
     ("561.33,C,true,1; 229.16,K,true,1", "isoDTB+TMT"), ("15.9949,M,true,3", "other"),
+    # every TMT reagent (D134): TMTpro, TMT2 (duplex), TMT0, TMTpro zero, as workflows write their masses
+    ("304.20715,K,true,-1", "TMT"), ("304.21,K,true,-1", "TMT"), ("225.1558,K (lysine),true,-1", "TMT"),
+    ("224.1525,K,true,-1", "TMT"), ("295.18959,K,true,-1", "TMT"), ("295.1896,n^,true,1", "TMT"),
+    ("295.19,K,true,-1", "TMT"), ("57.02146,C (cysteine),true,-1; 0.0,K (lysine),true,-1", "other"),
 ])
 def test_probe_class_from_masses(tmp_path, mods, cls):
     wf = tmp_path / "w.workflow"
     wf.write_text(f"msfragger.table.var-mods={mods}\n", encoding="utf-8")
     assert atlas.read_workflow_info(wf)["ProbeClass"] == cls
+    assert atlas.PROBE_MASSES[2] == ("TMT", r"229\.16|304\.20|304\.21|225\.15|224\.15|295\.18|295\.19")  # harvest's
+
+
+def test_a_manifests_first_line_is_a_row(tmp_path):
+    """fragpipe-files.fp-manifest has no header (D134: Carolyn's cytochrome C run is its first row)."""
+    mf = tmp_path / "fragpipe-files.fp-manifest"
+    mf.write_text(ELK_MANIFEST, encoding="utf-8")
+    rows = atlas.manifest_rows(mf)
+    assert len(rows) == 8 and rows[0] == {
+        "raw": "D:\\Qian\\QS_shotugun_cytochromeC_TosteLab\\QS_shotugun_cytochromeC_9N2_TosteLab.raw",
+        "experiment": "isoDTB_ELK052", "bioreplicate": "1", "data_type": "DDA"}
+    assert atlas.read_manifest_info(mf)["rows"] == rows and atlas.manifest_rows(tmp_path / "none") == []
 
 
 def test_manifest_info_reads_like_harvest(tmp_path):
@@ -757,6 +982,19 @@ def test_no_pins_when_the_cap_is_zero(design):
     assert {(x["path"], x["reason"]) for x in rec["left"]} == {("exp_1/S_1.pin", "its _edited.pin is taken"),
                                                                ("exp_1/S_1_edited.pin", "pins off"),
                                                                ("exp_2/S_2.pin", "pins off")}
+
+
+def test_a_jobs_record_leaves_a_pin_its_manifest_does_not_name(design):
+    """A .pin of an earlier search of other raw files, in the job's FragPipe folder (D134): left, with why."""
+    _run_folder(design["run"], {"exp_1/Old_search_F1_edited.pin": _pin(10)})
+    res = atlas.send(design["cfg"], design["job"])
+    assert res.ok and res.pins == 2, res.message
+    assert not [r for r in _files(Path(res.dest_dir)) if "Old_search" in r]
+    rec = json.loads(_read(Path(res.dest_dir) / names.ATLAS_HANDOFF_FILE))
+    assert rec["left"] == [{"path": "exp_1/Old_search_F1_edited.pin", "size": len(_pin(10)),
+                            "reason": "its raw file is not in this run's manifest"},
+                           {"path": "exp_1/S_1.pin", "size": len(design["pins"]["exp_1/S_1.pin"]),
+                            "reason": "its _edited.pin is taken"}]
 
 
 def test_a_changed_design_file_goes_beside_the_earlier_copy(design):

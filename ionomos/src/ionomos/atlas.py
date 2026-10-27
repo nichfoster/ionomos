@@ -77,12 +77,18 @@ SKIP_DIR_NAMES = ("Windows", "Program Files", "Program Files (x86)", "ProgramDat
                   "System Volume Information", "Recovery", "PerfLogs", "AppData", "node_modules", ".git", ".venv",
                   "venv", "__pycache__", "site-packages", "MSBooster", "tmp", "temp", "Temp", ".dropbox.cache",
                   "OneDriveTemp", "Config.Msi", "Intel", "NVIDIA", "MSOCache", "Boot", "EFI")
-RUN_MARKERS = ("fragpipe.workflow", "fragpipe-files.fp-manifest", "fragpipe.job", "combined_protein.tsv",
+MANIFEST_FILE = "fragpipe-files.fp-manifest"  # FragPipe's list of the run's raw files (headerless TSV)
+RUN_MARKERS = ("fragpipe.workflow", MANIFEST_FILE, "fragpipe.job", "combined_protein.tsv",
                "combined_peptide.tsv", "combined_ion.tsv", "combined_modified_peptide.tsv",
                "combined_modified_peptide_label_quant.tsv")
 ROOT_ALLOW = ("*.workflow", "*.fp-manifest", "*.job", "*.tsv", "*.txt", "*.csv", "*.log", "*.fas", "*.fasta",
               "*.params", "*.yml", "*.yaml", "*.json", "*.manifest", "*.xml")
 REPLICATE_ALLOW = ("psm.tsv", "peptide.tsv", "protein.tsv", "*.log", "log_*.txt")
+# TMT-Integrator's tables (D134; harvest takes the same): FragPipe writes them into the run folder's tmt-report
+# subfolder (abundance_*.tsv, ratio_*.tsv), so a subfolder of that name (case ignored) also takes every *.tsv, for
+# every run whatever its probe class; one level, NEVER_COPY and the size cap as for any subfolder
+TMT_REPORT_DIR = "tmt-report"
+TMT_REPORT_ALLOW = ("*.tsv",)
 NEVER_COPY = ("*.raw", "*.d", "*.wiff", "*.wiff2", "*.mzML", "*.mzXML", "*.mzBIN", "*.mzBIN_calibrated", "*.pepXML",
               "*.pep.xml", "*.prot.xml", "*.pin", "*.mgf", "*.pkl", "*.zip", "*.7z", "*.rar", "*.gz", "*.tar", "*.exe",
               "*.dll", "*.jar", "*.pdf", "*.png", "*.jpg", "*.pptx", "*.docx", "*.xlsx", "*.partial",
@@ -92,6 +98,11 @@ NEVER_COPY = ("*.raw", "*.d", "*.wiff", "*.wiff2", "*.mzML", "*.mzXML", "*.mzBIN
 # column of <x>.pin (the same values) plus its own features, so when it is there <x>.pin stays behind.
 PIN_ALLOW = ("*.pin",)
 PIN_EDITED = "_edited.pin"
+# A .pin is the run's own only when its raw file is (D134; harvest keeps the same rule): a run folder can hold the
+# .pin files of an earlier search of other raw files, or grouped otherwise, which FragPipe never removes. Checked
+# against the run's manifest after the _edited twin rule, before pins off and the cap; these are the reasons
+PIN_NOT_IN_MANIFEST = "its raw file is not in this run's manifest"
+PIN_OTHER_REPLICATE = "its raw file is another replicate's ({group})"
 GZIP_LEVEL = 6  # 0.34 of a .pin's size; 9 is no smaller and twice as slow (measured on the lab's runs, D127)
 # The sample design, from beside the run folder (harvest's $DesignFiles): Ionomos's experiment.yaml (conditions,
 # doses, times, roles, the tmt: channel map) and the analysis' FragPipe-Analyst annotation, in the experiment folder;
@@ -292,7 +303,7 @@ class Picked:
     """One file of a run folder (or, level design, from beside it), as harvest's inventory lists it."""
     path: Path
     rel: str           # relative to the run folder, with '/' (design: the file's name)
-    level: str         # root | replicate | design
+    level: str         # root | replicate | tmt-report (harvest's inventory's Level; handled as replicate) | design
     size: int
     mtime: float
     take: bool
@@ -318,13 +329,65 @@ def _born(st) -> float:
     return float(getattr(st, "st_birthtime", None) or st.st_ctime)
 
 
+def raw_stem(raw: str) -> str:
+    """A manifest row's raw file as a .pin is named after it: the last part of its path (Windows or POSIX
+    separators) without its extension (.raw, .mzML, .mzXML, .d, .mgf, ...)."""
+    name = re.split(r"[\\/]+", str(raw).strip().rstrip("\\/"))[-1]
+    return os.path.splitext(name)[0]
+
+
+def pin_stem(name: str) -> str:
+    """The raw file a .pin is of: its name without .pin and without a trailing _edited (MSBooster's <x>_edited.pin)."""
+    stem = name[:-len(".pin")] if name.lower().endswith(".pin") else name
+    edited = PIN_EDITED[:-len(".pin")]
+    return stem[:-len(edited)] if stem.lower().endswith(edited) else stem
+
+
+def replicate_group(row: dict) -> str:
+    """The subfolder FragPipe writes a manifest row's results into: <experiment>_<bioreplicate>, or <experiment> when
+    the row has no bioreplicate; "" when it has no experiment (no group known: the top folder)."""
+    exp, rep = str(row.get("experiment") or "").strip(), str(row.get("bioreplicate") or "").strip()
+    return f"{exp}_{rep}" if exp and rep else exp
+
+
+def _manifest_groups(run_dir: Path) -> dict[str, list[str]]:
+    """The run's manifest as {raw stem (lower case): [the group of each row with that stem]}; {} when the run has no
+    manifest, it can't be read, or no row names a raw file (then every .pin is checked as before D134)."""
+    groups: dict[str, list[str]] = {}
+    for r in manifest_rows(run_dir / MANIFEST_FILE):
+        if r["raw"]:
+            groups.setdefault(raw_stem(r["raw"]).lower(), []).append(replicate_group(r))
+    return groups
+
+
+def pin_not_this_runs(name: str, folder: str | None, groups: dict[str, list[str]], dirs: set[str]) -> str:
+    """Why a .pin is not this run's own by its manifest (D134); "" when it is, or when that can't be told for sure.
+    name: the .pin's file name; folder: the subfolder it is in (None: the top folder, which gets only the first
+    check); groups: _manifest_groups; dirs: the run folder's subfolder names, in lower case.
+      - the manifest names raw files, none of them the .pin's        -> PIN_NOT_IN_MANIFEST
+      - in a subfolder that no row of its raw file has as its group, while the group of such a row is a subfolder
+        of the run folder (an earlier search grouped the replicates otherwise) -> PIN_OTHER_REPLICATE with it
+    A row with no experiment has no known group; a group with no folder can't be told for sure: the .pin is taken."""
+    if not groups:
+        return ""
+    have = groups.get(pin_stem(name).lower())
+    if have is None:
+        return PIN_NOT_IN_MANIFEST
+    known = [g for g in have if g]
+    if folder is None or folder.lower() in {g.lower() for g in known}:
+        return ""
+    other = next((g for g in known if g.lower() in dirs), "")
+    return PIN_OTHER_REPLICATE.format(group=other) if other else ""
+
+
 def select(run_dir: Path, max_mb: int | None = None, pin_max_mb: int | None = None) -> list[Picked]:
     """Every file harvest_fragpipe.ps1 would list in a FragPipe output folder, and whether it takes it: the top
-    folder's files by ROOT_ALLOW; each subfolder's (one level, not SKIP_DIR_NAMES, no links) by REPLICATE_ALLOW;
-    then NEVER_COPY and the size cap. A .pin at either level is taken by its own rule (PIN_ALLOW, before NEVER_COPY):
-    gzip-compressed, not when its _edited.pin twin is there, and only up to pin_max_mb (0: none). Raises OSError
-    when a folder can't be listed: an incomplete run is never sent (harvest logs it and goes on; a hand-off waits
-    and tries again)."""
+    folder's files by ROOT_ALLOW; each subfolder's (one level, not SKIP_DIR_NAMES, no links) by REPLICATE_ALLOW, and
+    the tmt-report subfolder's also by TMT_REPORT_ALLOW; then NEVER_COPY and the size cap. A .pin at either level is
+    taken by its own rule (PIN_ALLOW, before NEVER_COPY): gzip-compressed; not when its _edited.pin twin is there;
+    not when the run's manifest says it is of another raw file or another replicate (pin_not_this_runs); and only up
+    to pin_max_mb (0: none). Raises OSError when a folder can't be listed: an incomplete run is never sent (harvest
+    logs it and goes on; a hand-off waits and tries again)."""
     run_dir = Path(run_dir)
     max_mb = MAX_FILE_MB if max_mb is None else max_mb
     pin_mb = MAX_PIN_MB if pin_max_mb is None else pin_max_mb
@@ -334,6 +397,7 @@ def select(run_dir: Path, max_mb: int | None = None, pin_max_mb: int | None = No
     with os.scandir(_fs(run_dir)) as it:
         top = sorted(it, key=lambda e: e.name.lower())
     top_names = {e.name.lower() for e in top if e.is_file()}
+    dirs = {e.name.lower() for e in top if e.is_dir()}
     for e in top:
         if e.is_dir():
             if _reparse(e) or _skip_dir(e.name):
@@ -341,11 +405,16 @@ def select(run_dir: Path, max_mb: int | None = None, pin_max_mb: int | None = No
             with os.scandir(e.path) as it:
                 sub = sorted(it, key=lambda x: x.name.lower())
             here = {f.name.lower() for f in sub if f.is_file()}
+            if e.name.lower() == TMT_REPORT_DIR.lower():  # harvest's inventory lists these at Level tmt-report
+                allow, level = REPLICATE_ALLOW + TMT_REPORT_ALLOW, TMT_REPORT_DIR
+            else:
+                allow, level = REPLICATE_ALLOW, "replicate"
             for f in sub:
                 if f.is_file():
-                    found.append((f, f"{e.name}/{f.name}", "replicate", _like(f.name, REPLICATE_ALLOW), here))
+                    found.append((f, f"{e.name}/{f.name}", level, _like(f.name, allow), here))
         elif e.is_file():
             found.append((e, e.name, "root", _like(e.name, ROOT_ALLOW), top_names))
+    groups = _manifest_groups(run_dir) if any(_is_pin(entry.name) for entry, *_rest in found) else {}
     out = []
     for entry, rel, level, take, here in found:
         st = entry.stat()
@@ -355,6 +424,9 @@ def select(run_dir: Path, max_mb: int | None = None, pin_max_mb: int | None = No
             gz = True
             if not low.endswith(PIN_EDITED) and low[:-len(".pin")] + PIN_EDITED in here:
                 take, reason = False, "its _edited.pin is taken"
+            elif why := pin_not_this_runs(entry.name, rel.rsplit("/", 1)[0] if level != "root" else None,
+                                          groups, dirs):
+                take, reason = False, why
             elif pin_bytes <= 0:
                 take, reason = False, "pins off"
             elif st.st_size > pin_bytes:
@@ -511,39 +583,46 @@ def read_workflow_info(path: Path) -> dict:
     return info
 
 
-# harvest's $ProbeMasses: the modification masses that say which probe (or label) a search looked for
-PROBE_MASSES = (("isoDTB", r"561\.33|567\.34"), ("isoTOP", r"464\.28|470\.29"), ("TMT", r"229\.16|304\.20|304\.21"))
+# harvest's $ProbeMasses: the modification masses that say which probe (or label) a search looked for. isoDTB light
+# and heavy; isoTOP light and heavy; TMT: 6/10/11-plex 229.1629, TMTpro 304.2071, TMT2 (duplex) 225.1558, TMT0
+# 224.1525 and TMTpro zero 295.1896 (295.18 catches 295.18959 and 295.1896, 295.19 a two-decimal rounding; D134)
+PROBE_MASSES = (("isoDTB", r"561\.33|567\.34"), ("isoTOP", r"464\.28|470\.29"),
+                ("TMT", r"229\.16|304\.20|304\.21|225\.15|224\.15|295\.18|295\.19"))
 
 
 def probe_class(mods: str) -> str:
-    """harvest's probe class of a workflow's modification tables: isoDTB, isoTOP, TMT (several joined by +), other."""
+    """harvest's probe class of a workflow's modification tables (harvest's $ProbeMasses, PROBE_MASSES): isoDTB,
+    isoTOP, TMT (any TMT reagent: 6/10/11-plex, TMTpro, TMT2, TMT0, TMTpro zero), several joined by +, else other."""
     return "+".join([c for c, pat in PROBE_MASSES if re.search(pat, mods)] or ["other"])
+
+
+def manifest_rows(path: Path) -> list[dict]:
+    """The rows of an fp-manifest, a TSV with no header (its first line is a row): raw file, experiment,
+    bioreplicate, data type, each {"raw", "experiment", "bioreplicate", "data_type"}; blank lines skipped. [] when
+    the file isn't there or can't be read."""
+    try:
+        text = Path(_fs(path)).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    rows = []
+    for ln in text.splitlines():
+        if not ln.strip():
+            continue
+        cols = ln.split("\t")
+        cols += [""] * (4 - len(cols))
+        rows.append({"raw": cols[0].strip(), "experiment": cols[1].strip(), "bioreplicate": cols[2].strip(),
+                     "data_type": cols[3].strip()})
+    return rows
 
 
 def read_manifest_info(path: Path) -> dict:
     """harvest's Read-ManifestInfo: raw files (and how many are missing) and experiment labels of an fp-manifest;
     plus the rows themselves (the replicate plan of the completion record)."""
-    out = {"RawCount": 0, "RawPaths": "", "Experiments": "", "RawMissing": 0, "rows": []}
-    try:
-        text = Path(_fs(path)).read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return out
-    raws, exps, rows = [], [], []
-    for ln in text.splitlines():
-        if not ln.strip():
-            continue
-        cols = ln.split("\t")
-        raw = cols[0].strip()
-        if raw:
-            raws.append(raw)
-        if len(cols) >= 2 and cols[1].strip():
-            exps.append(cols[1].strip())
-        cols += [""] * (4 - len(cols))
-        rows.append({"raw": raw, "experiment": cols[1].strip(), "bioreplicate": cols[2].strip(),
-                     "data_type": cols[3].strip()})
-    out.update(RawCount=len(raws), RawMissing=sum(1 for r in raws if not os.path.exists(r)),
-               RawPaths=" | ".join(raws), Experiments=" | ".join(dict.fromkeys(exps)), rows=rows)
-    return out
+    rows = manifest_rows(path)
+    raws = [r["raw"] for r in rows if r["raw"]]
+    exps = [r["experiment"] for r in rows if r["experiment"]]
+    return {"RawCount": len(raws), "RawPaths": " | ".join(raws), "Experiments": " | ".join(dict.fromkeys(exps)),
+            "RawMissing": sum(1 for r in raws if not os.path.exists(r)), "rows": rows}
 
 
 def _ps_number(x: float) -> str:
@@ -1051,7 +1130,7 @@ def transfer(run_dir: Path, exp_dir: Path | None, root: Path, kind: str = KINDS[
             or src_n == dst_n:
         res.message = f"the atlas folder {root_s} and the run folder {res.run_dir} are inside one another"
         return res
-    wf_path, mf_path = run_dir / "fragpipe.workflow", run_dir / "fragpipe-files.fp-manifest"
+    wf_path, mf_path = run_dir / "fragpipe.workflow", run_dir / MANIFEST_FILE
     wf = read_workflow_info(wf_path) if wf_path.is_file() else {"Version": "", "Database": "", "VarMods": "",
                                                                   "ProbeClass": "unknown", "Enzyme": ""}
     mf = read_manifest_info(mf_path) if mf_path.is_file() else read_manifest_info(Path(os.devnull))
@@ -1060,7 +1139,10 @@ def transfer(run_dir: Path, exp_dir: Path | None, root: Path, kind: str = KINDS[
               if not os.path.normcase(windows_path(p.path)).startswith(dst_n.rstrip("\\/") + os.sep)]
     take = [p for p in picks if p.take]
     dtake = [p for p in design if p.take]
-    left = [p for p in picks + design if p.reason.startswith(("larger", "pin", "its _edited"))]
+    # left[]: every .pin not taken (its _edited twin, not this run's by its manifest, pins off, its cap) and every
+    # file over a cap
+    left = [p for p in picks + design
+            if not p.take and (p.reason.startswith("larger") or (p.level != "design" and _is_pin(p.path.name)))]
     res.too_large = [p.rel if p.level != "design" else windows_path(p.path) for p in left if "larger" in p.reason]
     res.files, res.bytes = len(take) + len(dtake), sum(p.size for p in take + dtake)
     run_dest = destination(res.run_dir, root)
