@@ -344,6 +344,14 @@ def test_listing_a_drive_turns_windows_no_disk_box_off_and_back_on(tmp_path, mon
 
 
 @pytest.fixture
+def older(monkeypatch):
+    """The CLI's own version, older than EXE's: EXE stays 0.21.0 whatever this release is."""
+    from ionomos import cli
+
+    monkeypatch.setattr(cli, "__version__", "0.20.0")
+
+
+@pytest.fixture
 def no_lab(tmp_path, monkeypatch):
     """No remembered config of the developer's own: `ionomos update --from` reads one to stop its watcher."""
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
@@ -370,7 +378,7 @@ def test_cli_update_from_a_file_checks_it(tmp_path, capsys, no_lab):
     assert not (tmp_path / "Downloads").exists()  # a check copies nothing
 
 
-def test_cli_update_from_a_file_installs_from_downloads(tmp_path, monkeypatch, capsys, no_lab):
+def test_cli_update_from_a_file_installs_from_downloads(tmp_path, monkeypatch, capsys, no_lab, older):
     exe = _stick(tmp_path / "E")
     dl = tmp_path / "Downloads"
     ran = []
@@ -386,7 +394,7 @@ def test_cli_update_from_a_file_installs_from_downloads(tmp_path, monkeypatch, c
     assert main([*no_lab, "update", "--from", str(bad)]) == 1 and len(ran) == 1  # failed its check: nothing run
 
 
-def test_cli_update_from_a_file_stops_the_watcher_first(lab, tmp_path, monkeypatch, capsys):
+def test_cli_update_from_a_file_stops_the_watcher_first(lab, tmp_path, monkeypatch, capsys, older):
     from ionomos import health, service
 
     exe = _stick(tmp_path / "E")
