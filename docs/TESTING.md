@@ -550,7 +550,10 @@ method, ops, settings, out = T.fuzz_once(115, some_new_folder)   # what was dama
 **Windows during tests.** Tests that drive real Tk windows (the app, the naming
 / review window) skip on a dev machine so they don't cover the screen while you
 work. They run in CI (GitHub Actions sets `CI`; the Windows runner has a
-display). To run them locally:
+display). For the same reason `conftest.py` sets `IONOMOS_NO_GUI=1` there, so
+`check` / `diagnose` don't run their display probe (`probe-gui` opens a hidden
+Tk root in a child, and on macOS each one flashes a python icon in the Dock).
+To run them locally:
 
 ```bash
 cd ionomos && IONOMOS_GUI_TESTS=1 .venv/bin/pytest tests/test_app.py tests/test_review.py tests/test_resolve.py
