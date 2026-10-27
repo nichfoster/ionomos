@@ -1,7 +1,7 @@
-# Builds Ionomos on a GitHub Windows machine: the installer (Ionomos-Setup-<v>.exe) and a
+# Builds Ionomos on a GitHub Windows machine: the installer (Ionomos-Setup-<v>.exe, with its .sha256 file) and a
 # portable zip, tests both for real, and attaches them to a GitHub Release.
 #
-#   tag a version:      git tag v0.5.0 && git push --tags     -> release "v0.5.0" with both files
+#   tag a version:      git tag v0.5.0 && git push --tags     -> release "v0.5.0" with the three files
 #   or on demand:       GitHub -> Actions -> build-exe -> Run workflow   -> files under "Artifacts"
 name: build-exe
 on:
@@ -95,11 +95,29 @@ jobs:
           if ((Get-Content C:\Fragpipe_Auto\config.yaml) -ne "# the lab's settings") { throw "the lab's config was touched" }
           Write-Host "installer OK: install, LabWatch retirement, upgrade, uninstall; data kept"
           exit 0  # the expected non-zero from 'schtasks /Query' above must not fail the step
+      - name: The installer's .sha256 file (offline updates from a USB stick, D130)
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist\Ionomos-Setup-*.exe | Select-Object -First 1
+          $sum = "$($setup.FullName).sha256"
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $setup.FullName).Hash.ToLowerInvariant()
+          # sha256sum's format, "<64 hex>  <name>": ASCII (no BOM), LF; `sha256sum -c` and updates.parse_sidecar read it
+          [System.IO.File]::WriteAllText($sum, "$hash  $($setup.Name)`n", [System.Text.Encoding]::ASCII)
+          $bytes = [System.IO.File]::ReadAllBytes($sum)
+          $text = [System.Text.Encoding]::ASCII.GetString($bytes)
+          if ($text -cnotmatch '^[0-9a-f]{64}  Ionomos-Setup-[0-9.]+\.exe\n$' -or $bytes[0] -eq 0xEF) { throw "bad .sha256 file: $text" }
+          Write-Host $text
+          # the frozen CLI checks the installer against it the way the app will on the PC (no GitHub: the file only)
+          $env:IONOMOS_OFFLINE = "1"
+          $exe = Get-ChildItem dist\Ionomos-*-windows\ionomos-cli.exe | Select-Object -First 1
+          & $exe update --from $setup.FullName --check
+          if ($LASTEXITCODE -ne 0) { throw "the frozen exe did not accept the installer with its .sha256" }
       - uses: actions/upload-artifact@v4
         with:
           name: Ionomos-windows
           path: |
             dist/Ionomos-Setup-*.exe
+            dist/Ionomos-Setup-*.exe.sha256
             dist/Ionomos-*-windows.zip
       - name: Release (tags only)
         if: startsWith(github.ref, 'refs/tags/v')
@@ -107,5 +125,6 @@ jobs:
         with:
           files: |
             dist/Ionomos-Setup-*.exe
+            dist/Ionomos-Setup-*.exe.sha256
             dist/Ionomos-*-windows.zip
           generate_release_notes: true

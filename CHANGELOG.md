@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Updating a PC with no internet: the installer on a USB stick** (D130, docs/DEPLOY_WINDOWS.md "Updating a PC with
+  no internet"). Each release also publishes `Ionomos-Setup-<version>.exe.sha256` (sha256sum's format). Copy both
+  files onto a stick; on the PC, **Run & Test → Check for updates** finds the installer at the stick's top level or
+  in an `Ionomos` folder on it ("Ready on the USB stick F:\: Ionomos-Setup-…"), and **Update to x.y.z** installs it
+  as an online update does: the watcher stopped, the installer run silently, the app reopened, the watcher started
+  again.
+  - The installer runs only when it matches GitHub's digest for its version or, offline, the `.sha256` beside it
+    (read tolerantly: `*name`, upper case, a BOM, UTF-16, CRLF, a bare hash, certutil's output, Windows' ` (1)`).
+    Without either it is refused, saying which file to copy. The `.sha256` catches a bad or cut-short copy, not a
+    forged one (docs/SECURITY_NOTES.md).
+  - It runs from a copy in Downloads, made through a `.part`, read back and checked, never over another file, so a
+    stick pulled out mid-install can't break the program.
+  - **Update from a file…** beside Check for updates picks an installer anywhere (a USB disk that says it is a fixed
+    drive, a share). When GitHub can't be reached, the Updates box says the USB way in one line.
+  - `ionomos update --from FILE [--check]`, the same from the command line.
+  - Removable drives are found with `GetDriveTypeW`, never by reading them; a card reader with no card is skipped
+    without Windows' "no disk" box.
+  - The first update to this version is still the installer run by hand: older versions don't know the USB way.
+
 ### Fixed
 
 - **A closed window's timer can no longer press a button in another window** (#185, D129). A pop-up set a timer

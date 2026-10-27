@@ -2,6 +2,7 @@
 opens are hidden: tests/tkharness.py, docs/UI.md S4.1)."""
 import hashlib
 import time
+from pathlib import Path
 
 import pytest
 
@@ -291,12 +292,16 @@ def _update_release(sha256=None, size=1024):
                            size=size, sha256=sha256)
 
 
-def _installable_update(app, monkeypatch, shown, installed, downloaded):
-    """Make install_update() believe this is an installed Windows build; record dialogs, installs and downloads."""
+def _installable_update(app, monkeypatch, shown, installed, downloaded, downloads=None):
+    """Make install_update() believe this is an installed Windows build; record dialogs, installs and downloads.
+    downloads: the Downloads folder (a checked installer from elsewhere is copied there before it runs, D130)."""
     from tkinter import messagebox
 
     from ionomos import health, updates
 
+    if downloads is not None:
+        monkeypatch.setattr(updates, "downloads_dir", lambda: downloads)
+    monkeypatch.setattr(updates, "removable_drives", lambda: [])
     monkeypatch.setattr(updates, "can_self_update", lambda: True)
     monkeypatch.setattr(health, "is_locked", lambda *a, **k: False)
     monkeypatch.setattr(updates, "install", lambda *a, **k: installed.append(a[0]))
@@ -674,13 +679,14 @@ def test_install_update_refuses_an_installer_from_a_different_version(app, tmp_p
 def test_install_update_refuses_an_installer_that_fails_its_checksum(app, tmp_path, monkeypatch):
 
     shown, installed, downloaded = [], [], []
-    _installable_update(app, monkeypatch, shown, installed, downloaded)
+    _installable_update(app, monkeypatch, shown, installed, downloaded, downloads=tmp_path)
     payload = b"MZ fake installer"
     installer = tmp_path / "Ionomos-Setup-9.9.9.exe"
     installer.write_bytes(b"X" * len(payload))  # same size, wrong content: the digest check must catch it
     app._release = _update_release(sha256=hashlib.sha256(payload).hexdigest(), size=len(payload))
     app._update_found = (installer, "9.9.9")
     app.install_update()
+    assert _pump_until(app, lambda: shown)  # the check reads the file on a worker thread (D130)
     assert len(shown) == 1 and "checksum" in shown[0][1]
     assert not installed and not downloaded
 
@@ -688,15 +694,141 @@ def test_install_update_refuses_an_installer_that_fails_its_checksum(app, tmp_pa
 def test_install_update_runs_a_verified_downloads_installer(app, tmp_path, monkeypatch):
 
     shown, installed, downloaded = [], [], []
-    _installable_update(app, monkeypatch, shown, installed, downloaded)
+    _installable_update(app, monkeypatch, shown, installed, downloaded, downloads=tmp_path)
     payload = b"MZ fake installer"
     installer = tmp_path / "Ionomos-Setup-9.9.9.exe"
     installer.write_bytes(payload)
     app._release = _update_release(sha256=hashlib.sha256(payload).hexdigest(), size=len(payload))
     app._update_found = (installer, "9.9.9")
     app.install_update()
-    assert installed == [installer]
+    assert _pump_until(app, lambda: installed)
+    assert installed == [installer]  # in Downloads already: run where it is
     assert not shown and not downloaded
+
+
+def _updates_box(app, monkeypatch):
+    """The Run & Test tab's Updates box as an installed build shows it (the tests run from a git checkout, whose
+    app shows the development box in its place)."""
+    from tkinter import ttk
+
+    monkeypatch.setattr(app, "repo", None)
+    box = ttk.Frame(app.root)
+    app._updates_section(box)
+    texts = [w.cget("text") for w in box.winfo_children()[0].winfo_children() if isinstance(w, ttk.Button)]
+    assert texts[:2] == ["Check for updates", "Update from a file…"]  # next to each other
+    return box
+
+
+def _usb_stick(folder, payload=b"MZ fake installer", sidecar=True, name="Ionomos-Setup-9.9.9.exe"):
+    folder.mkdir(parents=True, exist_ok=True)
+    exe = folder / name
+    exe.write_bytes(payload)
+    if sidecar:
+        (folder / f"{name}.sha256").write_text(f"{hashlib.sha256(payload).hexdigest()}  {name}\r\n", encoding="utf-8")
+    return exe
+
+
+def test_update_from_a_file_checks_copies_and_installs_through_finish(app, tmp_path, monkeypatch):
+    """Update from a file…: the picked installer is checked against the .sha256 beside it, copied into Downloads and
+    the copy goes through _finish_update (watcher stopped, installer started, app closed) (D130)."""
+    from tkinter import filedialog
+
+    from ionomos import service
+
+    shown, installed, downloaded = [], [], []
+    dl = tmp_path / "Downloads"
+    _installable_update(app, monkeypatch, shown, installed, downloaded, downloads=dl)
+    exe = _usb_stick(tmp_path / "E")
+    picked = []
+    monkeypatch.setattr(filedialog, "askopenfilename", lambda **k: picked.append(k) or str(exe))
+    finished = []
+    real_finish = app._finish_update
+    monkeypatch.setattr(app, "_finish_update", lambda *a: finished.append(a) or real_finish(*a))
+    monkeypatch.setattr(service, "request_stop", lambda *a, **k: pytest.fail("no watcher runs here"))
+    app.install_update_from_file()
+    assert _pump_until(app, lambda: installed)
+    assert installed == [dl / exe.name] and (dl / exe.name).read_bytes() == exe.read_bytes()
+    assert finished and finished[0][0] == dl / exe.name and finished[0][1] == "9.9.9"
+    assert exe.is_file() and not shown and not downloaded  # the stick only read
+    assert ".sha256" in picked[0]["title"]
+
+
+def test_update_from_a_file_without_its_sha256_is_refused_saying_what_to_copy(app, tmp_path, monkeypatch):
+    from tkinter import filedialog
+
+    shown, installed, downloaded = [], [], []
+    dl = tmp_path / "Downloads"
+    _installable_update(app, monkeypatch, shown, installed, downloaded, downloads=dl)
+    exe = _usb_stick(tmp_path / "E", sidecar=False)
+    monkeypatch.setattr(filedialog, "askopenfilename", lambda **k: str(exe))
+    app.install_update_from_file()
+    assert len(shown) == 1 and "Ionomos-Setup-9.9.9.exe.sha256" in shown[0][1] and "releases" in shown[0][1]
+    assert not installed and not dl.exists()
+
+
+def test_update_from_a_file_that_fails_its_sha256_is_refused(app, tmp_path, monkeypatch):
+    from tkinter import filedialog
+
+    shown, installed, downloaded = [], [], []
+    dl = tmp_path / "Downloads"
+    _installable_update(app, monkeypatch, shown, installed, downloaded, downloads=dl)
+    exe = _usb_stick(tmp_path / "E")
+    exe.write_bytes(b"MZ fake installe")  # cut short after its .sha256 was made
+    monkeypatch.setattr(filedialog, "askopenfilename", lambda **k: str(exe))
+    app.install_update_from_file()
+    assert _pump_until(app, lambda: shown)
+    assert "failed its checksum" in shown[0][1] and not installed and not dl.exists()
+
+
+def test_update_from_a_file_refuses_an_older_or_odd_file(app, tmp_path, monkeypatch):
+    from tkinter import filedialog, messagebox
+
+    shown, installed, downloaded = [], [], []
+    _installable_update(app, monkeypatch, shown, installed, downloaded, downloads=tmp_path / "Downloads")
+    told = []
+    monkeypatch.setattr(messagebox, "showinfo", lambda *a, **k: told.append(a))
+    old = _usb_stick(tmp_path / "E", name="Ionomos-Setup-0.0.1.exe")
+    monkeypatch.setattr(filedialog, "askopenfilename", lambda **k: str(old))
+    app.install_update_from_file()
+    assert told and "0.0.1" in told[0][1]
+    odd = tmp_path / "setup.exe"
+    odd.write_bytes(b"MZ")
+    monkeypatch.setattr(filedialog, "askopenfilename", lambda **k: str(odd))
+    app.install_update_from_file()
+    assert shown and "not an Ionomos installer" in shown[0][1]
+    monkeypatch.setattr(filedialog, "askopenfilename", lambda **k: "")  # Cancel
+    app.install_update_from_file()
+    assert len(shown) == 1 and not installed
+
+
+def test_update_banner_and_button_for_an_installer_on_a_usb_stick(app, tmp_path, monkeypatch):
+    from ionomos import updates
+
+    shown, installed, downloaded = [], [], []
+    dl = tmp_path / "Downloads"
+    dl.mkdir()
+    _installable_update(app, monkeypatch, shown, installed, downloaded, downloads=dl)
+    stick = tmp_path / "E"
+    exe = _usb_stick(stick / "Ionomos")
+    monkeypatch.setattr(updates, "removable_drives", lambda: [stick])
+    _updates_box(app, monkeypatch)
+    app.check_downloaded_update(auto=False)
+    assert _pump_until(app, lambda: app.update_btn.cget("text") == "Update to 9.9.9")
+    assert app.upd_lbl.cget("text") == f"Ready on the USB stick {stick}: Ionomos-Setup-9.9.9.exe"
+    app.install_update()  # the bottom bar's button: the same check, copy and finish
+    assert _pump_until(app, lambda: installed)
+    assert installed == [dl / exe.name] and not shown
+
+
+def test_update_box_says_the_usb_way_when_github_cannot_be_reached(app, monkeypatch):
+    from ionomos import updates
+
+    _updates_box(app, monkeypatch)
+    app._show_update(None, None, "could not reach GitHub (no network)", auto=True)
+    text = app.upd_lbl.cget("text")
+    assert "could not reach GitHub" in text and "USB stick" in text and "Update from a file" in text
+    app._show_update(None, updates.Found(Path("E:/Ionomos-Setup-9.9.9.exe"), "9.9.9", "the USB stick E:\\"), "x")
+    assert "no Ionomos-Setup-9.9.9.exe.sha256 beside it" in app.upd_lbl.cget("text")
 
 
 def test_install_update_wont_download_a_digest_less_release(app, monkeypatch):

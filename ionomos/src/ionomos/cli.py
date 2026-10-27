@@ -65,6 +65,9 @@ Command line.
     ionomos notify-test                           send a test message to the channels in config.yaml notify:
     ionomos repair-ledger [--force]               rebuild the job list from the experiment folders
     ionomos update                                git pull + reinstall (only when running from a git checkout)
+    ionomos update --from FILE [--check]          an installed build: a Setup file from a USB stick checked against
+                                                   its .sha256 (or GitHub's digest), copied into Downloads and
+                                                   installed, the watcher stopped and restarted (D130)
     ionomos library  scan | list | show | recommend [--apply] | adopt | check
                                                    every FragPipe workflow and FASTA on the PC, described, flagged and
                                                    ranked per method; adopt copies one in (docs/LIBRARY.md, D89)
@@ -1332,13 +1335,75 @@ def cmd_repair_ledger(args) -> int:
 def cmd_update(args) -> int:
     from ionomos.service import source_checkout, update_source
 
+    if args.from_file:
+        return _update_from_file(args)
+    if args.check:
+        print("--check goes with --from FILE (it checks that installer)", file=sys.stderr)
+        return 2
     repo = source_checkout()
     if repo is None:
-        print("not running from a git checkout; update by installing a new release instead", file=sys.stderr)
+        print("not running from a git checkout; update by installing a new release instead (the app's Update button, "
+              "or `ionomos update --from Ionomos-Setup-<version>.exe`)", file=sys.stderr)
         return 2
     ok, msg = update_source(repo)
     print(msg)
     return 0 if ok else 1
+
+
+def _update_from_file(args) -> int:
+    """`ionomos update --from FILE`: what the app's Update from a file… does (D130). The installer is checked against
+    GitHub's digest for its version (when GitHub answers) or the .sha256 file beside it, copied into Downloads, and
+    run there: the watcher is stopped (a running search is re-queued) and started again when the new app opens.
+    --check stops after the check. 0 done (or checked), 1 refused, 2 no such file / not an installer / can't update."""
+    from ionomos import updates
+
+    path = Path(args.from_file)
+    version = updates.installer_version(path.name)
+    if not path.is_file() or version is None:
+        print(f"{path}: " + ("not an Ionomos installer (Ionomos-Setup-<version>.exe)" if path.is_file() else
+                             "no such file"), file=sys.stderr)
+        return 2
+    if not args.check and updates.parse_version(version) <= updates.parse_version(__version__):
+        print(f"{path.name} is Ionomos {version}; this is {__version__} already. Nothing was installed (run the "
+              "installer yourself to reinstall or go back).", file=sys.stderr)
+        return 1
+    rel, why = updates.check_latest()
+    release = rel if rel is not None and updates.parse_version(rel.version) == updates.parse_version(version) else None
+    checks = updates.checks_for(path, release)
+    try:
+        updates.verify_installer(path, release)
+    except updates.UpdateFileError as exc:
+        print(f"✗ {exc}\n  → {exc.fix}", file=sys.stderr)
+        return 1
+    against = (f"the SHA-256 GitHub publishes for Ionomos {version}" if checks.release
+               else f"{checks.sidecars[0][0].name} beside it (GitHub: {why or 'no digest for this version'})")
+    print(f"✓ {path.name} matches {against}")
+    if args.check:
+        return 0
+    if not updates.can_self_update():
+        print(f"this copy of Ionomos isn't an installed Windows build, so it can't update itself: run {path} yourself",
+              file=sys.stderr)
+        return 2
+    try:
+        installer = updates.prepare_installer(path, release)
+    except updates.UpdateFileError as exc:
+        print(f"✗ {exc}\n  → {exc.fix}", file=sys.stderr)
+        return 1
+    log_dir, running = None, False
+    try:
+        from ionomos import health
+        from ionomos.service import request_stop
+
+        log_dir = load(args.config, check_paths=False).log_dir
+        running = health.is_locked(log_dir)
+        if running:
+            print(f"stopping the watcher: {request_stop(log_dir, timeout=60)}")
+    except (ConfigError, OSError) as exc:  # the installer stops a watcher itself (`stop --wait 60 --remember`)
+        print(f"(config not read: {exc}; the installer stops the watcher itself)")
+    updates.install(installer, log_dir, running)
+    print(f"started {installer}: it closes Ionomos, installs {version} and opens the app"
+          + (", which starts the watcher again" if running else ""))
+    return 0
 
 
 def cmd_testbed(args) -> int:
@@ -1611,7 +1676,13 @@ def build_parser() -> argparse.ArgumentParser:
     rl = sub.add_parser("repair-ledger", help="rebuild the job ledger from the experiment folders")
     rl.add_argument("--force", action="store_true", help="rebuild even when the ledger reads fine (it is kept aside)")
     rl.set_defaults(fn=cmd_repair_ledger)
-    sub.add_parser("update", help="git pull + reinstall (dev install only)").set_defaults(fn=cmd_update)
+    up = sub.add_parser("update", help="git pull + reinstall (dev install); --from FILE: install a Setup file brought "
+                                       "on a USB stick (D130)")
+    up.add_argument("--from", dest="from_file", metavar="FILE",
+                    help="an Ionomos-Setup-<version>.exe (with its .sha256 beside it): checked, copied into Downloads "
+                         "and installed, the watcher stopped and started again, as the app's Update from a file…")
+    up.add_argument("--check", action="store_true", help="with --from: only check FILE, install nothing")
+    up.set_defaults(fn=cmd_update)
 
     from ionomos import testbed
 

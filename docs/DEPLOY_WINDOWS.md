@@ -6,7 +6,7 @@ runs FragPipe):
 | I want to… | Do this |
 |---|---|
 | **install** | download `Ionomos-Setup-<version>.exe` from [Releases](https://github.com/nichfoster/ionomos/releases/latest) → run it → Next, Finish. Ionomos opens on its **✓ Setup** checklist → **Auto-setup** → work down the list. |
-| **update** | nothing to download by hand: Ionomos checks GitHub when it opens and every 6 hours. When a new version is out, **Update to x.y.z** appears in the bottom bar → click → Yes. It downloads (checksum-verified), stops the watcher cleanly, installs, reopens and restarts the watcher. Settings and data are kept. *Run & Test → Check for updates* checks right now. |
+| **update** | nothing to download by hand: Ionomos checks GitHub when it opens and every 6 hours. When a new version is out, **Update to x.y.z** appears in the bottom bar → click → Yes. It downloads (checksum-verified), stops the watcher cleanly, installs, reopens and restarts the watcher. Settings and data are kept. *Run & Test → Check for updates* checks right now. No internet on the PC: [bring it on a USB stick](#updating-a-pc-with-no-internet). |
 | **report a problem** | **Report a problem…** (bottom right, every tab) → a sentence → **Save the zip** → a zip lands on the Desktop, selected → copy it to where it should go (Dropbox, a chat). Names in it are replaced by pseudonyms; the `KEY…DO-NOT-SHARE` file next to it stays on the PC. Tick the result-tables box when the numbers are to be checked. Details: [DEV_LOOP.md](DEV_LOOP.md#bundles-the-labs-files-on-the-developers-side-d63). |
 | **uninstall** | Settings → Apps → **Ionomos** → Uninstall. Removes the program, startup task and shortcuts. Keeps `config.yaml`, the job list, logs and every experiment folder. |
 | **start over completely** | `deploy\clean_slate.ps1` (also removes LabWatch leftovers; still keeps data). |
@@ -21,7 +21,8 @@ runs FragPipe):
 > **Still prototyping?** The *development install* runs straight from the
 > GitHub repository — [DEV_LOOP.md](DEV_LOOP.md). The installer is for normal use.
 
-No internet is needed on the PC except to download the Setup file.
+No internet is needed on the PC except to download the Setup file, and not
+even for that: a USB stick does it ([Updating a PC with no internet](#updating-a-pc-with-no-internet)).
 
 ---
 
@@ -172,8 +173,65 @@ py -3.14 -c "import tkinter; print('ok')"
 | add a user | **Users** → Add; or just create the folder under `C:\Fragpipe_General` |
 | see what a folder would do | `ionomos-cli.exe dry-run "C:\path\to\folder"` |
 | check how names are read (after changing `naming:`) | **Methods** → **Test names…**, or `ionomos-cli.exe names test <folder name> <file.raw> …` |
-| upgrade | **Update to …** in the bottom bar, or **Run & Test** → **Check for updates** → **Update now**; config/data untouched |
+| upgrade | **Update to …** in the bottom bar, or **Run & Test** → **Check for updates** → **Update now**; config/data untouched. Offline: a USB stick, [below](#updating-a-pc-with-no-internet) |
 | uninstall | Settings → Apps → Ionomos → Uninstall (data stays). Full reset: `deploy\clean_slate.ps1`. |
+
+## Updating a PC with no internet
+
+The new version can come on a USB stick. Ionomos checks it and installs it the
+same way as a download (D130).
+
+**On a computer with internet**
+
+1. Open the release on GitHub: [Releases → latest](https://github.com/nichfoster/ionomos/releases/latest)
+   (or the version you want).
+2. Download **both** files: `Ionomos-Setup-<version>.exe` and
+   `Ionomos-Setup-<version>.exe.sha256` (a one-line text file: the installer's
+   SHA-256, which Ionomos checks the installer against).
+3. Copy both onto a USB stick, at its top level or into a folder called
+   `Ionomos` on it. Keep their names (a Windows ` (1)` in a name is fine).
+
+**On the PC**
+
+1. Plug the stick in.
+2. **Run & Test** → **Check for updates**. The Updates box says *Ready on the
+   USB stick F:\\: Ionomos-Setup-x.y.z.exe* and **Update to x.y.z**
+   appears in the bottom bar → click → Yes. Or **Update from a file…** (next to
+   Check for updates) → pick the installer on the stick.
+3. Ionomos checks the installer against the `.sha256` beside it, copies it into
+   Downloads and checks the copy, then stops the watcher, installs, reopens and
+   starts the watcher again, as an online update does. Leave the stick in until
+   Ionomos closes for the install; the installer runs from the copy in
+   Downloads, so the stick can come out after that.
+
+From a terminal: `C:\Ionomos\ionomos-cli.exe update --from F:\Ionomos-Setup-<version>.exe`
+does the same; `--check` only checks.
+
+**What the check means.** The `.sha256` file catches a copy that went wrong: a
+bad stick, a copy cut short, a download that didn't finish, two files from
+different releases. It does not prove the installer is the real one: whoever
+can change the installer on the stick can change the `.sha256` beside it. So
+download both files yourself, from the release page, on a computer you trust.
+When the PC can reach GitHub, the SHA-256 GitHub publishes is used instead, and
+a `.sha256` that disagrees with it doesn't count.
+
+**If it doesn't work**
+
+- *"has nothing to be checked against … no Ionomos-Setup-x.y.z.exe.sha256
+  beside it"*: copy the `.sha256` file too, into the same folder as the
+  installer, and press **Check for updates** again.
+- *"failed its checksum"*: copy both files from the release page again.
+- **The stick isn't found.** Some USB disks and sticks say they are a fixed
+  disk (the PC's own `D:` does), so Ionomos doesn't look there by itself: use
+  **Update from a file…**.
+- **The first time.** A PC on 0.20.0 or older doesn't know this way yet, and
+  those releases have no `.sha256` file: copy the installer onto the PC (the
+  Desktop) and run it yourself. It stops the watcher itself and starts it
+  again afterwards; data and settings are kept.
+- The copy in Downloads (and its `.sha256`) stays there after the update;
+  delete it whenever you like. Ionomos never copies over a file: a different
+  file of the same name in Downloads is left as it is, and the copy is called
+  `Ionomos-Setup-<version>(1).exe`.
 
 ## Troubleshooting
 

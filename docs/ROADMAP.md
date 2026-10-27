@@ -946,6 +946,11 @@ Collected from the other docs; resolve before/during Phase 1.
 - [ ] D81: the next update on the PC (from 0.18.0) should end with the app reopening and no "Failed to load
       Python DLL … python314.dll" dialog. Confirm it, and that a watcher started from the app keeps running
       after the app is closed.
+- [ ] D130: the PC is offline for now. Once it runs the release after 0.20.0 (installed by hand the first time),
+      update it from a USB stick: is the stick found by itself (removable; the PD 2.5 stick is `E:`, a new one
+      `F:`) or only with **Update from a file…**, no "no disk" box from an empty card reader, the copy in Downloads,
+      the app reopened and the watcher started again? And does that release's page carry
+      `Ionomos-Setup-<version>.exe.sha256`?
 - [ ] Direction/type of the `Proteomics_File_Sharing` share.
 - [ ] Sleep/power policy and whether Task Scheduler can run at logon for the shared account.
 - [ ] Should results go to C: (fast, 99 GB free) or D: (slow USB, 14 TB free)? Proposal:
