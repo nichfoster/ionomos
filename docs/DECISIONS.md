@@ -5177,3 +5177,56 @@ and stopping the watcher first; `build-exe.yml` writes the file before the relea
 refusals, the stick's status line and button, the USB line when GitHub can't be reached; these open Tk, so CI only).
 **Not verified**: on Windows (`GetDriveTypeW` on a real stick and an empty card reader, the error mode, the file
 picker) and on the lab PC (a real update from a stick); the release step's PowerShell until the next tag.
+
+### D132 — A documentation site: MkDocs (Material) on GitHub Pages, made from the repository's own files
+**2026-10-26.** VISION.md item 6 (ROADMAP 5D step 7): a site with QUICKSTART, ENGINES, VALIDATION, the help that
+`ionomos help` renders and the real-data example's reports, so a reader sees a report before installing anything.
+It is `website/` (`mkdocs.yml`, `hooks.py`, the home page), built by `.github/workflows/docs-site.yml` and by
+`scripts/build_site.sh`, for <https://nichfoster.github.io/ionomos/>.
+1. **MkDocs 1.6.1 with Material 9.7.7, pinned, in the docs workflow only.** Not a generator of our own: docs/ uses
+   tables, fenced code, nested lists and #anchors, which the help's renderer (a deliberate subset, D46) does not
+   read, and a full Markdown renderer of our own would be the less robust half of the choice. MkDocs gives strict
+   mode (a broken link or anchor, or a page left out of the nav, fails the build), search and a theme. Neither is
+   a dependency of the package: `website/requirements.txt`, installed by the workflow, or locally into a
+   throwaway `.venv-site/`. Material is in maintenance mode, and MkDocs 2.0 would break its plugins (Material
+   prints a warning saying so at every build); the pins hold `mkdocs<2`. Zensical, Material's successor, reads
+   `mkdocs.yml`, so a later move is a config change, not a rewrite.
+2. **The pages are the repository's files, read where they are.** `hooks.py` adds the chosen docs, CHANGELOG.md
+   and the six help files as pages, so the site can't drift from the docs. Chosen for a stranger: QUICKSTART,
+   EXAMPLE, ENGINES, VALIDATION, VISION, SCOPE, CHANGELOG and the help (safety and the FAQ included). Left on
+   GitHub: the lab PC's and the developers' docs (DEPLOY_WINDOWS, DEV_LOOP, DECISIONS, ROADMAP, ...). A link to
+   one of them, or to the source (`../ionomos/src/...`), goes to the file on GitHub at the tag being built
+   (`IONOMOS_SITE_REF`; master otherwise); a link to a file that doesn't exist fails the strict build. Anchors are
+   made by GitHub's rule (the one `tests/test_docs_sync.py` checks the docs' links with), so one link works on
+   GitHub and on the site.
+3. **The help is rendered by `ionomos.help` itself.** Its files are a subset of Markdown with `{#id}` headings,
+   written for `help.to_html`, which escapes everything (so `<folder>` is text; Python-Markdown would read it as a
+   tag and drop it). Each heading goes to Markdown with its id (attr_list: the table of contents, the search and a
+   link to an entry work), and each text goes through as `to_html`'s HTML, one block per entry: the site says
+   what `help.html` and the report say, with the list of FragPipe's failure causes made from the code. A link to
+   an entry on another help page goes to that page. `ionomos help` and the package are unchanged.
+4. **The example's reports.** On a `v*` tag and a manual run the workflow runs `ionomos example` (the Zenodo zip
+   is cached by the record and its SHA-256) and the site gets each dataset's `results/` (the report and every
+   file it links to, with a listing page for its `fragpipe-analyst/` folder), its README.txt and experiment.yaml,
+   and the data's attribution beside them (source, licence, citation, the changes: CC BY 4.0, D96). Not the zip
+   or the source tables, which are Zenodo's to give. About 50 MB. A failed download or analysis does not fail the
+   build: the Example reports page then says the reports are missing this time and links to no report that isn't
+   there. A pull request's build has no example: fast, and no network.
+5. **The deploy is its own workflow and fails in plain words.** `actions/upload-pages-artifact` and
+   `actions/deploy-pages` in `docs-site.yml` (`pages: write`, `id-token: write`, environment `github-pages`), not
+   in `build-exe.yml` or `publish-pypi.yml`, so a tag's installer and package never wait on Pages. Pages is not
+   switched on yet: the deploy job asks the API first and fails with the one-time step (Settings → Pages → Source:
+   GitHub Actions, and the `github-pages` environment allowing tags `v*`; DEV_LOOP.md "Releasing"). No repository
+   setting was changed by this work.
+6. **Small choices.** `font: false`: the site loads no fonts from Google. `use_directory_urls: false`: the built
+   site also works opened from the disk. The `Documentation` URL in `ionomos/pyproject.toml` stays on GitHub's
+   QUICKSTART.md until the site is live (ROADMAP 5D step 7).
+
+**Verified**: `scripts/build_site.sh` builds strictly on macOS (Python 3.12; 16 pages), and again with a folder a
+real `ionomos example` wrote (Ionomos 0.20.0, the download and three analyses in 48 s; the three reports and their
+files, 54 MB); a broken link and a broken anchor each fail it. `tests/test_site.py`: the nav against the pages,
+every docs link on the site, the link rule's cases, every help entry on one page with its id, every link between
+help pages, the help's HTML byte for byte, the reports page with and without reports (and without the source
+tables), the workflow's triggers and permissions; in the docs workflow, with Python-Markdown, the help's ids,
+titles and text through Markdown and GitHub's anchors. **Not verified**: the deploy (Pages is off), and the
+workflow's example step and cache on GitHub's runners.

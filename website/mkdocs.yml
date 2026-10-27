@@ -1,0 +1,82 @@
+# The documentation site (D132): https://nichfoster.github.io/ionomos/
+#
+# Built by .github/workflows/docs-site.yml (pull requests: build only; v* tags: with the example's reports, then
+# deployed to GitHub Pages) and locally by scripts/build_site.sh, always with --strict: a broken link or anchor,
+# or a page left out of the nav, fails the build. The pages are the repository's own files: hooks.py adds the
+# docs below (PAGES), CHANGELOG.md and the help `ionomos help` renders, sends links to files that are not on the
+# site to GitHub, and adds the example's reports. tests/test_site.py keeps this nav and hooks.py in step.
+site_name: Ionomos
+site_url: https://nichfoster.github.io/ionomos/
+site_description: >-
+  Ionomos turns a proteomics search result into a statistical report that a bench scientist can read and a
+  reviewer can check.
+repo_url: https://github.com/nichfoster/ionomos
+repo_name: nichfoster/ionomos
+edit_uri: edit/master/   # each page's own path in the repository is set by hooks.py
+copyright: >-
+  Ionomos is free software, GPL-3.0-or-later. The example reports' data: Hsiao et al. 2024, CC BY 4.0.
+docs_dir: pages
+site_dir: ../build/site
+use_directory_urls: false   # page.html, not page/: the built site also works opened from the disk
+
+theme:
+  name: material
+  font: false   # the system's fonts: the site loads no fonts from Google
+  features:
+    - navigation.sections
+    - navigation.top
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+plugins:
+  - search
+
+hooks:
+  - hooks.py
+
+markdown_extensions:
+  - toc:
+      permalink: true   # its slugify is hooks.github_slug (set by on_config), so anchors are GitHub's
+  - attr_list           # the help's "## Title {#id}" headings keep their ids
+  - admonition
+  - tables
+  - fenced_code
+
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
+nav:
+  - Home: index.md
+  - Try it:
+      - Quickstart: quickstart.md
+      - The real-data example: example.md
+      - Example reports: reports/index.md
+  - Reference:
+      - Engines and tables: engines.md
+      - How accurate it is: validation.md
+  - Help:
+      - Getting started: help/getting_started.md
+      - Reading the report: help/reading.md
+      - Glossary: help/glossary.md
+      - Troubleshooting: help/troubleshooting.md
+      - Never done to your data: help/safety.md
+      - Questions: help/faq.md
+  - About:
+      - Vision: vision.md
+      - Scope: scope.md
+      - Changelog: changelog.md

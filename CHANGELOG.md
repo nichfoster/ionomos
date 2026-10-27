@@ -28,6 +28,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     without Windows' "no disk" box.
   - The first update to this version is still the installer run by hand: older versions don't know the USB way.
 
+- **A documentation site** (D132, docs/VISION.md item 6), for <https://nichfoster.github.io/ionomos/>: the
+  quickstart, the real-data example with its three reports, ENGINES, VALIDATION, every help page (the same text as
+  `ionomos help`, rendered by the same code), VISION, SCOPE and this changelog. MkDocs with the Material theme,
+  made from the repository's own files (`website/`); a link to a doc that is not on the site goes to it on GitHub.
+  - The new `docs-site` workflow builds it strictly on every pull request that touches the docs or the help (a
+    broken link or anchor fails the check). On a `v*` tag it runs `ionomos example`, puts the reports on the site
+    with the data's CC BY 4.0 attribution, and deploys to GitHub Pages; when the example can't be made the site
+    says so instead of linking to a missing report.
+  - Live once the maintainer switches GitHub Pages on (docs/DEV_LOOP.md "Releasing"). `scripts/build_site.sh`
+    builds it locally. MkDocs is not a dependency of the package.
+
 ### Fixed
 
 - **A closed window's timer can no longer press a button in another window** (#185, D129). A pop-up set a timer

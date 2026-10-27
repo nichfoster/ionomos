@@ -364,7 +364,7 @@ def test_the_slugs_are_githubs():
 # notes (docs/EXAMPLE.md, example.py: `ionomos example`); empty this when DECISIONS.md has it.
 DECISION_PENDING: dict[int, str] = {}
 # a number taken by a decision in a pull request that is not merged into this branch yet
-DECISION_GAPS: dict[int, str] = {129: "#195, a closed window's timer (D130's branch was cut before it merged)"}
+DECISION_GAPS: dict[int, str] = {131: "#200, a PC with no internet (not merged into this branch yet)"}
 _DREF = re.compile(r"(?<![\w-])D(\d{1,3})(?![\w])")
 
 

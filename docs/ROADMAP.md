@@ -402,7 +402,7 @@ installed.
   codes become editable config, with a "test your names" check (CLI + setup
   window), so another lab's convention needs no code change. Keep
   NAMING_CONVENTION.md ↔ naming.py in sync.
-- [ ] **Docs for a stranger:** (2026-09-30: QUICKSTART.md, ENGINES.md, the simulated demo and the "never done to your data" page (`help/safety.md`, #57) done; 2026-10-15: [VISION.md](VISION.md), SCOPE.md rewritten for today, CITATION.cff, CONTRIBUTING.md, a code of conduct, issue and pull-request templates; 2026-10-15: a real-data example, `ionomos example` (FragPipe-Analyst's published LFQ / DIA / TMT data, D96, [EXAMPLE.md](EXAMPLE.md)); still to do: a documentation site, 5D step 7)
+- [ ] **Docs for a stranger:** (2026-09-30: QUICKSTART.md, ENGINES.md, the simulated demo and the "never done to your data" page (`help/safety.md`, #57) done; 2026-10-15: [VISION.md](VISION.md), SCOPE.md rewritten for today, CITATION.cff, CONTRIBUTING.md, a code of conduct, issue and pull-request templates; 2026-10-15: a real-data example, `ionomos example` (FragPipe-Analyst's published LFQ / DIA / TMT data, D96, [EXAMPLE.md](EXAMPLE.md)); 2026-10-26: a documentation site, 5D step 7, D132, built and live once GitHub Pages is switched on)
 - [x] **Help users can see** (2026-09-30, D46, #57; the report's help added for designs, dose-response and TMT in #58–#60): one help source shown in two
   places. In the report: a Help entry, "?" buttons on each section and QC tab, a glossary,
   and troubleshooting for the issues in that report. From the app and CLI: a full offline
@@ -629,8 +629,8 @@ need nothing from the lab.
    Half done 2026-10-15 (D96): `ionomos example` fetches FragPipe-Analyst's
    published AP-MS / ccRCC DIA / ccRCC TMT data from Zenodo (CC BY 4.0), with
    a test on a 240-row excerpt. Still open: a mixed-species PRIDE dataset
-   with its expected ratios for `ionomos benchmark --expected`, and the
-   reports on the documentation site.
+   with its expected ratios for `ionomos benchmark --expected`. The three
+   reports go on the documentation site from each `v*` tag (D132).
 5. [ ] **The real-data evidence** — *the lab and the maintainer*; *an agent*
    writes it up in VALIDATION.md. The open items of 5C #10: a mixed-species
    sample on the lab's instrument (or step 4's dataset) benchmarked and the
@@ -644,12 +644,19 @@ need nothing from the lab.
    groups already on FragPipe isoDTB / ABPP workflows, or a core facility.
    Their problems go to issues; what they needed to change goes to
    NAMING_CONVENTION.md, ENGINES.md and QUICKSTART.md (*an agent*).
-7. [ ] **A documentation site** — *an agent*, after the maintainer chooses
-   how: GitHub Pages built in CI from `docs/` and the help files that
-   `ionomos help` already renders (no new dependency), or MkDocs (a dev
-   dependency only). It shows QUICKSTART, ENGINES, VALIDATION, the help and
-   step 4's report, so a reader sees a report before installing. Then the
-   `Documentation` URL in `ionomos/pyproject.toml` points at it.
+7. [x] **A documentation site** — *an agent*, 2026-10-26 (D132): built;
+   live after Pages is switched on. MkDocs with the Material theme, in the
+   docs workflow only (not a dependency of the package), made from `docs/`,
+   CHANGELOG.md and the help files that `ionomos help` renders (`website/`,
+   `.github/workflows/docs-site.yml`, `scripts/build_site.sh`). It shows
+   QUICKSTART, EXAMPLE with step 4's three reports, ENGINES, VALIDATION, the
+   help, VISION, SCOPE and the changelog; pull requests build it strictly, a
+   `v*` tag deploys it to <https://nichfoster.github.io/ionomos/>.
+   - [ ] *the maintainer*: switch GitHub Pages on, and let the
+     `github-pages` environment deploy tags `v*` (DEV_LOOP.md "Releasing",
+     step 5), then run the workflow once on `master`.
+   - [ ] *an agent*, once it is live: the `Documentation` URL in
+     `ionomos/pyproject.toml` points at the site.
 8. [ ] **Name and logo** — *the maintainer*. Keep "Ionomos" unless a
    tool-name or trademark clash turns up (the PyPI name was free on
    2026-09-30). No logo exists; decide whether the report and the app get
