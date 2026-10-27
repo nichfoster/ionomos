@@ -200,8 +200,10 @@ run's `fragpipe-files.fp-manifest`, after the `_edited` twin rule and before `pi
   of the `_edited` one: the twin rule comes first.
 - Isaac's run: in `isoDTB_IJ510312_1`, `_2` and `_3` only that replicate's 7 `.pin` files are taken; the others there,
   and every one in `_4` to `_7`, are left as `another replicate's (isoDTB_IJ510312_<rep>)`. Carolyn's: all 8 taken.
-- `harvest_fragpipe.ps1` takes the same rule (and the `tmt-report` tables, and the TMT masses) in the same release;
-  its copy of the rule is the Nomura-Lab repository's.
+- A DIA search's `.pin` files carry a suffix after the raw file's stem (DIA-Umpire's `<x>_Q1` to `_Q3`,
+  MSFragger-DIA's `<x>_rank<N>`): one whose whole stem is no raw file's counts as `<x>`'s.
+- This check is Ionomos' only. `harvest_fragpipe.ps1` takes the `tmt-report` tables and the TMT masses in the same
+  release, but still takes every `.pin`; the atlas side's decoy check drops the same two cases itself.
 
 ### After an update that changes the selection (D134)
 

@@ -35,8 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   isn't its raw file's, while that replicate's folder is there, too (`its raw file is another replicate's
   (<folder>)`); both in the record's `left[]`. When that can't be told for sure (no experiment, no such folder, no
   manifest) the `.pin` is taken as before. Isaac's `20260629-isoDTB` run, whose folders hold an earlier search's
-  `.pin` files grouped by fraction, was inflated by about 25% at the atlas. `harvest_fragpipe.ps1` gets the same
-  rule.
+  `.pin` files grouped by fraction, was inflated by about 25% at the atlas. A DIA search's `.pin` files
+  (`<raw>_Q1`..`_Q3`, `<raw>_rank<N>`) count as their raw file's. This check is Ionomos' only: harvest still
+  takes every `.pin`, and the atlas side's decoy check drops the same two cases itself.
 
 ## [0.21.0] - 2026-10-26
 

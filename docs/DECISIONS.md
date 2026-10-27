@@ -5375,8 +5375,9 @@ how the new lines read to a lab member; the JS tests were not run here (no `node
 ### D134 — The atlas takes TMT-Integrator's tables, knows every TMT reagent, and leaves an earlier search's `.pin` files
 **2026-10-27.** The lab's Dropbox export of 2026-10-27 showed three gaps in what the atlas hand-off takes
 (`atlas.select`, for a job's hand-off and the drive sweep's found runs alike). The user approved the three rules
-below; `harvest_fragpipe.ps1` (Nomura-Lab, another session's) changes to the same rules in the same release, so
-the PC's two senders keep one selection (D127).
+below; `harvest_fragpipe.ps1` (Nomura-Lab, another session's) takes rules 1 and 2 in the same release, so the
+PC's two senders keep one selection of files and one probe class (D127); rule 3 is Ionomos' only (harvest takes
+every `.pin`, and the atlas side's decoy check drops the same two cases itself).
 1. **TMT-Integrator's tables.** 46 runs of the export had TMT-Integrator on and none of its tables at the atlas:
    FragPipe writes them into the run folder's `tmt-report` subfolder (`abundance_*.tsv`, `ratio_*.tsv`), and a
    subfolder took only `$ReplicateAllow` (`psm.tsv`, `peptide.tsv`, `protein.tsv`, logs). A subfolder named
@@ -5404,7 +5405,9 @@ the PC's two senders keep one selection (D127).
    subfolder of the run folder → `its raw file is another replicate's (G)`. When G can't be told for sure (no
    experiment, no such folder) the `.pin` is taken, as before; a top-folder `.pin` gets only the first check; no
    manifest, an unreadable one, or one naming no raw file: every `.pin` as before. The new reasons reach the record's
-   `left[]` as the other `.pin` reasons do. Checking against what FragPipe was told is safer than guessing an
+   `left[]` as the other `.pin` reasons do. A DIA search names its `.pin` files `<x>_Q1` to `_Q3` (DIA-Umpire) or
+   `<x>_rank<N>` (MSFragger-DIA): one whose whole stem is no raw file's counts as `<x>`'s (`PIN_DIA_SUFFIX`), so a
+   DIA run never loses its decoys to this check. Checking against what FragPipe was told is safer than guessing an
    earlier search by the files' times, and taking a `.pin` whenever the group can't be told keeps a run whose
    folders were renamed by hand from losing its decoys.
 4. **What it does to runs sent before.** The drive sweep's fingerprint (D128) covers the taken files, so a found run
@@ -5426,4 +5429,5 @@ run's and a job's record) and `tests/test_atlassweep.py` (Kosuke's TMT2 tables b
 with the switch off and sent with it, its `tmt-report` tables included; a found run sent under the earlier rule sent
 again with only its two new tables copied, every earlier file at the destination byte- and time-identical but its
 record, the stale `.pin.gz` kept and named in `left[]`, and unchanged on the pass after). **Not verified**: on the
-lab PC, and `harvest_fragpipe.ps1`'s side of the same rules (its own session).
+lab PC; the DIA `.pin` names from FragPipe's documentation, not a lab run (the lab's isoDTB and TMT runs are DDA);
+and `harvest_fragpipe.ps1`'s side of rules 1 and 2 (its own session).

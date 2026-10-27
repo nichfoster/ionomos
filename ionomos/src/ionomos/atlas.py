@@ -98,11 +98,15 @@ NEVER_COPY = ("*.raw", "*.d", "*.wiff", "*.wiff2", "*.mzML", "*.mzXML", "*.mzBIN
 # column of <x>.pin (the same values) plus its own features, so when it is there <x>.pin stays behind.
 PIN_ALLOW = ("*.pin",)
 PIN_EDITED = "_edited.pin"
-# A .pin is the run's own only when its raw file is (D134; harvest keeps the same rule): a run folder can hold the
-# .pin files of an earlier search of other raw files, or grouped otherwise, which FragPipe never removes. Checked
-# against the run's manifest after the _edited twin rule, before pins off and the cap; these are the reasons
+# A .pin is the run's own only when its raw file is (D134; Ionomos' side only: harvest takes every .pin, and the
+# atlas side's decoy check drops the same two cases itself): a run folder can hold the .pin files of an earlier
+# search of other raw files, or grouped otherwise, which FragPipe never removes. Checked against the run's manifest
+# after the _edited twin rule, before pins off and the cap; these are the reasons
 PIN_NOT_IN_MANIFEST = "its raw file is not in this run's manifest"
 PIN_OTHER_REPLICATE = "its raw file is another replicate's ({group})"
+# A DIA search names a raw file's .pin files with a suffix: DIA-Umpire's pseudo-spectra <x>_Q1 .. <x>_Q3,
+# MSFragger-DIA's <x>_rank<N>. Such a .pin is <x>'s when its whole stem is no raw file's
+PIN_DIA_SUFFIX = re.compile(r"_(?:Q[123]|rank\d+)$", re.I)
 GZIP_LEVEL = 6  # 0.34 of a .pin's size; 9 is no smaller and twice as slow (measured on the lab's runs, D127)
 # The sample design, from beside the run folder (harvest's $DesignFiles): Ionomos's experiment.yaml (conditions,
 # doses, times, roles, the tmt: channel map) and the analysis' FragPipe-Analyst annotation, in the experiment folder;
@@ -364,13 +368,17 @@ def pin_not_this_runs(name: str, folder: str | None, groups: dict[str, list[str]
     """Why a .pin is not this run's own by its manifest (D134); "" when it is, or when that can't be told for sure.
     name: the .pin's file name; folder: the subfolder it is in (None: the top folder, which gets only the first
     check); groups: _manifest_groups; dirs: the run folder's subfolder names, in lower case.
-      - the manifest names raw files, none of them the .pin's        -> PIN_NOT_IN_MANIFEST
+      - the manifest names raw files, none of them the .pin's (nor, a DIA search's, without PIN_DIA_SUFFIX)
+                                                                     -> PIN_NOT_IN_MANIFEST
       - in a subfolder that no row of its raw file has as its group, while the group of such a row is a subfolder
         of the run folder (an earlier search grouped the replicates otherwise) -> PIN_OTHER_REPLICATE with it
     A row with no experiment has no known group; a group with no folder can't be told for sure: the .pin is taken."""
     if not groups:
         return ""
-    have = groups.get(pin_stem(name).lower())
+    stem = pin_stem(name).lower()
+    have = groups.get(stem)
+    if have is None:
+        have = groups.get(PIN_DIA_SUFFIX.sub("", stem))
     if have is None:
         return PIN_NOT_IN_MANIFEST
     known = [g for g in have if g]

@@ -389,6 +389,11 @@ PIN_CASES = [
     ("mzml-and-d", "/data/x/S_1.mzML\tE\t1\tDDA\nD:\\bruker\\S_2.d\tE\t2\tDIA\n",
      {"E_1/S_1.pin": TAKEN, "E_2/S_2.pin": TAKEN, "E_2/S_1.pin": "its raw file is another replicate's (E_1)",
       "tmt-report/S_2.pin": "its raw file is another replicate's (E_2)"}),  # a subfolder as any other
+    # a DIA search's .pin files carry a suffix after the raw file's stem: DIA-Umpire's _Q1.._Q3, MSFragger-DIA's _rank<N>
+    ("dia-suffixes", "D:\\dia\\S_1.raw\tE\t1\tDIA\nD:\\dia\\S_2.raw\tE\t2\tDIA\n",
+     {"E_1/S_1_Q1.pin": TAKEN, "E_1/S_1_Q3_edited.pin": TAKEN, "E_1/S_1_rank2.pin": TAKEN, "E_2/S_2_RANK10.pin": TAKEN,
+      "E_2/S_1_rank1.pin": "its raw file is another replicate's (E_1)", "E_1/S_9_Q1.pin": NOT_IN,
+      "E_1/S_1_Q4.pin": NOT_IN}),
 ]
 
 
