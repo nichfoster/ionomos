@@ -28,6 +28,7 @@ Rules every function keeps (D90):
 from __future__ import annotations
 
 import gzip
+import http.client
 import io
 import itertools
 import json
@@ -53,6 +54,9 @@ from pathlib import Path
 from ionomos import __version__
 
 urlopen = urllib.request.urlopen  # the one way out to the network; tests replace it
+# what a request can raise when the network is down or drops mid-way: urllib's URLError, the socket's OSError
+# (timeouts, resets), and http.client's IncompleteRead / BadStatusLine for a reply cut off (D131)
+_NET_ERRORS = (urllib.error.URLError, OSError, ValueError, http.client.HTTPException)
 
 UNIPROT = "https://rest.uniprot.org"
 FRAGPIPE_API = "https://api.github.com/repos/Nesvilab/FragPipe/contents"
@@ -231,6 +235,9 @@ def _net_error(exc: BaseException, url: str) -> str:
     reason = getattr(exc, "reason", exc)
     if isinstance(exc, TimeoutError) or "timed out" in str(reason):
         return f"{host} did not answer in time; check the internet connection and try again"
+    if isinstance(exc, (http.client.HTTPException, ConnectionError)):  # the reply was cut off: the network dropped
+        return (f"the connection to {host} broke off before the end ({type(exc).__name__}); check this computer's "
+                f"internet connection and try again")
     return (f"could not reach {host} ({reason}); check this computer's internet connection, or download the file "
             f"on another computer and use `ionomos fasta prepare` on it")
 
@@ -300,7 +307,7 @@ def uniprot_release(timeout: float = 10, *, notes: list[str] | None = None) -> d
             if rel:
                 return rel
             why = "UniProt did not say which release it is at (no X-UniProt-Release header)"
-        except (urllib.error.URLError, OSError, ValueError) as exc:
+        except _NET_ERRORS as exc:
             why = _net_error(exc, url)
     if notes is not None:
         notes.append(f"UniProt's current release is unknown: {why}")
@@ -386,7 +393,7 @@ def search_proteomes(organism_text: str, *, limit: int = 5, reference_only: bool
         with urlopen(_request(url, "text/plain"), timeout=timeout) as r:
             body = r.read().decode("utf-8", "replace")
             res.total = _total_from(r.headers)
-    except (urllib.error.URLError, OSError, ValueError) as exc:
+    except _NET_ERRORS as exc:
         res.error = _net_error(exc, url)
         return res
     lines = [ln for ln in body.splitlines() if ln.strip()]
@@ -477,7 +484,7 @@ def download_proteome(proteome_id: str, dest_dir: Path, *, reviewed: bool = True
             with urlopen(_request(count_url), timeout=timeout) as r:
                 res.expected = _total_from(r.headers)
                 rel = _release_from(r.headers)
-        except (urllib.error.URLError, OSError, ValueError) as exc:
+        except _NET_ERRORS as exc:
             res.error = _net_error(exc, count_url)
             return res
         res.release, res.release_date = rel.get("release", ""), rel.get("date", "")
@@ -509,7 +516,7 @@ def download_proteome(proteome_id: str, dest_dir: Path, *, reviewed: bool = True
         except _TooLong as exc:
             res.error = str(exc)
             return res
-        except (urllib.error.URLError, OSError, ValueError) as exc:
+        except _NET_ERRORS as exc:
             res.error = _net_error(exc, res.url)
             return res
         _say(progress, "unpacking", res.bytes, res.bytes)
@@ -848,15 +855,16 @@ def fetch_contaminants(*, timeout: float = 30, stop: threading.Event | None = No
         if entries:
             return entries, f"Philosopher's contaminant list ({PHILOSOPHER_CONTAMINANTS_MEMBER}, from GitHub)"
         notes.append(f"Philosopher's {PHILOSOPHER_CONTAMINANTS_MEMBER} had no entries")
-    except (urllib.error.URLError, OSError, ValueError, KeyError, zipfile.BadZipFile) as exc:
+    except (*_NET_ERRORS, KeyError, zipfile.BadZipFile) as exc:
         notes.append("Philosopher's contaminant list could not be downloaded: " + (
-            _net_error(exc, PHILOSOPHER_CONTAMINANTS_URL) if isinstance(exc, (urllib.error.URLError, OSError))
+            _net_error(exc, PHILOSOPHER_CONTAMINANTS_URL)
+            if isinstance(exc, (urllib.error.URLError, OSError, http.client.HTTPException))
             else str(exc)))
     try:
         entries = _parse_fasta_bytes(_download_bytes(CRAP_URL, timeout, stop))
         if entries:
             return entries, "the GPM's cRAP list (thegpm.org)"
-    except (urllib.error.URLError, OSError, ValueError) as exc:
+    except _NET_ERRORS as exc:
         notes.append("cRAP could not be downloaded: " + _net_error(exc, CRAP_URL))
     return [], ""
 
@@ -1214,7 +1222,7 @@ def stock_workflows(version: str, *, timeout: float = 15) -> StockList:
                 continue
             res.error = _net_error(exc, url)
             return res
-        except (urllib.error.URLError, OSError, ValueError) as exc:
+        except _NET_ERRORS as exc:
             res.error = _net_error(exc, url)
             return res
         if not isinstance(data, list):
@@ -1261,7 +1269,7 @@ def fetch_stock_workflow(version: str, name: str, dest_dir: Path, *, timeout: fl
                 continue
             res.error = _net_error(exc, url)
             return res
-        except (urllib.error.URLError, OSError, ValueError) as exc:
+        except _NET_ERRORS as exc:
             res.error = _net_error(exc, url)
             return res
     if not res.url:

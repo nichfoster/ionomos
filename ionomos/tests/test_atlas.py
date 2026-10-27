@@ -24,6 +24,7 @@ import yaml
 from ionomos import atlas, attention, names
 from ionomos.config import ConfigError, load
 from ionomos.ledger import Job, Ledger
+from tests.conftest import NO_INTERNET
 
 # ------------------------------------------------------------------------------------------- contract --
 
@@ -1019,6 +1020,34 @@ def test_check_finds_an_unset_or_unreachable_folder(handoff, monkeypatch):
     cfg = _write_cfg(handoff["lab"], enabled=True, handoff_dir=str(handoff["lab"]["root"] / "No Dropbox" / "x"))
     assert not all(f.ok for f in atlas.check(cfg))
     assert all(f.ok for f in atlas.check(handoff["cfg"]))  # its parent is there: the first hand-off makes it
+
+
+@pytest.mark.parametrize("make", NO_INTERNET)
+def test_without_internet_the_hand_off_its_check_and_the_checklist_line_all_work(handoff, monkeypatch, make):
+    """D131: the hand-off writes into the Dropbox folder on this PC; Dropbox uploads it when it is online. Nothing
+    here touches the network, so no internet is not a failure, and the checks don't call it one."""
+    import socket
+    import urllib.request
+
+    from ionomos import setupcheck
+
+    def no_network(*a, **k):
+        raise make()
+
+    def no_request(*a, **k):
+        raise AssertionError("the atlas hand-off must not go out to the network")
+
+    monkeypatch.setattr(socket, "create_connection", no_network)
+    monkeypatch.setattr(urllib.request, "urlopen", no_request)
+    cfg = handoff["cfg"]
+    assert all(f.ok for f in atlas.check(cfg)), atlas.check(cfg)
+    assert atlas.mark_pending(cfg, handoff["job"])
+    (res,) = atlas.HandoffLoop(lambda: cfg).run_once()
+    assert res.ok and res.state == atlas.SENT, res.message
+    assert atlas.state(handoff["exp"])["state"] == atlas.SENT and _records(handoff["root"])
+    item = setupcheck.atlas_item({"enabled": True, "handoff_dir": str(handoff["root"])})
+    assert item.status == "ok", item
+    assert not [i for i in attention.items(cfg.log_dir) if i.kind == atlas.ATTENTION_KIND]
 
 
 # ------------------------------------------------------------------------------------- the Dropbox folder --

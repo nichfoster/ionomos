@@ -113,6 +113,44 @@ def test_updates_available_and_update_source(clone, monkeypatch):
     assert ok and msg == "already up to date"
 
 
+GIT_OFFLINE = "fatal: unable to access 'https://github.com/nichfoster/ionomos/': Could not resolve host: github.com"
+
+
+def _git_says_offline(cmd, _timeout):
+    return subprocess.CompletedProcess(cmd, 128, "", GIT_OFFLINE)
+
+
+def _git_hangs(cmd, timeout):
+    raise subprocess.TimeoutExpired(cmd, timeout)
+
+
+@pytest.mark.parametrize("fail, words", [(_git_says_offline, "Could not resolve host: github.com"),
+                                         (_git_hangs, "git timed out (no network?)")])
+def test_git_without_internet_says_so_within_its_time_and_installs_nothing(clone, monkeypatch, fail, words):
+    """D131: a dev install's update check and update on a PC with no internet. git's own network calls (fetch,
+    pull) fail as git fails them; nothing is installed, the checkout is unchanged."""
+    _, _, work = clone
+    real_run = subprocess.run
+    seen = []
+
+    def run(cmd, *a, **k):
+        if "pip" in cmd:
+            raise AssertionError("nothing is installed when the pull did not happen")
+        if cmd[:2] == ["git", "fetch"] or cmd[:2] == ["git", "pull"]:
+            seen.append((cmd[1], k.get("timeout")))
+            return fail(cmd, k.get("timeout"))
+        return real_run(cmd, *a, **k)
+
+    monkeypatch.setattr(service.subprocess, "run", run)
+    before = _git(work, "rev-parse", "HEAD")
+    n, msg = service.updates_available(work)
+    assert n is None and words in msg
+    ok, msg = service.update_source(work, log=lambda _: None)
+    assert not ok and words in msg
+    assert seen == [("fetch", 60), ("pull", 180)], "each has a time limit"
+    assert _git(work, "rev-parse", "HEAD") == before
+
+
 def test_update_source_refuses_local_edits(clone):
     _, _, work = clone
     (work / "a.txt").write_text("edited on the PC\n", encoding="utf-8")

@@ -193,6 +193,9 @@ found are under "Real runs" in the open questions below.
     server yet. Open: per-user recipients (each person told about their
     own jobs). → 2026-10-02 (D67): the app's **Notifications** tab, with
     Send test and masked secrets; not yet seen on screen
+    → 2026-10-26 (D131): a message that never reached a channel (no
+    internet) waits in `notify_state.json` and is sent when the
+    connection is back, with one `notify_unsent` item meanwhile
   - log rotation: was there (5 MB, 5 files); now also safe when Windows
     refuses the rename
   - disk space: was there since 0.3.0 as a hold (`fragpipe.min_free_gb` +
@@ -890,6 +893,15 @@ Risks:
 ## Open questions (need a human)
 
 Collected from the other docs; resolve before/during Phase 1.
+
+**The PC without internet (2026-10-26, D131, PROTEOMICS_PC.md "No internet on the PC"): to see on the PC**
+- [ ] A day offline with notifications on: one "could not notify" line per channel in the log, one
+      **Notifications are waiting for a connection** item, and the messages "Sent late" once it is back.
+- [ ] FragPipe 24.0 without internet: `ionomos preflight` (Check FragPipe install) passes, and a real search
+      runs as before (Ionomos can't see what FragPipe checks online; its tools are on disk).
+- [ ] Dropbox offline: the hand-off still says `sent`; how online-only files behave (a hand-off that has to
+      compare with one); `C:`'s free space over a long outage, as nothing is uploaded or freed.
+- [ ] Are 7 days and 50 messages right for notifications kept through an outage?
 
 **The cysteine atlas hand-off (2026-10-19, D120–D125, ATLAS.md): what the lab must confirm**
 - [ ] Is the Dropbox client on the lab PC signed in to the lab Dropbox, and does it sync `Nicholas Foster Data`

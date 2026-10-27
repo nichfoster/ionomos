@@ -63,6 +63,58 @@ of six raws and a second one under way.
 - The user-entered "planned watcher folder" was `C:\Fragipe_Auto` (sic —
   typo). Proposal: `C:\Fragpipe_Auto`.
 
+## No internet on the PC
+
+Since 2026-10-26 the PC has no internet connection, possibly for weeks (D131). Ionomos does its work on the
+PC, so a whole day without internet goes as usual. Every request Ionomos makes has a time limit, none runs on
+the app's window thread or in the watcher's inbox loop, each says once what didn't happen and what to do, and
+each works again by itself when the connection is back. On a PC with no network at all the OS refuses at once;
+on a network that drops packets each request waits out its own time limit (below), once.
+
+**Works as before**: taking in drops; the searches (FragPipe, DIA-NN, MaxQuant and Sage are programs on the
+PC); the analysis and `report.html` (one offline file; its UniProt, STRING and GeneCards links need the internet
+only when clicked); instrument QC; the app and its help (a page on the PC); the assistant (a model on this PC,
+`localhost` only: with no model running it says so at once and shows Ionomos's own text); **Add decoys and
+contaminants…** (FragPipe's Philosopher has its list built in; without it, the `contam_` entries of a FASTA
+already on the PC); **Report a problem…** (the zip is saved on the Desktop; it goes to the maintainer by USB
+stick); the atlas hand-off and the drive sweep, which write into the Dropbox folder on this PC. The Setup
+checklist's atlas line and `ionomos atlas check` look only at that folder, so Dropbox being offline is not an
+error for them.
+
+FragPipe: Ionomos never asks FragPipe to download anything, and FragPipe's tools are on disk. What FragPipe
+24.0 itself does without internet has not been seen on the PC. `ionomos preflight` (the app's **Check FragPipe
+install**) starts FragPipe as a search does, with a time limit (90 s for `--help`, 300 s per method's dry run),
+so a FragPipe that wanted the network would show there. Its fix for a missing tool ("FragPipe GUI → Config tab
+→ Download / Update") needs the internet; offline, copy the tool from another FragPipe installation.
+
+**Waits, and goes out by itself later**
+
+| What | Without internet | When it is back | In the app |
+|---|---|---|---|
+| Notifications (`notify:`) | each message is tried once per channel. One that never reached the service (no connection, no name lookup, refused, or "try later": HTTP 429 / 503, an SMTP 4xx before the mail was taken) is kept in `<log_dir>\notify_state.json`: the newest about each job, at most 50, for 7 days. One line in the log per channel and error. A message the service refused (HTTP 404, a wrong password, a certificate that isn't the service's), or one that went out without an answer (a webhook's timeout, another 5xx, a mail server that took it and did not say 250), is not kept: it may have arrived, and none is ever sent twice. With notifications turned off, what was kept is dropped | the watcher tries again after 5 minutes, then 10, 20 and every 30 minutes, and at once when another message gets through or the watcher starts. Each goes as written, plus "Sent late: this happened …" | one item, **Notifications are waiting for a connection** (a warning: no pop-up), in the needs-attention list; it closes itself when they have gone. Dismissed, it stays away until they have |
+| The Dropbox side of the atlas hand-off (and the drive sweep) | Ionomos writes into the Dropbox folder on this PC as usual: the job's hand-off is `sent` | Dropbox uploads the files | nothing to see: the hand-off worked |
+
+Dropbox can't upload while offline, so what the hand-off and the sweep copy stays on `C:`. The sweep stops below
+`atlas.sweep_min_free_gb` (40 GB) free and a job's hand-off below `fragpipe.min_free_gb`, so the disk is not
+filled; over weeks, keep an eye on `C:`'s free space (the Setup checklist and `ionomos check` show it). Not seen
+on the PC: how Dropbox's online-only files behave offline. A hand-off that can't read a file already in the
+Dropbox folder fails and is tried again like any other (`atlas_handoff_failed`, up to `atlas.max_tries`).
+
+**Does not work until the internet is back**
+
+| What | What it says | What to do |
+|---|---|---|
+| **Download from UniProt…** (Methods tab), `ionomos fasta search` / `download` | "could not reach rest.uniprot.org (…); check this computer's internet connection, or download the file on another computer and use `ionomos fasta prepare` on it" (15 s for a search, 60 s per read of a download) | use a FASTA already on the PC, or copy one over on a USB stick, then **Add decoys and contaminants…** ([FASTA.md](FASTA.md)) |
+| UniProt's current release, in the Methods tab's **Check for updates** and `ionomos fasta release` | "UniProt's current release: unknown (…)"; the rest of the check (the files on this PC) is done (10 s) | nothing; ask again when online |
+| FragPipe's stock workflows from GitHub (`ionomos fasta stock-workflows [--get NAME]`) | "could not reach api.github.com …" (15 s) | copy the workflow from a FragPipe installation's `workflows\` folder |
+| `ionomos example` (Zenodo) | the URL of the zip and `ionomos example --zip` (60 s per read) | download the zip elsewhere, then `ionomos example --zip <file>` ([EXAMPLE.md](EXAMPLE.md)) |
+| Gene-set libraries the PC has never downloaded (enrichment) | the report's **Enrichment was incomplete**: "… not on this PC yet and could not be downloaded from maayanlab.cloud (…)"; one try per analysis (30 s), not one per library. Libraries downloaded before work offline | **Re-run analysis** once the PC is online |
+| Update checks | the app's Updates line: "Couldn't check GitHub just now (…)"; a development install: "could not check: …" | [DEPLOY_WINDOWS.md, "Updating a PC with no internet"](DEPLOY_WINDOWS.md#updating-a-pc-with-no-internet) (a USB stick) |
+
+`IONOMOS_OFFLINE=1` (an environment variable, set for the account the watcher runs as) makes the downloads and
+the update checks above say "off" without trying. It is not needed: without it they fail at once on a PC with no
+network. It does not hold back notifications, which wait as above.
+
 ## Known defects in the 2026-09-15 inventory
 
 1. **All `PATH:` sections report `DOES NOT EXIST YET`** because the paths were

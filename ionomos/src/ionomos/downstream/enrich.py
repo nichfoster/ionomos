@@ -91,11 +91,33 @@ def _download(lib: str, dest: Path, timeout: float) -> None:
     os.replace(part, dest)
 
 
+def _unreachable(exc: BaseException) -> str:
+    """Why a download failed, in words, when it was for want of a connection (no network, no name lookup, refused,
+    no answer, cut off); "" for anything else (the server answered: a missing library, not a library)."""
+    import http.client
+    import urllib.error
+
+    if isinstance(exc, urllib.error.HTTPError):
+        return ""
+    if isinstance(exc, urllib.error.URLError):
+        return f"could not connect: {exc.reason}"
+    if isinstance(exc, OSError) and getattr(exc, "filename", None):
+        return ""  # this PC's disk (the cache folder), not the network
+    if isinstance(exc, TimeoutError) or "timed out" in str(exc):
+        return "no answer in time"
+    if isinstance(exc, (OSError, http.client.HTTPException)):
+        return f"the connection broke off ({type(exc).__name__})"
+    return ""
+
+
 def load_libraries(names_: list[str], gmt: str | None = None, timeout: float = 30) -> tuple[dict, list[str]]:
-    """{display name: {term: genes}} for the chosen libraries (cached, downloaded when missing)."""
+    """{display name: {term: genes}} for the chosen libraries (cached, downloaded when missing). Without a
+    connection the first download that fails stops the others (one timeout per analysis, not one per library),
+    and one note names them all (D131)."""
     libs: dict[str, dict[str, set[str]]] = {}
     notes: list[str] = []
     offline = bool(os.environ.get("IONOMOS_OFFLINE"))
+    no_net, missing = "", []
     for name in names_:
         lib = LIBRARIES.get(name)
         if lib is None:
@@ -106,16 +128,28 @@ def load_libraries(names_: list[str], gmt: str | None = None, timeout: float = 3
             if offline:
                 notes.append(f"enrichment: {name} is not downloaded yet and this PC is offline")
                 continue
+            if no_net:
+                missing.append(name)
+                continue
             try:
                 _download(lib, path, timeout)
                 log.info("downloaded gene sets %s -> %s", lib, path)
             except Exception as exc:  # noqa: BLE001 - no internet must not break the analysis
-                notes.append(f"enrichment: could not download {name} ({exc}); it is tried again next time")
+                no_net = _unreachable(exc)
+                if no_net:
+                    missing.append(name)
+                else:
+                    notes.append(f"enrichment: could not download {name} ({exc}); it is tried again next time")
                 continue
         try:
             libs[name] = parse_library(path.read_text(encoding="utf-8", errors="replace"))
         except OSError as exc:
             notes.append(f"enrichment: could not read {path} ({exc})")
+    if missing:
+        one = len(missing) == 1
+        notes.append(f"enrichment: {', '.join(missing)} {'is' if one else 'are'} not on this PC yet and could not be "
+                     f"downloaded from {URL.split('/')[2]} ({no_net}); {'it is' if one else 'they are'} downloaded by "
+                     "the first analysis run while the PC is online (Re-run analysis then)")
     if gmt:
         p = Path(gmt)
         try:

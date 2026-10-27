@@ -61,13 +61,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   table is empty today. The LabWatch-era names are not keys and keep working (D21).
 - README.md: **Versioning and support**, VISION.md's promises from 1.0 in a few lines.
 
+- **No internet on the PC** (D131, docs/PROTEOMICS_PC.md "No internet on the PC", help "No internet on the PC"):
+  what works offline (everything but the items below), what waits, what doesn't work until the connection is back,
+  and how each shows up in the app. Every network touchpoint was tried with the socket failing as the OS fails it
+  (no name lookup, no route, refused, a connect timeout, a TLS handshake cut off) and with a reply cut off mid-way;
+  each has a test.
+
 ### Changed
 
 - The report's "How far to trust this" and `analysis.json`'s `trust` carry the lines above (new statement keys
   `simulated` and `ratios`, a longer `basis`, a `caveat` on `compare` and `benchmark`); the default label-free
   report's statements are the same. No default and no number changes. The help on the list says what the new lines
   are.
-
 ### Fixed
 
 - **A closed window's timer can no longer press a button in another window** (#185, D129). A pop-up set a timer
@@ -78,6 +83,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now the root's and do nothing once their window is closed (`tkutil.after`). The hidden-window tests fail on any
   window destroyed with a timer of its own still pending (`tests/tkharness.Timers`), and a source scan on any
   `widget.after` that isn't the root's.
+
+- **Notifications sent while the PC had no internet were lost** (D131; D58 sent once and forgot). A message that
+  never reached Teams, Slack, the webhook or the mail server (no connection, or "try later": HTTP 429 / 503, an
+  SMTP 4xx before the mail was taken) is kept in `notify_state.json` and sent when the connection is back, marked
+  "Sent late" (and as `include_names` says now): tried again after 5, 10, 20, then every 30 minutes, at the
+  watcher's start, and at once when another message gets through. The newest message about each search only, at
+  most 50, for 7 days; with notifications turned off they are dropped. One item, **Notifications are waiting for a
+  connection** (a warning, no pop-up), closes itself when they have gone. Never twice: a message the service
+  refused (a wrong address or password, a certificate that isn't the service's) or that went out without an answer
+  (a webhook's timeout, another 5xx, a mail server that took the mail and did not say 250) is not sent again, and
+  a kept message that was sent is remembered even when `notify_state.json` can't be written (then nothing more is
+  sent until it can).
+- **Enrichment without internet** tried each missing gene-set library in turn on every analysis (30 s each when
+  packets are dropped): the first failure now stops the rest, and one note names the missing libraries and says
+  to re-run the analysis once online.
+- **A download the network cut off part way** (UniProt, GitHub, Zenodo) ended in a traceback, and left the app's
+  UniProt search window waiting: it is an error in words now ("the connection to … broke off before the end"),
+  and nothing is left behind.
 - Windows CI on 0.20.0: a drive-sweep test with no `atlas.sweep_roots` walked the runner's own `C:` (every fixed
   drive is the default there); it stubs the drives now. The experiment editor's roles preview ran on a variable
   that outlived its closed window and raised a Tk error; it returns when its window is gone.

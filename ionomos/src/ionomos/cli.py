@@ -317,12 +317,16 @@ def cmd_run(args) -> int:
             log.info("detailed logging %s", "ON" if want == logging.DEBUG else "off")
 
     def daily():
+        from ionomos import notify
+
         last = time.monotonic()
         tick = 0
         while not stop.wait(1):
             tick += 1
             if tick % 30 == 1:
                 apply_debug_switch()
+            if tick % 60 == 5:  # notifications kept for want of a connection (D131): at start whatever their schedule
+                notify.retry_unsent(cfg, force=tick == 5)
             if (cfg.log_dir / STOP_FILE).exists():  # graceful stop requested by the app / another process
                 log.info("stop requested via %s", cfg.log_dir / STOP_FILE)
                 clear_stop(cfg.log_dir)

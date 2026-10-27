@@ -19,6 +19,7 @@ from ionomos import help as helpdoc
 from ionomos.assistant import audit, client, fake, helpsearch, proposals, scenarios, tools
 from ionomos.assistant.scenarios import states
 from ionomos.ledger import Ledger
+from tests.conftest import NO_INTERNET
 
 ALL_TOOLS = (*tools.TOOLS, *proposals.TOOLS)
 SETTINGS = {"enabled": True, "model": fake.MODEL, "stream": False}
@@ -205,6 +206,35 @@ def test_a_question_has_one_time_limit_and_each_request_gets_what_is_left(fp, tm
     assert "likely: FragPipe ran out of memory" in ans.text, "Ionomos's own explanation follows"
     (rec,) = audit.read(tmp_path / "audit.jsonl")
     assert rec["outcome"] == "unavailable" and rec["rounds"] == 2
+
+
+def _closed_port() -> int:
+    import socket
+
+    with socket.socket() as sk:  # a port nothing listens on: no model runtime on this PC
+        sk.bind(("127.0.0.1", 0))
+        return sk.getsockname()[1]
+
+
+@pytest.mark.parametrize("make", [None, *NO_INTERNET])
+def test_no_model_runtime_is_said_at_once_with_ionomos_own_text(fp, tmp_path, monkeypatch, make):
+    """D131: the assistant only talks to this PC (localhost), so the internet does not matter; a runtime that is
+    not running, or a socket that fails however the OS fails it, is an answer at once, never a wait."""
+    import socket
+
+    if make is not None:
+        def connect(*a, **k):
+            raise make()
+
+        monkeypatch.setattr(socket, "create_connection", connect)
+    cfg = replace(fp, assistant=assistant.settings_from({**SETTINGS, "timeout_seconds": 120,
+                                                          "base_url": f"http://127.0.0.1:{_closed_port()}/v1"}))
+    t0 = time.monotonic()
+    ans = assistant.ask(cfg, "Why did my search fail?", experiment="1", audit_path=tmp_path / "audit.jsonl")
+    assert time.monotonic() - t0 < 5
+    assert ans.outcome == "unavailable" and not ans.grounded and "no answer from the model runtime" in ans.reason
+    assert ans.text.startswith("The assistant's model is not answering (no answer from the model runtime at http")
+    assert "likely: FragPipe ran out of memory" in ans.text, "Ionomos's own explanation follows"
 
 
 def test_a_question_whose_time_is_used_up_between_requests_asks_no_more(fp, tmp_path):
