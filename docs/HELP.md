@@ -1,13 +1,14 @@
 # The help for users: where it lives and how to edit it
 
 Ionomos has one set of help texts for the people who use it (lab members, not
-bioinformaticians). They are shown in three places:
+bioinformaticians). They are shown in three places, and on the documentation site:
 
 | Where | What people see | How it's made |
 |---|---|---|
 | **Every report** (`results/report.html`) | **Help** in the top bar; a **?** beside each section title, each QC tab, the cut-offs, the p-value histogram and each issue box, opening its text in place; a Help section at the end with every report topic, the glossary and the issues found in *that* report | `report.py` embeds `help.report_payload(issues)`; `report.js` (the "help" block) draws it. Offline, inside the one file |
 | **The help page** (`help.html`) | Everything: getting started, reading the report, glossary, troubleshooting, what Ionomos never does to your data, questions. A search box filters the topics | `help.page()`. The app's **Help** button (bottom bar and Help tab), **More help** in each pop-up (opens at the topic that explains it), `ionomos help --open` |
 | **The terminal** | `ionomos help NO_TABLE`, `ionomos help pca`, `ionomos help glossary` print one topic as plain text | `help.text()` |
+| **The documentation site** (`help/*.html`, D132) | One page per file, the same text as `help.html` | `website/hooks.py` puts each heading in Markdown with its `{#id}` and each text as `help.to_html()` renders it |
 
 `help.html` is written to `<log_dir>/help/` on the lab PC (the app-data folder
 when there is no lab config, e.g. after `pip install`) and opened from there.
@@ -68,6 +69,8 @@ the other. See [imputation](#glossary.imputation) and
   under 60 KB, and issue titles from the data are escaped;
 - the files ship in the wheel (`pyproject.toml` package-data) and the exe
   (`deploy/ionomos.spec`).
+- on the documentation site (`tests/test_site.py`): every entry is on one
+  page with its id, and every link between the help pages resolves.
 
 After editing, run `cd ionomos && .venv/bin/pytest tests/test_help.py`, and
 regenerate the JS fixture (`.venv/bin/python tests/js/make_fixture.py`)

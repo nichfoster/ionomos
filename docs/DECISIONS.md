@@ -5068,3 +5068,306 @@ copied in just now, a dead process's lock, the saved pass, soft and hard stops).
 `search.failed` and `attention.analysis_failed` (FTS5 gives `search`, in most entries, almost no weight); any new
 help entry could flip it, as this one did, so the script asks for 5. **Not verified**: on the lab PC (its drives,
 the walk's time, Dropbox's upload of about 8 GiB), and the atlas side reading item 7.
+
+### D129 — A window's timer is the root's, and does nothing once the window is closed
+**2026-10-26.** Issue #185. The hidden-window smoke test once saw a "Find FragPipe" box on Windows CI that nothing in
+it pressed. The cause is tkinter's: `widget.after(ms, f)` makes `f` a Tcl command of the widget named
+`id(tkinter's wrapper) + f.__name__` ("2155…<lambda>", "2155…close") and sets a Tcl timer that calls that name.
+`widget.destroy()` deletes the command but not the timer. Python soon reuses the freed wrapper's address, so the
+next callback registered under the same `__name__` gets the same name, and the old timer calls it. Each pop-up
+set `win.after(1500, lambda: …)` (no longer on top after 1.5 s); the smoke test closes its five pop-ups after
+0.3 s, and the Setup checklist's Fix buttons are `command=lambda a=…: …`. When the checks finished while a pop-up's
+timer was pending, the timer pressed Find FragPipe, which on a runner without FragPipe asks with a box. In a loop
+with nothing in between, the next lambda took the name 200 times in 200. This was the app's bug, not the test's:
+on the lab PC a pop-up closed within 1.5 s (or an analysis pop-up closed by hand within 2.5 s of "All set") could
+press whatever was registered next, and a closed naming window's time-out could close the next one.
+
+1. **`tkutil.after(widget, ms, func, *args)` / `tkutil.after_idle`**: the timer is the root's, which lives as long
+   as the app, and `func` runs only if `widget` still exists. Every timer of a window that can close uses it: the
+   pop-up's 1.5 s and its 2.5 s close (`popups`), the naming window's file poll, live refresh, time-out and summary
+   refresh (`resolve`). `root.after` stays for the app's own loops; the drag-and-drop timer is the root's.
+   Cancelling the timers on `<Destroy>` was the alternative: a Toplevel's `<Destroy>` binding fires for each of
+   its children too, and a poll that re-arms itself has a new id each time.
+2. **A source scan** (`tests/test_tk_timers.py`, AST, as for the Tk variables) fails on `.after(` /
+   `.after_idle(` on anything but a root or `tkutil`.
+3. **The harness looks at the cause, not at its chance outcome.** `tests/tkharness.Timers` records each widget
+   destroyed while a timer of its own is still pending (it wraps `tkinter.Misc.destroy`, which every destroy ends
+   in, and reads `after info`). `make_app` installs it; `hidden_app` fails at teardown on any, so every hidden-app
+   test checks it on every run. Whether a later callback takes the name is chance (once in many CI runs); the
+   pending timer is not: the smoke test's pop-ups left five.
+4. **The smoke test is unchanged** (no skip, no expected dialog): with no window timers left nothing can press a
+   button in it. `NoDialogs`' record of where a dialog came from (round 5) stays.
+
+**Verified**: `tests/test_tk_timers.py` in a Tcl interpreter without Tk (no window: a window's own timer stays
+pending with its command gone and `Timers` names it; `tkutil.after` runs while the window is open and does nothing
+once it is closed; the scan, which named the nine old call sites before the fix). In CI only (real Tk): the
+smoke test, a pop-up closed at once with a button made right after, and a naming window closed at once with its
+poll, refresh and time-out pending. **Not verified**: that the flake is gone (it showed once); `ScrolledFrame`'s
+mouse-wheel `bind_all`, a Tcl script that can also name a closed window's command (ROADMAP).
+
+### D130 — An update brought on a USB stick: found, checked against its `.sha256`, copied into Downloads, installed as online
+**2026-10-26.** The lab PC can't reach the internet at the moment, so it can't update itself (D22). Offline the app
+found a Setup file in Downloads but refused it, as there was nothing to check it against, and the person ran it by
+hand: nothing checked the file, and a stick pulled out mid-install would break the program. (A hand-run installer
+does stop the watcher itself, `stop --wait 60 --remember`, and the startup task and the app it opens at the end start
+it again, unless the person unticks "Open Ionomos"; what the app's route adds is the check, a copy that can't be
+pulled out, and one button.) Now the USB stick is a way in like GitHub (`updates.py`,
+DEPLOY_WINDOWS.md "Updating a PC with no internet").
+1. **The release publishes `Ionomos-Setup-<version>.exe.sha256`** beside the installer, in sha256sum's format
+   (`<64 hex>  <name>`, lower case, ASCII, LF, no BOM), written by `build-exe.yml` with `Get-FileHash` and checked
+   there by the frozen CLI (`ionomos update --from <Setup> --check`, offline). On a computer with internet the
+   person copies both files onto a stick. Releases up to 0.20.0 have no such file; for them a person can make one
+   from the SHA-256 GitHub shows for the asset.
+2. **Where it looks**: Downloads (as before), the root of each removable drive, and an `Ionomos` folder at that root;
+   when the app opens, every 6 hours, and on **Check for updates**. Removable means Windows' `GetDriveTypeW` says
+   `DRIVE_REMOVABLE` (2) for a drive in `GetLogicalDrives`; A: and B: are not asked (a floppy drive is slow). That
+   reads Windows' drive table, not the media; the listing runs with `SetThreadErrorMode(SEM_FAILCRITICALERRORS |
+   SEM_NOOPENFILEERRORBOX)`, so a card reader with no card is an `OSError` that is skipped, never a "There is no
+   disk in the drive" box waiting for a click. Nothing but the folder listings is read until a person presses
+   Update. On the lab PC (inventory of 2026-09-15) D:, the WD Elements USB disk, reports 3 (fixed) and is not
+   looked at; E:, the 30 GB "Proteome Discoverer 2.5" stick, reports 2 and only its root is listed; a new stick
+   comes in as F:. A stick or USB disk that reports fixed is reached with **Update from a file…**. The newest
+   version newer than this one wins; of one version, the one with a `.sha256` beside it, then the one in Downloads,
+   then the newest file.
+3. **What makes it installable**: its SHA-256 (and size) matches GitHub's digest for its version, when GitHub
+   answers (as before, and that digest wins over a `.sha256` that disagrees); or, without one, a `.sha256` file
+   beside it gives its SHA-256. The `.sha256` is read tolerantly: a `*` before the name, upper-case hex, a UTF-8 BOM
+   or UTF-16 (PowerShell 5's `Out-File`), CRLF, a bare hash on its own line (certutil's output), BSD's
+   `SHA256 (name) = hex`, the name with a folder or Windows' ` (1)`; a line for another file or version is left
+   out. The file may also be called `… (1).sha256` or `.sha256.txt`. With neither, the refusal stays, and says to
+   copy `Ionomos-Setup-<version>.exe.sha256` from the release's page next time.
+   **What the `.sha256` proves**: that the copy is whole and is the file it names: a bad stick, a copy cut short, a
+   browser's half download, two files from different releases. It does not prove where the installer came from:
+   whoever can change the installer on the stick can change its `.sha256` too. The person who copied both from the
+   release page is the trust, as when they ran it by hand; the installer is not signed (SECURITY_NOTES.md). The app
+   says "checked against its .sha256 file", never "verified" or "safe".
+4. **Copied into Downloads before it runs.** Inno Setup reads its compressed payload from the exe while it installs
+   (a minute or more, with the app closed and the watcher stopped); a stick pulled out then, or Windows' "Eject",
+   leaves a half-replaced program. From C: nothing can be pulled. The copy goes through a new `.part` (opened
+   exclusive, so a browser's own `.part` stays), is read back from the disk and must match the digest that passed,
+   then is renamed: what runs is the bytes that were checked, even if the stick's file changes meanwhile. Never over
+   a file: a different file of that name in Downloads stays, and the copy is `Ionomos-Setup-<v>(1).exe` (the
+   name pattern already allows that); a file of that name with the same content is used as it is; a failed copy
+   removes only its own `.part`. The copy gets its own `.sha256`, so it can be checked again with the stick gone. A
+   file already in Downloads runs where it is. The cost is the installer's size on C: (about 99 GB free there).
+5. **In the app** the same **Update to x.y.z** button and status line ("Ready on the USB stick E:\:
+   Ionomos-Setup-0.21.0.exe"; one without its `.sha256` says so). **Update from a file…** beside Check for
+   updates opens a file picker at the first stick (else Downloads); the file's version must be newer than this
+   one (reinstalling or going back is the installer run by hand). The check and the copy run on a worker thread
+   (S2.2; a 100 MB read from a USB 2 stick takes seconds). Every route ends in `_finish_update` (the old `finish`):
+   `request_stop`, `RESTART_WATCHER`, the silent installer, the app closes, and reopens to start the watcher. When
+   GitHub can't be reached, the Updates box says the USB way in one line.
+6. **`ionomos update --from FILE [--check]`** does the same from the command line (the `update` command was git
+   only): GitHub's digest if it answers, else the `.sha256`; the copy into Downloads; the watcher of `--config`
+   stopped; the installer started. `--check` only checks (0 passes, 1 refused).
+7. **The first time** the PC still runs a version without this, so the first offline update is the installer run
+   by hand (the check is then the person's).
+
+**Verified**: `tests/test_usb_update.py` (the `.sha256` read in 23 forms; its file names; a match passes; a short,
+changed or empty copy is refused; no `.sha256`, or one that gives nothing, is refused saying what to copy; GitHub's
+digest alone passes and a different one wins over the `.sha256`, a release of another version does not count; the
+copy in Downloads with its `.sha256`, the stick only read, a second copy not made, a file already in Downloads run in
+place, a different file of the same name and a browser's `.part` left alone; a stick pulled out mid-copy and a copy
+that reads back wrong leave Downloads as it was; the newest version across Downloads and two sticks, the `Ionomos`
+folder, the tie-breaks, an unreadable place skipped; the drives from a stand-in kernel32 with the lab PC's drive types,
+never raising, the error mode set and put back; `ionomos update --from` checking, refusing, installing from Downloads
+and stopping the watcher first; `build-exe.yml` writes the file before the release and attaches it; the app's
+`_update_from_file` without Tk, through to `_finish_update`, and its status line), and the app in a real window in
+`tests/test_app.py` (Update from a file… through `_finish_update` with `updates.install` stubbed, the
+refusals, the stick's status line and button, the USB line when GitHub can't be reached; these open Tk, so CI only).
+**Not verified**: on Windows (`GetDriveTypeW` on a real stick and an empty card reader, the error mode, the file
+picker) and on the lab PC (a real update from a stick); the release step's PowerShell until the next tag.
+
+### D131 — No internet on the PC: every request is bounded and says why once; notifications wait and go later
+**2026-10-26.** The lab PC has no internet connection, possibly for weeks. Ionomos must run whole days like that:
+watch, search, report, hand off to the atlas, sweep the drives, without a hang, a slower watcher, a frozen app or
+the same message again and again. Every network touchpoint in `ionomos/src/ionomos` was listed and tried with the
+socket failing as an OS fails it (no name lookup, no route, refused, a connect timeout, a TLS handshake cut off:
+`tests/conftest.py` `NO_INTERNET`) and with a reply cut off mid-way. `updates.py` and the app's update flow are
+another PR's and were left out. What was found and done (PROTEOMICS_PC.md "No internet on the PC" for the lab):
+1. **Notifications were lost** (D58.6: "a message lost while the network was down is lost"; and a "held" message
+   was marked as told before it was sent, so a restart never sent it either). Now a message that never reached the
+   service is kept and sent later, and none is ever sent twice (a copy in the channel is worse than D58's one
+   try). `notify.worth_retrying` decides. Kept: urllib's URLError (the request was not sent: DNS, no route,
+   refused, a TLS handshake cut off), a mail server that could not be reached or went away before the DATA
+   command, an SMTP 4xx, HTTP 429 or 503 (the service says later and did nothing with it). Not kept, as before: a
+   service that said no (another HTTP 4xx, a wrong password, refused addresses), something that answered with a
+   certificate that isn't the service's or with another protocol (an ssl / starttls port mix-up; checked on the
+   error itself, as smtplib raises ssl's error unwrapped, and on urllib's `.reason`), a setting, and a message that
+   went out and got no answer, as it may have arrived (`_NoAnswer`): a webhook's timeout, another 5xx (a gateway's
+   502 / 504 may come after the work was done), and a mail server that went away or timed out after DATA, while
+   it was to say 250 (`_send_email` notes when DATA goes out; a review found four copies of one mail without it).
+   Kept in `<log_dir>/notify_state.json` (`unsent`, `retry` beside D58's `held`): the fields that would be sent,
+   never an address or password; only the newest message about a job (a newer announce replaces it, by the time it
+   was announced, so a slow thread can't keep a stale one; each kept message is looked up again just before it
+   goes); at most `UNSENT_MAX` (50), `UNSENT_DAYS` (7 days); all dropped, once, with notifications turned off (the
+   item closes). Sent again by `notify.retry_unsent`, which the watcher's maintenance thread calls every minute
+   (its own daemon thread; returns at once; one sender at a time), per channel after 5, 10, 20, then every 30
+   minutes (a schedule that doesn't read, from a hand-edited file, is due now, once); at the watcher's start
+   whatever the schedule; and at once when another message gets through on that channel. A sent message's id is
+   remembered for the life of the process (`_done_ids`), so a state file that could not be written never makes a
+   second copy; the write retries a refused replace as `attention._write` does, and while it keeps failing no
+   other kept message is sent (logged once) until it can be written. A late message is the same message plus "Sent
+   late: this happened <time>; the PC could not reach <service> then" (in `text`; the webhook's keys are D58.3's),
+   and with `include_names: false` as it is now, the job number, status and time only. Logged once per channel and
+   error ("Kept: it is sent when … can be reached again"). One attention item `notify_unsent` (a warning, no
+   pop-up, KINDS, help `attention.notify_unsent`) while any waits, its text changed only when the count or error
+   does; it closes when the last is sent; dismissed, it is not raised again until then. `ionomos notify-test` adds
+   that a search's message would wait. Test messages are never kept. Not taken: a digest of many late messages
+   (more surface; 50 and 7 days bound the burst), an endless queue (weeks-old "done" messages are noise).
+2. **Enrichment tried each missing gene-set library in turn** (30 s each with packets dropped; three by default)
+   on every analysis in the worker, with a raw exception in the note. Now the first failure for want of a
+   connection stops the rest (`enrich._unreachable`: a server that answered, an HTTP 404, is not that), and one
+   note names them all: "… not on this PC yet and could not be downloaded from maayanlab.cloud (…); they are
+   downloaded by the first analysis run while the PC is online (Re-run analysis then)". Cached libraries work
+   offline, as before (the report's **Enrichment was incomplete**, a warning: no pop-up).
+3. **A reply cut off mid-way escaped as an exception**: `fastasource` and `example` caught URLError and OSError
+   but not http.client's `IncompleteRead` / `BadStatusLine` (a chunked UniProt stream the network drops), so the
+   app's UniProt search window could wait for ever and `ionomos fasta` / `example` ended in a traceback.
+   `fastasource._NET_ERRORS` and example's except clause include `http.client.HTTPException`, and both say "the
+   connection to <host> broke off before the end (…)"; the `.part` files go, as before. (`updates.py` already
+   caught it.)
+4. **Already right, now with a test each**: UniProt search, release, download, contaminants and GitHub's stock
+   workflows (`test_without_internet_every_request_says_why_at_once_and_leaves_nothing`, every call × every
+   failure; `test_check_for_updates_without_internet_says_why_and_does_the_rest`); `ionomos example`
+   (`test_a_network_failure_is_a_sentence_and_leaves_no_part_file`); the assistant, which only talks to
+   `localhost` (`test_no_model_runtime_is_said_at_once_with_ionomos_own_text`: no runtime, or a socket that fails,
+   is the fallback at once); the dev install's git fetch / pull
+   (`test_git_without_internet_says_so_within_its_time_and_installs_nothing`: 60 s / 180 s, nothing installed);
+   the atlas hand-off, `atlas check` and the Setup checklist line, which look only at the Dropbox folder on this PC
+   (`test_without_internet_the_hand_off_its_check_and_the_checklist_line_all_work`): Dropbox being offline is not
+   an error for them. Every network call already ran off the Tk thread and outside the inbox loop (the app's
+   UniProt, update and Send test windows on worker threads; the worker's analysis and notifications in the worker
+   and daemon threads). `report.html` and the help page load nothing from the internet. `bundle.py` and
+   `notify._pc` ask only `socket.gethostname()`. FragPipe's preflight starts FragPipe on the PC with its time
+   limits (90 s, 300 s); Ionomos never asks FragPipe to download anything.
+
+**Verified**: `tests/test_notify.py` (what is worth sending again, table; every channel without internet × every
+failure, in words, no secret; which HTTP answers are kept; a job's message kept through a day of tries and a
+restart, then sent once, late; a newer message replacing the kept one and a working channel sending the rest at
+once; the bounds; a dismissed item; `retry_unsent` returning at once, one sender, a damaged file; the real
+`ionomos run` sending what was kept within seconds of its start; and, from a review of the first version: a mail
+whose 250 came late sent once, a mail server gone before DATA tried again, a refused replace of the state file
+and one that can't be written at all with nothing sent twice, notifications turned off, a kept message replaced
+mid-pass, `include_names` as it is now, a hand-edited schedule, 500 / 502 / 504 and the TLS errors not kept),
+`test_fpa.py`, `test_fastasource.py`,
+`test_example.py`, `test_library_tab.py`, `test_assistant_robustness.py`, `test_service.py`, `test_atlas.py`.
+**Not verified**: on the lab PC; what FragPipe 24.0 does without internet; how Dropbox's online-only files behave
+offline (a hand-off that can't read one fails and retries as `atlas_handoff_failed`, up to `atlas.max_tries`);
+Windows' DNS client on a network with no DNS server (its own time, not urllib's timeout, bounds a lookup).
+
+### D132 — A documentation site: MkDocs (Material) on GitHub Pages, made from the repository's own files
+**2026-10-26.** VISION.md item 6 (ROADMAP 5D step 7): a site with QUICKSTART, ENGINES, VALIDATION, the help that
+`ionomos help` renders and the real-data example's reports, so a reader sees a report before installing anything.
+It is `website/` (`mkdocs.yml`, `hooks.py`, the home page), built by `.github/workflows/docs-site.yml` and by
+`scripts/build_site.sh`, for <https://nichfoster.github.io/ionomos/>.
+1. **MkDocs 1.6.1 with Material 9.7.7, pinned, in the docs workflow only.** Not a generator of our own: docs/ uses
+   tables, fenced code, nested lists and #anchors, which the help's renderer (a deliberate subset, D46) does not
+   read, and a full Markdown renderer of our own would be the less robust half of the choice. MkDocs gives strict
+   mode (a broken link or anchor, or a page left out of the nav, fails the build), search and a theme. Neither is
+   a dependency of the package: `website/requirements.txt`, installed by the workflow, or locally into a
+   throwaway `.venv-site/`. Material is in maintenance mode, and MkDocs 2.0 would break its plugins (Material
+   prints a warning saying so at every build); the pins hold `mkdocs<2`. Zensical, Material's successor, reads
+   `mkdocs.yml`, so a later move is a config change, not a rewrite.
+2. **The pages are the repository's files, read where they are.** `hooks.py` adds the chosen docs, CHANGELOG.md
+   and the six help files as pages, so the site can't drift from the docs. Chosen for a stranger: QUICKSTART,
+   EXAMPLE, ENGINES, VALIDATION, VISION, SCOPE, CHANGELOG and the help (safety and the FAQ included). Left on
+   GitHub: the lab PC's and the developers' docs (DEPLOY_WINDOWS, DEV_LOOP, DECISIONS, ROADMAP, ...). A link to
+   one of them, or to the source (`../ionomos/src/...`), goes to the file on GitHub at the tag being built
+   (`IONOMOS_SITE_REF`; master otherwise); a link to a file that doesn't exist fails the strict build. Anchors are
+   made by GitHub's rule (the one `tests/test_docs_sync.py` checks the docs' links with), so one link works on
+   GitHub and on the site.
+3. **The help is rendered by `ionomos.help` itself.** Its files are a subset of Markdown with `{#id}` headings,
+   written for `help.to_html`, which escapes everything (so `<folder>` is text; Python-Markdown would read it as a
+   tag and drop it). Each heading goes to Markdown with its id (attr_list: the table of contents, the search and a
+   link to an entry work), and each text goes through as `to_html`'s HTML, one block per entry: the site says
+   what `help.html` and the report say, with the list of FragPipe's failure causes made from the code. A link to
+   an entry on another help page goes to that page. `ionomos help` and the package are unchanged.
+4. **The example's reports.** On a `v*` tag and a manual run the workflow runs `ionomos example` (the Zenodo zip
+   is cached by the record and its SHA-256) and the site gets each dataset's `results/` (the report and every
+   file it links to, with a listing page for its `fragpipe-analyst/` folder), its README.txt and experiment.yaml,
+   and the data's attribution beside them (source, licence, citation, the changes: CC BY 4.0, D96). Not the zip
+   or the source tables, which are Zenodo's to give. About 50 MB. A failed download or analysis does not fail the
+   build: the Example reports page then says the reports are missing this time and links to no report that isn't
+   there. A pull request's build has no example: fast, and no network.
+5. **The deploy is its own workflow and fails in plain words.** `actions/upload-pages-artifact` and
+   `actions/deploy-pages` in `docs-site.yml` (`pages: write`, `id-token: write`, environment `github-pages`), not
+   in `build-exe.yml` or `publish-pypi.yml`, so a tag's installer and package never wait on Pages. Pages is not
+   switched on yet: the deploy job asks the API first and fails with the one-time step (Settings → Pages → Source:
+   GitHub Actions, and the `github-pages` environment allowing tags `v*`; DEV_LOOP.md "Releasing"). No repository
+   setting was changed by this work.
+6. **Small choices.** `font: false`: the site loads no fonts from Google. `use_directory_urls: false`: the built
+   site also works opened from the disk. The `Documentation` URL in `ionomos/pyproject.toml` stays on GitHub's
+   QUICKSTART.md until the site is live (ROADMAP 5D step 7).
+
+**Verified**: `scripts/build_site.sh` builds strictly on macOS (Python 3.12; 16 pages), and again with a folder a
+real `ionomos example` wrote (Ionomos 0.20.0, the download and three analyses in 48 s; the three reports and their
+files, 54 MB); a broken link and a broken anchor each fail it. `tests/test_site.py`: the nav against the pages,
+every docs link on the site, the link rule's cases, every help entry on one page with its id, every link between
+help pages, the help's HTML byte for byte, the reports page with and without reports (and without the source
+tables), the workflow's triggers and permissions; in the docs workflow, with Python-Markdown, the help's ids,
+titles and text through Markdown and GitHub's anchors. **Not verified**: the deploy (Pages is off), and the
+workflow's example step and cache on GitHub's runners.
+
+### D133 — VALIDATION.md's open lines are said in the report where they apply; retired keys warn before they go
+**2026-10-26.** Two of VISION.md's v1.0 items are agent work: every open "Not verified" line of VALIDATION.md
+either verified or stated in the report's "How far to trust this", and the versioning and support promises in the
+README. The first is about what the report says, not what it computes: no default and no number changes.
+1. **Said only where it applies.** A report that pasted every caveat would be read by nobody (D60: a list of
+   checks with their numbers, not a disclaimer). So each open line of VALIDATION.md is said only when the analysis
+   used what it is about, and VALIDATION.md gives each line a status: *stated in the report* with the trust.py key
+   that says it, or *not a report caveat* with why.
+2. **The line that applies to every analysis goes under the list** (`trust.VALIDATED`, in `basis`): the
+   statistics are checked against the R tools they port and the settings on simulated data, not yet on real lab
+   data (no real benchmark sample, no real FragPipe-Analyst, MSstats or Perseus result compared). Not for a
+   results table Ionomos only read: it ran none of those methods. That covers the page's opening line, the
+   re-run by hand of 2026-10-06, the example (whose report does not know it is the example) and the simulated DIA
+   benchmark's "does not show how the lab's samples behave".
+3. **One method, one sentence**, in a statement `simulated` ("Checked on simulated data", never marked **check**:
+   it says what the evidence is), from the table `trust.SIMULATED`: `tmt` for every TMT analysis (the simulated
+   plexes have no ratio compression; on MS2-level TMT co-isolation makes real fold changes smaller), `rollup` /
+   `maxlfq` when Ionomos rolled peptides or precursors up itself (`meta["rollup"]`; no shared or modified peptides
+   in the simulation; MaxLFQ found a few more small changes and a few more false ones). With none of them, no
+   statement.
+4. **isoDTB site ratios get a statement of their own**, `ratios`, because its caveat has a number: how the ratios
+   were used (`fpa.centre_label`), the largest replicate offset from 0 on the stable sites (the doctor's
+   measurement), marked **check** on the doctor's `RATIO_OFFSET` threshold, and that a mixing error's effect and
+   the centring are known from simulated sites only. Two replicates were already marked (`replicates`).
+5. **Beside a result from the results folder** (`trust.EXTERNAL_CAVEATS`): a compare result whose reference is a
+   results table says that no real export of FragPipe-Analyst, limma, MSstats or Perseus has been tried (check how
+   many features matched); one against another Ionomos analysis says nothing, it needs no column layout. A
+   known-ratio benchmark says its code was tested on simulated mixed-species tables only. The simulated
+   benchmark's own title already says what it is.
+6. **Not report caveats**: the timing of 50,000 features (speed, not the result), the fuzz's simulated damage and
+   the engine formats checked on simulated tables (the report already names its engine and every repair it made;
+   which engines' real exports have been read is ENGINES.md's, with round 4's open loader items in ROADMAP).
+7. **Retired keys: the mechanism the promise needed.** Before this, config.yaml's checked sections warned about an
+   unknown key (D94 item 4), but said nothing of a key that had been renamed, and `analysis:`, `naming:`,
+   `methods:` and experiment.yaml refuse an unknown key outright, so a retired key there would have stopped the
+   file from loading with no release of warning. `retired.py` holds the table `RETIRED` (old key, new key or None,
+   the version that retired it, a message, the files it is read from; `*` for every name of a mapping, a rename
+   stays within its section). While an entry is there: config.yaml (`config.load`) renames it before anything
+   reads the file, so its value counts under the new name, or leaves a removed key out, and says so in
+   `Config.warnings` and `Config.retired_keys`: `ionomos check` prints a `!` line, the app's checklist marks
+   Settings saved, the watcher logs it at start. When both names are set, the new one wins and the old one is
+   said. The app's Save (`configio.read_config`) and experiment.yaml's (`manifest.overrides_text`) write a renamed
+   key under its new name with its value and keep a removed one where it is (a Save never drops a value, D67).
+   experiment.yaml (`parse_overrides`) does the same and keeps the words in `Overrides.warnings`, which the
+   analysis adds to its notes, and in the log once per process (it is read for every analysis).
+   `settings_from` applies the `analysis.` entries to settings from anywhere (a job record written before the
+   rename, the command line), logged once. The table is empty today. An entry stays until at least the next minor
+   release after its `since` has shipped. Values accepted in an older spelling (`imputation: man`) are not keys;
+   the LabWatch-era names are not keys either and stay in names.py for good (D21).
+8. **The README** gets a "Versioning and support" section that states VISION.md's promises in a few lines and
+   links to the full text; the promises themselves are VISION.md's (D92 item 2), unchanged.
+
+**Verified**: `tests/test_trust.py` (a table of analysis set-ups, DIA with and without imputation, isoDTB as
+measured with and without a mixing error and centred, TMT plexes, peptides by median polish and by MaxLFQ, each
+with the statements and caveat ids it must and must not show, the line under the list, and the ratios mark
+against the doctor's `RATIO_OFFSET`; a results table without the line; a table of compare / benchmark files and
+the sentence beside each), `tests/test_retired.py` (the real table and an example one checked: a released version,
+an old key no loader reads, a new key one does; renamed, both set, removed, an analysis key in either file, a key
+under every name of a mapping; config.yaml through `load`, `ionomos check`, the checklist and the app's Save;
+experiment.yaml through `load_overrides`, its Save and the analysis' notes, logged once; `settings_from` on a job
+record's old key). The default DIA report's statements are unchanged (the JS fixture's list). **Not verified**:
+how the new lines read to a lab member; the JS tests were not run here (no `node_modules`), CI runs them.

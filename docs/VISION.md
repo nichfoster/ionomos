@@ -161,12 +161,18 @@ In order. ROADMAP 5D has each step with an owner.
 6. **A documentation site.** Today the docs are Markdown on GitHub. A site
    (GitHub Pages) should hold QUICKSTART, ENGINES, VALIDATION, the help
    pages that `ionomos help` already renders, and the real-data example's
-   report, so a reader can see a report before installing.
+   report, so a reader can see a report before installing. Where it stands
+   (2026-10-26, D132): built, in `website/`, with VISION, SCOPE, the
+   changelog and the example's three reports too. The `docs-site` workflow
+   deploys it to <https://nichfoster.github.io/ionomos/> on each `v*` tag,
+   once the maintainer has switched GitHub Pages on
+   ([DEV_LOOP.md](DEV_LOOP.md#one-time-setup-for-the-documentation-site-github-pages)).
 7. **Name and logo.** Keep "Ionomos" unless a clash is found (the PyPI name
    was free on 2026-09-30); check for trademark and tool-name clashes before
    the paper. There is no logo; the app and the report use none. The GitHub
    description still says the tool is for one lab's PC.
 8. **Versioning and support promises** (below), written down before 1.0.
+   In the README since 2026-10-26 (D133).
 
 ## Versioning and support, from 1.0
 
@@ -203,7 +209,11 @@ In order. ROADMAP 5D has each step with an owner.
   engines, and its problems fixed.
 - The promises above written into the README, and every open "Not verified"
   line in VALIDATION.md either verified or stated in the report's "How far to
-  trust this".
+  trust this". Done 2026-10-26 (D133): the README's "Versioning and
+  support", with `retired.py` for the warning before a key goes; each open
+  line of VALIDATION.md carries its status (stated in the report, with the
+  key that says it, or why it is not a report caveat). A new open line needs
+  its status too.
 - CONTRIBUTING, a code of conduct, issue templates and CITATION.cff in the
   repository (added 2026-10-15).
 

@@ -14,6 +14,7 @@ import pytest
 from ionomos import configio, fastasource, library, library_tab, setupcheck
 from ionomos.config import load
 from ionomos.library_tab import DownloadFlow, Row
+from tests.conftest import NO_INTERNET, urllib_offline
 from tests.test_library import HUMAN, make_fasta, tsv, write_wf
 
 NO_DECOYS = "UP000005640_9606.fasta"
@@ -266,6 +267,25 @@ def test_check_for_updates_text_offline(pc, monkeypatch):
     flags = [library.Flag("UPDATE_FASTA_NEWER", "info", "TMT: a newer FASTA", "Adopt it")]
     text = library_tab.update_report(flags, rel, [], {"TMT": HUMAN}, "2026-10-15T10:00:00")
     assert "2026_03 (2026-09-02)" in text and "at least one release behind" in text and "→ Adopt it" in text
+
+
+@pytest.mark.parametrize("make", NO_INTERNET)
+def test_check_for_updates_without_internet_says_why_and_does_the_rest(pc, monkeypatch, make):
+    """D131: the PC is online as far as Ionomos knows (no IONOMOS_OFFLINE), but the network is not there."""
+    calls = []
+
+    def urlopen(req, timeout=None):
+        calls.append(timeout)
+        raise urllib_offline(make)
+
+    monkeypatch.delenv("IONOMOS_OFFLINE", raising=False)
+    monkeypatch.setattr(fastasource, "urlopen", urlopen)
+    t0 = time.monotonic()
+    text = library_tab.check_updates(pc["cfg"])
+    assert time.monotonic() - t0 < 5 and calls == [10], "one request, with its timeout"
+    assert "UniProt's current release: unknown (UniProt's current release is unknown: " in text
+    assert "rest.uniprot.org" in text and "internet connection" in text
+    assert f"TMT: {HUMAN}: made 2026-01-30" in text and "nothing has been changed" in text
 
 
 # ------------------------------------------------------------------ download dialog states --

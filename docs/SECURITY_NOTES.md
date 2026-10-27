@@ -58,13 +58,16 @@ round-4 security audit (2026-10-15); keep it in step with the code.
   server standing for 169.254.169.254); `http://` only to loopback. What is sent is `Message.fields`
   only: names (sanitised at intake to `[A-Za-z0-9._-]`), counts, the report's local path, the PC name;
   `include_names: false` sends the job number and status alone. Slack text escapes `& < >`, so no
-  name or reason can `@channel` or make a link.
+  name or reason can `@channel` or make a link. A message kept for want of a connection (D131) is written to
+  `<log_dir>/notify_state.json` as those fields only: the address and the password are read from the config
+  when it is sent, never kept with it; at most 50 messages, 7 days.
 - **Not protected**: an `https://` hook to a private address the config owner chose (they own the
   PC); the system proxy (`HTTPS_PROXY`) is used for hooks; Teams renders a little Markdown in a reason;
   e-mail goes over STARTTLS/SSL as configured (`security: none` refuses a password).
   `config.yaml` and its backups hold the values in plain text (D58).
   Tests: `test_a_webhook_address_with_a_password_*`, `test_a_hook_that_redirects_*`, `test_slack_*`,
-  `test_a_config_that_does_not_parse_is_still_redacted`, `test_a_hook_address_replaced_last_week_*`.
+  `test_a_config_that_does_not_parse_is_still_redacted`, `test_a_hook_address_replaced_last_week_*`,
+  `test_without_internet_every_channel_fails_at_once_in_words_*` (no secret in any detail).
 
 ## Diagnostics, fingerprints, catalog, logs (`service.diagnostics`, `fingerprint.py`, `library.py`)
 
@@ -162,9 +165,19 @@ round-4 security audit (2026-10-15); keep it in step with the code.
 - **Protected**: only an installer whose size and SHA-256 match the digest GitHub publishes runs:
   `download()` refuses a release without a digest, a non-`https://` address (urllib would also open
   `file:` and `ftp:`) and a name other than `Ionomos-Setup-<version>.exe`; the download is a `.part`
-  file, renamed after the check and deleted on failure. A Setup file found in Downloads runs only when
-  it matches the online release's digest. `check_latest` never raises on an odd answer.
+  file, renamed after the check and deleted on failure. A Setup file found in Downloads or on a USB
+  stick, or picked with Update from a file…, runs only when it matches the online release's digest for
+  its version or, without one, the `Ionomos-Setup-<version>.exe.sha256` beside it (D130); a digest from
+  GitHub that differs wins over the `.sha256`. It runs from a copy in Downloads, made through a new
+  `.part`, read back and compared with the digest that passed, and never written over another file, so
+  the bytes that run are the ones checked and a pulled stick can't break an install. Listing a
+  removable drive turns Windows' "no disk" box off; nothing on a stick is opened until a person presses
+  Update. `check_latest` never raises on an odd answer.
 - **Not protected**: the installer is not checked for an Authenticode signature; the digest comes from
   the same HTTPS answer as the address (trust = GitHub's TLS and the repository's owner). Someone who
-  can write to the user's Downloads can plant a file, but it runs only if its digest matches.
-  Tests: `test_loose_and_updates.py`, `test_an_installer_is_never_fetched_*`, `test_an_odd_answer_*`.
+  can write to the user's Downloads can plant a file, but it runs only if its digest matches. **A
+  `.sha256` on the same stick is not a signature**: it catches a bad or cut-short copy, not a forged
+  one (whoever can change the installer there can change its `.sha256`). Offline, the trust is the
+  person who copied both files from the release page, as when they ran the installer by hand.
+  Tests: `test_loose_and_updates.py`, `test_an_installer_is_never_fetched_*`, `test_an_odd_answer_*`,
+  `test_usb_update.py`.

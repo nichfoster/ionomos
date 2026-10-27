@@ -12,6 +12,7 @@ from ionomos.downstream import fpa, qc, stats
 from ionomos.downstream.quant import Feature, QuantMatrix
 from ionomos.downstream.rrandom import RRandom, qnorm
 from ionomos.downstream.tables import read_tsv
+from tests.conftest import NO_INTERNET, urllib_offline
 
 GOLD = Path(__file__).parent / "golden" / "fpa"
 
@@ -281,6 +282,39 @@ def test_enrichment_libraries_cache_offline_and_gmt(tmp_path, monkeypatch):
     assert "unknown library 'Nope'" in notes[0]
     assert enrich.gene_symbol("CA9;CA9P1") == "CA9" and enrich.gene_symbol("ca9 C174") == "CA9"
     assert enrich.gene_symbol("ACTB.1") == "ACTB"
+
+
+@pytest.mark.parametrize("make", NO_INTERNET)
+def test_enrichment_without_internet_tries_once_and_says_so_once(tmp_path, monkeypatch, make):
+    """D131: a PC with no internet and no cached library pays one failed request per analysis, not one per library,
+    and the report says once which libraries are missing and what to do."""
+    import urllib.error
+    import urllib.request
+
+    from ionomos.downstream import enrich
+
+    calls = []
+
+    def urlopen(req, timeout=None):
+        calls.append(timeout)
+        raise urllib_offline(make)
+
+    monkeypatch.setenv("IONOMOS_GENESETS", str(tmp_path / "gs"))
+    monkeypatch.delenv("IONOMOS_OFFLINE", raising=False)
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    libs, notes = enrich.load_libraries(["Hallmark", "GO Biological Process", "Reactome"])
+    assert libs == {} and calls == [30], "one request, with a timeout"
+    (note,) = notes
+    assert note.startswith("enrichment: Hallmark, GO Biological Process, Reactome are not on this PC yet and could "
+                           "not be downloaded from maayanlab.cloud (")
+    assert "Re-run analysis" in note and not (tmp_path / "gs").exists()
+
+    def answers_404(req, timeout=None):  # the server answered: that is not "no internet", and the next is tried
+        raise urllib.error.HTTPError(req.full_url, 404, "Not Found", {}, None)
+
+    monkeypatch.setattr(urllib.request, "urlopen", answers_404)
+    libs, notes = enrich.load_libraries(["Hallmark", "Reactome"])
+    assert len(notes) == 2 and all("HTTP Error 404" in n and "tried again next time" in n for n in notes)
 
 
 def test_ora_ranks_the_planted_term_first():

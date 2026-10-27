@@ -368,7 +368,8 @@ Press **Send test**: it sends a test message to each one and says which
 arrived (same as `ionomos notify-test`). Then **Save**, and restart the
 watcher (**Run & Test** → **Stop watcher**, **Start watcher**) so it uses the new
 settings. Everything on the tab is also `notify:` in `config.yaml`. A message that can't be sent never fails or slows a
-search ([A notification did not arrive](#trouble.notify)).
+search ([A notification did not arrive](#trouble.notify)); one that couldn't get through for want of a connection is
+sent when the connection is back ([Notifications are waiting](#attention.notify_unsent)).
 
 ## Does my isoDTB search go to the lab's cysteine atlas? {#faq.atlas}
 
@@ -532,6 +533,33 @@ Keys in the main window:
 - **Ctrl+0**: Today; **Ctrl+1** … **Ctrl+9**: the tab in that position
   (Ctrl+1 Inbox, Ctrl+2 Jobs, Ctrl+3 Analysis, Ctrl+4 Setup …)
 - **Ctrl+Tab**, **Ctrl+Shift+Tab**: the next or previous tab
+
+## How do I get a new version of Ionomos, also with no internet? {#faq.update}
+
+On the lab PC Ionomos looks for a new version on GitHub when it opens and
+every 6 hours. When there is one, **Update to x.y.z** shows in the bottom bar:
+press it and say Yes. Ionomos downloads the installer, checks it, stops the
+watcher (a running search starts again afterwards), installs, opens again and
+starts the watcher. **Run & Test** → **Check for updates** looks right now.
+Your settings and data are not touched ([what an update keeps](#safety.updates)).
+
+If the PC can't reach the internet, bring the new version on a USB stick:
+
+1. On a computer with internet, open the release page on GitHub and download
+   both `Ionomos-Setup-<version>.exe` and `Ionomos-Setup-<version>.exe.sha256`.
+2. Copy both onto the stick, at its top level or into a folder called
+   `Ionomos` on it.
+3. On the PC, plug the stick in, then **Run & Test** → **Check for updates**.
+   The Updates box says "Ready on the USB stick", and **Update to x.y.z**
+   shows in the bottom bar. Or press **Update from a file…** and pick the
+   installer.
+
+Ionomos checks the installer against the `.sha256` file and copies it into
+Downloads before it runs, so the stick can come out once Ionomos has closed for
+the install. Without the `.sha256` file it is not installed: copy that file
+too, next to the installer. The check catches a copy that went wrong; it can't
+tell a real installer from a changed one if both files on the stick were
+changed, so download them yourself from the release page.
 
 ## How do I get or update a FASTA? {#faq.fasta}
 

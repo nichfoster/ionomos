@@ -193,6 +193,9 @@ found are under "Real runs" in the open questions below.
     server yet. Open: per-user recipients (each person told about their
     own jobs). → 2026-10-02 (D67): the app's **Notifications** tab, with
     Send test and masked secrets; not yet seen on screen
+    → 2026-10-26 (D131): a message that never reached a channel (no
+    internet) waits in `notify_state.json` and is sent when the
+    connection is back, with one `notify_unsent` item meanwhile
   - log rotation: was there (5 MB, 5 files); now also safe when Windows
     refuses the rename
   - disk space: was there since 0.3.0 as a hold (`fragpipe.min_free_gb` +
@@ -402,7 +405,7 @@ installed.
   codes become editable config, with a "test your names" check (CLI + setup
   window), so another lab's convention needs no code change. Keep
   NAMING_CONVENTION.md ↔ naming.py in sync.
-- [ ] **Docs for a stranger:** (2026-09-30: QUICKSTART.md, ENGINES.md, the simulated demo and the "never done to your data" page (`help/safety.md`, #57) done; 2026-10-15: [VISION.md](VISION.md), SCOPE.md rewritten for today, CITATION.cff, CONTRIBUTING.md, a code of conduct, issue and pull-request templates; 2026-10-15: a real-data example, `ionomos example` (FragPipe-Analyst's published LFQ / DIA / TMT data, D96, [EXAMPLE.md](EXAMPLE.md)); still to do: a documentation site, 5D step 7)
+- [ ] **Docs for a stranger:** (2026-09-30: QUICKSTART.md, ENGINES.md, the simulated demo and the "never done to your data" page (`help/safety.md`, #57) done; 2026-10-15: [VISION.md](VISION.md), SCOPE.md rewritten for today, CITATION.cff, CONTRIBUTING.md, a code of conduct, issue and pull-request templates; 2026-10-15: a real-data example, `ionomos example` (FragPipe-Analyst's published LFQ / DIA / TMT data, D96, [EXAMPLE.md](EXAMPLE.md)); 2026-10-26: a documentation site, 5D step 7, D132, built and live once GitHub Pages is switched on)
 - [x] **Help users can see** (2026-09-30, D46, #57; the report's help added for designs, dose-response and TMT in #58–#60): one help source shown in two
   places. In the report: a Help entry, "?" buttons on each section and QC tab, a glossary,
   and troubleshooting for the issues in that report. From the app and CLI: a full offline
@@ -629,8 +632,8 @@ need nothing from the lab.
    Half done 2026-10-15 (D96): `ionomos example` fetches FragPipe-Analyst's
    published AP-MS / ccRCC DIA / ccRCC TMT data from Zenodo (CC BY 4.0), with
    a test on a 240-row excerpt. Still open: a mixed-species PRIDE dataset
-   with its expected ratios for `ionomos benchmark --expected`, and the
-   reports on the documentation site.
+   with its expected ratios for `ionomos benchmark --expected`. The three
+   reports go on the documentation site from each `v*` tag (D132).
 5. [ ] **The real-data evidence** — *the lab and the maintainer*; *an agent*
    writes it up in VALIDATION.md. The open items of 5C #10: a mixed-species
    sample on the lab's instrument (or step 4's dataset) benchmarked and the
@@ -644,12 +647,19 @@ need nothing from the lab.
    groups already on FragPipe isoDTB / ABPP workflows, or a core facility.
    Their problems go to issues; what they needed to change goes to
    NAMING_CONVENTION.md, ENGINES.md and QUICKSTART.md (*an agent*).
-7. [ ] **A documentation site** — *an agent*, after the maintainer chooses
-   how: GitHub Pages built in CI from `docs/` and the help files that
-   `ionomos help` already renders (no new dependency), or MkDocs (a dev
-   dependency only). It shows QUICKSTART, ENGINES, VALIDATION, the help and
-   step 4's report, so a reader sees a report before installing. Then the
-   `Documentation` URL in `ionomos/pyproject.toml` points at it.
+7. [x] **A documentation site** — *an agent*, 2026-10-26 (D132): built;
+   live after Pages is switched on. MkDocs with the Material theme, in the
+   docs workflow only (not a dependency of the package), made from `docs/`,
+   CHANGELOG.md and the help files that `ionomos help` renders (`website/`,
+   `.github/workflows/docs-site.yml`, `scripts/build_site.sh`). It shows
+   QUICKSTART, EXAMPLE with step 4's three reports, ENGINES, VALIDATION, the
+   help, VISION, SCOPE and the changelog; pull requests build it strictly, a
+   `v*` tag deploys it to <https://nichfoster.github.io/ionomos/>.
+   - [ ] *the maintainer*: switch GitHub Pages on, and let the
+     `github-pages` environment deploy tags `v*` (DEV_LOOP.md "Releasing",
+     step 5), then run the workflow once on `master`.
+   - [ ] *an agent*, once it is live: the `Documentation` URL in
+     `ionomos/pyproject.toml` points at the site.
 8. [ ] **Name and logo** — *the maintainer*. Keep "Ionomos" unless a
    tool-name or trademark clash turns up (the PyPI name was free on
    2026-09-30). No logo exists; decide whether the report and the app get
@@ -672,13 +682,21 @@ need nothing from the lab.
     says that coding agents wrote most of the code, and how it was checked:
     reference tests against R and Python tools, pull requests merged by a
     person (D31), the decision log.
-11. [ ] **Versioning and support promises** — *an agent* writes them into
+11. [x] **Versioning and support promises** — *an agent* writes them into
     README.md from VISION.md ("Versioning and support, from 1.0") once the
     maintainer agrees to them: semantic versioning of the command line, the
     YAML keys, `results/` and `analysis.json`; deprecations warn for one
     minor release; best-effort support through GitHub issues.
+    2026-10-26 (D133): README.md "Versioning and support" (merging it is the
+    maintainer's agreement); `retired.py` is how a retired key warns
+    (`ionomos check`, the checklist, the analysis' notes, the log), with an
+    empty table today.
 12. [ ] **v1.0** — *the maintainer* tags it when VISION.md's "done for v1.0"
-    holds.
+    holds. Done of that list (2026-10-26, D133): the promises in the README,
+    and every open "Not verified" line of VALIDATION.md stated in the report
+    where it applies or marked as no report caveat. Open: PyPI, the real-data
+    example on the site, a real mixed-species benchmark, real compares,
+    real TMT and isoDTB searches, a second lab.
 13. [ ] **Dead code**: `ionomos/src/ionomos/runners/` is imported by nothing
     in the program, only by `tests/test_downstream.py`, and the exe build's
     `deploy/check_frozen.py` lists it as an exception; remove it or wire it
@@ -876,6 +894,15 @@ Risks:
 
 Collected from the other docs; resolve before/during Phase 1.
 
+**The PC without internet (2026-10-26, D131, PROTEOMICS_PC.md "No internet on the PC"): to see on the PC**
+- [ ] A day offline with notifications on: one "could not notify" line per channel in the log, one
+      **Notifications are waiting for a connection** item, and the messages "Sent late" once it is back.
+- [ ] FragPipe 24.0 without internet: `ionomos preflight` (Check FragPipe install) passes, and a real search
+      runs as before (Ionomos can't see what FragPipe checks online; its tools are on disk).
+- [ ] Dropbox offline: the hand-off still says `sent`; how online-only files behave (a hand-off that has to
+      compare with one); `C:`'s free space over a long outage, as nothing is uploaded or freed.
+- [ ] Are 7 days and 50 messages right for notifications kept through an outage?
+
 **The cysteine atlas hand-off (2026-10-19, D120–D125, ATLAS.md): what the lab must confirm**
 - [ ] Is the Dropbox client on the lab PC signed in to the lab Dropbox, and does it sync `Nicholas Foster Data`
       (not online-only)? `ionomos atlas check` on the PC answers it; the app's Folders tab shows the folder it found.
@@ -946,6 +973,11 @@ Collected from the other docs; resolve before/during Phase 1.
 - [ ] D81: the next update on the PC (from 0.18.0) should end with the app reopening and no "Failed to load
       Python DLL … python314.dll" dialog. Confirm it, and that a watcher started from the app keeps running
       after the app is closed.
+- [ ] D130: the PC is offline for now. Once it runs the release after 0.20.0 (installed by hand the first time),
+      update it from a USB stick: is the stick found by itself (removable; the PD 2.5 stick is `E:`, a new one
+      `F:`) or only with **Update from a file…**, no "no disk" box from an empty card reader, the copy in Downloads,
+      the app reopened and the watcher started again? And does that release's page carry
+      `Ionomos-Setup-<version>.exe.sha256`?
 - [ ] Direction/type of the `Proteomics_File_Sharing` share.
 - [ ] Sleep/power policy and whether Task Scheduler can run at logon for the shared account.
 - [ ] Should results go to C: (fast, 99 GB free) or D: (slow USB, 14 TB free)? Proposal:
@@ -1149,6 +1181,11 @@ Collected from the other docs; resolve before/during Phase 1.
 - [ ] App settings (D67): open the Figure style, Check accuracy and Notifications pages on the PC (display scaling,
       the colour picker, the masked fields) and have a lab member set a figure style and send a test message without
       help. Should "Show addresses and password" exist at all, or should a stored secret only ever be replaced?
+- [ ] App (D129, #185): a scrolled list binds the mouse wheel for the whole app while the pointer is over it
+      (`tkutil.ScrolledFrame`, `bind_all`) and unbinds it on `<Leave>`. If its window closes under the pointer (the
+      analysis pop-up after Run analysis), the binding may keep naming the list's deleted command, as a closed
+      window's timer did. Does Tk then show its "invalid command name" box at the next wheel turn? Needs a real
+      pointer: on the PC, or unbind on `<Destroy>` regardless.
 - [ ] Phase 5: which pilot labs can we reach? Does this lab run titrations or phospho? (Orders 5C.)
 - [ ] D79 (2026-10-04): if the lab runs phospho, send one search's site table (FragPipe, TMT-Integrator or
       DIA-NN) to check the columns the readers expect, and say which kinase-substrate table it uses

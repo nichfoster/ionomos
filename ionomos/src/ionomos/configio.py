@@ -120,6 +120,11 @@ def read_config(path: str | Path) -> dict:
         raise ConfigError(parse_error(p, exc)) from exc
     if not isinstance(raw, dict):
         raw = {}
+    from ionomos import retired
+
+    # a renamed key is read under its new name, so a Save writes it there with its value; a removed one is kept
+    # where it is (a Save never drops a value) and the loader goes on saying so (retired.py, D133)
+    raw, _said = retired.apply(raw, retired.CONFIG, keep_removed=True)
     if isinstance(raw.get("notify"), dict):
         raw["notify"] = _notify_keys(raw["notify"])  # a bare `on:` key loads as True
     d = _normalise(_merge(defaults(), raw))

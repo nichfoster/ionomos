@@ -16,6 +16,9 @@ FASTAs, and writes the report.
 What it is for, who it is for, how it compares with FragPipe-Analyst, MSstats
 and others, and the road to publishing: [docs/VISION.md](docs/VISION.md).
 Analysis only, on any computer: [docs/QUICKSTART.md](docs/QUICKSTART.md).
+**Documentation site:** <https://nichfoster.github.io/ionomos/> (the quickstart,
+the help, and real reports to open before installing; live after the first
+tagged build with GitHub Pages switched on, D132).
 **Cite:** see [CITATION.cff](CITATION.cff), and cite the tools it ports
 ([License](#license)). Ionomos started as one lab's tool and was called
 *LabWatch* up to 0.4.0; existing installs upgrade in place.
@@ -69,7 +72,8 @@ lab: [docs/ROADMAP.md](docs/ROADMAP.md).
 | [`deploy/`](deploy/) | `dev_install.ps1` (PC runs from a git clone; updates = one button), `build_exe.ps1` (PyInstaller → `Ionomos.exe`, also run by GitHub Actions), `install.ps1` fallback |
 | [`.github/workflows/`](.github/workflows/) | CI: tests on Linux + Windows every push; exe build + Release on `v*` tags; the pip package built and tried on Windows / macOS / Linux on `v*` tags (uploads to PyPI once trusted publishing is set up) |
 | [`CITATION.cff`](CITATION.cff), [`CONTRIBUTING.md`](CONTRIBUTING.md), [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md), [`.github/ISSUE_TEMPLATE/`](.github/ISSUE_TEMPLATE/) | How to cite, contribute and report a problem |
-| [`scripts/`](scripts/) | One-shot dev/test setup for macOS and Windows |
+| [`scripts/`](scripts/) | One-shot dev/test setup for macOS and Windows; `build_site.sh` builds the documentation site |
+| [`website/`](website/) | The documentation site (MkDocs): its config, its home page and the hooks that make its pages from `docs/`, the help and the example's reports; built by `.github/workflows/docs-site.yml` |
 | [`tools/inventory/`](tools/inventory/) | PowerShell inventory collector to run on the lab PC (fixed version) |
 | [`reference/pc-inventory/`](reference/pc-inventory/) | Raw output of the inventory runs (2026-09-15) |
 | [`reference/lab-sops/`](reference/lab-sops/) | The lab's how-to docs for isoDTB and TMT in FragPipe (+ extracted text) |
@@ -140,6 +144,30 @@ ionomos/.venv/bin/ionomos setup   # the app, pointed at any config you like
 
 On the PC: [docs/DEV_LOOP.md](docs/DEV_LOOP.md) while prototyping,
 [docs/DEPLOY_WINDOWS.md](docs/DEPLOY_WINDOWS.md) for the finished tool.
+
+## Versioning and support
+
+What Ionomos promises from 1.0 (the full text:
+[docs/VISION.md](docs/VISION.md#versioning-and-support-from-10)):
+
+- **Semantic versioning of what you touch:** the command line (commands and
+  options), the `config.yaml` and `experiment.yaml` keys, the files in
+  `results/` and the fields of `analysis.json`. Python module internals are
+  not an API. A key or option that goes away warns for at least one minor
+  release first (`ionomos check` and the analysis' notes say so already). The
+  LabWatch-era names keep working.
+- **Python versions:** those CI runs (today 3.11 to 3.14) on Windows and
+  Linux; the package is also tried on macOS on each tag.
+- **Results don't change silently:** a change in a default or a numerical
+  method that changes results is a minor version at least, with a CHANGELOG
+  entry under "Changed" and a decision, and `ionomos compare` can show the
+  difference against the previous version's result.
+- **Support:** GitHub issues, answered by one maintainer as time allows, with
+  no guaranteed response time. A report with the diagnostics text or a bundle
+  ([docs/DEV_LOOP.md](docs/DEV_LOOP.md)) can be reproduced; one without
+  usually cannot.
+- **The watcher is Windows-only and FragPipe-first.** The analysis is
+  supported on Windows, macOS and Linux.
 
 ## Cite
 

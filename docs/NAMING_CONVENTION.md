@@ -482,7 +482,10 @@ notes: "24 h treatment, 1 µM"   # copied into ionomos.json for provenance
 
 A key Ionomos doesn't know rejects the folder with a note that names it, the
 key it was probably meant to be (`methd (did you mean method?)`) and every key
-the file can have. `method`, `user`, `workflow` and `fasta` take one name (a
+the file can have. A key a newer Ionomos renamed or took away is not
+rejected for at least one minor release: a renamed key counts under its new
+name, a removed one is ignored, and the analysis' notes say which and since
+when (`retired.py`, D133). `method`, `user`, `workflow` and `fasta` take one name (a
 list is refused, not turned into text); `allow_uneven_fractions` takes
 `true`/`false` (also `yes`/`no`, `on`/`off`, `1`/`0`, quoted or not; anything
 else is refused, so a quoted `'false'` no longer switches the check off); a

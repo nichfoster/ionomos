@@ -19,6 +19,10 @@ What a test gets from here (the fixtures in tests/conftest.py wrap them: ``hidde
   ``App._on_tk_error``: ``root.report_callback_exception`` is bound to it and ``App._pump_ui`` calls
   ``self._on_tk_error``), still writing the app's crash file, without the app's error box.
 - ``fits_screen(win, width=1366, height=768)``: the window's size fits that screen.
+- ``Timers``: records every widget destroyed while a timer of its own (``widget.after`` / ``after_idle``) is still
+  pending: that timer outlives its callback and can call one registered later under the same name (#185; the app
+  uses ``tkutil.after``). ``make_app`` installs one (``app._tkharness_timers``); ``hidden_app`` fails at teardown
+  on any.
 
 Patching dialogs: every Ionomos module that asks does ``from tkinter import messagebox`` (or filedialog,
 simpledialog, colorchooser): it holds the module object, so replacing ``messagebox.showerror`` on the module is
@@ -107,6 +111,7 @@ def make_app(tmp_path, monkeypatch, config_path=None, hide: bool = True):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("APPDATA", str(tmp_path))
     undo = hide_all_windows() if hide else None
+    timers = Timers().install()
     try:
         root = make_tk_root()
         root.withdraw()
@@ -116,10 +121,12 @@ def make_app(tmp_path, monkeypatch, config_path=None, hide: bool = True):
             tk.Tk.destroy(root)
             raise
     except BaseException:
+        timers.uninstall()
         if undo:
             undo()
         raise
     app._tkharness_undo = undo
+    app._tkharness_timers = timers
     return app
 
 
@@ -135,6 +142,9 @@ def destroy_app(app) -> None:
         tk.Tk.destroy(app.root)
     except tk.TclError:
         pass
+    timers = getattr(app, "_tkharness_timers", None)
+    if timers is not None:
+        timers.uninstall()
     undo = getattr(app, "_tkharness_undo", None)
     app._tkharness_undo = None
     if undo:
@@ -219,7 +229,8 @@ def _where(frame) -> str:
     """Where a dialog was asked from (frame: the caller of the recorder): when a Tk callback made the call, the
     widget whose command / binding / after() it was (tkinter.CallWrapper.widget), whether that widget still exists
     and which Tcl interpreter it is in (a previous test's app is another one); then the innermost Python frames.
-    Issue #185: a "Find FragPipe" box once came from nothing the smoke test pressed, and the log could not say how."""
+    Issue #185: a "Find FragPipe" box once came from nothing the smoke test pressed, and the log could not say how
+    (it was a closed pop-up's timer calling the Fix button's command under its old name: Timers)."""
     import traceback
 
     lines = []
@@ -418,6 +429,82 @@ class TkErrors:
             raise AssertionError(f"{len(self.errors)} error(s) in Tk callbacks:\n{self.text()}")
 
     def __enter__(self) -> TkErrors:
+        return self.install()
+
+    def __exit__(self, *exc) -> None:
+        self.uninstall()
+
+
+# ------------------------------------------------------------------------- timers --
+
+
+class DanglingTimer(NamedTuple):
+    widget: str   # the Tk path of the widget destroyed
+    command: str  # the Tcl command its pending timer calls: tkinter names it id(its wrapper) + the callback's __name__
+    kind: str     # "timer" or "idle"
+
+
+def _pending(w) -> list[tuple[str, str]]:
+    """(script, kind) of every pending after / after_idle event of w's Tcl interpreter."""
+    out = []
+    try:
+        ids = w.tk.splitlist(w.tk.call("after", "info"))
+    except tk.TclError:
+        return out
+    for tid in ids:
+        try:
+            script, kind = w.tk.splitlist(w.tk.call("after", "info", tid))
+        except (tk.TclError, ValueError):
+            continue
+        out.append((str(script), str(kind)))
+    return out
+
+
+class Timers:
+    """Record each widget destroyed while a timer of its own (``widget.after`` / ``after_idle``) is still pending,
+    as DanglingTimer(widget, command, kind); a context manager, or ``Timers().install()`` / ``.uninstall()``.
+
+    ``destroy()`` deletes a widget's Tcl commands but not its timers. Python soon reuses the freed callback wrapper's
+    address, so a callback registered later under the same ``__name__`` (any lambda) gets the same command name, and
+    the old timer calls it: a pop-up closed within 1.5 s of opening pressed the Setup checklist's Find FragPipe
+    button that way (#185). Whether the name is taken over is chance; the pending timer is not, so this looks at that,
+    when the widget is destroyed. The root is left out (destroying it ends the app): ``root.after`` and
+    ``tkutil.after`` are the root's. Patches ``tkinter.Misc.destroy``, which every widget's destroy() ends in."""
+
+    def __init__(self):
+        self.dangling: list[DanglingTimer] = []
+        self._orig = None
+
+    def install(self) -> Timers:
+        if self._orig is not None:
+            return self
+        orig = self._orig = tk.Misc.destroy
+        dangling = self.dangling
+
+        def destroy(widget):
+            mine = widget._tclCommands
+            if mine and not isinstance(widget, tk.Tk):
+                dangling.extend(DanglingTimer(str(widget), script, kind)
+                                for script, kind in _pending(widget) if script in mine)
+            orig(widget)
+
+        tk.Misc.destroy = destroy
+        return self
+
+    def uninstall(self) -> None:
+        if self._orig is not None:
+            tk.Misc.destroy = self._orig
+            self._orig = None
+
+    def report(self) -> str:
+        return "\n".join(f"  {d.widget}: its pending {d.kind} calls {d.command}" for d in self.dangling)
+
+    def assert_none(self) -> None:
+        if self.dangling:
+            raise AssertionError("widgets destroyed with a timer of their own still pending (set it with "
+                                 "tkutil.after; #185):\n" + self.report())
+
+    def __enter__(self) -> Timers:
         return self.install()
 
     def __exit__(self, *exc) -> None:

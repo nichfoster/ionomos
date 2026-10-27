@@ -7,8 +7,102 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-10-26
+
+### Added
+
+- **Updating a PC with no internet: the installer on a USB stick** (D130, docs/DEPLOY_WINDOWS.md "Updating a PC with
+  no internet"). Each release also publishes `Ionomos-Setup-<version>.exe.sha256` (sha256sum's format). Copy both
+  files onto a stick; on the PC, **Run & Test → Check for updates** finds the installer at the stick's top level or
+  in an `Ionomos` folder on it ("Ready on the USB stick F:\: Ionomos-Setup-…"), and **Update to x.y.z** installs it
+  as an online update does: the watcher stopped, the installer run silently, the app reopened, the watcher started
+  again.
+  - The installer runs only when it matches GitHub's digest for its version or, offline, the `.sha256` beside it
+    (read tolerantly: `*name`, upper case, a BOM, UTF-16, CRLF, a bare hash, certutil's output, Windows' ` (1)`).
+    Without either it is refused, saying which file to copy. The `.sha256` catches a bad or cut-short copy, not a
+    forged one (docs/SECURITY_NOTES.md).
+  - It runs from a copy in Downloads, made through a `.part`, read back and checked, never over another file, so a
+    stick pulled out mid-install can't break the program.
+  - **Update from a file…** beside Check for updates picks an installer anywhere (a USB disk that says it is a fixed
+    drive, a share). When GitHub can't be reached, the Updates box says the USB way in one line.
+  - `ionomos update --from FILE [--check]`, the same from the command line.
+  - Removable drives are found with `GetDriveTypeW`, never by reading them; a card reader with no card is skipped
+    without Windows' "no disk" box.
+  - The first update to this version is still the installer run by hand: older versions don't know the USB way.
+
+- **A documentation site** (D132, docs/VISION.md item 6), for <https://nichfoster.github.io/ionomos/>: the
+  quickstart, the real-data example with its three reports, ENGINES, VALIDATION, every help page (the same text as
+  `ionomos help`, rendered by the same code), VISION, SCOPE and this changelog. MkDocs with the Material theme,
+  made from the repository's own files (`website/`); a link to a doc that is not on the site goes to it on GitHub.
+  - The new `docs-site` workflow builds it strictly on every pull request that touches the docs or the help (a
+    broken link or anchor fails the check). On a `v*` tag it runs `ionomos example`, puts the reports on the site
+    with the data's CC BY 4.0 attribution, and deploys to GitHub Pages; when the example can't be made the site
+    says so instead of linking to a missing report.
+  - Live once the maintainer switches GitHub Pages on (docs/DEV_LOOP.md "Releasing"). `scripts/build_site.sh`
+    builds it locally. MkDocs is not a dependency of the package.
+
+- **"How far to trust this" says what the methods behind the analysis were checked on** (D133,
+  docs/VALIDATION.md), each thing only where the analysis used it:
+  - under the list, for every analysis whose statistics Ionomos ran: the statistics are checked against the R tools
+    they port and the settings on simulated data, not yet on real lab data (no real benchmark sample, no real
+    FragPipe-Analyst, MSstats or Perseus result compared);
+  - **Checked on simulated data** (`simulated`): for TMT, that the simulated plexes have no ratio compression; for
+    peptides or precursors Ionomos rolled up itself, that the simulation has no shared or modified peptides (and,
+    for MaxLFQ, what it found against median polish);
+  - **Site ratios** (`ratios`, isoDTB): how the ratios were used, the largest replicate offset from 0 on the stable
+    sites, marked **check** where the doctor raises `RATIO_OFFSET`, and that a mixing error's effect and the
+    centring are known from simulated sites only;
+  - beside a compare result whose reference is a results table, that no real export of FragPipe-Analyst, limma,
+    MSstats or Perseus has been tried; beside a known-ratio benchmark, that its code was tested on simulated tables.
+  - Every open "Not verified" line of VALIDATION.md now says where the report states it, or why it is not a report
+    caveat.
+- **A key of config.yaml or experiment.yaml that goes away warns first** (D133, `retired.py`): while it is in the
+  table of retired keys, a renamed key's value counts under its new name and a removed key is ignored, and each
+  says so with the version that retired it: `ionomos check` (a `!` line), the app's checklist (Settings saved),
+  the analysis' notes (experiment.yaml) and the log. The app's Save writes a renamed key under its new name. The
+  table is empty today. The LabWatch-era names are not keys and keep working (D21).
+- README.md: **Versioning and support**, VISION.md's promises from 1.0 in a few lines.
+
+- **No internet on the PC** (D131, docs/PROTEOMICS_PC.md "No internet on the PC", help "No internet on the PC"):
+  what works offline (everything but the items below), what waits, what doesn't work until the connection is back,
+  and how each shows up in the app. Every network touchpoint was tried with the socket failing as the OS fails it
+  (no name lookup, no route, refused, a connect timeout, a TLS handshake cut off) and with a reply cut off mid-way;
+  each has a test.
+
+### Changed
+
+- The report's "How far to trust this" and `analysis.json`'s `trust` carry the lines above (new statement keys
+  `simulated` and `ratios`, a longer `basis`, a `caveat` on `compare` and `benchmark`); the default label-free
+  report's statements are the same. No default and no number changes. The help on the list says what the new lines
+  are.
 ### Fixed
 
+- **A closed window's timer can no longer press a button in another window** (#185, D129). A pop-up set a timer
+  of its own (no longer on top after 1.5 s; closed 2.5 s after "All set"), and so did the naming window (file
+  poll, live refresh, time-out). Closing the window deleted the timer's callback but not the timer, and tkinter
+  gives the next callback registered under the same name (any lambda) that callback's name, so the timer called
+  it: on Windows CI a pop-up closed at once pressed the Setup checklist's Find FragPipe button. These timers are
+  now the root's and do nothing once their window is closed (`tkutil.after`). The hidden-window tests fail on any
+  window destroyed with a timer of its own still pending (`tests/tkharness.Timers`), and a source scan on any
+  `widget.after` that isn't the root's.
+
+- **Notifications sent while the PC had no internet were lost** (D131; D58 sent once and forgot). A message that
+  never reached Teams, Slack, the webhook or the mail server (no connection, or "try later": HTTP 429 / 503, an
+  SMTP 4xx before the mail was taken) is kept in `notify_state.json` and sent when the connection is back, marked
+  "Sent late" (and as `include_names` says now): tried again after 5, 10, 20, then every 30 minutes, at the
+  watcher's start, and at once when another message gets through. The newest message about each search only, at
+  most 50, for 7 days; with notifications turned off they are dropped. One item, **Notifications are waiting for a
+  connection** (a warning, no pop-up), closes itself when they have gone. Never twice: a message the service
+  refused (a wrong address or password, a certificate that isn't the service's) or that went out without an answer
+  (a webhook's timeout, another 5xx, a mail server that took the mail and did not say 250) is not sent again, and
+  a kept message that was sent is remembered even when `notify_state.json` can't be written (then nothing more is
+  sent until it can).
+- **Enrichment without internet** tried each missing gene-set library in turn on every analysis (30 s each when
+  packets are dropped): the first failure now stops the rest, and one note names the missing libraries and says
+  to re-run the analysis once online.
+- **A download the network cut off part way** (UniProt, GitHub, Zenodo) ended in a traceback, and left the app's
+  UniProt search window waiting: it is an error in words now ("the connection to … broke off before the end"),
+  and nothing is left behind.
 - Windows CI on 0.20.0: a drive-sweep test with no `atlas.sweep_roots` walked the runner's own `C:` (every fixed
   drive is the default there); it stubs the drives now. The experiment editor's roles preview ran on a variable
   that outlived its closed window and raised a Tk error; it returns when its window is gone.

@@ -29,6 +29,7 @@ from pathlib import Path
 
 import yaml
 
+from ionomos import retired
 from ionomos.config import read_yaml_text
 from ionomos.naming import NUMBER_WHY, NamingError, RawName, RawSet, number_ok
 
@@ -71,6 +72,8 @@ class Overrides:
     # a window's TMT channel editor showed the whole map (tmt_editor.py): save_overrides writes ov.tmt as the whole
     # tmt: block, and {} removes it. Not written to the file; False = an existing tmt: is kept unless ov.tmt is set
     tmt_set: bool = field(default=False, compare=False)
+    # keys of the file that were renamed or taken away (retired.py, D133), in words; the analysis notes them
+    warnings: list[str] = field(default_factory=list, compare=False)
 
     def is_empty(self) -> bool:
         return not any([self.method, self.user, self.date, self.workflow, self.fasta,
@@ -198,11 +201,13 @@ def parse_overrides(data: dict | None) -> Overrides:
     data = data or {}
     if not isinstance(data, dict):
         raise OverridesError("experiment.yaml must be a mapping")
+    data, said = retired.apply(data, retired.EXPERIMENT)  # a renamed key counts under its new name (D133)
+    retired.log_once(said)
     unknown = set(data) - _TOP_KEYS
     if unknown:
         raise OverridesError(_unknown_keys(unknown, _TOP_KEYS, "experiment.yaml"))
 
-    ov = Overrides()
+    ov = Overrides(warnings=said)
     ov.method = _name_value(data, "method")
     user = _name_value(data, "user")
     ov.user = _require_path_safe(user, "user") if user else None
@@ -318,6 +323,8 @@ def overrides_text(folder: Path, ov: Overrides, replace_analysis: bool = False, 
             existing = {}
         if not isinstance(existing, dict):  # a list or a bare word: nothing to merge over
             existing = {}
+        # a renamed key goes back under its new name, never beside it; a removed one stays (retired.py, D133)
+        existing, _said = retired.apply(existing, retired.EXPERIMENT, keep_removed=True)
     merged = {**existing, **ov.to_dict()}
     if replace_files:
         if ov.files:

@@ -52,8 +52,8 @@ new file's name (`my human.fasta` → `<date>-decoys-contam-my_human.fasta.fas`)
 3. The entries are counted and must equal `X-Total-Results` (the stream endpoint itself sends no count); the taxon
    is the commonest `OX=` of the first 2,000 headers. Only then is the file named `UP…_<taxon>.fasta`.
 
-Anything that goes wrong (offline, a timeout, HTTP 400 for a bad query, a cut-off gzip, a short count, Stop)
-returns an `error` in words; the `.part` files are removed and nothing else is left.
+Anything that goes wrong (offline, a timeout, HTTP 400 for a bad query, a connection cut off mid-reply, a cut-off
+gzip, a short count, Stop) returns an `error` in words; the `.part` files are removed and nothing else is left.
 
 ### Prepare (`prepare_for_fragpipe`)
 
@@ -152,7 +152,9 @@ GitHub's API allows 60 requests an hour per network without a login (a 403 says 
 
 - Network requests only when a function is called (never at import), each with a timeout, none when the
   environment variable `IONOMOS_OFFLINE` is set (the tests set it). Offline or failing: a plain-words `error` or
-  note in the result, never an exception to the caller.
+  note in the result, never an exception to the caller; that includes a reply the network cuts off part way
+  (http.client's `IncompleteRead`, a reset: "the connection to … broke off before the end", D131). A PC with no
+  internet: PROTEOMICS_PC.md "No internet on the PC".
 - Long work takes `progress(message, done, total)` (total `None` when unknown) and `stop` (`threading.Event`).
 - Results are dataclasses with `notes`, `error` and `as_dict()`: `DownloadResult`, `PrepareResult` (with
   `summary()`), `SearchResult`, `StockList`, `FetchResult`; `uniprot_release` returns a dict or `None`.

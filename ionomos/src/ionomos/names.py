@@ -129,7 +129,8 @@ def log_files(log_dir: Path) -> list[Path]:
     return out
 
 
-# Notifications (D58): which "held" messages were already sent, so a restart doesn't repeat them.
+# Notifications (D58): which "held" messages were already sent, so a restart doesn't repeat them; and (D131) the
+# messages that could not be sent for want of a connection, sent when it is back.
 NOTIFY_STATE = "notify_state.json"
 
 # Instrument QC trending (D45): the per-run metric store and the trend page, both in log_dir.

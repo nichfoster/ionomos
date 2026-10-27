@@ -205,11 +205,14 @@ install can coexist; they share the same `config.yaml`.
 2. Optional, on a Windows machine: `powershell -ExecutionPolicy Bypass -File
    deploy\build_exe.ps1 -NoInstaller`. `deploy/check_frozen.py` fails the
    build if a module or data file of the package is missing from the exe.
-3. `git tag vX.Y.Z && git push --tags`. Two workflows run: `build-exe`
-   (installer + zip, tested, attached to the GitHub Release) and
+3. `git tag vX.Y.Z && git push --tags`. Three workflows run: `build-exe`
+   (installer, its `.sha256` file for updates from a USB stick (D130) and the
+   zip, tested, attached to the GitHub Release),
    `publish-pypi` (checks the tag is the pyproject version, builds, `twine
    check`, installs the wheel on Windows / macOS / Linux, then uploads only
-   when step 4 is done).
+   when step 4 is done) and `docs-site` (the documentation site with the
+   example's reports, deployed to GitHub Pages once step 5 is done; each
+   workflow fails or passes on its own).
 
 ### One-time setup for PyPI (the maintainer; no token is stored anywhere)
 
@@ -236,6 +239,42 @@ workflow of this repository instead of a password.
       venv, then the project page's links (pyproject's `[project.urls]`).
       PyPI never takes the same version twice: a failed upload is fixed by
       a new patch version, not by re-running the tag.
+
+### One-time setup for the documentation site (GitHub Pages)
+
+[`.github/workflows/docs-site.yml`](../.github/workflows/docs-site.yml)
+builds the site in [`website/`](../website/mkdocs.yml) (D132) for
+<https://nichfoster.github.io/ionomos/>. On a pull request that touches the
+docs or the help it only builds, strictly: a broken link or anchor fails the
+check. On a `v*` tag, or *Actions → docs-site → Run workflow*, it also runs
+`ionomos example`, puts the three reports on the site and deploys it. Until
+step 5 is done the deploy job fails with a message that names the step; the
+installer and the package of the same tag are not affected.
+
+5. a. **GitHub → Settings → Pages → Build and deployment → Source: GitHub
+      Actions.** This is the one switch; nothing else in Pages needs setting.
+   b. **GitHub → Settings → Environments → `github-pages` → Deployment
+      branches and tags**: add the tag rule `v*` (Pages allows only `master`
+      at first, and a tag's deploy would be refused).
+   c. *Actions → docs-site → Run workflow* on `master` deploys the site now,
+      without waiting for a tag. Check the home page and **Example reports**
+      (three reports, not a box saying they are missing). Then an agent
+      points the `Documentation` URL in `ionomos/pyproject.toml` at the site
+      (ROADMAP 5D step 7).
+
+**Building the site on the Mac**, as the workflow does (strict):
+
+```bash
+scripts/build_site.sh                         # -> build/site/index.html, opens from the disk
+ionomos/.venv/bin/ionomos example /tmp/ex --quiet && scripts/build_site.sh --example /tmp/ex   # with the reports
+scripts/build_site.sh --serve                 # live preview at http://127.0.0.1:8000/ionomos/
+```
+
+MkDocs and its theme go into `.venv-site/` (gitignored), at the versions in
+`website/requirements.txt`; they are never a dependency of the package. A
+page of the site is a file of the repository: edit the doc or the help file
+itself. A new page needs a line in `website/hooks.py`'s `PAGES` and in
+`website/mkdocs.yml`'s nav (`tests/test_site.py` checks they agree).
 
 ### One-time repository settings that belong to a release
 

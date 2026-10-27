@@ -21,6 +21,7 @@ Each window says what happened, the most likely causes, what to do, the details
     intake_rejected                    Open the inbox, the note
     atlas_handoff_failed               Send to atlas (the app's, D125); opened from the list only, never by itself
     atlas_sweep_problem                the runs the drive sweep couldn't send and why (D128); from the list only
+    notify_unsent                      notifications waiting for a connection, sent by themselves (D131); list only
     every item                         Ask about this (the local assistant, read-only: AskWindow), More help (the
                                        help page at this problem), Remind me in an hour, Dismiss
 
@@ -51,7 +52,8 @@ KIND_TITLE = {"analysis_input": "Your analysis needs a decision", "analysis_fail
               "search_failed": "A FragPipe search failed", "search_waiting": "A search is waiting",
               "intake_rejected": "A dropped folder couldn't be taken in",
               "atlas_handoff_failed": "A search wasn't handed to the atlas",  # in the list only: no pop-up (D121)
-              "atlas_sweep_problem": "Runs found on this PC weren't handed to the atlas"}  # the list only (D128)
+              "atlas_sweep_problem": "Runs found on this PC weren't handed to the atlas",  # the list only (D128)
+              "notify_unsent": "Notifications are waiting for a connection"}  # the list only (D131)
 SEV_COLOUR = {"error": "#c62828", "input": "#b26a00", "warning": "#555"}
 
 
@@ -270,7 +272,7 @@ class ItemWindow:
         win.title(f"Ionomos — {KIND_TITLE.get(item.kind, 'needs attention')}")
         try:
             win.attributes("-topmost", True)
-            win.after(1500, lambda: win.winfo_exists() and win.attributes("-topmost", False))
+            tkutil.after(win, 1500, lambda: win.attributes("-topmost", False))  # not win.after (#185)
         except tk.TclError:
             pass
         f = ttk.Frame(win, padding=12)
@@ -480,7 +482,7 @@ class ItemWindow:
 
         if not doctor.popups(out.issues):
             self.msg.configure(text="All set — the report is open. This window closes in a moment.")
-            self.win.after(2500, self.close)
+            tkutil.after(self.win, 2500, self.close)
         else:
             self.msg.configure(text="Some things still need a look (listed above).", foreground="#b26a00")
 

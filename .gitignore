@@ -45,3 +45,6 @@ labwatch-testbed/
 # JS test harness (dev-only, tests/js)
 node_modules/
 ionomos/tests/js/node_modules/
+
+# the docs site: scripts/build_site.sh's throwaway venv (its output goes to build/site, ignored above)
+.venv-site/

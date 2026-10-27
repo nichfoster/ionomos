@@ -1,0 +1,5 @@
+# The documentation site's build tools (D132). Installed only by .github/workflows/docs-site.yml and
+# scripts/build_site.sh (into .venv-site/), never by the ionomos package: they are not a dependency of Ionomos.
+# Exact versions, so a new release can't change the site or break the strict build without a pull request.
+mkdocs==1.6.1
+mkdocs-material==9.7.7

@@ -69,7 +69,7 @@ look; an item that would change it is out of scope.
 | **Users** | User folders and their initials, learned aliases, the catch-all user | PC keeper |
 | **Methods** | Methods (keywords, workflow, FASTA, data type, post-processing), Import workflow…, Test names…, and the library panel (Find on this PC…, Download from UniProt…, Add decoys and contaminants…, Check for updates) | PC keeper |
 | **Advanced** | Watcher timings and FragPipe threads/RAM/timeout/disk (checked as you type), the resolver window and pop-ups switch, learned aliases file, config file (open, logs, reset, Undo last save, Restore a previous config…) | PC keeper |
-| **Run & Test** | Watcher page: start/stop and status, diagnostics, startup task, updates; Testing page: the testbed, the development-install box; an output pane under both | PC keeper |
+| **Run & Test** | Watcher page: start/stop and status, diagnostics, startup task, updates (Check for updates, Update from a file… for an installer on a USB stick, D130); Testing page: the testbed, the development-install box; an output pane under both | PC keeper |
 | **Notifications** | Teams / Slack / webhook / email when a search ends | PC keeper |
 | **Help** | Keyboard shortcuts, the full help page button, the set-up text | PC keeper |
 
@@ -500,7 +500,7 @@ the rest of the app.
 | S3.1 Check everything | `checks.py`, the Setup tab, `ionomos doctor` | no Stop for the full preflight yet (open) |
 | S3.2 quick check on start | `refresh_setup` at start, Today's Checks line | |
 | S3.3 fields as you type | `forms.check_setting`, the Advanced tab's `num()` | paths already had dots |
-| S4.1 harness | `tests/tkharness.py`, fixtures `hidden_app`, `no_dialogs`, `tk_errors`; docs/TESTING.md | |
+| S4.1 harness | `tests/tkharness.py`, fixtures `hidden_app`, `no_dialogs`, `tk_errors`; docs/TESTING.md | a window's leftover timer fails a hidden-app test (`Timers`, D129, #185) |
 | S4.2 smoke test | `tests/test_ui_smoke.py` | the assistant's proposal dialog is not in it (its own tests cover it) |
 | S4.3 untested windows | `tests/test_app.py` (Test names, Change…, startup task, Reset testbed, colour picker), the smoke test (Download, Prepare) | |
 | S4.4 screenshots | `scripts/screenshots.py`; the Windows CI job uploads `ui-screenshots-3.14` | run here twice: 32 PNGs |

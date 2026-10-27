@@ -3,6 +3,7 @@ and analysed. No real network here: the download is stubbed (example.urlopen) wi
 tests/golden/example/ (CC BY 4.0, see its README.txt), and example.ARCHIVE is pointed at that zip's size and hashes."""
 import csv
 import hashlib
+import http.client
 import io
 import os
 import subprocess
@@ -17,6 +18,7 @@ import pytest
 
 from ionomos import cli, example
 from ionomos.downstream import quant
+from tests.conftest import NO_INTERNET, urllib_offline
 
 GOLDEN = Path(__file__).parent / "golden" / "example"
 
@@ -261,9 +263,34 @@ def test_offline_says_where_to_fetch_it_and_what_to_run(tmp_path, monkeypatch, c
     assert not list(tmp_path.iterdir()), "a failed start leaves no empty ionomos_example behind"
 
 
-def test_a_network_failure_is_a_sentence_and_leaves_no_part_file(tmp_path, monkeypatch, capsys):
+class _Cut(_Response):
+    """A reply the network drops after its first bytes (D131)."""
+
+    def __init__(self, exc: BaseException):
+        super().__init__(b"PK\x03\x04" + b"\0" * 60)
+        self.exc = exc
+
+    def read(self, n=-1):
+        data = super().read(n)
+        if data:
+            return data
+        raise self.exc
+
+
+@pytest.mark.parametrize("fail, words", [
+    (lambda: urllib.error.URLError("getaddrinfo failed"), "could not reach zenodo.org"),
+    *[pytest.param(lambda m=p.values[0]: urllib_offline(m), "zenodo.org", id=p.id) for p in NO_INTERNET],
+    (lambda: _Cut(http.client.IncompleteRead(b"", 20_000_000)), "connection to zenodo.org broke off"),
+    (lambda: _Cut(ConnectionResetError(54, "Connection reset by peer")), "connection to zenodo.org broke off"),
+    (lambda: _Cut(TimeoutError("timed out")), "zenodo.org did not answer in time"),
+])
+def test_a_network_failure_is_a_sentence_and_leaves_no_part_file(tmp_path, monkeypatch, fail, words):
     def unreachable(req, timeout=None):
-        raise urllib.error.URLError("getaddrinfo failed")
+        assert timeout, "every network call has a timeout"
+        answer = fail()
+        if isinstance(answer, BaseException):
+            raise answer
+        return answer
 
     monkeypatch.delenv("IONOMOS_OFFLINE", raising=False)
     monkeypatch.setattr(example, "urlopen", unreachable)
@@ -271,7 +298,7 @@ def test_a_network_failure_is_a_sentence_and_leaves_no_part_file(tmp_path, monke
     with pytest.raises(example.ExampleError) as e:
         example.download(dl)
     msg = str(e.value)
-    assert "could not reach zenodo.org" in msg and example.ARCHIVE.url in msg and "--zip" in msg
+    assert words in msg and example.ARCHIVE.url in msg and "--zip" in msg, msg
     assert not list(dl.iterdir())
 
 

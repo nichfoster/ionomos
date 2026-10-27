@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import http.client
 import io
 import json
 import os
@@ -287,6 +288,8 @@ def _net_error(exc: BaseException, url: str) -> str:
     reason = getattr(exc, "reason", exc)
     if isinstance(exc, TimeoutError) or "timed out" in str(reason):
         return f"{host} did not answer in time"
+    if isinstance(exc, (http.client.HTTPException, ConnectionError)):  # cut off mid-way: the network dropped (D131)
+        return f"the connection to {host} broke off before the end ({type(exc).__name__})"
     if not isinstance(exc, urllib.error.URLError) and getattr(exc, "filename", None):  # this computer's disk
         return f"the download from {host} could not be saved ({exc})"
     return f"could not reach {host} ({reason})"
@@ -326,7 +329,7 @@ def download(dest_dir: Path, archive: Archive | None = None, progress=None, time
                     if time.monotonic() - started > time_limit:
                         raise ExampleError(by_hand(f"the download took longer than {time_limit / 60:.0f} minutes",
                                                    archive))
-        except (urllib.error.URLError, OSError, ValueError) as exc:
+        except (urllib.error.URLError, OSError, ValueError, http.client.HTTPException) as exc:  # IncompleteRead too
             raise ExampleError(by_hand(_net_error(exc, archive.url), archive)) from exc
         bad = mismatch(part, archive)
         if bad:

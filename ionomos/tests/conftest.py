@@ -68,6 +68,32 @@ def lab(tmp_path: Path):
             "cfg_path": cfg_path, "cfg_dict": cfg, "cfg": load(cfg_path)}
 
 
+def _no_internet():
+    """How the socket fails on a PC with no internet (D131): the name lookup, no route, refused, a connect timeout,
+    a TLS handshake cut off. Each is the OSError the OS gives; urllib wraps it in URLError, smtplib does not."""
+    import errno
+    import socket
+    import ssl
+
+    return [
+        pytest.param(lambda: socket.gaierror(11001, "getaddrinfo failed"), id="dns"),
+        pytest.param(lambda: OSError(errno.ENETUNREACH, "Network is unreachable"), id="no-route"),
+        pytest.param(lambda: ConnectionRefusedError(errno.ECONNREFUSED, "Connection refused"), id="refused"),
+        pytest.param(lambda: TimeoutError("timed out"), id="connect-timeout"),
+        pytest.param(lambda: ssl.SSLEOFError(8, "EOF occurred in violation of protocol"), id="tls"),
+    ]
+
+
+NO_INTERNET = _no_internet()
+
+
+def urllib_offline(make):
+    """The error urlopen raises for one of NO_INTERNET's socket errors (a URLError around it)."""
+    import urllib.error
+
+    return urllib.error.URLError(make())
+
+
 def make_drop(inbox: Path, name: str, raws: list[str], others: list[str] = (), raw_sub: bool = False):
     d = inbox / name
     d.mkdir()
@@ -135,7 +161,8 @@ def no_dialogs(monkeypatch):
 @pytest.fixture
 def hidden_app(tmp_path, monkeypatch, no_dialogs):
     """The app on a withdrawn root, every window it opens withdrawn, its dialogs recorded (no_dialogs: a native
-    message box cannot be hidden and would wait for a click). Skips where gui_tests() says no (CI runs it)."""
+    message box cannot be hidden and would wait for a click). Skips where gui_tests() says no (CI runs it). The test
+    fails at teardown if a window was destroyed with a timer of its own still pending (tkharness.Timers, #185)."""
     ok, why = gui_tests()
     if not ok:
         pytest.skip(f"no GUI: {why}")
@@ -144,6 +171,7 @@ def hidden_app(tmp_path, monkeypatch, no_dialogs):
     app = make_app(tmp_path, monkeypatch)
     try:
         yield app
+        app._tkharness_timers.assert_none()
     finally:
         destroy_app(app)
 
