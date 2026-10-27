@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-10-26
+
 ### Added
 
 - **Updating a PC with no internet: the installer on a USB stick** (D130, docs/DEPLOY_WINDOWS.md "Updating a PC with
