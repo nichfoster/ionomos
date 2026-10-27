@@ -328,11 +328,16 @@ def _covariates(v) -> dict[str, dict]:
     return out
 
 def settings_from(*layers: dict | None) -> Settings:
-    """Later layers win. Unknown keys are an error (typos shouldn't silently do nothing)."""
+    """Later layers win. Unknown keys are an error (typos shouldn't silently do nothing). A key renamed or taken
+    away still counts under its new name, or is ignored, and is said once in the log (retired.py, D133): a
+    settings dict from a job record written before the rename, or from the command line, as well as the files."""
+    from ionomos import retired
+
     s = Settings()
     names = {f.name for f in fields(Settings)}
     for layer in layers:
-        layer = layer or {}
+        layer, said = retired.analysis(layer or {})
+        retired.log_once(said)
         if layer.get("block") not in (None, "") and layer.get("block_from") not in (None, ""):
             raise AnalysisError("set either block or block_from, not both")
         for k, v in layer.items():

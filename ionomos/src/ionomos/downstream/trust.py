@@ -19,10 +19,19 @@ its threshold; the thresholds are the ones those checks already use:
                    low values (IMPUTATION_MISMATCH)
     plexes         several TMT plexes neither put on one scale (IRS) nor in the model as a block (D71); with IRS on
                    the plex means, the t-test (limma reduces its df for them)
+    ratios         isoDTB site ratios (D70): a replicate clearly off 0 that nothing centred (the doctor's
+                   RATIO_OFFSET threshold)
     imputed hits   5 or more hits, and 30 % or more of a comparison's hits, resting on imputed values
     p-values       a histogram shape of "conservative" or "hump"
     power          the fold change detectable at 80 % power (p 0.05, median spread) is above the cut-off
     statistics     any guard finding (guards.py), a low-confidence or fold-change-only comparison
+
+What the methods were checked on (D133): docs/VALIDATION.md says what is verified and on what. Its line that
+applies to every analysis (no real lab data yet) is the basis under the list (VALIDATED), shown when Ionomos ran
+the statistics. What it says of one method only is said only when the analysis used that method: the "simulated"
+statement (SIMULATED: TMT, the roll-up of peptides), the "ratios" statement (the mixing error and the centring),
+and a sentence beside a compare result read from a results table or a benchmark against known ratios
+(EXTERNAL_CAVEATS). No statement lists every caveat.
 
 A compare / benchmark result is shown with whether it was made on an analysis with these settings
 (settings_digest); one made with other settings is shown as such, never dropped silently.
@@ -43,6 +52,31 @@ SIMULATED_JSON = "benchmark_simulated.json"
 SIMULATED_JSONS = (SIMULATED_JSON, "benchmark_simulated_isodtb.json", "benchmark_simulated_tmt.json",  # D66
                    "benchmark_simulated_rollup.json")  # D76
 LEFT_CENSORED = ("perseus", "mindet", "minprob", "min", "zero")
+BASIS = "Each statement repeats a check of this analysis with its number. There is no overall score."
+# docs/VALIDATION.md's opening line, for every analysis whose statistics Ionomos ran (D133). Change it with that line.
+VALIDATED = ("The statistics are checked against the R tools they port and the settings on simulated data, not yet "
+             "on real lab data (no real benchmark sample, no real FragPipe-Analyst, MSstats or Perseus result "
+             "compared).")
+# What VALIDATION.md says was checked on simulated data only, for one kind of analysis (D133): (id, the sentence).
+# _simulated picks the rows the analysis used; each id is named in VALIDATION.md beside the line it states.
+SIMULATED = {
+    "tmt": "TMT: the plex and normalisation settings were checked on simulated plexes, which have no ratio "
+           "compression; on MS2-level TMT, co-isolated ions make real fold changes smaller.",
+    "rollup": "Peptides to proteins (Tukey median polish, by Ionomos): checked on simulated peptides only, none of "
+              "them shared between proteins or modified.",
+    "maxlfq": "Peptides to proteins (MaxLFQ, by Ionomos): checked on simulated peptides only, none of them shared "
+              "between proteins or modified; there it found a few more small changes than median polish, and a few "
+              "more false ones.",
+}
+# A sentence beside a compare / benchmark result in the results folder, when VALIDATION.md says its kind was not
+# tried on real data (D133): compare only for a results table (another Ionomos analysis needs no column layout).
+EXTERNAL_CAVEATS = {
+    "compare": "A results table is read by its column names (the documented layouts of FragPipe-Analyst, limma, "
+               "MSstats and Perseus); none has been tried on a real export of those tools yet: check how many "
+               "features matched.",
+    "benchmark": "The known-ratio benchmark was tested on simulated mixed-species tables only: check each group's "
+                 "protein count on its page.",
+}
 
 
 def settings_digest(settings: dict) -> str:
@@ -139,6 +173,9 @@ def build(m, p, diffs: list, insight: dict | None, qcd: dict | None, settings, g
         plexed = _plexes(p, settings)
         if plexed:
             out.append(plexed)
+        centring = _ratios(p)
+        if centring:
+            out.append(centring)
 
     for d in diffs:
         hits = d.up + d.down
@@ -210,13 +247,65 @@ def build(m, p, diffs: list, insight: dict | None, qcd: dict | None, settings, g
             continue
         out.append(_st("statistics", "Statistics", True, text, **{k: v for k, v in g.items()}))
 
+    simulated = _simulated(m, p)
+    if simulated:
+        out.append(simulated)
+
     digest = settings_digest(analysis.as_dict(settings)) if settings is not None else ""
     return {"statements": out, "settings_digest": digest,
             "compare": _external(results_dir, COMPARE_JSON, digest),
             "benchmark": _external(results_dir, BENCHMARK_JSON, digest),
             "benchmark_simulated": next((x for x in (_external(results_dir, n, digest) for n in SIMULATED_JSONS) if x),
                                         None),
-            "basis": "Each statement repeats a check of this analysis with its number. There is no overall score."}
+            "basis": BASIS + (" " + VALIDATED if pm is not None and pm.samples else "")}
+
+
+def _simulated(m, p) -> dict | None:
+    """The SIMULATED rows that apply to the methods this analysis used, as one statement; None when none does.
+    Never for a results table (p is None): Ionomos ran none of these methods on it."""
+    if p is None or not p.m.samples:
+        return None
+    pm = p.m
+    meta = {**(pm.meta or {}), **((m.meta or {}) if m is not None else {})}
+    ids = []
+    if pm.exp == "TMT":
+        ids.append("tmt")
+    rolled = meta.get("rollup")
+    if pm.exp != "TMT" and rolled in ("median_polish", "maxlfq"):  # Ionomos rolled peptides up itself (D76)
+        ids.append("maxlfq" if rolled == "maxlfq" else "rollup")
+    if not ids:
+        return None
+    return _st("simulated", "Checked on simulated data", False, " ".join(SIMULATED[i] for i in ids), on=ids)
+
+
+def _ratios(p) -> dict | None:
+    """isoDTB site ratios (fpa.centre_ratios, D70): how they were used, the largest replicate offset measured on the
+    stable sites, and that the mixing error and its centring are known from simulated sites only (VALIDATION.md).
+    "check" on the doctor's RATIO_OFFSET threshold: a replicate clearly off 0 that nothing centred."""
+    from ionomos.downstream import fpa
+
+    info = (p.normalization or {}).get("ratio_centre") or {}
+    if p.m.kind != "ratio" or not info.get("conditions"):
+        return None
+    reps = [(s, r["offset"]) for v in info["conditions"].values() for s, r in (v.get("replicates") or {}).items()
+            if isinstance(r.get("offset"), (int, float)) and math.isfinite(r["offset"])]
+    off = [s for v in info["conditions"].values() if not v.get("centred") for s in v.get("clear") or []]
+    centred = info.get("used", "none") != "none"
+    text = f"Site ratios: {fpa.centre_label(info)}" + ("." if centred else
+                                                      ", so a heavy / light mixing error stays in them.")
+    worst = max(reps, key=lambda x: abs(x[1])) if reps else None
+    if worst:
+        text += (f" The largest offset of a replicate from 0{' before centring' if centred else ''}, on the sites "
+                 f"that do not change: {worst[1]:+.2f} log2 ({worst[0]}).")
+    if off:
+        text += (f" {', '.join(off[:5])} {'sits' if len(off) == 1 else 'sit'} clearly off 0, which moves every ratio "
+                 f"of {'that replicate' if len(off) == 1 else 'those replicates'}.")
+    text += (" The centring was checked on simulated sites only." if centred else
+             " A mixing error's effect (up to 10.6 % false calls) and the centring that removes it (ratio_centre: "
+             "auto) were measured on simulated sites only.")
+    return _st("ratios", "Site ratios", bool(off), text, centring=info.get("used", "none"),
+               asked=info.get("asked", "none"), largest_offset=worst[1] if worst else None,
+               sample=worst[0] if worst else None, off_zero=off)
 
 
 def _plexes(p, settings) -> dict | None:
@@ -269,9 +358,14 @@ def _external(results_dir: Path | None, name: str, digest: str) -> dict | None:
     if not isinstance(data, dict):
         return None
     made_on = (data.get("analysis") or {}).get("settings_digest", "")
+    caveat = ""
+    if name == COMPARE_JSON and data.get("reference_kind") != "another Ionomos analysis":
+        caveat = EXTERNAL_CAVEATS["compare"]
+    elif name == BENCHMARK_JSON:
+        caveat = EXTERNAL_CAVEATS["benchmark"]
     return {"file": name, "page": name.replace(".json", ".html"), "generated_at": str(data.get("generated_at", "")),
             "reference": str(data.get("reference_name", "")), "same_settings": bool(made_on) and made_on == digest,
-            "lines": [str(x) for x in (data.get("headline") or data.get("verdicts") or [])][:8]}
+            "lines": [str(x) for x in (data.get("headline") or data.get("verdicts") or [])][:8], "caveat": caveat}
 
 
 def html(t: dict | None) -> str:
@@ -291,8 +385,9 @@ def html(t: dict | None) -> str:
                                                 "with other settings than this one; run it again to update it.")
         ref = f" ({escape(x['reference'])})" if x.get("reference") else ""
         lines = "".join(f"<li>{escape(v)}</li>" for v in x["lines"])
+        caveat = f" {escape(x['caveat'])}" if x.get("caveat") else ""
         items.append(f"<li data-key='{key}'><b>{title}</b>{ref}, {escape(x['generated_at'])}: "
-                     f"<a href='{escape(x['page'])}'>{escape(x['page'])}</a>{stale}<ul>{lines}</ul></li>")
+                     f"<a href='{escape(x['page'])}'>{escape(x['page'])}</a>{stale}{caveat}<ul>{lines}</ul></li>")
     return ("<div class='card findings' id='trust'><h3>How far to trust this</h3><ul>" + "".join(items) + "</ul>"
             f"<div class='meta'>{escape(t.get('basis', ''))} Accuracy against a reference or known ratios: "
             "<code>ionomos compare</code>, <code>ionomos benchmark</code>.</div></div>")

@@ -39,6 +39,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Live once the maintainer switches GitHub Pages on (docs/DEV_LOOP.md "Releasing"). `scripts/build_site.sh`
     builds it locally. MkDocs is not a dependency of the package.
 
+- **"How far to trust this" says what the methods behind the analysis were checked on** (D133,
+  docs/VALIDATION.md), each thing only where the analysis used it:
+  - under the list, for every analysis whose statistics Ionomos ran: the statistics are checked against the R tools
+    they port and the settings on simulated data, not yet on real lab data (no real benchmark sample, no real
+    FragPipe-Analyst, MSstats or Perseus result compared);
+  - **Checked on simulated data** (`simulated`): for TMT, that the simulated plexes have no ratio compression; for
+    peptides or precursors Ionomos rolled up itself, that the simulation has no shared or modified peptides (and,
+    for MaxLFQ, what it found against median polish);
+  - **Site ratios** (`ratios`, isoDTB): how the ratios were used, the largest replicate offset from 0 on the stable
+    sites, marked **check** where the doctor raises `RATIO_OFFSET`, and that a mixing error's effect and the
+    centring are known from simulated sites only;
+  - beside a compare result whose reference is a results table, that no real export of FragPipe-Analyst, limma,
+    MSstats or Perseus has been tried; beside a known-ratio benchmark, that its code was tested on simulated tables.
+  - Every open "Not verified" line of VALIDATION.md now says where the report states it, or why it is not a report
+    caveat.
+- **A key of config.yaml or experiment.yaml that goes away warns first** (D133, `retired.py`): while it is in the
+  table of retired keys, a renamed key's value counts under its new name and a removed key is ignored, and each
+  says so with the version that retired it: `ionomos check` (a `!` line), the app's checklist (Settings saved),
+  the analysis' notes (experiment.yaml) and the log. The app's Save writes a renamed key under its new name. The
+  table is empty today. The LabWatch-era names are not keys and keep working (D21).
+- README.md: **Versioning and support**, VISION.md's promises from 1.0 in a few lines.
+
+### Changed
+
+- The report's "How far to trust this" and `analysis.json`'s `trust` carry the lines above (new statement keys
+  `simulated` and `ratios`, a longer `basis`, a `caveat` on `compare` and `benchmark`); the default label-free
+  report's statements are the same. No default and no number changes. The help on the list says what the new lines
+  are.
+
 ### Fixed
 
 - **A closed window's timer can no longer press a button in another window** (#185, D129). A pop-up set a timer
