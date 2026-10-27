@@ -170,6 +170,26 @@ def test_every_window_opens_hidden_and_fits_a_laptop_screen(hidden_app, no_dialo
     assert "resolver demo" in seen and len(seen) >= 14, sorted(seen)
     # each one with the widget whose Tk callback asked and that widget's interpreter (this app's: below) (#185)
     assert not no_dialogs.unexpected(), f"this app's interpreter {id(app.root.tk):#x}\n{no_dialogs.report()}"
+    # the pop-ups above closed after 0.3 s, before their own 1.5 s timer: none is left to call another's callback
+    assert not app._tkharness_timers.dangling, app._tkharness_timers.report()
+
+
+def test_a_pop_up_closed_at_once_leaves_no_timer_to_press_a_button(hidden_app, no_dialogs, tk_errors, tmp_path):
+    """#185: a pop-up's own timer (win.after(1500, ...)) outlived it, and the command a Fix button registered a
+    moment later got its Tcl name: the timer pressed Find FragPipe. A window's timers are the root's now and do
+    nothing once it is closed (tkutil.after); the harness fails any test that leaves one (tkharness.Timers)."""
+    from tkinter import ttk
+
+    app = hidden_app
+    _lab(app, tmp_path)
+    w = app.popups.show(_item(app._active_log_dir(), "search_waiting"))
+    app.root.update()
+    w.close()
+    pressed = []
+    ttk.Button(app.root, command=lambda: pressed.append("pressed by a timer"))
+    pump_until(app, lambda: bool(pressed), secs=2)
+    assert not app._tkharness_timers.dangling, app._tkharness_timers.report()
+    assert not pressed and not no_dialogs.unexpected(), no_dialogs.report()
 
 
 def test_main_buttons_are_on_screen_at_1366x768(hidden_app, no_dialogs, tmp_path):

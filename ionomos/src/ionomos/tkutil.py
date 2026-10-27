@@ -5,6 +5,7 @@ Small Tk helpers shared by the app's windows.
     char_width / line_height    the default font's size in pixels: windows are sized in text units (docs/UI.md S1.10)
     text_size / fit_window      a box of cols x rows characters, clamped to the screen
     ScrolledFrame               a frame that scrolls when its content is taller than the space (S1.8)
+    after / after_idle          a timer of a window that may close first: never calls another window's callback (#185)
 
 tkinter.Variable.__del__ calls into Tcl. If Python's garbage collector happens
 to run on another thread (the FragPipe worker, the watcher, an app helper
@@ -17,6 +18,7 @@ from __future__ import annotations
 
 import threading
 import tkinter as tk
+from collections.abc import Callable
 from tkinter import ttk
 
 
@@ -35,6 +37,35 @@ class StringVar(_ThreadSafeDel, tk.StringVar):
 
 class BooleanVar(_ThreadSafeDel, tk.BooleanVar):
     pass
+
+
+# ------------------------------------------------------------- timers of a window that may close first (#185) --
+#
+# widget.after(ms, f) makes f a Tcl command of the widget, named id(tkinter's wrapper) + f.__name__
+# ("2155…<lambda>", "2155…close"), and sets a Tcl timer that calls that name. widget.destroy() deletes the command
+# but not the timer. Python soon reuses the freed wrapper's address, so the next callback registered with the same
+# __name__ gets the same command name, and the old timer calls it: a pop-up closed within 1.5 s of opening pressed
+# the Setup checklist's Find FragPipe button (its command=lambda a=…: …) that way. So a timer of a window that can
+# close is set on the root, which lives as long as the app, and does nothing once that window is gone.
+
+
+def after(widget, ms: int | str, func: Callable, *args):
+    """widget.after(ms, func, *args) for a widget that may be destroyed before the timer fires: the timer is the
+    root's, and func runs only if widget still exists then. Returns the root's after id."""
+    def run():
+        try:
+            alive = bool(widget.winfo_exists())
+        except tk.TclError:  # the app is closing
+            alive = False
+        if alive:
+            func(*args)
+
+    return widget._root().after(ms, run)
+
+
+def after_idle(widget, func: Callable, *args):
+    """widget.after_idle(func, *args) for a widget that may be destroyed first (as after)."""
+    return after(widget, "idle", func, *args)
 
 
 # ------------------------------------------------------------- sizes in text units (docs/UI.md S1.10) --

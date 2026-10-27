@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A closed window's timer can no longer press a button in another window** (#185, D129). A pop-up set a timer
+  of its own (no longer on top after 1.5 s; closed 2.5 s after "All set"), and so did the naming window (file
+  poll, live refresh, time-out). Closing the window deleted the timer's callback but not the timer, and tkinter
+  gives the next callback registered under the same name (any lambda) that callback's name, so the timer called
+  it: on Windows CI a pop-up closed at once pressed the Setup checklist's Find FragPipe button. These timers are
+  now the root's and do nothing once their window is closed (`tkutil.after`). The hidden-window tests fail on any
+  window destroyed with a timer of its own still pending (`tests/tkharness.Timers`), and a source scan on any
+  `widget.after` that isn't the root's.
 - Windows CI on 0.20.0: a drive-sweep test with no `atlas.sweep_roots` walked the runner's own `C:` (every fixed
   drive is the default there); it stubs the drives now. The experiment editor's roles preview ran on a variable
   that outlived its closed window and raised a Tk error; it returns when its window is gone.

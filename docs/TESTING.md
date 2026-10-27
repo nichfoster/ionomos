@@ -64,7 +64,7 @@ Three layers, all runnable on macOS and Windows:
 | FASTA readers (round 4) | `fasta_headers` and `_read_entries` equal a plain line reading on 264 random inputs in every chunk size from 1 byte; a 200 MB zero-filled file and a file with a 200 MB header read in < 1 s with a tracemalloc peak < 16 chunks; a BOM through Python and the Philosopher stand-in gives identical bytes to a BOM-less run; the library describes a BOM file like the BOM-less one | `tests/test_fastasource.py`, `tests/test_library.py` |
 | Library ranking and adopting (round 4, D101) | the MS1-labelled kinds (SILAC, isoTOP, ipIAA, PAL), stock ties, learned aliases on adopt, adopt `--no-config` and its refusals, the GENCODE organism, install globs, the partial-scan merge, missing roots, grammar, list `--kind`, representatives, a linear-time FASTA read; the app's Use asks and avoids the live file (CI only); `job_matches` "none", the Today snapshot of a damaged ledger | `tests/test_library.py`, `tests/test_library_tab.py`, `tests/test_ui_nav.py` |
 | TMT fixes (round 4) | a Retry after fixing `experiment.yaml` (fake FragPipe), an iTRAQ-4 drop searched end to end, two plexes' annotation files; long condition names cut to short file names (#157) | `tests/test_tmtkit.py`, `tests/test_downstream.py` |
-| Hidden-window UI tests (D93, docs/UI.md slice 4) | `tests/tkharness.py`: the app on a withdrawn root with every window it opens withdrawn, every message box / file / text / colour dialog recorded (answers queued with `expect`, strict mode fails at the call naming the dialog), exceptions from Tk and `App.post` callbacks captured, the open windows listed, a window's size against a 1366×768 screen; the fixtures `hidden_app`, `no_dialogs`, `tk_errors` (CI only, [below](#hidden-window-ui-tests)). Screenshots of every tab, Analysis sub-tab and window for a person to look at (`scripts/screenshots.py`, Windows) | `tests/conftest.py`, the smoke tests in `tests/test_ui_smoke.py`; `python scripts/screenshots.py` |
+| Hidden-window UI tests (D93, docs/UI.md slice 4) | `tests/tkharness.py`: the app on a withdrawn root with every window it opens withdrawn, every message box / file / text / colour dialog recorded (answers queued with `expect`, strict mode fails at the call naming the dialog), exceptions from Tk and `App.post` callbacks captured, a window destroyed with a timer of its own still pending (D129), the open windows listed, a window's size against a 1366×768 screen; the fixtures `hidden_app`, `no_dialogs`, `tk_errors` (CI only, [below](#hidden-window-ui-tests)). Screenshots of every tab, Analysis sub-tab and window for a person to look at (`scripts/screenshots.py`, Windows) | `tests/conftest.py`, the smoke tests in `tests/test_ui_smoke.py`; `python scripts/screenshots.py` |
 
 ## One-shot setup
 
@@ -576,10 +576,18 @@ uses; its docstring lists every name. In short:
   `root.report_callback_exception` and `App._on_tk_error` (which `App.post`
   callbacks reach too), records each exception and still lets the app write
   its crash file, without its error box.
+- **No timer outlives its window.** `Timers` records each widget destroyed
+  while a timer of its own (`widget.after`) is still pending: the timer
+  outlives its callback and can call the next one registered under the same
+  name (#185, D129; the app uses `tkutil.after`). `make_app` installs one,
+  and `hidden_app` fails at teardown on any. `tests/test_tk_timers.py`
+  checks the same without a window (a Tcl interpreter without Tk), and scans
+  the source for a `widget.after` that isn't the root's.
 
 The fixtures in `tests/conftest.py`: `hidden_app` (the app on a new config in
-`tmp_path`, HOME and APPDATA there, dialogs recorded; it skips where
-`gui_tests()` says no), `no_dialogs`, and `tk_errors` (the test fails at
+`tmp_path`, HOME and APPDATA there, dialogs recorded, a window's leftover
+timer a failure; it skips where `gui_tests()` says no), `no_dialogs`, and
+`tk_errors` (the test fails at
 teardown if a callback raised; `tk_errors.clear()` after checking one the test
 meant to cause). `pump_until(app, cond)` runs the Tk loop until `cond()` holds.
 

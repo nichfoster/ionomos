@@ -270,7 +270,7 @@ class ItemWindow:
         win.title(f"Ionomos — {KIND_TITLE.get(item.kind, 'needs attention')}")
         try:
             win.attributes("-topmost", True)
-            win.after(1500, lambda: win.winfo_exists() and win.attributes("-topmost", False))
+            tkutil.after(win, 1500, lambda: win.attributes("-topmost", False))  # not win.after (#185)
         except tk.TclError:
             pass
         f = ttk.Frame(win, padding=12)
@@ -480,7 +480,7 @@ class ItemWindow:
 
         if not doctor.popups(out.issues):
             self.msg.configure(text="All set — the report is open. This window closes in a moment.")
-            self.win.after(2500, self.close)
+            tkutil.after(self.win, 2500, self.close)
         else:
             self.msg.configure(text="Some things still need a look (listed above).", foreground="#b26a00")
 
