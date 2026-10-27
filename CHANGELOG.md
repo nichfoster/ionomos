@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-10-27
+
 ### Added
 
 - **The atlas hand-off takes TMT-Integrator's tables** (D134, docs/ATLAS.md): every `*.tsv` of the run folder's
