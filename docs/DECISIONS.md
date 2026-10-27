@@ -5078,24 +5078,34 @@ socket failing as an OS fails it (no name lookup, no route, refused, a connect t
 another PR's and were left out. What was found and done (PROTEOMICS_PC.md "No internet on the PC" for the lab):
 1. **Notifications were lost** (D58.6: "a message lost while the network was down is lost"; and a "held" message
    was marked as told before it was sent, so a restart never sent it either). Now a message that never reached the
-   service is kept and sent later. `notify.worth_retrying` decides: urllib's URLError (the request was not sent:
-   DNS, no route, refused, TLS), an SMTP connection that failed or a 4xx, HTTP 429 or 5xx are kept; a service
-   that said no (HTTP 4xx, a wrong password, refused addresses, a certificate that isn't the service's), a setting,
-   and a webhook that took the request and gave no answer (it may have arrived: `_NoAnswer`) are not, as before.
+   service is kept and sent later, and none is ever sent twice (a copy in the channel is worse than D58's one
+   try). `notify.worth_retrying` decides. Kept: urllib's URLError (the request was not sent: DNS, no route,
+   refused, a TLS handshake cut off), a mail server that could not be reached or went away before the DATA
+   command, an SMTP 4xx, HTTP 429 or 503 (the service says later and did nothing with it). Not kept, as before: a
+   service that said no (another HTTP 4xx, a wrong password, refused addresses), something that answered with a
+   certificate that isn't the service's or with another protocol (an ssl / starttls port mix-up; checked on the
+   error itself, as smtplib raises ssl's error unwrapped, and on urllib's `.reason`), a setting, and a message that
+   went out and got no answer, as it may have arrived (`_NoAnswer`): a webhook's timeout, another 5xx (a gateway's
+   502 / 504 may come after the work was done), and a mail server that went away or timed out after DATA, while
+   it was to say 250 (`_send_email` notes when DATA goes out; a review found four copies of one mail without it).
    Kept in `<log_dir>/notify_state.json` (`unsent`, `retry` beside D58's `held`): the fields that would be sent,
    never an address or password; only the newest message about a job (a newer announce replaces it, by the time it
-   was announced, so a slow thread can't keep a stale one); at most `UNSENT_MAX` (50), `UNSENT_DAYS` (7 days).
-   Sent again by `notify.retry_unsent`, which the watcher's maintenance thread calls every minute (its own daemon
-   thread; returns at once; one sender at a time), per channel after 5, 10, 20, then every 30 minutes; at the
-   watcher's start whatever the schedule; and at once when another message gets through on that channel. A late
-   message is the same message plus "Sent late: this happened <time>; the PC could not reach <service> then" (in
-   `text`; the webhook's keys are D58.3's). Logged once per channel and error ("Kept: it is sent when … can be
-   reached again"). One attention item `notify_unsent` (a warning, no pop-up, KINDS, help
-   `attention.notify_unsent`) while any waits, its text changed only when the count or error does; it closes when
-   the last is sent; dismissed, it is not raised again until then. `ionomos notify-test` adds that a search's
-   message would wait. Test messages are never kept. Not taken: a digest of many late messages (more surface; 50
-   and 7 days bound the burst), an endless queue (weeks-old "done" messages are noise), retrying "no answer"
-   (a duplicate in the channel is worse than D58's one try).
+   was announced, so a slow thread can't keep a stale one; each kept message is looked up again just before it
+   goes); at most `UNSENT_MAX` (50), `UNSENT_DAYS` (7 days); all dropped, once, with notifications turned off (the
+   item closes). Sent again by `notify.retry_unsent`, which the watcher's maintenance thread calls every minute
+   (its own daemon thread; returns at once; one sender at a time), per channel after 5, 10, 20, then every 30
+   minutes (a schedule that doesn't read, from a hand-edited file, is due now, once); at the watcher's start
+   whatever the schedule; and at once when another message gets through on that channel. A sent message's id is
+   remembered for the life of the process (`_done_ids`), so a state file that could not be written never makes a
+   second copy; the write retries a refused replace as `attention._write` does, and while it keeps failing no
+   other kept message is sent (logged once) until it can be written. A late message is the same message plus "Sent
+   late: this happened <time>; the PC could not reach <service> then" (in `text`; the webhook's keys are D58.3's),
+   and with `include_names: false` as it is now, the job number, status and time only. Logged once per channel and
+   error ("Kept: it is sent when … can be reached again"). One attention item `notify_unsent` (a warning, no
+   pop-up, KINDS, help `attention.notify_unsent`) while any waits, its text changed only when the count or error
+   does; it closes when the last is sent; dismissed, it is not raised again until then. `ionomos notify-test` adds
+   that a search's message would wait. Test messages are never kept. Not taken: a digest of many late messages
+   (more surface; 50 and 7 days bound the burst), an endless queue (weeks-old "done" messages are noise).
 2. **Enrichment tried each missing gene-set library in turn** (30 s each with packets dropped; three by default)
    on every analysis in the worker, with a raw exception in the note. Now the first failure for want of a
    connection stops the rest (`enrich._unreachable`: a server that answered, an HTTP 404, is not that), and one
@@ -5127,7 +5137,11 @@ another PR's and were left out. What was found and done (PROTEOMICS_PC.md "No in
 failure, in words, no secret; which HTTP answers are kept; a job's message kept through a day of tries and a
 restart, then sent once, late; a newer message replacing the kept one and a working channel sending the rest at
 once; the bounds; a dismissed item; `retry_unsent` returning at once, one sender, a damaged file; the real
-`ionomos run` sending what was kept within seconds of its start), `test_fpa.py`, `test_fastasource.py`,
+`ionomos run` sending what was kept within seconds of its start; and, from a review of the first version: a mail
+whose 250 came late sent once, a mail server gone before DATA tried again, a refused replace of the state file
+and one that can't be written at all with nothing sent twice, notifications turned off, a kept message replaced
+mid-pass, `include_names` as it is now, a hand-edited schedule, 500 / 502 / 504 and the TLS errors not kept),
+`test_fpa.py`, `test_fastasource.py`,
 `test_example.py`, `test_library_tab.py`, `test_assistant_robustness.py`, `test_service.py`, `test_atlas.py`.
 **Not verified**: on the lab PC; what FragPipe 24.0 does without internet; how Dropbox's online-only files behave
 offline (a hand-off that can't read one fails and retries as `atlas_handoff_failed`, up to `atlas.max_tries`);

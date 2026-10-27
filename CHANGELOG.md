@@ -18,12 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Notifications sent while the PC had no internet were lost** (D131; D58 sent once and forgot). A message that
-  never reached Teams, Slack, the webhook or the mail server (no connection, or "try later": HTTP 429 / 5xx, SMTP
-  4xx) is kept in `notify_state.json` and sent when the connection is back, marked "Sent late": tried again after
-  5, 10, 20, then every 30 minutes, at the watcher's start, and at once when another message gets through. The
-  newest message about each search only, at most 50, for 7 days. One item, **Notifications are waiting for a
-  connection** (a warning, no pop-up), closes itself when they have gone. A message the service refused (a wrong
-  address or password) is still not sent again, nor one a webhook took without answering.
+  never reached Teams, Slack, the webhook or the mail server (no connection, or "try later": HTTP 429 / 503, an
+  SMTP 4xx before the mail was taken) is kept in `notify_state.json` and sent when the connection is back, marked
+  "Sent late" (and as `include_names` says now): tried again after 5, 10, 20, then every 30 minutes, at the
+  watcher's start, and at once when another message gets through. The newest message about each search only, at
+  most 50, for 7 days; with notifications turned off they are dropped. One item, **Notifications are waiting for a
+  connection** (a warning, no pop-up), closes itself when they have gone. Never twice: a message the service
+  refused (a wrong address or password, a certificate that isn't the service's) or that went out without an answer
+  (a webhook's timeout, another 5xx, a mail server that took the mail and did not say 250) is not sent again, and
+  a kept message that was sent is remembered even when `notify_state.json` can't be written (then nothing more is
+  sent until it can).
 - **Enrichment without internet** tried each missing gene-set library in turn on every analysis (30 s each when
   packets are dropped): the first failure now stops the rest, and one note names the missing libraries and says
   to re-run the analysis once online.

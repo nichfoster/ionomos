@@ -170,7 +170,8 @@ Nothing to do: Ionomos keeps the messages and sends them by itself when the
 connection is back, marked "Sent late" with the time they happened. It
 tries again every few minutes, then every half hour; a message is kept for
 7 days, at most 50 of them, and only the newest about each search. The item
-closes by itself once they are sent. To check the connection now, press
+closes by itself once they are sent, or when notifications are turned off
+(what was kept is then dropped). To check the connection now, press
 **Send test** on the **Notifications** tab, or run `ionomos notify-test`.
 More: [No internet on the PC](#trouble.offline).
 
@@ -448,8 +449,10 @@ by ..."). The search itself is not affected: its status, `DONE.txt` /
 the message never reached the service (no internet, the service can't be
 reached, or it said "try later"), it is kept and sent by itself when the
 connection is back: [Notifications are waiting](#attention.notify_unsent).
-When the service answered no (a wrong address, a wrong password), it is
-not sent again.
+When the service answered no (a wrong address, a wrong password, a
+certificate that isn't the service's), or the message went out and no
+answer came (it may have arrived), it is not sent again: a message is
+never sent twice.
 
 Press **Send test** on the app's **Notifications** tab, or run
 `ionomos notify-test`. It sends a test message to every channel and says

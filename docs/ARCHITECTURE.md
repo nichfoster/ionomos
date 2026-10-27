@@ -460,7 +460,7 @@ build(...) → Message                                     the only thing that l
 daemon thread: deliver → webhook, teams, slack, email    one try each, timeout_seconds
    ▼
 log: "notified by slack: job 12 done"  /  "could not notify by slack: …" (once per channel and error)
-   │  never reached the service (no connection, DNS, refused, HTTP 429 / 5xx, SMTP 4xx; worth_retrying)
+   │  never reached the service (no connection, DNS, refused; HTTP 429 / 503, SMTP 4xx; worth_retrying)
    ▼                                                      kept in notify_state.json (D131): the newest per job,
 retry_unsent (maintenance thread, every minute; at start) at most 50, 7 days; one notify_unsent item
    │  due: 5, 10, 20, then every 30 minutes; at once when the channel works again
