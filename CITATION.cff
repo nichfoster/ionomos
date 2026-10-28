@@ -10,8 +10,8 @@ authors:
   - given-names: Nich
     family-names: Foster
     alias: nichfoster
-version: 0.18.1
-date-released: 2026-10-06
+version: 0.22.0
+date-released: 2026-10-28
 license: GPL-3.0-or-later
 repository-code: "https://github.com/nichfoster/ionomos"
 url: "https://github.com/nichfoster/ionomos"

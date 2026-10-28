@@ -220,7 +220,7 @@ another result for the same experiment. The reference can be:
 
 - a results table with a fold-change and a p-value column per comparison: a
   FragPipe-Analyst export, a limma or MSstats table, a Perseus matrix, the
-  output of the lab's R script (`.tsv`, `.csv`, `.txt`, `.xlsx`),
+  output of your lab's R script (`.tsv`, `.csv`, `.txt`, `.xlsx`),
 - or another folder analysed by Ionomos (for example with other settings).
 
 It matches the proteins by ID or gene, then reports per comparison: how many
@@ -371,12 +371,13 @@ settings. Everything on the tab is also `notify:` in `config.yaml`. A message th
 search ([A notification did not arrive](#trouble.notify)); one that couldn't get through for want of a connection is
 sent when the connection is back ([Notifications are waiting](#attention.notify_unsent)).
 
-## Does my isoDTB search go to the lab's cysteine atlas? {#faq.atlas}
+## Does my isoDTB search go to your lab's cysteine atlas? {#faq.atlas}
 
 Yes, once the person who looks after Ionomos turns the hand-off on (it is off
 by default). Then every isoDTB search that finishes is copied, by itself, into
-the lab Dropbox folder `Nicholas Foster Data\fragpipe-runs`, the same way the
-lab's harvest script copies older runs: the result tables (`psm.tsv` per
+the Dropbox folder the atlas side reads (for example
+`<team folder>\fragpipe-runs`), the same way the atlas's harvest script
+copies older runs: the result tables (`psm.tsv` per
 replicate, the workflow, the file list, the combined tables, TMT-Integrator's
 tables in `tmt-report`, the logs), never the raw files. The decoys go too: each
 replicate's `.pin` file, compressed (`.pin.gz`, about a third of its size), so
@@ -391,7 +392,7 @@ since goes beside the earlier copy. The atlas picks the run up from there.
 To turn it on: the **Folders** tab → **Cysteine atlas**, tick it, pick the
 Dropbox folder (**Browse…**, or **Use** the one Ionomos found), **Save**.
 **Also TMT searches** sends finished TMT searches as well (competition
-experiments, for the lab's engagement model): the atlas keeps them with their
+experiments, for the atlas's own models): the atlas keeps them with their
 sample design and counts no cysteine site from them. The
 **Jobs** tab then shows, for each isoDTB search, whether it was handed off,
 and **Send to atlas** sends a selected finished search now: also one from
@@ -411,9 +412,9 @@ A search Ionomos ran and already handed off is not sent again by itself:
 at once; `ionomos atlas sweep --dry-run` shows what it would send without
 copying anything.
 
-When the atlas publishes its site list back into that folder, an isoDTB
+When the atlas writes its site list back into that folder, an isoDTB
 report shows, for each human cysteine site, its atlas tier, how many atlas
-experiments saw it, and whether it is new to the atlas. These are the lab's
+experiments saw it, and whether it is new to the atlas. These are your lab's
 own numbers; the line under the table says whether they may be quoted.
 
 ## Can I ask Ionomos a question in plain words? {#faq.assistant}
@@ -612,7 +613,7 @@ In the app, on the **Methods** tab, select the method, then use the panel
   replaced before you Save: the copy then gets a `-2` name). A workflow of
   another kind than the method's, or a file with a ✗ mark, asks first. The
   list is remembered: the next time it opens at once,
-  and **Rescan** looks again. The drive with the lab's data (`D:/`) is only
+  and **Rescan** looks again. A data drive (`D:/`, say) is only
   looked at when it is added under `library: roots:` in config.yaml.
 - **Choose…** beside the workflow or FASTA box opens the same list with only
   workflows or only FASTAs.

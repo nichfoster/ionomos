@@ -1,9 +1,9 @@
 """The drive sweep (atlassweep.py, docs/ATLAS.md "The drive sweep", D128): the FragPipe runs on the PC's disks that
 Ionomos did not search, handed to the cysteine atlas with their decoys and sample design.
 
-The walk is harvest_fragpipe.ps1's pass 1 (Nomura-Lab, Lab Informatics/tools); the copying is the hand-off's
-(atlas.transfer, tests/test_atlas.py). Every test writes under tmp_path only: never the real Dropbox, nomura-data,
-C:/Fragpipe_Auto or C:/Fragpipe_General.
+The walk is harvest_fragpipe.ps1's pass 1 (the atlas's own repository, which is private); the copying is the
+hand-off's (atlas.transfer, tests/test_atlas.py). Every test writes under tmp_path only: never the real Dropbox, the
+atlas's data folder, C:/Fragpipe_Auto or C:/Fragpipe_General.
 """
 from __future__ import annotations
 
@@ -30,16 +30,16 @@ from tests.test_atlas import WORKFLOW, _files, _long, _pin, _read, _records, _ru
 TMT_WORKFLOW = ("# FragPipe (23.1) runtime properties\ndatabase.db-path=C\\:\\\\fasta\\\\h.fas\n"
                 "msfragger.table.fix-mods=229.16293,K,true,-1; 229.16293,n^,true,-1\n")
 ISOTOP_WORKFLOW = "# FragPipe (22.0)\nmsfragger.table.var-mods=464.28596,C,true,1\n"
-# D:\Kosuke\A549_nucleus_TMT-check's five runs (the lab's Dropbox export of 2026-10-27): TMT2 (duplex, 225.1558) on K
-# and the peptide N-term, TMT6's 229.16293 on S turned off; classed other before D134. FragPipe's fix-mods table lists
-# every site, most at 0.0
-A549_FIX = ("0.0,C-Term Peptide,true,-1; 0.0,N-Term Peptide,true,-1; 0.0,C-Term Protein,true,-1; "
+# Five runs of one experiment's TMT check (a Dropbox export of the first lab's runs, 2026-10-27): TMT2 (duplex,
+# 225.1558) on K and the peptide N-term, TMT6's 229.16293 on S turned off; classed other before D135. FragPipe's
+# fix-mods table lists every site, most at 0.0
+TMT2_FIX = ("0.0,C-Term Peptide,true,-1; 0.0,N-Term Peptide,true,-1; 0.0,C-Term Protein,true,-1; "
             "0.0,N-Term Protein,true,-1; 0.0,G (glycine),true,-1; 0.0,A (alanine),true,-1; 0.0,S (serine),true,-1; "
             "0.0,P (proline),true,-1; 57.02146,C (cysteine),true,-1; 225.1558,K (lysine),true,-1; "
             "0.0,R (arginine),true,-1")
-A549_VAR = "225.1558,n^,true,1; 229.16293,S,false,1"
-A549_WORKFLOW = (f"# FragPipe (23.1) runtime properties\nmsfragger.table.fix-mods={A549_FIX}\n"
-                 f"msfragger.table.var-mods={A549_VAR}\n")
+TMT2_VAR = "225.1558,n^,true,1; 229.16293,S,false,1"
+TMT2_WORKFLOW = (f"# FragPipe (23.1) runtime properties\nmsfragger.table.fix-mods={TMT2_FIX}\n"
+                 f"msfragger.table.var-mods={TMT2_VAR}\n")
 HOURS_AGO = 3
 
 
@@ -72,7 +72,7 @@ def drives(lab, monkeypatch):
     monkeypatch.delenv("APPDATA", raising=False)
     # _age sets modified times only; a test can't set a file's creation time, which Windows reports (atlas._born)
     monkeypatch.setattr(atlas, "_born", lambda st: 0.0)
-    dropbox = lab["root"] / "TNRG Dropbox" / "Nicholas Foster Data"
+    dropbox = lab["root"] / "Team Dropbox" / "Nicholas Foster Data"
     dropbox.mkdir(parents=True)
     dest = dropbox / "fragpipe-runs"
     disk = lab["root"] / "D"
@@ -154,7 +154,7 @@ def test_sweep_settings_refuse(raw, words):
 def test_the_sweep_settings_survive_a_save(tmp_path):
     d = configio.defaults(str(tmp_path))
     d["atlas"] = {**d["atlas"], "enabled": True, "sweep": True,
-                  "handoff_dir": r"C:\Users\Daniel Nomura\TNRG Dropbox\Nicholas Foster Data\fragpipe-runs",
+                  "handoff_dir": r"C:\Users\Lab Account\Team Dropbox\Nicholas Foster Data\fragpipe-runs",
                   "sweep_roots": ["C:\\", "D:\\Old Runs"], "sweep_exclude": [r"D:\Backups"], "sweep_hours": 12}
     p = tmp_path / "config.yaml"
     p.write_text(configio.dump_config(d), encoding="utf-8")
@@ -227,9 +227,9 @@ def test_the_walk_stops_when_asked(tmp_path):
 
 @pytest.mark.parametrize(("path", "owner"), [
     (r"C:\Fragpipe_General\EJQ\20261019_isoDTB\fragpipe", "EJQ"),
-    (r"C:\Users\Daniel Nomura\Desktop\Isaac\run", "Daniel Nomura"),
+    (r"C:\Users\Lab Account\Desktop\member\run", "Lab Account"),
     (r"D:\Taylor_Elements\2024\TMT\fragpipe", "Taylor_Elements"),
-    (r"D:\Fragpipe_General\Qian\x", "Qian"),
+    (r"D:\Fragpipe_General\member2\x", "member2"),
     (r"\\server\share\x", "server"),
 ])
 def test_the_owner_is_harvests_guess(path, owner):
@@ -239,11 +239,11 @@ def test_the_owner_is_harvests_guess(path, owner):
 def test_exclusions_hold_the_atlas_and_dropbox_folders(tmp_path):
     info = tmp_path / "local" / "Dropbox" / "info.json"
     info.parent.mkdir(parents=True)
-    info.write_text(json.dumps({"business": {"path": str(tmp_path / "TNRG Dropbox")}}), encoding="utf-8")
-    s = atlas.settings_from({"handoff_dir": str(tmp_path / "TNRG Dropbox" / "x" / "fragpipe-runs"),
+    info.write_text(json.dumps({"business": {"path": str(tmp_path / "Team Dropbox")}}), encoding="utf-8")
+    s = atlas.settings_from({"handoff_dir": str(tmp_path / "Team Dropbox" / "x" / "fragpipe-runs"),
                              "sweep_exclude": [str(tmp_path / "Backups")]})
     assert atlassweep.exclusions(s, env={"LOCALAPPDATA": str(tmp_path / "local")}) == \
-        [s["handoff_dir"], str(tmp_path / "TNRG Dropbox"), str(tmp_path / "Backups")]
+        [s["handoff_dir"], str(tmp_path / "Team Dropbox"), str(tmp_path / "Backups")]
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows' drives")
@@ -461,8 +461,8 @@ def test_a_run_with_no_psm_tsv_is_left(drives):
     ("561.3387,C,true,1; 229.16293,K,false,-1", "", "isoDTB"),      # its TMT row off
     ("", "229.16293,K,true,-1; 229.16293,n^,true,-1", "TMT"),
     ("561.3387", "", "isoDTB"),                                      # no enabled field: counts
-    (A549_VAR, A549_FIX, "TMT"),                                     # TMT2 (D134); its 229.16293 row is off
-    ("229.16293,S,false,1", A549_FIX.replace("225.1558", "0.0"), "other"),
+    (TMT2_VAR, TMT2_FIX, "TMT"),                                     # TMT2 (D135); its 229.16293 row is off
+    ("229.16293,S,false,1", TMT2_FIX.replace("225.1558", "0.0"), "other"),
     ("", "304.20715,K,true,-1; 304.20715,n^,true,-1", "TMT"),       # TMTpro
     ("", "295.18959,K,true,-1", "TMT"),                              # TMTpro zero
     ("224.1525,n^,true,1", "", "TMT"),                               # TMT0
@@ -472,10 +472,10 @@ def test_only_the_modifications_turned_on_count(var, fix, want):
 
 
 def test_a_tmt2_run_goes_as_tmt_with_tmt_integrators_tables(drives):
-    """One of Kosuke's A549_nucleus_TMT-check runs (D134): TMT by its TMT2 mass, so it goes with the TMT switch on,
+    """One of those TMT2 runs (D135): TMT by its TMT2 mass, so it goes with the TMT switch on,
     and its tmt-report tables go with it, to tmt-report/<name> under the run's destination."""
-    run = _run_folder(drives["disk"] / "Kosuke" / "A549_nucleus_TMT-check" / "fragpipe", {
-        "fragpipe.workflow": A549_WORKFLOW.encode(), "nucleus/psm.tsv": b"Peptide\n" * 4,
+    run = _run_folder(drives["disk"] / "member4" / "TMT2-check" / "fragpipe", {
+        "fragpipe.workflow": TMT2_WORKFLOW.encode(), "nucleus/psm.tsv": b"Peptide\n" * 4,
         "tmt-report/abundance_protein_MD.tsv": b"Index\tNumberPSM\n", "tmt-report/ratio_gene_None.tsv": b"Index\n",
         "tmt-report/notes.txt": b"not a table"})
     _age(drives["disk"])
@@ -492,7 +492,7 @@ def test_a_tmt2_run_goes_as_tmt_with_tmt_integrators_tables(drives):
 
 
 def test_a_run_sent_by_the_earlier_rule_goes_again_and_nothing_there_is_touched(drives, monkeypatch):
-    """D134 changed what is taken. A found run sent before (its tmt-report tables left behind, an earlier search's
+    """D135 changed what is taken. A found run sent before (its tmt-report tables left behind, an earlier search's
     .pin taken) has another fingerprint now, so the next pass sends it again: the new files are copied, the rest
     compared and kept; nothing at the destination is removed or overwritten but the run's ionomos-handoff.json, whose
     new version lists the stale .pin in left[] and not in files[] (the receiver goes by files[]). The .pin.gz copied
@@ -503,7 +503,7 @@ def test_a_run_sent_by_the_earlier_rule_goes_again_and_nothing_there_is_touched(
     _run_folder(run, {"tmt-report/abundance_gene_MD.tsv": b"Index\tDMSO_1\n", "tmt-report/ratio_gene_MD.tsv": b"I\n",
                       stale: _pin(40)})
     _age(drives["tmt"])
-    with monkeypatch.context() as m:  # the rule before D134: no tmt-report tables, every .pin
+    with monkeypatch.context() as m:  # the rule before D135: no tmt-report tables, every .pin
         m.setattr(atlas, "TMT_REPORT_ALLOW", ())
         m.setattr(atlas, "_manifest_groups", lambda run_dir: {})
         first = atlassweep.sweep(cfg)

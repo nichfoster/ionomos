@@ -23,7 +23,7 @@ The folder name must contain two things, anywhere and in any order:
 
 A date is optional. The recommended shape sorts well:
 `YYYYMMDD_<initials>_<method>_<anything>`, for example
-`20260902_EJQ_isoDTB_EJQ-2-027_1uM-3h`.
+`20260902_ABC_isoDTB_ABC-2-027_1uM-3h`.
 
 Spaces and brackets are fine: they are removed on the way in, because
 FragPipe can't handle spaces. The original name is kept in `ionomos.json`.

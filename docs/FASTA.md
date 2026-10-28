@@ -17,14 +17,14 @@ For a FragPipe search it needs two more kinds of entry:
   the header, so the search can assign their spectra and the analysis can remove them (FragPipe-Analyst's rule, and
   D87: Ionomos also reads the `contam_` accessions of the search's FASTA).
 
-## How the lab made its FASTA so far
+## How the first lab made its FASTA so far
 
-The PC's searches use `C:\Fragpipe_Auto\fasta\2026-01-30-decoys-contam-UP000005640_9606.fasta.fas` (human,
+The searches on the PC of the lab where Ionomos started use `C:\Fragpipe_Auto\fasta\2026-01-30-decoys-contam-UP000005640_9606.fasta.fas` (human,
 20,698 targets, `rev_` decoys, contaminants; PROTEOMICS_PC.md). The name is the one Philosopher gives when it is
 run on an existing file (`--custom`, FragPipe's Database tab → **Add decoys**): `<date>-decoys-contam-<the file's
 name>.fas`. So a file called `UP000005640_9606.fasta` was turned into it on 2026-01-30. That is the name UniProt's
 FTP site gives a reference proteome's "one protein per gene" file, and 20,698 is about the size of that set for
-human (the reviewed entries were 20,416 at release 2026_03). *Assumed, not confirmed with the lab:* which file it
+human (the reviewed entries were 20,416 at release 2026_03). *Assumed, not confirmed with that lab:* which file it
 was, and whether isoforms or unreviewed entries were wanted. Nobody had re-done it, and nothing said when it was
 stale; this module does both.
 
@@ -100,7 +100,7 @@ says which was used. A given contaminant file is always used in Python (Philosop
 
 **Name**: `<YYYY-MM-DD>-decoys[-reviewed][-isoforms][-contam]-<source file name>.fas`, Philosopher's pattern
 (`dat.Save`): the flags in its order, the source's full name as the base. Prepared from a download the base is
-`UP…_<taxon>.fasta`, so the result reads like the lab's file; `reviewed` / `isoforms` are added as Philosopher adds
+`UP…_<taxon>.fasta`, so the result reads like the first lab's file; `reviewed` / `isoforms` are added as Philosopher adds
 them when it downloads by itself.
 
 **Checks**: a source that already has decoys is refused (decoys twice break the search), as is a file with no
@@ -177,7 +177,7 @@ GitHub's API allows 60 requests an hour per network without a login (a 403 says 
 | GPM cRAP at `ftp.thegpm.org/fasta/cRAP/crap.fasta` | *Failing on 2026-10-14* (TLS certificate for another name; plain HTTP 404). Kept as the last fallback only |
 | FragPipe tags `24.0`, `23.1`, `23.0`, `22.0` (no `v`); `workflows/` from 23.0, `MSFragger-GUI/workflows/` at 22.0; raw URLs | **Confirmed** (GitHub API refs and contents) |
 | Philosopher in `<FragPipe>\tools\Philosopher\philosopher-v*` (an `.exe` on Windows) | From `fragpipe.install_report`'s check; the exact file name on the PC is *not seen yet* |
-| The lab's file came from UniProt's FTP "one protein per gene" `UP000005640_9606.fasta` via Add decoys | *Assumed* from its name and size (above) |
+| The first lab's file came from UniProt's FTP "one protein per gene" `UP000005640_9606.fasta` via Add decoys | *Assumed* from its name and size (above) |
 
 ## Licences
 
@@ -186,7 +186,7 @@ on GitHub); Ionomos runs the copy FragPipe installed, and its Python steps are a
 `database` logic, which Ionomos' own GPL-3.0-or-later allows. Philosopher's contaminant list is downloaded when
 needed, never shipped with Ionomos.
 
-## Open questions for the lab
+## Open questions for the first lab
 
 - Which human FASTA do you want from now on: reviewed only (Ionomos' default, ~20,400), the one-per-gene set your
   current file looks like (~20,700, includes some unreviewed), or with isoforms? Reviewed vs. one-per-gene changes

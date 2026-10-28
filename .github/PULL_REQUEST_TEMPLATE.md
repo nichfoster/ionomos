@@ -11,9 +11,10 @@
 - [ ] A new issue code, hold reason or rejection has a help entry (`ionomos/src/ionomos/help/`)
 - [ ] Nothing deletes or overwrites user data; no default path with spaces; on-disk names from `names.py`
 - [ ] No new dependency on the analysis path (PyYAML only; D18, D40)
+- [ ] Nothing lab-specific: no person's or lab's name and no lab's private path in the code, the docs or the help
 
 ## Tested, and not tested
 
-<!-- What ran where: CI, macOS, Windows, the lab PC, real data, on screen. Say plainly what has not been seen. -->
+<!-- What ran where: CI, macOS, Windows, an instrument PC, real data, on screen. Say plainly what has not been seen. -->
 
 A person merges this pull request, not its author (docs/DECISIONS.md D31).

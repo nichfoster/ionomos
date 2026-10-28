@@ -1,17 +1,29 @@
-# Lab workflows → headless FragPipe
+# Methods → headless FragPipe
 
-What each method needs, distilled from the lab SOPs in
-[`reference/lab-sops/`](../reference/lab-sops/), the R scripts in
-[`reference/lab-scripts/`](../reference/lab-scripts/), and the FragPipe output
-folders seen in the inventory. This is what the runners have to reproduce.
+A method is a key in `config.yaml` with its FragPipe workflow and FASTA
+(D54), so another lab's method needs no code change: pin its workflow and
+FASTA under a key of its own. isoDTB, TMT and DIA are the three the first
+lab uses, and the sections below describe them.
+
+What each method needs, distilled from the SOPs of the lab where Ionomos
+started ([`reference/lab-sops/`](../reference/lab-sops/)), its R scripts
+([`reference/lab-scripts/`](../reference/lab-scripts/)), and the FragPipe
+output folders seen in that lab's inventory. This is what the runners have
+to reproduce.
 
 ## Common: headless FragPipe
 
 Checked on 2026-10-01 against FragPipe's
 [headless tutorial](https://fragpipe.nesvilab.org/docs/tutorial_headless.html)
 and the source of FragPipe 24.0, compared with 23.1 where it could differ
-(D59). **Not yet seen on the PC**: every line below is from documentation or
-source, and [FIRST_REAL_RUN.md](FIRST_REAL_RUN.md) is how it gets confirmed.
+(D59). **Seen on the PC** ([REAL_RUNS.md](REAL_RUNS.md)): two DIA searches
+through `fragpipe.bat --headless` on 2026-09-23 (the launcher, FragPipe's
+own Java, the console reaching Ionomos, the `Process '…' finished` lines,
+the DIA output folder), and TMT, DIA and DDA searches through the watcher
+that finished (0.19.0 to 0.21.0, reported 2026-10-28). The rest of what
+follows is from documentation or source. The step-by-step confirmation,
+with each search's `run_fingerprint.json`, is still to be filed;
+[FIRST_REAL_RUN.md](FIRST_REAL_RUN.md) is how.
 
 ```
 bin\fragpipe.bat --headless --workflow <wf> --manifest <mf> --workdir <out>
@@ -63,7 +75,7 @@ bin\fragpipe.bat --headless --workflow <wf> --manifest <mf> --workdir <out>
   a warning naming the runs FragPipe left out (#179). Two files with the
   same name stop the run.
 - **Experiment names** keep only letters, digits and `_`: FragPipe turns
-  every other character into `_` (`EJQ-2-027` → `EJQ_2_027`). Output
+  every other character into `_` (`ABC-2-027` → `ABC_2_027`). Output
   folders are `<experiment>_<bioreplicate>\`, and one flat folder when the
   spectral library or DIA-NN runs. Ionomos warns when a name will change.
 - The isoDTB / TMT / DIA sections below apply to a method by its kind, not its
@@ -130,9 +142,10 @@ lab's actual working workflow from the 24.0 GUI and pin it as
 `C:\Fragpipe_Auto\workflows\isoDTB.workflow`.
 
 **Manifest**: one line per raw. experiment = `<prefix>`, bioreplicate = `<rep>`,
-type `DDA`. Fractions share experiment+rep and FragPipe merges them. The
-existing run `20260902-isoDTB_EJQ-2-027` used experiment `EJQ_2_027`,
-bioreps 1–3 — output subfolders `EJQ_2_027_1/`, `_2/`, `_3/`.
+type `DDA`. Fractions share experiment+rep and FragPipe merges them. An
+existing run in the inventory, `YYYYMMDD-isoDTB_<compound code>`, used
+experiment `<compound_code>` (FragPipe's `_` for each `-`), bioreps 1–3 —
+output subfolders `<compound_code>_1/`, `_2/`, `_3/`.
 
 **Key output**: `<workdir>\combined_modified_peptide_label_quant.tsv`.
 
@@ -162,10 +175,14 @@ search and a report (D91). Checked on 2026-10-14 against the source of
 FragPipe 24.0 (`CmdTmtIntegrator`, `TmtiPanel`, `QuantLabel`, `TmtiConfProps`),
 TMT-Integrator's source (`PsmPreProcessor`, `tmt-i_param.yml`), FragPipe's
 stock `TMT10-MS3`, `TMT16`, `TMT10-bridge` and `TMT18-Astral` workflows, the
-FragPipe output guide and ProteoWizard's filter documentation. **Not yet seen
-on the PC**: no TMT search has run there under Ionomos
-([REAL_RUNS.md](REAL_RUNS.md)); the list at the end of this section says what
-the first one must confirm.
+FragPipe output guide and ProteoWizard's filter documentation. **Run on the
+PC, records not yet filed**: a TMT search has run through the watcher and
+finished (reported by the maintainer on 2026-10-28,
+[REAL_RUNS.md](REAL_RUNS.md)), and a real TMT result analysed with 0.21.0
+gave FragPipe-Analyst's fold changes. Until that search's
+`run_fingerprint.json` and console log are filed, what is below is from
+source and the fake; the list at the end of this section says what those
+records must confirm.
 
 ### The SOP, step by step
 
@@ -441,8 +458,9 @@ protein abundance and ratio, `_None`, peptide; single-site when the workflow
 searches phospho), and stops as FragPipe does on a missing reference tag.
 Scenarios: `tmt_good`, `tmt_plexes`, `tmt_flat_plexes`, `tmt16_na` (TMTpro,
 NA channels), `tmt_tag_mismatch`, `tmt_own_annotation`, `tmt_bridge`,
-`tmt_poor_label` (`tests/test_tmtkit.py`, `tests/test_tmtqc.py`). **The first
-real TMT run must confirm**: the `psm.tsv` header (reporter columns and their
+`tmt_poor_label` (`tests/test_tmtkit.py`, `tests/test_tmtqc.py`). **The
+records of the first real TMT run (reported 2026-10-28, not yet filed) must
+confirm**: the `psm.tsv` header (reporter columns and their
 order, `Purity`), that FragPipe found Ionomos' `annotation.txt` (the names in
 `abundance_gene_MD.tsv`), the labelling and purity numbers against what the
 lab expects, the `.raw` versus mzML comparison above, and how long a 10-plex
@@ -476,7 +494,7 @@ with 8 fractions takes (`timeout_minutes`).
 
 ## DIA
 
-No lab SOP yet. From the inventory: DIA runs exist for Chris, EJQ, Isaac
+No lab SOP yet. From the inventory: DIA runs exist for several users
 (`Fragpipe-DIANN\`, `FRAGPIPE-DIANN\` folders, some with `_RERUN`,
 `_incl-Peptide` variants — i.e. people iterate on DIA settings).
 
@@ -498,7 +516,9 @@ makes `report.tsv` from it (`CmdDiann`); the run columns are the
 `<raw>_uncalibrated.mzML` files MSFragger wrote beside the raws. With a spectral library or DIA-NN in the workflow
 there are no per-experiment folders. ⚠ The stock workflow's own notes say
 "For quantification using DIA-NN, Thermo/Sciex DIA files should be in mzML
-format": whether `.raw` works on the PC is for the first DIA run to show.
+format": on the PC `.raw` works (2026-09-23: MSFragger read the `.raw`
+files and DIA-NN the `_uncalibrated.mzML` FragPipe wrote,
+[REAL_RUNS.md](REAL_RUNS.md)).
 
 **Post-processing**: none known. Leave `postprocess: []` and ask users what
 they do next (FragPipe Analyst upload?).
@@ -771,7 +791,7 @@ samples' raw files have an acquisition time, the Quality control section has a
 **Competition experiments** (`downstream/roles.py`, D61). A condition whose
 name has `comp`, `competition`, `competitor`, `competed`, `compete`,
 `competing` or `excess` as a word (`Probe_Comp`, `Probe+Comp`, `ProbeComp`,
-`KL6283A_Comp_KL6159A`) is the compound plus a competitor, linked to the
+`XY101A_Comp_XY202A`) is the compound plus a competitor, linked to the
 compound named by the rest of it (or the only compound).
 
 | Comparison | Reads as |
@@ -1013,13 +1033,13 @@ does. Off unless the proteome is named; nothing is guessed:
 ```yaml
 analysis:                      # usually experiment.yaml
   protein_correction:
-    proteome: D:/Fragpipe_General/EJQ/20261001-DIA_EJQ-2-030   # an analysed Ionomos experiment (folder or results/),
+    proteome: D:/Fragpipe_General/ABC/20261001-DIA_ABC-2-030   # an analysed Ionomos experiment (folder or results/),
                                                                # or a protein table (MSstats groupComparison output:
                                                                # Protein, Label, log2FC, SE, DF; or an Ionomos
                                                                # *_differential.tsv); relative = in the experiment folder
     match: gene                # gene | protein (UniProt accessions, isoforms joined)
     conditions:                # site condition -> proteome comparison, compound first
-      EJQ_2_027: Cmpd vs DMSO  # default: the comparison whose first condition has the site condition's name
+      ABC_2_027: Cmpd vs DMSO  # default: the comparison whose first condition has the site condition's name
 ```
 
 - **Scale**: site ratios are log2 heavy / light. A proteome comparison

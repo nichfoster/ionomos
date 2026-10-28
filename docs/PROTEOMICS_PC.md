@@ -1,4 +1,12 @@
-# Proteomics PC — facts from the 2026-09-15 inventory
+# The instrument-side PC Ionomos was built for
+
+These are the facts of the first lab's PC, the Windows computer beside its
+mass spectrometer where the watcher runs, from its 2026-09-15 inventory. They
+are kept because they explain design constraints that another lab's PC will
+likely share: no R, no git, Python from python.org with the Microsoft Store
+stub first on PATH, FragPipe running on its bundled JRE with no Java on PATH,
+and a space in the account name (so in the home folder's path), which
+FragPipe does not allow in its paths.
 
 Source: [`reference/pc-inventory/2026-09-15/`](../reference/pc-inventory/2026-09-15/)
 (`system_report.txt`, `software_path_candidates.csv`), collected 15:24 on
@@ -8,8 +16,7 @@ Source: [`reference/pc-inventory/2026-09-15/`](../reference/pc-inventory/2026-09
 
 | | |
 |---|---|
-| Hostname | `DESKTOP-NI5V92B` |
-| Account | `DESKTOP-NI5V92B\Daniel Nomura` (local; WORKGROUP, not domain-joined) |
+| Account | a single local account whose name contains a space (not domain-joined) |
 | OS | Windows 11 Pro for Workstations, build 10.0.26200 |
 | CPU | Xeon Silver 4216 — 16 cores / 32 threads @ 2.1 GHz |
 | RAM | 64 GB |
@@ -28,7 +35,7 @@ Source: [`reference/pc-inventory/2026-09-15/`](../reference/pc-inventory/2026-09
 | FragPipe | 22.0 | unzipped in Downloads (`FragPipe-jre-22.0\`), has stock `workflows\isoDTB-ABPP.workflow`, MSFragger 4.1, IonQuant 1.10.27 |
 | DIA-NN | 2.3.2 Academia | installed (MSI); path not captured. FragPipe 24.0 also has its own copy, `tools\diann\2.3.2\DiaNN.exe`, and used it with `config_diann` empty (2026-09-23) |
 | Proteome Discoverer | 2.5.0.400 | `C:\Program Files\Thermo\Proteome Discoverer 2.5` |
-| Python | 3.14.5 (user) | `C:\Users\Daniel Nomura\AppData\Local\Python\pythoncore-3.14-64` |
+| Python | 3.14.5 (user) | `C:\Users\<account>\AppData\Local\Python\pythoncore-3.14-64` |
 | Python | 3.9.13 | system-wide; `py` launcher at `C:\Windows\py.exe` |
 | `python` on PATH | — | resolves to the **WindowsApps store stub** (`0.0.0.0`). Do not rely on `python`; use `py -3.14` or the absolute path |
 | Java on PATH | — | **not found**. `fragpipe.bat` needs `JAVA_HOME` or `java` on PATH, so Ionomos sets `JAVA_HOME` to FragPipe's own `jre` (D59). Yet on 2026-09-23 (0.5.1, before that) `fragpipe.bat` started FragPipe on Java 17.0.10 by itself; how it found Java is not known |
@@ -47,21 +54,18 @@ of six raws and a second one under way.
   R scripts and the "representative experiment" answers point there). **Not
   scanned** by the inventory — needs the fixed script.
 - `D:\<user>\` holds completed experiments with raws, mzML/mzBIN conversions,
-  and FragPipe output — ~15 user folders: Aman, Carolyn, Chris, CMZ, EJQ,
-  Isaac, Kosuke, Melissa, Melody, Phillip, Qian, RUI, Sheena, Taylor_Elements,
-  Thang, Yun, Zoe.
+  and FragPipe output, in about 15 per-user folders.
 - Folder naming is ad hoc (see NAMING_CONVENTION.md). Raw naming is consistent:
   `<prefix>_<rep>_<fraction>.raw`.
-- FragPipe outputs seen: per-replicate subfolders (`EJQ_2_027_1\`) with
+- FragPipe outputs seen: per-replicate subfolders (`ABC_2_027_1\`) with
   `*_ion_label_quant.tsv`, `*_modified_peptide_label_quant.tsv`,
   `*_protein_label_quant.tsv`, `interact-*.pep.xml`; top-level
   `combined_*.tsv`, `fragpipe.workflow`, `fragpipe.job`,
   `fragpipe-files.fp-manifest`, `filelist_ionquant.txt`, `modmasses_ionquant.txt`.
 - People re-run: `Fragpipe-DIANN_RERUN`, `Redo\`, `Again (see this one)\`
   folders exist. The watcher's "never overwrite" rule matters.
-- Lab SOP docs and R scripts live on the Desktop of the shared account.
-- The user-entered "planned watcher folder" was `C:\Fragipe_Auto` (sic —
-  typo). Proposal: `C:\Fragpipe_Auto`.
+- Ionomos keeps its own folders on this PC under `C:\Fragpipe_Auto` (no
+  spaces); its searches' FASTA is there (below).
 
 ## No internet on the PC
 

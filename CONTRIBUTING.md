@@ -15,7 +15,7 @@ Open an issue with the template. What makes a problem reproducible:
   **bundle** (**Report a problem…**, or `ionomos bundle 12 --level validate`):
   one zip, saved on your computer, never uploaded by Ionomos. Read
   [docs/DEV_LOOP.md](docs/DEV_LOOP.md) ("Bundles") before sharing one; keep
-  its key file in the lab.
+  its key file on the PC it was made on.
 - **With `ionomos analyze`:** `ionomos --version`, the command you ran, the
   first lines of the table's header, and `results/analysis.json` if one was
   written. Don't attach unpublished data you may not share.
@@ -54,6 +54,10 @@ push.
 - **Never delete or overwrite user data.** Intake moves; a failure leaves
   everything in place (D4, D17, D29). Results go only into folders Ionomos
   owns (D33).
+- **Nothing lab-specific.** Ionomos is for any lab: no person's name, no
+  lab's name and no lab's private path goes into the code, the docs or the
+  help. A lab's own names are configuration (`config.yaml`), and material
+  that belongs to one lab stays in that lab's own repository.
 - **No spaces in any default path** (FragPipe refuses them), and anything
   path-related works on Windows and macOS.
 - **A numerical method is a port, checked against its reference.** Add a
@@ -76,7 +80,7 @@ push.
 
 Fill in the template. Small, single-purpose pull requests are reviewed
 fastest. Write in the docs' voice: plain, specific, no marketing. Say what
-was tested and what was not (on real data, on the lab PC, on screen).
+was tested and what was not (on real data, on an instrument PC, on screen).
 
 ## Releases (the maintainer)
 

@@ -10,7 +10,7 @@ Pure Python, one dependency (PyYAML), Windows / macOS / Linux, no Tk needed
 for the analysis.
 
 ```bash
-pip install ionomos
+pip install ionomos        # not on PyPI yet: pip install "git+https://github.com/nichfoster/ionomos#subdirectory=ionomos"
 ionomos demo --open                              # a simulated experiment and its report
 ionomos analyze path/to/report.pg_matrix.tsv --open
 ```
@@ -26,12 +26,16 @@ ionomos analyze path/to/report.pg_matrix.tsv --open
 - a results table that already holds fold changes and p-values (plotted as given)
 
 Results go to `results/` in a folder, or `<table name>_ionomos/` next to a
-table; nothing beside your data is changed.
+table; nothing beside your data is changed. The analysis settings are yours:
+`experiment.yaml` (or the app's Analysis tab) says what kind of experiment it
+is and how it is analysed.
 
 Ionomos is also a Windows app that watches a drop folder on the instrument PC,
-files each experiment and runs FragPipe headlessly before the analysis; that
-part is set up from the installer on the
-[releases page](https://github.com/nichfoster/ionomos/releases).
+files each experiment and runs FragPipe headlessly (or DIA-NN, MaxQuant, Sage)
+before the analysis. The methods (each a FragPipe workflow and its FASTA) and
+the file-naming rules are configuration, so the watcher runs your lab's
+workflows under your lab's names. That part is set up from the installer on
+the [releases page](https://github.com/nichfoster/ionomos/releases).
 
 - 10-minute quickstart: <https://github.com/nichfoster/ionomos/blob/master/docs/QUICKSTART.md>
 - Source, docs and issues: <https://github.com/nichfoster/ionomos>

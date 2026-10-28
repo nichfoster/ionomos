@@ -1,9 +1,9 @@
 # Scope
 
-What Ionomos does and does not do, as of 2026-10-15 (version 0.18.1 plus the
-unreleased library and TMT work). It started as one lab's plan (2026-09-15,
-"Where it started" below); D36 (2026-09-30) widened it to other labs.
-[VISION.md](VISION.md) says who it is for and the road to publishing.
+What Ionomos does and does not do, as of 2026-10-28 (version 0.21.0). It
+started as one lab's plan (2026-09-15, "Where it started" below); D36
+(2026-09-30) widened it to other labs. [VISION.md](VISION.md) says who it is
+for.
 
 ## Problem
 
@@ -56,8 +56,8 @@ analysis of the same data?
   say what each is and what is wrong with it, pin one per method, download
   and prepare a UniProt FASTA, warn when it is stale (D89, D90;
   [LIBRARY.md](LIBRARY.md), [FASTA.md](FASTA.md)).
-- The lab's R post-processing, ported byte-identical (isoDTB sites, TMT
-  annotation; D5, D18).
+- The first lab's R post-processing (isoDTB sites, TMT annotation), ported
+  byte-identical, as the built-in post-processing for those methods (D5, D18).
 - A Windows app (setup, control panel, analysis, notifications), an
   installer and one-button updates (D14, D22, D58, D67).
 - Instrument QC trending of the lab's QC standard (D45, D55).
@@ -112,11 +112,12 @@ analysis of the same data?
 
 - **Lab members** (about 15 in the first lab): drop folders and read
   reports. They should never need a terminal.
-- **The maintainer** of a lab's PC: config, workflows, FASTAs, logs. Today one
-  person, who also maintains Ionomos.
-- **Anyone with a protein table**: installs from pip and runs one command.
-- **Other labs and core facilities** running the watcher with their own names
-  and engines; none yet (ROADMAP 5D).
+- **The maintainer** of a lab's PC: config, methods (workflows and FASTAs),
+  naming rules, logs. In the first lab, one person, who also maintains
+  Ionomos.
+- **Anyone with a protein table**: installs with pip and runs one command.
+- **Other labs and core facilities** running the watcher with their own names,
+  methods and engines (all configuration: D37, D54); none yet (ROADMAP 5D).
 
 See [VISION.md](VISION.md) for these in more detail.
 
@@ -141,7 +142,7 @@ Tk, no network after the first enrichment download (D40).
 
 ## Success criteria
 
-The v1 criteria (below) still hold for the watcher. For the published tool,
+The v1 criteria (below) still hold for the watcher. For the tool as a whole,
 "done for v1.0" is defined in [VISION.md](VISION.md#what-done-for-v10-means).
 
 ## Where it started
@@ -178,6 +179,8 @@ multi-user permissions; parallel FragPipe runs.
   written next to it, and nothing else happens.
 - Restarting the PC mid-run does not lose or duplicate the job.
 
-As of 2026-10-15 the second and third hold in tests and the stress testbed;
-the first has not yet happened on the PC: no isoDTB search has run there under
-Ionomos ([REAL_RUNS.md](REAL_RUNS.md)).
+As of 2026-10-28 the second and third hold in tests and the stress testbed.
+For the first: TMT, DIA and DDA searches have run through the watcher on the
+PC (reported by the maintainer on 2026-10-28; the run records are still to be
+filed), and an isoDTB search processed with zero maintainer intervention is
+still to be recorded in [REAL_RUNS.md](REAL_RUNS.md).

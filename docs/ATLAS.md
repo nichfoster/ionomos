@@ -1,22 +1,25 @@
 # The hand-off to the lab's cysteine atlas
 
-The lab keeps a **cysteine atlas**: one database of every cysteine site the lab's isoDTB experiments have
-seen (`%USERPROFILE%\nomura-data\atlas\atlas.duckdb`, built by the Nomura-Lab repository's `Lab Informatics\tools`).
-FragPipe isoDTB runs reach it through the lab Dropbox: `harvest_fragpipe.ps1` copies a run's result files into
-`Nicholas Foster Data\fragpipe-runs`, `ingest_fragpipe.py` turns them into evidence rows, and
-`build_site_atlas.py` rebuilds the atlas. Until 2026-10-19 a person ran that by hand.
+The lab where Ionomos started keeps a **cysteine atlas**: one database of every cysteine site the lab's isoDTB
+experiments have seen. It is built on the atlas side, a private repository of the lab that keeps the atlas; its
+harvest script (`harvest_fragpipe.ps1`) defines the selection rule Ionomos copies. FragPipe isoDTB runs reach it
+through the lab Dropbox: `harvest_fragpipe.ps1` copies a run's result files into
+`<Dropbox>\<team folder>\fragpipe-runs`, `ingest_fragpipe.py` turns them into evidence rows, and
+`build_site_atlas.py` rebuilds the atlas. Until 2026-10-19 a person ran that by hand. The folder's name is the atlas
+side's choice and is set in `atlas.handoff_dir`; the app's Dropbox suggestion looks for the team folder name the
+first atlas uses (a constant in `atlas.py`). The hand-off is off by default: a lab with no such atlas leaves it off.
 
 Ionomos runs the lab's FragPipe searches, so it is the natural sender: when an isoDTB search is done, it copies the
 run into the same Dropbox folder, the same way, and says so with a small record the atlas side reads. The atlas
 publishes a site lookup back, and the isoDTB report shows it beside each site. Both sides implement one contract,
-below, word for word; the Nomura-Lab side is built in that repository.
+below, word for word; the atlas side is built in its own repository.
 
 Since 2026-10-21 (D127, contract `/2`) the hand-off also carries what a model of cysteine engagement trained on the
 lab's competition runs needs, and what a decoy check of FragPipe's results needs: TMT searches (one switch; the atlas
 stores them and counts nothing from them), each run's sample design (`experiment.yaml`, the annotation files) and
-its decoys (each replicate's `.pin`, gzip-compressed). **Not on the atlas side yet** (checked 2026-10-26 on Nomura-Lab
-main): `atlas_intake.py` still reads only `/1` and `harvest_fragpipe.ps1` still takes no `.pin` or design file; the
-receiver for `/2` (and item 7) is being written in that repository. Until it is, `/2` records wait in Dropbox,
+its decoys (each replicate's `.pin`, gzip-compressed). **Not on the atlas side yet** (checked 2026-10-26 on the atlas
+repository's main branch): `atlas_intake.py` still reads only `/1` and `harvest_fragpipe.ps1` still takes no `.pin`
+or design file; the receiver for `/2` (and item 7) is being written there. Until it is, `/2` records wait in Dropbox,
 uncounted.
 
 Since 2026-10-26 (D128) Ionomos also does what a person did with `harvest_fragpipe.ps1`: the **drive sweep** searches
@@ -26,7 +29,7 @@ decoys and sample design included ([The drive sweep](#the-drive-sweep), contract
 
 Decisions: D120 (the contract and the settings), D121 (when a job is handed off), D122 (how files are copied),
 D123 (the command line), D124 (atlas context in the report), D125 (the app), D127 (TMT, the sample design and the
-decoys: contract `/2`), D128 (the drive sweep), D134 (TMT-Integrator's tables, every TMT reagent's mass, a run's
+decoys: contract `/2`), D128 (the drive sweep), D135 (TMT-Integrator's tables, every TMT reagent's mass, a run's
 `.pin` files checked against its manifest). Code: `ionomos/src/ionomos/atlas.py`,
 `ionomos/src/ionomos/atlassweep.py`, `ionomos/src/ionomos/downstream/atlasctx.py`.
 
@@ -34,15 +37,15 @@ decoys: contract `/2`), D128 (the drive sweep), D134 (TMT-Integrator's tables, e
 
 Both sides implement exactly this.
 
-1. **Destination.** `<dest>` is configured as `atlas.handoff_dir`. It is normally the lab Dropbox folder `...\Nicholas Foster Data\fragpipe-runs`, the same folder `harvest_fragpipe.ps1` copies into.
-   - There is no default, because that path has spaces and CLAUDE.md forbids default paths with spaces.
+1. **Destination.** `<dest>` is configured as `atlas.handoff_dir`. It is normally the lab Dropbox folder `<Dropbox>\<team folder>\fragpipe-runs`, the same folder `harvest_fragpipe.ps1` copies into.
+   - There is no default, because that path has spaces and Ionomos has no default paths with spaces.
    - The app may offer a detected Dropbox folder as a suggestion the person confirms.
    - The feature is off unless `atlas.enabled: true` is set.
-2. **What is copied.** For a done job whose method is in `atlas.methods` (default `[isoDTB]`; FragPipe isoDTB or TMT methods), copy the FragPipe run folder's result files using the SAME selection rule as `harvest_fragpipe.ps1`. Read the script and `Lab Informatics/tools/HARVEST-README.md` "What it takes and what it leaves" in the Nomura-Lab repository, read-only.
+2. **What is copied.** For a done job whose method is in `atlas.methods` (default `[isoDTB]`; FragPipe isoDTB or TMT methods), copy the FragPipe run folder's result files using the SAME selection rule as `harvest_fragpipe.ps1`. The script and its README's "What it takes and what it leaves", on the atlas side, are the reference.
    - From the top folder: `*.workflow`, `*.fp-manifest`, `*.job`, `*.tsv`, `*.txt`, `*.csv`, `*.log`, `*.fas`, `*.params`, `*.json`, `*.xml`.
    - From each replicate subfolder: `psm.tsv`, `peptide.tsv`, `protein.tsv` and logs.
-   - From the `tmt-report` subfolder (TMT-Integrator's `abundance_*.tsv` and `ratio_*.tsv`; the name's case ignored), also every `*.tsv`, for every run whatever its probe class (D134).
-   - **The decoys** (`/2`): every `*.pin` of the top folder and of each replicate subfolder, gzip-compressed to `<name>.pin.gz`, if it is no larger than `atlas.pin_max_mb` (default 100 MB, before compression; 0 = none). When `<x>_edited.pin` (MSBooster's) is beside `<x>.pin`, only the `_edited` one. A `.pin` whose raw file the run's manifest doesn't name, or that is another replicate's, stays behind (D134, [below](#a-runs-pin-files-and-its-manifest-d134)).
+   - From the `tmt-report` subfolder (TMT-Integrator's `abundance_*.tsv` and `ratio_*.tsv`; the name's case ignored), also every `*.tsv`, for every run whatever its probe class (D135).
+   - **The decoys** (`/2`): every `*.pin` of the top folder and of each replicate subfolder, gzip-compressed to `<name>.pin.gz`, if it is no larger than `atlas.pin_max_mb` (default 100 MB, before compression; 0 = none). When `<x>_edited.pin` (MSBooster's) is beside `<x>.pin`, only the `_edited` one. A `.pin` whose raw file the run's manifest doesn't name, or that is another replicate's, stays behind (D135, [below](#a-runs-pin-files-and-its-manifest-d135)).
    - **The sample design** (`/2`), from beside the run folder: the experiment folder's `experiment.yaml` and `results\fragpipe-analyst\experiment_annotation.tsv`, and every file whose name ends in `annotation.txt` in each folder holding the manifest's raw files (where FragPipe reads a TMT annotation). Ionomos's experiment folder is the job's; harvest takes the run folder's parent when it holds `experiment.yaml` or Ionomos's status file (`ionomos.json`, or the LabWatch-era `labwatch.json`): `experiment.yaml` is there only once someone saved an analysis choice.
    - Never raw data, `.pepXML`, `.prot.xml`, speclibs, or any file over 500 MB.
 3. **Layout and copying.**
@@ -61,7 +64,7 @@ Both sides implement exactly this.
    - The atlas counts sites from `isoDTB` runs only. A `TMT` run is verified and stored with its design and decoys; no counting rule reads it.
 5. **Re-sending.** Re-sending a job (Retry or re-run) writes a new record. The atlas side keys a run by Run + HandoffSha256 and never double-counts. The atlas side is to accept `/1` records as before.
 6. **Return path.** The atlas side publishes `<dest>\_atlas\atlas_sites_lookup.tsv` and `atlas_sites_lookup.json`.
-   - TSV columns: accession, site (1-based position of the C in the canonical UniProt sequence), tier (high/medium/low by Dan's spectra rule of 2026-10-14), experiments, spectra, qc_suspect (0/1). Human only, sorted by accession then site.
+   - TSV columns: accession, site (1-based position of the C in the canonical UniProt sequence), tier (high/medium/low by the atlas's own tier rule; the rule and date are in the lookup's JSON), experiments, spectra, qc_suspect (0/1). Human only, sorted by accession then site.
    - JSON: contract `ionomos-atlas-lookup/1`, atlas_sha256, built, rule, sources, set, rows, quotable (bool).
    - Ionomos reads it read-only and only if it is present. A malformed file is ignored with a note.
 7. **A run Ionomos found on the drives** (D128: not an Ionomos job; the drive sweep). Items 1-5 hold, with these differences.
@@ -81,30 +84,30 @@ Both sides implement exactly this.
   it. A replicate subfolder is one level down; `MSBooster\`, `tmp\` and the script's other skipped names are not
   entered, and a junction or link is never followed. "Over 500 MB" is the script's: more than 500 × 1024 × 1024
   bytes. No `ion.tsv` (harvest takes it only with `-IncludeIonTsv`).
-- **TMT-Integrator's tables (D134).** FragPipe writes them into the run folder's `tmt-report` subfolder
-  (`abundance_<level>_<norm>.tsv`, `ratio_<level>_<norm>.tsv`), where `$ReplicateAllow` took none of them: the lab's
-  Dropbox export of 2026-10-27 had 46 runs with TMT-Integrator on and none of its tables. A subfolder named
+- **TMT-Integrator's tables (D135).** FragPipe writes them into the run folder's `tmt-report` subfolder
+  (`abundance_<level>_<norm>.tsv`, `ratio_<level>_<norm>.tsv`), where `$ReplicateAllow` took none of them: a
+  Dropbox export of the first lab's runs (2026-10-27) had 46 runs with TMT-Integrator on and none of its tables. A subfolder named
   `tmt-report` (case ignored) now also takes `*.tsv` (`TMT_REPORT_DIR`, `TMT_REPORT_ALLOW`), for every run whatever
   its probe class (the selection never looks at the class). One level only, as any subfolder; `$NeverCopy` and the 500 MB cap apply (a table over it stays behind and is
   in `left[]`). It lands at `tmt-report/<name>` under the run's destination, as any subfolder's file. `select`
   lists these files at level `tmt-report`, as harvest's inventory does, and handles them as a replicate folder's.
 - **The probe class by the masses** is harvest's `$ProbeMasses` (`atlas.PROBE_MASSES`): isoDTB `561.33` /
   `567.34`; isoTOP `464.28` / `470.29`; TMT `229.16` (TMT 6/10/11-plex), `304.20` / `304.21` (TMTpro), and since
-  D134 `225.15` (TMT2, duplex: 225.1558), `224.15` (TMT0: 224.1525) and `295.18` / `295.19` (TMTpro zero: 295.1896,
-  written 295.18959, or rounded to two decimals). The five runs of `D:\Kosuke\A549_nucleus_TMT-check` are TMT2 and
+  D135 `225.15` (TMT2, duplex: 225.1558), `224.15` (TMT0: 224.1525) and `295.18` / `295.19` (TMTpro zero: 295.1896,
+  written 295.18959, or rounded to two decimals). Five runs of that export (one experiment's TMT check) are TMT2 and
   were classed `other` before. The drive sweep still reads only the rows turned on (D128).
-- **The decoys, measured (D127).** The lab PC's harvest inventory of 2026-10-12 lists 4,642 `.pin` files in 379
+- **The decoys, measured (D127).** The harvest inventory of 2026-10-12 on the first lab's PC lists 4,642 `.pin` files in 379
   runs: median 8 MiB, the largest 57 MiB, 42.5 GiB in all; 2,199 are MSBooster's `_edited.pin`. An `_edited.pin`
   holds every row and every column of its `.pin` with the same values (checked on six pairs of a lab run) plus
   seven MSBooster features, and Percolator scored it, so it alone is taken: 2,449 files, 23.6 GiB before
   compression. gzip level 6 makes a `.pin` 0.336 of its size (level 9: 0.336, twice as slow; level 1: 0.51), so
   all of them come to about 8 GiB in Dropbox (isoDTB runs 2.4 GiB, TMT 1.6 GiB), beside the 32 GiB harvest takes
-  today. The 100 MB cap leaves none of them behind; it is there for a run unlike the lab's so far. The `.gz` has
+  today. The 100 MB cap leaves none of them behind; it is there for a run unlike the first lab's so far. The `.gz` has
   no name or time in its header (Python's `GzipFile(mtime=0)`), so Ionomos gives the same bytes every time.
 - **A `.pin` is taken at either level**: FragPipe writes one per raw file into the experiment's subfolder, or into
   the top folder when the manifest names no experiment. `$NeverCopy`'s `*.pin` and `*.gz` still keep every other
-  such file out; the `.pin` rule is applied first. Since D134 it is the run's own only when its manifest says so
-  ([below](#a-runs-pin-files-and-its-manifest-d134)).
+  such file out; the `.pin` rule is applied first. Since D135 it is the run's own only when its manifest says so
+  ([below](#a-runs-pin-files-and-its-manifest-d135)).
 - **The sample design's kinds** are `experiment.yaml`, `experiment_annotation.tsv` (Ionomos's analysis wrote it
   for FragPipe-Analyst) and `annotation.txt` (any file whose name ends so, beside a raw file of the run). A folder
   of raw files that is gone or can't be listed adds nothing (harvest's RawMissing counts those raw files). A file
@@ -118,17 +121,17 @@ Both sides implement exactly this.
   ```json
   {
     "contract": "ionomos-atlas-handoff/2",
-    "run": "C:\\Fragpipe_General\\Nicholas\\20261019_isoDTB_x\\fragpipe",
+    "run": "C:\\Fragpipe_General\\Alex\\20261019_isoDTB_x\\fragpipe",
     "probe_class": "isoDTB",
     "files": [{"path": "exp_1/psm.tsv", "size": 123456, "sha256": "<64 lowercase hex>"},
               {"path": "exp_1/a_edited.pin.gz", "size": 3812345, "sha256": "<of the .gz>",
                "gzip_of": {"path": "exp_1/a_edited.pin", "size": 11345678, "sha256": "<of the .pin>"}}],
     "design": [{"kind": "experiment.yaml",
-                "source": "C:\\Fragpipe_General\\Nicholas\\20261019_isoDTB_x\\experiment.yaml",
-                "path": "C/Fragpipe_General/Nicholas/20261019_isoDTB_x/experiment.yaml", "size": 412,
+                "source": "C:\\Fragpipe_General\\Alex\\20261019_isoDTB_x\\experiment.yaml",
+                "path": "C/Fragpipe_General/Alex/20261019_isoDTB_x/experiment.yaml", "size": 412,
                 "sha256": "…"}],
     "left": [{"path": "exp_1/a.pin", "size": 9654321, "reason": "its _edited.pin is taken"}],
-    "job": {"number": 12, "user": "Nicholas", "experiment": "20261019_isoDTB_x", "inbox_name": "…",
+    "job": {"number": 12, "user": "Alex", "experiment": "20261019_isoDTB_x", "inbox_name": "…",
             "method": "isoDTB", "fragpipe_version": "24.0", "workflow": "…\\isoDTB.workflow", "fasta": "…",
             "raw_files": ["…\\a.raw"], "replicate_plan": [{"raw": "…", "experiment": "…", "bioreplicate": "1",
             "data_type": "DDA"}], "search_finished_at": "2026-10-19T14:02:11-07:00",
@@ -139,9 +142,9 @@ Both sides implement exactly this.
   A run the drive sweep found has, in place of `job` (item 7):
 
   ```json
-    "found": {"owner": "EJQ", "experiment": "2025-03-04_isoDTB_EJQ-1-100",
-              "experiment_folder": "D:\\EJQ\\2025-03-04_isoDTB_EJQ-1-100", "fragpipe_version": "22.0",
-              "workflow": "D:\\EJQ\\2025-03-04_isoDTB_EJQ-1-100\\fragpipe\\fragpipe.workflow", "fasta": "…",
+    "found": {"owner": "ABC", "experiment": "2025-03-04_isoDTB_ABC-1-100",
+              "experiment_folder": "D:\\ABC\\2025-03-04_isoDTB_ABC-1-100", "fragpipe_version": "22.0",
+              "workflow": "D:\\ABC\\2025-03-04_isoDTB_ABC-1-100\\fragpipe\\fragpipe.workflow", "fasta": "…",
               "raw_files": ["…\\S_1.raw"], "replicate_plan": [{"raw": "…", "experiment": "exp_1", "bioreplicate": "",
               "data_type": "DDA"}], "last_modified": "2025-03-05T09:12:44", "probe_class_by_masses": "isoDTB",
               "ionomos_version": "0.19.0"}
@@ -155,7 +158,7 @@ Both sides implement exactly this.
   reading of the workflow's modification masses, for information; `probe_class` and the CSV's ProbeClass are the
   method's kind (only FragPipe isoDTB and TMT methods may be in `atlas.methods`). `design[].path` is relative to
   `<dest>`, with `/`; `left[].reason` is `its _edited.pin is taken`, `its raw file is not in this run's manifest`,
-  `its raw file is another replicate's (<folder>)` (both D134), `pins off`, `pin larger than N MB` or
+  `its raw file is another replicate's (<folder>)` (both D135), `pins off`, `pin larger than N MB` or
   `larger than 500 MB` (a design file's `path` there is its source). The record holds no send time, so sending
   the same files and job again gives the same bytes and the same HandoffSha256: nothing new for the atlas to
   count. A design file edited since the last send changes the record, as it should: the atlas side stores the
@@ -167,22 +170,22 @@ Both sides implement exactly this.
   `FragPipeVersion` is the workflow's `# FragPipe (x)` line, else the run fingerprint's. The time in the name is
   local; a second send in the same second takes the next second's name.
 - **Only one file at the destination is ever replaced**: `ionomos-handoff.json`, and only when the record changed
-  (Ionomos was updated between two sends, the run's files changed, or what is taken from them did: D134). A runs CSV
+  (Ionomos was updated between two sends, the run's files changed, or what is taken from them did: D135). A runs CSV
   whose HandoffSha256 no longer matches the record was superseded by a newer CSV of the same Run.
 - **SHA-256 is lowercase hex** (compare without case against PowerShell's `Get-FileHash`).
 
-### A run's `.pin` files and its manifest (D134)
+### A run's `.pin` files and its manifest (D135)
 
-FragPipe never removes an earlier search's files from its output folder. Isaac's `D:\Isaac\20260629-isoDTB\output`
-(the lab's Dropbox export of 2026-10-27) holds the folders `isoDTB_IJ510312_1` to `_7` of an earlier search that
+FragPipe never removes an earlier search's files from its output folder. One isoDTB run of that export
+(`D:\<member>\20260629-isoDTB\output`) holds the folders `isoDTB_AB0001_1` to `_7` of an earlier search that
 grouped its 21 raw files by fraction; the current manifest groups them by replicate (`_1` to `_3`), and each folder
 kept the earlier search's `.pin` files beside the current ones. Every `.pin` was taken, which inflated the run's
 hand-off by about 25%. So each `.pin` that `select` finds (top folder or a replicate folder) is checked against the
 run's `fragpipe-files.fp-manifest`, after the `_edited` twin rule and before `pins off` and the cap.
 
 - **The manifest** is a TSV with no header: raw file, experiment, bioreplicate, data type, separated by tabs
-  (`C:\Proteomics_File_Sharing\CG_isoDTB_22rv1_ELK_1_F1.raw`, `isoDTB_ELK052`, `1`, `DDA`). Its first line is a row
-  (Carolyn's `D:\Carolyn\isoDTB_ELK\output` lists a cytochrome C run first). FragPipe writes a row's results into
+  (`C:\Proteomics_File_Sharing\CD_isoDTB_22rv1_CD0002_1_F1.raw`, `isoDTB_CD0002`, `1`, `DDA`). Its first line is a
+  row (another run of the export lists a cytochrome C run first). FragPipe writes a row's results into
   the subfolder `<experiment>_<bioreplicate>`, or `<experiment>` when the bioreplicate is empty: that is the row's
   group. A row with no experiment has no known group.
 - **Stems**: a `.pin`'s is its file name without `.pin` and without a trailing `_edited` (MSBooster's
@@ -198,14 +201,15 @@ run's `fragpipe-files.fp-manifest`, after the `_edited` twin rule and before `pi
 - **No manifest**, one that can't be read, or one with no row naming a raw file: every `.pin` as before.
 - A plain `<x>.pin` whose `<x>_edited.pin` is beside it keeps `its _edited.pin is taken`, whatever the manifest says
   of the `_edited` one: the twin rule comes first.
-- Isaac's run: in `isoDTB_IJ510312_1`, `_2` and `_3` only that replicate's 7 `.pin` files are taken; the others there,
-  and every one in `_4` to `_7`, are left as `another replicate's (isoDTB_IJ510312_<rep>)`. Carolyn's: all 8 taken.
+- The first run: in `isoDTB_AB0001_1`, `_2` and `_3` only that replicate's 7 `.pin` files are taken; the others
+  there, and every one in `_4` to `_7`, are left as `another replicate's (isoDTB_AB0001_<rep>)`. The second: all 8
+  taken.
 - A DIA search's `.pin` files carry a suffix after the raw file's stem (DIA-Umpire's `<x>_Q1` to `_Q3`,
   MSFragger-DIA's `<x>_rank<N>`): one whose whole stem is no raw file's counts as `<x>`'s.
 - This check is Ionomos' only. `harvest_fragpipe.ps1` takes the `tmt-report` tables and the TMT masses in the same
   release, but still takes every `.pin`; the atlas side's decoy check drops the same two cases itself.
 
-### After an update that changes the selection (D134)
+### After an update that changes the selection (D135)
 
 - **A run the drive sweep sent before** is sent again once when what it takes changed: a TMT run with `tmt-report`
   tables, a run with an earlier search's `.pin` files. Its fingerprint (D128) covers the taken files, so it differs.
@@ -271,8 +275,8 @@ copy (`experiment.<sha12>.yaml`); the record names the one this send used.
 
 ## The drive sweep
 
-The runs the lab searched before Ionomos, or searched by hand in FragPipe, are on the PC's drives: about 380 runs
-with 4,642 `.pin` files in the harvest inventory of 2026-10-12. `harvest_fragpipe.ps1` copied their result files,
+The runs the lab searched before Ionomos, or searched by hand in FragPipe, are on the PC's drives (on the first lab's PC,
+about 380 runs with 4,642 `.pin` files in the harvest inventory of 2026-10-12). `harvest_fragpipe.ps1` copied their result files,
 but not their decoys or sample design, and only when a person ran it. With `atlas.sweep` on, Ionomos does it by
 itself (`atlassweep.py`, D128):
 
@@ -304,7 +308,7 @@ atlas.transfer       as a job's hand-off: compare, copy through .partial, verify
 
 | What a run came to | Why | What happens next |
 |---|---|---|
-| `sent` | every file verified, record and CSV written | nothing, until its files change, or what Ionomos takes from them (an update, [D134](#after-an-update-that-changes-the-selection-d134)): then it is sent again (a new record; only the new files are copied) |
+| `sent` | every file verified, record and CSV written | nothing, until its files change, or what Ionomos takes from them (an update, [D135](#after-an-update-that-changes-the-selection-d135)): then it is sent again (a new record; only the new files are copied) |
 | `unchanged` | sent before, the same files since | nothing |
 | `job` | the run of an Ionomos job | the job's hand-off (atlas.py) sends it, with its job record |
 | `left` | not for the atlas: probe class isoTOP, other or unknown (no workflow), TMT with the switch off, a probe row turned off, no `psm.tsv`, another method's job, an earlier attempt in an Ionomos experiment folder, the test bed's fake run | nothing |
@@ -341,7 +345,7 @@ deletes, moves or overwrites anything; each step can be stopped and done again.
 1. **Install 0.20.0 or later** (the installer from the GitHub release, or the app's update check), then restart
    the app and the watcher.
 2. **Set the folder and the switches, not the sweep yet.** Folders tab → Cysteine atlas: **Use** the Dropbox
-   folder Ionomos found (`…\Nicholas Foster Data\fragpipe-runs`), tick **Also TMT searches**, leave **Also search
+   folder Ionomos found (`<Dropbox>\<team folder>\fragpipe-runs`), tick **Also TMT searches**, leave **Also search
    this PC's drives** off, **Save**. Then `ionomos-cli.exe atlas check`: every line ✓ (the folder there and
    writable; the site lookup may be missing). Ticking the hand-off itself is not needed for the dry run.
 3. **Dry run** (10-30 minutes: it lists every folder of C: and D:; it copies and writes nothing):
@@ -352,9 +356,9 @@ deletes, moves or overwrites anything; each step can be stopped and done again.
    (`cmd /c`: Windows PowerShell 5.1's own `>` writes UTF-16, which the atlas side's reader takes for broken JSON.)
    The first prints the runs that would go by probe class and owner, and why the others are left; the second has
    every run with its path, owner, probe class, FragPipe version, modification tables (which TMT, which probe on
-   C), `.pin` and annotation counts, and the MB not in Dropbox yet. Copy the JSON into `Nicholas Foster Data\`
-   in Dropbox (not into `fragpipe-runs`) for the atlas side. Check: about 380 runs in all (harvest's inventory of
-   2026-10-12), isoDTB and TMT ones under the owners you expect, and `C:`'s free space above 40 GB plus about
+   C), `.pin` and annotation counts, and the MB not in Dropbox yet. Copy the JSON into `<Dropbox>\<team folder>\`
+   (not into `fragpipe-runs`) for the atlas side. Check: as many runs as harvest's inventory had (about 380 on the
+   first lab's PC on 2026-10-12), isoDTB and TMT ones under the owners you expect, and `C:`'s free space above 40 GB plus about
    8 GB (the `.pin.gz`).
 4. **One folder first, by hand**, an owner with TMT competition runs (the hand-off on: tick it, **Save**):
    ```powershell
@@ -374,7 +378,7 @@ deletes, moves or overwrites anything; each step can be stopped and done again.
 ```yaml
 atlas:   # hand finished isoDTB (and TMT) searches to the lab's cysteine atlas. Off by default
   enabled: false
-  handoff_dir: ''      # the lab Dropbox folder ...\Nicholas Foster Data\fragpipe-runs
+  handoff_dir: ''      # the lab Dropbox folder <Dropbox>\<team folder>\fragpipe-runs
   methods: [isoDTB]    # FragPipe isoDTB or TMT methods whose searches are handed off (the atlas counts isoDTB only)
   pin_max_mb: 100      # each .pin (the decoys) goes gzip-compressed if no larger than this many MB; 0 = none
   max_tries: 10        # a hand-off that keeps failing (Dropbox offline) stops after this many tries
@@ -387,7 +391,7 @@ atlas:   # hand finished isoDTB (and TMT) searches to the lab's cysteine atlas. 
 ```
 
 - `handoff_dir` may have spaces: FragPipe never sees it. It must be a full path (`C:\…` or `\\server\share\…`).
-  When the folder is not there yet but its parent is (Dropbox has `Nicholas Foster Data` but no `fragpipe-runs`),
+  When the folder is not there yet but its parent is (Dropbox has the team folder but no `fragpipe-runs`),
   the first hand-off makes it, as harvest does; when the parent is missing too, the hand-off waits (Dropbox not
   running, not signed in, or the folder not synced to this PC).
 - `methods` may name only methods searched by FragPipe whose kind is isoDTB or TMT (`isoDTB`, `TMT`, or a method
@@ -398,8 +402,8 @@ atlas:   # hand finished isoDTB (and TMT) searches to the lab's cysteine atlas. 
 - `pin_max_mb` is a whole number from 0 to 4096, in MiB before compression, like harvest's `-MaxPinMB`; 0 sends no
   `.pin` at all.
 - `sweep_roots` and `sweep_exclude` are lists of full folder paths (spaces are fine: they are only read). With no
-  `sweep_roots`, every fixed drive (Windows' DRIVE_FIXED, as harvest's Win32_LogicalDisk DriveType 3): the lab
-  PC's `C:` and its USB archive disk `D:`, not its flash drive. `sweep_hours` is a number from 1 to 720,
+  `sweep_roots`, every fixed drive (Windows' DRIVE_FIXED, as harvest's Win32_LogicalDisk DriveType 3): on the
+  first lab's PC, `C:` and its USB archive disk `D:`, not its flash drive. `sweep_hours` is a number from 1 to 720,
   `sweep_min_free_gb` from 0 (0 = no floor; a job's hand-off keeps `fragpipe.min_free_gb` instead). The sweep needs `enabled` and `handoff_dir`; **Search now** and `ionomos atlas
   sweep` work while `sweep` is off.
 - The watcher reads `atlas:` again on every pass, so turning the hand-off on or off in the app counts without a
@@ -421,8 +425,8 @@ follow D102.
 
 - **Folders tab → Cysteine atlas**: "Hand finished isoDTB searches to the cysteine atlas" (`atlas.enabled`), the
   destination folder (spaces allowed) with **Browse…**, and the Dropbox folder Ionomos found (as
-  `harvest_fragpipe.ps1` finds it: `%LOCALAPPDATA%\Dropbox\info.json`, then `Nicholas Foster Data` up to two
-  levels down), offered with **Use**, never filled in by itself. **Help** opens `faq.atlas`. **Also TMT searches**
+  `harvest_fragpipe.ps1` finds it: `%LOCALAPPDATA%\Dropbox\info.json`, then the team folder up to two
+  levels down; its name is `atlas.DATA_FOLDER`, the one the first atlas uses), offered with **Use**, never filled in by itself. **Help** opens `faq.atlas`. **Also TMT searches**
   (D127) is on while `atlas.methods` names one of the lab's FragPipe TMT methods; ticking it adds every such method
   (`atlas.methods_of_kind`), clearing it takes them out. **Save** writes `enabled`, `handoff_dir` and that change
   of `methods`, and keeps the other `atlas:` keys (and the other names in `methods`) as the file has them.
@@ -456,5 +460,5 @@ in the report changes; a malformed lookup is ignored and the report says so in i
 ## What the lab must confirm
 
 See [ROADMAP.md](ROADMAP.md) ("The cysteine atlas hand-off"): whether the lab PC's Dropbox client is signed in to
-the lab Dropbox and syncs `Nicholas Foster Data`, whether the Windows account the watcher runs as can write there,
+the lab Dropbox and syncs the team folder, whether the Windows account the watcher runs as can write there,
 and who decides a conflict; for the drive sweep, that the atlas side reads item 7's records.

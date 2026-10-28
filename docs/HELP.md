@@ -1,6 +1,6 @@
 # The help for users: where it lives and how to edit it
 
-Ionomos has one set of help texts for the people who use it (lab members, not
+Ionomos has one set of help texts for the people who use it (the scientists in the lab, not
 bioinformaticians). They are shown in three places, and on the documentation site:
 
 | Where | What people see | How it's made |
@@ -10,7 +10,7 @@ bioinformaticians). They are shown in three places, and on the documentation sit
 | **The terminal** | `ionomos help NO_TABLE`, `ionomos help pca`, `ionomos help glossary` print one topic as plain text | `help.text()` |
 | **The documentation site** (`help/*.html`, D132) | One page per file, the same text as `help.html` | `website/hooks.py` puts each heading in Markdown with its `{#id}` and each text as `help.to_html()` renders it |
 
-`help.html` is written to `<log_dir>/help/` on the lab PC (the app-data folder
+`help.html` is written to `<log_dir>/help/` on the instrument PC (the app-data folder
 when there is no lab config, e.g. after `pip install`) and opened from there.
 It loads nothing from the internet.
 

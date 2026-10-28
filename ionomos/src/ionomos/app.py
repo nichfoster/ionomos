@@ -1022,9 +1022,9 @@ class App:
         self.atlas_entry = ttk.Entry(g, textvariable=self.v("atlas.handoff_dir"), width=58)
         self.atlas_entry.grid(row=1, column=1, columnspan=2, sticky="ew", **PAD)
         ttk.Button(g, text="Browse…", width=9, command=self.browse_atlas).grid(row=1, column=3, **PAD)
-        ttk.Label(g, text="The lab Dropbox folder …\\Nicholas Foster Data\\fragpipe-runs. FragPipe never sees it, so "
-                          "spaces are fine here.", foreground="#666").grid(row=2, column=1, columnspan=3, sticky="w",
-                                                                            padx=6)
+        ttk.Label(g, text="The Dropbox folder the atlas side reads, e.g. …\\<team folder>\\fragpipe-runs. FragPipe "
+                          "never sees it, so spaces are fine here.",
+                  foreground="#666").grid(row=2, column=1, columnspan=3, sticky="w", padx=6)
         self.atlas_found = ttk.Label(g, text="", foreground="#1565c0")  # "Dropbox folder found: …" (+ Use)
         self.atlas_found.grid(row=3, column=1, sticky="w", padx=6)
         self.atlas_use = ttk.Button(g, text="Use", width=9, command=self.use_atlas_suggestion)

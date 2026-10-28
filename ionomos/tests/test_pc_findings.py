@@ -16,15 +16,15 @@ def _touch(p: Path) -> Path:
 
 @pytest.fixture
 def pc(tmp_path, monkeypatch):
-    """C:\\FragPipe with the 23.1 and 24.0 installer layouts + an old 22.0 zip under 'Daniel Nomura' (a space)."""
+    """C:\\FragPipe with the 23.1 and 24.0 installer layouts + an old 22.0 zip under 'Lab Account' (a space)."""
     fp = tmp_path / "FragPipe"
     new = _touch(fp / "FragPipe-24.0" / "bin" / "FragPipe-24.0.exe")
     _touch(fp / "FragPipe-23.1" / "bin" / "FragPipe-23.1.exe")
-    old = _touch(tmp_path / "Users" / "Daniel Nomura" / "Downloads" / "FragPipe-jre-22.0" / "fragpipe" / "bin" / "fragpipe.bat")
+    old = _touch(tmp_path / "Users" / "Lab Account" / "Downloads" / "FragPipe-jre-22.0" / "fragpipe" / "bin" / "fragpipe.bat")
     _touch(old.parent / "fragpipe.exe")
     monkeypatch.setattr(fragpipe, "LAUNCHER_GLOBS", (
         str(fp / "*" / "bin" / "fragpipe.bat"), str(fp / "*" / "bin" / "FragPipe*.exe"),
-        str(tmp_path / "Users" / "Daniel Nomura" / "Downloads" / "FragPipe*" / "fragpipe" / "bin" / "fragpipe.bat")))
+        str(tmp_path / "Users" / "Lab Account" / "Downloads" / "FragPipe*" / "fragpipe" / "bin" / "fragpipe.bat")))
     return {"new": new, "old": old, "fp": fp}
 
 
@@ -67,9 +67,9 @@ def test_checklist_names_the_path_with_a_space(lab):
     from ionomos import configio
 
     d = configio.read_config(lab["cfg_path"])
-    d["paths"]["fragpipe_exe"] = "C:/Users/Daniel Nomura/Downloads/FragPipe-jre-22.0/fragpipe/bin/fragpipe.bat"
+    d["paths"]["fragpipe_exe"] = "C:/Users/Lab Account/Downloads/FragPipe-jre-22.0/fragpipe/bin/fragpipe.bat"
     item = next(i for i in setupcheck.run(lab["cfg_path"], d, probe_watcher=False) if i.key == "layout")
-    assert "fragpipe_exe = C:/Users/Daniel Nomura" in item.detail
+    assert "fragpipe_exe = C:/Users/Lab Account" in item.detail
 
 
 def test_config_saved_in_the_program_folder_moves_next_to_the_data(tmp_path, monkeypatch):

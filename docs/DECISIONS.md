@@ -199,7 +199,7 @@ build (commit) inside so a report maps to code. CI installs, upgrades and
 uninstalls the real installer on Windows for every release.
 
 ### D23 — Loose raw files get a folder; ambiguity still goes to a person
-**2026-09-23.** On the first real drop, Chris's files went straight into the
+**2026-09-23.** On the first real drop, a lab member's files went straight into the
 inbox and were silently ignored. Ionomos now groups loose `.raw` files by their
 shared leading name parts (≥ 2) into a folder in the inbox, after the usual
 stability wait, and hands that folder to intake immediately. Only moves, never
@@ -356,8 +356,8 @@ on branch protection for `master` requiring one approving code-owner review,
 with admins exempt so the owner can still push directly.
 
 ### D32 — Small groups are tested and labelled, never refused; p-values are never invented
-**2026-09-27.** A real run (Chris, 22Rv1 FLAG-AR, one DMSO against three
-MA25) ended with "not enough replicates" and an empty volcano. The lab wants a
+**2026-09-27.** A real run (a lab member's FLAG pull-down, one DMSO against three
+compound replicates) ended with "not enough replicates" and an empty volcano. The lab wants a
 plot from whatever it has. A group of one is now tested: limma's group-means
 model pools residual variance across every condition, and a Welch test falls
 back to a pooled t-test. The comparison is labelled *low confidence* wherever
@@ -382,7 +382,7 @@ analysing a stray `psm.tsv`.
 
 ### D34 — Every drop is shown before it is filed; config changes apply without a restart
 **2026-09-28.** D13 opened the window only when a name couldn't be parsed. A
-real drop (Kosuke, `KC_DIA_D1..C3`) showed that a clean parse can still be
+real drop (a lab member, `KC_DIA_D1..C3`) showed that a clean parse can still be
 wrong: each file became its own condition, and nobody saw it before the
 search. So every parsed drop now opens the same window in review mode
 (`gui.review_drops`, on by default). It shows user, method, date, each file's
@@ -2545,7 +2545,7 @@ proteome comes from, and whether to centre, are the lab's decisions.
    format MSstatsPTM itself takes, or an Ionomos `*_differential.tsv`. A
    relative path is read from the experiment folder; the proteome is only
    read. `match: gene | protein` (accessions with isoforms joined, as the site
-   annotation does). A site condition (an isoDTB prefix such as `EJQ_2_027`)
+   annotation does). A site condition (an isoDTB prefix such as `ABC_2_027`)
    takes the comparison `conditions` names, else the one whose first
    condition has its name; none or several is `PROTEIN_CORRECTION_CONDITIONS`
    (decide) and that condition is not corrected. Alternatives weighed: taking
@@ -3886,7 +3886,7 @@ conditions: vehicle and compound pull-downs, and an empty vector (EV) as the
 negative control. Ionomos read EV as a second control (it is a control
 keyword), compared "EV vs DMSO" so everything the bait pulls down read as
 *down*, let a filter across all samples remove proteins absent from EV (which
-is the point of EV), and median-centred EV against the pull-downs. Sheena:
+is the point of EV), and median-centred EV against the pull-downs. The experiment's owner:
 in EV "the only things you'd see are proteins that non-specifically bind to
 beads", so most proteins are expected to be missing there.
 
@@ -3946,7 +3946,7 @@ proteomes, the preview not matching the analysis) are fixed above.
 **2026-10-15.** The Methods tab offered a combobox over the workflows folder and
 an "Import workflow…" file dialog. The 2026-09-15 inventory lists ~150
 `fragpipe.workflow` files on `D:\`, a custom `fragpipe_pax8.workflow` for
-Aman's 9-plex TMT, the stock `isoDTB-ABPP.workflow` in the 22.0 zip, three
+a member's 9-plex TMT, the stock `isoDTB-ABPP.workflow` in the 22.0 zip, three
 FragPipe installations, and one known FASTA. Nobody could say which workflow
 was the TMT one, whether its FASTA still existed, or whether it was current.
 `library.py` (no Tk), `ionomos library`.
@@ -4000,7 +4000,7 @@ was the TMT one, whether its FASTA still existed, or whether it was current.
 
 **Verified**: `tests/test_library.py` (89 tests) on a fake PC built from the
 inventory's real names (paths with spaces, the recycle bin, the 22.0 zip, two
-of Chris's DIA folders with the same settings, an offset search), workflows
+of a member's DIA folders with the same settings, an offset search), workflows
 abridged from FragPipe 24.0's stock ones; property names and formats checked
 on GitHub (`Nesvilab/FragPipe`, `workflows/` and the GUI source for
 `fragpipe-ui.cache`). **Not verified**: on the lab PC — how long a scan of
@@ -4770,10 +4770,10 @@ re-acquisition in the phosphosite matrix still raises DUPLICATE_SAMPLES, and in 
 samples by run and doesn't read the manifest's conditions, it stays two samples named by file, as before (ROADMAP).
 
 ### D120 — Ionomos hands finished isoDTB searches to the lab's cysteine atlas, by one contract, off by default
-**2026-10-19.** The lab's cysteine atlas (Nomura-Lab repository, `Lab Informatics\tools`) took FragPipe isoDTB runs
+**2026-10-19.** The lab's cysteine atlas (the lab's private atlas repository) took FragPipe isoDTB runs
 as its third source on 2026-10-19, through `harvest_fragpipe.ps1`, which a person ran by hand. Ionomos runs those
 searches, so it sends them. Both sides implement one contract, `ionomos-atlas-handoff/1`, copied word for word
-into ATLAS.md; the Nomura-Lab side was built at the same time against the same text.
+into ATLAS.md; the atlas side was built at the same time against the same text.
 1. **`atlas:` in config.yaml**: `enabled` (false), `handoff_dir` (no default: the lab's Dropbox path has spaces,
    and CLAUDE.md forbids a default path with one; the app offers the folder it finds, D125), `methods` (`[isoDTB]`),
    `max_tries` (10), `retry_minutes` (15). `handoff_dir` may have spaces (FragPipe never sees it) but must be a full
@@ -4828,7 +4828,7 @@ into ATLAS.md; the Nomura-Lab side was built at the same time against the same t
    longer matches it was superseded.
 5. **One process per job**: `<log_dir>/atlas-send-job<N>.lock`, made exclusively (the watcher's thread, the app and
    the command line can all send); one older than 6 hours was left by a process that died and is taken over.
-6. **The destination folder is made only when its parent is there**, as harvest does: no `Nicholas Foster Data`
+6. **The destination folder is made only when its parent is there**, as harvest does: no `<team folder>`
    means Dropbox is not running or not synced, and the hand-off waits instead of making a local folder that never
    syncs. Paths past 260 characters use the `\\?\` form.
 
@@ -4855,7 +4855,7 @@ The lookup reaches the analysis as an argument, like `site_annotation`, not as a
 while the hand-off is on or a listed job has one, and has **Send to atlas** for a selected done job; the item's
 window in the attention list has it too. The Folders tab has the hand-off switch and the destination with
 **Browse…**, and offers the Dropbox folder Ionomos found (`atlas.dropbox_suggestion`: harvest's own search,
-`%LOCALAPPDATA%\Dropbox\info.json` then `Nicholas Foster Data` up to two levels down) to confirm with **Use**,
+`%LOCALAPPDATA%\Dropbox\info.json` then `<team folder>` up to two levels down) to confirm with **Use**,
 never filled in by itself; its Save writes `enabled` and `handoff_dir` and keeps the other keys. The Setup checklist
 has a line from `atlas.check` (only while the hand-off is on; to do / warning / problem) with **Fix**, a new action
 `atlas_folder` that puts the cursor in the folder field; `ionomos check` has no atlas row (`ionomos doctor` shows the
@@ -4866,7 +4866,7 @@ work the busy indicator should show), again only for a file whose time changed. 
 a space past column 80 (a long Dropbox path) was folded onto the next line and the comment after it made
 config.yaml unreadable; it writes on one line now.
 
-**Not verified (D120-D125)**: on the lab PC: the Dropbox client signed in and syncing `Nicholas Foster Data`,
+**Not verified (D120-D125)**: on the lab PC: the Dropbox client signed in and syncing `<team folder>`,
 the watcher's Windows account writing there, a real isoDTB search handed off and ingested by the atlas side, and
 the app's new controls on the PC's screen.
 
@@ -4959,12 +4959,12 @@ that the installed Ionomos.exe can nest the job (a console log would say it
 could not).
 
 ### D127 — The atlas hand-off carries TMT runs, the sample design and the decoys: contract `/2`
-**2026-10-21.** Dan approved training a model of cysteine engagement on the lab's competition runs (the Nomura-Lab
+**2026-10-21.** The lab head approved training a model of cysteine engagement on the lab's competition runs (the atlas repository
 PROJECT-LOG, 2026-10-21). It needs the TMT competition runs and how each was designed (conditions, doses, times,
 the channel map); and FragPipe's numbers in the atlas can't be quoted until a decoy check exists, which needs the
 decoys that `harvest_fragpipe.ps1` has left behind so far (MSFragger's `.pin`). The hand-off and the harvest were
 to change together, so the lab PC's two senders keep one selection rule (`harvest_fragpipe.ps1` and HARVEST-README
-in the Nomura-Lab repository). **Correction 2026-10-26**: neither change reached Nomura-Lab (main at 25d2b99 and
+in the atlas repository). **Correction 2026-10-26**: neither change reached the atlas repository (main at 25d2b99 and
 the desktop copy of 2026-10-23: `atlas_intake.py` reads only `/1`, harvest takes no `.pin`); the receiver is being
 written there, and the drive sweep (D128) does harvest's part from Ionomos.
 1. **TMT is one switch.** `atlas.methods` may name FragPipe methods whose kind is isoDTB or TMT (`atlas.KINDS`);
@@ -4995,7 +4995,7 @@ written there, and the drive sweep (D128) does harvest's part from Ionomos.
    was saved); Ionomos uses the job's folder (the same folder for every Ionomos run).
 5. **The contract is `ionomos-atlas-handoff/2`** because the receiver must change: it skipped every row whose
    ProbeClass isn't isoDTB, and refused a file path outside the run folder. The record gains `probe_class`,
-   `files[].gzip_of`, `design` and `left`; the CSV's columns are the same. The Nomura-Lab `atlas_intake.py` is to take
+   `files[].gzip_of`, `design` and `left`; the CSV's columns are the same. The atlas side's `atlas_intake.py` is to take
    `/1` and `/2`, store TMT runs and the new files, and change no counting rule (not done yet: see the correction
    above).
 
@@ -5372,10 +5372,59 @@ experiment.yaml through `load_overrides`, its Save and the analysis' notes, logg
 record's old key). The default DIA report's statements are unchanged (the JS fixture's list). **Not verified**:
 how the new lines read to a lab member; the JS tests were not run here (no `node_modules`), CI runs them.
 
-### D134 — The atlas takes TMT-Integrator's tables, knows every TMT reagent, and leaves an earlier search's `.pin` files
-**2026-10-27.** The lab's Dropbox export of 2026-10-27 showed three gaps in what the atlas hand-off takes
+### D134 — Ionomos is a tool for any lab: nothing lab-specific in the public repository
+**2026-10-28.** D36 widened the scope to other labs a month ago, but the
+public face still read as one lab's project: the GitHub description said the
+tool was for one lab's proteomics PC, the README opened with "On the
+lab PC", the installer's publisher was the lab, the docs named lab members,
+the lab head, a person's Dropbox folder and the lab's private repository, and
+VISION.md and ROADMAP.md carried the plan for publishing the tool. The
+repository is now read by people outside the lab, so:
+
+1. **No person, no lab, no private path, in anything public.** The README,
+   `docs/`, the help, the code's user-facing strings, the installer metadata
+   (`AppPublisher=Ionomos`) and the GitHub description name no lab member, no
+   lab, and no path that holds a person's name. A lab member is "a lab
+   member" or "the owner"; the lab Ionomos was built in is "the first lab" or
+   "the lab where Ionomos started"; the atlas's Dropbox folder is
+   `<Dropbox>\<team folder>\fragpipe-runs`; the atlas's own repository is
+   "the atlas side, a private repository". CONTRIBUTING.md states the rule.
+   Test fixtures keep paths with a space in the account name (that is what
+   they test) under made-up names.
+2. **What belongs to one lab lives in that lab's private repository**, not
+   here: the plan for publishing the tool (VISION.md's "The road to
+   publishing", ROADMAP 5D's paper steps and the paper-related risks), the
+   open questions about the first lab's own process and people, and the
+   identified PC inventory (hostname, account, user folders). Moved on
+   2026-10-28; the public docs keep the technical content (the roadmap's
+   adoption steps, the open questions a lab can answer on its PC, the PC's
+   facts that shaped the design) without the names. `docs/PROTEOMICS_PC.md`
+   stays, de-identified, because CLAUDE.md, SCOPE.md and ARCHITECTURE.md
+   point at it and its constraints hold for any lab's PC.
+3. **The public docs say nothing about publishing.** A reader decides what
+   the tool is worth from what it does, what it was checked against and what
+   has run for real (REAL_RUNS.md, VALIDATION.md), not from a plan to write
+   it up. The "Mostly agent-written code" risk stays (D31): it is true and a
+   reader will ask how the code was checked.
+4. **What stays as it is.** `reference/` keeps the first lab's SOPs, R
+   scripts and PC inventory: the isoDTB and TMT ports are checked against
+   those scripts byte for byte (D18) and the naming tests are table-driven
+   from the inventory's real names, and git history holds the files in any
+   case; the README now says whose they are. DECISIONS.md and CHANGELOG.md
+   are history and are not rewritten, beyond replacing a person's name or
+   folder with a role or a placeholder. The Dropbox suggestion's folder-name
+   constant in `atlas.py` keeps its value (the first atlas's folder; a
+   convenience only, `atlas.handoff_dir` is the setting).
+
+**Not done**: no code behaviour changed; `reference/` was not moved
+(above); the GitHub description was changed by the maintainer's tooling, not
+by a workflow, so a future rename of the repository would need it changed
+again by hand.
+
+### D135 — The atlas takes TMT-Integrator's tables, knows every TMT reagent, and leaves an earlier search's `.pin` files
+**2026-10-27.** A Dropbox export of the first lab's runs (2026-10-27) showed three gaps in what the atlas hand-off takes
 (`atlas.select`, for a job's hand-off and the drive sweep's found runs alike). The user approved the three rules
-below; `harvest_fragpipe.ps1` (Nomura-Lab, another session's) takes rules 1 and 2 in the same release, so the
+below; `harvest_fragpipe.ps1` (the atlas side's, a private repository) takes rules 1 and 2 in the same release, so the
 PC's two senders keep one selection of files and one probe class (D127); rule 3 is Ionomos' only (harvest takes
 every `.pin`, and the atlas side's decoy check drops the same two cases itself).
 1. **TMT-Integrator's tables.** 46 runs of the export had TMT-Integrator on and none of its tables at the atlas:
@@ -5387,17 +5436,17 @@ every `.pin`, and the atlas side's decoy check drops the same two cases itself).
    it is in `left[]` as any capped file. It lands at `tmt-report/<name>` under the run's destination. Its files'
    level is `tmt-report`, as harvest's inventory lists them (so the two sides' parity test compares like with
    like); everything that reads a level treats it as a replicate folder's.
-2. **Every TMT reagent's mass.** 5 runs (`D:\Kosuke\A549_nucleus_TMT-check`) were TMT2 (duplex, 225.1558 on K and
+2. **Every TMT reagent's mass.** 5 runs (one experiment's TMT check) were TMT2 (duplex, 225.1558 on K and
    the peptide N-term; TMT6's 229.16293 on S turned off) and were classed `other`, so the sweep left them.
    `PROBE_MASSES`'s TMT pattern (harvest's `$ProbeMasses`) is now `229\.16|304\.20|304\.21|225\.15|224\.15|295\.18|295\.19`:
    TMT2 225.1558, TMT0 224.1525 and TMTpro zero 295.1896 added (295.18 catches 295.18959 and 295.1896; 295.19 a
    two-decimal rounding). The sweep still reads only the rows turned on (`enabled_class`, D128).
 3. **A run's `.pin` files checked against its manifest.** FragPipe leaves an earlier search's files in its output
-   folder. Isaac's `D:\Isaac\20260629-isoDTB\output` has the folders `isoDTB_IJ510312_1` to `_7` of a search that
+   folder. One isoDTB run (`D:\<member>\20260629-isoDTB\output`) has the folders `isoDTB_AB0001_1` to `_7` of a search that
    grouped its 21 raw files by fraction, while its manifest groups them by replicate (`_1` to `_3`): every `.pin` was
    taken, which inflated the run by about 25% at the atlas and gave the decoy check two searches' decoys of one raw
    file. Now each `.pin` is checked against `fragpipe-files.fp-manifest` (no header: its first line is a row, as
-   Carolyn's `D:\Carolyn\isoDTB_ELK\output` shows with a cytochrome C run first), after the `_edited` twin rule and
+   another run of the export shows with a cytochrome C run first), after the `_edited` twin rule and
    before `pins off` and the cap. Stems: the `.pin`'s name without `.pin` and a trailing `_edited`; the raw file's
    name (last path part, `\` or `/`) without its extension; compared without case. A manifest that names raw files
    but not the `.pin`'s → `its raw file is not in this run's manifest`. In a subfolder F, its stem in the manifest
@@ -5422,12 +5471,12 @@ every `.pin`, and the atlas side's decoy check drops the same two cases itself).
 **Verified**: `tests/test_atlas.py` (the selection table with `tmt-report` and a leftover `.pin`; `TMT-Report` in
 mixed case with two tables taken, a `.txt` there and a `.tsv` a level deeper not, one over the cap, at
 `tmt-report/<name>`, its level `tmt-report` with the sweep's fingerprint as a replicate's; every TMT mass; the manifest's first line a row; the `.pin` cases
-table-driven from the export's real names: Isaac's 39 `.pin` files with 21 taken and 18 left naming the right
-replicate, Carolyn's 8 all taken, a leftover `Old_search_F1_edited.pin`, no or an empty or an unreadable manifest,
+table-driven from the export's runs, under made-up names (D134): the first run's 39 `.pin` files with 21 taken and
+18 left naming the right replicate, the second's 8 all taken, a leftover `Old_search_F1_edited.pin`, no or an empty or an unreadable manifest,
 no experiment, a group with no folder, case, mzML and `.d` raws; the order of the rules; the reasons in a found
-run's and a job's record) and `tests/test_atlassweep.py` (Kosuke's TMT2 tables by enabled rows; a TMT2 run left
+run's and a job's record) and `tests/test_atlassweep.py` (the TMT2 run's tables by enabled rows; a TMT2 run left
 with the switch off and sent with it, its `tmt-report` tables included; a found run sent under the earlier rule sent
 again with only its two new tables copied, every earlier file at the destination byte- and time-identical but its
 record, the stale `.pin.gz` kept and named in `left[]`, and unchanged on the pass after). **Not verified**: on the
 lab PC; the DIA `.pin` names from FragPipe's documentation, not a lab run (the lab's isoDTB and TMT runs are DDA);
-and `harvest_fragpipe.ps1`'s side of rules 1 and 2 (its own session).
+and `harvest_fragpipe.ps1`'s side of rules 1 and 2 (the atlas side's).

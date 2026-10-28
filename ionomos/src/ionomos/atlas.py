@@ -10,7 +10,7 @@ The hand-off to the lab's cysteine atlas (docs/ATLAS.md, D120-D125, D127), contr
     state(dest)                               # the `atlas` block of an experiment's ionomos.json ({} = never)
     HandoffLoop(get_cfg).run_forever()        # the watcher's thread: hands off what is due, with a back-off
     check(cfg)                                # destination writable, the atlas's lookup present and valid
-    dropbox_suggestion()                      # "...\\Nicholas Foster Data\\fragpipe-runs" when Dropbox has it
+    dropbox_suggestion()                      # "...\\<team folder>\\fragpipe-runs" when Dropbox has it
 
 The rules, from CLAUDE.md and the contract:
   - the experiment folder is only read: nothing in it is moved, renamed or deleted; the only write is the
@@ -84,7 +84,7 @@ RUN_MARKERS = ("fragpipe.workflow", MANIFEST_FILE, "fragpipe.job", "combined_pro
 ROOT_ALLOW = ("*.workflow", "*.fp-manifest", "*.job", "*.tsv", "*.txt", "*.csv", "*.log", "*.fas", "*.fasta",
               "*.params", "*.yml", "*.yaml", "*.json", "*.manifest", "*.xml")
 REPLICATE_ALLOW = ("psm.tsv", "peptide.tsv", "protein.tsv", "*.log", "log_*.txt")
-# TMT-Integrator's tables (D134; harvest takes the same): FragPipe writes them into the run folder's tmt-report
+# TMT-Integrator's tables (D135; harvest takes the same): FragPipe writes them into the run folder's tmt-report
 # subfolder (abundance_*.tsv, ratio_*.tsv), so a subfolder of that name (case ignored) also takes every *.tsv, for
 # every run whatever its probe class; one level, NEVER_COPY and the size cap as for any subfolder
 TMT_REPORT_DIR = "tmt-report"
@@ -98,7 +98,7 @@ NEVER_COPY = ("*.raw", "*.d", "*.wiff", "*.wiff2", "*.mzML", "*.mzXML", "*.mzBIN
 # column of <x>.pin (the same values) plus its own features, so when it is there <x>.pin stays behind.
 PIN_ALLOW = ("*.pin",)
 PIN_EDITED = "_edited.pin"
-# A .pin is the run's own only when its raw file is (D134; Ionomos' side only: harvest takes every .pin, and the
+# A .pin is the run's own only when its raw file is (D135; Ionomos' side only: harvest takes every .pin, and the
 # atlas side's decoy check drops the same two cases itself): a run folder can hold the .pin files of an earlier
 # search of other raw files, or grouped otherwise, which FragPipe never removes. Checked against the run's manifest
 # after the _edited twin rule, before pins off and the cap; these are the reasons
@@ -151,8 +151,8 @@ def settings_from(raw) -> dict:
     v = raw.get("handoff_dir")
     if v is not None:
         if not isinstance(v, str):
-            raise AtlasError("handoff_dir must be a folder path, e.g. the Dropbox folder "
-                             "'...\\Nicholas Foster Data\\fragpipe-runs' (in quotes)")
+            raise AtlasError("handoff_dir must be a folder path, e.g. the Dropbox folder the atlas side reads, "
+                             "'...\\<team folder>\\fragpipe-runs' (in quotes)")
         v = v.strip()
         if v and not _absolute(v):
             raise AtlasError(f"handoff_dir must be a full folder path (C:\\... or \\\\server\\share\\...), not {v!r}")
@@ -356,7 +356,7 @@ def replicate_group(row: dict) -> str:
 
 def _manifest_groups(run_dir: Path) -> dict[str, list[str]]:
     """The run's manifest as {raw stem (lower case): [the group of each row with that stem]}; {} when the run has no
-    manifest, it can't be read, or no row names a raw file (then every .pin is checked as before D134)."""
+    manifest, it can't be read, or no row names a raw file (then every .pin is checked as before D135)."""
     groups: dict[str, list[str]] = {}
     for r in manifest_rows(run_dir / MANIFEST_FILE):
         if r["raw"]:
@@ -365,7 +365,7 @@ def _manifest_groups(run_dir: Path) -> dict[str, list[str]]:
 
 
 def pin_not_this_runs(name: str, folder: str | None, groups: dict[str, list[str]], dirs: set[str]) -> str:
-    """Why a .pin is not this run's own by its manifest (D134); "" when it is, or when that can't be told for sure.
+    """Why a .pin is not this run's own by its manifest (D135); "" when it is, or when that can't be told for sure.
     name: the .pin's file name; folder: the subfolder it is in (None: the top folder, which gets only the first
     check); groups: _manifest_groups; dirs: the run folder's subfolder names, in lower case.
       - the manifest names raw files, none of them the .pin's (nor, a DIA search's, without PIN_DIA_SUFFIX)
@@ -593,7 +593,7 @@ def read_workflow_info(path: Path) -> dict:
 
 # harvest's $ProbeMasses: the modification masses that say which probe (or label) a search looked for. isoDTB light
 # and heavy; isoTOP light and heavy; TMT: 6/10/11-plex 229.1629, TMTpro 304.2071, TMT2 (duplex) 225.1558, TMT0
-# 224.1525 and TMTpro zero 295.1896 (295.18 catches 295.18959 and 295.1896, 295.19 a two-decimal rounding; D134)
+# 224.1525 and TMTpro zero 295.1896 (295.18 catches 295.18959 and 295.1896, 295.19 a two-decimal rounding; D135)
 PROBE_MASSES = (("isoDTB", r"561\.33|567\.34"), ("isoTOP", r"464\.28|470\.29"),
                 ("TMT", r"229\.16|304\.20|304\.21|225\.15|224\.15|295\.18|295\.19"))
 
@@ -1070,8 +1070,8 @@ def send(cfg, job, trigger: str = "auto", force: bool = False) -> Result:
     if not s["enabled"]:
         return Result(jid, "", "the atlas hand-off is off (config.yaml atlas.enabled: false)", setup=True)
     if not s["handoff_dir"]:
-        return Result(jid, "", "atlas.handoff_dir is not set: the lab Dropbox folder "
-                               "'...\\Nicholas Foster Data\\fragpipe-runs' (app: Folders tab)", setup=True)
+        return Result(jid, "", "atlas.handoff_dir is not set: the Dropbox folder the atlas side reads, e.g. "
+                               "'...\\<team folder>\\fragpipe-runs' (app: Folders tab)", setup=True)
     if job is None:
         return Result(None, "", "no such job")
     if job.status != "done":
@@ -1480,6 +1480,7 @@ def check(cfg, write_probe: bool = True) -> list[Finding]:
 
 # -------------------------------------------------------------------------------------- Dropbox folder --
 
+# the team folder name the first atlas uses; the suggestion is only a convenience, atlas.handoff_dir is the setting
 DATA_FOLDER = "Nicholas Foster Data"
 RUNS_FOLDER = "fragpipe-runs"
 
@@ -1506,7 +1507,7 @@ def dropbox_roots(env: dict | None = None) -> list[str]:
 
 
 def dropbox_suggestion(env: dict | None = None, roots: list[str] | None = None) -> str:
-    r"""<the folder "Nicholas Foster Data" up to two levels under a Dropbox root>\fragpipe-runs, as harvest finds
+    r"""<the team folder (DATA_FOLDER) up to two levels under a Dropbox root>\fragpipe-runs, as harvest finds
     it; "" when there is none. A suggestion the person confirms, never a default (the path has spaces). Lists a
     few folders: call it off the Tk thread."""
     for root in (dropbox_roots(env) if roots is None else roots):

@@ -17,9 +17,10 @@ with a CHANGELOG line that credits you unless you ask not to be named.
 ## Supported versions
 
 Only the latest minor release (the newest `0.x` on the
-[Releases page](https://github.com/nichfoster/ionomos/releases) and on PyPI)
-gets security fixes. The app offers its own updates; `pip install -U ionomos`
-for the package.
+[Releases page](https://github.com/nichfoster/ionomos/releases)) gets security
+fixes. The app offers its own updates. The pip package is not on PyPI yet
+(checked 2026-10-28); install or update it from GitHub with
+`pip install -U "git+https://github.com/nichfoster/ionomos#subdirectory=ionomos"`.
 
 ## What Ionomos is, for judging a report
 
