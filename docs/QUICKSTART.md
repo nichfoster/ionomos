@@ -11,17 +11,15 @@ PC is a separate Windows install: [DEPLOY_WINDOWS.md](DEPLOY_WINDOWS.md).)
 You need Python 3.11 or newer (`python3 --version`; on Windows `py --version`).
 
 ```bash
-python3 -m pip install ionomos            # Windows: py -m pip install ionomos
-```
-
-Until the first release is on PyPI, install it from GitHub instead:
-
-```bash
 python3 -m pip install "git+https://github.com/nichfoster/ionomos#subdirectory=ionomos"
 ```
 
+(Windows: `py -m pip install …`.) `ionomos` is not on PyPI yet
+(2026-10-28); once it is, `python3 -m pip install ionomos` does the same.
+
 The only dependency is PyYAML. A virtual environment (`python3 -m venv
-ionomos-env`) or `pipx install ionomos` keeps it apart from other tools. If the
+ionomos-env`) or `pipx install` with the same address keeps it apart from
+other tools. If the
 shell says `ionomos: command not found`, pip's scripts folder is not on your
 PATH: run `python3 -m ionomos ...` (Windows: `py -m ionomos ...`) instead.
 

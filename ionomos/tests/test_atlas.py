@@ -1,10 +1,10 @@
 """The hand-off to the lab's cysteine atlas (atlas.py, docs/ATLAS.md, D120-D125, D127), contract
 "ionomos-atlas-handoff/2".
 
-The selection rule is harvest_fragpipe.ps1's (Nomura-Lab, Lab Informatics/tools), so its cases are table-driven
-from the script's constants; the layout is its Get-RelativeDestination, checked against the atlas side's reader
-(ingest_fragpipe.local_run_dir, copied below). Every test writes under tmp_path only: never the real Dropbox,
-nomura-data, C:/Fragpipe_Auto or C:/Fragpipe_General.
+The selection rule is harvest_fragpipe.ps1's (the atlas's own repository, which is private), so its cases are
+table-driven from the script's constants; the layout is its Get-RelativeDestination, checked against the atlas
+side's reader (ingest_fragpipe.local_run_dir, copied below). Every test writes under tmp_path only: never the real
+Dropbox, the atlas's data folder, C:/Fragpipe_Auto or C:/Fragpipe_General.
 """
 from __future__ import annotations
 
@@ -57,9 +57,9 @@ def test_the_contract_names_and_columns():
 @pytest.mark.parametrize(("raw", "want"), [
     (None, atlas.DEFAULTS),
     ({}, atlas.DEFAULTS),
-    ({"enabled": True, "handoff_dir": r"C:\Users\me\TNRG Dropbox\Daniel Nomura\Nicholas Foster Data\fragpipe-runs"},
+    ({"enabled": True, "handoff_dir": r"C:\Users\me\Team Dropbox\Lab Head\Nicholas Foster Data\fragpipe-runs"},
      {**atlas.DEFAULTS, "enabled": True,
-      "handoff_dir": r"C:\Users\me\TNRG Dropbox\Daniel Nomura\Nicholas Foster Data\fragpipe-runs"}),
+      "handoff_dir": r"C:\Users\me\Team Dropbox\Lab Head\Nicholas Foster Data\fragpipe-runs"}),
     ({"handoff_dir": r"\\server\share\fragpipe-runs"}, {**atlas.DEFAULTS, "handoff_dir": r"\\server\share\fragpipe-runs"}),
     ({"methods": "isoDTB"}, atlas.DEFAULTS),
     ({"max_tries": 3, "retry_minutes": 2.5}, {**atlas.DEFAULTS, "max_tries": 3, "retry_minutes": 2.5}),
@@ -152,7 +152,7 @@ def test_the_dropbox_folder_with_spaces_survives_a_save(tmp_path):
     from ionomos import configio
 
     d = configio.defaults("C:/Fragpipe_Auto", "C:/Fragpipe_General")
-    d["atlas"].update(enabled=True, handoff_dir=r"C:\Users\me\TNRG Dropbox\Daniel Nomura\Nicholas Foster Data\fragpipe-runs")
+    d["atlas"].update(enabled=True, handoff_dir=r"C:\Users\me\Team Dropbox\Lab Head\Nicholas Foster Data\fragpipe-runs")
     p = tmp_path / "config.yaml"
     configio.write_config(p, d, backup=False)
     assert configio.read_config(p)["atlas"] == d["atlas"]
@@ -211,8 +211,8 @@ SELECTION = [
     ("exp_2/S_3.pin", False, "its _edited.pin is taken"),  # MSBooster's twin holds all of it
     ("exp_2/S_3_edited.pin", True, "selected (gzip)"),
     ("exp_2/S_4_edited.pin", True, "selected (gzip)"),
-    ("exp_2/Old_search_F1_edited.pin", False, "its raw file is not in this run's manifest"),  # D134: a leftover
-    # TMT-Integrator's tables (D134): the tmt-report subfolder takes every .tsv; another subfolder only the psm,
+    ("exp_2/Old_search_F1_edited.pin", False, "its raw file is not in this run's manifest"),  # D135: a leftover
+    # TMT-Integrator's tables (D135): the tmt-report subfolder takes every .tsv; another subfolder only the psm,
     # peptide and protein tables
     ("tmt-report/abundance_gene_MD.tsv", True, "selected"),
     ("tmt-report/ratio_protein_None.tsv", True, "selected"),
@@ -282,7 +282,7 @@ def test_an_unreadable_run_folder_raises(tmp_path):
 
 
 def test_the_tmt_report_folder_by_any_case_and_under_the_cap(tmp_path, monkeypatch):
-    """FragPipe writes TMT-Integrator's tables into tmt-report (D134); case is ignored, as harvest's -like; one
+    """FragPipe writes TMT-Integrator's tables into tmt-report (D135); case is ignored, as harvest's -like; one
     level only; the size cap and left[] as for any file. harvest's tests have the same cases (its parity test
     compares the two)."""
     run = _run_folder(tmp_path / "fragpipe", {
@@ -318,7 +318,7 @@ def test_the_tmt_report_folder_by_any_case_and_under_the_cap(tmp_path, monkeypat
         "TMT", 100, [dataclasses.replace(p, level="replicate") if p.level == "tmt-report" else p for p in picks])
 
 
-# ---------------------------------------------------------------- a run's .pin files and its manifest (D134) --
+# ---------------------------------------------------------------- a run's .pin files and its manifest (D135) --
 
 ISAAC_EXP = "isoDTB_IJ510312"
 
@@ -414,7 +414,7 @@ def test_an_unreadable_manifest_leaves_the_pins_as_before(tmp_path):
 
 
 def test_the_edited_twin_rule_goes_first_and_the_cap_last(tmp_path):
-    """Order (D134): the _edited twin, then the manifest, then pins off and the size cap."""
+    """Order (D135): the _edited twin, then the manifest, then pins off and the size cap."""
     stale = f"{ISAAC_EXP}_1/{_isaac_raw(2, 1)}"
     run = _run_folder(tmp_path / "output", {f"{stale}.pin": _pin(3), f"{stale}_edited.pin": _pin(3),
                                             f"{ISAAC_EXP}_1/{_isaac_raw(1, 1)}_edited.pin": MB + 1,
@@ -484,7 +484,7 @@ def test_the_pins_left_by_the_manifest_are_in_the_record(tmp_path):
 
 
 def local_run_dir(run_path, harvest_root):
-    """ingest_fragpipe.local_run_dir (Nomura-Lab, the atlas side), as it is: how the atlas finds a run's copy."""
+    """ingest_fragpipe.local_run_dir (the atlas side's own repository), as it is: how the atlas finds a run's copy."""
     m = re.match(r"^([A-Za-z]):\\(.*)$", run_path)
     return os.path.join(harvest_root, m.group(1).upper(), m.group(2)) if m else run_path
 
@@ -503,9 +503,9 @@ def test_the_layout_is_get_relative_destination(source, parts):
     assert atlas.layout_parts(source) == parts
 
 
-@pytest.mark.parametrize("run", [r"C:\Fragpipe_General\Nicholas\2026-10-19_isoDTB_x\fragpipe", r"D:\EJQ\run 2\fragpipe"])
+@pytest.mark.parametrize("run", [r"C:\Fragpipe_General\member\2026-10-19_isoDTB_x\fragpipe", r"D:\EJQ\run 2\fragpipe"])
 def test_the_atlas_finds_the_copy_where_it_lands(run):
-    root = r"C:\Users\me\TNRG Dropbox\Daniel Nomura\Nicholas Foster Data\fragpipe-runs"
+    root = r"C:\Users\me\Team Dropbox\Lab Head\Nicholas Foster Data\fragpipe-runs"
     ours = "\\".join([root, *atlas.layout_parts(run)])
     assert local_run_dir(run, root).replace("/", "\\") == ours
 
@@ -532,7 +532,7 @@ def test_workflow_info_reads_like_harvest(tmp_path):
 @pytest.mark.parametrize(("mods", "cls"), [
     ("567.34,C,true,1", "isoDTB"), ("464.28,C,true,1", "isoTOP"), ("229.1629,K,true,1", "TMT"),
     ("561.33,C,true,1; 229.16,K,true,1", "isoDTB+TMT"), ("15.9949,M,true,3", "other"),
-    # every TMT reagent (D134): TMTpro, TMT2 (duplex), TMT0, TMTpro zero, as workflows write their masses
+    # every TMT reagent (D135): TMTpro, TMT2 (duplex), TMT0, TMTpro zero, as workflows write their masses
     ("304.20715,K,true,-1", "TMT"), ("304.21,K,true,-1", "TMT"), ("225.1558,K (lysine),true,-1", "TMT"),
     ("224.1525,K,true,-1", "TMT"), ("295.18959,K,true,-1", "TMT"), ("295.1896,n^,true,1", "TMT"),
     ("295.19,K,true,-1", "TMT"), ("57.02146,C (cysteine),true,-1; 0.0,K (lysine),true,-1", "other"),
@@ -545,7 +545,7 @@ def test_probe_class_from_masses(tmp_path, mods, cls):
 
 
 def test_a_manifests_first_line_is_a_row(tmp_path):
-    """fragpipe-files.fp-manifest has no header (D134: Carolyn's cytochrome C run is its first row)."""
+    """fragpipe-files.fp-manifest has no header (D135: Carolyn's cytochrome C run is its first row)."""
     mf = tmp_path / "fragpipe-files.fp-manifest"
     mf.write_text(ELK_MANIFEST, encoding="utf-8")
     rows = atlas.manifest_rows(mf)
@@ -594,7 +594,7 @@ WORKFLOW = ("# FragPipe (24.0) runtime properties\ndatabase.db-path=C\\:\\\\Frag
 @pytest.fixture
 def handoff(lab):
     """A done isoDTB job with a FragPipe output folder, and the hand-off on, into a folder whose path has spaces."""
-    dropbox = lab["root"] / "TNRG Dropbox" / "Nicholas Foster Data"
+    dropbox = lab["root"] / "Team Dropbox" / "Nicholas Foster Data"
     dropbox.mkdir(parents=True)
     dest_root = dropbox / "fragpipe-runs"
     cfg = _write_cfg(lab, enabled=True, handoff_dir=str(dest_root), max_tries=3, retry_minutes=1)
@@ -782,7 +782,7 @@ def test_an_unreachable_destination_waits_backs_off_and_gives_up(handoff, monkey
 
 
 def test_the_destination_is_made_only_when_its_parent_is_there(handoff):
-    assert not handoff["root"].exists()  # Nicholas Foster Data is there, fragpipe-runs not yet
+    assert not handoff["root"].exists()  # the team folder (DATA_FOLDER) is there, fragpipe-runs not yet
     assert atlas.send(handoff["cfg"], handoff["job"]).ok
     assert handoff["root"].is_dir()
 
@@ -990,7 +990,7 @@ def test_no_pins_when_the_cap_is_zero(design):
 
 
 def test_a_jobs_record_leaves_a_pin_its_manifest_does_not_name(design):
-    """A .pin of an earlier search of other raw files, in the job's FragPipe folder (D134): left, with why."""
+    """A .pin of an earlier search of other raw files, in the job's FragPipe folder (D135): left, with why."""
     _run_folder(design["run"], {"exp_1/Old_search_F1_edited.pin": _pin(10)})
     res = atlas.send(design["cfg"], design["job"])
     assert res.ok and res.pins == 2, res.message
@@ -1304,12 +1304,12 @@ def _dropbox(tmp_path, info: dict) -> dict:
 
 
 def test_the_dropbox_folder_is_found_as_harvest_finds_it(tmp_path):
-    team = tmp_path / "TNRG Dropbox"
-    (team / "Daniel Nomura" / "Nicholas Foster Data").mkdir(parents=True)
+    team = tmp_path / "Team Dropbox"
+    (team / "Lab Head" / "Nicholas Foster Data").mkdir(parents=True)
     env = _dropbox(tmp_path, {"business": {"path": str(team), "root_path": str(team)},
                               "personal": {"path": str(tmp_path / "Dropbox")}})
     assert atlas.dropbox_roots(env) == [str(team), str(tmp_path / "Dropbox")]
-    assert atlas.dropbox_suggestion(env) == str(team / "Daniel Nomura" / "Nicholas Foster Data" / "fragpipe-runs")
+    assert atlas.dropbox_suggestion(env) == str(team / "Lab Head" / "Nicholas Foster Data" / "fragpipe-runs")
 
 
 def test_no_dropbox_no_suggestion(tmp_path):

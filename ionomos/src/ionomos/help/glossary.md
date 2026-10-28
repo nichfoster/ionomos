@@ -145,10 +145,10 @@ Low [purity](#glossary.purity) and quantification from MS2 make it worse.
 ## MS2 and MS3 quantification {#glossary.ms3}
 
 Where the reporter ions are read. MS2: in the same spectrum used to identify
-the peptide (faster, more interference). MS3 (SPS-MS3 on the Eclipse):
-after a second isolation of fragments, which removes most interference. The
-workflow says which (`tmtintegrator.quant_level` 2 or 3; the lab's TMT10-MS3
-workflow uses MS3).
+the peptide (faster, more interference). MS3 (SPS-MS3 on an Orbitrap Tribrid
+such as the Eclipse): after a second isolation of fragments, which removes
+most interference. The workflow says which (`tmtintegrator.quant_level` 2 or
+3; FragPipe's TMT10-MS3 workflow uses MS3).
 
 ## isoDTB {#glossary.isodtb}
 

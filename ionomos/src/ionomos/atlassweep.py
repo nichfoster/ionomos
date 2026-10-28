@@ -516,8 +516,8 @@ def sweep(cfg, trigger: str = "auto", dry_run: bool = False, retry: bool | None 
         p.setup, p.message = True, "the atlas hand-off is off (config.yaml atlas.enabled: false)"
         return p
     if not dry_run and not s["handoff_dir"]:
-        p.setup, p.message = True, ("atlas.handoff_dir is not set: the lab Dropbox folder "
-                                    "'...\\Nicholas Foster Data\\fragpipe-runs' (app: Folders tab)")
+        p.setup, p.message = True, ("atlas.handoff_dir is not set: the Dropbox folder the atlas side reads, e.g. "
+                                    "'...\\<team folder>\\fragpipe-runs' (app: Folders tab)")
         return p
     where = list(roots_ or roots(s))
     if not where:

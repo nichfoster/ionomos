@@ -18,9 +18,15 @@ keep them in sync with code changes (especially NAMING_CONVENTION.md ↔
 - Tests: `cd ionomos && .venv/bin/pytest`. Tests that open real Tk windows skip locally
   (they run in CI); never switch them on (`IONOMOS_GUI_TESTS=1`) unless the user asks: the windows
   cover their screen. If the repo folder moved, delete
-  `ionomos/.venv` and re-run `scripts/test_mac.sh`: venv paths are absolute. Add table-driven cases using real
-  names from `reference/pc-inventory/` when extending `naming.py`.
+  `ionomos/.venv` and re-run `scripts/test_mac.sh`: venv paths are absolute. Add table-driven cases using the real
+  folder and file names from `reference/pc-inventory/` when extending `naming.py`
+  (tests only: nothing a doc, the help or the app shows names a lab member).
 - Log decisions in `docs/DECISIONS.md`; open questions in `docs/ROADMAP.md`.
+- Ionomos is a tool for any lab (D134): no person's name, no lab's name and
+  no private path in the README, `docs/`, the help or the code's strings;
+  nothing about publishing in public files. Material that belongs to one lab
+  (publishing plans, lab-process questions, the identified PC inventory)
+  lives in that lab's private repository, not here.
 - The project was called LabWatch up to 0.4.0. Every on-disk/system name and
   its LabWatch-era twin lives in `ionomos/src/ionomos/names.py`; read through
   it, never hard-code `ionomos.json`, `ionomos_run`, log/lock/pid names, the task

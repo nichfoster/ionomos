@@ -180,7 +180,10 @@ found are under "Real runs" in the open questions below.
   section, figures and doctor issues; `_None` / `ratio_*` tables read;
   `ionomos tmt plan | annotation | suggest | qc`; five more testbed scenarios;
   the channel editor in the review window and the experiment editor.
-  **Not run on a real TMT search yet**: see "Open questions".
+  2026-10-28: real TMT and DIA searches (and a DDA one) have run through the
+  watcher on the PC, reported by the maintainer; their run records are still
+  to be filed in [REAL_RUNS.md](REAL_RUNS.md). A real TMT result was compared
+  with its FragPipe-Analyst results table there.
 
 ## Phase 4 — Operations & niceties
 
@@ -320,10 +323,10 @@ decoys and contaminants…, Check for updates) and a first-setup proposal
     it takes, what it finds, whether the TMT and DIA candidates it ranks
     first are the ones the lab would choose; how the dialog feels with ~150
     rows.
-  - Which TMT workflow is the lab's? `fragpipe_pax8.workflow` (Aman, saved
-    with 23.1?), Kosuke's `A549_nucleus_TMT-check`, Melissa's
-    `A549_EN3235_TMT`, or FragPipe 24's stock `TMT10-MS3`? `ionomos library
-    list workflows --kind TMT --flags` lists them with their differences.
+  - Which TMT workflow is the lab's: one of three that lab members saved
+    (one perhaps with FragPipe 23.1), or FragPipe 24's stock `TMT10-MS3`?
+    `ionomos library list workflows --kind TMT --flags` lists them with their
+    differences.
   - Is FragPipe 24's "Save SDRF" to be switched off in the lab's pinned
     workflows (`WF_SDRF_ON`; D59 item 11)?
   - FASTA policy: reviewed only (Ionomos' default, 20,416 at UniProt
@@ -380,10 +383,10 @@ Installation and configuration kill lab tools: in one study, 28% of omics
 tools failed to install within 2 hours, and tools on package managers always
 installed.
 
-- [x] **Analysis-only install from pip.** (2026-09-30, D40: `ionomos demo`, PyPI workflow; publishing awaits the maintainer's trusted-publisher setup) `pip install ionomos`, then
+- [x] **Analysis-only install from pip.** (2026-09-30, D40: `ionomos demo`, PyPI workflow; the upload awaits the maintainer's trusted-publisher setup) `pip install ionomos`, then
   `ionomos analyze <table or folder>` and `ionomos demo`, on Windows / macOS /
   Linux, with no Tk needed. The analysis has one dependency (PyYAML), so this
-  is the cheapest adoption lever. Publishing to PyPI is the maintainer's step
+  is the cheapest adoption lever. The upload to PyPI is the maintainer's step
   (trusted publishing from a tag).
 - [x] **Engine adapters** (import side first). (2026-09-30: `downstream/engines.py`, docs/ENGINES.md; run side: DIA-NN, D39) One registry; each adapter can:
   - recognise its results folder / tables (with a confidence score)
@@ -588,11 +591,11 @@ Stay deterministic. The one credible published "AI interpretation"
 (GeneAgent, Nat Methods 2025) verifies every claim against databases. Plain
 templated summaries, like the key findings, are easier to trust.
 
-### 5D — Adoption and publishing (checklist of 2026-10-15)
+### 5D — Adoption (checklist of 2026-10-15, updated 2026-10-28)
 
 The aim, who it is for, the comparison with other tools and what "done for
 v1.0" means are in [VISION.md](VISION.md). In order; each step says who does
-it. "The maintainer" is @nichfoster (accounts, settings, the lab, authorship);
+it. "The maintainer" is @nichfoster (accounts, settings, the first lab's PC);
 "an agent" opens a pull request that the maintainer merges (D31). Steps 1–3
 need nothing from the lab.
 
@@ -603,16 +606,18 @@ need nothing from the lab.
    pending publisher on pypi.org (project `ionomos`, owner `nichfoster`, repo
    `ionomos`, workflow `publish-pypi.yml`, environment `pypi`), the `pypi`
    environment on GitHub (required reviewer, tag rule `v*`), the repository
-   variable `PYPI_PUBLISH=true`; then tag the next release. On 2026-10-15
-   `ionomos` is not on PyPI (a pending publisher does not reserve the name).
+   variable `PYPI_PUBLISH=true`; then tag the next release. On 2026-10-28
+   `ionomos` is still not on PyPI (a pending publisher does not reserve the
+   name).
    *Then an agent* drops "until it is on PyPI" from README.md,
    QUICKSTART.md and `ionomos/README.md`.
-2. [ ] **Repository settings** — *the maintainer*. Branch protection on
-   `master` requiring a code-owner review (D31 says it is not enforced yet);
-   the GitHub description and topics (the description still says it is for
-   one lab's PC); private vulnerability reporting on; Zenodo's GitHub
-   integration on, so each release gets a DOI (JOSS asks for an archive DOI
-   on acceptance), and the DOI into CITATION.cff.
+2. [ ] **Repository settings** — *the maintainer*.
+   - [ ] Branch protection on `master` requiring a code-owner review (D31
+     says it is not enforced yet).
+   - [x] The GitHub description: changed on 2026-10-28; it no longer says
+     the tool is for one lab's PC.
+   - [ ] The GitHub topics.
+   - [ ] Private vulnerability reporting on (SECURITY.md relies on it).
 3. [x] **Community files** — *an agent*, 2026-10-15: VISION.md,
    SCOPE.md for today's scope, CITATION.cff, CONTRIBUTING.md,
    CODE_OF_CONDUCT.md (Contributor Covenant 2.1), issue templates that ask
@@ -643,6 +648,13 @@ need nothing from the lab.
    Also: FragPipe-Analyst's own result for the example data (its web app or
    FragPipeAnalystR), then `ionomos compare` and a VALIDATION.md row
    (EXAMPLE.md says how).
+   Where it stands (2026-10-28): real TMT, DIA and DDA searches have run
+   through the watcher (reported by the maintainer; the run records are still
+   to be filed in REAL_RUNS.md); an isoDTB search through the watcher is still
+   to be recorded. A real TMT result compared by hand with the owner's
+   FragPipe-Analyst results table (134 of its 143 hits shared, log2 fold
+   changes identical) is recorded in REAL_RUNS.md; it was not run through
+   `ionomos compare`.
 6. [ ] **Pilot labs** — *the maintainer*. 2–3 labs, ideally chemoproteomics
    groups already on FragPipe isoDTB / ABPP workflows, or a core facility.
    Their problems go to issues; what they needed to change goes to
@@ -660,48 +672,27 @@ need nothing from the lab.
      step 5), then run the workflow once on `master`.
    - [ ] *an agent*, once it is live: the `Documentation` URL in
      `ionomos/pyproject.toml` points at the site.
-8. [ ] **Name and logo** — *the maintainer*. Keep "Ionomos" unless a
-   tool-name or trademark clash turns up (the PyPI name was free on
-   2026-09-30). No logo exists; decide whether the report and the app get
-   one.
-9. [ ] **A preprint and a J. Proteome Res. technical note** — *the
-   maintainer* writes, *an agent* drafts the methods and the validation
-   tables from VALIDATION.md. A technical note is at most 4,500 words and
-   must show an advantage over existing methods; the raw data are deposited
-   (ProteomeXchange preferred). Material: steps 4–6, the limma /
-   FragPipeAnalystR parity tests, and the D36 positioning. The preprint
-   (bioRxiv) goes up when the note is submitted.
-10. [ ] **A JOSS paper** — *an agent* drafts `paper/paper.md` and
-    `paper/paper.bib` (750–1,750 words: Summary, Statement of need, State of
-    the field, Software design, Research impact statement, AI usage
-    disclosure); *the maintainer* completes authors and affiliations and
-    submits. Not before 2027-03-17: JOSS wants a repository public for more
-    than six months with development across them (created 2026-09-16; *the
-    maintainer* confirms it was public from then), and evidence of research
-    use (step 9's preprint or a pilot lab's paper). The AI usage disclosure
-    says that coding agents wrote most of the code, and how it was checked:
-    reference tests against R and Python tools, pull requests merged by a
-    person (D31), the decision log.
-11. [x] **Versioning and support promises** — *an agent* writes them into
-    README.md from VISION.md ("Versioning and support, from 1.0") once the
-    maintainer agrees to them: semantic versioning of the command line, the
-    YAML keys, `results/` and `analysis.json`; deprecations warn for one
-    minor release; best-effort support through GitHub issues.
-    2026-10-26 (D133): README.md "Versioning and support" (merging it is the
-    maintainer's agreement); `retired.py` is how a retired key warns
-    (`ionomos check`, the checklist, the analysis' notes, the log), with an
-    empty table today.
-12. [ ] **v1.0** — *the maintainer* tags it when VISION.md's "done for v1.0"
-    holds. Done of that list (2026-10-26, D133): the promises in the README,
-    and every open "Not verified" line of VALIDATION.md stated in the report
-    where it applies or marked as no report caveat. Open: PyPI, the real-data
-    example on the site, a real mixed-species benchmark, real compares,
-    real TMT and isoDTB searches, a second lab.
-13. [ ] **Dead code**: `ionomos/src/ionomos/runners/` is imported by nothing
+8. [x] **Versioning and support promises** — *an agent* writes them into
+   README.md from VISION.md ("Versioning and support, from 1.0") once the
+   maintainer agrees to them: semantic versioning of the command line, the
+   YAML keys, `results/` and `analysis.json`; deprecations warn for one
+   minor release; best-effort support through GitHub issues.
+   2026-10-26 (D133): README.md "Versioning and support" (merging it is the
+   maintainer's agreement); `retired.py` is how a retired key warns
+   (`ionomos check`, the checklist, the analysis' notes, the log), with an
+   empty table today.
+9. [ ] **v1.0** — *the maintainer* tags it when VISION.md's "done for v1.0"
+   holds. Done of that list (2026-10-26, D133): the promises in the README,
+   and every open "Not verified" line of VALIDATION.md stated in the report
+   where it applies or marked as no report caveat. Open: PyPI, the real-data
+   example on the site, a real mixed-species benchmark, real compares, the
+   run records of the TMT / DIA / DDA searches, a real isoDTB search through
+   the watcher, a second lab.
+10. [ ] **Dead code**: `ionomos/src/ionomos/runners/` is imported by nothing
     in the program, only by `tests/test_downstream.py`, and the exe build's
     `deploy/check_frozen.py` lists it as an exception; remove it or wire it
     in (*the maintainer decides*, 2026-10-15).
-14. [ ] **Interoperate rather than compete** (ongoing): open in
+11. [ ] **Interoperate rather than compete** (ongoing): open in
     FragPipe-Analyst (already exported), optional pmultiqc-compatible QC,
     SDRF.
 
@@ -712,16 +703,16 @@ need nothing from the lab.
   adapters are the hedge.
 - **One maintainer.** Keep scope tight: no web server, cloud, or multi-user
   permissions.
-- **Trust in a Python limma.** Publish the parity tests against R, and keep
-  real-data fixtures in CI.
-- **Mostly agent-written code** (2026-10-15). Reviewers and journals will ask
+- **Trust in a Python limma.** Keep the parity tests against R in the
+  repository and in CI, and keep real-data fixtures in CI.
+- **Mostly agent-written code** (2026-10-15). Reviewers and users will ask
   how it was checked. The answer has to stay true: every port against its
   reference tool, every pull request merged by a person (D31), every choice
-  in DECISIONS.md. A change that skips one of these weakens the paper.
+  in DECISIONS.md. A change that skips one of these weakens that answer.
 - **Real data lag behind the code.** Every accuracy number is simulated or
-  from R on shared inputs (VALIDATION.md). A paper without 5D step 5 would
-  claim more than the evidence; keep the "Not verified" lines until they are.
-- **A published tool gets users the maintainer can't see.** Their reports
+  from R on shared inputs (VALIDATION.md), apart from the first real-data
+  comparisons in REAL_RUNS.md; keep the "Not verified" lines until they are.
+- **A public tool gets users the maintainer can't see.** Their reports
   arrive without the PC, the config or the data. The diagnostics text and
   the bundle (D63, D74) make them answerable; the issue template asks for
   them.
@@ -904,17 +895,14 @@ Collected from the other docs; resolve before/during Phase 1.
 - [ ] Are 7 days and 50 messages right for notifications kept through an outage?
 
 **The cysteine atlas hand-off (2026-10-19, D120–D125, ATLAS.md): what the lab must confirm**
-- [ ] Is the Dropbox client on the lab PC signed in to the lab Dropbox, and does it sync `Nicholas Foster Data`
-      (not online-only)? `ionomos atlas check` on the PC answers it; the app's Folders tab shows the folder it found.
+- [ ] Is the Dropbox client on the lab PC signed in to the lab's Dropbox, and does it sync
+      `<Dropbox>\<team folder>\fragpipe-runs` (not online-only)? `ionomos atlas check` on the PC answers it; the
+      app's Folders tab shows the folder it found.
 - [ ] Which Windows account runs the watcher, and can it write to that folder? (The hand-off runs as the watcher.)
-- [ ] Who decides a conflict (a different copy of a run's file already in Dropbox), and how do they tell Ionomos
-      (today: move the old copy aside, then Send to atlas)?
 - [ ] Turn it on (`atlas.enabled`), then hand off one real isoDTB search and check that the atlas side ingests it
       (its `runs-ionomos-*.csv`, Run + HandoffSha256) and that a second **Send to atlas** is not counted twice.
 - [ ] Should searches done before the hand-off was turned on be sent (one by one with Send to atlas, or a
       "send all" for a date range), or does harvest's earlier copy cover them?
-- [ ] The report's atlas context: once the atlas publishes `_atlas\atlas_sites_lookup.tsv`, check one report's
-      tiers and "new to the atlas" marks against the atlas itself, and that the quotable line says what Dan wants.
 - [ ] `atlas.methods` admits FragPipe isoDTB and TMT methods (D120, D127): should isoTOP or other probes go too,
       once the atlas reads them (the CSV would need their ProbeClass)?
 - [ ] TMT, the sample design and the decoys (D127): with **Also TMT searches** on, hand off one real TMT
@@ -926,52 +914,49 @@ Collected from the other docs; resolve before/during Phase 1.
       last inventory (runs, probe classes, owners); then turn **Also search this PC's drives** on and watch the
       first pass (its time, the free space on `C:`, Dropbox's upload of about 8 GiB of `.pin.gz`).
 - [ ] The atlas side reads contract item 7 (`runs-ionomos-<time>-found-<run id>.csv`, `found` in place of `job`):
-      Nomura-Lab `atlas_intake.py`. Until it does, found runs wait in Dropbox, uncounted.
+      `atlas_intake.py` in the atlas's own repository, which is private. Until it does, found runs wait in Dropbox,
+      uncounted.
 - [ ] Should the sweep also send isoTOP runs (left today, as the atlas doesn't read them), and should it leave
       some owners' folders out by default?
-- [ ] The selection of D134 on the PC (with harvest's matching version): the first sweep after the update sends the
-      runs whose takes changed once more; check in Dropbox that a TMT run's `tmt-report\*.tsv` arrived, that Kosuke's
-      `A549_nucleus_TMT-check` runs went as TMT, and that Isaac's `20260629-isoDTB` record lists the earlier
+- [ ] The selection of D135 on the PC (with harvest's matching version): the first sweep after the update sends the
+      runs whose takes changed once more; check in Dropbox that a TMT run's `tmt-report\*.tsv` arrived, that one member's
+      `A549_nucleus_TMT-check` runs went as TMT, and that a member's `20260629-isoDTB` record lists the earlier
       search's `.pin` files in `left[]`, the copies sent before still there.
-- [ ] Replicate folders that are no group of the current manifest (D134: Isaac's `isoDTB_IJ510312_4` to `_7`, left
+- [ ] Replicate folders that are no group of the current manifest (D135: that run's `isoDTB_ABC510312_4` to `_7`, left
       by an earlier search that grouped by fraction) still have their `psm.tsv`, `peptide.tsv` and `protein.tsv`
       taken by the replicate rule; only their `.pin` files stay behind. Should those tables stay behind too (on both
       sides, harvest's and Ionomos'), or does the atlas side tell them apart by the manifest?
 - [ ] A run that moved drives (Sheena's, from `C:` to `D:`) arrives as a new run key (Run is its path). A
       `same_inputs_as` field in the record would let the atlas side link the two, but deciding it needs the hashes of
-      the Dropbox copies, and harvest's copies CSV has no SHA-256; not now (D134).
+      the Dropbox copies, and harvest's copies CSV has no SHA-256; not now (D135).
 
-**Lab process**
-- [ ] Confirm the naming convention with users (NAMING_CONVENTION.md); collect initials → user-folder aliases for config.
-- [ ] Trello board has a naming discussion — reconcile with NAMING_CONVENTION.md.
-- [ ] Is `USER` == folder under `C:\Fragpipe_General\`? Who has multiple folders?
-- [ ] Is plain `DDA` a real method in the lab or only isoDTB/TMT/DIA?
-- [ ] Which DIA workflow is used, and what happens after a DIA run?
-- [x] What is the TMT "Peak Picking & zero Samples" pre-step (which app)? → 2026-10-15 (D91): MSConvertGUI
-      (ProteoWizard) with the `peakPicking` and `zeroSamples removeExtra` filters, raw → mzML. FragPipe 24 reads
-      `.raw` (REAL_RUNS.md), so Ionomos does not convert. **Still for the lab**: search the same plex once from
-      `.raw` and once from the SOP's mzML; if they agree, drop the step from the SOP. A drop of only `.mzML` files
-      is not taken in by intake today (decide whether it should be).
-- [x] Where are FASTA files kept, which ones, how often updated? → 2026-10-15 (D89, D90): `ionomos library scan`
-      finds them; `ionomos fasta release` says how old each is. The policy questions are under Phase 4 above.
-- [ ] **The first real TMT run must confirm** (D91): the `psm.tsv` header (the `Intensity <sample>` reporter
-      block, its order, `Purity`, `Assigned Modifications` listing the fixed K mod); that FragPipe picked up
-      Ionomos' `annotation.txt` (the sample names in `abundance_gene_MD.tsv`); the labelling / purity numbers
-      against what the lab expects (are 95 % and 0.7 right?); the run time of a 10-plex × 8 fractions
-      (`timeout_minutes`); whether FragPipe 24 leaves `_None` / `ratio_*` tables beside `_MD`.
+**TMT: what the first TMT search's records must confirm (D91).** A TMT search has run through the watcher
+(reported 2026-10-28, REAL_RUNS.md); its `run_fingerprint.json` and console log still have to be read for:
+- [ ] the `psm.tsv` header (the `Intensity <sample>` reporter block, its order, `Purity`, `Assigned Modifications`
+      listing the fixed K mod); that FragPipe picked up Ionomos' `annotation.txt` (the sample names in
+      `abundance_gene_MD.tsv`); the labelling / purity numbers against what the lab expects (are 95 % and 0.7
+      right?); the run time of a 10-plex × 8 fractions (`timeout_minutes`); whether FragPipe 24 leaves `_None` /
+      `ratio_*` tables beside `_MD`.
+- [ ] The SOP's "Peak Picking & zero Samples" pre-step (MSConvertGUI, raw → mzML) is not done by Ionomos, as
+      FragPipe 24 reads `.raw` (REAL_RUNS.md). Search the same plex once from `.raw` and once from the SOP's
+      mzML; if they agree, drop the step from the SOP. A drop of only `.mzML` files is not taken in by intake
+      today (decide whether it should be).
 - [ ] Which `annotation.txt` style do people prefer: FragPipe's window, `experiment.yaml`, or the app's channel
       editor (all work now)?
 - [ ] Look at the review window with a TMT drop on the PC's screen (the grid adds ~250 px under the file table).
 - [ ] A filed experiment's renamed channels count only for the next search: should a re-analysis map
-        TMT-Integrator's default `<plex>_<channel>` names (a search run without a map) to the editor's names?
-- [ ] The lab's R script keeps only `condition_1_channel`; Suggest numbers plex 2 as `DMSO_2_127N` (tmtkit's
-        convention, flagged `TMT_NAME_PATTERN`): which do people want for multi-plex experiments?
+      TMT-Integrator's default `<plex>_<channel>` names (a search run without a map) to the editor's names?
+- [ ] The first lab's R script keeps only `condition_1_channel`; Suggest numbers plex 2 as `DMSO_2_127N`
+      (tmtkit's convention, flagged `TMT_NAME_PATTERN`): which do people want for multi-plex experiments?
 - [ ] A channel named `Pool…` is read as a reference even when marked sample (rename it to make it a sample); fine?
 - [ ] TMT-35 (hyperplexing), iTRAQ and DiLeu are passed to FragPipe unchecked. `downstream/plex.py`'s
       `TMT_ORDERS` (Sage / MaxQuant channel order) is separate from `tmtkit.LABEL_TYPES` (FragPipe's); they
       describe different engines' columns. → 2026-10-15 (#154): iTRAQ-4, iTRAQ-8, TMT-35, TMT-2, TMT-0 and
       iodoTMT-6 are planned and checked by their channels; sCLIP-6, IBT-16, DiLeu-12, DiLeu-1, DeAla-13 and Trp-2
       are still passed on unchecked (`TMT_LABEL_UNKNOWN`).
+
+Questions for the first lab's own process (its naming, its user folders, its methods and its workflows) are kept
+in that lab's private repository.
 
 **Machine**
 - [ ] FragPipe 24.0 launcher: from FragPipe's build it is `C:\FragPipe\FragPipe-24.0\bin\fragpipe.bat`, next to
@@ -1019,8 +1004,8 @@ Collected from the other docs; resolve before/during Phase 1.
       analysis took for the experiment's own design. Fixed in 0.14.0: an SDRF with no factor value column and no
       sample names is skipped with a note (`sdrfdesign._engine_template`). Confirm on the first real run that the
       real file looks like that.
-- [ ] D59: FragPipe replaces everything but letters, digits and `_` in experiment names (`EJQ-2-027` →
-      `EJQ_2_027`), so its tables and Ionomos' `_sites.tsv` carry the `_` form. Ionomos warns per job. Should
+- [ ] D59: FragPipe replaces everything but letters, digits and `_` in experiment names (`ABC-2-027` →
+      `ABC_2_027`), so its tables and Ionomos' `_sites.tsv` carry the `_` form. Ionomos warns per job. Should
       intake write the `_` form into the manifest from the start?
 - [x] D59: FragPipe's DIA workflow notes say "For quantification using DIA-NN, Thermo/Sciex DIA files should be in
       mzML format". Does the lab's DIA route (bundled DIA-NN 1.8.2 beta 8, or 2.3.2 via `fragpipe.config_diann`)
@@ -1112,10 +1097,7 @@ Collected from the other docs; resolve before/during Phase 1.
       filter and marks what the filter removed (`removed_by_filter` in `presence_absence.tsv`, in grey in the
       report, `only_in_one_condition_filtered_out` in analysis.json); `FILTER_REMOVES_ONE_CONDITION` says how
       many features complete in a condition a global filter removed and suggests 0 % / 50 %.
-- [ ] Real runs: should the Analysis tab caution against a global filter before the analysis runs (a pull-down,
-      three conditions of three), not only the doctor after it (D84)? (Sheena, 2026-10-09: with an empty-vector
-      negative control, most proteins are expected to be missing from a third of the samples, so a global
-      filter is wrong for that design; D88 now leaves a sure background out of it.)
+- Questions for the first lab's own process are kept in that lab's private repository.
 - [x] Real runs: leaving samples out (`exclude_samples`) makes the run-order stage fail with a `KeyError` on a
       left-out sample (found re-running the 2026-10-06 analysis without the empty-vector runs). → 2026-10-09
       (D84): the stage uses only the samples analysed; the manifest map still held the ones left out.
@@ -1217,7 +1199,7 @@ Collected from the other docs; resolve before/during Phase 1.
 - [ ] Phase 6 (D75, 2026-10-04): confirm the proposal whitelist (with `de_type`); that a proposal
       is withheld when its answer fails the citation check; `experiment-backups/` for every editor
       save, never pruned; and that Confirm saves without re-running the analysis.
-- [ ] Phase 5: publish on PyPI as `ionomos` (needs a PyPI account / trusted publisher set up by the maintainer).
+- [ ] Phase 5: release on PyPI as `ionomos` (needs a PyPI account / trusted publisher set up by the maintainer).
 - [x] Agent auto-merge: removed 2026-09-27; a person merges (D31).
 - [x] CI Python versions: 3.11 (floor), 3.12 (exe build), 3.14 (the PC) since 2026-09-27.
 

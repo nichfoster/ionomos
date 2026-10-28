@@ -3,10 +3,14 @@
 Two DIA searches ran on the PC on 2026-09-23 (0.5.1 and 0.5.3), before
 the runner was checked against FragPipe's headless tutorial and the source
 of FragPipe 24.0 (D59). What they showed, and every real run since, is in
-[REAL_RUNS.md](REAL_RUNS.md). No isoDTB or TMT search, no preflight, and no
-search on 0.14.0 or later (the D59 runner) has been reported yet. The test
-suite runs the runner against a fake that copies FragPipe's output. This
-page is what to do on the lab PC, in order, for each first run.
+[REAL_RUNS.md](REAL_RUNS.md). Since then TMT, DIA and DDA searches have run
+through the watcher on a later version (0.19.0 to 0.21.0) and finished
+(reported by the maintainer on 2026-10-28). Their records are still to be
+filed, so the "collect these" items below still apply to them. No isoDTB
+search and no preflight has been recorded yet: an isoDTB search is still
+the one to record first. The test suite runs the runner against a fake that
+copies FragPipe's output. This page is what to do on the lab PC, in order,
+for each first run.
 It closes [ROADMAP.md](ROADMAP.md) Phase 2. Installing is
 [DEPLOY_WINDOWS.md](DEPLOY_WINDOWS.md); what each method needs is
 [WORKFLOWS.md](WORKFLOWS.md).
@@ -104,8 +108,9 @@ After fixing a cause: **Retry**. The earlier output is kept as
 ## 3. Then
 
 - [ ] A full isoDTB experiment (3 × 7; 30-60 min in the GUI).
-- [ ] **The Phase 2 exit test**: run the lab's R script
-      `isoDTB_Fragpipe_merge-individual-peptides-to-Site.R` on the same
+- [ ] **The Phase 2 exit test**: run the first lab's R script in
+      [`reference/lab-scripts/`](../reference/lab-scripts/),
+      `isoDTB_Fragpipe_merge-individual-peptides-to-Site.R`, on the same
       `fragpipe\combined_modified_peptide_label_quant.tsv` (R is not on the
       PC: use the machine the script normally runs on; `sample_prefix` is
       FragPipe's experiment name, as in the table's column names). Compare
@@ -118,9 +123,12 @@ After fixing a cause: **Retry**. The earlier output is kept as
       FragPipe 24 writes DIA-NN's tables to `fragpipe\dia-quant-output\`.
       `.raw` works (2026-09-23): MSFragger reads it and FragPipe writes the
       `_uncalibrated.mzML` DIA-NN reads. The pinned `DIA.workflow` already
-      ran twice ([REAL_RUNS.md](REAL_RUNS.md)); what is left is a search on
-      0.14.0 or later, with its fingerprint.
-- [ ] **TMT**: one plex per experiment, or several plexes each in a folder
+      ran twice on 2026-09-23 ([REAL_RUNS.md](REAL_RUNS.md)), and DIA
+      searches on 0.19.0 to 0.21.0 finished (reported 2026-10-28); what is
+      left is one of those searches' fingerprint on file.
+- [ ] **TMT** (a TMT search has run and finished, reported 2026-10-28; its
+      fingerprint and what [WORKFLOWS.md](WORKFLOWS.md)'s TMT section lists
+      are still to be filed): one plex per experiment, or several plexes each in a folder
       of its own (`<plex>\*.raw`; the folder name is the plex name in
       `experiment.yaml` `tmt: plexes:`). List all channels of the label type
       in the review window / `experiment.yaml` (`NA` for unused). Several
@@ -162,6 +170,11 @@ or vanished files).
 
 Seen on the PC (2026-09-23, 0.5.1 and 0.5.3, [REAL_RUNS.md](REAL_RUNS.md)):
 two DIA searches through `fragpipe.bat --headless`, the console reaching
-Ionomos, FragPipe's Java and tool versions, the DIA output folder. Not
-verified: the D59 runner (0.14.0 and later) against a running FragPipe, a
-failed step, isoDTB, TMT. That is what this page is for.
+Ionomos, FragPipe's Java and tool versions, the DIA output folder.
+Reported, not yet on file (2026-10-28, [REAL_RUNS.md](REAL_RUNS.md)): TMT,
+DIA and DDA searches through the D59 runner (0.19.0 to 0.21.0) that
+finished; their fingerprints and console logs are still to be filed. Not
+verified: a failed step, an isoDTB search (whether the DDA search used the
+isoDTB workflow is not recorded), the TMT search's details (the `psm.tsv`
+header, the annotation found, the step list). That is what this page is
+for.

@@ -54,10 +54,10 @@ analysis:
   #                          # (centred on the stable sites, only when a replicate is clearly off 0: removes a
   #                          # heavy / light mixing error without the median's shift when many sites go one way)
   # protein_correction:      # subtract each site's protein change, from an unenriched proteome (MSstatsPTM)
-  #   proteome: D:/Fragpipe_General/EJQ/20261001-DIA_EJQ-2-030   # an analysed Ionomos experiment, or a protein
+  #   proteome: D:/Fragpipe_General/ABC/20261001-DIA_ABC-2-030   # an analysed Ionomos experiment, or a protein
   #                          # table (MSstats groupComparison output, or an Ionomos *_differential.tsv); usually
   #   match: gene            # in experiment.yaml. gene | protein (UniProt accessions)
-  #   conditions: {EJQ_2_027: Cmpd vs DMSO}   # site condition -> proteome comparison, compound first
+  #   conditions: {ABC_2_027: Cmpd vs DMSO}   # site condition -> proteome comparison, compound first
   # Phosphoproteomics (D79), all off by default; usually per experiment, in experiment.yaml:
   # phospho: true            # analyse the search's phosphosite table instead of the proteins: FragPipe's
   #                          # combined_site_STY_79.9663.tsv, TMT-Integrator's abundance_single-site_MD.tsv or

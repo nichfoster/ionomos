@@ -1,6 +1,6 @@
 # The app's UI: what it is, what we saw, and the plan for daily driving
 
-The app (`ionomos setup`, `Ionomos.exe`) is the lab PC's control panel. The
+The app (`ionomos setup`, `Ionomos.exe`) is the instrument PC's control panel. The
 maintainer's brief (2026-10-15): keep the current look, "a robust lab tool
 for real scientists", and make it easier to navigate, with more features,
 checks and tests. This file is the spec for that work. It names the rules the
@@ -167,7 +167,7 @@ the size of a 1366×768 laptop.
     lay out, apart from items 4 and 6.
 
 Not a UI problem, but found while making the testbed: the fake FragPipe's
-isoDTB search failed on `EJQ_PK_EJQ_2_027_…` vs `EJQ-2-027` in a file name
+isoDTB search failed on `ABC_PK_ABC_2_027_…` vs `ABC-2-027` in a file name
 (FileNotFoundError), and the explanation said "ended from outside". Worth a
 look by whoever owns `fake_fragpipe.py` / `fragpipe.EXPLANATIONS`.
 

@@ -32,10 +32,10 @@ def _no_real_dropbox(monkeypatch):
 
 
 def _dropbox(tmp_path: Path, spaces: bool = True) -> Path:
-    """<tmp>/TNRG Dropbox/Nicholas Foster Data (there) / fragpipe-runs (not yet): a path with spaces, as the lab's.
+    """<tmp>/Team Dropbox/<DATA_FOLDER> (there) / fragpipe-runs (not yet): a path with spaces, as a team Dropbox's is.
     spaces=False for a folder the app saves: a test's tmp folder is long, and a long value with spaces does not
     survive configio.dump_config yet (test_a_long_dropbox_path_with_spaces_survives_a_save)."""
-    parent = tmp_path / ("TNRG Dropbox" if spaces else "TNRG_Dropbox") / \
+    parent = tmp_path / ("Team Dropbox" if spaces else "Team_Dropbox") / \
         ("Nicholas Foster Data" if spaces else "Nicholas_Foster_Data")
     parent.mkdir(parents=True)
     return parent / "fragpipe-runs"
@@ -47,7 +47,7 @@ def test_a_long_dropbox_path_with_spaces_survives_a_save(tmp_path):
     from ionomos import configio
 
     d = configio.defaults()
-    long = "C:\\Users\\" + "x" * 70 + "\\TNRG Dropbox\\Daniel Nomura\\Nicholas Foster Data\\fragpipe-runs"
+    long = "C:\\Users\\" + "x" * 70 + "\\Team Dropbox\\Lab Head\\Nicholas Foster Data\\fragpipe-runs"
     d["atlas"].update(enabled=True, handoff_dir=long)  # a string only: nothing is made there
     p = tmp_path / "config.yaml"
     p.write_text(configio.dump_config(d), encoding="utf-8")
@@ -64,8 +64,8 @@ def test_on_without_a_folder_is_a_step_to_take(monkeypatch):
     it = setupcheck.atlas_item({"enabled": True})
     assert (it.key, it.title, it.status, it.action) == ("atlas", "Cysteine atlas hand-off", "todo", "atlas_folder")
     assert "handoff_dir is not set" in it.detail and it.fix.startswith("Pick the lab Dropbox folder on the Folders tab")
-    monkeypatch.setattr(atlas, "dropbox_suggestion", lambda *a, **k: r"C:\Users\me\TNRG Dropbox\fragpipe-runs")
-    assert "(found: C:\\Users\\me\\TNRG Dropbox\\fragpipe-runs)" in setupcheck.atlas_item({"enabled": True}).fix
+    monkeypatch.setattr(atlas, "dropbox_suggestion", lambda *a, **k: r"C:\Users\me\Team Dropbox\fragpipe-runs")
+    assert "(found: C:\\Users\\me\\Team Dropbox\\fragpipe-runs)" in setupcheck.atlas_item({"enabled": True}).fix
 
 
 @pytest.mark.parametrize("there", ["folder", "parent"])
@@ -212,7 +212,7 @@ def _long(p) -> str:
 
 
 def _lab(app, tmp_path, on: bool = True) -> Path:
-    """The app's standard layout under tmp_path, saved; the hand-off on into <tmp>/TNRG_Dropbox/…/fragpipe-runs."""
+    """The app's standard layout under tmp_path, saved; the hand-off on into <tmp>/Team_Dropbox/…/fragpipe-runs."""
     app.v("quick.root").set(str(tmp_path / "Auto"))
     app.v("quick.users").set(str(tmp_path / "General"))
     app.apply_quick()
