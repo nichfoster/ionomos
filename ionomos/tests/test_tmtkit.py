@@ -133,7 +133,7 @@ def test_a_plex_of_na_only_stops_before_the_search():
 
 def test_tmt_plan_says_a_not_utf8_experiment_yaml_once(tmp_path, caplog, capsys):
     """#156: `tmt plan` on an experiment.yaml saved as Windows-1252 said "is not UTF-8 ... Save it as UTF-8" twice."""
-    drop = tmp_path / "20260126_Aman_TMT_KL6159A-9plex"
+    drop = tmp_path / "20260126_Kim_TMT_KL6159A-9plex"
     drop.mkdir()
     (drop / "KL6159A_TMT_F1.raw").write_bytes(b"\0" * 8)
     text = yaml.safe_dump({"notes": "24 h \u2013 1 \u00b5M", "tmt": {"tag": "TMT-10", "channels": GOOD}},
@@ -241,7 +241,7 @@ def test_annotation_text_and_read(tmp_path):
 
 
 def test_channel_map_from_folder_reads_and_never_writes(tmp_path):
-    d = tmp_path / "20260127_Aman_TMT_KL6160-2plex"
+    d = tmp_path / "20260127_Kim_TMT_KL6160-2plex"
     (d / "plexA").mkdir(parents=True)
     (d / "plexB").mkdir()
     (d / "plexA" / "annotation.txt").write_text(tmtkit.annotation_text(GOOD), encoding="utf-8")
@@ -309,7 +309,7 @@ def test_fragpipes_rules_keep_their_words():
 
 def _plan(tmp_path, tmt=None, props=PROPS10, layout=None, user=None, workflow="TMT10-MS3.workflow"):
     """A filed experiment folder: layout {relative raw path: experiment}; user {relative path: text}."""
-    dest = tmp_path / "20260126_Aman_TMT_KL6159A-9plex"
+    dest = tmp_path / "20260126_Kim_TMT_KL6159A-9plex"
     layout = layout or {"KL6159A_TMT_F1.raw": "KL6159A", "KL6159A_TMT_F2.raw": "KL6159A"}
     for f in layout:
         (dest / f).parent.mkdir(parents=True, exist_ok=True)
@@ -452,7 +452,7 @@ def test_cli_suggest_plan_annotation(tmp_path, capsys):
     assert cli.main(["tmt", "suggest", "--tag", "TMT-10", "--conditions", "A,B,C", "--replicates", "4"]) == 2
     assert "need 12" in capsys.readouterr().out
 
-    drop = tmp_path / "20260126_Aman_TMT_KL6159A-9plex"
+    drop = tmp_path / "20260126_Kim_TMT_KL6159A-9plex"
     drop.mkdir()
     for i in (1, 2):
         (drop / f"KL6159A_TMT_F{i}.raw").write_bytes(b"\0" * 8)
@@ -536,7 +536,7 @@ def test_tmt_commands_refuse_a_job_that_is_not_tmt(tmp_path, capsys):
     assert "--method Foo is not one of the lab's methods (isoDTB, TMT, DIA, LFQ, Phospho, Open)" in capsys.readouterr().out
 
     # a filed job: ionomos.json says what it was filed as
-    filed = tmp_path / "20260914_Isaac_DIA_FLAG-AR-pulldown"
+    filed = tmp_path / "20260914_Sam_DIA_FLAG-AR-pulldown"
     (filed / "raw").mkdir(parents=True)
     (filed / "raw" / "DMSO_1.raw").write_bytes(b"\0")
     rec = {"plan": {"folder": {"method": "DIA"},
@@ -701,7 +701,7 @@ def test_an_itraq4_drop_is_taken_in_and_searched(bed):
     it, the annotation is written in iTRAQ's channels and the fake FragPipe searches it (TESTED)."""
     (bed["cfg"].workflow_dir / "iTRAQ4.workflow").write_text(testbed.workflow_text("TMT", "iTRAQ-4"),
                                                               encoding="utf-8", newline="\n")
-    drop = bed["root"] / "Fragpipe_Auto" / "inbox" / "20260301_Aman_TMT_KL7001-itraq"
+    drop = bed["root"] / "Fragpipe_Auto" / "inbox" / "20260301_Kim_TMT_KL7001-itraq"
     drop.mkdir()
     for i in (1, 2):
         (drop / f"KL7001_TMT_F{i}.raw").write_bytes(b"RAW" * 400)

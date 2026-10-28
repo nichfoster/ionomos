@@ -3,7 +3,7 @@
   "about": "Ask about this on an analysis that needs a decision (doctor issue ONE_CONDITION).",
   "state": "doctor",
   "question": "Why is there no volcano plot?",
-  "item": "analysis_20260914_Isaac_DIA_vehicle-only-",
+  "item": "analysis_20260914_Sam_DIA_vehicle-only-",
   "model": [
     {
       "tool_calls": [

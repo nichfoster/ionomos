@@ -686,7 +686,7 @@ def _with_mq(cfg, exe, **extra):
 
 
 def _queue_mq(mq, cfg) -> Path:
-    folder = make_drop(cfg.inbox, "20260930_EJQ_isoDTB_mq-faults", ["DMSO_1_1.raw", "Drug_1_1.raw"])
+    folder = make_drop(cfg.inbox, "20260930_ABC_isoDTB_mq-faults", ["DMSO_1_1.raw", "Drug_1_1.raw"])
     assert intake(folder, cfg, mq["ledger"]).value == "queued"
     return Path(mq["ledger"].list()[-1].dest_dir)
 

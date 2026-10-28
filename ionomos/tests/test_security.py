@@ -316,8 +316,8 @@ def test_a_batch_launcher_is_never_started_with_an_argument_cmd_would_read_as_a_
     # a program that is not a batch file is started without a shell: every argument reaches it as written
     assert fragpipe.batch_problem(["C:/DIA-NN/diann.exe", "--cfg", arg]) == ""
     assert fragpipe.batch_problem(["/opt/fragpipe/bin/fragpipe", arg]) == ""
-    assert fragpipe.batch_problem(["C:/Fragpipe_Auto/users/EJQ/20260902_EJQ_x/fragpipe.bat", "--workflow",
-                                   "C:/Fragpipe_Auto/users/EJQ/20260902_EJQ_isoDTB_x-1.2_3/ionomos_run/a.workflow"]) == ""
+    assert fragpipe.batch_problem(["C:/Fragpipe_Auto/users/ABC/20260902_ABC_x/fragpipe.bat", "--workflow",
+                                   "C:/Fragpipe_Auto/users/ABC/20260902_ABC_isoDTB_x-1.2_3/ionomos_run/a.workflow"]) == ""
 
 
 def test_a_search_in_a_folder_with_an_ampersand(tmp_path, monkeypatch):
@@ -332,7 +332,7 @@ def test_a_search_in_a_folder_with_an_ampersand(tmp_path, monkeypatch):
     monkeypatch.setenv("IONOMOS_FAKE_FP_SECONDS", "0")
     cfg = load(testbed.init(tmp_path / "R&D"))
     ledger = Ledger(cfg.database)
-    d = cfg.inbox / "20260301_Isaac_DIA_BRD4"
+    d = cfg.inbox / "20260301_Sam_DIA_BRD4"
     (d / "raw").mkdir(parents=True)
     for r in ("DMSO_1", "DMSO_2", "Drug_1", "Drug_2"):
         (d / "raw" / f"{r}.raw").write_bytes(b"\0" * 256)
@@ -443,7 +443,7 @@ def test_a_scan_never_opens_a_network_path_written_in_a_file_it_finds(tmp_path, 
     would make Windows sign in to that server with the account Ionomos runs as. The scan reports it unread."""
     from ionomos import library
 
-    root = tmp_path / "users" / "EJQ" / "drop"
+    root = tmp_path / "users" / "ABC" / "drop"
     root.mkdir(parents=True)
     (root / "evil.workflow").write_text(f"msfragger.run-msfragger=true\ndatabase.db-path={db}\n", encoding="utf-8")
     (root / library.UI_CACHE).write_text(f"database.db-path={db}\nworkflow.workflow-option=x\n", encoding="utf-8")

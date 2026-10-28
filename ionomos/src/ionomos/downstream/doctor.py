@@ -144,10 +144,10 @@ def _ratio_checks(f: Findings, p, s, add) -> None:
             add(Issue("PROTEIN_CORRECTION_CONDITIONS", sev,
                       "Protein correction: the proteome's comparisons don't match the sites' conditions",
                       msg,
-                      ["The isoDTB sample is named after the experiment (EJQ_2_027), the proteome after the compound",
+                      ["The isoDTB sample is named after the experiment (ABC_2_027), the proteome after the compound",
                        "The proteome compares other conditions, or the same compound twice (against two controls)"],
                       ["Name the proteome comparison for each site condition under analysis: protein_correction: "
-                       "conditions: {EJQ_2_027: Cmpd vs DMSO} in experiment.yaml (the compound first) and Run analysis",
+                       "conditions: {ABC_2_027: Cmpd vs DMSO} in experiment.yaml (the compound first) and Run analysis",
                        "The uncorrected results are not affected"], {"message": msg}))
         else:
             add(Issue("PROTEIN_CORRECTION", sev, "The protein correction needs a look", msg,

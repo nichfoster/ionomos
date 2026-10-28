@@ -55,6 +55,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the Dropbox suggestion still looks for the first atlas's team folder (`atlas.DATA_FOLDER`, a convenience;
     `atlas.handoff_dir` is the setting). Test fixtures use made-up names and keep their spaces. A few help
     sentences that described one lab now read for any lab.
+  - The example data in code names nobody either (2026-10-28, D134 addendum): the testbed's users are `ABC`,
+    `Sam` (aliases `SK`, `SKD`), `Lee`, `Kim` and `Robin_Lake`, its drops `20260902-isoDTB_ABC-2-027`,
+    `SKD05_isoDTB_FLAGpull`, `20260914_Sam_DIA_FLAG-AR-pulldown` and so on; `config.example.yaml`'s aliases,
+    the Users tab's hints ("SK, SKD → Sam"), the Analysis tab's placeholder, the resolver window's fallback
+    users, the assistant's scenarios and `stress.py` use the same names, which are the ones
+    NAMING_CONVENTION.md already uses. Every behaviour a test relied on is kept (a user folder with a space
+    in its name, initials glued to an ID, an alias that beats a shorter one). `reference/` and the naming
+    tests that are table-driven from the PC inventory are as they were.
 
 ## [0.21.0] - 2026-10-26
 

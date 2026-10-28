@@ -47,7 +47,7 @@ ionomos/.venv/bin/ionomos testbed drop iso_good ./ionomos-testbed
 ionomos/.venv/bin/ionomos testbed drop dia_good ./ionomos-testbed
 ionomos/.venv/bin/ionomos --config ionomos-testbed/Fragpipe_Auto/config.yaml status --all
 ionomos/.venv/bin/ionomos --config ionomos-testbed/Fragpipe_Auto/config.yaml attention
-ionomos/.venv/bin/ionomos analyze ionomos-testbed/Fragpipe_General/EJQ/20260902-isoDTB_EJQ-2-027 --test welch
+ionomos/.venv/bin/ionomos analyze ionomos-testbed/Fragpipe_General/ABC/20260902-isoDTB_ABC-2-027 --test welch
 ```
 
 `ionomos-testbed/` is gitignored lab-simulation output — safe to delete/reset
@@ -77,7 +77,7 @@ See [codebase-map.md](codebase-map.md).
   tests without a display)
 - E2E primary flow: testbed init → watcher (`run --no-gui`, fake FragPipe) →
   dropped `iso_good` + `dia_good` → both jobs reached `done` in ~10s →
-  results filed to `Fragpipe_General/{EJQ,Isaac}/<experiment>/results/` with
+  results filed to `Fragpipe_General/{ABC,Sam}/<experiment>/results/` with
   `report.html` (self-contained, `ionomos-report-v2` marker present),
   `analysis.json`, volcano SVGs, FragPipe-Analyst export for DIA →
   `ionomos attention` exit 0 ("nothing needs attention") →

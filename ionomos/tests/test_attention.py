@@ -143,7 +143,7 @@ def test_rejected_folder_raises_an_item_that_clears_when_queued(bed):
     assert folder.name in it.title and it.data["folder"] == str(folder) and it.severity == "error"
     assert "naming" in " ".join(it.causes).lower()
     # the person fixes it (an experiment.yaml naming the user) -> taken in -> the item closes
-    (folder / "experiment.yaml").write_text("user: EJQ\n", encoding="utf-8")
+    (folder / "experiment.yaml").write_text("user: ABC\n", encoding="utf-8")
     assert intake(folder, bed["cfg"], bed["ledger"]).value == "queued"
     assert not _open(bed, "intake_rejected")
 

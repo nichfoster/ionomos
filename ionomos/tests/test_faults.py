@@ -67,7 +67,7 @@ def _job(bed, dest: Path) -> Job:
 
 def _then_a_good_job_runs(bed) -> None:
     """The worker is not stuck after a fault: the next experiment is searched to the end."""
-    dest = _queue(bed, "dia_good", name=f"20260914_Isaac_DIA_after-{len(bed['ledger'].list())}")
+    dest = _queue(bed, "dia_good", name=f"20260914_Sam_DIA_after-{len(bed['ledger'].list())}")
     _drain(Worker(bed["cfg"], bed["ledger"]))
     assert _job(bed, dest).status == "done", _job(bed, dest).reason
 
@@ -552,7 +552,7 @@ def test_a_fasta_with_a_space_in_its_name_holds_the_job_on_windows(bed, monkeypa
 
 def test_two_jobs_for_one_experiment_folder_search_it_once(bed):
     dest = _queue(bed)
-    bed["ledger"].insert(Job(inbox_name="copy-of-the-same", user="EJQ", method="isoDTB", dest_dir=str(dest),
+    bed["ledger"].insert(Job(inbox_name="copy-of-the-same", user="ABC", method="isoDTB", dest_dir=str(dest),
                              parsed=_status(dest)))
     _drain(Worker(bed["cfg"], bed["ledger"]))
     first, second = bed["ledger"].get(1), bed["ledger"].get(2)
@@ -564,8 +564,8 @@ def test_two_jobs_for_one_experiment_folder_search_it_once(bed):
 
 
 def test_the_same_raw_files_dropped_twice_are_two_experiments(bed):
-    a = _queue(bed, name="20260902-isoDTB_EJQ-2-027")
-    b = _queue(bed, name="20260902-isoDTB_EJQ-2-027_redo")
+    a = _queue(bed, name="20260902-isoDTB_ABC-2-027")
+    b = _queue(bed, name="20260902-isoDTB_ABC-2-027_redo")
     _drain(Worker(bed["cfg"], bed["ledger"]))
     assert _job(bed, a).status == "done" and _job(bed, b).status == "done" and a != b
 
@@ -616,7 +616,7 @@ def test_earlier_output_that_cannot_be_moved_aside_holds_the_job_and_is_never_wr
 def test_the_worker_loop_runs_through_a_queue_of_faults(bed):
     """Faults back to back in one running worker, the way the lab PC meets them."""
     modes = ["oom", "truncated-table", "garbled-log", "killed", "no-done-line"]
-    dests = [_queue(bed, mode=m, name=f"20260902-isoDTB_EJQ-fault-{i}") for i, m in enumerate(modes)]
+    dests = [_queue(bed, mode=m, name=f"20260902-isoDTB_ABC-fault-{i}") for i, m in enumerate(modes)]
     good = _queue(bed, "dia_good")
     w = Worker(bed["cfg"], bed["ledger"], poll_seconds=0.05)
     t = threading.Thread(target=w.run_forever, daemon=True)
@@ -667,7 +667,7 @@ def test_a_flat_drop_with_several_plexes_is_filed_as_it_is_with_a_clear_warning(
 
 def test_plex_folders_are_read_only_when_nothing_is_at_the_top(bed, tmp_path):
     cfg = bed["cfg"]
-    drop = cfg.inbox / "20260127_Aman_TMT_layout"
+    drop = cfg.inbox / "20260127_Kim_TMT_layout"
     (drop / "plex A").mkdir(parents=True)
     (drop / "plex B").mkdir()
     (drop / "plex A" / "P1_TMT_F1.raw").write_bytes(b"x" * 64)
@@ -680,14 +680,14 @@ def test_plex_folders_are_read_only_when_nothing_is_at_the_top(bed, tmp_path):
     dest = Path(bed["ledger"].list()[-1].dest_dir)
     assert (dest / "plex-A" / "P1_TMT_F1.raw").is_file()
 
-    same = cfg.inbox / "20260127_Aman_TMT_same-names"
+    same = cfg.inbox / "20260127_Kim_TMT_same-names"
     for sub in ("plexA", "plexB"):
         (same / sub).mkdir(parents=True)
         (same / sub / "P_TMT_F1.raw").write_bytes(b"x" * 64)
     with pytest.raises(Exception, match="FragPipe needs every raw file name once"):
         plan(same, cfg)
 
-    mixed = cfg.inbox / "20260127_Aman_TMT_top-level"
+    mixed = cfg.inbox / "20260127_Kim_TMT_top-level"
     (mixed / "old").mkdir(parents=True)
     (mixed / "Q_TMT_F1.raw").write_bytes(b"x" * 64)
     (mixed / "old" / "Q_TMT_F9.raw").write_bytes(b"x" * 64)

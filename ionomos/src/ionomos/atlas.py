@@ -458,8 +458,8 @@ def windows_path(p: str | Path) -> str:
 
 
 def layout_parts(source: str) -> list[str]:
-    r"""harvest's Get-RelativeDestination as path parts under the destination: C:\Fragpipe_General\EJQ\run ->
-    [C, Fragpipe_General, EJQ, run]; \\server\share\x -> [server_share, x]. A POSIX path (a test off Windows) goes
+    r"""harvest's Get-RelativeDestination as path parts under the destination: C:\Fragpipe_General\ABC\run ->
+    [C, Fragpipe_General, ABC, run]; \\server\share\x -> [server_share, x]. A POSIX path (a test off Windows) goes
     under '_'."""
     s = _plain(str(source))
     if re.match(r"^[A-Za-z]:[\\/]", s) or s.startswith(("\\\\", "//")):

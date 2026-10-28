@@ -288,7 +288,7 @@ def test_cli_ask_prints_the_proposal_and_the_command_and_changes_nothing(bed, ca
         assert cli.main(["--config", str(bed["cfg_path"]), "ask", "retry", "job", "1"]) == 0
         out = capsys.readouterr().out.splitlines()
         assert "Proposed change (nothing has changed; `ionomos ask` never makes a change):" in out
-        assert cmd in out and "Retry job 1 (20260902-isoDTB_EJQ-2-027)" in out
+        assert cmd in out and "Retry job 1 (20260902-isoDTB_ABC-2-027)" in out
     model = fake.ScriptedModel([{"tool_calls": [{"name": "propose_leave_out",
                                                  "arguments": {"job_id": 2, "sample": "DMSO_2", "leave_out": True}}]},
                                 {"content": "I proposed leaving DMSO_2 out [job:2]."}])

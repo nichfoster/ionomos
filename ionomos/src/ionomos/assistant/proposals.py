@@ -63,7 +63,7 @@ class Proposal:
     job_id: int
     job_name: str
     action: str                     # "retry" | "analysis"
-    title: str                      # one line, e.g. "Retry job 12 (EJQ_...)"
+    title: str                      # one line, e.g. "Retry job 12 (ABC_...)"
     changes: list[str] = field(default_factory=list)   # what Confirm does, in words
     diff: str = ""                  # experiment.yaml, unified diff ("" for a retry)
     analysis: dict | None = None    # the whole analysis: block after the change (what is saved)

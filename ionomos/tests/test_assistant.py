@@ -251,7 +251,7 @@ def test_the_assistant_package_cannot_write_delete_start_or_connect():
     ("log_tail", {"job_id": 1, "contains": "x" * 61}, "contains is too long"),
     ("log_tail", {"job_id": 1, "errors_only": "yes"}, "errors_only must be true or false"),
     ("list_experiments", {"status": "deleted"}, "status must be one of"),
-    ("list_experiments", {"user": "../Isaac"}, "user has characters that are not allowed"),
+    ("list_experiments", {"user": "../Sam"}, "user has characters that are not allowed"),
     ("list_experiments", {"user": "C:\\Users"}, "user has characters that are not allowed"),
     ("explain_issue", {"code": "NO_TABLE; rm -rf"}, "code has characters that are not allowed"),
     ("search_help", {"query": 7}, "query must be text"),
@@ -271,7 +271,7 @@ def test_tools_wrap_the_ledger_attention_help_and_the_log(bed):
     jobs = tools.call(ctx, "list_experiments", {})
     assert jobs["total"] == 1 and jobs["experiments"][0]["job"] == 1 and jobs["experiments"][0]["status"] == "failed"
     assert tools.call(ctx, "list_experiments", {"status": "done"})["total"] == 0
-    assert tools.call(ctx, "list_experiments", {"user": "ejq"})["total"] == 1
+    assert tools.call(ctx, "list_experiments", {"user": "abc"})["total"] == 1
 
     job = tools.call(ctx, "get_job", {"job_id": 1})
     led = bed["ledger"].get(1)
@@ -499,8 +499,8 @@ def test_ask_about_an_attention_item_and_an_unknown_one(bed):
     ans = assistant.ask(bed["ready"], "what happened?", item_id="no-such-item", transport=fake.ScriptedModel([]),
                         audit_path=bed["audit"])
     assert ans.outcome == "fallback" and ans.text.startswith("Note: there is no attention item no-such-item")
-    assert assistant.find_job(bed["ledger"], "20260902-isoDTB_EJQ-2-027") == (1, "")
-    assert assistant.find_job(bed["ledger"], "#1") == (1, "") and assistant.find_job(bed["ledger"], "ejq-2-027") == (1, "")
+    assert assistant.find_job(bed["ledger"], "20260902-isoDTB_ABC-2-027") == (1, "")
+    assert assistant.find_job(bed["ledger"], "#1") == (1, "") and assistant.find_job(bed["ledger"], "abc-2-027") == (1, "")
     assert assistant.find_job(bed["ledger"], "7")[1] == "there is no job 7"
     assert "no experiment is called" in assistant.find_job(bed["ledger"], "nothing\x1b like it")[1]
 

@@ -5420,3 +5420,20 @@ repository is now read by people outside the lab, so:
 (above); the GitHub description was changed by the maintainer's tooling, not
 by a workflow, so a future rename of the repository would need it changed
 again by hand.
+
+**Addendum, 2026-10-28 (example data in code).** Point 1 left the lab
+members' names in the code's example data: the testbed's users and drops
+(`testbed.py`), `config.example.yaml`'s aliases, the Users tab's hints and
+the resolver window's fallback users (`app.py`), the assistant's scenarios,
+`stress.py`, and the docstrings and error messages that quoted them. They
+now use one set of made-up names, the set NAMING_CONVENTION.md already
+used: `ABC` for the initials-style user, `Sam` with the aliases `SK` and
+`SKD` (so `SKD05` still resolves through the longer alias), `Lee`, `Kim`,
+`Robin_Lake` for the user whose folder name has two words (the drop
+"Robin Lake TMT run 3" still resolves to it), and `Kai` and `Alex` in the
+library test's fake PC. Every stand-in keeps the property its test relies
+on; no behaviour changed. The tests that build on the testbed changed with
+it; the `lab` fixture in `conftest.py`, the naming tests table-driven from
+`reference/pc-inventory/` and the tests with their own fixtures keep the
+inventory's names, which CLAUDE.md allows in tests only. `atlas.DATA_FOLDER`
+keeps its value (point 4).
