@@ -5420,3 +5420,63 @@ repository is now read by people outside the lab, so:
 (above); the GitHub description was changed by the maintainer's tooling, not
 by a workflow, so a future rename of the repository would need it changed
 again by hand.
+
+### D135 — The atlas takes TMT-Integrator's tables, knows every TMT reagent, and leaves an earlier search's `.pin` files
+**2026-10-27.** A Dropbox export of the first lab's runs (2026-10-27) showed three gaps in what the atlas hand-off takes
+(`atlas.select`, for a job's hand-off and the drive sweep's found runs alike). The user approved the three rules
+below; `harvest_fragpipe.ps1` (the atlas side's, a private repository) takes rules 1 and 2 in the same release, so the
+PC's two senders keep one selection of files and one probe class (D127); rule 3 is Ionomos' only (harvest takes
+every `.pin`, and the atlas side's decoy check drops the same two cases itself).
+1. **TMT-Integrator's tables.** 46 runs of the export had TMT-Integrator on and none of its tables at the atlas:
+   FragPipe writes them into the run folder's `tmt-report` subfolder (`abundance_*.tsv`, `ratio_*.tsv`), and a
+   subfolder took only `$ReplicateAllow` (`psm.tsv`, `peptide.tsv`, `protein.tsv`, logs). A subfolder named
+   `tmt-report` (case ignored) now also takes `*.tsv` (`TMT_REPORT_DIR`, `TMT_REPORT_ALLOW`), for every run,
+   whatever its probe class: the selection stays one rule for every class (the engagement model and the decoy check
+   read TMT runs' quantities from there). One level only; `NEVER_COPY` and the 500 MB cap apply, and a table over
+   it is in `left[]` as any capped file. It lands at `tmt-report/<name>` under the run's destination. Its files'
+   level is `tmt-report`, as harvest's inventory lists them (so the two sides' parity test compares like with
+   like); everything that reads a level treats it as a replicate folder's.
+2. **Every TMT reagent's mass.** 5 runs (one experiment's TMT check) were TMT2 (duplex, 225.1558 on K and
+   the peptide N-term; TMT6's 229.16293 on S turned off) and were classed `other`, so the sweep left them.
+   `PROBE_MASSES`'s TMT pattern (harvest's `$ProbeMasses`) is now `229\.16|304\.20|304\.21|225\.15|224\.15|295\.18|295\.19`:
+   TMT2 225.1558, TMT0 224.1525 and TMTpro zero 295.1896 added (295.18 catches 295.18959 and 295.1896; 295.19 a
+   two-decimal rounding). The sweep still reads only the rows turned on (`enabled_class`, D128).
+3. **A run's `.pin` files checked against its manifest.** FragPipe leaves an earlier search's files in its output
+   folder. One isoDTB run (`D:\<member>\20260629-isoDTB\output`) has the folders `isoDTB_AB0001_1` to `_7` of a search that
+   grouped its 21 raw files by fraction, while its manifest groups them by replicate (`_1` to `_3`): every `.pin` was
+   taken, which inflated the run by about 25% at the atlas and gave the decoy check two searches' decoys of one raw
+   file. Now each `.pin` is checked against `fragpipe-files.fp-manifest` (no header: its first line is a row, as
+   another run of the export shows with a cytochrome C run first), after the `_edited` twin rule and
+   before `pins off` and the cap. Stems: the `.pin`'s name without `.pin` and a trailing `_edited`; the raw file's
+   name (last path part, `\` or `/`) without its extension; compared without case. A manifest that names raw files
+   but not the `.pin`'s → `its raw file is not in this run's manifest`. In a subfolder F, its stem in the manifest
+   but in no row whose group (`<experiment>_<bioreplicate>`, or `<experiment>`) is F, while such a row's group G is a
+   subfolder of the run folder → `its raw file is another replicate's (G)`. When G can't be told for sure (no
+   experiment, no such folder) the `.pin` is taken, as before; a top-folder `.pin` gets only the first check; no
+   manifest, an unreadable one, or one naming no raw file: every `.pin` as before. The new reasons reach the record's
+   `left[]` as the other `.pin` reasons do. A DIA search names its `.pin` files `<x>_Q1` to `_Q3` (DIA-Umpire) or
+   `<x>_rank<N>` (MSFragger-DIA): one whose whole stem is no raw file's counts as `<x>`'s (`PIN_DIA_SUFFIX`), so a
+   DIA run never loses its decoys to this check. Checking against what FragPipe was told is safer than guessing an
+   earlier search by the files' times, and taking a `.pin` whenever the group can't be told keeps a run whose
+   folders were renamed by hand from losing its decoys.
+4. **What it does to runs sent before.** The drive sweep's fingerprint (D128) covers the taken files, so a found run
+   whose takes changed (a TMT run with `tmt-report` tables, a run with stale `.pin` files) is sent again once: only
+   the missing files are copied, the rest compared, nothing at the destination removed or overwritten (D122). A
+   stale `.pin.gz` copied earlier stays in Dropbox and the new record lists it in `left[]`, not `files[]`;
+   receivers go by `files[]`. The run's `ionomos-handoff.json` is the one file replaced, as when Ionomos is updated.
+   Runs newly classed TMT go on the next pass with the TMT switch on. An Ionomos job's hand-off that is `sent` is
+   state-based and is not sent again by itself; **Send to atlas** / `ionomos atlas send JOB` sends it with the new
+   selection. Neither was changed: re-sending every sent job by itself would copy nothing new for most of them.
+
+**Verified**: `tests/test_atlas.py` (the selection table with `tmt-report` and a leftover `.pin`; `TMT-Report` in
+mixed case with two tables taken, a `.txt` there and a `.tsv` a level deeper not, one over the cap, at
+`tmt-report/<name>`, its level `tmt-report` with the sweep's fingerprint as a replicate's; every TMT mass; the manifest's first line a row; the `.pin` cases
+table-driven from the export's runs, under made-up names (D134): the first run's 39 `.pin` files with 21 taken and
+18 left naming the right replicate, the second's 8 all taken, a leftover `Old_search_F1_edited.pin`, no or an empty or an unreadable manifest,
+no experiment, a group with no folder, case, mzML and `.d` raws; the order of the rules; the reasons in a found
+run's and a job's record) and `tests/test_atlassweep.py` (the TMT2 run's tables by enabled rows; a TMT2 run left
+with the switch off and sent with it, its `tmt-report` tables included; a found run sent under the earlier rule sent
+again with only its two new tables copied, every earlier file at the destination byte- and time-identical but its
+record, the stale `.pin.gz` kept and named in `left[]`, and unchanged on the pass after). **Not verified**: on the
+lab PC; the DIA `.pin` names from FragPipe's documentation, not a lab run (the lab's isoDTB and TMT runs are DDA);
+and `harvest_fragpipe.ps1`'s side of rules 1 and 2 (the atlas side's).

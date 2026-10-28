@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-10-28
+
+### Added
+
+- **The atlas hand-off takes TMT-Integrator's tables** (D135, docs/ATLAS.md): every `*.tsv` of the run folder's
+  `tmt-report` subfolder (`abundance_*.tsv`, `ratio_*.tsv`; the folder's name in any case), for a job's hand-off and
+  the drive sweep alike, whatever the run's probe class. One level only; the 500 MB cap and `left[]` as for any
+  file. A Dropbox export of the first lab's runs (2026-10-27) had 46 runs with TMT-Integrator on and none of these
+  tables. `harvest_fragpipe.ps1` takes the same in the same release.
+
 ### Changed
 
 - **Ionomos reads as a tool for any lab** (D134). The README is rewritten for a reader who has never seen the
@@ -41,7 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `ionomos compare`*. The JS fixture is regenerated.
   - The other design docs (ARCHITECTURE, ATLAS, DEPLOY_WINDOWS, DEV_LOOP, LIBRARY, UI, FASTA, NAMING_CONVENTION,
     ASSISTANT, HELP, TESTING, ENGINES, QUICKSTART): examples use made-up users and initials; the atlas hand-off's
-    receiver is "the atlas side", a private repository, and its folder `<Dropbox>\<team folder>ragpipe-runs`
+    receiver is "the atlas side", a private repository, and its folder `<Dropbox>\<team folder>\fragpipe-runs`
     (the name is the atlas side's choice, set in `atlas.handoff_dir`); "the first lab" where a fact is about the
     lab where Ionomos started (its PC, FASTA, SOPs, R scripts); the dev loop is "developer machine ↔ instrument
     PC". QUICKSTART installs from GitHub first, since `ionomos` is not on PyPI yet. No command, default, decision
@@ -51,10 +61,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `CITATION.cff` is at 0.21.0 (it still said 0.18.1). CONTRIBUTING.md has the rule "Nothing lab-specific" and
     the pull-request template a matching checkbox; CLAUDE.md says the same for agents.
   - The atlas hand-off's messages, the Folders tab hint, the `config.yaml` comment and the help no longer show
-    one person's Dropbox folder ("the Dropbox folder the atlas side reads, e.g. `...\<team folder>ragpipe-runs`");
+    one person's Dropbox folder ("the Dropbox folder the atlas side reads, e.g. `...\<team folder>\fragpipe-runs`");
     the Dropbox suggestion still looks for the first atlas's team folder (`atlas.DATA_FOLDER`, a convenience;
     `atlas.handoff_dir` is the setting). Test fixtures use made-up names and keep their spaces. A few help
     sentences that described one lab now read for any lab.
+- **Every TMT reagent counts as TMT** (D135): the probe class by the masses (harvest's `$ProbeMasses`) also knows
+  TMT2 (duplex, 225.1558), TMT0 (224.1525) and TMTpro zero (295.1896). Runs searched with them (five runs of that
+  export, TMT2) were classed `other` and left by the drive sweep; with **Also TMT
+  searches** on they go on the next pass.
+- **A run the drive sweep sent before goes again once** when this release changes what is taken from it (a TMT run
+  with `tmt-report` tables, a run with an earlier search's `.pin` files): only the missing files are copied, the
+  rest compared; nothing in Dropbox is removed or overwritten but the run's `ionomos-handoff.json`, and a `.pin.gz`
+  copied earlier that is now left stays there, named in the new record's `left[]`. An Ionomos job already handed
+  off is not sent again by itself: **Send to atlas** or `ionomos atlas send JOB` sends it with the new selection.
+
+### Fixed
+
+- **A notification kept for later is always the newest about its job** (D131). Two messages about one job
+  announced within one tick of Windows' clock (about 16 ms before Python 3.13) had the same order, so a
+  stale "waiting" could replace "done" in the kept list when its sending thread ended last; and the kept
+  orders (times in ns) were compared as floats, which hold them only to 256 ns. Each announcement now comes
+  after the one before, and orders are compared as whole numbers.
+- **An earlier search's `.pin` files no longer go to the atlas as the run's** (D135). Each `.pin` is checked against
+  the run's `fragpipe-files.fp-manifest` (no header: its first line is a row): one whose raw file the manifest
+  doesn't name stays behind (`its raw file is not in this run's manifest`), and one in a replicate folder that
+  isn't its raw file's, while that replicate's folder is there, too (`its raw file is another replicate's
+  (<folder>)`); both in the record's `left[]`. When that can't be told for sure (no experiment, no such folder, no
+  manifest) the `.pin` is taken as before. One isoDTB run of that export, whose folders hold an earlier search's
+  `.pin` files grouped by fraction, was inflated by about 25% at the atlas. A DIA search's `.pin` files
+  (`<raw>_Q1`..`_Q3`, `<raw>_rank<N>`) count as their raw file's. This check is Ionomos' only: harvest still
+  takes every `.pin`, and the atlas side's decoy check drops the same two cases itself.
 
 ## [0.21.0] - 2026-10-26
 

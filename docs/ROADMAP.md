@@ -918,6 +918,17 @@ Collected from the other docs; resolve before/during Phase 1.
       uncounted.
 - [ ] Should the sweep also send isoTOP runs (left today, as the atlas doesn't read them), and should it leave
       some owners' folders out by default?
+- [ ] The selection of D135 on the PC (with harvest's matching version): the first sweep after the update sends the
+      runs whose takes changed once more; check in Dropbox that a TMT run's `tmt-report\*.tsv` arrived, that the TMT2
+      runs (one experiment's TMT check) went as TMT, and that the `20260629-isoDTB` run's record lists the earlier
+      search's `.pin` files in `left[]`, the copies sent before still there.
+- [ ] Replicate folders that are no group of the current manifest (D135: one run's folders `_4` to `_7`, left
+      by an earlier search that grouped by fraction) still have their `psm.tsv`, `peptide.tsv` and `protein.tsv`
+      taken by the replicate rule; only their `.pin` files stay behind. Should those tables stay behind too (on both
+      sides, harvest's and Ionomos'), or does the atlas side tell them apart by the manifest?
+- [ ] A run that moved drives (one of the export's, from `C:` to `D:`) arrives as a new run key (Run is its path). A
+      `same_inputs_as` field in the record would let the atlas side link the two, but deciding it needs the hashes of
+      the Dropbox copies, and harvest's copies CSV has no SHA-256; not now (D135).
 
 **TMT: what the first TMT search's records must confirm (D91).** A TMT search has run through the watcher
 (reported 2026-10-28, REAL_RUNS.md); its `run_fingerprint.json` and console log still have to be read for:

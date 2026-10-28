@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import csv
 import gzip
+import hashlib
 import io
 import json
 import os
@@ -29,6 +30,16 @@ from tests.test_atlas import WORKFLOW, _files, _long, _pin, _read, _records, _ru
 TMT_WORKFLOW = ("# FragPipe (23.1) runtime properties\ndatabase.db-path=C\\:\\\\fasta\\\\h.fas\n"
                 "msfragger.table.fix-mods=229.16293,K,true,-1; 229.16293,n^,true,-1\n")
 ISOTOP_WORKFLOW = "# FragPipe (22.0)\nmsfragger.table.var-mods=464.28596,C,true,1\n"
+# Five runs of one experiment's TMT check (a Dropbox export of the first lab's runs, 2026-10-27): TMT2 (duplex,
+# 225.1558) on K and the peptide N-term, TMT6's 229.16293 on S turned off; classed other before D135. FragPipe's
+# fix-mods table lists every site, most at 0.0
+TMT2_FIX = ("0.0,C-Term Peptide,true,-1; 0.0,N-Term Peptide,true,-1; 0.0,C-Term Protein,true,-1; "
+            "0.0,N-Term Protein,true,-1; 0.0,G (glycine),true,-1; 0.0,A (alanine),true,-1; 0.0,S (serine),true,-1; "
+            "0.0,P (proline),true,-1; 57.02146,C (cysteine),true,-1; 225.1558,K (lysine),true,-1; "
+            "0.0,R (arginine),true,-1")
+TMT2_VAR = "225.1558,n^,true,1; 229.16293,S,false,1"
+TMT2_WORKFLOW = (f"# FragPipe (23.1) runtime properties\nmsfragger.table.fix-mods={TMT2_FIX}\n"
+                 f"msfragger.table.var-mods={TMT2_VAR}\n")
 HOURS_AGO = 3
 
 
@@ -450,9 +461,79 @@ def test_a_run_with_no_psm_tsv_is_left(drives):
     ("561.3387,C,true,1; 229.16293,K,false,-1", "", "isoDTB"),      # its TMT row off
     ("", "229.16293,K,true,-1; 229.16293,n^,true,-1", "TMT"),
     ("561.3387", "", "isoDTB"),                                      # no enabled field: counts
+    (TMT2_VAR, TMT2_FIX, "TMT"),                                     # TMT2 (D135); its 229.16293 row is off
+    ("229.16293,S,false,1", TMT2_FIX.replace("225.1558", "0.0"), "other"),
+    ("", "304.20715,K,true,-1; 304.20715,n^,true,-1", "TMT"),       # TMTpro
+    ("", "295.18959,K,true,-1", "TMT"),                              # TMTpro zero
+    ("224.1525,n^,true,1", "", "TMT"),                               # TMT0
 ])
 def test_only_the_modifications_turned_on_count(var, fix, want):
     assert atlassweep.enabled_class({"VarMods": var, "FixMods": fix}) == want
+
+
+def test_a_tmt2_run_goes_as_tmt_with_tmt_integrators_tables(drives):
+    """One of those TMT2 runs (D135): TMT by its TMT2 mass, so it goes with the TMT switch on,
+    and its tmt-report tables go with it, to tmt-report/<name> under the run's destination."""
+    run = _run_folder(drives["disk"] / "member4" / "TMT2-check" / "fragpipe", {
+        "fragpipe.workflow": TMT2_WORKFLOW.encode(), "nucleus/psm.tsv": b"Peptide\n" * 4,
+        "tmt-report/abundance_protein_MD.tsv": b"Index\tNumberPSM\n", "tmt-report/ratio_gene_None.tsv": b"Index\n",
+        "tmt-report/notes.txt": b"not a table"})
+    _age(drives["disk"])
+    off = _outcome(atlassweep.sweep(drives["cfg"]), run)
+    assert (off.outcome, off.kind, off.why) == ("left", "TMT", "probe class TMT (the TMT switch is off)")
+    on = _outcome(atlassweep.sweep(_tmt_on(drives)), run)
+    assert (on.outcome, on.kind) == ("sent", "TMT"), on.why
+    run_dest = atlas.destination(run, drives["dest"])
+    assert _read(run_dest / "tmt-report" / "abundance_protein_MD.tsv") == b"Index\tNumberPSM\n"
+    assert "tmt-report/notes.txt" not in _files(run_dest)
+    rec = json.loads(_read(run_dest / names.ATLAS_HANDOFF_FILE))
+    assert rec["probe_class"] == "TMT" and rec["found"]["probe_class_by_masses"] == "TMT"
+    assert {"tmt-report/abundance_protein_MD.tsv", "tmt-report/ratio_gene_None.tsv"} <= {f["path"] for f in rec["files"]}
+
+
+def test_a_run_sent_by_the_earlier_rule_goes_again_and_nothing_there_is_touched(drives, monkeypatch):
+    """D135 changed what is taken. A found run sent before (its tmt-report tables left behind, an earlier search's
+    .pin taken) has another fingerprint now, so the next pass sends it again: the new files are copied, the rest
+    compared and kept; nothing at the destination is removed or overwritten but the run's ionomos-handoff.json, whose
+    new version lists the stale .pin in left[] and not in files[] (the receiver goes by files[]). The .pin.gz copied
+    earlier stays where it is."""
+    cfg = _tmt_on(drives)
+    run = drives["tmt"] / "fragpipe"
+    stale = "plex1/Old_search_F1_edited.pin"
+    _run_folder(run, {"tmt-report/abundance_gene_MD.tsv": b"Index\tDMSO_1\n", "tmt-report/ratio_gene_MD.tsv": b"I\n",
+                      stale: _pin(40)})
+    _age(drives["tmt"])
+    with monkeypatch.context() as m:  # the rule before D135: no tmt-report tables, every .pin
+        m.setattr(atlas, "TMT_REPORT_ALLOW", ())
+        m.setattr(atlas, "_manifest_groups", lambda run_dir: {})
+        first = atlassweep.sweep(cfg)
+    assert _outcome(first, run).outcome == atlassweep.SENT and first.ok
+    run_dest = atlas.destination(run, drives["dest"])
+    assert stale + ".gz" in _files(run_dest) and "tmt-report/abundance_gene_MD.tsv" not in _files(run_dest)
+
+    def there() -> dict:
+        return {r: (os.stat(f).st_size, os.stat(f).st_mtime_ns, hashlib.sha256(_read(f)).hexdigest())
+                for r, f in _files(drives["dest"]).items()}
+
+    before = there()
+    second = atlassweep.sweep(cfg)
+    assert second.ok, second.message
+    r = _outcome(second, run)
+    assert (r.outcome, r.copied) == (atlassweep.SENT, 2)  # only the two tables; the rest is there already
+    assert _outcome(second, drives["iso"] / "fragpipe").outcome == atlassweep.UNCHANGED  # its takes are the same
+    after = there()
+    prefix = "/".join(atlas.layout_parts(atlas.windows_path(run))) + "/"
+    assert set(before) <= set(after)  # nothing removed
+    assert {k for k in before if after[k] != before[k]} == {prefix + names.ATLAS_HANDOFF_FILE}  # nor overwritten
+    new = set(after) - set(before)
+    assert {k[len(prefix):] for k in new if k.startswith(prefix)} == {"tmt-report/abundance_gene_MD.tsv",
+                                                                       "tmt-report/ratio_gene_MD.tsv"}
+    assert len([k for k in new if k.startswith(names.ATLAS_LOG_DIR + "/")]) == 1  # a second runs CSV
+    rec = json.loads(_read(run_dest / names.ATLAS_HANDOFF_FILE))
+    assert {"path": stale, "size": len(_pin(40)), "reason": "its raw file is not in this run's manifest"} in rec["left"]
+    assert stale + ".gz" not in {f["path"] for f in rec["files"]} and stale + ".gz" in _files(run_dest)
+    assert {"tmt-report/abundance_gene_MD.tsv", "tmt-report/ratio_gene_MD.tsv"} <= {f["path"] for f in rec["files"]}
+    assert _outcome(atlassweep.sweep(cfg), run).outcome == atlassweep.UNCHANGED  # and once only
 
 
 def test_a_label_free_workflow_copied_from_isodtb_is_left(drives):
