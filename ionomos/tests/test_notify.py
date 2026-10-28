@@ -15,6 +15,7 @@ import subprocess
 import sys
 import threading
 import time
+import types
 import urllib.error
 import zipfile
 from dataclasses import replace
@@ -708,6 +709,23 @@ def test_a_newer_message_about_a_job_replaces_the_kept_one_and_a_working_channel
         (9, "done", False), (7, "done", True), (8, "failed", True)]
     assert notify.unsent(cfg.log_dir) == [] and _item(cfg.log_dir).state == "resolved"
 
+
+def test_two_messages_in_one_tick_of_the_clock_keep_their_order(lab, hook, offline, monkeypatch):
+    """Windows' clock ticked every ~16 ms before Python 3.13: two messages about a job announced in one tick had one
+    order, and the older one, its thread ending last, replaced the newer in the kept list (Windows CI, py3.12). Each
+    announcement now comes after the one before, whatever the clock says."""
+    frozen = types.SimpleNamespace(**{k: getattr(time, k) for k in dir(time) if not k.startswith("_")})
+    frozen.time_ns = lambda: 1_761_600_000_000_000_000
+    monkeypatch.setattr(notify, "time", frozen)
+    cfg = _cfg(lab, webhook={"url": hook.url + "/hook"})
+    s, job = cfg.notify, _job(id=7)
+    held, done = notify._next_order(), notify._next_order()
+    assert held < done
+    # the newer message's thread ends first, the older one's after it
+    notify._send_logged(s, notify.build("done", job, s, "", SUMMARY), "job 7 done", cfg.log_dir, 7, done)
+    notify._send_logged(s, notify.build("held", job, s, "low disk space: 12 GB free", None), "job 7 waiting",
+                        cfg.log_dir, 7, held)
+    assert [(e["job_id"], e["fields"]["event"]) for e in notify.unsent(cfg.log_dir)] == [(7, "done")]
 
 def test_kept_messages_are_bounded_in_number_and_age(lab, hook, offline, monkeypatch, caplog):
     monkeypatch.setattr(notify, "UNSENT_MAX", 3)

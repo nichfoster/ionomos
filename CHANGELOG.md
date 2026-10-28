@@ -31,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A notification kept for later is always the newest about its job** (D131). Two messages about one job
+  announced within one tick of Windows' clock (about 16 ms before Python 3.13) had the same order, so a
+  stale "waiting" could replace "done" in the kept list when its sending thread ended last. Each
+  announcement now comes after the one before.
 - **An earlier search's `.pin` files no longer go to the atlas as the run's** (D134). Each `.pin` is checked against
   the run's `fragpipe-files.fp-manifest` (no header: its first line is a row): one whose raw file the manifest
   doesn't name stays behind (`its raw file is not in this run's manifest`), and one in a replicate folder that

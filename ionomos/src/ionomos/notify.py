@@ -650,6 +650,8 @@ _lock = threading.Lock()
 _failing: dict[str, str] = {}  # channel -> the error already logged (log once until it changes or works)
 _sending: list[threading.Thread] = []
 _unsent_lock = threading.Lock()  # one thread at a time sends the kept messages (D131)
+_order_lock = threading.Lock()
+_last_order = 0
 _SERVICE = {"webhook": "the webhook", "teams": "Teams", "slack": "Slack", "email": "the mail server"}
 
 
@@ -1110,6 +1112,16 @@ def retry_unsent(cfg, now: float | None = None, force: bool = False) -> threadin
         return None
 
 
+def _next_order() -> int:
+    """When a message is announced, in ns: the clock, but always after the one before in this process. Windows' clock
+    ticked every ~16 ms before Python 3.13, so two messages about a job in one tick had the same order and the older
+    one, its thread ending last, replaced the newer in the kept list (D131)."""
+    global _last_order
+    with _order_lock:
+        _last_order = max(time.time_ns(), _last_order + 1)
+        return _last_order
+
+
 def announce(cfg, event: str, job, reason: str = "", summary: dict | None = None) -> threading.Thread | None:
     """Tell the configured channels that `job` is done / failed / held. Returns at once: the sending is
     done by the returned daemon thread (None if nothing is sent). Never raises.
@@ -1121,7 +1133,7 @@ def announce(cfg, event: str, job, reason: str = "", summary: dict | None = None
         s = getattr(cfg, "notify", None) or {}
         if not s.get("enabled") or not channels(s):
             return None
-        order = time.time_ns()
+        order = _next_order()
         log_dir = getattr(cfg, "log_dir", None)
         if log_dir is not None:
             if event == "held":
