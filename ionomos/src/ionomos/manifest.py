@@ -6,7 +6,7 @@ what the GUI resolver writes when a human fixes a naming problem, so a
 decision made once is remembered if the folder is re-dropped.
 
     method: TMT                      # override keyword match
-    user: Isaac                      # override initials match (must be a users_root folder)
+    user: Sam                      # override initials match (must be a users_root folder)
     date: 2026-09-02
     workflow: TMT10-MS3-phospho      # file under workflow_dir (extension optional)
     fasta: human_2025-01_decoys.fas
@@ -176,7 +176,7 @@ def _name_value(data: dict, key: str) -> str | None:
     return str(v) if v else None
 
 
-_EXAMPLE = {"method": "isoDTB", "user": "EJQ", "workflow": "isoDTB.workflow", "fasta": "human_reviewed_decoys.fas"}
+_EXAMPLE = {"method": "isoDTB", "user": "ABC", "workflow": "isoDTB.workflow", "fasta": "human_reviewed_decoys.fas"}
 
 
 _TRUE = {"true", "yes", "y", "on", "1"}

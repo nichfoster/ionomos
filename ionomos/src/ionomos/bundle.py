@@ -375,7 +375,7 @@ class Anonymiser:
             self._other.append(name)
 
     def add_fragment(self, word) -> None:
-        """A word of a name (a key file's `names` entry: 'then' of EJQ_isoDTB_then_TMT): found only inside the
+        """A word of a name (a key file's `names` entry: 'then' of ABC_isoDTB_then_TMT): found only inside the
         names it belongs to, never as a plain word on its own, unless it is distinct (KL6159A) (#142)."""
         word = self._clean(word)
         if word and word not in self._fragments:

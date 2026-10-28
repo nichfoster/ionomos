@@ -217,7 +217,7 @@ def test_the_walk_stops_when_asked(tmp_path):
 @pytest.mark.parametrize(("path", "owner"), [
     (r"C:\Fragpipe_General\EJQ\20261019_isoDTB\fragpipe", "EJQ"),
     (r"C:\Users\Lab Account\Desktop\member\run", "Lab Account"),
-    (r"D:\Taylor_Elements\2024\TMT\fragpipe", "Taylor_Elements"),
+    (r"D:\Robin_Lake\2024\TMT\fragpipe", "Robin_Lake"),
     (r"D:\Fragpipe_General\member2\x", "member2"),
     (r"\\server\share\x", "server"),
 ])

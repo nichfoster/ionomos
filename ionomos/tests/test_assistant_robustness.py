@@ -323,7 +323,7 @@ def _bad_arguments(tool) -> list:
     props, required = tool.parameters["properties"], tool.parameters["required"]
     good = {"job_id": 3, "sample": "DMSO_1", "condition": "Drug", "leave_out": True, "key": "alpha", "value": "0.01",
             "role": "control", "code": "NO_TABLE", "query": "memory", "lines": 5, "limit": 2, "status": "failed",
-            "user": "EJQ", "contains": "error", "errors_only": True}
+            "user": "ABC", "contains": "error", "errors_only": True}
     base = {k: good[k] for k in required}
     out: list = [[], "not json {", json.dumps([1, 2]), {**base, "path": "C:/Windows"}, {**base, "job_id_": 1}]
     out += [{k: v for k, v in base.items() if k != r} for r in required]
@@ -411,7 +411,7 @@ def test_an_injected_help_entry_reaches_the_model_as_cleaned_data_only(fp, tmp_p
 
 @pytest.mark.parametrize(("experiment", "note"), [
     ("\u00b2", "no experiment is called"), ("9" * 5000, "there is no job"), ("99999999999999999999", "there is no job"),
-    ("#0", "there is no job #0"), ("  ", ""), ("EJQ", "2 experiments match 'EJQ'"),
+    ("#0", "there is no job #0"), ("  ", ""), ("ABC", "2 experiments match 'ABC'"),
 ])
 def test_odd_experiment_values_never_crash_ask(fp, tmp_path, experiment, note):
     ans, _ = _ask(fp, "why?", [{"content": "x"}], tmp_path, experiment=experiment)

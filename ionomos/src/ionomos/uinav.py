@@ -339,7 +339,7 @@ class StatusLine:
 
 
 def jobs_summary(database: str | Path | None) -> str:
-    """'FragPipe: RUNNING job 3 (EJQ/x, isoDTB) since 10:12 · 1 queued, 0 failed, 2 done · waiting: …'."""
+    """'FragPipe: RUNNING job 3 (ABC/x, isoDTB) since 10:12 · 1 queued, 0 failed, 2 done · waiting: …'."""
     from ionomos.ledger import Ledger, integrity
 
     if not database or integrity(database) != "ok":

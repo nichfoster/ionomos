@@ -176,8 +176,8 @@ assistant:
 # Aliases let initials in a folder name resolve to that folder.
 users:
   aliases:
-    Isaac: [IJ, IJD]
-    EJQ: [EJQ_2]
+    Sam: [SK, SKD]
+    ABC: [ABC_2]
   default: ""                 # e.g. "_unsorted" — file unrecognised users there instead of rejecting
   # learned_aliases_file: C:/Fragpipe_Auto/learned_aliases.yaml   # written by the resolver window
 

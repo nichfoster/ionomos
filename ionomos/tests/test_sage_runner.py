@@ -41,7 +41,7 @@ def bed(tmp_path, monkeypatch):
 
 def _queue(bed, cfg=None) -> Path:
     cfg = cfg or bed["cfg"]
-    folder = make_drop(cfg.inbox, "20260930_EJQ_isoDTB_sage-lfq", FILES)
+    folder = make_drop(cfg.inbox, "20260930_ABC_isoDTB_sage-lfq", FILES)
     assert intake(folder, cfg, bed["ledger"]).value == "queued"
     return Path(bed["ledger"].list()[-1].dest_dir)
 
@@ -140,7 +140,7 @@ def _queue_tmt(bed, channels: dict | None, kit="Tmt10", **tmt) -> tuple:
     lab = bed["cfg"].workflow_dir / "lab_tmt.json"
     lab.write_text(json.dumps({**TMT_SETTINGS, "quant": {**TMT_SETTINGS["quant"], "tmt": kit}}), encoding="utf-8")
     cfg = _with_sage(bed["cfg"], bed["exe"], bed["conv"], key="TMT", sage_config="lab_tmt.json")
-    folder = make_drop(cfg.inbox, "20260930_EJQ_TMT_sage-tmt", TMT_FILES)
+    folder = make_drop(cfg.inbox, "20260930_ABC_TMT_sage-tmt", TMT_FILES)
     if channels or tmt:
         (folder / "experiment.yaml").write_text(yaml.safe_dump({"tmt": {**({"channels": channels} if channels else {}),
                                                                         **tmt}}), encoding="utf-8")
@@ -213,7 +213,7 @@ def test_tmt_plexes_map_must_name_every_plex(bed):
 def test_a_qc_standard_searched_by_sage_is_trended(bed):
     from ionomos import qctrend
 
-    folder = make_drop(bed["cfg"].inbox, "20260930_EJQ_isoDTB_HeLa-200ng-QC", ["HeLa_200ng_1.raw", "HeLa_200ng_2.raw"])
+    folder = make_drop(bed["cfg"].inbox, "20260930_ABC_isoDTB_HeLa-200ng-QC", ["HeLa_200ng_1.raw", "HeLa_200ng_2.raw"])
     assert intake(folder, bed["cfg"], bed["ledger"]).value == "queued"
     Worker(bed["cfg"], bed["ledger"]).run_once()
     job = bed["ledger"].get(1)

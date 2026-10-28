@@ -81,7 +81,7 @@ FIRST-TIME SETUP (the set-up tabs, left to right)
               with "Also TMT searches", TMT ones) to the lab Dropbox folder
               the atlas reads (spaces are fine there).
   Users       One subfolder per person under users_root. Add the initials each
-              person uses in folder names so "IJD05_isoDTB" -> Isaac.
+              person uses in folder names so "SKD05_isoDTB" -> Sam.
   Methods     For each method: which .workflow file (exported from the FragPipe
               GUI via Workflow -> Save to custom folder, AFTER setting the FASTA)
               and which FASTA. Keywords are what Ionomos looks for in names.
@@ -102,7 +102,7 @@ SAVING
 
 NAMING RULES (tell the lab)
   Folder: anything containing your initials and isoDTB / TMT / DIA.
-          e.g. 20260902_EJQ_isoDTB_EJQ-2-027_1uM-3h
+          e.g. 20260902_ABC_isoDTB_ABC-2-027_1uM-3h
   Files:  isoDTB  <sample>_<rep>_<fraction>.raw     (X_1_1.raw ... X_3_7.raw)
           TMT     <sample>_TMT_F<fraction>.raw      (all reps are in channels)
           DIA     <condition>_<biorep>.raw          (DMSO_1.raw, Drug_2.raw)
@@ -1178,7 +1178,7 @@ class App:
         f.columnconfigure(1, weight=1)
         f.rowconfigure(1, weight=1)
         ttk.Label(f, text="A user is a subfolder of the users folder. Add the initials each person writes in "
-                          "folder names so they are recognised (e.g. IJ, IJD → Isaac).", wraplength=820).grid(
+                          "folder names so they are recognised (e.g. SK, SKD → Sam).", wraplength=820).grid(
             row=0, column=0, columnspan=2, sticky="w", **PAD)
 
         left = ttk.LabelFrame(f, text="User folders", padding=6)
@@ -1200,7 +1200,7 @@ class App:
         ttk.Label(right, textvariable=self.v("users.sel"), font=("", 11, "bold")).grid(row=0, column=1, sticky="w", **PAD)
         ttk.Label(right, text="Initials / aliases").grid(row=1, column=0, sticky="e", **PAD)
         ttk.Entry(right, textvariable=self.v("users.sel_aliases"), width=40).grid(row=1, column=1, sticky="ew", **PAD)
-        ttk.Label(right, text="comma-separated, e.g.  IJ, IJD, Isaac-J", foreground="#666").grid(row=2, column=1, sticky="w", padx=6)
+        ttk.Label(right, text="comma-separated, e.g.  SK, SKD, Sam-K", foreground="#666").grid(row=2, column=1, sticky="w", padx=6)
         ttk.Button(right, text="Apply aliases", command=self.apply_aliases).grid(row=3, column=1, sticky="w", **PAD)
         ttk.Label(right, text="Learned from the resolver window (read-only):").grid(row=4, column=0, columnspan=2, sticky="w", **PAD)
         self.learned_lbl = ttk.Label(right, text="", foreground="#666", wraplength=500, justify="left")
@@ -1262,7 +1262,7 @@ class App:
             return
         if " " in name:
             messagebox.showerror("Add user", "No spaces in user folder names: FragPipe can't use a path with a space.\n\n"
-                                             "→ Type the name without spaces (Isaac_J, not Isaac J), then Add.")
+                                             "→ Type the name without spaces (Sam_K, not Sam K), then Add.")
             return
         root = self._users_root()
         try:
@@ -1508,7 +1508,7 @@ class App:
                   wraplength=tkutil.text_size(92, 1)[0], justify="left").pack(anchor="w")
         inp = tk.Text(f, width=90, height=6)
         inp.pack(fill="x", pady=4)
-        inp.insert("1.0", "20260902_EJQ_isoDTB_EJQ-2-027\nEJQ_PK_EJQ-2-027_isoDTB_1uM_3h_1_1.raw\n")
+        inp.insert("1.0", "20260902_ABC_isoDTB_ABC-2-027\nABC_PK_ABC-2-027_isoDTB_1uM_3h_1_1.raw\n")
         out = tk.Text(f, width=90, height=18, wrap="none", state="disabled")
 
         def run():
@@ -2517,13 +2517,13 @@ class App:
         from ionomos.intake import Draft, DraftFile, Kind
         from ionomos.resolve import TkResolver
 
-        files = [DraftFile(f"EJQ_PK_EJQ-2-027_isoDTB_1uM_3h_{r}_{fr}.raw", "EJQ_PK_EJQ-2-027_isoDTB_1uM_3h", str(r), str(fr))
+        files = [DraftFile(f"ABC_PK_ABC-2-027_isoDTB_1uM_3h_{r}_{fr}.raw", "ABC_PK_ABC-2-027_isoDTB_1uM_3h", str(r), str(fr))
                  for r in (1, 2, 3) for fr in range(1, 4)]
-        files.append(DraftFile("EJQ_PK_EJQ-2-027_isoDTB_1uM_3h_extra.raw", "EJQ_PK_EJQ-2-027_isoDTB_1uM_3h_extra", "1", "",
+        files.append(DraftFile("ABC_PK_ABC-2-027_isoDTB_1uM_3h_extra.raw", "ABC_PK_ABC-2-027_isoDTB_1uM_3h_extra", "1", "",
                                error="must end in _rep_fraction"))
         d = Draft(folder="20260902-isoDTB_XYZ-2-027 (1uM 3h)", problem="no known user in the folder name (demo)",
                   kind=Kind.USER, user="", method="isoDTB", date="2026-09-02",
-                  known_users=list(self.user_list.get(0, "end")) or ["EJQ", "Isaac"], known_methods=list(self.data["methods"]),
+                  known_users=list(self.user_list.get(0, "end")) or ["ABC", "Sam"], known_methods=list(self.data["methods"]),
                   files=files)
         ov = TkResolver(self.root, remember=lambda u, a: self.out.write(f"(demo) would remember {a!r} -> {u}")).resolve(d)
         self.out.write("demo answer: " + ("skipped" if ov is None else str(ov.to_dict())))

@@ -57,7 +57,7 @@ def test_heartbeat_and_staleness(tmp_path):
     assert healthy and "worker" in text and "IonQuant" in text
     text, healthy = health.heartbeat_summary(tmp_path, now=time.time() + 600)
     assert not healthy and "NOT RESPONDING" in text
-    hb.beat("watcher", "busy: taking in EJQ_isoDTB (resolver window open)", force=True)
+    hb.beat("watcher", "busy: taking in ABC_isoDTB (resolver window open)", force=True)
     hb.beat("worker", "idle", force=True)
     text, healthy = health.heartbeat_summary(tmp_path, now=time.time() + 600)
     assert "watcher" in text and "NOT RESPONDING" in text  # the worker is stale...
@@ -199,12 +199,12 @@ RAW_HINT = "A .raw file couldn't be read"
     # sage.py's own line, with the real converter's messages (log4net: "<date> LEVEL message") above it
     "2026-09-30 10:00:01 ERROR Unable to access the RAW file using the native Thermo API\n"
     "ionomos sage-job: ERROR: converting DMSO_1_1.raw failed (ThermoRawFileParser exit code 1, no mzML written)",
-    "ionomos sage-job: ERROR: converting 20250301_EJQ_HeLa_1.raw failed (ThermoRawFileParser exit code 0, no mzML written)",
+    "ionomos sage-job: ERROR: converting 20250301_ABC_HeLa_1.raw failed (ThermoRawFileParser exit code 0, no mzML written)",
     "FAKE ThermoRawFileParser: ERROR RawFileReader could not open DMSO_1_1.raw",
     "ThermoRawFileParser failed with exit code 1",
     "Exception thrown by RawFileReader while opening the file",
     "RawFileReader: unable to open the file",
-    "Error reading D:\\Fragpipe_General\\EJQ\\x\\DMSO_1_1.raw",
+    "Error reading D:\\Fragpipe_General\\ABC\\x\\DMSO_1_1.raw",
     "error loading spectra from DMSO_1_1.raw",
     "DMSO_1_1.raw appears to be truncated",
     "File Drug_2_1.raw is corrupt",
@@ -604,7 +604,7 @@ def test_locked_database_waits_instead_of_crashing(bed):
 
 def test_job_insert_uses_status(bed):
     led = bed["ledger"]
-    led.insert(Job(inbox_name="x", user="EJQ", method="isoDTB", dest_dir="/nowhere", status="done"))
+    led.insert(Job(inbox_name="x", user="ABC", method="isoDTB", dest_dir="/nowhere", status="done"))
     assert led.get(1).status == "done"
 
 
@@ -635,9 +635,9 @@ def test_intake_never_loops_on_a_bad_folder(bed, monkeypatch, case):
         f = cfg.inbox / "🧪🧪"
         f.mkdir()
         (f / "x_1_1.raw").write_bytes(b"1")
-        (f / "experiment.yaml").write_text("method: isoDTB\nuser: EJQ\n", encoding="utf-8")
+        (f / "experiment.yaml").write_text("method: isoDTB\nuser: ABC\n", encoding="utf-8")
     elif case == "emoji_raw_with_resolver":
-        f = cfg.inbox / "EJQ_isoDTB_x"
+        f = cfg.inbox / "ABC_isoDTB_x"
         f.mkdir()
         (f / "🧪.raw").write_bytes(b"1")
 
@@ -647,7 +647,7 @@ def test_intake_never_loops_on_a_bad_folder(bed, monkeypatch, case):
 
         resolver = Skip()
     else:
-        f = cfg.inbox / "EJQ_isoDTB_y"
+        f = cfg.inbox / "ABC_isoDTB_y"
         f.mkdir()
         (f / "x_1_1.raw").write_bytes(b"1")
         monkeypatch.setattr(intake_mod, "_plan", lambda *a, **k: 1 / 0)

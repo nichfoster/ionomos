@@ -623,7 +623,7 @@ def _walk(path: tuple, old: dict, new: dict, out: list[str]) -> None:
 
 def diff_words(old: dict, new: dict) -> list[str]:
     """What a Save changes, one line per setting in words: 'FragPipe → Threads: 24 → 28',
-    'Users → Aliases → Isaac: IJ → IJ, IJD', 'Methods → TMT: (not set) → …', 'X: 5 → (removed)'.
+    'Users → Aliases → Sam: SK → SK, SKD', 'Methods → TMT: (not set) → …', 'X: 5 → (removed)'.
     Lines follow the order of `new`, then the removed keys. Secrets (notify url / password) show as •••."""
     out: list[str] = []
     _walk((), old if isinstance(old, dict) else {}, new if isinstance(new, dict) else {}, out)

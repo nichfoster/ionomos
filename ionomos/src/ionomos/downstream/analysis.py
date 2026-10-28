@@ -87,9 +87,9 @@ experiment.yaml `analysis:` block:
       ratio_centre: none          # site ratios (isoDTB): none (default) | median | auto: centre each replicate, which
                                   #   removes a heavy / light mixing error (fpa.centre_ratios, D70)
       protein_correction:         # site ratios (isoDTB): subtract each site's protein ratio from a matching
-        proteome: D:/Fragpipe_General/EJQ/20261001-DIA_EJQ-2-030   # unenriched proteome (proteincorr.py, D70):
+        proteome: D:/Fragpipe_General/ABC/20261001-DIA_ABC-2-030   # unenriched proteome (proteincorr.py, D70):
         match: gene               #   an analysed Ionomos experiment or a protein table; gene | protein
-        conditions: {EJQ_2_027: Cmpd vs DMSO}   # site condition -> proteome comparison (default: the same name)
+        conditions: {ABC_2_027: Cmpd vs DMSO}   # site condition -> proteome comparison (default: the same name)
                                   #   (phospho: site comparison -> proteome comparison, default: the same conditions)
 
       phospho: false              # true: analyse the search's phosphosite table instead of its proteins (phospho.py, D79)
@@ -565,7 +565,7 @@ def _protein_correction(v, before: dict) -> dict:
     if v.get("conditions") not in (None, "", {}):
         if not isinstance(v["conditions"], dict):
             raise AnalysisError("protein_correction.conditions must map a site condition to a proteome comparison, "
-                                "e.g. {EJQ_2_027: Cmpd vs DMSO}")
+                                "e.g. {ABC_2_027: Cmpd vs DMSO}")
         out["conditions"] = {**out.get("conditions", {}),
                              **{str(a).strip(): str(b).strip() for a, b in v["conditions"].items() if str(b).strip()}}
     if out and not out.get("proteome"):

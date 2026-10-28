@@ -42,7 +42,7 @@ def default_root() -> Path:
 
 
 DEFAULT_DIR = str(default_root())
-USERS = ["EJQ", "Isaac", "Chris", "Aman", "Taylor_Elements"]
+USERS = ["ABC", "Sam", "Lee", "Kim", "Robin_Lake"]
 
 
 def _iso(prefix: str, reps=(1, 2, 3), fracs=(1, 2, 3)) -> list[str]:
@@ -56,27 +56,27 @@ _TMT16 = (*_TMT10, "131C", "132N", "132C", "133N", "133C", "134N")
 # dict|None, the fake FragPipe's fault mode for it, what it shows)
 SAMPLES: dict[str, dict] = {
     "fp_fail": dict(
-        folder="20260910_Chris_DIA_crash-test_FAKEFAIL",
+        folder="20260910_Lee_DIA_crash-test_FAKEFAIL",
         raws=["DMSO_1.raw", "DMSO_2.raw", "Drug_1.raw", "Drug_2.raw"],
         shows="filed fine, then the fake FragPipe fails on purpose -> job failed, FAILED.txt; Retry re-runs it",
     ),
     "iso_good": dict(
-        folder="20260902-isoDTB_EJQ-2-027",
-        raws=_iso("EJQ_PK_EJQ-2-027_isoDTB_1uM_3h"), others=["EJQ-2-027_notes.xlsx"],
-        shows="clean isoDTB drop: 3 reps x 3 fractions, user EJQ, date from name -> queued",
+        folder="20260902-isoDTB_ABC-2-027",
+        raws=_iso("ABC_PK_ABC-2-027_isoDTB_1uM_3h"), others=["ABC-2-027_notes.xlsx"],
+        shows="clean isoDTB drop: 3 reps x 3 fractions, user ABC, date from name -> queued",
     ),
     "iso_spaces": dict(
-        folder="20260902 isoDTB EJQ-2-027 (1uM 3h)",
-        raws=_iso("EJQ PK isoDTB 1uM 3h", reps=(1, 2), fracs=(1, 2)),
+        folder="20260902 isoDTB ABC-2-027 (1uM 3h)",
+        raws=_iso("ABC PK isoDTB 1uM 3h", reps=(1, 2), fracs=(1, 2)),
         shows="spaces/parentheses in folder AND file names -> sanitised, queued",
     ),
     "dia_good": dict(
-        folder="20260914_Isaac_DIA_FLAG-AR-pulldown",
+        folder="20260914_Sam_DIA_FLAG-AR-pulldown",
         raw_sub=["DMSO_1.raw", "DMSO_2.raw", "DMSO_3.raw", "Drug_1.raw", "Drug_2.raw", "Drug_3.raw"],
         shows="DIA with raws in a raw/ subfolder: two conditions x 3 bioreps -> queued",
     ),
     "tmt_good": dict(
-        folder="20260126_Aman_TMT_KL6159A-9plex",
+        folder="20260126_Kim_TMT_KL6159A-9plex",
         raws=[f"KL6159A_TMT_F{i}.raw" for i in range(1, 5)],
         # every channel of the label type is listed (FragPipe refuses a shorter list); NA = not used
         yaml={"tmt": {"tag": "TMT-10", "channels": {"126": "DMSO_1_126", "127N": "DMSO_1_127N", "127C": "DMSO_1_127C",
@@ -86,13 +86,13 @@ SAMPLES: dict[str, dict] = {
         shows="TMT, 4 fractions, biorep 1, channel map in experiment.yaml -> queued",
     ),
     "glued_initials": dict(
-        folder="IJD05_isoDTB_FLAGpull",
-        raws=_iso("IJD05_FLAG", reps=(1, 2), fracs=(1, 2)),
-        shows="initials glued to an ID (IJD05) resolve via alias IJD -> Isaac -> queued",
+        folder="SKD05_isoDTB_FLAGpull",
+        raws=_iso("SKD05_FLAG", reps=(1, 2), fracs=(1, 2)),
+        shows="initials glued to an ID (SKD05) resolve via alias SKD -> Sam -> queued",
     ),
     "method_in_files": dict(
-        folder="EJQ_2027_pulldown",
-        raws=_iso("EJQ_isoDTB_2027", reps=(1,), fracs=(1, 2)),
+        folder="ABC_2027_pulldown",
+        raws=_iso("ABC_isoDTB_2027", reps=(1,), fracs=(1, 2)),
         shows="no method in folder name, but the raw file names say isoDTB -> queued",
     ),
     "gui_unknown_user": dict(
@@ -101,33 +101,33 @@ SAMPLES: dict[str, dict] = {
         shows="unknown initials -> resolver window (pick user, tick 'remember XYZ')",
     ),
     "gui_no_method": dict(
-        folder="EJQ_2027_mystery",
+        folder="ABC_2027_mystery",
         raws=["DMSO_1.raw", "DMSO_2.raw", "Drug_1.raw", "Drug_2.raw"],
         shows="no method anywhere -> resolver window (pick DIA; files re-parse as cond_biorep)",
     ),
     "gui_bad_tail": dict(
-        folder="EJQ_isoDTB_odd-names",
+        folder="ABC_isoDTB_odd-names",
         raws=["Sample_1_1.raw", "Sample_1_2.raw", "Sample_extra.raw"],
         shows="one file has no rep/fraction tail -> resolver window (type its rep/frac)",
     ),
     "gui_incomplete": dict(
-        folder="EJQ_isoDTB_partial-copy",
-        raws=_iso("EJQ_partial")[:-1],
+        folder="ABC_isoDTB_partial-copy",
+        raws=_iso("ABC_partial")[:-1],
         shows="rep 3 is missing fraction 3 -> resolver window ('accept uneven' or skip)",
     ),
     "reject_no_raws": dict(
-        folder="EJQ_isoDTB_empty",
+        folder="ABC_isoDTB_empty",
         raws=[], others=["notes.txt"],
         shows="no .raw files -> watcher waits forever (min_raw_files); nothing happens",
     ),
     "reject_two_methods": dict(
-        folder="EJQ_isoDTB_then_TMT",
+        folder="ABC_isoDTB_then_TMT",
         raws=["S_1_1.raw"],
         shows="two method keywords -> resolver window (pick one)",
     ),
     # D69: TMT plexes as a drop can hold them, and FragPipe faults the fake acts out per experiment
     "tmt_plexes": dict(
-        folder="20260127_Aman_TMT_KL6160-2plex",
+        folder="20260127_Kim_TMT_KL6160-2plex",
         plex_subs={"plexA": ["KL6160A_TMT_F1.raw", "KL6160A_TMT_F2.raw"],
                    "plexB": ["KL6160B_TMT_F1.raw", "KL6160B_TMT_F2.raw"]},
         yaml={"tmt": {"tag": "TMT-10", "plexes": {
@@ -137,23 +137,23 @@ SAMPLES: dict[str, dict] = {
         shows="two TMT plexes, each in its own folder (<plex>/*.raw) -> kept as dropped, one annotation.txt per plex",
     ),
     "tmt_flat_plexes": dict(
-        folder="20260128_Aman_TMT_KL6161-flat",
+        folder="20260128_Kim_TMT_KL6161-flat",
         raws=["KL6161A_TMT_F1.raw", "KL6161A_TMT_F2.raw", "KL6161B_TMT_F1.raw", "KL6161B_TMT_F2.raw"],
         shows="two TMT plexes in one folder -> filed as dropped, with a warning: FragPipe names the channels itself",
     ),
     "fp_cut_table": dict(
-        folder="20260911_EJQ_isoDTB_cut-table",
-        raws=_iso("EJQ_cut", reps=(1, 2), fracs=(1,)), mode="truncated-table",
+        folder="20260911_ABC_isoDTB_cut-table",
+        raws=_iso("ABC_cut", reps=(1, 2), fracs=(1,)), mode="truncated-table",
         shows="the fake FragPipe leaves its main table cut off mid-row -> failed, 'not written to the end'",
     ),
     "fp_hang": dict(
-        folder="20260912_EJQ_isoDTB_hang",
-        raws=_iso("EJQ_hang", reps=(1, 2), fracs=(1,)), mode="hang,child",
+        folder="20260912_ABC_isoDTB_hang",
+        raws=_iso("ABC_hang", reps=(1, 2), fracs=(1,)), mode="hang,child",
         shows="the fake FragPipe hangs in MSFragger -> killed with everything it started at the time limit",
     ),
     # D91: TMT in depth (tmtkit.py, downstream/tmtqc.py)
     "tmt16_na": dict(
-        folder="20260129_Aman_TMT_KL6162-TMTpro",
+        folder="20260129_Kim_TMT_KL6162-TMTpro",
         raws=[f"KL6162_TMT_F{i}.raw" for i in range(1, 4)],
         yaml={"workflow": "TMT16.workflow", "tmt": {"tag": "TMT-16", "channels": {
             ch: (f"{c}_1_{ch}" if c else "NA") for ch, c in zip(_TMT16, (
@@ -162,7 +162,7 @@ SAMPLES: dict[str, dict] = {
         shows="TMTpro 16 (TMT16.workflow), 11 channels named and 5 NA -> queued, annotation.txt with NA lines",
     ),
     "tmt_tag_mismatch": dict(
-        folder="20260130_Aman_TMT_KL6163-wrong-tag",
+        folder="20260130_Kim_TMT_KL6163-wrong-tag",
         raws=["KL6163_TMT_F1.raw", "KL6163_TMT_F2.raw"],
         yaml={"tmt": {"tag": "TMT-16", "channels": {ch: (f"{c}_1_{ch}" if c else "NA") for ch, c in zip(_TMT16, (
             "DMSO", "DMSO", "DMSO", "Drug", "Drug", "Drug", "", "", "", "", "", "", "", "", "", ""), strict=True)}}},
@@ -170,7 +170,7 @@ SAMPLES: dict[str, dict] = {
               "which to change",
     ),
     "tmt_own_annotation": dict(
-        folder="20260131_Aman_TMT_KL6164-own-map",
+        folder="20260131_Kim_TMT_KL6164-own-map",
         raws=["KL6164_TMT_F1.raw", "KL6164_TMT_F2.raw"],
         texts={"annotation.txt": "".join(f"{ch} {c}_1_{ch}\n" if c else f"{ch} NA\n" for ch, c in zip(_TMT10, (
             "Veh", "Veh", "Veh", "Cmpd", "Cmpd", "Cmpd", "", "", "", ""), strict=True))},
@@ -178,7 +178,7 @@ SAMPLES: dict[str, dict] = {
               "uses it, the report knows Veh / Cmpd",
     ),
     "tmt_bridge": dict(
-        folder="20260201_Aman_TMT_KL6165-bridge",
+        folder="20260201_Kim_TMT_KL6165-bridge",
         plex_subs={"plexA": ["KL6165A_TMT_F1.raw", "KL6165A_TMT_F2.raw"],
                    "plexB": ["KL6165B_TMT_F1.raw", "KL6165B_TMT_F2.raw"]},
         yaml={"tmt": {"tag": "TMT-10", "reference_channel": "126", "plexes": {
@@ -188,7 +188,7 @@ SAMPLES: dict[str, dict] = {
         shows="two TMT plexes in their own folders with a pooled bridge on 126 in each -> IRS on the bridge",
     ),
     "tmt_poor_label": dict(
-        folder="20260202_Aman_TMT_KL6166-poor-labelling",
+        folder="20260202_Kim_TMT_KL6166-poor-labelling",
         raws=["KL6166_TMT_F1.raw", "KL6166_TMT_F2.raw"],
         yaml={"tmt": {"tag": "TMT-10", "channels": {ch: (f"{c}_1_{ch}" if c else "NA") for ch, c in zip(_TMT10, (
             "DMSO", "DMSO", "DMSO", "Drug", "Drug", "Drug", "", "", "", ""), strict=True)}}},
@@ -198,20 +198,20 @@ SAMPLES: dict[str, dict] = {
     ),
     # round 4: the other searches the lab runs, and what a healthy run on the PC also does
     "lfq_good": dict(
-        folder="20260915_Chris_labelfree_AR-interactome",
+        folder="20260915_Lee_labelfree_AR-interactome",
         raws=[f"{c}_{r}.raw" for c in ("DMSO", "Drug") for r in (1, 2, 3)],
         shows="label-free DDA (method LFQ, LFQ-MBR.workflow): IonQuant's combined_protein.tsv -> done, Drug vs "
               "DMSO from the MaxLFQ intensities",
     ),
     "phospho_lfq": dict(
-        folder="20260916_Isaac_lfqphospho_EGF-5min",
+        folder="20260916_Sam_lfqphospho_EGF-5min",
         raws=[f"{c}_{r}.raw" for c in ("Ctrl", "EGF") for r in (1, 2, 3)],
         yaml={"analysis": {"phospho": True, "phospho_min_localization": 0.75}},
         shows="label-free phospho (method Phospho, 79.96633 STY): combined_site_STY_79.9663.tsv beside "
               "combined_protein.tsv -> done, sites analysed",
     ),
     "dia_fractions": dict(
-        folder="20260917_Isaac_DIA_two-fraction",
+        folder="20260917_Sam_DIA_two-fraction",
         raws=[f"{c}_{r}_F{f}.raw" for c in ("DMSO", "Drug") for r in (1, 2, 3) for f in (1, 2)],
         yaml={"files": {f"{c}_{r}_F{f}.raw": {"experiment": c, "bioreplicate": r, "fraction": f}
                         for c in ("DMSO", "Drug") for r in (1, 2, 3) for f in (1, 2)}},
@@ -219,27 +219,27 @@ SAMPLES: dict[str, dict] = {
               "samples, which the analysis adds up per sample",
     ),
     "open_search": dict(
-        folder="20260918_EJQ_opensearch_mass-shifts",
+        folder="20260918_ABC_opensearch_mass-shifts",
         raws=[f"HEK_{r}.raw" for r in (1, 2)],
         shows="an open search (Open.workflow: -150 to +500 Da, PTM-Shepherd): psm.tsv with mass shifts and "
               "ptm-shepherd-output/, no quantification table -> done, nothing to compare",
     ),
     "open_search_no_los": dict(
-        folder="20260918_EJQ_opensearch_no-localisation",
+        folder="20260918_ABC_opensearch_no-localisation",
         raws=[f"HEK_{r}.raw" for r in (1, 2)],
         yaml={"workflow": "Open-noLOS.workflow"},
         shows="the open search with 'Localize mass shift' off: FragPipe prints an ERROR line and searches anyway "
               "-> done, the line not taken for a failure",
     ),
     "non_ascii_log": dict(
-        folder="20260919_EJQ_isoDTB_umlaut-log",
-        raws=_iso("EJQ_umlaut", reps=(1, 2), fracs=(1,)), mode="non-ascii",
+        folder="20260919_ABC_isoDTB_umlaut-log",
+        raws=_iso("ABC_umlaut", reps=(1, 2), fracs=(1,)), mode="non-ascii",
         shows="the tools print umlauts, µ and Japanese: '?' on FragPipe's console (cp1252), the real text in "
               "log_<date>.txt -> done",
     ),
     "retry_previous": dict(
-        folder="20260920_EJQ_isoDTB_fails-once",
-        raws=_iso("EJQ_once", reps=(1, 2), fracs=(1,)), mode="fail-once",
+        folder="20260920_ABC_isoDTB_fails-once",
+        raws=_iso("ABC_once", reps=(1, 2), fracs=(1,)), mode="fail-once",
         shows="the first search fails in IonQuant -> failed; Retry -> done, the first attempt kept as "
               "fragpipe_previous_<time>",
     ),
@@ -1293,7 +1293,7 @@ def init(root: Path, slow_defaults: bool = False) -> Path:
                     "min_raw_files": 1},
         "fragpipe": {"threads": 4, "ram_gb": 4, "timeout_minutes": 5, "min_free_gb": 0.1},
         "gui": {"enabled": True, "timeout_minutes": 0},
-        "users": {"aliases": {"Isaac": ["IJ", "IJD"], "EJQ": ["EJQ_2"]}, "default": ""},
+        "users": {"aliases": {"Sam": ["SK", "SKD"], "ABC": ["ABC_2"]}, "default": ""},
         "methods": {
             "isoDTB": {"aliases": ["isodtb", "iso-dtb"], "workflow": "isoDTB.workflow",
                        "fasta": "human_reviewed_decoys.fas", "data_type": "DDA",
@@ -1384,13 +1384,13 @@ def gui_demo() -> int:
         return 1
     import tkinter as tk
 
-    files = [DraftFile(f"EJQ_PK_EJQ-2-027_isoDTB_1uM_3h_{r}_{f}.raw", "EJQ_PK_EJQ-2-027_isoDTB_1uM_3h", str(r), str(f))
+    files = [DraftFile(f"ABC_PK_ABC-2-027_isoDTB_1uM_3h_{r}_{f}.raw", "ABC_PK_ABC-2-027_isoDTB_1uM_3h", str(r), str(f))
              for r in (1, 2, 3) for f in range(1, 8)]
-    files.append(DraftFile("EJQ_PK_EJQ-2-027_isoDTB_1uM_3h_extra.raw", "EJQ_PK_EJQ-2-027_isoDTB_1uM_3h_extra", "1", "",
+    files.append(DraftFile("ABC_PK_ABC-2-027_isoDTB_1uM_3h_extra.raw", "ABC_PK_ABC-2-027_isoDTB_1uM_3h_extra", "1", "",
                            error="must end in _rep_fraction"))
     d = Draft(folder="20260902-isoDTB_XYZ-2-027 (1uM 3h)",
               problem="no known user in '20260902-isoDTB_XYZ-2-027 (1uM 3h)'; include your initials or folder name "
-                      "(known: Aman, Chris, EJQ, Isaac)",
+                      "(known: ABC, Kim, Lee, Sam)",
               kind=Kind.USER, user="", method="isoDTB", date="2026-09-02",
               known_users=USERS, known_methods=["isoDTB", "TMT", "DIA"], files=files)
     root = tk.Tk()
