@@ -1,6 +1,6 @@
 # Naming convention
 
-The contract between lab members and the watcher. Philosophy: **flexible
+The contract between the people who drop data and the watcher. Philosophy: **flexible
 folder names, strict raw-file tails.** The watcher looks for keywords in the
 folder name rather than enforcing a fixed layout; the *end* of each raw file
 name is reserved for replicate/fraction numbers, and what those numbers mean
@@ -10,7 +10,7 @@ Implemented in `ionomos/src/ionomos/naming.py`; `ionomos dry-run <folder>`
 shows exactly how a folder will be interpreted without touching it, and
 `ionomos names test <names…>` shows how any list of names is read.
 
-Everything below is this lab's convention, which is the default. Another lab
+Everything below is the convention of the lab where Ionomos started, which is the default. Another lab
 can change the file patterns, date formats and condition codes in
 `config.yaml` without touching code: see
 [Other conventions (config)](#other-conventions-config).
@@ -21,27 +21,27 @@ Anything you like, as long as the name contains:
 
 | Must contain | How it's found | Examples that work |
 |---|---|---|
-| **Method** | keyword anywhere in the folder name (case-insensitive): `isoDTB`, `TMT`, `DIA` (aliases configurable, e.g. `DIANN`). If the folder name has none, the **raw file names** are searched too | `20260902-isoDTB_EJQ-2-027`, `THB10ISODTB`, `KL6159A_9plex_TMT`, `EJQ_123_DIA` |
-| **User** | your initials or your folder name under `C:\Fragpipe_General\`. Matched as a token (split on `_ - . space ( )`) **or glued to an ID** (`IJD05`, `EJQ123`, `THB10`). Aliases live in `config.yaml` (`IJ` → `Isaac`); the resolver window can add them | `EJQ_isoDTB_…`, `IJD05_isoDTB`, `Taylor Elements TMT run 3` |
+| **Method** | keyword anywhere in the folder name (case-insensitive): `isoDTB`, `TMT`, `DIA` (aliases configurable, e.g. `DIANN`). If the folder name has none, the **raw file names** are searched too | `20260902-isoDTB_ABC-2-027`, `THB10ISODTB`, `KL6159A_9plex_TMT`, `ABC_123_DIA` |
+| **User** | your initials or your folder name under `C:\Fragpipe_General\`. Matched as a token (split on `_ - . space ( )`) **or glued to an ID** (`SKD05`, `ABC123`, `THB10`). Aliases live in `config.yaml` (`SK` → `Sam`); the resolver window can add them | `ABC_isoDTB_…`, `SKD05_isoDTB`, `Robin Lake TMT run 3` |
 | *(optional)* **Date** | `YYYYMMDD`, `YYYY-MM-DD`, `MMDDYYYY`, `MM-DD-YYYY` or `MMDDYY`, tried in that order (`naming.date_formats`) — the six-digit `MMDDYY` form only when its year `20yy` falls within `[today.year − 25, today.year + 1]` (the last 25 years through next year; a run ID like `113056` is never a date). If absent, the drop date is recorded | `20260902`, `2026-09-02`, `08172026`, `081726` |
 
 Recommended shape (sorts well, unambiguous): `YYYYMMDD_<initials>_<method>_<whatever>`
-e.g. `20260902_EJQ_isoDTB_EJQ-2-027_1uM-3h`.
+e.g. `20260902_ABC_isoDTB_ABC-2-027_1uM-3h`.
 
 **Spaces and punctuation are tolerated** — the folder is renamed on the way in
-(`20260902-isoDTB_EJQ-2-027 (1uM 3h)` → `20260902-isoDTB_EJQ-2-027-1uM-3h`)
+(`20260902-isoDTB_ABC-2-027 (1uM 3h)` → `20260902-isoDTB_ABC-2-027-1uM-3h`)
 because FragPipe cannot handle spaces in paths. The original name is kept in
 `ionomos.json`. On Windows a folder whose name ends in a dot or a space (made
-on a Mac or in WSL; Windows programs can't open it by that name) is first
+on macOS or in WSL; Windows programs can't open it by that name) is first
 renamed in the inbox without them; if that name is taken, the log says so once
 and how to rename it.
 
 Rejected, with a `<name>.REJECTED.txt` note left next to the folder:
 
-- no method keyword (`IJD05_FLAG_pulldown`)
-- two method keywords (`EJQ_isoDTB_and_TMT`)
+- no method keyword (`SKD05_FLAG_pulldown`)
+- two method keywords (`ABC_isoDTB_and_TMT`)
 - no recognisable user (`XYZ99_isoDTB`) — unless `users.default` is set, in which case it's filed there
-- two users (`EJQ_Isaac_isoDTB`)
+- two users (`ABC_Sam_isoDTB`)
 - destination already exists / same name was processed before → add `_redo`
 
 **All of these except the last open the resolver window** (see below) when the
@@ -95,7 +95,7 @@ next to the original), the resolver window asks which is which — it never gues
 ### isoDTB — `<sample>_<rep>_<fraction>.raw`
 
 ```
-EJQ_PK_EJQ-2-027_isoDTB_1uM_3h_1_1.raw … _3_7.raw    3 reps × 7 fractions
+ABC_PK_ABC-2-027_isoDTB_1uM_3h_1_1.raw … _3_7.raw    3 reps × 7 fractions
 X_R2_F7.raw                                          same thing, prefixed
 X_2.raw                                              unfractionated, rep 2
 ```
@@ -111,7 +111,7 @@ KL6159A_F3.raw   KL6159A_3.raw              also fine
 KL6159A.raw                                 single fraction
 ```
 Every TMT run holds all replicates in its channels, so **bioreplicate is
-always 1** (per the lab SOP). `sample` → experiment (= plex name). Two plexes
+always 1** (per the first lab's SOPs, `reference/lab-sops/`). `sample` → experiment (= plex name). Two plexes
 in one drop = two different `sample` prefixes. Channel → sample-name mapping
 comes from `experiment.yaml` (below) or a FragPipe `annotation.txt` you put in
 the folder.
@@ -122,7 +122,7 @@ per folder, so plexes that share a folder get FragPipe's own channel names
 For your sample names, drop the experiment with a folder per plex:
 
 ```
-20260127_Aman_TMT_KL6160-2plex\
+20260127_Lee_TMT_KL6160-2plex\
   plexA\KL6160A_TMT_F1.raw  plexA\KL6160A_TMT_F2.raw
   plexB\KL6160B_TMT_F1.raw  plexB\KL6160B_TMT_F2.raw
   experiment.yaml           tmt: plexes: {plexA: {channels: …}, plexB: {channels: …}}
@@ -145,7 +145,7 @@ Drug_R3.raw                                 also fine
 number is bioreplicate 1.
 
 **Short condition codes.** A 1–2 letter code glued to the replicate number is
-read as condition + replicate, with the lab's codes expanded:
+read as condition + replicate, with the configured codes expanded:
 
 ```
 KC_DIA_D1.raw  KC_DIA_D2.raw  KC_DIA_D3.raw  →  KC_DIA_DMSO, reps 1–3
@@ -295,7 +295,7 @@ whether or not they are saved.
 
 ## QC standard runs
 
-Runs of the lab's recurring QC standard (a HeLa or K562 digest) are filed and
+Runs of the lab's recurring QC standard (a HeLa or K562 digest by default; the words are configurable) are filed and
 searched like any drop, then also trended on the instrument QC page
 ([QC_TREND.md](QC_TREND.md), D45). Nothing about the name has to change. A
 run counts when its `.raw` name or folder name contains one of
@@ -312,11 +312,11 @@ run counts when its `.raw` name or folder name contains one of
 
 | Folder / file | QC run? | Series |
 |---|---|---|
-| `20260930_EJQ_DIA_HeLa-200ng-QC` / `HeLa_200ng_1.raw` | yes (`hela`) | DIA · HeLa · 200ng |
-| `20260930_EJQ_DIA_instrument-check` / `K562-50ng_1.raw` | yes (the file name) | DIA · K562 · 50ng |
-| `20260930_EJQ_DIA_QC` / `run_1.raw` | yes (`_qc_`) | DIA · QC |
-| `20260930_EJQ_DIA_QCtest` / `run_1.raw` | no (`QC` is not a word here) | – |
-| `20260930_EJQ_DIA_HeLa_KO-vs-WT` / `KO_1`, `KO_2`, `WT_1`, `WT_2` | no (an experiment) | – |
+| `20260930_ABC_DIA_HeLa-200ng-QC` / `HeLa_200ng_1.raw` | yes (`hela`) | DIA · HeLa · 200ng |
+| `20260930_ABC_DIA_instrument-check` / `K562-50ng_1.raw` | yes (the file name) | DIA · K562 · 50ng |
+| `20260930_ABC_DIA_QC` / `run_1.raw` | yes (`_qc_`) | DIA · QC |
+| `20260930_ABC_DIA_QCtest` / `run_1.raw` | no (`QC` is not a word here) | – |
+| `20260930_ABC_DIA_HeLa_KO-vs-WT` / `KO_1`, `KO_2`, `WT_1`, `WT_2` | no (an experiment) | – |
 
 The amount (`200ng`, `50ng`, `1ug`) is read from the name, so standards at
 different loads are trended separately. An Xcalibur stamp at the end of the
@@ -330,9 +330,9 @@ changing (same 60 s rule), Ionomos groups them by their shared name and moves
 each group into a new folder in the inbox, named after that shared part:
 
 ```
-CS_22rv1_FLAG-AR_MA25-10uM_DMSO_1.raw  ┐
-CS_22rv1_FLAG-AR_MA25-10uM_MA25_1.raw  ├─▶ inbox\CS_22rv1_FLAG-AR_MA25-10uM\
-CS_22rv1_FLAG-AR_MA25-10uM_MA25_2.raw  ┘
+KL_HEK293_FLAG-Bait_DrugA-10uM_DMSO_1.raw  ┐
+KL_HEK293_FLAG-Bait_DrugA-10uM_DrugA_1.raw  ├─▶ inbox\KL_HEK293_FLAG-Bait_DrugA-10uM\
+KL_HEK293_FLAG-Bait_DrugA-10uM_DrugA_2.raw  ┘
 ```
 
 Files sharing at least the first two name parts go together; trailing
@@ -382,7 +382,7 @@ display, drops are filed as read.
 
 Users and aliases added in the app while the window is open appear in it
 within two seconds. A blank user is filled in as soon as an alias matches
-(e.g. `KC` → Kosuke). The running watcher re-reads `config.yaml` whenever it
+(e.g. `KC` → Kai). The running watcher re-reads `config.yaml` whenever it
 changes, so there's no need to restart it.
 
 ## When Ionomos can't tell: the resolver window
@@ -392,15 +392,15 @@ out, the same window opens with the problem at the top:
 
 ```
  20260902-isoDTB_XYZ-2-027 (1uM 3h)
- ⚠ no known user in '…'; include your initials or folder name (known: Aman, Chris, EJQ, Isaac)
+ ⚠ no known user in '…'; include your initials or folder name (known: ABC, Kim, Lee, Sam)
 
- User    [ Isaac        ▼]  (type a new name to create a folder)
+ User    [ Sam          ▼]  (type a new name to create a folder)
  Method  [ isoDTB       ▼]   Date [2026-09-02]
  [x] Remember that [XYZ] means this user (future drops won't ask)
  [ ] Accept uneven fractions between replicates
 
  Files — experiment / replicate / fraction          [Re-read from file names]
- EJQ_PK_…_1_1.raw   [EJQ_PK_EJQ-2-027_isoDTB_1uM_3h] [1] [1]
+ ABC_PK_…_1_1.raw   [ABC_PK_ABC-2-027_isoDTB_1uM_3h] [1] [1]
  …
                                     [Skip (leave in inbox)]  [Accept & queue ⏎]
 ```
@@ -419,7 +419,7 @@ validated at intake and its values override what was parsed.
 
 ```yaml
 method: TMT                 # override the keyword match
-user: Isaac                 # override the initials match
+user: Sam                   # override the initials match
 date: 2026-09-02
 workflow: TMT10-MS3-phospho # a file name in config workflow_dir (a path is refused: D105)
 fasta: human_reviewed_2025-01_decoys.fas  # a file name in fasta_dir
@@ -430,7 +430,7 @@ files:                      # per-file overrides; numbers 1–999 (fraction: -1 
 
 tmt:                        # TMT only: the channel map (every key below, under "The tmt: block")
   tag: TMT-10               # the kit; must be the workflow's label type
-  channels:                 # channel → sample name as condition_plex_channel: the lab's
+  channels:                 # channel → sample name as condition_plex_channel: the first lab's
     126:  DMSO_1_126        #   annotation script (and the report's conditions) key on it
     127N: DMSO_1_127N       #   ... every channel of the kit, NA for the unused ones
     127C: Drug_1_127C
@@ -518,8 +518,8 @@ block).
 | `reference_channel` | the bridge / pool channel (or sample name) in every plex; a list for several | joins the plexes (IRS, D48; the same as `analysis.tmt_reference`); a plex's own `reference:` wins |
 
 Names follow `condition_plex_channel`: the condition is one word (the text
-before the first `_`), the plex a number, the channel the reporter. The lab's
-annotation script keeps only `condition_1_channel`; with several plexes
+before the first `_`), the plex a number, the channel the reporter. The first lab's
+annotation script (`reference/lab-scripts/`) keeps only `condition_1_channel`; with several plexes
 Ionomos' port also keeps `condition_2_channel` … (WORKFLOWS.md, "Multi-plex
 extension"); other names still work in the report (a note says so). `ionomos tmt suggest` writes the block from a few
 answers; `ionomos tmt plan <folder>` shows what will be used. The **TMT
@@ -631,7 +631,7 @@ next to a `Probe` condition, and Ionomos asks. Say it yourself in the
 review window or the experiment editor (**Roles**), or with `roles:` in
 `experiment.yaml`.
 
-## Still to confirm with the lab
+## Still to confirm with the first lab
 
 - Which words mark "probe plus competitor" in a condition name? Only `Comp` was seen on the PC (D61).
 

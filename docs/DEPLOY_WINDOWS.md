@@ -66,7 +66,7 @@ layout in one click. By hand, tab by tab:
 | Tab | What to do |
 |---|---|
 | **Folders** | Check the paths in *Quick fill* (`C:/Fragpipe_Auto` and `C:/Fragpipe_General`) → **Apply layout** → **Create all missing folders**. Then set **Inbox** to the shared drop folder if it's somewhere else (Browse…), and **FragPipe launcher** to the exe under `C:\FragPipe\FragPipe-24.0\` (needed only for searches — fine to leave for later). Green dots = exists. |
-| **Users** | Type each lab member's name → **Add** (creates `C:\Fragpipe_General\<Name>`). Select a user, type their initials (`IJ, IJD`) → **Apply aliases**. |
+| **Users** | Type each lab member's name → **Add** (creates `C:\Fragpipe_General\<Name>`). Select a user, type their initials (`SK, SKD`) → **Apply aliases**. |
 | **Methods** | For each method pick the **Workflow file** and **FASTA file** (dropdowns list what's in the folders — put files there first, see A4). |
 | **Advanced** | Usually nothing. Threads/RAM default to 28 / 48 GB for this PC. |
 | **Run & Test** | **Save & Check** (bottom bar) → all ✓ (a `!` on the FragPipe launcher / a method means those jobs will *wait* until it's fixed) → **Install startup task** → **Start watcher** (both on the *Watcher* page). Optional: **Desktop shortcut**. |
@@ -95,7 +95,7 @@ Back in the app: **Methods** → select the method → pick the files → **Appl
 4. Watch **Run & Test** (or the Jobs tab): *FragPipe: RUNNING job N* → *done*. In the experiment folder:
    `DONE.txt`, `fragpipe\` with the results, `ionomos_run\fragpipe_console.log`.
 5. If it says FAILED: open `FAILED.txt` / the console log, fix, then select the job on the
-   **Jobs** tab → **Retry**. Paste **Copy diagnostics** + the console log to Claude if it's unclear.
+   **Jobs** tab → **Retry**. Paste **Copy diagnostics** + the console log into an issue (or to the maintainer) if it's unclear.
 
 Advanced → *Run FragPipe automatically* off = experiments are only filed (the
 Phase 1 behaviour).
@@ -129,7 +129,7 @@ The one-paragraph version of [NAMING_CONVENTION.md](NAMING_CONVENTION.md):
 Use if you'd rather not build the exe. Same result, but the app is started
 with a command instead of a double-click.
 
-1. On the Mac: `deploy/make_release.sh` → `dist/ionomos-<version>-windows.zip` (wheel + offline deps + scripts).
+1. On a macOS or Linux machine: `deploy/make_release.sh` → `dist/ionomos-<version>-windows.zip` (wheel + offline deps + scripts).
 2. On the PC: unzip to the Desktop, then in PowerShell:
 
 ```powershell

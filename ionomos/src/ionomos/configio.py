@@ -369,10 +369,10 @@ def dump_config(d: dict) -> str:
             a(f"  {_y(str(k))}: {_y(v)}")
     a("")
     at = d.get("atlas") if isinstance(d.get("atlas"), dict) else {}
-    a("atlas:   # hand finished isoDTB (and TMT) searches to the lab's cysteine atlas (docs/ATLAS.md). Off by default")
+    a("atlas:   # hand finished isoDTB (and TMT) searches to your lab's cysteine atlas (docs/ATLAS.md). Off by default")
     a(f"  enabled: {_y(at.get('enabled', False))}")
-    a(f"  handoff_dir: {_y(at.get('handoff_dir', '') or '')}   # the lab Dropbox folder "
-      "...\\Nicholas Foster Data\\fragpipe-runs (spaces are fine here: FragPipe never sees it)")
+    a(f"  handoff_dir: {_y(at.get('handoff_dir', '') or '')}   # the Dropbox folder the atlas side reads, e.g. "
+      "...\\<team folder>\\fragpipe-runs (spaces are fine here: FragPipe never sees it)")
     a(f"  methods: {_y(list(at.get('methods') or []) if at.get('methods') is not None else ['isoDTB'])}   "
       "# FragPipe isoDTB or TMT methods whose searches are handed off (the atlas counts isoDTB only)")
     a(f"  pin_max_mb: {_y(at.get('pin_max_mb', 100))}   # each .pin (the decoys) goes gzip-compressed if no larger than "

@@ -15,7 +15,7 @@ A relative link to a file the site doesn't show (DECISIONS.md, ../ionomos/src/..
 (rewrite_links), at IONOMOS_SITE_REF (the tag being built; default master). A link to a file that doesn't exist is
 a warning, so `mkdocs build --strict` fails on it as it fails on a broken link or anchor between pages. Anchors
 are GitHub's (github_slug, the rule tests/test_docs_sync.py checks the docs' links with), so a link such as
-`VISION.md#the-road-to-publishing` works on GitHub and on the site alike.
+`VISION.md#how-it-compares` works on GitHub and on the site alike.
 
 Everything but the on_* hooks is plain Python with no MkDocs import: tests/test_site.py runs it without MkDocs.
 """

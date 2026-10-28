@@ -111,8 +111,8 @@ message closes when the folder is filed.
 ## A search wasn't handed to the cysteine atlas {#attention.atlas_handoff_failed}
 
 When the lab has turned on the atlas hand-off, every finished isoDTB search is
-copied into the lab Dropbox folder the cysteine atlas reads
-(`Nicholas Foster Data\fragpipe-runs`). This item says one copy did not
+copied into the Dropbox folder the cysteine atlas reads (for example
+`<team folder>\fragpipe-runs`). This item says one copy did not
 finish. Your search and its report are fine and nothing in your experiment
 folder was changed: the hand-off only reads it.
 
@@ -137,7 +137,7 @@ each search stands. More: [the hand-off](#faq.atlas).
 When the lab has turned on **Also search this PC's drives**, Ionomos looks
 through the PC's disks every day for FragPipe results it did not search
 itself and copies the isoDTB ones (and TMT ones, with **Also TMT searches**)
-into the lab Dropbox folder the atlas reads. This item says some of them did
+into the Dropbox folder the atlas reads. This item says some of them did
 not go, or a pass over the drives stopped. Nothing on the drives was changed:
 the sweep only reads them.
 
@@ -954,15 +954,15 @@ correction is always reported. Fix the setting under `analysis:` in
 ## Protein correction: the proteome's comparisons don't match the sites' conditions {#issue.PROTEIN_CORRECTION_CONDITIONS}
 
 Each site condition (an isoDTB sample, often named after the experiment, like
-`EJQ_2_027`) needs the proteome comparison of the same compound against its
+`ABC_2_027`) needs the proteome comparison of the same compound against its
 control, and Ionomos never guesses it. By default it looks for a comparison
 whose first condition has the site condition's name. Name it instead:
 
 ```yaml
 analysis:
   protein_correction:
-    proteome: D:/Fragpipe_General/EJQ/20261001-DIA_EJQ-2-030
-    conditions: {EJQ_2_027: Cmpd vs DMSO}   # the compound first
+    proteome: D:/Fragpipe_General/ABC/20261001-DIA_ABC-2-030
+    conditions: {ABC_2_027: Cmpd vs DMSO}   # the compound first
 ```
 
 and re-run the analysis ([How to re-run](#faq.rerun)). The message lists the
@@ -1509,9 +1509,9 @@ instead of naming the organism of the few that do (often the contaminants).
 
 ## Most of the FASTA is unreviewed UniProt {#library.fasta_unreviewed}
 
-Most entries start `tr|` (TrEMBL, not checked by a curator). The lab's
-searches use reviewed (Swiss-Prot) proteomes; unreviewed entries make the
-search slower and the protein groups larger. Use a reviewed FASTA unless you
+Most entries start `tr|` (TrEMBL, not checked by a curator). Most searches
+use a reviewed (Swiss-Prot) proteome; unreviewed entries make the search
+slower and the protein groups larger. Use a reviewed FASTA unless you
 need the extra entries.
 
 ## The FASTA is more than a year old {#library.fasta_old}

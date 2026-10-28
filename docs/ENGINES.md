@@ -1,7 +1,7 @@
 # Engines: whose results Ionomos can analyse
 
-Ionomos runs **FragPipe** itself: the watcher, the headless search, and the
-lab's workflows. It can also **analyse results from other engines** with the
+Ionomos runs **FragPipe** itself: the watcher, the headless search, and
+your lab's workflows. It can also **analyse results from other engines** with the
 same statistics and report. Point `ionomos analyze` at the engine's output
 folder or its main table; the Analysis tab's **Table…** button works too.
 
@@ -233,7 +233,7 @@ channel left out (`exclude_samples`) need none (D118). experiment.yaml's
 
 ## Running DIA-NN directly (instead of FragPipe)
 
-A DIA method can be searched by the lab's own DIA-NN (1.9 or 2.x) rather than
+A DIA method can be searched by your lab's own DIA-NN (1.9 or 2.x) rather than
 FragPipe (D39):
 
 ```yaml
@@ -289,7 +289,7 @@ any.
 
 ## Running MaxQuant directly (instead of FragPipe)
 
-A DDA method can be searched by the lab's own MaxQuant (D50):
+A DDA method can be searched by your lab's own MaxQuant (D50):
 
 ```yaml
 methods:
