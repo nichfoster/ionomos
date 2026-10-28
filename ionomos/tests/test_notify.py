@@ -727,6 +727,37 @@ def test_two_messages_in_one_tick_of_the_clock_keep_their_order(lab, hook, offli
                         cfg.log_dir, 7, held)
     assert [(e["job_id"], e["fields"]["event"]) for e in notify.unsent(cfg.log_dir)] == [(7, "done")]
 
+
+@pytest.mark.parametrize("start", [1_761_600_000_000_000_000, 1_761_600_000_000_000_255, 1_793_150_000_123_456_789])
+def test_orders_a_few_ns_apart_compare_as_ints(lab, hook, offline, monkeypatch, start):
+    """An order is a time in ns, about 1.8e18: as a float it is only good to 256 ns, so the stored order of a newer
+    message 1 ns after an older one compared equal (or lower) and the older one replaced it (Ubuntu CI). The state
+    file's orders are read as ints; a hand-edited one still reads."""
+    monkeypatch.setattr(notify, "_last_order", start - 1)
+    frozen = types.SimpleNamespace(**{k: getattr(time, k) for k in dir(time) if not k.startswith("_")})
+    frozen.time_ns = lambda: 0
+    monkeypatch.setattr(notify, "time", frozen)
+    cfg = _cfg(lab, webhook={"url": hook.url + "/hook"})
+    s, job = cfg.notify, _job(id=7)
+    held, done = notify._next_order(), notify._next_order()
+    assert (held, done) == (start, start + 1)
+    notify._send_logged(s, notify.build("done", job, s, "", SUMMARY), "job 7 done", cfg.log_dir, 7, done)
+    notify._send_logged(s, notify.build("held", job, s, "low disk space: 12 GB free", None), "job 7 waiting",
+                        cfg.log_dir, 7, held)
+    assert [(e["job_id"], e["fields"]["event"], e["order"]) for e in notify.unsent(cfg.log_dir)] == [
+        (7, "done", start + 1)]
+    notify._drop_unsent(cfg.log_dir, 7, start + 1)  # not newer than what is kept: it stays
+    assert len(notify.unsent(cfg.log_dir)) == 1
+    notify._drop_unsent(cfg.log_dir, 7, start + 2)
+    assert notify.unsent(cfg.log_dir) == []
+
+
+@pytest.mark.parametrize(("v", "want"), [(5, 5), ("17", 17), (" 9 ", 9), (2.0, 2), ("3.5", 3), (None, 0), ("x", 0),
+                                         (True, 0), (float("nan"), 0), ("inf", 0), ([], 0)])
+def test_a_hand_edited_order_still_reads(v, want):
+    assert notify._order(v) == want
+
+
 def test_kept_messages_are_bounded_in_number_and_age(lab, hook, offline, monkeypatch, caplog):
     monkeypatch.setattr(notify, "UNSENT_MAX", 3)
     cfg = _cfg(lab, webhook={"url": hook.url + "/hook"})

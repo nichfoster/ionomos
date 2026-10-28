@@ -725,6 +725,20 @@ def _num(v, default: float = 0.0) -> float:
         return default
 
 
+def _order(v) -> int:
+    """A kept message's order from the state file: an int of ns, compared as one (a float holds a time in ns only to
+    256 ns, so two messages a few ns apart compared equal, or the wrong way round). Anything else is 0."""
+    if isinstance(v, bool):
+        return 0
+    if isinstance(v, int):
+        return v
+    try:
+        return int(str(v).strip())
+    except ValueError:
+        f = _num(v)
+        return int(f) if f == f and abs(f) != float("inf") else 0
+
+
 def _unsent_entry(e) -> bool:
     return (isinstance(e, dict) and isinstance(e.get("id"), str) and isinstance(e.get("channel"), str)
             and isinstance(e.get("title"), str) and isinstance(e.get("fields"), dict)
@@ -844,7 +858,7 @@ def _keep(log_dir: Path, r: Result, msg: Message, what: str, job_id, order: int 
              "error": r.detail, "kept": now}
     with _lock:
         state = _read_state(log_dir)
-        if any(_same_job(e, job_id) and _num(e.get("order")) > order for e in state["unsent"]):
+        if any(_same_job(e, job_id) and _order(e.get("order")) > order for e in state["unsent"]):
             return True  # a newer message about this job waits already: this one is stale
         old = [e for e in state["unsent"] if not (e["channel"] == r.channel and _same_job(e, job_id))]
         state["unsent"], dropped = _trim([*old, entry], now)
@@ -866,7 +880,7 @@ def _drop_unsent(log_dir: Path, job_id, order: int) -> None:
     """A newer message about `job_id` (announced at `order`) replaces whatever was kept about it."""
     with _lock:
         state = _read_state(log_dir)
-        left = [e for e in state["unsent"] if not (_same_job(e, job_id) and _num(e.get("order")) < order)]
+        left = [e for e in state["unsent"] if not (_same_job(e, job_id) and _order(e.get("order")) < order)]
         if len(left) == len(state["unsent"]):
             return
         state["unsent"] = left
