@@ -2545,7 +2545,7 @@ proteome comes from, and whether to centre, are the lab's decisions.
    format MSstatsPTM itself takes, or an Ionomos `*_differential.tsv`. A
    relative path is read from the experiment folder; the proteome is only
    read. `match: gene | protein` (accessions with isoforms joined, as the site
-   annotation does). A site condition (an isoDTB prefix such as `EJQ_2_027`)
+   annotation does). A site condition (an isoDTB prefix such as `ABC_2_027`)
    takes the comparison `conditions` names, else the one whose first
    condition has its name; none or several is `PROTEIN_CORRECTION_CONDITIONS`
    (decide) and that condition is not corrected. Alternatives weighed: taking
