@@ -1,9 +1,9 @@
 """The drive sweep (atlassweep.py, docs/ATLAS.md "The drive sweep", D128): the FragPipe runs on the PC's disks that
 Ionomos did not search, handed to the cysteine atlas with their decoys and sample design.
 
-The walk is harvest_fragpipe.ps1's pass 1 (Nomura-Lab, Lab Informatics/tools); the copying is the hand-off's
-(atlas.transfer, tests/test_atlas.py). Every test writes under tmp_path only: never the real Dropbox, nomura-data,
-C:/Fragpipe_Auto or C:/Fragpipe_General.
+The walk is harvest_fragpipe.ps1's pass 1 (the atlas's own repository, which is private); the copying is the
+hand-off's (atlas.transfer, tests/test_atlas.py). Every test writes under tmp_path only: never the real Dropbox, the
+atlas's data folder, C:/Fragpipe_Auto or C:/Fragpipe_General.
 """
 from __future__ import annotations
 
@@ -61,7 +61,7 @@ def drives(lab, monkeypatch):
     monkeypatch.delenv("APPDATA", raising=False)
     # _age sets modified times only; a test can't set a file's creation time, which Windows reports (atlas._born)
     monkeypatch.setattr(atlas, "_born", lambda st: 0.0)
-    dropbox = lab["root"] / "TNRG Dropbox" / "Nicholas Foster Data"
+    dropbox = lab["root"] / "Team Dropbox" / "Nicholas Foster Data"
     dropbox.mkdir(parents=True)
     dest = dropbox / "fragpipe-runs"
     disk = lab["root"] / "D"
@@ -143,7 +143,7 @@ def test_sweep_settings_refuse(raw, words):
 def test_the_sweep_settings_survive_a_save(tmp_path):
     d = configio.defaults(str(tmp_path))
     d["atlas"] = {**d["atlas"], "enabled": True, "sweep": True,
-                  "handoff_dir": r"C:\Users\Daniel Nomura\TNRG Dropbox\Nicholas Foster Data\fragpipe-runs",
+                  "handoff_dir": r"C:\Users\Lab Account\Team Dropbox\Nicholas Foster Data\fragpipe-runs",
                   "sweep_roots": ["C:\\", "D:\\Old Runs"], "sweep_exclude": [r"D:\Backups"], "sweep_hours": 12}
     p = tmp_path / "config.yaml"
     p.write_text(configio.dump_config(d), encoding="utf-8")
@@ -216,9 +216,9 @@ def test_the_walk_stops_when_asked(tmp_path):
 
 @pytest.mark.parametrize(("path", "owner"), [
     (r"C:\Fragpipe_General\EJQ\20261019_isoDTB\fragpipe", "EJQ"),
-    (r"C:\Users\Daniel Nomura\Desktop\Isaac\run", "Daniel Nomura"),
+    (r"C:\Users\Lab Account\Desktop\member\run", "Lab Account"),
     (r"D:\Taylor_Elements\2024\TMT\fragpipe", "Taylor_Elements"),
-    (r"D:\Fragpipe_General\Qian\x", "Qian"),
+    (r"D:\Fragpipe_General\member2\x", "member2"),
     (r"\\server\share\x", "server"),
 ])
 def test_the_owner_is_harvests_guess(path, owner):
@@ -228,11 +228,11 @@ def test_the_owner_is_harvests_guess(path, owner):
 def test_exclusions_hold_the_atlas_and_dropbox_folders(tmp_path):
     info = tmp_path / "local" / "Dropbox" / "info.json"
     info.parent.mkdir(parents=True)
-    info.write_text(json.dumps({"business": {"path": str(tmp_path / "TNRG Dropbox")}}), encoding="utf-8")
-    s = atlas.settings_from({"handoff_dir": str(tmp_path / "TNRG Dropbox" / "x" / "fragpipe-runs"),
+    info.write_text(json.dumps({"business": {"path": str(tmp_path / "Team Dropbox")}}), encoding="utf-8")
+    s = atlas.settings_from({"handoff_dir": str(tmp_path / "Team Dropbox" / "x" / "fragpipe-runs"),
                              "sweep_exclude": [str(tmp_path / "Backups")]})
     assert atlassweep.exclusions(s, env={"LOCALAPPDATA": str(tmp_path / "local")}) == \
-        [s["handoff_dir"], str(tmp_path / "TNRG Dropbox"), str(tmp_path / "Backups")]
+        [s["handoff_dir"], str(tmp_path / "Team Dropbox"), str(tmp_path / "Backups")]
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows' drives")

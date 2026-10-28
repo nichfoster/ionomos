@@ -1,10 +1,10 @@
 """The hand-off to the lab's cysteine atlas (atlas.py, docs/ATLAS.md, D120-D125, D127), contract
 "ionomos-atlas-handoff/2".
 
-The selection rule is harvest_fragpipe.ps1's (Nomura-Lab, Lab Informatics/tools), so its cases are table-driven
-from the script's constants; the layout is its Get-RelativeDestination, checked against the atlas side's reader
-(ingest_fragpipe.local_run_dir, copied below). Every test writes under tmp_path only: never the real Dropbox,
-nomura-data, C:/Fragpipe_Auto or C:/Fragpipe_General.
+The selection rule is harvest_fragpipe.ps1's (the atlas's own repository, which is private), so its cases are
+table-driven from the script's constants; the layout is its Get-RelativeDestination, checked against the atlas
+side's reader (ingest_fragpipe.local_run_dir, copied below). Every test writes under tmp_path only: never the real
+Dropbox, the atlas's data folder, C:/Fragpipe_Auto or C:/Fragpipe_General.
 """
 from __future__ import annotations
 
@@ -56,9 +56,9 @@ def test_the_contract_names_and_columns():
 @pytest.mark.parametrize(("raw", "want"), [
     (None, atlas.DEFAULTS),
     ({}, atlas.DEFAULTS),
-    ({"enabled": True, "handoff_dir": r"C:\Users\me\TNRG Dropbox\Daniel Nomura\Nicholas Foster Data\fragpipe-runs"},
+    ({"enabled": True, "handoff_dir": r"C:\Users\me\Team Dropbox\Lab Head\Nicholas Foster Data\fragpipe-runs"},
      {**atlas.DEFAULTS, "enabled": True,
-      "handoff_dir": r"C:\Users\me\TNRG Dropbox\Daniel Nomura\Nicholas Foster Data\fragpipe-runs"}),
+      "handoff_dir": r"C:\Users\me\Team Dropbox\Lab Head\Nicholas Foster Data\fragpipe-runs"}),
     ({"handoff_dir": r"\\server\share\fragpipe-runs"}, {**atlas.DEFAULTS, "handoff_dir": r"\\server\share\fragpipe-runs"}),
     ({"methods": "isoDTB"}, atlas.DEFAULTS),
     ({"max_tries": 3, "retry_minutes": 2.5}, {**atlas.DEFAULTS, "max_tries": 3, "retry_minutes": 2.5}),
@@ -151,7 +151,7 @@ def test_the_dropbox_folder_with_spaces_survives_a_save(tmp_path):
     from ionomos import configio
 
     d = configio.defaults("C:/Fragpipe_Auto", "C:/Fragpipe_General")
-    d["atlas"].update(enabled=True, handoff_dir=r"C:\Users\me\TNRG Dropbox\Daniel Nomura\Nicholas Foster Data\fragpipe-runs")
+    d["atlas"].update(enabled=True, handoff_dir=r"C:\Users\me\Team Dropbox\Lab Head\Nicholas Foster Data\fragpipe-runs")
     p = tmp_path / "config.yaml"
     configio.write_config(p, d, backup=False)
     assert configio.read_config(p)["atlas"] == d["atlas"]
@@ -270,7 +270,7 @@ def test_an_unreadable_run_folder_raises(tmp_path):
 
 
 def local_run_dir(run_path, harvest_root):
-    """ingest_fragpipe.local_run_dir (Nomura-Lab, the atlas side), as it is: how the atlas finds a run's copy."""
+    """ingest_fragpipe.local_run_dir (the atlas side's own repository), as it is: how the atlas finds a run's copy."""
     m = re.match(r"^([A-Za-z]):\\(.*)$", run_path)
     return os.path.join(harvest_root, m.group(1).upper(), m.group(2)) if m else run_path
 
@@ -289,9 +289,9 @@ def test_the_layout_is_get_relative_destination(source, parts):
     assert atlas.layout_parts(source) == parts
 
 
-@pytest.mark.parametrize("run", [r"C:\Fragpipe_General\Nicholas\2026-10-19_isoDTB_x\fragpipe", r"D:\EJQ\run 2\fragpipe"])
+@pytest.mark.parametrize("run", [r"C:\Fragpipe_General\member\2026-10-19_isoDTB_x\fragpipe", r"D:\EJQ\run 2\fragpipe"])
 def test_the_atlas_finds_the_copy_where_it_lands(run):
-    root = r"C:\Users\me\TNRG Dropbox\Daniel Nomura\Nicholas Foster Data\fragpipe-runs"
+    root = r"C:\Users\me\Team Dropbox\Lab Head\Nicholas Foster Data\fragpipe-runs"
     ours = "\\".join([root, *atlas.layout_parts(run)])
     assert local_run_dir(run, root).replace("/", "\\") == ours
 
@@ -364,7 +364,7 @@ WORKFLOW = ("# FragPipe (24.0) runtime properties\ndatabase.db-path=C\\:\\\\Frag
 @pytest.fixture
 def handoff(lab):
     """A done isoDTB job with a FragPipe output folder, and the hand-off on, into a folder whose path has spaces."""
-    dropbox = lab["root"] / "TNRG Dropbox" / "Nicholas Foster Data"
+    dropbox = lab["root"] / "Team Dropbox" / "Nicholas Foster Data"
     dropbox.mkdir(parents=True)
     dest_root = dropbox / "fragpipe-runs"
     cfg = _write_cfg(lab, enabled=True, handoff_dir=str(dest_root), max_tries=3, retry_minutes=1)
@@ -552,7 +552,7 @@ def test_an_unreachable_destination_waits_backs_off_and_gives_up(handoff, monkey
 
 
 def test_the_destination_is_made_only_when_its_parent_is_there(handoff):
-    assert not handoff["root"].exists()  # Nicholas Foster Data is there, fragpipe-runs not yet
+    assert not handoff["root"].exists()  # the team folder (DATA_FOLDER) is there, fragpipe-runs not yet
     assert atlas.send(handoff["cfg"], handoff["job"]).ok
     assert handoff["root"].is_dir()
 
@@ -1061,12 +1061,12 @@ def _dropbox(tmp_path, info: dict) -> dict:
 
 
 def test_the_dropbox_folder_is_found_as_harvest_finds_it(tmp_path):
-    team = tmp_path / "TNRG Dropbox"
-    (team / "Daniel Nomura" / "Nicholas Foster Data").mkdir(parents=True)
+    team = tmp_path / "Team Dropbox"
+    (team / "Lab Head" / "Nicholas Foster Data").mkdir(parents=True)
     env = _dropbox(tmp_path, {"business": {"path": str(team), "root_path": str(team)},
                               "personal": {"path": str(tmp_path / "Dropbox")}})
     assert atlas.dropbox_roots(env) == [str(team), str(tmp_path / "Dropbox")]
-    assert atlas.dropbox_suggestion(env) == str(team / "Daniel Nomura" / "Nicholas Foster Data" / "fragpipe-runs")
+    assert atlas.dropbox_suggestion(env) == str(team / "Lab Head" / "Nicholas Foster Data" / "fragpipe-runs")
 
 
 def test_no_dropbox_no_suggestion(tmp_path):

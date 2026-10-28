@@ -5,13 +5,13 @@ bench scientist can read and a reviewer can check**: filtering,
 normalisation, imputation, limma statistics, QC and enrichment, in one offline
 HTML page, from FragPipe, DIA-NN, MaxQuant, Sage, Spectronaut, AlphaDIA,
 MSstats-format or Proteome Discoverer tables. Its statistics are Python ports
-of published R tools (FragPipe-Analyst, limma, MSstatsTMT, CurveCurator and
+of R tools (FragPipe-Analyst, limma, MSstatsTMT, CurveCurator and
 others), each tested against that tool's own output.
 
 ## See a report first
 
 [**Example reports**](reports/index.md): three reports Ionomos wrote from
-real, published data (FragPipe-Analyst's label-free, DIA and TMT example
+real, public data (FragPipe-Analyst's label-free, DIA and TMT example
 datasets). They open in the browser; there is nothing to install.
 
 ## Try it on your computer
@@ -39,8 +39,10 @@ ionomos analyze your_table.tsv --open   # your own table or results folder
 
 On a Windows instrument PC Ionomos can also run the search: lab members drop
 a folder into an inbox, and it runs FragPipe (or DIA-NN, MaxQuant, Sage)
-headlessly with the lab's checked workflows and FASTAs, then writes the
-report. That install is described in
+headlessly with your lab's workflows and FASTAs, then writes the report. The
+methods, the file-naming rules and the analysis settings (`experiment.yaml`,
+or the app's Analysis tab) are configuration, so each lab sets its own. That
+install is described in
 [DEPLOY_WINDOWS.md](https://github.com/nichfoster/ionomos/blob/master/docs/DEPLOY_WINDOWS.md)
 on GitHub.
 

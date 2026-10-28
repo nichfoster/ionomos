@@ -7,10 +7,12 @@ checked against, how a lab member checks it on their own experiment
 (`ionomos benchmark`), what it does with messy tables, and what the "How far
 to trust this" list in every report is made of (D60).
 
-**Not verified, anywhere on this page: real lab data.** Every number below
-comes from simulated tables or from reference runs of R packages on simulated
-tables. No mixed-species sample has been run on the lab's instrument yet, and
-no real FragPipe-Analyst, MSstats or Perseus export has been compared.
+**Not verified, anywhere in the tables on this page: real lab data.** Every
+number below comes from simulated tables or from reference runs of R
+packages on simulated tables. Real lab data has been checked by hand twice
+(below and [REAL_RUNS.md](REAL_RUNS.md)), but no real FragPipe-Analyst,
+MSstats or Perseus export has been run through `ionomos compare`, and no
+mixed-species sample has been run on a real instrument.
 *Status:* stated in the report, in the line under every "How far to trust
 this" list whose statistics Ionomos ran (trust.py: `basis`).
 
@@ -20,7 +22,18 @@ appears only when the analysis used what the line is about; **not a report
 caveat** says why it cannot be one. The list itself is
 [at the end](#how-far-to-trust-this).
 
-One real experiment has been checked by hand (2026-10-06, a DIA pull-down,
+**A real TMT result against FragPipe-Analyst's table** (2026-10-28, Ionomos
+0.21.0 defaults, [REAL_RUNS.md](REAL_RUNS.md)). One TMT experiment (compound
+vs vehicle, 3 vs 3, one plex, 5,639 genes) was compared by hand with its
+owner's FragPipe-Analyst results table for the same search: the log2 fold
+changes are the same (Pearson r = 1.000; FragPipe-Analyst's sign
+convention is the reverse), 134 of FragPipe-Analyst's 143 hits are hits in
+Ionomos too, and 2 hits are in Ionomos only. The 9 not shared were not
+examined one by one. It is the first numeric comparison with a
+FragPipe-Analyst results table, and it was not made with `ionomos compare`,
+so no verdict is on file.
+
+**A real DIA pull-down against the web app** (2026-10-06,
 [REAL_RUNS.md](REAL_RUNS.md)). It was run on fragpipe-analyst.org and one
 protein was a hit there that was not a hit in Ionomos. It was measured in
 one condition only, and Ionomos' run had a global missing-value filter
@@ -38,7 +51,7 @@ FragPipe-Analyst's defaults** in the Analysis tab sets the same.
 
 | Part | Checked against | How close | Test |
 |---|---|---|---|
-| isoDTB site table, TMT annotation | the lab's R scripts | byte-identical | `tests/test_downstream.py`, `tests/golden/` |
+| isoDTB site table, TMT annotation | the first lab's R scripts (`reference/lab-scripts/`) | byte-identical | `tests/test_downstream.py`, `tests/golden/` |
 | Imputation (Perseus-type), R's random numbers | R's `set.seed(123)`, `rnorm`; FragPipeAnalystR's `manual_impute` | 1e-13; 1e-9 | `tests/test_fpa.py` |
 | limma (`~0 + condition`, all / control / others, missing values) | limma 3.68 | 1e-8 | `tests/test_fpa.py`, `tests/golden/fpa/` |
 | Unequal groups (DMSO 2, Probe 4, Probe_Comp 4) through filter, median normalisation, imputation or none, the role comparisons and `small_group_min_valid` (`half` and `same`) | limma 3.68.5 | 1e-8 | `tests/test_roles.py`, `tests/golden/unequal/` |
@@ -76,7 +89,7 @@ experiment:
 | limma | a `topTable` written to a file (`logFC`, `P.Value`, `adj.P.Val`) |
 | MSstats | `groupComparison`'s result (long format: `Protein`, `Label`, `log2FC`, `pvalue`, `adj.pvalue`) |
 | Perseus | the matrix with `Difference`, `-Log p-value`, `q-value`, `Significant` columns |
-| the lab's old R output, a hand-made sheet | any table with a fold-change column and a p-value column per comparison (`.tsv`, `.csv`, `.txt`, `.xlsx`) |
+| your lab's old R output, a hand-made sheet | any table with a fold-change column and a p-value column per comparison (`.tsv`, `.csv`, `.txt`, `.xlsx`) |
 
 Tables are read by `downstream/anytable.py`, which already recognises
 fold-change and p columns (D33); long format is read by `compare.py`.
@@ -231,8 +244,8 @@ What this says about the settings, on data like this simulation:
 
 This is a simulation. It shows how the method behaves on data shaped like
 the simulation: log-normal noise, missingness that depends only on
-abundance, changes of one size, no outlier samples. It does not show how the
-lab's samples behave. *Status:* stated in the report (trust.py: `basis`: the
+abundance, changes of one size, no outlier samples. It does not show how
+your lab's samples behave. *Status:* stated in the report (trust.py: `basis`: the
 settings checked on simulated data); a `benchmark_simulated.json` in the
 results folder shows under "These settings on simulated data".
 
@@ -250,7 +263,7 @@ measures 1.7 – 6.3 %.
 #### isoDTB site ratios (`--kind isodtb`, D66)
 
 The table is FragPipe's `combined_modified_peptide_label_quant.tsv`
-(`simulate.isodtb_ratios`), merged into sites by the port of the lab's R
+(`simulate.isodtb_ratios`), merged into sites by the port of the first lab's R
 script and loaded as `analyze()` loads it; each compound is tested against 0.
 
 - 900 cysteines, three per protein; every site its own replicate SD (0.35
@@ -294,8 +307,8 @@ What this says, on data like this simulation:
   moves by the error, so the unchanged sites sit 0.07 – 0.13 log2 off 0 (mean
   over the tables; the error is random, so it averages out over many
   experiments, not within one). The test against 0 then calls more of them:
-  up to 10.6 % per scenario. Since D70 the lab can centre the ratios
-  (`ratio_centre`, below); the default stays `none` until the lab decides.
+  up to 10.6 % per scenario. Since D70 a lab can centre the ratios
+  (`ratio_centre`, below); the default stays `none`.
 
 *Status:* stated in the report for site ratios: two replicates are marked
 (trust.py: `replicates`); how the ratios were used, the largest replicate
@@ -334,7 +347,7 @@ scenario, limma. FDP and found at adjusted p ≤ 0.05; |offset| per table:
   is move the unchanged sites (|offset| 0.08 – 0.11).
 
 `ionomos benchmark --kind isodtb` (the standard grid) now runs the two
-centring settings beside limma and the t-test, so the lab can see them on
+centring settings beside limma and the t-test, so a lab can see them on
 2 – 4 replicates; the table above is the `centring` grid
 (`benchmark.simulated("centring", kind="isodtb")`), with more seeds.
 *Status:* stated in the report when the ratios were centred (trust.py:
@@ -393,8 +406,8 @@ What this says, on data like this simulation:
   median centring shifts every unchanged protein by -0.2 (2-fold) to -0.4
   log2 (4-fold); at adjusted p alone most calls are then false. The
   fold-change cut-off keeps most of them out of the hits, not all: 8.4 % false
-  hits with 2 DMSO channels per plex. The lab PC's `normalize: median` is
-  this row.
+  hits with 2 DMSO channels per plex. The first lab's PC has
+  `normalize: median`, which is this row.
 - **Without IRS the plex effect stays in.** The plain model then finds 40 %
   of the 2-fold changes (conservative: 0.3 % false); the doctor warns
   (`TMT_PLEXES_NOT_IN_MODEL`) and "How far to trust this" marks it. A plex
@@ -439,8 +452,8 @@ block within 0.06.
 These simulations share the DIA benchmark's limits: normal noise on the log
 scale, missingness from abundance alone, changes of one size, no outlier
 channel, no ratio compression from co-isolated ions (MS2 TMT shrinks real
-ratios; the lab's workflow is MS3). They show how the methods behave on such
-data, not how the lab's samples behave. *Status:* stated in every TMT report
+ratios; the first lab's TMT workflow is MS3). They show how the methods
+behave on such data, not how your lab's samples behave. *Status:* stated in every TMT report
 (trust.py: `simulated`, id `tmt`); how several plexes were handled was
 already stated, with the simulated numbers (trust.py: `plexes`).
 
@@ -482,7 +495,7 @@ is open (ROADMAP). *Status:* stated in the report when Ionomos rolled
 peptides or precursors up itself (trust.py: `simulated`, id `rollup` for
 median polish, `maxlfq` for MaxLFQ).
 
-### A real benchmark sample on the lab's instrument
+### A real benchmark sample on your instrument
 
 A simulation cannot stand in for the instrument. The standard real benchmark
 is a mix of whole-proteome digests in known ratios, usually human, yeast and
@@ -502,7 +515,7 @@ E. coli ("HYE"; Navarro et al., *Nat. Biotechnol.* 2016, doi:10.1038/nbt.3685).
    assumes that most proteins do not change.
 2. **Acquire** at least 3 injections of A and 3 of B (4 is better) with the
    method you want to judge, alternating A and B. Name them so the conditions
-   are `A` and `B` (for example `HYE_A_1.raw`); for DIA use the lab's naming
+   are `A` and `B` (for example `HYE_A_1.raw`); for DIA use your lab's naming
    (`docs/NAMING_CONVENTION.md`).
 3. **Search** with a FASTA that holds all three proteomes (reviewed human,
    yeast and E. coli K12 from UniProt, with decoys) and let Ionomos analyse it
@@ -578,7 +591,7 @@ covers, and what happens (`tests/test_robustness.py`):
 | decimal commas, thousands separators (also in tab files) | read; `1,234` alone is read as 1234 | a note; mixed formats are refused with a note |
 | values beyond 2^100 or below 2^-100, numbers too large for a float | missing | a note with the count |
 | 1 or 2 features | analysed; median normalisation is pointed out as the reason nothing is testable | a note, `FEW_FEATURES`, `VARIANCE_PRIOR` |
-| 50,000 features × 6 samples | about 3 s on the development Mac (the lab PC was not timed: not a report caveat, it is about speed, not the result) | – |
+| 50,000 features × 6 samples | about 3 s on the development Mac (a lab PC was not timed: not a report caveat, it is about speed, not the result) | – |
 | ragged rows, a BOM, CRLF | read | a note for ragged rows |
 | UTF-16 (Excel's "Unicode text"), Windows' cp1252, every cell in quotes, commas instead of tabs, a delimiter inside a quoted cell (any format, FragPipe's tables too) | read to the same numbers | a note for cp1252 |
 | a quote that is never closed | quotes read as plain characters, so no rows are joined | a note |
@@ -648,8 +661,11 @@ check crossed its own threshold:
 
 Under the list, a line says what every analysis whose statistics Ionomos ran
 was checked on: the ports against their R tools, the settings on simulated
-data, nothing yet on real lab data (this page's opening line). A results
-table that Ionomos only read does not get it.
+data, nothing yet on real lab data: no real benchmark sample, and no real
+FragPipe-Analyst, MSstats or Perseus result run through `ionomos compare`
+(trust.py: `VALIDATED`; the 2026-10-28 hand comparison in this page's opening
+section is not a `compare` run, so the line stands). A results table that
+Ionomos only read does not get it.
 
 The thresholds are those of the checks themselves (the doctor, the scorecard,
 D35), plus two that are new here and stated in the list: fewer than 3

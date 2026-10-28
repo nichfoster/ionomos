@@ -86,7 +86,7 @@ Needs Python 3.11+ from python.org with *tcl/tk* and *py launcher* ticked.
 Both scripts create `ionomos/.venv`, install in editable mode, run ruff and
 pytest, and (with `--bed`/`-Bed`) build the testbed: `./ionomos-testbed` on
 macOS, **`C:\ionomos-testbed`** on Windows. (Not under your profile folder:
-usernames like `Daniel Nomura` contain a space, and on Windows the config
+usernames with a space (`C:\Users\First Last\...`) are common, and on Windows the config
 loader refuses paths with spaces — the FragPipe rule.)
 
 ## Driving the testbed from the app
@@ -417,8 +417,8 @@ python3 make_limma_reference.py && Rscript run_limma.R
 python3 make_stats_reference.py        # in an env with scipy
 ```
 
-The R ports must stay byte-identical to `R_*.tsv`. If the lab changes an R
-script, regenerate and re-port.
+The R ports must stay byte-identical to `R_*.tsv`. If the first lab changes an R
+script in `reference/lab-scripts/`, regenerate and re-port.
 
 ### FragPipe-Analyst port (`tests/test_fpa.py`, `tests/golden/fpa/`)
 

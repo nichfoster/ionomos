@@ -1,9 +1,9 @@
 # The workflow and FASTA library
 
-`ionomos/src/ionomos/library.py` (D89). The lab PC holds well over a hundred
-FragPipe `.workflow` files — one `fragpipe.workflow` inside every output folder
-on `D:\<user>\`, custom ones such as Aman's `fragpipe_pax8.workflow`, the stock
-ones of three FragPipe versions — and FASTAs in several places. Nobody could say
+`ionomos/src/ionomos/library.py` (D89). The PC of the lab where Ionomos started holds
+well over a hundred FragPipe `.workflow` files — one `fragpipe.workflow` inside every
+output folder on `D:\<user>\`, custom ones such as a member's `fragpipe_pax8.workflow`,
+the stock ones of three FragPipe versions — and FASTAs in several places. Nobody could say
 which workflow is the lab's TMT one, whether its FASTA still exists, or whether
 it is current. The library finds them, says in plain words what each one is,
 marks what is wrong with it, ranks the candidates for each method and copies the
@@ -382,8 +382,8 @@ Assumed (not checked against a source):
   that the PC's copy sits in `<install>\cache\` (the 2026-09-15 inventory saw
   one in the 22.0 zip's `fragpipe\cache\`);
 - FragPipe's FASTA name pattern beyond the one real example
-  (`2026-01-30-decoys-contam-UP000005640_9606.fasta.fas`); Agent B's
-  `docs/FASTA.md` checks Philosopher's.
+  (`2026-01-30-decoys-contam-UP000005640_9606.fasta.fas`);
+  [FASTA.md](FASTA.md) checks Philosopher's.
 
 ## Not verified
 

@@ -55,8 +55,8 @@ LEFT_CENSORED = ("perseus", "mindet", "minprob", "min", "zero")
 BASIS = "Each statement repeats a check of this analysis with its number. There is no overall score."
 # docs/VALIDATION.md's opening line, for every analysis whose statistics Ionomos ran (D133). Change it with that line.
 VALIDATED = ("The statistics are checked against the R tools they port and the settings on simulated data, not yet "
-             "on real lab data (no real benchmark sample, no real FragPipe-Analyst, MSstats or Perseus result "
-             "compared).")
+             "on real lab data (no real benchmark sample; no real FragPipe-Analyst, MSstats or Perseus result run "
+             "through ionomos compare).")
 # What VALIDATION.md says was checked on simulated data only, for one kind of analysis (D133): (id, the sentence).
 # _simulated picks the rows the analysis used; each id is named in VALIDATION.md beside the line it states.
 SIMULATED = {

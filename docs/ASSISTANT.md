@@ -26,7 +26,7 @@ Until someone sets it up, the button and `ionomos ask` show Ionomos's own text
 ionomos ask "why did my search fail?" --experiment 12
 ionomos ask "what does 'samples group by replicate number' mean?"
 ionomos ask "why wasn't my folder taken in?" --item intake_XYZ99_isoDTB_run-5f847e78c2
-ionomos ask "how many hits?" --experiment 20260914_Isaac_DIA_FLAG-AR-pulldown --json
+ionomos ask "how many hits?" --experiment 20260914_Sam_DIA_FLAG-AR-pulldown --json
 ```
 
 - `--experiment` takes a job id (`ionomos status`) or an experiment's name.
@@ -78,7 +78,7 @@ Lower Threads or raise RAM (GB) in Advanced, close other programs, then press Re
 
 Sources:
   [log:1#5] Exception in thread "main" java.lang.OutOfMemoryError: Java heap space
-  [job:1] job 1: 20260902-isoDTB_EJQ-2-027 (failed)
+  [job:1] job 1: 20260902-isoDTB_ABC-2-027 (failed)
   [help:attention.search_failed] A search failed
 
 (assistant: grounded, model <name>)
@@ -687,7 +687,7 @@ then the requests sent and the seconds. "Cut" marks a reply cut by the context.
   6.0 / 6.1 there, the context size, the right `keep_alive` and
   `while_searching` for that PC, and whether the runtime needs a lower
   priority. (Two models scored on the dev PC's GPU are above.)
-- Whether lab members finish the tasks unaided with the confirm window (6.2's
+- Whether the people in the lab finish the tasks unaided with the confirm window (6.2's
   exit), the window on the PC's display, and any real model's proposals.
 - Re-running the analysis from the confirm window (Confirm saves; the Jobs
   tab's Re-run analysis uses it).

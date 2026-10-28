@@ -14,7 +14,8 @@ Engine and acquisition (FragPipe DIA, DIA-NN, MaxQuant TMT, …), the design
 
 **A reference to check it against**
 Ionomos ports methods and tests them against the original tool (docs/VALIDATION.md).
-Which tool, package or paper does this already, and which version?
+Which tool or package does this already, and which version? Or where is the
+method described?
 
 **Licence**
 If it needs a database or a program: its licence, and whether it may be

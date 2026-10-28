@@ -159,17 +159,17 @@ def test_keep_conditions_keeps_every_condition_word_but_not_the_user():
 
 
 def test_addresses_home_folders_and_odd_names():
-    a = _anon(samples=["Drug A 0.5uM_1"], users={"Nich Foster": []}, folders=["2026 03 01 Zoë (redo)"])
-    out = a.text("mail nich.foster@berkeley.edu and NICH.FOSTER@berkeley.edu from 10.32.4.17 or fe80::1ff:fe23:4567:890a; "
+    a = _anon(samples=["Drug A 0.5uM_1"], users={"Jane Doe": []}, folders=["2026 03 01 Zoë (redo)"])
+    out = a.text("mail first.last@example.edu and FIRST.LAST@example.edu from 10.32.4.17 or fe80::1ff:fe23:4567:890a; "
                  "ThermoRawFileParser 1.4.3.0 on 127.0.0.1")
-    assert "berkeley" not in out and out.count("email01@example.invalid") == 2
+    assert "example.edu" not in out and out.count("email01@example.invalid") == 2
     assert "10.32.4.17" not in out and "fe80" not in out
     assert "1.4.3.0" in out and "127.0.0.1" in out                       # a version, and loopback, are not addresses
     home = a.text(r"C:\Users\jsmith\Desktop\x.zip and C:\\Users\\jsmith\\AppData and /Users/mlee/x /home/mlee C:\Users\Public\x")
     assert "jsmith" not in home and "mlee" not in home and r"C:\Users\Public\x" in home
     assert a.text("jsmith") != "jsmith"                                   # learnt from the path, known from then on
     assert a.grew
-    assert a.text("by Nich Foster, in '2026 03 01 Zoë (redo)'") == "by user01, in 'exp001'"
+    assert a.text("by Jane Doe, in '2026 03 01 Zoë (redo)'") == "by user01, in 'exp001'"
     assert a.text(json.dumps("2026 03 01 Zoë (redo)")) == '"exp001"'      # as json.dumps writes it (\\u00eb)
     assert "Drug A" in a.text("Drug A 0.5uM_1") and a.find("x") == []    # every word of it is a kept word
 
@@ -648,9 +648,9 @@ def test_a_name_after_a_json_escape_is_replaced_and_found():
     out = a.text(line)
     assert "EJQ" not in out and "mystery" not in out and "XYZ99" not in out
     assert "\\u201cexp001\\u201d" in out and "exp002\\u2013" in out.replace(" ", "")
-    odd = _anon(users={"Nich Foster": []}, folders=["2026 03 01 Zoë (redo)"])
-    assert odd.text(json.dumps("see “2026 03 01 Zoë (redo)” by Nich Foster")) == json.dumps("see “exp001” by user01")
-    assert odd.find(json.dumps("“Nich Foster”")) == ["Nich Foster"]
+    odd = _anon(users={"Jane Doe": []}, folders=["2026 03 01 Zoë (redo)"])
+    assert odd.text(json.dumps("see “2026 03 01 Zoë (redo)” by Jane Doe")) == json.dumps("see “exp001” by user01")
+    assert odd.find(json.dumps("“Jane Doe”")) == ["Jane Doe"]
     assert sorted(a.find(line)) == ["EJQ_2027_mystery", "XYZ99_isoDTB_run"]
     assert a.find(out) == []
 

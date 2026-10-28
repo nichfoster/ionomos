@@ -1,12 +1,11 @@
-# Vision: what Ionomos is for, and the road to publishing it
+# Vision: what Ionomos is for
 
-Written 2026-10-15, at version 0.18.1 (plus the unreleased workflow / FASTA
-library and TMT work). Ionomos began in 2026-09 as LabWatch, one lab's
-drop-folder automation for FragPipe on a Windows PC ([SCOPE.md](SCOPE.md),
-"Where it started"). It is now also an analysis anyone can `pip install`, and
-the plan is to publish it as a tool for other labs. This page says what that
-tool is, who it is for, what it promises, and what is left before a 1.0 and a
-paper. [ROADMAP.md](ROADMAP.md) Phase 5D holds the checklist.
+Written 2026-10-15; updated 2026-10-28 at version 0.21.0. Ionomos began in
+2026-09 as LabWatch, one lab's drop-folder automation for FragPipe on a
+Windows PC ([SCOPE.md](SCOPE.md), "Where it started"). It is now a tool any
+lab can install, and its analysis is something anyone can `pip install`. This
+page says what that tool is, who it is for, what it promises, and what is left
+before 1.0. [ROADMAP.md](ROADMAP.md) Phase 5D holds the checklist.
 
 ## In one paragraph
 
@@ -21,7 +20,9 @@ CurveCurator and others), each tested against that tool's own output;
 on real data. On a Windows instrument PC it can also do the step before: run
 FragPipe (or DIA-NN, MaxQuant, Sage) on folders that lab members drop into an
 inbox, with the lab's workflows and FASTAs found, checked and kept current, so
-nobody sets up a search by hand.
+nobody sets up a search by hand. Which methods a lab runs, what its files are
+called and how each experiment is analysed are settings, not code (D37, D54;
+`experiment.yaml` and the app's Analysis tab).
 
 ## Who it is for
 
@@ -32,7 +33,7 @@ nobody sets up a search by hand.
 | **A core facility** | Runs searches for many groups and hands each a report with its methods, provenance and an SDRF sample sheet; trends the QC standard | [ENGINES.md](ENGINES.md), [QC_TREND.md](QC_TREND.md) |
 | **A bench scientist with a table and no bioinformatician** | `pip install ionomos`, `ionomos analyze table.tsv --open`; figures for slides with `ionomos export` | [QUICKSTART.md](QUICKSTART.md) |
 | **Another lab that wants the watcher** | Describes its own file names in `config.yaml` (D37) and its own methods (D54), runs the engines it has licences for | [NAMING_CONVENTION.md](NAMING_CONVENTION.md), [WORKFLOWS.md](WORKFLOWS.md) |
-| **A reviewer checking a paper's analysis** | Re-runs the analysis from the deposited tables, or checks the authors' result with `ionomos compare` and the report's "How far to trust this" list | [VALIDATION.md](VALIDATION.md) |
+| **Someone checking another group's analysis** | Re-runs the analysis from the deposited tables, or checks the authors' result with `ionomos compare` and the report's "How far to trust this" list | [VALIDATION.md](VALIDATION.md) |
 
 ## Principles, and where each was decided
 
@@ -115,65 +116,6 @@ chemoproteomics (isoDTB sites, liganded cysteines, competition experiments,
 dose-response; D52, D61, D44), which none of the tools above automates end to
 end (ROADMAP Phase 5, "Positioning").
 
-Citations above are the tools' main papers; check them before quoting in a
-manuscript.
-
-## The road to publishing
-
-In order. ROADMAP 5D has each step with an owner.
-
-1. **A PyPI release.** The workflow exists and builds and tries the package
-   on Windows, macOS and Linux for every `v*` tag (`publish-pypi.yml`); it
-   uploads once the maintainer sets up trusted publishing (D40). On
-   2026-10-15 `ionomos` is still not on PyPI.
-2. **A real-data example.** The demo is simulated (D40). A public dataset
-   from PRIDE, analysed and published with its report, shows what a real
-   table looks like in Ionomos. The best candidate is a mixed-species
-   benchmark (human / yeast / *E. coli* in known ratios), because it serves
-   the benchmark too ([VALIDATION.md](VALIDATION.md), "A real benchmark
-   sample"). Its tables are downloaded, not bundled: the demo stays offline
-   and small.
-3. **The evidence.** What a paper can show today: the parity table in
-   VALIDATION.md (limma, FragPipeAnalystR, MSstatsTMT, MSstatsPTM,
-   CurveCurator, iq, KSEAapp, R's splines; 1e-8 or closer), the simulated
-   benchmarks, and the fuzz of messy tables. What it cannot show yet, and
-   needs: a real mixed-species benchmark, an `ionomos compare` against a real
-   FragPipe-Analyst export and a real MSstats or Perseus export, and real
-   TMT and isoDTB searches through the watcher (REAL_RUNS.md).
-4. **A JOSS paper.** JOSS (criteria read 2026-10-15) asks for: an OSI
-   licence (GPL-3.0-or-later: done), a public repository with issues
-   (done), an automated install (pip: done once on PyPI), tests and CI
-   (done), documentation with a statement of need, examples and community
-   guidelines (CONTRIBUTING.md, issue templates), a repository public for
-   **more than six months** with development across that time (created
-   2026-09-16, so not before 2027-03-17), **evidence of research use** (a
-   preprint, a paper or documented adoption; plans do not count), and a
-   `paper.md` of 750–1,750 words with the sections Summary, Statement of
-   need, State of the field, Software design, Research impact statement and
-   **AI usage disclosure**. Most of the code was written by coding agents
-   under review (D31); the disclosure must say so and say how the output was
-   checked (the reference tests, human-merged pull requests).
-5. **A preprint and a J. Proteome Res. technical note.** A technical note is
-   at most 4,500 words, must show an advantage over existing methods, and
-   needs the raw data deposited (ProteomeXchange preferred). The
-   mixed-species benchmark and one real experiment from a pilot lab are the
-   material. A bioRxiv preprint goes up when the note is submitted.
-6. **A documentation site.** Today the docs are Markdown on GitHub. A site
-   (GitHub Pages) should hold QUICKSTART, ENGINES, VALIDATION, the help
-   pages that `ionomos help` already renders, and the real-data example's
-   report, so a reader can see a report before installing. Where it stands
-   (2026-10-26, D132): built, in `website/`, with VISION, SCOPE, the
-   changelog and the example's three reports too. The `docs-site` workflow
-   deploys it to <https://nichfoster.github.io/ionomos/> on each `v*` tag,
-   once the maintainer has switched GitHub Pages on
-   ([DEV_LOOP.md](DEV_LOOP.md#one-time-setup-for-the-documentation-site-github-pages)).
-7. **Name and logo.** Keep "Ionomos" unless a clash is found (the PyPI name
-   was free on 2026-09-30); check for trademark and tool-name clashes before
-   the paper. There is no logo; the app and the report use none. The GitHub
-   description still says the tool is for one lab's PC.
-8. **Versioning and support promises** (below), written down before 1.0.
-   In the README since 2026-10-26 (D133).
-
 ## Versioning and support, from 1.0
 
 - **Semantic versioning** of what users touch: the command line (commands
@@ -197,14 +139,21 @@ In order. ROADMAP 5D has each step with an owner.
 ## What "done for v1.0" means
 
 - `pip install ionomos` from PyPI, and the Windows installer, both from the
-  same tag.
+  same tag. The installer is built on every `v*` tag; on 2026-10-28
+  `ionomos` is not on PyPI yet (ROADMAP 5D step 1).
 - A real-data example from PRIDE with its report on the documentation site.
-- At least one real mixed-species benchmark run and published in
+  The site is built (`website/`, D132) and goes live once GitHub Pages is
+  switched on (ROADMAP 5D step 7).
+- At least one real mixed-species benchmark run and written up in
   VALIDATION.md, and the imputation default decided from it (ROADMAP 5C #10).
 - One `ionomos compare` against a real FragPipe-Analyst export, one against a
-  real MSstats or Perseus export.
+  real MSstats or Perseus export. A first real TMT result was compared by hand
+  with its FragPipe-Analyst results table on 2026-10-28 (log2 fold changes
+  identical, 134 of FragPipe-Analyst's 143 hits shared; [REAL_RUNS.md](REAL_RUNS.md)).
 - Real TMT and isoDTB searches through the watcher on the lab PC, recorded in
-  REAL_RUNS.md.
+  REAL_RUNS.md. TMT, DIA and DDA searches have run through the watcher
+  (reported by the maintainer on 2026-10-28; their run records are still to
+  be filed). An isoDTB search through the watcher is still to be recorded.
 - At least one lab other than the first using it, on its own names and
   engines, and its problems fixed.
 - The promises above written into the README, and every open "Not verified"

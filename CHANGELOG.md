@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Ionomos reads as a tool for any lab** (D134). The README is rewritten for a reader who has never seen the
+  project: what it does, a screenshot of a report (`docs/images/report_overview.png`, the simulated demo), the two
+  ways to use it, what the report shows, what is configuration (methods D54, names D37, `experiment.yaml` and the
+  Analysis tab), how the watcher works, the table of reference checks, the status, the rules about user data,
+  the commands, the layout and the docs index. Nothing in the public repository names a lab member, the lab,
+  a person's Dropbox folder or the lab's private repository any more, and nothing public talks about publishing
+  the tool; what belongs to one lab (the publishing plan, the open questions about its own process and people,
+  the identified PC inventory) moved on 2026-10-28 to that lab's private repository. The GitHub description and
+  topics say what Ionomos is instead of whose PC it was for.
+  - **docs/VISION.md** is "Vision: what Ionomos is for" (updated 2026-10-28 at 0.21.0): the publishing section
+    is gone; "done for v1.0" says where each item stands. **docs/SCOPE.md** is dated 2026-10-28 and says what has
+    run. **docs/ROADMAP.md** Phase 5D is "Adoption": the publishing steps are gone and the rest renumbered (8
+    versioning and support, 9 v1.0, 10 dead code, 11 interoperate), step 2's GitHub description is done, step 5
+    says where the real-data evidence stands; the open questions keep the technical ones (the TMT search's
+    records to confirm, D91) and point at the private repository for the first lab's own process.
+    **docs/PROTEOMICS_PC.md** is "The instrument-side PC Ionomos was built for": the same facts without the
+    hostname, account name or user folder names.
+  - **docs/REAL_RUNS.md** records the TMT, DIA and DDA searches that finished through the watcher on the first
+    lab's PC (reported by the maintainer on 2026-10-28, version 0.19.0 to 0.21.0; their `run_fingerprint.json`
+    and console logs are still to be filed, and whether the DDA search used the isoDTB workflow is not recorded),
+    and the 2026-10-28 analysis of real isoDTB, TMT and DIA FragPipe results with 0.21.0 defaults: the doctor's
+    `RATIO_OFFSET` (isoDTB) and replicate-batch (TMT) warnings, and the first numeric comparison with a
+    FragPipe-Analyst results table (TMT: the same log2 fold changes, r = 1.000, sign convention reversed; 134 of
+    143 hits shared, 2 only in Ionomos; by hand, not through `ionomos compare`). FIRST_REAL_RUN.md, WORKFLOWS.md
+    (now "Methods → headless FragPipe", opening with methods as configuration) and VALIDATION.md say the same
+    where they said no TMT search or no real comparison had happened. The page names no person, experiment
+    folder, cell line, bait or compound (the real names are in each job's `ionomos.json` on the PC).
+  - The line under every "How far to trust this" list (trust.py `VALIDATED`, D133) now says what is exactly
+    true: no real benchmark sample, and no real FragPipe-Analyst, MSstats or Perseus result run *through
+    `ionomos compare`*. The JS fixture is regenerated.
+  - The other design docs (ARCHITECTURE, ATLAS, DEPLOY_WINDOWS, DEV_LOOP, LIBRARY, UI, FASTA, NAMING_CONVENTION,
+    ASSISTANT, HELP, TESTING, ENGINES, QUICKSTART): examples use made-up users and initials; the atlas hand-off's
+    receiver is "the atlas side", a private repository, and its folder `<Dropbox>\<team folder>ragpipe-runs`
+    (the name is the atlas side's choice, set in `atlas.handoff_dir`); "the first lab" where a fact is about the
+    lab where Ionomos started (its PC, FASTA, SOPs, R scripts); the dev loop is "developer machine ↔ instrument
+    PC". QUICKSTART installs from GitHub first, since `ionomos` is not on PyPI yet. No command, default, decision
+    number or date changed.
+  - The Windows installer's publisher is "Ionomos" (`deploy/ionomos.iss`, with the repository as publisher and
+    support URL); the package description lists every table Ionomos reads and every engine the watcher runs;
+    `CITATION.cff` is at 0.21.0 (it still said 0.18.1). CONTRIBUTING.md has the rule "Nothing lab-specific" and
+    the pull-request template a matching checkbox; CLAUDE.md says the same for agents.
+  - The atlas hand-off's messages, the Folders tab hint, the `config.yaml` comment and the help no longer show
+    one person's Dropbox folder ("the Dropbox folder the atlas side reads, e.g. `...\<team folder>ragpipe-runs`");
+    the Dropbox suggestion still looks for the first atlas's team folder (`atlas.DATA_FOLDER`, a convenience;
+    `atlas.handoff_dir` is the setting). Test fixtures use made-up names and keep their spaces. A few help
+    sentences that described one lab now read for any lab.
+
 ## [0.21.0] - 2026-10-26
 
 ### Added
@@ -153,7 +202,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Finished isoDTB searches go to the lab's cysteine atlas by themselves** (D120–D125, docs/ATLAS.md). With
-  `atlas.enabled` and `atlas.handoff_dir` (the lab Dropbox `…\Nicholas Foster Data\fragpipe-runs`; no default),
+  `atlas.enabled` and `atlas.handoff_dir` (the lab Dropbox `<Dropbox>\<team folder>\fragpipe-runs`; no default),
   the worker queues each done isoDTB job and the watcher's new `atlas` thread copies the run's result files into
   that folder exactly as `harvest_fragpipe.ps1` does (its selection rule and drive-letter layout), each verified by
   SHA-256 through a `.partial`, then writes `ionomos-handoff.json` and a one-row

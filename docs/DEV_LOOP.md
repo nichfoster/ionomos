@@ -1,13 +1,13 @@
-# The Mac ↔ PC loop (while Ionomos is being prototyped)
+# The developer machine ↔ instrument PC loop
 
-Code is written on the Mac (with Claude), run on the proteomics PC. GitHub
+Code is written on the developer's machine (macOS or Windows), run on the instrument PC. GitHub
 sits in the middle. Nothing is ever "uninstalled".
 
 ```
- Mac                          GitHub                        Proteomics PC
+ dev machine                  GitHub                        Proteomics PC
  ┌──────────────────┐  push   ┌──────────────┐   pull    ┌───────────────────────────┐
  │ edit + tests     │ ──────▶ │ public repo  │ ────────▶ │ C:\ionomos-src  (clone)  │
- │ (Claude)         │         │              │           │   └─ .venv  (editable)    │
+ │                  │         │              │           │   └─ .venv  (editable)    │
  └──────────────────┘         └──────────────┘           │ Ionomos app ← runs from  │
         ▲                                                │   the clone directly      │
         │  paste "Copy diagnostics"                      └───────────────────────────┘
@@ -35,11 +35,11 @@ outside the clone and are never touched.
 
 ## Every day after that
 
-| On the Mac | On the PC |
+| On the dev machine | On the PC |
 |---|---|
-| Describe the problem to Claude (paste the diagnostics), it fixes + tests, then `git push` | Open Ionomos → **Run & Test** → **Testing** → the *Development install* box says **UPDATE AVAILABLE** → **Update from GitHub & restart** |
+| Paste the diagnostics into the issue or to the maintainer; the fix is made and tested, then `git push` | Open Ionomos → **Run & Test** → **Testing** → the *Development install* box says **UPDATE AVAILABLE** → **Update from GitHub & restart** |
 | | Test again |
-| | Something's off → **Copy diagnostics** → paste into the chat |
+| | Something's off → **Copy diagnostics** → paste into the issue or to the maintainer |
 
 That's it. The Update button stops the watcher, pulls, reinstalls, and reopens
 the app (press **Start watcher** again if you don't use the startup task).
@@ -49,7 +49,7 @@ From a terminal the same thing is `C:\ionomos-src\UPDATE.ps1`.
 `check`, `status --all`, the config, the last 150 log lines, what's in the
 inbox and any `.REJECTED.txt` notes. Also saved as
 `C:\Fragpipe_Auto\logs\diagnostics-<date>.txt`. Paste the whole thing — that's
-everything needed to reproduce a problem on the Mac. Since D74 the copied
+everything needed to reproduce a problem on the dev machine. Since D74 the copied
 text has the lab's names replaced as a bundle does (the same pseudonyms, and
 the same leak check before it reaches the clipboard); the saved copy is
 `diagnostics-<date>-anonymised.txt` with its key next to it, so
@@ -84,7 +84,7 @@ boxes and a list of what will go in with its size. From a terminal:
 ```powershell
 ionomos bundle                       # diagnose: settings, logs, the running / waiting / last failed jobs
 ionomos bundle 12 --level validate   # job 12 with the search's result tables and results\
-ionomos bundle C:\Fragpipe_General\EJQ\20260902_EJQ_isoDTB_x --level validate --out D:\tmp
+ionomos bundle C:\Fragpipe_General\ABC\20260902_ABC_isoDTB_x --level validate --out D:\tmp
 ionomos bundle 12 --level validate --dry-run     # list what would go in; write nothing
 ionomos bundle 12 --include diann-report,peptides   # validate + DIA-NN's main report and the peptide / ion tables (D74)
 ```
@@ -112,8 +112,8 @@ gets the same pseudonym in every file, file name and table header
 rewritten word by word, so the analysis reads it as before:
 
 ```
-20260914_Isaac_DIA_FLAG-AR-pulldown        ->  exp002            (a folder: as a whole)
-Isaac / IJ                                 ->  user01 / user01a
+20260914_Sam_DIA_FLAG-AR-pulldown          ->  exp002            (a folder: as a whole)
+Sam / SK                                   ->  user01 / user01a
 Zanubrutinib_10uM_3h_2.raw                 ->  condB_10uM_3h_2.raw
 DMSO_1, pool_126, 9plex, isoDTB, F3        ->  unchanged (control / role words, numbers, doses, method names)
 ```
@@ -132,7 +132,7 @@ plain word of a name standing alone elsewhere (`pulldown`; words with
 letters and digits such as `KL6159A` are replaced everywhere), names that
 are also gene names (kept in identifier columns, listed in the key file),
 folder names above the users folder, pictures and other non-text files (left
-out). **Nothing here has been run on the lab's real folders yet.**
+out). **Nothing here has been run on a lab's real folders yet.**
 
 **On the developer's side.**
 
@@ -175,10 +175,10 @@ bundle says when they could not).
 
 - **Never edit code on the PC.** Update refuses to run if files in the clone
   were changed by hand (it would have to throw the edits away). Edit on the
-  Mac, push, update.
+  dev machine, push, update.
 - **Everything of yours lives outside `C:\ionomos-src`.** If the clone is
   ever broken, delete the folder and re-run `dev_install.ps1`; nothing is lost.
-- The Mac side: `scripts/test_mac.sh` before pushing. GitHub also runs the
+- The dev machine side: `scripts/test_mac.sh` (macOS) before pushing. GitHub also runs the
   suite on Linux *and Windows* on every push (Actions tab), so Windows-only
   mistakes get caught there first.
 
@@ -262,7 +262,7 @@ installer and the package of the same tag are not affected.
       points the `Documentation` URL in `ionomos/pyproject.toml` at the site
       (ROADMAP 5D step 7).
 
-**Building the site on the Mac**, as the workflow does (strict):
+**Building the site on a macOS or Linux dev machine**, as the workflow does (strict):
 
 ```bash
 scripts/build_site.sh                         # -> build/site/index.html, opens from the disk
@@ -281,10 +281,10 @@ itself. A new page needs a line in `website/hooks.py`'s `PAGES` and in
 - **Settings → Code security → Private vulnerability reporting → Enable**:
   [SECURITY.md](../SECURITY.md) sends reporters there.
 
-## Optional: Claude Code on the PC too
+## Optional: a coding assistant on the PC too
 
-Installing Claude Code on the PC lets you say "look at the log and tell me
-why the drop didn't move" *there*, with it reading the real files. It works
-fine alongside this loop — GitHub is still what moves code between the two
-machines — but each machine's Claude has its own memory of the project, so
-keep the Mac as the place where changes are made.
+A coding assistant installed on the PC can be asked "look at the log and tell
+me why the drop didn't move" *there*, reading the real files. It works fine
+alongside this loop — GitHub is still what moves code between the two
+machines — but each machine's assistant has its own memory of the project, so
+keep the dev machine as the place where changes are made.
