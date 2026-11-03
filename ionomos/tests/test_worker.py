@@ -56,7 +56,7 @@ def test_isodtb_job_runs_to_done(bed):
     assert len(manifest) == 9
     path, exp, rep, dtype = manifest[0].split("\t")
     assert Path(path).is_file() and "\\" not in path
-    assert exp == "EJQ_PK_EJQ-2-027_isoDTB_1uM_3h" and rep == "1" and dtype == "DDA"
+    assert exp == "ABC_PK_ABC-2-027_isoDTB_1uM_3h" and rep == "1" and dtype == "DDA"
     wf = (run / "isoDTB.workflow").read_text(encoding="utf-8")
     fasta = bed["cfg"].fasta_dir / "human_reviewed_decoys.fas"
     assert fragpipe.workflow_db_path(wf) == str(fasta).replace("\\", "/")
@@ -73,7 +73,7 @@ def test_isodtb_job_runs_to_done(bed):
     # downstream analysis ran: report + sites table (R port) + a volcano, recorded in ionomos.json and DONE.txt
     assert (dest / "results" / "report.html").is_file()
     # FragPipe turns the - of an experiment name into _ (InputLcmsFile), so its tables and ours say _
-    assert (dest / "results" / "EJQ_PK_EJQ_2_027_isoDTB_1uM_3h_sites.tsv").is_file()
+    assert (dest / "results" / "ABC_PK_ABC_2_027_isoDTB_1uM_3h_sites.tsv").is_file()
     assert any("FragPipe keeps only letters, digits and _" in n for n in st["run"]["notes"])
     # a note, not a warning on every job with a - in its sample name
     assert not any("FragPipe keeps" in w for w in st["run"]["warnings"])
@@ -112,7 +112,7 @@ def _tmt_job(dest: Path, manifest: list[dict], tmt: dict) -> Job:
         (dest / m["file"]).parent.mkdir(parents=True, exist_ok=True)
         (dest / m["file"]).write_bytes(b"\0" * 64)
     plan = {"manifest": manifest, "overrides": {"tmt": tmt}}
-    return Job(inbox_name=dest.name, user="EJQ", method="TMT", dest_dir=str(dest), parsed={"plan": plan})
+    return Job(inbox_name=dest.name, user="ABC", method="TMT", dest_dir=str(dest), parsed={"plan": plan})
 
 
 def test_tmt_plexes_in_one_folder_get_no_annotation_file_and_a_warning(bed):

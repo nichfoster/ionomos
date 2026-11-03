@@ -520,10 +520,10 @@ def find_user(name: str, users: dict[str, str], method_aliases: dict[str, list[s
 
     `users` maps lowercase alias -> canonical user dir name (build with
     build_user_lookup). Three passes, first one that hits wins:
-      1. exact token match ("EJQ_isoDTB_x", multi-token "Taylor_Elements")
-      2. initials glued to an ID: token = alias + digits ("IJD05", "EJQ123",
+      1. exact token match ("ABC_isoDTB_x", multi-token "Robin_Lake")
+      2. initials glued to an ID: token = alias + digits ("SKD05", "ABC123",
          "THB10" after stripping method keywords: "THB10ISODTB"). Longest
-         alias wins so "IJD" beats "IJ" for "IJD05".
+         alias wins so "SKD" beats "SK" for "SKD05".
     Ambiguity within a pass -> NamingError.
     """
     toks = tuple(t.lower() for t in tokens_of(name))

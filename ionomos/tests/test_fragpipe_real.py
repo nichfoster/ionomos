@@ -81,39 +81,39 @@ Numpy version 1.26.4
 
 
 LCMS files:
-  Experiment/Group: EJQ_2_027_1
+  Experiment/Group: ABC_2_027_1
   (if "spectral library generation" is enabled, all files will be analyzed together)
-  - C:\Fragpipe_General\EJQ\x\EJQ_2_027_1_1.raw	DDA
+  - C:\Fragpipe_General\ABC\x\ABC_2_027_1_1.raw	DDA
 
 
 8 commands to execute:
 CheckCentroid
-C:\FragPipe\FragPipe-24.0\jre\bin\java.exe -Xmx48G -cp C:\FragPipe\FragPipe-24.0\lib/* org.nesvilab.fragpipe.util.CheckCentroid C:\Fragpipe_General\EJQ\x\EJQ_2_027_1_1.raw 28
-WorkspaceCleanInit [Work dir: C:\Fragpipe_General\EJQ\x\fragpipe\EJQ_2_027_1]
+C:\FragPipe\FragPipe-24.0\jre\bin\java.exe -Xmx48G -cp C:\FragPipe\FragPipe-24.0\lib/* org.nesvilab.fragpipe.util.CheckCentroid C:\Fragpipe_General\ABC\x\ABC_2_027_1_1.raw 28
+WorkspaceCleanInit [Work dir: C:\Fragpipe_General\ABC\x\fragpipe\ABC_2_027_1]
 C:\FragPipe\FragPipe-24.0\tools\Philosopher\philosopher-v5.1.3-RC9.exe workspace --clean --nocheck
-MSFragger [Work dir: C:\Fragpipe_General\EJQ\x\fragpipe]
-C:\FragPipe\FragPipe-24.0\jre\bin\java.exe -jar -Dfile.encoding=UTF-8 -Xmx48G C:\FragPipe\FragPipe-24.0\tools\MSFragger-4.4.1\MSFragger-4.4.1.jar C:\Fragpipe_General\EJQ\x\fragpipe\fragger.params C:\Fragpipe_General\EJQ\x\EJQ_2_027_1_1.raw
+MSFragger [Work dir: C:\Fragpipe_General\ABC\x\fragpipe]
+C:\FragPipe\FragPipe-24.0\jre\bin\java.exe -jar -Dfile.encoding=UTF-8 -Xmx48G C:\FragPipe\FragPipe-24.0\tools\MSFragger-4.4.1\MSFragger-4.4.1.jar C:\Fragpipe_General\ABC\x\fragpipe\fragger.params C:\Fragpipe_General\ABC\x\ABC_2_027_1_1.raw
 MSFragger move pepxml
-C:\FragPipe\FragPipe-24.0\jre\bin\java.exe -cp C:\FragPipe\FragPipe-24.0\lib\fragpipe-24.0.jar org.nesvilab.utils.FileMove --no-err C:\Fragpipe_General\EJQ\x\EJQ_2_027_1_1.pepXML C:\Fragpipe_General\EJQ\x\fragpipe\EJQ_2_027_1\EJQ_2_027_1_1.pepXML
-Percolator [Work dir: C:\Fragpipe_General\EJQ\x\fragpipe\EJQ_2_027_1]
+C:\FragPipe\FragPipe-24.0\jre\bin\java.exe -cp C:\FragPipe\FragPipe-24.0\lib\fragpipe-24.0.jar org.nesvilab.utils.FileMove --no-err C:\Fragpipe_General\ABC\x\ABC_2_027_1_1.pepXML C:\Fragpipe_General\ABC\x\fragpipe\ABC_2_027_1\ABC_2_027_1_1.pepXML
+Percolator [Work dir: C:\Fragpipe_General\ABC\x\fragpipe\ABC_2_027_1]
 C:\FragPipe\FragPipe-24.0\tools\percolator_3_7_1\windows\percolator.exe --only-psms --no-terminate --post-processing-tdc --num-threads 28
-Percolator: Convert to pepxml [Work dir: C:\Fragpipe_General\EJQ\x\fragpipe\EJQ_2_027_1]
+Percolator: Convert to pepxml [Work dir: C:\Fragpipe_General\ABC\x\fragpipe\ABC_2_027_1]
 C:\FragPipe\FragPipe-24.0\jre\bin\java.exe -cp C:\FragPipe\FragPipe-24.0\lib/* org.nesvilab.fragpipe.tools.percolator.PercolatorOutputToPepXML
-PhilosopherReport [Work dir: C:\Fragpipe_General\EJQ\x\fragpipe\EJQ_2_027_1]
+PhilosopherReport [Work dir: C:\Fragpipe_General\ABC\x\fragpipe\ABC_2_027_1]
 C:\FragPipe\FragPipe-24.0\tools\Philosopher\philosopher-v5.1.3-RC9.exe report
-IonQuant [Work dir: C:\Fragpipe_General\EJQ\x\fragpipe]
-C:\FragPipe\FragPipe-24.0\jre\bin\java.exe -Xmx48G -Dlibs.bruker.dir=C:\FragPipe\FragPipe-24.0\tools\MSFragger-4.4.1\ext\bruker -Dlibs.thermo.dir=C:\FragPipe\FragPipe-24.0\tools\MSFragger-4.4.1\ext\thermo -cp C:\FragPipe\FragPipe-24.0\tools\IonQuant-1.11.20.jar ionquant.IonQuant --threads 28 --perform-ms1quant 1 --filelist C:\Fragpipe_General\EJQ\x\fragpipe\filelist_ionquant.txt
+IonQuant [Work dir: C:\Fragpipe_General\ABC\x\fragpipe]
+C:\FragPipe\FragPipe-24.0\jre\bin\java.exe -Xmx48G -Dlibs.bruker.dir=C:\FragPipe\FragPipe-24.0\tools\MSFragger-4.4.1\ext\bruker -Dlibs.thermo.dir=C:\FragPipe\FragPipe-24.0\tools\MSFragger-4.4.1\ext\thermo -cp C:\FragPipe\FragPipe-24.0\tools\IonQuant-1.11.20.jar ionquant.IonQuant --threads 28 --perform-ms1quant 1 --filelist C:\Fragpipe_General\ABC\x\fragpipe\filelist_ionquant.txt
 ~~~~~~~~~~~~~~~~~~~~~~
 
 Execution order:
 
-    Cmd: [START], Work dir: [C:\Fragpipe_General\EJQ\x\fragpipe]
-    Cmd: [CheckCentroid], Work dir: [C:\Fragpipe_General\EJQ\x\fragpipe]
-    Cmd: [WorkspaceCleanInit], Work dir: [C:\Fragpipe_General\EJQ\x\fragpipe\EJQ_2_027_1]
-    Cmd: [MSFragger], Work dir: [C:\Fragpipe_General\EJQ\x\fragpipe]
-    Cmd: [Percolator], Work dir: [C:\Fragpipe_General\EJQ\x\fragpipe\EJQ_2_027_1]
-    Cmd: [PhilosopherReport], Work dir: [C:\Fragpipe_General\EJQ\x\fragpipe\EJQ_2_027_1]
-    Cmd: [IonQuant], Work dir: [C:\Fragpipe_General\EJQ\x\fragpipe]
+    Cmd: [START], Work dir: [C:\Fragpipe_General\ABC\x\fragpipe]
+    Cmd: [CheckCentroid], Work dir: [C:\Fragpipe_General\ABC\x\fragpipe]
+    Cmd: [WorkspaceCleanInit], Work dir: [C:\Fragpipe_General\ABC\x\fragpipe\ABC_2_027_1]
+    Cmd: [MSFragger], Work dir: [C:\Fragpipe_General\ABC\x\fragpipe]
+    Cmd: [Percolator], Work dir: [C:\Fragpipe_General\ABC\x\fragpipe\ABC_2_027_1]
+    Cmd: [PhilosopherReport], Work dir: [C:\Fragpipe_General\ABC\x\fragpipe\ABC_2_027_1]
+    Cmd: [IonQuant], Work dir: [C:\Fragpipe_General\ABC\x\fragpipe]
 
 ~~~~~~~~~~~~~~~~~~~~~~
 
@@ -154,7 +154,7 @@ phi-report.run-report=true
 quantitation.run-label-free-quant=true
 speclibgen.run-speclibgen=false
 tmtintegrator.run-tmtintegrator=false
-workdir=C\:\\Fragpipe_General\\EJQ\\x\\fragpipe
+workdir=C\:\\Fragpipe_General\\ABC\\x\\fragpipe
 workflow.description=Perform closed search and MS1-based label quantification with chemically labelled cysteines. Note\: If the dataset has multiple MS files they should be annotated as different experiments.
 workflow.ram=48
 workflow.saved-with-ver=24.0-build27
@@ -162,17 +162,17 @@ workflow.threads=28"""
 
 # What the steps print when all is well (issue #2509's log up to its failing step, #2418, #2808).
 REAL_STEPS_OK = r"""CheckCentroid
-C:\FragPipe\FragPipe-24.0\jre\bin\java.exe -Xmx48G -cp C:\FragPipe\FragPipe-24.0\lib/* org.nesvilab.fragpipe.util.CheckCentroid C:\Fragpipe_General\EJQ\x\EJQ_2_027_1_1.raw 28
+C:\FragPipe\FragPipe-24.0\jre\bin\java.exe -Xmx48G -cp C:\FragPipe\FragPipe-24.0\lib/* org.nesvilab.fragpipe.util.CheckCentroid C:\Fragpipe_General\ABC\x\ABC_2_027_1_1.raw 28
 Done in 4.6 s.
 Process 'CheckCentroid' finished, exit code: 0
-WorkspaceCleanInit [Work dir: C:\Fragpipe_General\EJQ\x\fragpipe\EJQ_2_027_1]
+WorkspaceCleanInit [Work dir: C:\Fragpipe_General\ABC\x\fragpipe\ABC_2_027_1]
 C:\FragPipe\FragPipe-24.0\tools\Philosopher\philosopher-v5.1.3-RC9.exe workspace --clean --nocheck
 time="13:34:50" level=info msg="Executing Workspace  v5.1.3-RC9"
 time="13:34:50" level=info msg="Removing workspace"
 time="13:34:50" level=info msg=Done
 Process 'WorkspaceCleanInit' finished, exit code: 0
-MSFragger [Work dir: C:\Fragpipe_General\EJQ\x\fragpipe]
-C:\FragPipe\FragPipe-24.0\jre\bin\java.exe -jar -Dfile.encoding=UTF-8 -Xmx48G C:\FragPipe\FragPipe-24.0\tools\MSFragger-4.4.1\MSFragger-4.4.1.jar C:\Fragpipe_General\EJQ\x\fragpipe\fragger.params C:\Fragpipe_General\EJQ\x\EJQ_2_027_1_1.raw
+MSFragger [Work dir: C:\Fragpipe_General\ABC\x\fragpipe]
+C:\FragPipe\FragPipe-24.0\jre\bin\java.exe -jar -Dfile.encoding=UTF-8 -Xmx48G C:\FragPipe\FragPipe-24.0\tools\MSFragger-4.4.1\MSFragger-4.4.1.jar C:\Fragpipe_General\ABC\x\fragpipe\fragger.params C:\Fragpipe_General\ABC\x\ABC_2_027_1_1.raw
 MSFragger version MSFragger-4.4.1
 Batmass-IO version 1.36.5
 (c) University of Michigan
@@ -181,7 +181,7 @@ System OS: Windows 11, Architecture: AMD64
 JVM started with 48 GB memory
 Checking database...
 Checking spectral files...
-C:\Fragpipe_General\EJQ\x\EJQ_2_027_1_1.raw: Scans = 34000
+C:\Fragpipe_General\ABC\x\ABC_2_027_1_1.raw: Scans = 34000
 In total 5138423 peptides.
 Generated 8278769 modified peptides.
 Number of peptides with more than 5000 modification patterns: 0
@@ -189,26 +189,26 @@ Selected fragment index width 0.10 Da.
 346779428 fragments to be searched in 1 slices (3.23 GB total)
 Operating on slice 1 of 1:
 	Fragment index slice generated in 2.78 s
-	001. EJQ_2_027_1_1.mzBIN_calibrated 2.1 s | deisotoping 0.8 s
+	001. ABC_2_027_1_1.mzBIN_calibrated 2.1 s | deisotoping 0.8 s
 *******************************TOTAL TIME 0.468 MIN*****
 Process 'MSFragger' finished, exit code: 0
 MSFragger move pepxml
-C:\FragPipe\FragPipe-24.0\jre\bin\java.exe -cp C:\FragPipe\FragPipe-24.0\lib\fragpipe-24.0.jar org.nesvilab.utils.FileMove --no-err C:\Fragpipe_General\EJQ\x\EJQ_2_027_1_1.pepXML C:\Fragpipe_General\EJQ\x\fragpipe\EJQ_2_027_1\EJQ_2_027_1_1.pepXML
+C:\FragPipe\FragPipe-24.0\jre\bin\java.exe -cp C:\FragPipe\FragPipe-24.0\lib\fragpipe-24.0.jar org.nesvilab.utils.FileMove --no-err C:\Fragpipe_General\ABC\x\ABC_2_027_1_1.pepXML C:\Fragpipe_General\ABC\x\fragpipe\ABC_2_027_1\ABC_2_027_1_1.pepXML
 Process 'MSFragger move pepxml' finished, exit code: 0
-Percolator [Work dir: C:\Fragpipe_General\EJQ\x\fragpipe\EJQ_2_027_1]
+Percolator [Work dir: C:\Fragpipe_General\ABC\x\fragpipe\ABC_2_027_1]
 C:\FragPipe\FragPipe-24.0\tools\percolator_3_7_1\windows\percolator.exe --only-psms --no-terminate --post-processing-tdc --num-threads 28
 Processing took 23.2650 cpu seconds or 24 seconds wall clock time.
 Process 'Percolator' finished, exit code: 0
-Percolator: Convert to pepxml [Work dir: C:\Fragpipe_General\EJQ\x\fragpipe\EJQ_2_027_1]
+Percolator: Convert to pepxml [Work dir: C:\Fragpipe_General\ABC\x\fragpipe\ABC_2_027_1]
 C:\FragPipe\FragPipe-24.0\jre\bin\java.exe -cp C:\FragPipe\FragPipe-24.0\lib/* org.nesvilab.fragpipe.tools.percolator.PercolatorOutputToPepXML
 Process 'Percolator: Convert to pepxml' finished, exit code: 0
-PhilosopherReport [Work dir: C:\Fragpipe_General\EJQ\x\fragpipe\EJQ_2_027_1]
+PhilosopherReport [Work dir: C:\Fragpipe_General\ABC\x\fragpipe\ABC_2_027_1]
 C:\FragPipe\FragPipe-24.0\tools\Philosopher\philosopher-v5.1.3-RC9.exe report
 time="13:35:46" level=info msg="Executing Report  v5.1.3-RC9"
 time="13:35:46" level=info msg="Creating reports"
 time="13:35:46" level=info msg=Done
 Process 'PhilosopherReport' finished, exit code: 0
-IonQuant [Work dir: C:\Fragpipe_General\EJQ\x\fragpipe]
+IonQuant [Work dir: C:\Fragpipe_General\ABC\x\fragpipe]
 C:\FragPipe\FragPipe-24.0\jre\bin\java.exe -Xmx48G -Dlibs.thermo.dir=C:\FragPipe\FragPipe-24.0\tools\MSFragger-4.4.1\ext\thermo -cp C:\FragPipe\FragPipe-24.0\tools\IonQuant-1.11.20.jar ionquant.IonQuant --threads 28
 IonQuant version IonQuant-1.11.20
 (c) University of Michigan
@@ -295,7 +295,7 @@ FAIL = "Process returned non-zero exit code, stopping\n\n~~~~~~~~~~~~~~~~~~~~\nC
 
 def _failed(step: str, said: str, code: int = 1) -> str:
     """A run that got as far as `step`, which printed `said` and failed: the shape FragPipe gives it."""
-    return (REAL_HEAD.replace("{CONFIG}", REAL_CONFIG) + f"{step} [Work dir: C:\\Fragpipe_General\\EJQ\\x\\fragpipe]\n"
+    return (REAL_HEAD.replace("{CONFIG}", REAL_CONFIG) + f"{step} [Work dir: C:\\Fragpipe_General\\ABC\\x\\fragpipe]\n"
             + said.rstrip("\n") + f"\nProcess '{step}' finished, exit code: {code}\n" + FAIL)
 
 
@@ -323,12 +323,12 @@ REAL_FAILURES = [
     # then System.exit(1)); FragpipeRun's TMT check (a dialog: the <b> tags stay)
     (_refused("Database looks to be empty"), "no protein entries"),
     (_refused("Some loaded files don't exist. Please double check.")
-     + "2026-10-01 14:03:11,533 ERROR - C:\\Fragpipe_Auto\\users\\EJQ\\x\\DMSO_1_1.raw\n",
+     + "2026-10-01 14:03:11,533 ERROR - C:\\Fragpipe_Auto\\users\\ABC\\x\\DMSO_1_1.raw\n",
      "moved, renamed or deleted after Ionomos checked"),
     (_refused("Not all TMT groups have annotation files set. Check <b>Quant (Isobaric)</b> tab, \"Assign files to "
               "TMT channels\"."), "no TMT annotation"),
     # TabWorkflow.manifestLoad: the line is left out and the run goes on (REAL_RUNS.md job 1)
-    (_refused("Manifest file contained some badly formatted lines  C:\\Fragpipe_Auto\\users\\EJQ\\x\\A_2.raw\tA\t"
+    (_refused("Manifest file contained some badly formatted lines  C:\\Fragpipe_Auto\\users\\ABC\\x\\A_2.raw\tA\t"
               "20260508180610\tDDA"), "left lines of the file list out"),
     # FragpipeRun.validateWd; TabConfig's tool checks
     (_refused("Output directory path contains whitespace characters. Some programs in the pipeline might not work "
@@ -607,7 +607,7 @@ def test_workflow_needs_follow_fragpipes_run_switches():
 
 
 def test_experiment_names_as_fragpipe_keeps_them():
-    assert fragpipe.fp_experiment("EJQ-2-027") == "EJQ_2_027"
+    assert fragpipe.fp_experiment("ABC-2-027") == "ABC_2_027"
     assert fragpipe.fp_experiment("DMSO.rep 1") == "DMSO_rep_1"
     assert fragpipe.fp_experiment("Drug_4h") == "Drug_4h"
 
@@ -660,9 +660,9 @@ def test_the_fake_refuses_what_fragpipe_refuses(bed, monkeypatch):
     assert res.code == 1 and "FASTA's decoys" in res.reason and "ERROR - FASTA file contains 20% decoys." in res.reason
     # prepareWd made the group folder before the check; the shutdown hook saved the (empty) console
     left = {p.relative_to(dest / "fragpipe").as_posix() for p in (dest / "fragpipe").rglob("*")}
-    assert {p for p in left if not p.startswith("log_")} == {"EJQ_PK_EJQ_2_027_isoDTB_1uM_3h_1",
-                                                           "EJQ_PK_EJQ_2_027_isoDTB_1uM_3h_2",
-                                                           "EJQ_PK_EJQ_2_027_isoDTB_1uM_3h_3"}
+    assert {p for p in left if not p.startswith("log_")} == {"ABC_PK_ABC_2_027_isoDTB_1uM_3h_1",
+                                                           "ABC_PK_ABC_2_027_isoDTB_1uM_3h_2",
+                                                           "ABC_PK_ABC_2_027_isoDTB_1uM_3h_3"}
     assert [(dest / "fragpipe" / p).stat().st_size for p in left if p.startswith("log_")] == [0]
 
 
@@ -675,11 +675,11 @@ def test_a_complete_run_leaves_fragpipes_files(bed):
     assert bed["ledger"].get(1).status == "done", bed["ledger"].get(1).reason
     wd = dest / "fragpipe"
     have = {p.relative_to(wd).as_posix() for p in wd.rglob("*") if p.is_file()}
-    group = "EJQ_PK_EJQ_2_027_isoDTB_1uM_3h_1"  # <experiment>_<bioreplicate>, - turned into _
+    group = "ABC_PK_ABC_2_027_isoDTB_1uM_3h_1"  # <experiment>_<bioreplicate>, - turned into _
     for f in ("fragpipe.workflow", "fragpipe-files.fp-manifest", "fragpipe.job", "fragger.params", "combined.prot.xml",
               "filelist_ionquant.txt", "modmasses_ionquant.txt", "experiment_annotation.tsv",
               "combined_modified_peptide_label_quant.tsv", f"{group}/psm.tsv", f"{group}/protein.fas",
-              f"{group}/interact-EJQ_PK_EJQ-2-027_isoDTB_1uM_3h_1_1.pep.xml"):
+              f"{group}/interact-ABC_PK_ABC-2-027_isoDTB_1uM_3h_1_1.pep.xml"):
         assert f in have, f
     assert any(re.fullmatch(r"log_\d{4}-\d\d-\d\d_\d\d-\d\d-\d\d\.txt", f) for f in have)
     assert "sdrf.tsv" not in have  # off in the testbed's workflows; see the xfail below

@@ -113,7 +113,7 @@ ionomos --config C:\ionomos-testbed\Fragpipe_Auto\config.yaml run   # Windows
 
 ```bash
 ionomos testbed list                       # the 29 samples, their fake modes and every mode
-ionomos testbed drop iso_good              # -> queued under Fragpipe_General/EJQ
+ionomos testbed drop iso_good              # -> queued under Fragpipe_General/ABC
 ionomos testbed drop iso_good --slow       # file-by-file copy: watch the "waiting for copy to settle" log line
 ionomos testbed drop gui_unknown_user      # -> resolver window pops in terminal 1
 ionomos testbed drop gui_incomplete        # -> window with "accept uneven fractions"
@@ -145,7 +145,7 @@ init --slow-defaults` uses production timings (10 s / 60 s).
 | `iso_spaces` | spaces and `()` in folder *and* file names are sanitised, originals recorded in `ionomos.json` |
 | `dia_good` | `raw/` subfolder; DIA tails (`cond_biorep`); manifest type `DIA` |
 | `tmt_good` | TMT tails (`_TMT_F#`), biorep forced to 1, `experiment.yaml` channel map carried through |
-| `glued_initials` | `IJD05` resolves to Isaac via alias `IJD` |
+| `glued_initials` | `SKD05` resolves to Sam via alias `SKD` |
 | `method_in_files` | method keyword only in the raw file names |
 | `gui_unknown_user` | resolver: user combobox, "remember XYZ → user" writes `learned_aliases.yaml` |
 | `gui_no_method` | resolver: choosing a method re-parses the file grid |

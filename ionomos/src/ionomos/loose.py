@@ -9,7 +9,7 @@ there the normal folder path takes over (user, method, resolver window, ...).
     CS_22rv1_FLAG-AR_MA25-10uM_DMSO_1.raw  ┐
     CS_22rv1_FLAG-AR_MA25-10uM_DMSO_2.raw  ├─▶ inbox/CS_22rv1_FLAG-AR_MA25-10uM/
     CS_22rv1_FLAG-AR_MA25-10uM_MA25_1.raw  ┘
-    EJQ_PK_A_1_1.raw, EJQ_PK_A_1_2.raw     ──▶ inbox/EJQ_PK_A/
+    ABC_PK_A_1_1.raw, ABC_PK_A_1_2.raw     ──▶ inbox/ABC_PK_A/
 
 Grouping: files sharing at least MIN_SHARED_TOKENS leading name tokens (split
 on _ - . and spaces) go together; the folder is named after that shared part,

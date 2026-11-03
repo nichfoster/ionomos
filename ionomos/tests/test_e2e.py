@@ -64,12 +64,12 @@ def test_slow_drop_is_queued_once_stable(bed):
         testbed.drop(bed["root"], "iso_good", slow=True, delay=0.05)
         assert _wait(lambda: bed["ledger"].next_queued() is not None, timeout=30)
         job = bed["ledger"].next_queued()
-        assert job.user == "EJQ" and job.method == "isoDTB"
+        assert job.user == "ABC" and job.method == "isoDTB"
         dest = Path(job.dest_dir)
-        assert len(list(dest.glob("*.raw"))) == 9 and (dest / "EJQ-2-027_notes.xlsx").is_file()
+        assert len(list(dest.glob("*.raw"))) == 9 and (dest / "ABC-2-027_notes.xlsx").is_file()
         rec = json.loads((dest / "ionomos.json").read_text())
-        assert rec["plan"]["layout"] == {"EJQ_PK_EJQ-2-027_isoDTB_1uM_3h": {"1": [1, 2, 3], "2": [1, 2, 3], "3": [1, 2, 3]}}
-        assert not (bed["cfg"].inbox / "20260902-isoDTB_EJQ-2-027").exists()
+        assert rec["plan"]["layout"] == {"ABC_PK_ABC-2-027_isoDTB_1uM_3h": {"1": [1, 2, 3], "2": [1, 2, 3], "3": [1, 2, 3]}}
+        assert not (bed["cfg"].inbox / "20260902-isoDTB_ABC-2-027").exists()
     finally:
         w.stop()
 
@@ -83,17 +83,17 @@ def test_all_good_samples_queue(bed):
             testbed.drop(bed["root"], n)
         assert _wait(lambda: len(bed["ledger"].list("queued")) == len(good), timeout=15)
         jobs = {j.inbox_name: j for j in bed["ledger"].list()}
-        assert jobs["20260902-isoDTB-EJQ-2-027-1uM-3h"].user == "EJQ"
-        assert jobs["IJD05_isoDTB_FLAGpull"].user == "Isaac"
-        assert jobs["EJQ_2027_pulldown"].method == "isoDTB"
-        assert jobs["20260126_Aman_TMT_KL6159A-9plex"].parsed["plan"]["manifest"][0]["bioreplicate"] == 1
+        assert jobs["20260902-isoDTB-ABC-2-027-1uM-3h"].user == "ABC"
+        assert jobs["SKD05_isoDTB_FLAGpull"].user == "Sam"
+        assert jobs["ABC_2027_pulldown"].method == "isoDTB"
+        assert jobs["20260126_Kim_TMT_KL6159A-9plex"].parsed["plan"]["manifest"][0]["bioreplicate"] == 1
         assert not any(p.suffix == ".txt" for p in bed["cfg"].inbox.iterdir())
     finally:
         w.stop()
 
 
 def test_gui_samples_go_to_resolver_and_get_queued(bed):
-    res = ScriptedResolver(Overrides(user="Chris", method="DIA", allow_uneven_fractions=True))
+    res = ScriptedResolver(Overrides(user="Lee", method="DIA", allow_uneven_fractions=True))
     w, _ = _run_watcher(bed, resolver=res)
     try:
         names = ["gui_unknown_user", "gui_no_method", "gui_incomplete", "reject_two_methods"]
@@ -102,7 +102,7 @@ def test_gui_samples_go_to_resolver_and_get_queued(bed):
         assert _wait(lambda: len(bed["ledger"].list("queued")) == len(names), timeout=15)
         assert sorted(d.kind.value for d in res.drafts) == ["layout", "method", "method", "user"]
         for j in bed["ledger"].list():
-            assert j.user == "Chris"
+            assert j.user == "Lee"
             assert (Path(j.dest_dir) / "experiment.yaml").is_file()
     finally:
         w.stop()
@@ -117,34 +117,34 @@ def test_resolver_skip_then_user_fixes_folder(bed):
         assert _wait(note.exists)
         assert bed["ledger"].list() == []
         # user fixes it by writing an experiment.yaml -> tree changes -> re-evaluated, no resolver needed
-        (d / "experiment.yaml").write_text("user: EJQ\n")
+        (d / "experiment.yaml").write_text("user: ABC\n")
         assert _wait(lambda: bed["ledger"].next_queued() is not None)
-        assert bed["ledger"].next_queued().user == "EJQ"
+        assert bed["ledger"].next_queued().user == "ABC"
         assert not note.exists() and len(res.drafts) == 1
     finally:
         w.stop()
 
 
 def test_no_raws_never_queues_and_unresolvable_writes_note(bed):
-    w, _ = _run_watcher(bed, resolver=ScriptedResolver(Overrides(user="EJQ")))
+    w, _ = _run_watcher(bed, resolver=ScriptedResolver(Overrides(user="ABC")))
     try:
         testbed.drop(bed["root"], "reject_no_raws")
         testbed.drop(bed["root"], "iso_good")
         assert _wait(lambda: bed["ledger"].next_queued() is not None)
         testbed.drop(bed["root"], "iso_good")  # same name again -> dest exists -> note, no resolver
-        note = bed["cfg"].inbox / "20260902-isoDTB_EJQ-2-027.REJECTED.txt"
+        note = bed["cfg"].inbox / "20260902-isoDTB_ABC-2-027.REJECTED.txt"
         assert _wait(note.exists)
         assert "already" in note.read_text()
         time.sleep(0.5)
         assert len(bed["ledger"].list()) == 1
-        assert (bed["cfg"].inbox / "EJQ_isoDTB_empty").is_dir()  # still waiting for raws, untouched
+        assert (bed["cfg"].inbox / "ABC_isoDTB_empty").is_dir()  # still waiting for raws, untouched
     finally:
         w.stop()
 
 
 def test_restart_recovers_running_job(bed):
     testbed.drop(bed["root"], "iso_good")
-    assert intake(bed["cfg"].inbox / "20260902-isoDTB_EJQ-2-027", bed["cfg"], bed["ledger"]).value == "queued"
+    assert intake(bed["cfg"].inbox / "20260902-isoDTB_ABC-2-027", bed["cfg"], bed["ledger"]).value == "queued"
     bed["ledger"].start_attempt(1)
     fresh = Ledger(bed["cfg"].database)
     assert fresh.recover_on_startup() == [(1, "queued")]

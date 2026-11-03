@@ -1214,7 +1214,7 @@ _LONGEST_SUFFIX = len("figures/volcano_") + len(".svg.tmp")  # the most a file n
 
 def fit_file_stem(results: Path, d) -> str | None:
     """Give a comparison a file stem whose paths stay under Windows' limit (#140). A DIA condition carries the
-    experiment prefix ('L7355qyk_Aman_DIA_55qyk_Drug'), so '<cond>_vs_<cond>_differential.tsv' held it twice on
+    experiment prefix ('L7355qyk_Kim_DIA_55qyk_Drug'), so '<cond>_vs_<cond>_differential.tsv' held it twice on
     top of the experiment folder, and the tables and volcano plots went missing on long names. When the full
     name would pass the budget, the part both conditions share is dropped and a short hash of the comparison's
     name keeps the stem unique; a note says so. Returns the note, or None when the full name fits."""

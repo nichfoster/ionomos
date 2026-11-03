@@ -45,9 +45,9 @@ from ionomos import names, testbed
 log = logging.getLogger("ionomos.stress")
 
 WEIRD_NAMES = [
-    "ÉJQ_isoDTB_überprobe_2026-09-01", "Isaac_DIA_日本語テスト", "EJQ_isoDTB_🧪🧪_run", "   EJQ isoDTB leading spaces",
-    "EJQ_isoDTB_" + "x" * 150, "!!!###$$$", "EJQ.isoDTB.dots.everywhere.", "con", "EJQ_isoDTB_(1)[2]{3}",
-    "Isaac_DIA_semi;colon,comma", "EJQ_TMT_O'Brien", "EJQ  isoDTB  double  spaces", "-EJQ_isoDTB-",
+    "ÁBC_isoDTB_überprobe_2026-09-01", "Sam_DIA_日本語テスト", "ABC_isoDTB_🧪🧪_run", "   ABC isoDTB leading spaces",
+    "ABC_isoDTB_" + "x" * 150, "!!!###$$$", "ABC.isoDTB.dots.everywhere.", "con", "ABC_isoDTB_(1)[2]{3}",
+    "Sam_DIA_semi;colon,comma", "ABC_TMT_O'Brien", "ABC  isoDTB  double  spaces", "-ABC_isoDTB-",
 ]
 BELOW = 80  # characters under an experiment folder: raw files, a/b/c nesting, Ionomos' and FragPipe's own folders
 
@@ -141,7 +141,7 @@ def _make_drop(staging: Path, i: int, rng: random.Random, used: set[str],
     kind = rng.choices(
         ["iso", "dia", "tmt", "weird", "noraws", "empty_raw", "deep", "badtail", "fail", "dup", "loose", "fault"],
         weights=[20, 12, 6, 12, 5, 4, 4, 6, 5, 4, 8, 6])[0]
-    user = rng.choice(["EJQ", "Isaac", "IJD", "Chris", "Aman"])
+    user = rng.choice(["ABC", "Sam", "SKD", "Lee", "Kim"])
     tag = "".join(rng.choices(string.ascii_lowercase + string.digits, k=5))
     date = f"2026{rng.randint(1, 12):02d}{rng.randint(1, 28):02d}"
     if kind == "dup" and used:
@@ -162,7 +162,7 @@ def _make_drop(staging: Path, i: int, rng: random.Random, used: set[str],
     folder = staging / f"{i:03d}" / name
     folder.mkdir(parents=True)
     if unusable:  # user + method supplied, so only the name itself is the problem
-        (folder / "experiment.yaml").write_text("method: isoDTB\nuser: EJQ\n", encoding="utf-8")
+        (folder / "experiment.yaml").write_text("method: isoDTB\nuser: ABC\n", encoding="utf-8")
     size = rng.randint(1_000, 20_000)
     if kind in ("iso", "empty_raw", "badtail", "deep", "fault") or (kind in ("weird", "dup") and "DIA" not in name):
         reps, fracs = rng.randint(1, 3), rng.randint(1, 4)
@@ -221,7 +221,7 @@ def run(n: int = 60, seed: int = 1, root: Path | None = None, keep: bool = False
     staging = root / "staging"
 
     used: set[str] = set()
-    room = _name_room([staging / "000", cfg.inbox, cfg.users_root / "Isaac"])
+    room = _name_room([staging / "000", cfg.inbox, cfg.users_root / "Sam"])
     if room:
         rep.notes.append(f"Windows long paths are off: drop names cut to {room} characters to fit under {root}")
     drops = [_make_drop(staging, i, rng, used, room) for i in range(n)]
@@ -430,7 +430,7 @@ def fuzz_names(n: int = 2000, seed: int = 1) -> list[str]:
 
     rng = random.Random(seed)
     alphabet = string.printable + "äöüéß日本語🧪—–·  "
-    parts = ["isoDTB", "DIA", "TMT", "EJQ", "IJD05", "_", "-", " ", "1", "2", "F1", "rep", "frac", ".raw", "2026",
+    parts = ["isoDTB", "DIA", "TMT", "ABC", "SKD05", "_", "-", " ", "1", "2", "F1", "rep", "frac", ".raw", "2026",
              "20260902", "09-02-2026", "(", ")", "__", "R3", "biorep"]
     failures = []
     for _ in range(n):

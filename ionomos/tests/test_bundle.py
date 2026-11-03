@@ -22,11 +22,11 @@ from ionomos.intake import intake
 from ionomos.ledger import Ledger
 from ionomos.worker import Worker
 
-FOLDER = "20260301_Isaac_DIA_BRD4-JQ1-degrader"
+FOLDER = "20260301_Sam_DIA_BRD4-JQ1-degrader"
 RAWS = [f"{c}_{r}" for c in ("DMSO", "Zanubrutinib", "Abemaciclib") for r in (1, 2, 3)]
 # what must never be in an anonymised bundle (the testbed's users, this drop's names)
-SECRET_WORDS = ["Isaac", "EJQ", "Aman", "Chris", "Taylor_Elements", "Zanubrutinib", "Abemaciclib", "JQ1", "BRD4",
-                FOLDER, "IJD"]
+SECRET_WORDS = ["Sam", "ABC", "Kim", "Lee", "Robin_Lake", "Zanubrutinib", "Abemaciclib", "JQ1", "BRD4",
+                FOLDER, "SKD"]
 
 
 @pytest.fixture
@@ -71,7 +71,7 @@ def _members(z: Path) -> dict[str, bytes]:
 
 def _survivors(z: Path, words) -> list[tuple[str, str]]:
     """(file, word) for every word still in a file of the zip or in a file name: a plain, case-insensitive
-    search that knows nothing of bundle.py. Words under 6 characters must stand alone (EJQ, not 'rejqx')."""
+    search that knows nothing of bundle.py. Words under 6 characters must stand alone (ABC, not 'rabcx')."""
     hits = []
     for name, data in _members(z).items():
         text = data.decode("utf-8", "replace")
@@ -102,38 +102,38 @@ def _anon(samples=(), users=None, folders=(), other=(), **kw) -> Anonymiser:
 
 
 def test_names_are_replaced_token_by_token_and_numbers_doses_and_control_words_stay():
-    a = _anon(samples=["Olaparib_10uM_3h_1", "Olaparib_10uM_3h_2", "DMSO_1", "pool_1"], users={"Isaac": ["IJ"]},
-              folders=["20260301_Isaac_DIA_BRD4-JQ1-degrader"])
+    a = _anon(samples=["Olaparib_10uM_3h_1", "Olaparib_10uM_3h_2", "DMSO_1", "pool_1"], users={"Sam": ["SK"]},
+              folders=["20260301_Sam_DIA_BRD4-JQ1-degrader"])
     new = a.text("Olaparib_10uM_3h_1")
     cond = a.tok["olaparib"]
     assert new == f"{cond}_10uM_3h_1" and "_" not in cond and cond.lower().endswith("cond" + cond[-1].lower())
     assert a.text("DMSO_1") == "DMSO_1" and a.text("pool_1") == "pool_1"       # the analysis reads these words
-    assert a.text("Isaac") == "user01" and a.text("IJ") == "user01a"
-    assert a.text("20260301_Isaac_DIA_BRD4-JQ1-degrader") == "exp001"
+    assert a.text("Sam") == "user01" and a.text("SK") == "user01a"
+    assert a.text("20260301_Sam_DIA_BRD4-JQ1-degrader") == "exp001"
     # the same original gives the same pseudonym wherever it stands, whatever its case or separator
-    line = "C:\\Fragpipe_General\\Isaac\\20260301_Isaac_DIA_BRD4-JQ1-degrader\\raw\\OLAPARIB_10uM_3h_1.raw olaparib-10uM"
+    line = "C:\\Fragpipe_General\\Sam\\20260301_Sam_DIA_BRD4-JQ1-degrader\\raw\\OLAPARIB_10uM_3h_1.raw olaparib-10uM"
     assert a.text(line) == f"C:\\Fragpipe_General\\user01\\exp001\\raw\\{cond}_10uM_3h_1.raw {cond}-10uM"
     assert a.text(f"Mean_{'Olaparib_10uM_3h_1'} Intensity\t12.5\t1e-05") == f"Mean_{cond}_10uM_3h_1 Intensity\t12.5\t1e-05"
     assert a.find("nothing here: DMSO_1 12.5 user01 exp001") == []
-    assert a.find("left: Olaparib_10uM_3h_2 and isaac") == ["Olaparib_10uM_3h_2", "isaac"]
+    assert a.find("left: Olaparib_10uM_3h_2 and sam") == ["Olaparib_10uM_3h_2", "sam"]
 
 
 def test_a_name_inside_a_longer_word_is_left_alone():
-    a = _anon(samples=["Al_1", "Al_2", "DMSO_1"], users={"Al": [], "Aman": []})
+    a = _anon(samples=["Al_1", "Al_2", "DMSO_1"], users={"Al": [], "Kim": []})
     assert a.text("Al") == "user01"
     assert a.text("Albumin ALB serum albumin; human, Amanita") == "Albumin ALB serum albumin; human, Amanita"
     assert a.text("Al_1\tAl-2\t(Al)") == "user01_1\tuser01-2\t(user01)"
 
 
 def test_a_plain_word_of_a_name_is_replaced_inside_the_name_only_an_id_everywhere():
-    a = _anon(samples=["EJQ_PK_EJQ-2-027_isoDTB_1uM_3h_1", "KL6159A_TMT_F1"], users={"EJQ": []})
+    a = _anon(samples=["ABC_PK_ABC-2-027_isoDTB_1uM_3h_1", "KL6159A_TMT_F1"], users={"ABC": []})
     pk, kl = a.tok["pk"], a.tok["kl6159a"]
-    assert a.text("EJQ_PK_EJQ-2-027_isoDTB_1uM_3h_1") == f"user01_{pk}_user01-2-027_isoDTB_1uM_3h_1"
+    assert a.text("ABC_PK_ABC-2-027_isoDTB_1uM_3h_1") == f"user01_{pk}_user01-2-027_isoDTB_1uM_3h_1"
     assert a.text("PK and pk values") == "PK and pk values"            # two letters alone: just a word
     assert a.text("compound KL6159A, kl6159a") == f"compound {kl}, {kl}"
     # a cut-off or re-joined name is still that name (the analysis writes such names)
-    assert a.text("series EJQ_PK_EJQ_2_027_isoDTB_3h") == f"series user01_{pk}_user01_2_027_isoDTB_3h"
-    assert a.text("EJQ_PK") == f"user01_{pk}"
+    assert a.text("series ABC_PK_ABC_2_027_isoDTB_3h") == f"series user01_{pk}_user01_2_027_isoDTB_3h"
+    assert a.text("ABC_PK") == f"user01_{pk}"
     assert a.name("PK") == pk
 
 
@@ -148,13 +148,13 @@ def test_pseudonyms_keep_the_byte_order_of_the_sample_names():
     assert bundle.order_kept(a, samples)
     assert a.text("Abemaciclib_1") < "DMSO_1" < a.text("Zanubrutinib_1")
     # users are numbered, not ordered: when two users' initials lead the sample names, it is reported
-    b = _anon(samples=["IJ_x_1", "EJQ_x_1"], users={"Isaac": ["IJ"], "EJQ": []})
-    assert not bundle.order_kept(b, ["IJ_x_1", "EJQ_x_1"])
+    b = _anon(samples=["SK_x_1", "ABC_x_1"], users={"Sam": ["SK"], "ABC": []})
+    assert not bundle.order_kept(b, ["SK_x_1", "ABC_x_1"])
 
 
 def test_keep_conditions_keeps_every_condition_word_but_not_the_user():
-    a = _anon(samples=["EJQ_Olaparib_1", "DMSO_1"], users={"EJQ": []}, keep_conditions=True)
-    assert a.text("EJQ_Olaparib_1 Olaparib") == "user01_Olaparib_1 Olaparib"
+    a = _anon(samples=["ABC_Olaparib_1", "DMSO_1"], users={"ABC": []}, keep_conditions=True)
+    assert a.text("ABC_Olaparib_1 Olaparib") == "user01_Olaparib_1 Olaparib"
     assert "olaparib" in a.kept_seen
 
 
@@ -176,13 +176,13 @@ def test_addresses_home_folders_and_odd_names():
 
 def test_names_nothing_registered_are_recognised_by_their_shape():
     """An old log line names a folder that was rejected and removed long ago: not in the job list, not in the inbox."""
-    a = _anon(users={"Isaac": []})
-    line = ("2026-01-05 10:00:01 INFO rejected 20251130_Isaac_TMT_Sotorasib-KRAS (uneven fractions): "
+    a = _anon(users={"Sam": []})
+    line = ("2026-01-05 10:00:01 INFO rejected 20251130_Sam_TMT_Sotorasib-KRAS (uneven fractions): "
             "Sotorasib_KRAS_TMT_F1.raw, sotorasib_kras_tmt_f2.RAW; kept crash-20260105-100001-worker.txt, "
             "ionomos-20260105.db and fragpipe_previous_20260105-100001")
     out = a.text(line)
     assert "Sotorasib" not in out and "sotorasib" not in out and "KRAS" not in out and "kras" not in out
-    folder = a.text("20251130_Isaac_TMT_Sotorasib-KRAS")
+    folder = a.text("20251130_Sam_TMT_Sotorasib-KRAS")
     assert folder.startswith("20251130_user01_TMT_name") and f"rejected {folder} (uneven fractions)" in out and a.grew
     assert "crash-20260105-100001-worker.txt" in out and "ionomos-20260105.db" in out      # Ionomos' own stamps
     assert "fragpipe_previous_20260105-100001" in out and out.startswith("2026-01-05 10:00:01 INFO")
@@ -209,9 +209,9 @@ def test_analysis_setting_names_and_ionomos_words_are_never_pseudonyms():
     for word in ("enrichment", "control", "results", "log2fc", "20260101_test_results"):
         assert a.text(word) == word
     # a user folder that is a number or an ordinary word is not a person; a one-word folder is still replaced
-    b = _anon(samples=["EJQ_Olaparib_1"], users={"EJQ": [], "2024": [], "test": []},
-              folders=["Olaparib", "Venetoclax", "EJQ"])
-    assert b.text("in 2024, a test by EJQ") == "in 2024, a test by user01"
+    b = _anon(samples=["ABC_Olaparib_1"], users={"ABC": [], "2024": [], "test": []},
+              folders=["Olaparib", "Venetoclax", "ABC"])
+    assert b.text("in 2024, a test by ABC") == "in 2024, a test by user01"
     assert b.text("Olaparib") == b.tok["olaparib"] != "Olaparib" and b.text("folder Venetoclax") == "folder exp001"
 
 
@@ -227,7 +227,7 @@ def test_validate_bundle_round_trip_reproduces_the_analysis(bed, capsys):
     assert "imputed" in lab["protein_results.tsv"]
 
     assert cli.main(["--config", str(bed["cfg_path"]), "bundle", "1", "--level", "validate", "--out", str(bed["out"]),
-                     "--note", "Isaac's JQ1 run looked odd"]) == 0
+                     "--note", "Sam's JQ1 run looked odd"]) == 0
     said = capsys.readouterr().out
     z = next(bed["out"].glob("Ionomos-bundle-*-validate-*.zip"))
     key = next(bed["out"].glob("*KEY*DO-NOT-SHARE.json"))
@@ -273,9 +273,9 @@ def test_diagnose_bundle_of_a_failed_search(bed, monkeypatch):
     _run(bed)
     assert bed["ledger"].get(1).status == "failed"
     (names.run_dir(dest) / names.RUN_FINGERPRINT).write_text(
-        json.dumps({"fragpipe": "24.0", "folder": str(dest), "user": "Isaac"}), encoding="utf-8")
+        json.dumps({"fragpipe": "24.0", "folder": str(dest), "user": "Sam"}), encoding="utf-8")
     (bed["cfg"].log_dir / "ionomos.log").write_text(
-        f"2026-03-01 12:00:00 ERROR job 1 {FOLDER} failed for Isaac (IJ) on 10.0.5.9\n", encoding="utf-8")
+        f"2026-03-01 12:00:00 ERROR job 1 {FOLDER} failed for Sam (SK) on 10.0.5.9\n", encoding="utf-8")
     res = bundle.create(bed["cfg_path"], opts=Options(note="it broke"), dest_dir=bed["out"])   # no job named
     m = _members(res.path)
     assert res.manifest["level"] == "diagnose" and [j["status"] for j in res.manifest["jobs"]] == ["failed"]
@@ -302,7 +302,7 @@ def test_diagnose_bundle_of_a_failed_search(bed, monkeypatch):
         assert hashlib.sha256(m[n]).hexdigest() == f["sha256"] and len(m[n]) == f["bytes"]
     readme = m["README.txt"].decode()
     assert "Ionomos sent it nowhere" in readme and "stays in the lab" in readme and "Not covered" in readme
-    assert key["users"]["user01"] == "Isaac" and key["experiments"]["exp001"] == FOLDER
+    assert key["users"]["user01"] == "Sam" and key["experiments"]["exp001"] == FOLDER
     assert key["bundle"] == res.path.name and "KEEP IT IN THE LAB" in key["what"]
 
 
@@ -324,9 +324,9 @@ def test_what_is_never_included_and_what_cannot_be_scrubbed(bed):
     dest = _job(bed)
     for rel in ("fragpipe/library.tsv", "fragpipe/lib.predicted.speclib", "fragpipe/DMSO_1.mzML", "results/db.fasta",
                 "results/copy.raw", "fragpipe/combined_protein.tsv.bak"):
-        (dest / rel).write_text("Isaac\n", encoding="utf-8")
-    (dest / "results" / "volcano.png").write_bytes(b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR Isaac")
-    (dest / "results" / "notes_utf16.txt").write_bytes("Zanubrutinib by Isaac\n".encode("utf-16"))
+        (dest / rel).write_text("Sam\n", encoding="utf-8")
+    (dest / "results" / "volcano.png").write_bytes(b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR Sam")
+    (dest / "results" / "notes_utf16.txt").write_bytes("Zanubrutinib by Sam\n".encode("utf-16"))
     res = bundle.create(bed["cfg_path"], ["1"], Options(level="validate"), dest_dir=bed["out"])
     m = _members(res.path)
     assert not [n for n in m if n.lower().endswith((".raw", ".mzml", ".fasta", ".speclib", ".png", ".bak"))]
@@ -344,7 +344,7 @@ def test_what_is_never_included_and_what_cannot_be_scrubbed(bed):
 
 def test_size_limit_and_row_sampling_are_said_plainly(bed):
     testbed.drop(bed["root"], "iso_good")
-    assert intake(bed["cfg"].inbox / "20260902-isoDTB_EJQ-2-027", bed["cfg"], bed["ledger"]).value == "queued"
+    assert intake(bed["cfg"].inbox / "20260902-isoDTB_ABC-2-027", bed["cfg"], bed["ledger"]).value == "queued"
     _run(bed)
     dest = Path(bed["ledger"].get(1).dest_dir)
     psm = sorted(dest.glob("fragpipe/*/psm.tsv"))
@@ -360,7 +360,7 @@ def test_size_limit_and_row_sampling_are_said_plainly(bed):
     job = res.manifest["jobs"][0]
     assert job["reproducible"] is False and "PSM-level numbers will differ" in job["incomplete"][0]
     assert "NOT fully" in bundle.inspect_text(res.path) and "capped:" in bundle.inspect_text(res.path)
-    assert _survivors(res.path, ["EJQ", "EJQ-2-027", "20260902-isoDTB_EJQ-2-027"]) == []
+    assert _survivors(res.path, ["ABC", "ABC-2-027", "20260902-isoDTB_ABC-2-027"]) == []
     # -- over the limit for the whole bundle: tables are left out and listed; the small files all stay
     small = bundle.create(bed["cfg_path"], ["1"], Options(level="validate", max_mb=0.2), dest_dir=bed["out"])
     ms = _members(small.path)
@@ -409,19 +409,19 @@ def test_file_names_in_the_zip_are_checked_too(bed):
     bad = bed["tmp"] / "bad.zip"
     with zipfile.ZipFile(res.path) as src, zipfile.ZipFile(bad, "w") as out:
         out.writestr("jobs/1-exp001/results/Zanubrutinib_vs_DMSO.svg", "<svg/>")
-        out.writestr("logs/x.log", "fine\nrun by Isaac\n")
-        out.writestr("jobs/1-exp001/results/protein_results.tsv", "id\tlabel\tdescription\tx\nP1\tChris\tIsaac\t1\n")
+        out.writestr("logs/x.log", "fine\nrun by Sam\n")
+        out.writestr("jobs/1-exp001/results/protein_results.tsv", "id\tlabel\tdescription\tx\nP1\tLee\tSam\t1\n")
         out.writestr("BUNDLE.json", src.read("BUNDLE.json"))
     leaks, kept = bundle.verify(bad, anon)
     assert ("jobs/1-exp001/results/Zanubrutinib_vs_DMSO.svg (its name)", "Zanubrutinib", 1) in leaks
-    assert ("logs/x.log", "Isaac", 1) in leaks and len(leaks) == 2
+    assert ("logs/x.log", "Sam", 1) in leaks and len(leaks) == 2
     # a name that is also in an identifier column is kept there and reported, not failed
-    assert sorted(o for _a, o, _n in kept) == ["Chris", "Isaac"]
+    assert sorted(o for _a, o, _n in kept) == ["Lee", "Sam"]
     assert bundle.verify(res.path, anon)[0] == []
 
 
 def test_free_text_and_name_fragments_in_structured_files(bed):
-    extra = {"notes": "Isaac's JQ1 titration for the Smith collaboration", "analysis": {"control": "DMSO"}}
+    extra = {"notes": "Sam's JQ1 titration for the Smith collaboration", "analysis": {"control": "DMSO"}}
     dest = _drop(bed, extra=extra)
     _run(bed)
     res = bundle.create(bed["cfg_path"], ["1"], dest_dir=bed["out"])
@@ -433,7 +433,7 @@ def test_free_text_and_name_fragments_in_structured_files(bed):
     assert "Smith" not in m["jobs/1-exp001/ionomos.json"].decode()
     original = json.loads((dest / "ionomos.json").read_text(encoding="utf-8"))["plan"]["folder"]["tokens"]
     assert "BRD4" in original and len(rec["plan"]["folder"]["tokens"]) == len(original)
-    assert not {"BRD4", "JQ1", "degrader", "Isaac"} & set(rec["plan"]["folder"]["tokens"])
+    assert not {"BRD4", "JQ1", "degrader", "Sam"} & set(rec["plan"]["folder"]["tokens"])
     files = [x["file"] for x in rec["plan"]["manifest"]]
     assert "raw/DMSO_1.raw" in files and len(files) == 9 and not [f for f in files if "nib" in f or "lib" in f]
     assert _survivors(res.path, [*SECRET_WORDS, "Smith", "degrader"]) == []
@@ -479,7 +479,7 @@ def test_a_folder_that_is_not_a_job_non_ascii_and_long_paths(bed):
 def test_a_large_table_is_streamed_not_loaded(tmp_path):
     import tracemalloc
 
-    a = _anon(samples=["Olaparib_1", "DMSO_1"], users={"Isaac": []})
+    a = _anon(samples=["Olaparib_1", "DMSO_1"], users={"Sam": []})
     table = tmp_path / "combined_protein.tsv"
     row = "P12345\tALB\t" + "\t".join(f"{i * 1234.5678:.4f}" for i in range(60)) + "\n"
     with open(table, "w", encoding="utf-8") as f:
@@ -632,7 +632,7 @@ def test_the_windows_logic_needs_no_window(bed):
     assert bundle.collect(bed["cfg_path"], (), Options()).jobs == []
     kept = bundle.create(bed["cfg_path"], ["1"], Options(level="validate", keep_conditions=True), dest_dir=bed["out"])
     assert "jobs/1-exp001/results/Zanubrutinib_vs_DMSO_differential.tsv" in _members(kept.path)
-    assert kept.manifest["anonymised"]["conditions"] == "keep" and _survivors(kept.path, ["Isaac", FOLDER, "BRD4"]) == []
+    assert kept.manifest["anonymised"]["conditions"] == "keep" and _survivors(kept.path, ["Sam", FOLDER, "BRD4"]) == []
 
 
 # ------------------------------------------------------ #135 / #142: escapes and plain words ----
@@ -642,16 +642,16 @@ def test_a_name_after_a_json_escape_is_replaced_and_found():
     """#135: attention.py writes items with json.dumps (ASCII escapes), so a curly quote before a name becomes
     the six characters backslash-u201c, and the name followed the letters 'u201c'; it was neither replaced nor
     found by the leak check."""
-    a = _anon(users={"EJQ": []}, folders=["EJQ_2027_mystery", "XYZ99_isoDTB_run"])
-    line = json.dumps({"title": "Couldn't take in “EJQ_2027_mystery”", "message": "XYZ99_isoDTB_run – 3 files"})
+    a = _anon(users={"ABC": []}, folders=["ABC_2027_mystery", "XYZ99_isoDTB_run"])
+    line = json.dumps({"title": "Couldn't take in “ABC_2027_mystery”", "message": "XYZ99_isoDTB_run – 3 files"})
     assert "\\u201c" in line and "\\u2013" in line
     out = a.text(line)
-    assert "EJQ" not in out and "mystery" not in out and "XYZ99" not in out
+    assert "ABC" not in out and "mystery" not in out and "XYZ99" not in out
     assert "\\u201cexp001\\u201d" in out and "exp002\\u2013" in out.replace(" ", "")
     odd = _anon(users={"Jane Doe": []}, folders=["2026 03 01 Zoë (redo)"])
     assert odd.text(json.dumps("see “2026 03 01 Zoë (redo)” by Jane Doe")) == json.dumps("see “exp001” by user01")
     assert odd.find(json.dumps("“Jane Doe”")) == ["Jane Doe"]
-    assert sorted(a.find(line)) == ["EJQ_2027_mystery", "XYZ99_isoDTB_run"]
+    assert sorted(a.find(line)) == ["ABC_2027_mystery", "XYZ99_isoDTB_run"]
     assert a.find(out) == []
 
 
@@ -661,14 +661,14 @@ def test_a_rejected_drop_with_a_curly_quoted_title_leaves_no_name_in_the_bundle(
 
     _job(bed)
     inbox = bed["cfg"].inbox
-    (inbox / "EJQ_2027_mystery").mkdir()
-    (inbox / "EJQ_2027_mystery" / "a.raw").write_bytes(b"\0" * 64)
-    (inbox / "EJQ_2027_mystery.REJECTED.txt").write_text("no method", encoding="utf-8")
-    attention.raise_item(bed["cfg"].log_dir, "intake_rejected", "Couldn't take in “EJQ_2027_mystery”",
-                         "The folder name EJQ_2027_mystery holds no method.", key="intake:EJQ_2027_mystery")
+    (inbox / "ABC_2027_mystery").mkdir()
+    (inbox / "ABC_2027_mystery" / "a.raw").write_bytes(b"\0" * 64)
+    (inbox / "ABC_2027_mystery.REJECTED.txt").write_text("no method", encoding="utf-8")
+    attention.raise_item(bed["cfg"].log_dir, "intake_rejected", "Couldn't take in “ABC_2027_mystery”",
+                         "The folder name ABC_2027_mystery holds no method.", key="intake:ABC_2027_mystery")
     res = bundle.create(bed["cfg_path"], opts=Options(level="validate"), dest_dir=bed["out"])
     items = [n for n in _members(res.path) if n.startswith("attention/")]
-    assert items and _survivors(res.path, ["EJQ_2027_mystery", "mystery", "EJQ"]) == []
+    assert items and _survivors(res.path, ["ABC_2027_mystery", "mystery", "ABC"]) == []
     check = bundle.self_check(res.path, bed["cfg_path"])
     assert check["hits"] == 0, check
 
@@ -678,7 +678,7 @@ def test_inspect_does_not_call_the_plain_words_of_a_name_leaks(bed):
     own and found them in Ionomos' own text. Its verdict must agree with the bundle's leak check."""
     _job(bed)
     inbox = bed["cfg"].inbox
-    for name in ("EJQ_isoDTB_then_TMT", "EJQ_isoDTB_own-map", "XYZ99_isoDTB_run"):
+    for name in ("ABC_isoDTB_then_TMT", "ABC_isoDTB_own-map", "XYZ99_isoDTB_run"):
         (inbox / name).mkdir()
         (inbox / f"{name}.REJECTED.txt").write_text("no", encoding="utf-8")
     res = bundle.create(bed["cfg_path"], opts=Options(level="validate"), dest_dir=bed["out"])
@@ -690,6 +690,6 @@ def test_inspect_does_not_call_the_plain_words_of_a_name_leaks(bed):
         check = bundle.self_check(res.path, config)
         assert check["sources"] and check["hits"] == 0, [(f["path"], f["hits"]) for f in check["files"] if f["hits"]]
     # the fragments still count inside the names they belong to
-    bad = _members(res.path)["README.txt"].decode() + "\nleft: EJQ_isoDTB_then_TMT\n"
+    bad = _members(res.path)["README.txt"].decode() + "\nleft: ABC_isoDTB_then_TMT\n"
     anon, _src = bundle._checker(None, key)
-    assert anon.find(bad) == ["EJQ_isoDTB_then_TMT"] and anon.find("run then own txt") == []
+    assert anon.find(bad) == ["ABC_isoDTB_then_TMT"] and anon.find("run then own txt") == []

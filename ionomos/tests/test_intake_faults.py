@@ -90,13 +90,13 @@ def test_a_drop_still_being_written_at_its_final_size_is_retried_not_filed_half_
         assert w.scan_once(now=61) == [folder]  # stable by size and time ...
         assert seen == [IntakeResult.RETRY]  # ... but not filed while the copy holds the file
         assert _sizes(folder) == before and bed["ledger"].list() == []
-        assert not (bed["users"] / "EJQ" / folder.name).exists() and not note_path(folder).exists()
+        assert not (bed["users"] / "ABC" / folder.name).exists() and not note_path(folder).exists()
         assert w.scan_once(now=70) == []  # backing off
     finally:
         fh.close()
     assert w.scan_once(now=77) == [folder]
     assert seen[-1] == IntakeResult.QUEUED
-    assert _sizes(bed["users"] / "EJQ" / folder.name) == before
+    assert _sizes(bed["users"] / "ABC" / folder.name) == before
 
 
 @pytest.mark.skipif(not WINDOWS, reason="the in-use check is a Windows sharing check")
@@ -117,11 +117,11 @@ def test_a_cross_volume_copy_waits_for_a_file_that_is_still_open(bed, monkeypatc
     fh = open(sorted(folder.glob("*.raw"))[0], "r+b")  # noqa: SIM115
     try:
         assert _take(bed, folder) == IntakeResult.RETRY
-        assert _sizes(folder) == before and not (bed["users"] / "EJQ" / folder.name).exists()
+        assert _sizes(folder) == before and not (bed["users"] / "ABC" / folder.name).exists()
     finally:
         fh.close()
     assert _take(bed, folder) == IntakeResult.QUEUED
-    assert not folder.exists() and _sizes(bed["users"] / "EJQ" / folder.name) == before
+    assert not folder.exists() and _sizes(bed["users"] / "ABC" / folder.name) == before
 
 
 # ------------------------------------------------------------ renamed, removed, twice --
@@ -136,7 +136,7 @@ def test_a_drop_renamed_while_it_settles_is_waited_for_again_under_its_new_name(
     assert w.scan_once(now=30) == []  # the old name is forgotten, the new one seen for the first time
     assert w.scan_once(now=70) == []  # 40 s: not settled under its new name yet
     assert w.scan_once(now=91) == [new] and got == [new]
-    assert (bed["users"] / "Isaac" / new.name).is_dir() and not folder.exists()
+    assert (bed["users"] / "Sam" / new.name).is_dir() and not folder.exists()
     assert [j.inbox_name for j in bed["ledger"].list()] == [new.name]
 
 
@@ -169,7 +169,7 @@ def test_a_drop_renamed_while_the_review_window_is_open_is_not_filed_under_the_o
 def test_two_drops_with_the_same_name_a_minute_apart_are_never_merged_or_overwritten(bed):
     first = _drop(bed, "dia_good")
     assert _take(bed, first) == IntakeResult.QUEUED
-    dest = bed["users"] / "Isaac" / first.name
+    dest = bed["users"] / "Sam" / first.name
     filed = _sizes(dest)
     second = _drop(bed, "dia_good")  # the same folder dragged again (or a re-acquisition under the old name)
     (second / "raw" / "Drug_3.raw").write_bytes(b"re-acquired" * 50)
@@ -184,7 +184,7 @@ def test_two_drops_with_the_same_name_a_minute_apart_are_never_merged_or_overwri
     _drain(bed)
     assert [j.status for j in bed["ledger"].list()] == ["done", "done"]
     assert _sizes(dest) == filed
-    assert (bed["users"] / "Isaac" / redo.name / "raw" / "Drug_3.raw").stat().st_size == len(b"re-acquired" * 50)
+    assert (bed["users"] / "Sam" / redo.name / "raw" / "Drug_3.raw").stat().st_size == len(b"re-acquired" * 50)
 
 
 # ------------------------------------------------------------------------- names --
@@ -193,7 +193,7 @@ def test_two_drops_with_the_same_name_a_minute_apart_are_never_merged_or_overwri
 def test_a_word_in_another_script_is_never_silently_dropped_from_a_sample_name(bed):
     """実験_1_1.raw used to be filed as sample "1" (the word vanished in the clean-up and the numbers moved up)."""
     raws = [f"実験_{r}_{f}.raw" for r in (1, 2) for f in (1, 2)]
-    folder = make_drop(bed["inbox"], "20260902_isoDTB_EJQ_kanji", raws)
+    folder = make_drop(bed["inbox"], "20260902_isoDTB_ABC_kanji", raws)
     assert _take(bed, folder) == IntakeResult.REJECTED
     reason = note_path(folder).read_text(encoding="utf-8")
     assert "実験 has no letters FragPipe can use" in reason and "rename the file" in reason
@@ -203,11 +203,11 @@ def test_a_word_in_another_script_is_never_silently_dropped_from_a_sample_name(b
 
 
 @pytest.mark.parametrize(("name", "raws", "safe", "samples"), [
-    ("20260902_isoDTB_EJQ_Müller Probe", ["Müller_1_1.raw", "Müller_2_1.raw"], "20260902_isoDTB_EJQ_M-ller-Probe",
+    ("20260902_isoDTB_ABC_Müller Probe", ["Müller_1_1.raw", "Müller_2_1.raw"], "20260902_isoDTB_ABC_M-ller-Probe",
      {"M-ller"}),
-    ("20260902_isoDTB_EJQ_µM-dose", ["10µM_1_1.raw", "10µM_2_1.raw"], "20260902_isoDTB_EJQ_M-dose", {"10-M"}),
+    ("20260902_isoDTB_ABC_µM-dose", ["10µM_1_1.raw", "10µM_2_1.raw"], "20260902_isoDTB_ABC_M-dose", {"10-M"}),
     # names Windows reserves on their own are ordinary inside a longer name
-    ("20260902_isoDTB_EJQ_CON", ["CON_1_1.raw", "AUX_1_1.raw", "NUL_x_1_1.raw"], "20260902_isoDTB_EJQ_CON",
+    ("20260902_isoDTB_ABC_CON", ["CON_1_1.raw", "AUX_1_1.raw", "NUL_x_1_1.raw"], "20260902_isoDTB_ABC_CON",
      {"CON", "AUX", "NUL_x"}),
 ])
 def test_unicode_and_reserved_looking_names_are_filed_with_safe_names(bed, name, raws, safe, samples):
@@ -220,20 +220,20 @@ def test_unicode_and_reserved_looking_names_are_filed_with_safe_names(bed, name,
 
 
 def test_a_200_character_folder_name_is_filed_when_the_path_fits(bed):
-    name = ("20260902_EJQ_isoDTB_" + "long-description-" * 20)[:200]
-    longest = bed["users"] / "EJQ" / name / "fragpipe" / "EJQ_PK_1_1" / "EJQ_PK_1_1.pepXML"
+    name = ("20260902_ABC_isoDTB_" + "long-description-" * 20)[:200]
+    longest = bed["users"] / "ABC" / name / "fragpipe" / "ABC_PK_1_1" / "ABC_PK_1_1.pepXML"
     if WINDOWS and len(str(longest)) > 259:
         pytest.skip("too long for Windows without long paths here (issues #138/#139 cover that case)")
-    folder = make_drop(bed["inbox"], name, ["EJQ_PK_1_1.raw", "EJQ_PK_2_1.raw"])
+    folder = make_drop(bed["inbox"], name, ["ABC_PK_1_1.raw", "ABC_PK_2_1.raw"])
     assert _take(bed, folder) == IntakeResult.QUEUED
-    assert (bed["users"] / "EJQ" / name / "EJQ_PK_1_1.raw").is_file()
+    assert (bed["users"] / "ABC" / name / "ABC_PK_1_1.raw").is_file()
 
 
 @pytest.mark.skipif(WINDOWS, reason="Windows can't make such a folder by name (see the next test)")
 def test_a_folder_name_ending_in_a_dot_is_filed_without_it(bed):
-    folder = make_drop(bed["inbox"], "20260902_EJQ_isoDTB_x.", ["S_1_1.raw"])
+    folder = make_drop(bed["inbox"], "20260902_ABC_isoDTB_x.", ["S_1_1.raw"])
     assert _take(bed, folder) == IntakeResult.QUEUED
-    assert (bed["users"] / "EJQ" / "20260902_EJQ_isoDTB_x" / "S_1_1.raw").is_file()
+    assert (bed["users"] / "ABC" / "20260902_ABC_isoDTB_x" / "S_1_1.raw").is_file()
 
 
 def _ext(p: Path) -> str:
@@ -245,24 +245,24 @@ def _ext(p: Path) -> str:
 def test_a_folder_windows_cannot_open_by_name_is_renamed_and_filed(bed, end):
     """Made on a Mac or in WSL: listed by Windows, but every normal path to it loses the dot, so the watcher used to
     skip it for ever without a word."""
-    folder = bed["inbox"] / ("20260902_EJQ_isoDTB_dots" + end)
+    folder = bed["inbox"] / ("20260902_ABC_isoDTB_dots" + end)
     os.mkdir(_ext(folder))
     with open(_ext(folder) + "\\S_1_1.raw", "wb") as fh:
         fh.write(b"\0" * 64)
     got = []
     w = Watcher(bed["inbox"], lambda f: got.append(f) or _take(bed, f), stable_seconds=10)
     w.scan_once(now=0)  # renamed in the inbox
-    fixed = bed["inbox"] / "20260902_EJQ_isoDTB_dots"
+    fixed = bed["inbox"] / "20260902_ABC_isoDTB_dots"
     assert fixed.is_dir() and (fixed / "S_1_1.raw").is_file()
     w.scan_once(now=1)
-    assert w.scan_once(now=12) == [fixed] and (bed["users"] / "EJQ" / fixed.name / "S_1_1.raw").is_file()
+    assert w.scan_once(now=12) == [fixed] and (bed["users"] / "ABC" / fixed.name / "S_1_1.raw").is_file()
 
 
 @pytest.mark.skipif(not WINDOWS, reason="names ending in a dot or space only trouble Windows")
 def test_a_folder_windows_cannot_open_is_left_alone_and_said_once_when_its_name_is_taken(bed, caplog):
-    odd = bed["inbox"] / "20260902_EJQ_isoDTB_x."
+    odd = bed["inbox"] / "20260902_ABC_isoDTB_x."
     os.mkdir(_ext(odd))
-    taken = make_drop(bed["inbox"], "20260902_EJQ_isoDTB_x", ["S_1_1.raw"])
+    taken = make_drop(bed["inbox"], "20260902_ABC_isoDTB_x", ["S_1_1.raw"])
     try:
         w = Watcher(bed["inbox"], lambda f: IntakeResult.REJECTED, stable_seconds=10)
         for t in range(3):
@@ -334,22 +334,22 @@ def test_a_really_read_only_inbox_keeps_the_drop_and_retries(bed):
 
 
 @pytest.mark.parametrize(("yaml_text", "said"), [
-    ("methd: TMT\nusr: EJQ\nworkflw: x\n", ["methd (did you mean method?)", "usr (did you mean user?)",
+    ("methd: TMT\nusr: ABC\nworkflw: x\n", ["methd (did you mean method?)", "usr (did you mean user?)",
                                            "the keys it can have: allow_uneven_fractions"]),
     ("date: 2026-02-30\n", ["date that does not exist", "YYYY-MM-DD"]),
     ("date: [2026]\n", ["date must be YYYY-MM-DD"]),
     ("allow_uneven_fractions: maybe\n", ["allow_uneven_fractions must be true or false"]),
-    ("user: [EJQ, Isaac]\n", ["user must be one name, not a list"]),
+    ("user: [ABC, Sam]\n", ["user must be one name, not a list"]),
     ("method: {isoDTB: 1}\n", ["method must be one name, not a mapping"]),
     ("method: proteomics\n", ["method 'proteomics' is not one of"]),
     ("user: Nobody\n", ["user 'Nobody': no folder"]),
     ("files: [a.raw]\n", ["files: must be a mapping"]),
-    ("files:\n  EJQ_PK_EJQ-2-027_isoDTB_1uM_3h_1_1.raw: {bioreplicat: 2}\n", ["bioreplicat (did you mean bioreplicate?)"]),
+    ("files:\n  ABC_PK_ABC-2-027_isoDTB_1uM_3h_1_1.raw: {bioreplicat: 2}\n", ["bioreplicat (did you mean bioreplicate?)"]),
     ("files:\n  nothere.raw: {bioreplicate: 2}\n", ["not in folder: nothere.raw"]),
     ("tmt: 5\n", ["tmt"]),
     ("analysis: [x]\n", ["analysis: must be a mapping"]),
     ("- method: isoDTB\n", ["must be a mapping"]),
-    ("method: isoDTB\n\tuser: EJQ\n", ["not valid YAML"]),
+    ("method: isoDTB\n\tuser: ABC\n", ["not valid YAML"]),
     ("method: 'isoDTB\n", ["not valid YAML"]),
 ])
 def test_experiment_yaml_with_every_key_wrong_says_which_key_and_what_to_write(bed, yaml_text, said):
@@ -367,7 +367,7 @@ def test_experiment_yaml_with_every_key_wrong_says_which_key_and_what_to_write(b
 
 @pytest.mark.parametrize("flag", ["'false'", "'no'", "0", "off"])
 def test_a_quoted_false_does_not_switch_the_fraction_check_off(bed, flag):
-    folder = make_drop(bed["inbox"], "20260902_isoDTB_EJQ_uneven", iso_raws(reps=(1, 2), fracs=(1, 2))[:-1])
+    folder = make_drop(bed["inbox"], "20260902_isoDTB_ABC_uneven", iso_raws(reps=(1, 2), fracs=(1, 2))[:-1])
     (folder / "experiment.yaml").write_text(f"allow_uneven_fractions: {flag}\n", encoding="utf-8")
     assert _take(bed, folder) == IntakeResult.REJECTED
     assert "incomplete copy" in note_path(folder).read_text(encoding="utf-8")
@@ -375,7 +375,7 @@ def test_a_quoted_false_does_not_switch_the_fraction_check_off(bed, flag):
 
 def test_an_experiment_yaml_that_is_not_utf8_is_still_read(bed):
     folder = _drop(bed)
-    (folder / "experiment.yaml").write_bytes("notes: Probe — Müller\nuser: EJQ\n".encode("cp1252"))
+    (folder / "experiment.yaml").write_bytes("notes: Probe — Müller\nuser: ABC\n".encode("cp1252"))
     assert _take(bed, folder) == IntakeResult.QUEUED  # D86
 
 
@@ -384,7 +384,7 @@ def test_an_experiment_yaml_that_is_not_utf8_is_still_read(bed):
 
 def test_a_damaged_naming_history_never_costs_a_drop(bed):
     hist = bed["cfg"].log_dir / names.NAMING_HISTORY_FILE
-    hist.write_bytes(b'{"user": "EJQ\x97", "method": "isoDTB"}\n\xff\xfe garbage\n[1, 2]\n"x"\n\n')
+    hist.write_bytes(b'{"user": "ABC\x97", "method": "isoDTB"}\n\xff\xfe garbage\n[1, 2]\n"x"\n\n')
     folder = _drop(bed)
     assert _take(bed, folder) == IntakeResult.QUEUED
 
@@ -403,7 +403,7 @@ def test_a_restart_while_a_job_runs_survives_a_damaged_ionomos_json(bed, body):
     assert recover(bed["cfg"], bed["ledger"]) == [(job.id, "queued")]
     rec = json.loads((Path(job.dest_dir) / names.STATUS_FILE).read_text(encoding="utf-8"))
     assert rec["status"] == "queued"  # a mapping is kept and updated; anything else is replaced by the job's record
-    assert rec.get("plan", job.parsed["plan"])["folder"]["user"] == "Isaac"
+    assert rec.get("plan", job.parsed["plan"])["folder"]["user"] == "Sam"
     _drain(bed)
     assert bed["ledger"].get(job.id).status == "done"
 
@@ -413,7 +413,7 @@ def test_damaged_status_files_are_skipped_by_the_rebuild_and_the_hourly_adoption
     _take(bed, _drop(bed, "iso_good"))
     for i, body in enumerate(["null", "[]", '{"plan": {"folder": "x"}, "status": "queued"}', '{"plan": 5}',
                               '{"plan": {"folder": null}}', "\xff"]):
-        d = bed["users"] / "EJQ" / f"odd{i}"
+        d = bed["users"] / "ABC" / f"odd{i}"
         d.mkdir()
         (d / names.STATUS_FILE).write_text(body, encoding="utf-8")
     assert ledger_mod.adopt_orphans(bed["ledger"], bed["users"]) == []
@@ -422,7 +422,7 @@ def test_damaged_status_files_are_skipped_by_the_rebuild_and_the_hourly_adoption
     assert n == 2 and moved.is_file()
     assert sum("skipping unreadable status file" in r.getMessage() for r in caplog.records) >= 12
     bed["ledger"] = Ledger(bed["cfg"].database)
-    assert sorted(j.user for j in bed["ledger"].list()) == ["EJQ", "Isaac"]
+    assert sorted(j.user for j in bed["ledger"].list()) == ["ABC", "Sam"]
 
 
 def test_ionomos_stopping_while_it_files_a_folder_never_loses_it(bed, monkeypatch):
@@ -436,7 +436,7 @@ def test_ionomos_stopping_while_it_files_a_folder_never_loses_it(bed, monkeypatc
     monkeypatch.setattr(intake_mod, "_acquisition", power_cut)
     with pytest.raises(SystemExit):
         _take(bed, folder)
-    dest = bed["users"] / "Isaac" / folder.name
+    dest = bed["users"] / "Sam" / folder.name
     rec = json.loads((dest / names.STATUS_FILE).read_text(encoding="utf-8"))
     assert rec["status"] == "queued" and rec["reason"] == FILING and not folder.exists()
     assert bed["ledger"].list() == []

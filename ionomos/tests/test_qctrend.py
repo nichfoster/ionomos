@@ -584,7 +584,7 @@ def test_worker_job_on_a_qc_standard_records_it(tmp_path, monkeypatch):
     cfg = load(testbed.init(tmp_path / "bed"))
     cfg = replace(cfg, gui_enabled=False, review_drops=False)
     ledger = Ledger(cfg.database)
-    folder = cfg.inbox / "20260930_Isaac_DIA_HeLa-200ng-QC"
+    folder = cfg.inbox / "20260930_Sam_DIA_HeLa-200ng-QC"
     folder.mkdir()
     for k in (1, 2):
         (folder / f"HeLa_200ng_{k}.raw").write_bytes(b"\0" * 64)

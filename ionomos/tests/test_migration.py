@@ -133,7 +133,7 @@ def test_problem_report_has_the_note_build_and_app_log(bed, tmp_path, monkeypatc
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("APPDATA", str(tmp_path))
     (service.appdata_dir() / "app.log").write_text("app started\n", encoding="utf-8")
-    z = service.save_problem_report(bed["cfg_path"], "dropped EJQ at 3pm, nothing moved", dest_dir=tmp_path)
+    z = service.save_problem_report(bed["cfg_path"], "dropped ABC at 3pm, nothing moved", dest_dir=tmp_path)
     assert z.name.startswith("Ionomos-report-") and z.name.endswith(".zip")
     zf = zipfile.ZipFile(z)
     names_in = zf.namelist()

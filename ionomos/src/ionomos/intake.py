@@ -328,7 +328,7 @@ def plan(folder: Path, cfg: Config, ledger: Ledger | None = None, new_user: str 
     except NamingError as exc:  # e.g. a name made only of symbols/emoji survives until sanitize()
         msg = str(exc)
         if "no usable characters" in msg:
-            msg += " — rename it using letters and digits (e.g. 20260902_EJQ_isoDTB_sample)"
+            msg += " — rename it using letters and digits (e.g. 20260902_ABC_isoDTB_sample)"
         raise IntakeError(msg, Kind.RAWS if ".raw" in msg.lower() else Kind.OTHER) from exc
 
 

@@ -272,14 +272,14 @@ def _flag(d: dict, section: str, key: str, default: bool) -> bool:
 
 
 def _texts(v, where: str) -> list[str]:
-    """A list of names; one name alone is a list of one ("IJ" is ['IJ'], never ['I', 'J'])."""
+    """A list of names; one name alone is a list of one ("SK" is ['SK'], never ['S', 'K'])."""
     if v is None:
         return []
     if isinstance(v, (str, int, float)) and not isinstance(v, bool):
         return [str(v)] if str(v) else []
     if isinstance(v, (list, tuple)):
         return [str(x) for x in v if x is not None]  # a blank one is left for the checks to name
-    raise ConfigError(f"'{where}' must be a list of names, e.g. [IJ, IJD], not {_kind(v)}", key=where)
+    raise ConfigError(f"'{where}' must be a list of names, e.g. [SK, SKD], not {_kind(v)}", key=where)
 
 
 _SPACE_WARNINGS: list[str] = []
@@ -427,7 +427,7 @@ def _load(path: str | Path, check_paths: bool = True) -> Config:
         raise ConfigError(f"methods: {exc}") from None
 
     users = dict(_section(raw, "users", "aliases, default, learned_aliases_file, ignore"))
-    aliases_raw = _section(users, "aliases", "a user folder name, then its initials: Isaac: [IJ, IJD]", "users")
+    aliases_raw = _section(users, "aliases", "a user folder name, then its initials: Sam: [SK, SKD]", "users")
     user_aliases = {str(k): _texts(v, f"users.aliases.{k}") for k, v in aliases_raw.items()}
     if users.get("ignore") is not None:
         users["ignore"] = _texts(users["ignore"], "users.ignore")

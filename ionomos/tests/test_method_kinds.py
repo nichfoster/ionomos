@@ -53,7 +53,7 @@ def _drop_as(bed, key: str) -> Path:
     """The built-in method's testbed sample, dropped under a folder name that says the custom method."""
     like, sample, alias = CUSTOM[key]
     spec = testbed.SAMPLES[sample]
-    folder = make_drop(bed["cfg"].inbox, f"20260930_EJQ_{alias}_run", spec.get("raws") or spec["raw_sub"])
+    folder = make_drop(bed["cfg"].inbox, f"20260930_ABC_{alias}_run", spec.get("raws") or spec["raw_sub"])
     if spec.get("yaml"):
         (folder / "experiment.yaml").write_text(yaml.safe_dump(spec["yaml"]), encoding="utf-8")
     return folder
@@ -107,7 +107,7 @@ def test_builtin_rules_have_no_like_and_unknown_methods_are_themselves():
 @pytest.mark.parametrize(("fname", "like"), [
     ("CG_isoDTB_ELK_R1_F1.raw", "isoDTB"),
     ("CMZ_E6_isoDTB_ABPP_3_6.raw", "isoDTB"),
-    ("EJQ_EJQ123_isoDTB_25uM_2h_2_4.raw", "isoDTB"),
+    ("ABC_ABC123_isoDTB_25uM_2h_2_4.raw", "isoDTB"),
     ("KC_22Rv1_isoDTB_HNRNPL_EN802_50uM_3h_1_3.raw", "isoDTB"),
     ("ZD_isoDTB_HT_ZD1186_50uM_16h_1_2.raw", "isoDTB"),
     ("CS_isoDTB_ELK_3_1-7_DIA.raw", "DIA"),
@@ -125,9 +125,9 @@ def test_real_names_read_the_same_under_a_like_method(bed, fname, like):
 
 
 def test_names_test_says_what_a_custom_method_is_run_as(bed):
-    text = format_readings(check_names(["20260930_EJQ_tmtpro_run", "KL6159A_TMT_F1.raw"], bed["cfg"]))
+    text = format_readings(check_names(["20260930_ABC_tmtpro_run", "KL6159A_TMT_F1.raw"], bed["cfg"]))
     assert "method     : TMTpro  (searched and analysed as TMT)" in text
-    plain = format_readings(check_names(["20260930_EJQ_TMT_run", "KL6159A_TMT_F1.raw"], bed["cfg"]))
+    plain = format_readings(check_names(["20260930_ABC_TMT_run", "KL6159A_TMT_F1.raw"], bed["cfg"]))
     assert "method     : TMT\n" in plain  # a built-in method reads as before
 
 
@@ -142,8 +142,8 @@ def test_review_reads_a_custom_method_as_its_kind(bed, key):
     assert has_control(d.kind_of(key)) == has_control(like) == (like == "DIA")
     assert summarize(d.files, d.kind_of(key), "DMSO") == summarize(d.files, like, "DMSO")
     # a control that isn't a condition only matters where there is a control
-    a = Answer("EJQ", key, "", False, d.files, control="Nope")
-    assert validate(a, d.known_methods, d.kinds) == validate(Answer("EJQ", like, "", False, d.files, control="Nope"),
+    a = Answer("ABC", key, "", False, d.files, control="Nope")
+    assert validate(a, d.known_methods, d.kinds) == validate(Answer("ABC", like, "", False, d.files, control="Nope"),
                                                              d.known_methods, d.kinds)
     assert ("not one of the conditions" in validate(a, d.known_methods, d.kinds)) == (like == "DIA")
 
@@ -268,7 +268,7 @@ def test_diann_method_under_another_key_is_dia(bed, tmp_path):
         d["naming"]["methods"]["SWATH"] = "{sample}_{rep}"   # its own template, no like:
     bed["cfg"] = cfg = load(_reload(bed["cfg_path"], change))
     assert cfg.kind("SWATH") == "DIA" and cfg.analysis_method("SWATH") == "DIA"
-    folder = make_drop(cfg.inbox, "20260930_EJQ_swath_run", [f"{c}_{r}.raw" for c in ("DMSO", "Drug") for r in (1, 2, 3)])
+    folder = make_drop(cfg.inbox, "20260930_ABC_swath_run", [f"{c}_{r}.raw" for c in ("DMSO", "Drug") for r in (1, 2, 3)])
     assert has_control(draft(folder, cfg, review=True).kind_of("SWATH"))
     dest = _run(bed, folder)
     a = _analysis(dest)
@@ -289,7 +289,7 @@ def test_maxquant_method_stays_label_free_whatever_its_names_are_like(bed, tmp_p
     assert cfg.file_rules["LFQ"].like == "isoDTB"
     assert cfg.kind("LFQ") == "LFQ" and cfg.analysis_method("LFQ") == "MaxQuant"
     files = [f"{c}_{r}_{f}.raw" for c in ("DMSO", "Drug") for r in (1, 2, 3) for f in (1, 2)]
-    folder = make_drop(cfg.inbox, "20260930_EJQ_lfq_run", files)
+    folder = make_drop(cfg.inbox, "20260930_ABC_lfq_run", files)
     assert has_control(draft(folder, cfg, review=True).kind_of("LFQ"))
     dest = _run(bed, folder)
     a = _analysis(dest)

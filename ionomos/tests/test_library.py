@@ -2,7 +2,7 @@
 
 A fake lab PC is built in tmp_path from real names in reference/pc-inventory/2026-09-15/system_report.txt: Aman's
 TMT folder with fragpipe_pax8.workflow (under "012626_from Cdrive", a path with a space), Chris's DIA searches,
-Carolyn's shotgun and open searches, Qian's offset search, a recycle bin, FragPipe 24.0's installation with stock
+Kai's shotgun and open searches, Alex's offset search, a recycle bin, FragPipe 24.0's installation with stock
 workflows and its window's settings cache, and the 22.0 zip in Downloads with the stock isoDTB-ABPP.workflow.
 The workflows carry the keys of FragPipe 24.0's stock TMT10-MS3 / chemprot-ABPP-isoDTB / DIA_SpecLib_Quant /
 Open / Mass-Offset-CommonPTMs workflows (checked on GitHub, docs/LIBRARY.md), abridged."""
@@ -212,11 +212,11 @@ def pc(tmp_path):
         tsv(chris / sub / "dia-quant-output" / "report.pg_matrix.tsv", ["Protein.Group", "a.raw", "b.raw"])
     (chris / "wt_VS_KD" / "dia-quant-output" / "report.pg_matrix.tsv").touch()
     os.utime(chris / "wt_VS_KD" / "dia-quant-output" / "report.pg_matrix.tsv", (1_788_000_000, 1_788_000_000))
-    carolyn = d / "Carolyn"
+    carolyn = d / "Kai"
     write_wf(carolyn / "EN3170-Shotgun" / "output" / "fragpipe.workflow", "LFQ", db=fasta)
     tsv(carolyn / "EN3170-Shotgun" / "output" / "combined_protein.tsv", ["Protein", "S1 Intensity", "S2 Intensity"])
     write_wf(carolyn / "SUMO-open" / "fragpipe.workflow", "open", db=fasta)
-    write_wf(d / "Qian" / "QS_shotgunP3F_L1C14_100uM" / "Offset-search" / "fragpipe.workflow", "offset")
+    write_wf(d / "Alex" / "QS_shotgunP3F_L1C14_100uM" / "Offset-search" / "fragpipe.workflow", "offset")
     write_wf(d / "EJQ" / "EJQ123_TMT" / "fragpipe.workflow", "TMT", db=Path("D:/EJQ/gone.fas"))
     write_wf(d / "$RECYCLE.BIN" / "S-1-5-21-4178110133" / "$R37VZLS" / "fragpipe.workflow", "TMT")
     make_fasta(d / "Melody" / "BSA_19A" / "mixed species.fasta", human=6, yeast=5, ecoli=3, decoy=None)
@@ -652,9 +652,9 @@ def test_scan_the_fake_pc(pc):
     assert "TMT group by: gene (pinned: all levels)" in differs.text
     ejq = by["D/EJQ/EJQ123_TMT/fragpipe.workflow"]
     assert {"WF_DATABASE_MISSING", "WF_NO_RUNS"} <= {f.code for f in ejq.flags}
-    assert by["D/Carolyn/SUMO-open/fragpipe.workflow"].kind == "open"
-    assert by["D/Carolyn/EN3170-Shotgun/output/fragpipe.workflow"].runs["tables"] == ["LFQ"]
-    assert by["D/Qian/QS_shotgunP3F_L1C14_100uM/Offset-search/fragpipe.workflow"].traits == ["mass-offset"]
+    assert by["D/Kai/SUMO-open/fragpipe.workflow"].kind == "open"
+    assert by["D/Kai/EN3170-Shotgun/output/fragpipe.workflow"].runs["tables"] == ["LFQ"]
+    assert by["D/Alex/QS_shotgunP3F_L1C14_100uM/Offset-search/fragpipe.workflow"].traits == ["mass-offset"]
     stock = by["C_FragPipe/FragPipe-24.0/workflows/TMT10-MS3.workflow"]
     assert "WF_SDRF_ON" in {f.code for f in stock.flags} and "WF_NO_RUNS" in {f.code for f in stock.flags}
     assert not any(f.code == "WF_TOOL_MISSING" for w in cat.workflows for f in w.flags), "every tool is installed"
@@ -781,8 +781,8 @@ def test_scan_follows_a_link_or_junction_once(pc):
 
 
 def test_scan_excludes_patterns_and_reuses_fasta_readings(pc, monkeypatch):
-    cat = library.scan([pc["d"]], cfg=pc["cfg"], exclude=["Carolyn"])
-    assert not any("Carolyn" in w.path for w in cat.workflows) and any("excluded (Carolyn)" in s for s in cat.skipped)
+    cat = library.scan([pc["d"]], cfg=pc["cfg"], exclude=["Kai"])
+    assert not any("Kai" in w.path for w in cat.workflows) and any("excluded (Kai)" in s for s in cat.skipped)
     library._FASTA_CACHE.clear()
     monkeypatch.setattr(library, "_headers", lambda *a, **k: (_ for _ in ()).throw(AssertionError("read again")))
     again = library.scan([pc["d"]], cfg=pc["cfg"], previous=cat)
@@ -837,7 +837,7 @@ def test_a_partial_scan_never_replaces_a_fuller_catalog(pc, capsys):
     stock = after.find(pc["stock_tmt"])
     assert stock is not None and stock.source == "stock"
     # a file deleted since is not kept
-    gone = pc["d"] / "Qian" / "QS_shotgunP3F_L1C14_100uM" / "Offset-search" / "fragpipe.workflow"
+    gone = pc["d"] / "Alex" / "QS_shotgunP3F_L1C14_100uM" / "Offset-search" / "fragpipe.workflow"
     gone.unlink()
     assert cli.main(["--config", cfg, "library", "scan", "--only", "--root", str(pc["auto"]), "--time", "5"]) == 0
     capsys.readouterr()

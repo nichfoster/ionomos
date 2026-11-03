@@ -8,13 +8,13 @@ Where that proteome comes from is the lab's choice, so it is named explicitly an
 
     analysis:
       protein_correction:
-        proteome: D:/Fragpipe_General/EJQ/20261001-DIA_EJQ-2-030   # an analysed Ionomos experiment (its folder or
+        proteome: D:/Fragpipe_General/ABC/20261001-DIA_ABC-2-030   # an analysed Ionomos experiment (its folder or
                                                                    #   results/), or a protein table: MSstats
                                                                    #   groupComparison output (Protein, Label, log2FC,
                                                                    #   SE, DF) or an Ionomos *_differential.tsv
         match: gene                  # gene (gene names) | protein (UniProt accessions, isoforms joined)
         conditions:                  # site condition -> the proteome comparison of the same compound, compound
-          EJQ_2_027: Cmpd vs DMSO    #   first; a condition not named here needs a comparison whose treatment has
+          ABC_2_027: Cmpd vs DMSO    #   first; a condition not named here needs a comparison whose treatment has
                                      #   its name, else it is not corrected (PROTEIN_CORRECTION_CONDITIONS)
 
 Off unless `proteome` is set. A relative path is read from the experiment folder. The proteome is only read.

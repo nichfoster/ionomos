@@ -32,10 +32,10 @@ def test_testbed_init_list_drop_reset(tmp_path, capsys):
     assert main(["testbed", "list", str(bed)]) == 0
     assert "iso_good" in capsys.readouterr().out
     assert main(["testbed", "drop", "iso_good", str(bed)]) == 0
-    assert (bed / "Fragpipe_Auto" / "inbox" / "20260902-isoDTB_EJQ-2-027").is_dir()
+    assert (bed / "Fragpipe_Auto" / "inbox" / "20260902-isoDTB_ABC-2-027").is_dir()
     assert main(["--config", str(bed / "Fragpipe_Auto" / "config.yaml"), "check"]) == 0
     assert main(["--config", str(bed / "Fragpipe_Auto" / "config.yaml"), "dry-run",
-                 str(bed / "Fragpipe_Auto" / "inbox" / "20260902-isoDTB_EJQ-2-027")]) == 0
+                 str(bed / "Fragpipe_Auto" / "inbox" / "20260902-isoDTB_ABC-2-027")]) == 0
     assert main(["testbed", "reset", str(bed)]) == 0
     assert not any((bed / "Fragpipe_Auto" / "inbox").iterdir())
 

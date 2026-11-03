@@ -240,7 +240,7 @@ def test_files_fragpipe_writes_before_the_first_step(bed, monkeypatch):
               "filelist_ionquant.txt", "filelist_proteinprophet.txt", "modmasses_ionquant.txt",
               "experiment_annotation.tsv"):
         assert (wd / f).is_file(), f
-    assert sorted(p.name for p in wd.iterdir() if p.is_dir()) == [f"EJQ_PK_EJQ_2_027_isoDTB_1uM_3h_{r}" for r in (1, 2, 3)]
+    assert sorted(p.name for p in wd.iterdir() if p.is_dir()) == [f"ABC_PK_ABC_2_027_isoDTB_1uM_3h_{r}" for r in (1, 2, 3)]
     assert not list(wd.glob("log_*.txt"))  # killed: no shutdown hook, no log
     ionquant = _tsv(wd / "filelist_ionquant.txt")
     assert ionquant[0] == ["flag", "value"] and [r[0] for r in ionquant[1:]] == ["--psm"] * 3 + ["--specdir"]

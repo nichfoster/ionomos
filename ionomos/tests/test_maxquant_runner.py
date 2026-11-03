@@ -35,7 +35,7 @@ def bed(tmp_path, monkeypatch):
 
 def _queue(bed, cfg=None) -> Path:
     cfg = cfg or bed["cfg"]
-    folder = make_drop(cfg.inbox, "20260930_EJQ_isoDTB_mq-lfq", FILES)
+    folder = make_drop(cfg.inbox, "20260930_ABC_isoDTB_mq-lfq", FILES)
     assert intake(folder, cfg, bed["ledger"]).value == "queued"
     return Path(bed["ledger"].list()[-1].dest_dir)
 

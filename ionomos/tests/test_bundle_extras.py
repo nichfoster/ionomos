@@ -52,7 +52,7 @@ def _failed_job(bed, monkeypatch) -> Path:
     _run(bed)
     assert bed["ledger"].get(1).status == "failed"
     (bed["cfg"].log_dir / "ionomos.log").write_text(
-        f"2026-03-01 12:00:00 ERROR job 1 {FOLDER} failed for Isaac (IJ) on 10.0.5.9; Zanubrutinib_2.raw\n",
+        f"2026-03-01 12:00:00 ERROR job 1 {FOLDER} failed for Sam (SK) on 10.0.5.9; Zanubrutinib_2.raw\n",
         encoding="utf-8")
     return dest
 
@@ -72,17 +72,17 @@ def test_copy_diagnostics_is_anonymised_as_a_bundle_is(bed, monkeypatch, capsys)
     key = bundle.key_path_for(where)
     assert key.is_file() and key.name.endswith(names.BUNDLE_KEY_SUFFIX)
     back = bundle.translate(key, text)
-    assert "Isaac" in back and FOLDER in back and "Zanubrutinib_2.raw" in back
+    assert "Sam" in back and FOLDER in back and "Zanubrutinib_2.raw" in back
     # the same pseudonyms as a `diagnose` bundle made from the same lab (one Anonymiser, one way of learning)
     res = bundle.create(bed["cfg_path"], opts=Options(), dest_dir=bed["out"])
     kb, kd = (json.loads(p.read_text(encoding="utf-8")) for p in (res.key_path, key))
     for group in ("users", "experiments", "names", "addresses"):
         assert {p: o for p, o in kd[group].items() if o in kb[group].values()} == \
             {p: o for p, o in kb[group].items() if o in kd[group].values()}, group
-    assert kd["users"]["user01"] == "Isaac" and kd["experiments"]["exp001"] == FOLDER
+    assert kd["users"]["user01"] == "Sam" and kd["experiments"]["exp001"] == FOLDER
     # the real text is still there, and saved as before (no key)
     real, where2 = service.save_diagnostics(bed["cfg_path"])
-    assert "Isaac" in real and FOLDER in real and "-anonymised" not in where2.name
+    assert "Sam" in real and FOLDER in real and "-anonymised" not in where2.name
     assert not bundle.key_path_for(where2).exists()
     # the terminal: --anonymise
     assert cli.main(["--config", str(bed["cfg_path"]), "diagnose", "--anonymise"]) == 0
@@ -99,13 +99,13 @@ def test_the_leak_check_runs_on_the_diagnostics_text(bed, monkeypatch, capsys):
     real = bundle._Scrub.line
 
     def forgetful(self, s):  # a bug: the log tail goes out unscrubbed
-        return s if "failed for Isaac" in s else real(self, s)
+        return s if "failed for Sam" in s else real(self, s)
 
     monkeypatch.setattr(bundle._Scrub, "line", forgetful)
     before = sorted(bed["cfg"].log_dir.glob("diagnostics-*"))
     with pytest.raises(bundle.BundleLeak) as err:
         service.save_diagnostics(bed["cfg_path"], anonymise=True)
-    assert any(o == "Isaac" for _w, o, _n in err.value.leaks)
+    assert any(o == "Sam" for _w, o, _n in err.value.leaks)
     assert sorted(bed["cfg"].log_dir.glob("diagnostics-*")) == before     # nothing saved, no key
     assert cli.main(["--config", str(bed["cfg_path"]), "diagnose", "--anonymise"]) == 1
     said = capsys.readouterr()
@@ -113,7 +113,7 @@ def test_the_leak_check_runs_on_the_diagnostics_text(bed, monkeypatch, capsys):
     # the check itself, on any text
     anon = bundle.learn(bundle.collect(bed["cfg_path"]))
     assert bundle.check_text(anon, "fine: user01 and exp001\n") == []
-    assert [o for _w, o, _n in bundle.check_text(anon, "run by Isaac\n", "pasted")] == ["Isaac"]
+    assert [o for _w, o, _n in bundle.check_text(anon, "run by Sam\n", "pasted")] == ["Sam"]
 
 
 # --------------------------------------------- tables included on request ----
@@ -287,10 +287,10 @@ def test_inspect_searches_every_file_for_the_labs_names(bed, capsys):
     with zipfile.ZipFile(res.path) as src, zipfile.ZipFile(bad, "w") as out:
         for n in src.namelist():
             out.writestr(n, src.read(n))
-        out.writestr("logs/added.log", "Isaac ran Zanubrutinib_2 again\n")
+        out.writestr("logs/added.log", "Sam ran Zanubrutinib_2 again\n")
     d = bundle.self_check(bad, bed["cfg_path"])
     hit = next(f for f in d["files"] if f["path"] == "logs/added.log")
-    assert "Isaac" in [o for o, _n in hit["hits"]] and any("Zanubrutinib" in o for o, _n in hit["hits"])
+    assert "Sam" in [o for o, _n in hit["hits"]] and any("Zanubrutinib" in o for o, _n in hit["hits"])
     assert [f["path"] for f in d["files"] if f["hits"]] == ["logs/added.log"]
     assert "logs/added.log: FOUND" in "\n".join(bundle.self_check_lines(d))
     # the developer's side: no lab settings, no key -> said; with the key alone, its originals are searched for
