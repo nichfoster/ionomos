@@ -378,14 +378,16 @@ by default). Then every isoDTB search that finishes is copied, by itself, into
 the Dropbox folder the atlas side reads (for example
 `<team folder>\fragpipe-runs`), the same way the atlas's harvest script
 copies older runs: the result tables (`psm.tsv` per
-replicate, the workflow, the file list, the combined tables, the logs), never
-the raw files. The decoys go too: each replicate's `.pin` file, compressed
-(`.pin.gz`, about a third of its size), so the atlas can check FragPipe's false
-rate. So does the sample design: the experiment's `experiment.yaml`, the
-analysis' `experiment_annotation.tsv` and the TMT `annotation.txt` beside the
-raw files. Each copy is checked, and nothing already in Dropbox is ever
-overwritten: a sample design you changed since goes beside the earlier copy.
-The atlas picks the run up from there.
+replicate, the workflow, the file list, the combined tables, TMT-Integrator's
+tables in `tmt-report`, the logs), never the raw files. The decoys go too: each
+replicate's `.pin` file, compressed (`.pin.gz`, about a third of its size), so
+the atlas can check FragPipe's false rate; only those of the raw files in the
+search's file list, each from its own replicate's folder (an earlier search's
+`.pin` files left in the folder stay behind). So does the sample design: the
+experiment's `experiment.yaml`, the analysis' `experiment_annotation.tsv` and
+the TMT `annotation.txt` beside the raw files. Each copy is checked, and
+nothing already in Dropbox is ever overwritten: a sample design you changed
+since goes beside the earlier copy. The atlas picks the run up from there.
 
 To turn it on: the **Folders** tab → **Cysteine atlas**, tick it, pick the
 Dropbox folder (**Browse…**, or **Use** the one Ionomos found), **Save**.
@@ -403,9 +405,12 @@ once a day, while no search is running, Ionomos looks through every fixed
 drive of the PC for FragPipe results (as the harvest script does) and hands
 each isoDTB run (and TMT run, with **Also TMT searches**) to the atlas the same
 way, with its decoys and sample design, by its owner's folder name. A run is
-sent once; it is sent again only when its files change. **Search now** starts
-a pass over the drives at once; `ionomos atlas sweep --dry-run` shows what it
-would send without copying anything.
+sent once; it is sent again only when its files change, or when an update of
+Ionomos changes what it takes from them (only the new files are copied).
+A search Ionomos ran and already handed off is not sent again by itself:
+**Send to atlas** sends it again. **Search now** starts a pass over the drives
+at once; `ionomos atlas sweep --dry-run` shows what it would send without
+copying anything.
 
 When the atlas writes its site list back into that folder, an isoDTB
 report shows, for each human cysteine site, its atlas tier, how many atlas

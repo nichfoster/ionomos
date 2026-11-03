@@ -378,7 +378,7 @@ def consider(cfg, run: str, jobs: dict, prev: dict | None, retry: bool, dry_run:
         rr.outcome, rr.why = WAITING, (f"a file was made or changed {max(age, 0) / 60:.0f} min ago; it may still be "
                                        "being written or copied")
         return rr, None
-    mf_path = run_dir / "fragpipe-files.fp-manifest"
+    mf_path = run_dir / atlas.MANIFEST_FILE
     mf = atlas.read_manifest_info(mf_path) if os.path.isfile(atlas._fs(mf_path)) else {"rows": []}
     exp_dir = atlas.experiment_folder(run_dir)
     every = picks + atlas.design_files(exp_dir, mf["rows"], run_dir=run_dir)

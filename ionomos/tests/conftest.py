@@ -8,6 +8,10 @@ from pathlib import Path
 import pytest
 
 os.environ.setdefault("IONOMOS_OFFLINE", "1")  # the app must not git-fetch during tests
+if not (os.environ.get("CI") or os.environ.get("IONOMOS_GUI_TESTS")):
+    # `check` / `diagnose` probe for a display in a child (`probe-gui`), which opens a withdrawn Tk root: on
+    # macOS each one flashes a python icon in the Dock. Off on a dev machine, as the real-window tests are
+    os.environ.setdefault("IONOMOS_NO_GUI", "1")
 import yaml
 
 from ionomos.config import load
